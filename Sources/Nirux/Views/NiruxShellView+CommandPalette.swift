@@ -97,6 +97,12 @@ extension NiruxShellView {
                 self?.openCodex()
             },
             PaletteAction(
+                icon: .agent("agy"), title: "Open Antigravity",
+                subtitle: "Launch Google’s Antigravity CLI in a new terminal", shortcut: nil
+            ) { [weak self] in
+                self?.openAgy()
+            },
+            PaletteAction(
                 icon: .symbol(Theme.Symbol.sessionHistory), title: "Session History…",
                 subtitle: "Every session of this space, to go back to or resume", shortcut: nil
             ) { [weak self] in

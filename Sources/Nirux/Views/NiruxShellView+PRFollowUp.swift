@@ -366,8 +366,8 @@ extension NiruxShellView {
         return .round(PRFollowUp.roundText(last.kind, number: entry.rounds.count))
     }
 
-    /// When a prompt that isn't a poll event last went into one of the
-    /// workspace's agents.
+    /// When a prompt last went into one of the workspace's agents (see
+    /// `PtySession.agentLastUserPromptAt`).
     private static func lastUserPrompt(in workspace: WorkspaceState) -> TimeInterval {
         workspace.columns.compactMap { $0.pty?.agentLastUserPromptAt }.max() ?? 0
     }

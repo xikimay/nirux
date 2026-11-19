@@ -20,10 +20,13 @@ final class ReviewFindingsTests: XCTestCase {
     }
 
     private func record(
-        _ kinds: [String], workspace: String, task: String, pullRequest: Int?, at time: TimeInterval
+        _ kinds: [String], workspace: String, branch: String?, missionBranch: String? = nil, pullRequest: Int?, at time: TimeInterval
     ) -> ReviewFindings.Outcome {
         let findings = kinds.map { ReviewFindings.Finding(kind: $0, text: "a \($0) finding") }
-        let review = ReviewFindings.Review(findings: findings, workspace: workspace, task: task, pullRequest: pullRequest)
+        let review = ReviewFindings.Review(
+            findings: findings, workspace: workspace, branch: branch, missionBranch: missionBranch, folderOrTitle: "Title",
+            pullRequest: pullRequest, repository: nil
+        )
         return ReviewFindings.recordNow(review, spaceID: "S1", now: time, stateDirectory: state)
     }
 
@@ -48,16 +51,17 @@ final class ReviewFindingsTests: XCTestCase {
         XCTAssertNotNil(refusal([["kind": "a"]]))
     }
 
-    /// Each review of a task is its next round, and one task, before and
-    /// after its pull request opens (named by its pull request then); a
-    /// second branch in the same worktree is another task. A kind another
-    /// task had is said so, the most seen kind first. Reviews past 30 days
-    /// count for neither.
+    /// Each review of a task is its next round: a task is its workspace
+    /// and its branch, named by its pull request once it has one. While
+    /// HEAD is detached (a rebase), its last review's name; before its git
+    /// context arrives, its Mission's branch. A kind another task had is
+    /// said so, the most seen kind first. Reviews past 30 days count for
+    /// neither.
     func testRoundsAndKindsSeenInASecondTask() throws {
-        _ = record(["old-kind", "layer"], workspace: "W-old", task: "feat/old", pullRequest: 1, at: now - 33 * day)
-        guard case .recorded(let first, _) = record(["layer"], workspace: "W-A", task: "feat/a", pullRequest: nil, at: now - 3 * day),
-              case .recorded(let second, _) = record(["timer", "layer"], workspace: "W-A", task: "feat/a", pullRequest: 10, at: now - 2 * day),
-              case .recorded(let other, let kinds) = record(["layer", "new"], workspace: "W-B", task: "feat/b", pullRequest: nil, at: now - day)
+        _ = record(["old-kind", "layer"], workspace: "W-old", branch: "feat/old", pullRequest: 1, at: now - 33 * day)
+        guard case .recorded(let first, _) = record(["layer"], workspace: "W-A", branch: "feat/a", pullRequest: nil, at: now - 4 * day),
+              case .recorded(let second, _) = record(["timer", "layer"], workspace: "W-A", branch: "feat/a", pullRequest: 10, at: now - 3 * day),
+              case .recorded(let other, let kinds) = record(["layer", "new"], workspace: "W-B", branch: "feat/b", pullRequest: nil, at: now - 2 * day)
         else { return XCTFail("not recorded") }
         XCTAssertEqual([first.round, second.round, other.round], [1, 2, 1])
         XCTAssertEqual(kinds.map(\.name).first, "layer")
@@ -68,12 +72,20 @@ final class ReviewFindingsTests: XCTestCase {
         let answer = ReviewFindings.answer(for: other, title: "B", kinds: kinds)
         XCTAssertTrue(answer.hasPrefix("Recorded round 1 of “B”: 2 findings."), answer)
         XCTAssertTrue(answer.contains("Seen in another task too: layer (#10, feat/b)."), answer)
-        guard case .recorded(let next, let later) = record(["layer"], workspace: "W-A", task: "feat/c", pullRequest: 11, at: now)
-        else { return XCTFail("not recorded") }
-        XCTAssertEqual(next.round, 1, "a new branch in the same worktree")
-        XCTAssertEqual(later.first?.taskCount, 3)
         XCTAssertFalse(answer.contains("new ("), answer)
         XCTAssertTrue(answer.contains("Other kinds this space used in the last 30 days: timer."), answer)
+
+        guard case .recorded(let detached, let afterRebase) = record(["layer"], workspace: "W-A", branch: nil, missionBranch: "feat/start", pullRequest: nil, at: now - day)
+        else { return XCTFail("not recorded") }
+        XCTAssertEqual([detached.task, String(detached.round)], ["feat/a", "3"], "HEAD detached in a rebase: the same task")
+        XCTAssertEqual(afterRebase.first?.taskCount, 2)
+        guard case .recorded(let moved, let later) = record(["layer"], workspace: "W-A", branch: "feat/c", pullRequest: 11, at: now)
+        else { return XCTFail("not recorded") }
+        XCTAssertEqual([moved.task, String(moved.round)], ["feat/c", "1"], "the checkout moved to another branch: another task")
+        XCTAssertEqual(later.first?.taskCount, 3)
+        guard case .recorded(let started, _) = record(["new"], workspace: "W-M", branch: nil, missionBranch: "feat/m", pullRequest: nil, at: now)
+        else { return XCTFail("not recorded") }
+        XCTAssertEqual(started.task, "feat/m", "its Mission's branch, before its git context arrives")
         let url = try XCTUnwrap(ReviewFindings.lines.fileURL(spaceID: "S1", stateDirectory: state))
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int, 0o600)
     }
@@ -83,7 +95,7 @@ final class ReviewFindingsTests: XCTestCase {
     func testALogThatTakesNothingRecordsNothing() throws {
         let url = try XCTUnwrap(ReviewFindings.lines.fileURL(spaceID: "S1", stateDirectory: state))
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        guard case .notRecorded(let unwritable) = record(["layer"], workspace: "W", task: "feat/a", pullRequest: 1, at: now)
+        guard case .notRecorded(let unwritable) = record(["layer"], workspace: "W", branch: "feat/a", pullRequest: 1, at: now)
         else { return XCTFail("a folder in its place takes no line") }
         XCTAssertTrue(unwritable.contains("couldn’t write"), unwritable)
 
@@ -93,7 +105,7 @@ final class ReviewFindingsTests: XCTestCase {
         let handle = try FileHandle(forWritingTo: url)
         for _ in 0...(ReviewFindings.lines.maxFileBytes / line.count) { try handle.write(contentsOf: line) }
         try handle.close()
-        guard case .notRecorded(let full) = record(["layer"], workspace: "W", task: "feat/a", pullRequest: 1, at: now)
+        guard case .notRecorded(let full) = record(["layer"], workspace: "W", branch: "feat/a", pullRequest: 1, at: now)
         else { return XCTFail("a full log takes no line") }
         XCTAssertTrue(full.contains("full"), full)
     }
@@ -103,7 +115,9 @@ final class ReviewFindingsTests: XCTestCase {
     func testALongFirstLineIsReadWhole() throws {
         let long = (1...ReviewFindings.maxFindings).map { _ in ["kind": "layer", "text": String(repeating: "x", count: ReviewFindings.maxTextLength)] }
         guard case .success(let findings) = ReviewFindings.findings(long) else { return XCTFail("refused") }
-        let review = ReviewFindings.Review(findings: findings, workspace: "W", task: "feat/a", pullRequest: nil)
+        let review = ReviewFindings.Review(
+            findings: findings, workspace: "W", branch: "feat/a", missionBranch: nil, folderOrTitle: "Title", pullRequest: nil, repository: nil
+        )
         _ = ReviewFindings.recordNow(review, spaceID: "S1", now: now, stateDirectory: state)
         let url = try XCTUnwrap(ReviewFindings.lines.fileURL(spaceID: "S1", stateDirectory: state))
         let old = Date(timeIntervalSince1970: 1_000_000_000)

@@ -109,9 +109,9 @@ typed meanwhile).
 
 - The row: `Auto follow-up 1/3 · failed checks` while a round's turn runs;
   `Needs you · #52 still fails its checks: the automatic round pushed
-  nothing` (and the task's attention mark) once stopped, until a prompt that
-  isn't a poll event goes into one of its agents (the user's, or a Mission
-  message), kept in the entry across relaunches.
+  nothing` (and the task's attention mark) once stopped, until a prompt goes
+  into one of its agents (the user's, or a Mission message), kept in the
+  entry across relaunches.
 - Without an agent to type into, the decision still runs: it settles rounds
   and clears stops.
 - The decisions go to the log category `followUp`, once per change.

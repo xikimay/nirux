@@ -814,7 +814,8 @@ extension WorkspaceState {
         missionID: String?,
         missionHandoffsEnabled: Bool,
         executablePath: String?,
-        launchID: String
+        launchID: String,
+        inherited: [String: String] = ProcessInfo.processInfo.environment
     ) -> [String: String] {
         var environment = [
             "NIRUX_PROFILE_ID": profileID,
@@ -829,6 +830,10 @@ extension WorkspaceState {
             // Nor is a copy's opt-in to the real state (see RealStateGuard).
             "NIRUX_ALLOW_REAL_STATE": ""
         ]
+        // Antigravity then says what it does and why it waits
+        // (AgentProgramStatus): Nirux doesn't answer its query. A user's own
+        // setting stays.
+        if inherited["AGY_CLI_OSC7501"] == nil { environment["AGY_CLI_OSC7501"] = "on" }
         if missionHandoffsEnabled {
             environment["NIRUX_MISSION_HANDOFFS"] = "1"
             if let executablePath {

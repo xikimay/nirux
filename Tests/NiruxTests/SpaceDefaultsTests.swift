@@ -181,6 +181,25 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: elsewhere, encoding: .utf8), #"{"agent": "codex"}"#)
     }
 
+    /// The daily pass is on after 06:00 unless the file says; an hour it
+    /// can't take keeps the file read-only, and a file it can't read turns
+    /// the pass off.
+    func testTheDailyPassSetting() throws {
+        XCTAssertTrue(SpaceDefaults().dailyPassIsOn)
+        XCTAssertEqual(SpaceDefaults().dailyPassHour, DailyPass.defaultHour)
+        let set = SpaceDefaultsStore.decode(Data(#"{"leadDailyPass": false, "leadDailyPassHour": 9}"#.utf8))
+        XCTAssertEqual(set.status, .loaded)
+        XCTAssertFalse(set.defaults.dailyPassIsOn)
+        XCTAssertEqual(set.defaults.dailyPassHour, 9)
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(set.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["leadDailyPassHour"] as? Int, 9)
+        let odd = SpaceDefaultsStore.decode(Data(#"{"leadDailyPassHour": 24}"#.utf8))
+        XCTAssertEqual(odd.status, .readOnly(.unknownSettings(["leadDailyPassHour"])))
+        XCTAssertEqual(odd.defaults.dailyPassHour, DailyPass.defaultHour)
+        XCTAssertFalse(odd.defaults.dailyPassIsOn, "an hour it can't read: off")
+        XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.dailyPassIsOn)
+    }
+
     /// A deleted space's defaults, setup scripts, proposed rules and logs go;
     /// its brief stays, and its Claude settings stay empty for the launch
     /// lines that name them.

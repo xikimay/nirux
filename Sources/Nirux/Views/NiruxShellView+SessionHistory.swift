@@ -16,6 +16,9 @@ extension NiruxShellView {
         switch event.kind {
         case .claude:
             agentProcess = appliedEvent.claudeSessionAgent
+        case .agy:
+            // Antigravity's conversations aren't in the session history.
+            return
         case .codex:
             let foreground = resolution.column.pty?.foregroundProcess(snapshot: snapshot)
             agentProcess = foreground.flatMap {
