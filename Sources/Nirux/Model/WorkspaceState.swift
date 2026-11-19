@@ -861,7 +861,9 @@ extension WorkspaceState {
         handle.onDragStart = { [weak self, weak handle] in
             guard let self, let handle, let edge = self.resizeHandles.firstIndex(of: handle),
                   edge == self.focusedIndex || edge == self.focusedIndex - 1 else { return nil }
-            return (self.columns.map(\.view.frame.width), self.stripView.frame.width, self.lastCameraX, self.focusedCardIsCentred)
+            let widths = self.columns.map(\.view.frame.width)
+            let centred = Self.centres(widths, focus: self.focusedIndex, viewport: self.containerView.bounds.width)
+            return (widths, self.stripView.frame.width, self.lastCameraX, self.focusedIndex, centred)
         }
         handle.onDrag = { [weak self, weak handle] start, delta in
             guard let self, let handle, let edge = self.resizeHandles.firstIndex(of: handle) else { return }
@@ -873,16 +875,23 @@ extension WorkspaceState {
             self.heldCamera = nil
             self.layoutAndScroll(viewportWidth: self.containerView.bounds.width, height: self.containerView.bounds.height, animated: true)
         }
-        // Double-click: the focused card back to half, shared alike.
+        // Double-click: the focused card back to half, by the same share.
         handle.onReset = { [weak self, weak handle] in
-            guard let self, let handle, let edge = self.resizeHandles.firstIndex(of: handle) else { return }
-            let viewport = self.containerView.bounds.width
-            let share = Self.share(edge: edge, focus: self.focusedIndex, count: self.columns.count, centred: self.focusedCardIsCentred)
-            self.setColumnWidths(Self.resized(
-                self.columns.map(\.view.frame.width), focus: self.focusedIndex,
-                to: Self.width(ColumnWidth.half.fraction, in: viewport), share: share,
-                minWidth: Self.width(Self.minWidthFraction, in: viewport)
-            ), viewport: viewport)
+            guard let self, let handle, let edge = self.resizeHandles.firstIndex(of: handle),
+                  edge == self.focusedIndex || edge == self.focusedIndex - 1 else { return }
+            let viewport = self.containerView.bounds.width, focus = self.focusedIndex
+            let widths = self.columns.map(\.view.frame.width)
+            let share = Self.share(
+                edge: edge, focus: focus, count: widths.count, centred: Self.centres(widths, focus: focus, viewport: viewport)
+            )
+            let toHalf = Self.width(ColumnWidth.half.fraction, in: viewport) - widths[focus]
+            let asks: [(column: Int, points: CGFloat)] = switch share {
+            case .both: [(focus + 1, ceil(toHalf / 2)), (focus - 1, floor(toHalf / 2))]
+            case .left: [(focus - 1, toHalf)]
+            case .right: [(focus + 1, toHalf)]
+            case .none: [(focus, toHalf)]
+            }
+            self.setColumnWidths(Self.resized(widths, focus: focus, taking: asks, share: share, viewport: viewport), viewport: viewport)
         }
         handle.wantsLayer = true
         stripView.addSubview(handle)
@@ -903,46 +912,56 @@ extension WorkspaceState {
         return edge < count - 1 ? .right : .none
     }
 
-    /// The widths `widths` take once the focused column `focus` is
-    /// `target` wide, its neighbours paying by `share`, none under
-    /// `minWidth`.
-    static func resized(_ widths: [CGFloat], focus: Int, to target: CGFloat, share: ResizeShare, minWidth: CGFloat) -> [CGFloat] {
-        let payers: [Int] = switch share {
-        case .both: [focus - 1, focus + 1]
-        case .left: [focus - 1]
-        case .right: [focus + 1]
-        case .none: []
-        }
-        let room = payers.map { max(0, widths[$0] - minWidth) }.min().map { $0 * CGFloat(payers.count) } ?? .infinity
+    /// The widths `widths` take when the focused column `focus` takes
+    /// `points` from each column of `asks` in turn (a negative ask gives
+    /// back), every one kept between the minimum and the maximum width, the
+    /// focused one, when `share` is `.both`, within the viewport: a
+    /// column that runs out pays what it can. An ask on `focus` itself
+    /// grows it alone.
+    static func resized(
+        _ widths: [CGFloat], focus: Int, taking asks: [(column: Int, points: CGFloat)], share: ResizeShare, viewport: CGFloat
+    ) -> [CGFloat] {
+        let low = width(minWidthFraction, in: viewport), high = width(maxWidthFraction, in: viewport)
+        let focusHigh = share == .both ? width(1, in: viewport) : high
         var resized = widths
-        resized[focus] = max(minWidth, min(target, widths[focus] + room))
-        let paid = resized[focus] - widths[focus], first = floor(paid / CGFloat(max(payers.count, 1)))
-        for (k, payer) in payers.enumerated() { resized[payer] -= k == 0 ? first : paid - first }
+        for ask in asks {
+            // What the focused card may take without leaving its range, and
+            // the payer its own; a column already outside keeps where it is.
+            var lower = min(0, low - resized[focus]), upper = max(0, focusHigh - resized[focus])
+            if ask.column != focus {
+                lower = max(lower, min(0, resized[ask.column] - high))
+                upper = min(upper, max(0, resized[ask.column] - low))
+            }
+            let paid = min(max(ask.points, lower), upper)
+            resized[focus] += paid
+            if ask.column != focus { resized[ask.column] -= paid }
+        }
         return resized
     }
 
     /// The focused card's edge right of column `edge` dragged `delta`
-    /// points from `start`, staying under the pointer: a card centred
-    /// between two neighbours grows on both sides; a strip that changes
-    /// width (its last edge) moves as `draggedWidth` and `dragCamera` say.
+    /// points from `start`, staying under the pointer: the neighbour across
+    /// the edge pays what the pointer moved, and the other as much while the
+    /// card is centred (`share`); the strip's last edge moves as
+    /// `draggedWidth` and `dragCamera` say. A focus moved since the drag
+    /// began leaves it there.
     private func drag(edge: Int, from start: ColumnResizeHandle.Start, by delta: CGFloat) {
-        let viewport = containerView.bounds.width, focus = focusedIndex
-        guard start.widths.count == columns.count, start.widths.indices.contains(focus) else { return }
+        let viewport = containerView.bounds.width, focus = start.focus
+        guard focus == focusedIndex, start.widths.count == columns.count else { return }
         let share = Self.share(edge: edge, focus: focus, count: columns.count, centred: start.centred)
-        let width = start.widths[focus]
-        let target: CGFloat = switch share {
-        case .both: width + 2 * (edge == focus ? delta : -delta)
-        case .left: width - delta
-        case .right: width + delta
-        case .none: Self.draggedWidth(width, strip: start.strip, viewport: viewport, by: delta)
+        let pull = edge == focus ? delta : -delta
+        let near = edge == focus ? focus + 1 : focus - 1, far = edge == focus ? focus - 1 : focus + 1
+        let asks: [(column: Int, points: CGFloat)] = switch share {
+        case .both: [(near, pull), (far, pull)]
+        case .left, .right: [(near, pull)]
+        case .none: [(focus, Self.draggedWidth(start.widths[focus], strip: start.strip, viewport: viewport, by: delta) - start.widths[focus])]
         }
+        let widths = Self.resized(start.widths, focus: focus, taking: asks, share: share, viewport: viewport)
         let camera = share == .none
-            ? Self.dragCamera(width: width, strip: start.strip, camera: start.camera, viewport: viewport, to: target)
+            ? Self.dragCamera(width: start.widths[focus], strip: start.strip, camera: start.camera, viewport: viewport, to: widths[focus])
             : start.camera
         heldCamera = camera.map { ($0, columns[focus].id) }
-        setColumnWidths(Self.resized(
-            start.widths, focus: focus, to: target, share: share, minWidth: Self.width(Self.minWidthFraction, in: viewport)
-        ), viewport: viewport)
+        setColumnWidths(widths, viewport: viewport)
     }
 
     /// The width a column `width` wide on a strip `strip` wide gets from its
@@ -967,10 +986,23 @@ extension WorkspaceState {
         return strip - width + target <= viewport ? nil : 0
     }
 
-    /// Whether the focused card lies in the middle of the viewport.
-    private var focusedCardIsCentred: Bool {
-        guard let card = columns[safe: focusedIndex]?.view.frame else { return false }
-        return abs(card.midX - lastCameraX - containerView.bounds.width / 2) <= 1
+    /// Where the camera goes when nothing holds it, for cards `widths` wide
+    /// in a viewport `viewport` wide, `focus` focused: a strip narrower
+    /// than the viewport lies in its middle; a wider one brings the focused
+    /// card to the middle, stopping at the strip's ends. A card wider than
+    /// the viewport shows from its left edge, with its air.
+    static func camera(for widths: [CGFloat], focus: Int, viewport: CGFloat) -> CGFloat {
+        let total = widths.reduce(0, +) + columnGap * CGFloat(widths.count - 1) + columnInset * 2
+        guard total > viewport else { return -floor((viewport - total) / 2) }
+        let left = widths[..<focus].reduce(columnInset) { $0 + $1 + columnGap }, width = widths[focus]
+        let camera = width + columnInset * 2 > viewport ? left - columnInset : floor(left + width / 2 - viewport / 2)
+        return max(0, min(camera, total - viewport))
+    }
+
+    /// Whether that camera centres the focused card.
+    static func centres(_ widths: [CGFloat], focus: Int, viewport: CGFloat) -> Bool {
+        let left = widths[..<focus].reduce(columnInset) { $0 + $1 + columnGap }
+        return abs(left + widths[focus] / 2 - camera(for: widths, focus: focus, viewport: viewport) - viewport / 2) <= 1
     }
 
     static let minWidthFraction: CGFloat = 0.15
@@ -981,10 +1013,14 @@ extension WorkspaceState {
         heldCamera = columns[safe: index].map { (lastCameraX, $0.id) }
     }
 
+    /// Only the columns whose width changes take a new fraction: the others
+    /// keep theirs as they are.
     private func setColumnWidths(_ widths: [CGFloat], viewport: CGFloat) {
-        let fractions = widths.map { min(Self.maxWidthFraction, max(Self.minWidthFraction, ($0 + Self.columnGap) / max(Self.span(viewport), 1))) }
-        guard fractions != columns.map(\.widthFraction) else { return }
-        for (column, fraction) in zip(columns, fractions) { column.widthFraction = fraction }
+        let laidOut = columns.map(\.view.frame.width)
+        guard widths.count == columns.count, widths != laidOut else { return }
+        for (index, width) in widths.enumerated() where width != laidOut[index] {
+            columns[index].widthFraction = min(Self.maxWidthFraction, max(Self.minWidthFraction, (width + Self.columnGap) / max(Self.span(viewport), 1)))
+        }
         layoutAndScroll(viewportWidth: viewport, height: containerView.bounds.height, animated: false)
     }
 
@@ -1163,25 +1199,12 @@ extension WorkspaceState {
         for handle in resizeHandles { stripView.addSubview(handle) }
         stripView.frame = NSRect(x: stripView.frame.origin.x, y: 0, width: totalWidth, height: height)
 
-        // 3. Camera: a strip narrower than the viewport lies in its middle;
-        // a wider one brings the focused card to the middle, stopping at the
-        // strip's ends. A card wider than the viewport shows from its left
-        // edge, with its air.
-        let cameraX: CGFloat
-        // A hold is over once its card has lost the focus.
+        // 3. Camera (`camera(for:focus:viewport:)`), unless a hold keeps it
+        // where it is: past the strip's end too, so that the last edge
+        // dragged in stays under the pointer. A hold is over once its card
+        // has lost the focus.
         if heldCamera?.column != columns[safe: focusedIndex]?.id { heldCamera = nil }
-        if let held = heldCamera {
-            cameraX = held.x
-        } else if totalWidth <= viewportWidth {
-            cameraX = -floor((viewportWidth - totalWidth) / 2)
-        } else if fitAll {
-            cameraX = 0
-        } else {
-            let left = widths[..<focusedIndex].reduce(inset) { $0 + $1 + gap }
-            let width = widths[focusedIndex]
-            let camera = width + inset * 2 > viewportWidth ? left - inset : floor(left + width / 2 - viewportWidth / 2)
-            cameraX = max(0, min(camera, totalWidth - viewportWidth))
-        }
+        let cameraX = heldCamera?.x ?? Self.camera(for: widths, focus: focusedIndex, viewport: viewportWidth)
 
         lastCameraX = cameraX
 

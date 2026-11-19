@@ -271,6 +271,7 @@ final class ColumnCardsTests: XCTestCase {
     func testACentredCardGrowsOnBothSides() throws {
         let workspace = workspace(columns: 4)
         let strip = try strip(of: workspace)
+        workspace.columns[3].widthFraction = 0.43
         workspace.focusedIndex = 1
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
         let handles = strip.subviews.compactMap { $0 as? ColumnResizeHandle }
@@ -285,6 +286,7 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(widths[0] - before[0], -40, accuracy: 1)
         XCTAssertEqual(widths[2] - before[2], -40, accuracy: 1)
         XCTAssertEqual(widths[3], before[3])
+        XCTAssertEqual(workspace.columns[3].widthFraction, 0.43, "untouched, its fraction as it was")
         XCTAssertEqual(card.frame.maxX + strip.frame.minX - edge, 40, accuracy: 1, "the edge under the pointer")
         XCTAssertEqual(card.frame.midX + strip.frame.minX, 500, accuracy: 1)
         handles[1].onDragEnd?()
@@ -294,10 +296,70 @@ final class ColumnCardsTests: XCTestCase {
         handles[0].onDrag?(fromLeft, 40)
         XCTAssertEqual(card.frame.width - widths[1], -80, accuracy: 1, "its left edge in")
         XCTAssertEqual(card.frame.midX + strip.frame.minX, 500, accuracy: 1)
+        handles[0].onDragEnd?()
+
+        // It grows up to the viewport's width, centred.
+        let wide = try XCTUnwrap(handles[1].onDragStart?())
+        handles[1].onDrag?(wide, 400)
+        XCTAssertEqual(card.frame.width, 1000 - inset * 2, accuracy: 1)
+        handles[1].onDragEnd?()
+        XCTAssertEqual(card.frame.midX + strip.frame.minX, 500, accuracy: 1, "nothing glides")
     }
 
-    /// A card not centred (at the strip's ends, or among cards that fit)
-    /// takes from the neighbour across the dragged edge alone.
+    /// A neighbour that runs out pays what it can, and the other pays on:
+    /// the dragged edge stays under the pointer.
+    func testANeighbourThatRunsOutLeavesTheOtherToPay() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        workspace.columns[1].widthFraction = 0.25
+        workspace.focusedIndex = 2
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let handles = strip.subviews.compactMap { $0 as? ColumnResizeHandle }
+        let card = workspace.columns[2].view
+        XCTAssertEqual(card.frame.midX + strip.frame.minX, 500, accuracy: 1)
+        let before = workspace.columns.map(\.view.frame.width), edge = card.frame.maxX + strip.frame.minX
+        let start = try XCTUnwrap(handles[2].onDragStart?())
+        handles[2].onDrag?(start, 200)
+        let widths = workspace.columns.map(\.view.frame.width)
+        XCTAssertEqual(widths[1], floor(WorkspaceState.minWidthFraction * (1000 - inset * 2 + gap) - gap), accuracy: 1, "down to the minimum")
+        XCTAssertEqual(widths[3] - before[3], -200, accuracy: 1)
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX - edge, 200, accuracy: 1)
+        XCTAssertEqual(widths.reduce(0, +), before.reduce(0, +), accuracy: 2, "the strip as wide")
+    }
+
+    /// A focus moved during a drag leaves the drag's card where it is.
+    func testAFocusMovedDuringADragEndsIt() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        workspace.focusedIndex = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let handle = strip.subviews.compactMap { $0 as? ColumnResizeHandle }[1]
+        let start = try XCTUnwrap(handle.onDragStart?())
+        workspace.focusedIndex = 3
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let before = workspace.columns.map(\.view.frame.width)
+        handle.onDrag?(start, 60)
+        XCTAssertEqual(workspace.columns.map(\.view.frame.width), before)
+    }
+
+    /// A card not centred never takes more than the maximum width, nor its
+    /// neighbour more than it gives.
+    func testWidthsStayWithinTheirRange() throws {
+        let workspace = workspace(columns: 2)
+        let strip = try strip(of: workspace)
+        workspace.columns[0].widthFraction = 1.6
+        workspace.columns[1].widthFraction = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let before = workspace.columns.map(\.view.frame.width)
+        let handle = strip.subviews.compactMap { $0 as? ColumnResizeHandle }[0]
+        let start = try XCTUnwrap(handle.onDragStart?())
+        handle.onDrag?(start, 600)
+        XCTAssertEqual(workspace.columns[0].widthFraction, WorkspaceState.maxWidthFraction, accuracy: 0.01)
+        XCTAssertEqual(workspace.columns.map(\.view.frame.width).reduce(0, +), before.reduce(0, +), accuracy: 2)
+    }
+
+    /// A card not centred (at the strip's ends, or at the side of cards that
+    /// fit) takes from the neighbour across the dragged edge alone.
     func testACardNotCentredTakesFromTheNeighbourAcrossTheEdge() throws {
         let workspace = workspace(columns: 4)
         let strip = try strip(of: workspace)
@@ -759,7 +821,7 @@ final class ColumnCardsTests: XCTestCase {
     func testADoubleClickOnAHandleLeavesNoDragBehind() {
         let handle = ColumnResizeHandle(frame: NSRect(x: 0, y: 0, width: 9, height: 100))
         var drags = 0
-        handle.onDragStart = { ([100], 500, 0, false) }
+        handle.onDragStart = { ([100], 500, 0, 0, false) }
         handle.onDrag = { _, _ in drags += 1 }
         handle.onReset = {}
         func event(_ type: NSEvent.EventType, clicks: Int) -> NSEvent {
