@@ -201,6 +201,10 @@ final class AgentSessionResumeTests: XCTestCase {
             instance: ProcessInstance(pid: 13, startedAt: 4), name: "codex", arguments: ["codex", "--sandbox", "read-only"]
         )
         XCTAssertFalse(CodexSessionTracker.canProve(modeOnly), "an option's value is no prompt")
+        for arguments in [["codex", "resume"], ["node", "/usr/local/lib/node_modules/@openai/codex/bin/codex"]] {
+            let process = ForegroundProcess(instance: ProcessInstance(pid: 14, startedAt: 5), name: "codex", arguments: arguments)
+            XCTAssertFalse(CodexSessionTracker.canProve(process), "the program is no prompt: \(arguments)")
+        }
         XCTAssertTrue(CodexSessionTracker.canProve(launched) && CodexSessionTracker.canProve(resumed))
     }
 
@@ -209,6 +213,10 @@ final class AgentSessionResumeTests: XCTestCase {
     /// itself with the binary.
     func testCodexQueueRunsWhatRunsTheCodex() {
         XCTAssertEqual(CodexQueue.command(executable: "/opt/codex/bin/codex", arguments: ["codex", "Go"]), ["/opt/codex/bin/codex"])
+        XCTAssertEqual(
+            CodexQueue.command(executable: "/opt/homebrew/bin/codex-aarch64-apple-darwin", arguments: ["codex", "resume", "t1", "-C", "/repos/codex"]),
+            ["/opt/homebrew/bin/codex-aarch64-apple-darwin"], "only a runtime runs a script"
+        )
         XCTAssertEqual(
             CodexQueue.command(executable: "/usr/local/bin/node", arguments: ["node", "/usr/local/lib/node_modules/@openai/codex/bin/codex.js", "Go"]),
             ["/usr/local/bin/node", "/usr/local/lib/node_modules/@openai/codex/bin/codex.js"]

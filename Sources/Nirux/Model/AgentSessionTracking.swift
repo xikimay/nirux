@@ -141,12 +141,15 @@ struct CodexSessionTracker {
     }
 
     /// The prompt `process` was launched with: its last argument, as
-    /// Nirux's launch line ends, when it is no option nor an option's value.
+    /// Nirux's launch line ends, when it follows the program (`codex`, or a
+    /// runtime's script) and is no option nor an option's value. None in a
+    /// resume.
     private static func launchPrompt(of process: ForegroundProcess) -> String? {
         let arguments = process.arguments
-        guard arguments.count > 1, let last = arguments.last, !last.hasPrefix("-"),
-              !AgentHookCenter.codexOptionsWithValue.contains(arguments[arguments.count - 2]),
-              resumedSessionID(of: process) == nil else { return nil }
+        let program = arguments.firstIndex { (($0 as NSString).lastPathComponent as NSString).deletingPathExtension == "codex" } ?? 0
+        guard !arguments.contains("resume"), arguments.count > program + 1, let last = arguments.last, !last.hasPrefix("-"),
+              arguments.count - 2 == program || !AgentHookCenter.codexOptionsWithValue.contains(arguments[arguments.count - 2])
+        else { return nil }
         return last
     }
 

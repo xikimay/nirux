@@ -243,7 +243,7 @@ final class ProcessSnapshot {
         return processGroupMap[processGroupID]?.contains(process.pid) == true
     }
 
-    private static let runtimeBinaries: Set<String> = [
+    static let runtimeBinaries: Set<String> = [
         "node", "python", "python3", "ruby", "perl", "java", "deno", "bun"
     ]
 
