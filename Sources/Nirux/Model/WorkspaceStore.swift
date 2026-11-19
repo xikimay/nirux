@@ -164,20 +164,20 @@ final class WorkspaceStore {
     /// space's first. Workspaces with a close in flight don't count.
     func fallbackIndexAfterClosingWorkspace(at index: Int) -> Int? {
         guard workspaces.indices.contains(index) else { return nil }
-        let isOpen = { (candidate: Int) in candidate != index && !self.workspaces[candidate].isClosing }
+        let isCandidate = { (candidate: Int) in candidate != index && self.isOpen(candidate) }
         let isActive = { (candidate: Int) in !self.workspaces[candidate].isInactive }
         let profileID = workspaces[index].profileID
         let list = visibleWorkspaceIndices(in: profileID)
         let position = list.firstIndex(of: index) ?? list.count
-        let neighbours = (Array(list[position...]) + list[..<position].reversed()).filter(isOpen)
+        let neighbours = (Array(list[position...]) + list[..<position].reversed()).filter(isCandidate)
         if let neighbour = neighbours.first(where: isActive) { return neighbour }
         let otherSpaces = profiles.filter { $0.id != profileID }
             .flatMap { visibleWorkspaceIndices(in: $0.id) }
-            .filter(isOpen)
+            .filter(isCandidate)
         return otherSpaces.first(where: isActive)
             ?? neighbours.first
             ?? otherSpaces.first
-            ?? workspaces.indices.first(where: isOpen)
+            ?? workspaces.indices.first(where: isCandidate)
     }
 
     @discardableResult

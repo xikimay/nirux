@@ -396,10 +396,17 @@ extension NiruxShellView {
             return "\(waiting.name) needs the user" + (waiting.dialog.map { ": \($0)" } ?? "")
         }
         if let failed = agents.first(where: { $0.failure != nil }), let failure = failed.failure {
-            return "\(failed.name) \(failure.headline)" + (failure.detail.map { " — \($0)" } ?? "")
+            return "\(failed.name) \(failure.headline)" + (Self.leadDetail(of: failure).map { " — \($0)" } ?? "")
         }
         if let working = agents.first(where: { $0.status == AgentStatus.working }) { return "\(working.name) working" }
         return "\(first.name) idle"
+    }
+
+    /// A stuck state's specifics, for the Lead: a silent turn's way out is
+    /// interrupt_task, not the user's Esc its row suggests.
+    private static func leadDetail(of stuck: SidebarStuckState) -> String? {
+        guard case .silent(_, _, let interruptible) = stuck else { return stuck.detail }
+        return interruptible ? "interrupt_task can stop it" : "only the user can stop it, in its terminal"
     }
 
     /// An agent in front of one of a workspace's columns, as list_tasks

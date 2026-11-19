@@ -125,6 +125,13 @@ final class WorkspaceCloseFallbackTests: XCTestCase {
         XCTAssertEqual(store.activeWorkspace?.id, "c")
         store.removeWorkspace(try XCTUnwrap(store.workspaces.first { $0.id == "c" }))
         XCTAssertEqual(store.activeWorkspace?.id, "a")
+
+        // On a space whose only workspace closes, a removal elsewhere.
+        let other = makeStore(["x:work", "y", "z"])
+        other.workspaces[0].isClosing = true
+        XCTAssertTrue(other.selectProfile("work"))
+        other.removeWorkspace(try XCTUnwrap(other.workspaces.first { $0.id == "z" }))
+        XCTAssertEqual(other.activeWorkspace?.id, "y")
     }
 
     func testIndexOutOfRangeHasNoFallback() {

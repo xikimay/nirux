@@ -26,7 +26,7 @@ final class EditorDiffGroupTests: BranchReviewRepositoryTestCase {
         editor.showDiff(path: "Sources/App.swift")
         XCTAssertEqual(editor.activePath, repo + "/Sources/App.swift")
         editor.switchTo(path: group)
-        waitUntil("the tab's files", timeout: 10) { editor.diffGroupTabs[group]?.isLoading == false }
+        waitUntil("the tab's files") { editor.diffGroupTabs[group]?.isLoading == false }
         XCTAssertEqual(editor.diffGroupTabs[group]?.files.count, 2)
     }
 }

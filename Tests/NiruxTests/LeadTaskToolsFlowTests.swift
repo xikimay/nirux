@@ -901,28 +901,63 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertTrue(try interrupt().text.contains("shows no interrupt"))
             XCTAssertTrue(try interrupt().text.contains("Esc already went into this turn"), "a second Esc would open the rewind")
             harness.waitUntil("the Esc read as ignored") { pty.agentAwaitsModel(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot())) }
+            let handle = try XCTUnwrap(FileHandle(forWritingAtPath: transcript))
+            handle.seekToEndOfFile()
+            handle.write(Data((Self.toolResultLine + "\n").utf8))
+            try handle.close()
+            try passSilenceThreshold(task.column, in: harness)
+            let list = try harness.callLeadTool(LeadTools.listTasks, lead: lead).text
+            XCTAssertTrue(list.contains(" · claude silent for "), list)
+            XCTAssertTrue(list.contains(" — only the user can stop it, in its terminal"), "the Esc can't go in again: \(list)")
         }
     }
 
-    /// A turn stopped on an API error reads so in list_tasks, as on its
-    /// row: neither idle, as once the user saw it, nor needing the user for
-    /// nothing said.
-    func testListTasksSaysATurnStoppedOnAnAPIError() throws {
+    /// A tool's result, last in a transcript: the turn waits on the model.
+    private static let toolResultLine = #"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"ok"}]}}"#
+
+    /// `column`'s turn, waiting on the model with its transcript measured,
+    /// reads as silent: its awake clock moves past the threshold.
+    private func passSilenceThreshold(_ column: ColumnState, in harness: UIFlowHarness) throws {
+        let pty = try XCTUnwrap(column.pty)
+        // The system notification needs an app bundle, which xctest isn't.
+        column.onAgentAttention = { _ in }
+        column.noteTranscriptGrowth(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot()), now: Date().timeIntervalSince1970)
+        let later = ProcessInfo.processInfo.systemUptime + AgentSilence.threshold(waitThreshold: harness.shell.stuckAgentWaitThreshold) + 60
+        pty.awakeClock = { later }
+    }
+
+    /// A turn stopped on an API error, or gone silent, reads so in
+    /// list_tasks, as on its row: neither idle, as once the user saw it,
+    /// nor needing the user for nothing said, nor working.
+    func testListTasksSaysATurnFailedAsItsRowDoes() throws {
         try UIFlowHarness.run { harness in
             let lead = try harness.makeLead()
             let task = try reportingTask("Builder", lead: lead, harness: harness)
             defer { task.agent.remove() }
             let pty = try XCTUnwrap(task.column.pty)
+            let line = {
+                try harness.callLeadTool(LeadTools.listTasks, lead: lead).text.split(separator: "\n")
+                    .first { $0.hasPrefix("- “Builder”") }.map(String.init) ?? ""
+            }
             for isUserFocused in [true, false] {
                 task.hook(.userPromptSubmit)
                 _ = pty.applyAgentHook(AgentHookEvent(
                     kind: .claude, name: .stopFailure, agentUUID: task.column.agentUUID, sessionID: "task", emitterProcess: task.claude,
                     errorKind: "overloaded", timestamp: Date().timeIntervalSince1970
                 ), isUserFocused: isUserFocused)
-                let list = try harness.callLeadTool(LeadTools.listTasks, lead: lead).text
-                let line = list.split(separator: "\n").first { $0.hasPrefix("- “Builder”") }.map(String.init) ?? ""
-                XCTAssertTrue(line.hasSuffix(" · claude stopped on an API error — overloaded"), "focused: \(isUserFocused), \(list)")
+                let failed = try line()
+                XCTAssertTrue(failed.hasSuffix(" · claude stopped on an API error — overloaded"), "focused: \(isUserFocused), \(failed)")
             }
+
+            let transcript = harness.root + "/builder.jsonl"
+            try (Self.toolResultLine + "\n").write(toFile: transcript, atomically: true, encoding: .utf8)
+            task.column.followClaudeTranscript(at: transcript, sessionID: "task", process: task.claude)
+            task.hook(.userPromptSubmit)
+            task.hook(.preToolUse)
+            task.hook(.postToolUse)
+            try passSilenceThreshold(task.column, in: harness)
+            let silent = try line()
+            XCTAssertTrue(silent.contains(" · claude silent for ") && silent.hasSuffix(" — interrupt_task can stop it"), silent)
         }
     }
 
