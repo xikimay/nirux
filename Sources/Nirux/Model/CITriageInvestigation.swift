@@ -345,11 +345,7 @@ enum CITriageInvestigation {
     }
 
     @Sendable private static func runGH(_ arguments: [String], timeout: TimeInterval, maxBytes: Int) -> Data? {
-        guard let ghPath = GitHub.CLI.installedPath(),
-              let result = GitHub.CLI.run(ghPath, arguments: arguments, timeout: timeout, maxStandardOutputBytes: maxBytes),
-              result.terminationStatus == 0
-        else { return nil }
-        return result.standardOutput
+        try? GitHub.CLI.run(arguments, timeout: timeout, maxStandardOutputBytes: maxBytes).flatMap(\.result).get()
     }
 
     /// Read-only, and local: a partial clone doesn't fetch what it lacks.

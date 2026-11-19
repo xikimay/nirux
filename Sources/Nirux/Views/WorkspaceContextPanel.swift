@@ -363,7 +363,7 @@ final class WorkspaceContextPanel {
         let pullRequest: String
         if let pr = configuration.prInfo {
             let ci = pr.ciStatus.map { "  ·  CI \($0.lowercased())" } ?? ""
-            pullRequest = "PR        #\(pr.number) \(pr.state.rawValue.lowercased())\(ci)"
+            pullRequest = "PR        #\(pr.number) \(pr.state.word)\(ci)"
         } else {
             pullRequest = "PR        None detected"
         }

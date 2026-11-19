@@ -34,7 +34,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
         _ candidates: [MergeQueue.ConfirmationReading.Candidate],
         settings: BoardConfig.QueueSettings = MQ.settings(),
         isDryRun: Bool = false,
-        baseRuns: [MergeQueue.Run] = [],
+        baseRuns: [GitHub.WorkflowRun] = [],
         remaining: Int = 5000,
         baseMergeQueue: Bool = false
     ) -> MergeQueue.ConfirmationReading {

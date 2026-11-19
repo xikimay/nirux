@@ -55,7 +55,7 @@ extension MergeQueue {
                 guard worktree.branch == branch else { continue }
                 let status = WorktreeCleanup.git(["status", "--porcelain", "--untracked-files=no"], in: worktree.path, tools: tools)
                 guard status.status == 0 else {
-                    let reason = WorktreeCleanup.firstLine(status.stderr) ?? "git status failed"
+                    let reason = status.stderr.firstLine ?? "git status failed"
                     inspection.worktrees.append(LocalWorktree(path: worktree.path, problem: .unreadable(reason)))
                     continue
                 }

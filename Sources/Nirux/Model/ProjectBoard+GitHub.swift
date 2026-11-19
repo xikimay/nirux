@@ -11,11 +11,11 @@ protocol ProjectBoardGitHub: Sendable {
     /// The pull requests of `repository` (`owner/name`) as a JSON list:
     /// the open ones with their checks, or the merged ones opened or
     /// updated last.
-    func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError>
+    func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, GitHub.CLI.Failure>
     /// `gh run list` as JSON: the last push run of `workflow` on `branch`.
-    func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError>
+    func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, GitHub.CLI.Failure>
     /// Bases pull request `number` on `base`.
-    func retarget(repository: String, number: Int, base: String) -> Result<Data, ProjectBoard.FetchError>
+    func retarget(repository: String, number: Int, base: String) -> Result<Data, GitHub.CLI.Failure>
 }
 
 extension ProjectBoard {
@@ -31,36 +31,22 @@ extension ProjectBoard {
         case merged
     }
 
-    enum FetchError: Error, Equatable, Sendable {
-        /// The GitHub CLI isn't where Nirux looks for it.
-        case ghMissing
-        /// gh has no GitHub account to read with (its status 4), or GitHub
-        /// refuses its token: what gh said, when it says more than to run
-        /// `gh auth login`.
-        case notSignedIn(String?)
-        /// gh failed: its first line of error, or why it didn't run.
-        case failed(String)
-        /// gh answered with something that isn't the JSON asked for.
-        case unreadable
-
-        var message: String {
-            switch self {
-            case .ghMissing: return "\(GitHub.CLI.missing): pull requests can’t be read."
-            case .notSignedIn(let detail):
-                return "\(GitHub.CLI.signedOut): run gh auth login in a terminal, then Refresh."
-                    + (detail.map { " (gh: \($0))" } ?? "")
-            case .failed(let reason): return "gh: \(reason)"
-            case .unreadable: return "gh answered with something Nirux can’t read."
-            }
+    /// A failed read as the Board says it: what to do when gh is missing or
+    /// signed out.
+    static func message(_ failure: GitHub.CLI.Failure) -> String {
+        switch failure {
+        case .ghMissing: return "\(GitHub.CLI.missing): pull requests can’t be read."
+        case .notSignedIn(let detail):
+            return "\(GitHub.CLI.signedOut): run gh auth login in a terminal, then Refresh." + (detail.map { " (gh: \($0))" } ?? "")
+        default: return failure.message
         }
     }
 
     /// What a repository's failed reads say, each thing once, sorted. A
     /// gh that is signed out fails every read, and each call words it
-    /// its own way ("HTTP 401: Bad credentials (https://…)", "Bad
-    /// credentials"): said once, as the first read in `Source`'s order
-    /// says it.
-    static func messages(of errors: [Source: FetchError]) -> [String] {
+    /// its own way ("Bad credentials (https://…)", "Bad credentials"):
+    /// said once, as the first read in `Source`'s order says it.
+    static func messages(of errors: [Source: GitHub.CLI.Failure]) -> [String] {
         var messages = Set<String>()
         var isSignedOut = false
         for source in Source.allCases {
@@ -69,7 +55,7 @@ extension ProjectBoard {
                 guard !isSignedOut else { continue }
                 isSignedOut = true
             }
-            messages.insert(error.message)
+            messages.insert(message(error))
         }
         return messages.sorted()
     }
@@ -106,8 +92,6 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
         + "updated: pullRequests(states: MERGED, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...merged } } } } "
         + "fragment merged on PullRequest { number state headRefName headRefOid headRepositoryOwner { login } "
         + "headRepository { name } baseRefName url title mergedAt }"
-    static let runFields = "status,conclusion,headSha,createdAt,updatedAt,url"
-
     /// Both name the host (`--repo`, `--hostname`): a terminal's
     /// `GH_HOST` would otherwise point `owner/name` at another server.
     static func pullRequestArguments(repository: String, state: ProjectBoard.PullRequestList) -> [String] {
@@ -116,7 +100,7 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
             return ["pr", "list", "--repo", "\(GitHub.host)/\(repository)", "--state", "open", "--limit", "100",
                     "--json", openFields]
         case .merged:
-            return GitHub.CLI.graphQL(mergedQuery, strings: GitHub.CLI.ownerAndName(repository))
+            return GitHub.CLI.graphQL(mergedQuery, strings: GitHub.CLI.repositoryVariables(repository))
         }
     }
 
@@ -141,7 +125,7 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
 
     static func runArguments(repository: String, workflow: String, branch: String) -> [String] {
         ["run", "list", "--repo", "\(GitHub.host)/\(repository)", "--workflow", workflow, "--branch", branch,
-         "--event", "push", "--limit", "1", "--json", runFields]
+         "--event", "push", "--limit", "1", "--json", GitHub.WorkflowRun.fields]
     }
 
     /// REST, as the merge queue's mutations: `gh pr edit` reads much more
@@ -151,7 +135,7 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
          "-f", "base=\(base)", "--jq", ".base.ref"]
     }
 
-    func retarget(repository: String, number: Int, base: String) -> Result<Data, ProjectBoard.FetchError> {
+    func retarget(repository: String, number: Int, base: String) -> Result<Data, GitHub.CLI.Failure> {
         run(Self.retargetArguments(repository: repository, number: number, base: base))
     }
 
@@ -161,40 +145,22 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
     /// answer or its failure stands: a failure then reads as the open
     /// pull requests' does. Not for a gh that is missing or signed out,
     /// which fails every call.
-    func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError> {
+    func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, GitHub.CLI.Failure> {
         let read = run(Self.pullRequestArguments(repository: repository, state: state))
         guard state == .merged else { return read }
-        let both = read.flatMap { Self.mergedList($0).map(Result.success) ?? .failure(.unreadable) }
+        let both = read.flatMap { data in Self.mergedList(data).map(Result.success) ?? .failure(.unreadable(output: data)) }
         switch both {
         case .success, .failure(.ghMissing), .failure(.notSignedIn): return both
-        case .failure(.failed), .failure(.unreadable): return run(Self.openedLastArguments(repository: repository))
+        case .failure: return run(Self.openedLastArguments(repository: repository))
         }
     }
 
-    func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError> {
+    func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, GitHub.CLI.Failure> {
         run(Self.runArguments(repository: repository, workflow: workflow, branch: branch))
     }
 
-    private func run(_ arguments: [String]) -> Result<Data, ProjectBoard.FetchError> {
-        guard let ghPath = findGH() else { return .failure(.ghMissing) }
-        guard let result = GitHub.CLI.run(ghPath, arguments: arguments, timeout: timeout) else {
-            return .failure(.failed("it couldn’t start, or took longer than \(Int(timeout)) s"))
-        }
-        guard result.terminationStatus == 0 else {
-            // No account signed in, or a token GitHub refuses: as the merge
-            // queue tells them, from what gh says on its standard error
-            // alone. A failed `gh api` also prints the answer it got, and
-            // a pull request's title ("How to run gh auth login") is no reason.
-            let output = GitHub.CLI.Output(
-                status: result.terminationStatus, standardOutput: Data(), standardError: result.standardError
-            )
-            if case .notSignedIn(let message) = GitHub.CLI.classify(output) {
-                return .failure(.notSignedIn(message.lowercased().contains("gh auth login") ? nil : message))
-            }
-            let stderr = String(data: result.standardError, encoding: .utf8) ?? ""
-            return .failure(.failed(WorktreeCleanup.firstLine(stderr) ?? "exit status \(result.terminationStatus)"))
-        }
-        return .success(result.standardOutput)
+    private func run(_ arguments: [String]) -> Result<Data, GitHub.CLI.Failure> {
+        GitHub.CLI.run(arguments, gh: findGH(), timeout: timeout).flatMap(\.result)
     }
 }
 
@@ -317,7 +283,7 @@ extension ProjectBoard {
             case (false, false): text += "open"
             }
         } else {
-            text += pullRequest.state.rawValue.lowercased()
+            text += pullRequest.state.word
         }
         if pullRequest.isOpen, let base = pullRequest.baseRefName, let baseBranch, base != baseBranch {
             text += " → \(base)"

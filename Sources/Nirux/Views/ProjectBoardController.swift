@@ -32,7 +32,7 @@ final class ProjectBoardController {
         var mergedPullRequests: [ProjectBoard.PullRequest]?
         /// The last post-merge run; `.some(nil)` when there is none yet.
         var postMergeRun: GitHub.WorkflowRun??
-        var errors: [ProjectBoard.Source: ProjectBoard.FetchError] = [:]
+        var errors: [ProjectBoard.Source: GitHub.CLI.Failure] = [:]
         /// Why the last Retarget failed: shown until Refresh.
         var retargetFailure: String?
         var pullRequestsReadAt: Date?
@@ -539,7 +539,7 @@ final class ProjectBoardController {
             let list: ProjectBoard.PullRequestList = source == .openPullRequests ? .open : .merged
             Self.readOffMain({
                 client.pullRequests(repository: name, state: list).flatMap { data in
-                    ProjectBoard.parsePullRequests(data, repository: gitHub).map(Result.success) ?? .failure(.unreadable)
+                    ProjectBoard.parsePullRequests(data, repository: gitHub).map(Result.success) ?? .failure(.unreadable(output: data))
                 }
             }, then: { [weak self] result in
                 self?.finish(source, section: id, reads: repository, generation: current) { reads in
@@ -566,7 +566,7 @@ final class ProjectBoardController {
             }
             Self.readOffMain({
                 client.postMergeRuns(repository: name, workflow: workflow, branch: branch).flatMap { data in
-                    GitHub.parseWorkflowRuns(data).map { .success($0.first) } ?? .failure(.unreadable)
+                    GitHub.parseWorkflowRuns(data).map { .success($0.first) } ?? .failure(.unreadable(output: data))
                 }
             }, then: { [weak self] result in
                 self?.finish(source, section: id, reads: repository, generation: current) { reads in
@@ -588,7 +588,7 @@ final class ProjectBoardController {
         let current = generation
         Self.readOffMain({ client.retarget(repository: name, number: number, base: base) }, then: { [weak self] result in
             guard let self, current == self.generation, self.reads[id]?.generation == repository.generation else { return }
-            self.reads[id]?.retargetFailure = result.failureValue.map { "Retarget #\(number): \($0.message)" }
+            self.reads[id]?.retargetFailure = result.failureValue.map { "Retarget #\(number): \(ProjectBoard.message($0))" }
             self.reads[id]?.schedule.expire(.openPullRequests)
             self.onRead?()
             self.tick(onScreen: self.isShown())

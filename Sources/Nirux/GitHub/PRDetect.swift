@@ -129,19 +129,16 @@ enum PRDetect {
             "deletions", "changedFiles"
         ].joined(separator: ",")
         // From the checkout: gh finds the base repository through its remotes.
-        let result = GitHub.CLI.run(
-            cliContext.executablePath,
-            arguments: ["pr", "list", "--head", branch,
-                        "--state", state,
-                        "--json", fields,
-                        "--limit", String(limit)],
+        let output = try? GitHub.CLI.run(
+            ["pr", "list", "--head", branch,
+             "--state", state,
+             "--json", fields,
+             "--limit", String(limit)],
+            gh: cliContext.executablePath,
             in: URL(fileURLWithPath: cliContext.repositoryRoot),
             timeout: cliContext.timeout
-        )
-        guard let result, result.terminationStatus == 0 else { return nil }
-        return try? JSONSerialization.jsonObject(
-            with: result.standardOutput
-        ) as? [[String: Any]]
+        ).flatMap(\.result).get()
+        return output.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] }
     }
 
     private static func pullRequestNumberDescending(
@@ -168,8 +165,6 @@ enum PRDetect {
             return (check["conclusion"] as? String)?.isEmpty ?? false
         }
         let allChecksPending = !rollup.isEmpty && conclusions.allSatisfy({ $0.isEmpty })
-        // Red as the Project Board defines it (docs/design/project-board.md,
-        // section 3.2): only the latest run of each check counts.
         let checks = GitHub.latest(rollup.compactMap(GitHub.check(from:)))
         let ciStatus: String?
         if checks.contains(where: { $0.result == .failure }) {

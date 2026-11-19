@@ -164,7 +164,7 @@ extension MergeQueueController {
         case .ghMissing:
             return "\(GitHub.CLI.missing): install it, sign in with gh auth login, then Start again."
         case .notSignedIn(let message):
-            return "\(GitHub.CLI.signedOut) (\(message)): run gh auth login in a terminal, then Start again."
+            return GitHub.CLI.signedOut + (message.map { " (\($0))" } ?? "") + ": run gh auth login in a terminal, then Start again."
         case .rateLimited, .secondaryRateLimit:
             return "GitHub’s rate limit is reached: Start again later."
         case .refused, .noAnswer, .unreadable:

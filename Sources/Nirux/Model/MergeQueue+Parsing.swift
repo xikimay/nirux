@@ -7,12 +7,6 @@ extension MergeQueue {
         (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
-    /// A full commit SHA, lowercased; nil for anything else.
-    static func objectID(_ value: Any?) -> String? {
-        guard let value = value as? String, [40, 64].contains(value.count), value.allSatisfy(\.isHexDigit) else { return nil }
-        return value.lowercased()
-    }
-
     /// `gh api rate_limit`.
     static func parseRateLimit(_ data: Data) -> RateLimit? {
         let resources = GitHub.dig(object(data), "resources")
@@ -52,7 +46,7 @@ extension MergeQueue {
               json["mergeCommit"] != nil,
               let state = GitHub.PullRequestState(json["state"] as? String),
               let headRefName = json["headRefName"] as? String,
-              let headOid = objectID(json["headRefOid"]),
+              let headOid = GitHub.objectID(json["headRefOid"]),
               let baseRefName = json["baseRefName"] as? String,
               let url = json["url"] as? String
         else { return nil }
@@ -60,7 +54,7 @@ extension MergeQueue {
             (GitHub.dig(json, "headRepository", "name") as? String).map { GitHubRepository(owner: owner, name: $0) }
         }
         let mergeCommit = json["mergeCommit"] as? [String: Any]
-        let parents = (GitHub.dig(mergeCommit, "parents", "nodes") as? [[String: Any]] ?? []).compactMap { objectID($0["oid"]) }
+        let parents = (GitHub.dig(mergeCommit, "parents", "nodes") as? [[String: Any]] ?? []).compactMap { GitHub.objectID($0["oid"]) }
         return PullRequestSnapshot(
             number: number,
             state: state,
@@ -72,7 +66,7 @@ extension MergeQueue {
             mergeable: (json["mergeable"] as? String)?.uppercased() ?? "UNKNOWN",
             hasAutoMerge: !(autoMerge is NSNull),
             isInMergeQueue: isInMergeQueue,
-            mergeCommit: objectID(mergeCommit?["oid"]),
+            mergeCommit: GitHub.objectID(mergeCommit?["oid"]),
             mergeCommitParents: parents,
             url: url
         )
@@ -149,32 +143,16 @@ extension MergeQueue {
     static func parseComparison(_ data: Data) -> Comparison? {
         guard let json = object(data), let status = json["status"] as? String,
               let ahead = json["ahead_by"] as? Int, let behind = json["behind_by"] as? Int,
-              let base = objectID(json["base_commit"])
+              let base = GitHub.objectID(json["base_commit"])
         else { return nil }
         return Comparison(status: status, aheadBy: ahead, behindBy: behind, baseCommit: base)
     }
 
     /// The commit filter's `{sha, committer, parents}`.
     static func parseCommit(_ data: Data) -> CommitInfo? {
-        guard let json = object(data), let sha = objectID(json["sha"]), let parents = json["parents"] as? [Any] else { return nil }
-        let ids = parents.compactMap(objectID)
+        guard let json = object(data), let sha = GitHub.objectID(json["sha"]), let parents = json["parents"] as? [Any] else { return nil }
+        let ids = parents.compactMap(GitHub.objectID)
         guard ids.count == parents.count else { return nil }
         return CommitInfo(sha: sha, committerLogin: json["committer"] as? String, parents: ids)
-    }
-
-    /// `gh run list --json …`, newest first.
-    static func parseRuns(_ data: Data) -> [Run]? {
-        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return nil }
-        var runs: [Run] = []
-        for run in json {
-            guard let id = run["databaseId"] as? Int, let status = run["status"] as? String,
-                  let headSha = objectID(run["headSha"]), let event = run["event"] as? String
-            else { return nil }
-            let conclusion = (run["conclusion"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            runs.append(Run(id: id, status: status, conclusion: conclusion, headSha: headSha, event: event,
-                            attempt: run["attempt"] as? Int ?? 1, title: run["displayTitle"] as? String,
-                            url: run["url"] as? String))
-        }
-        return runs
     }
 }

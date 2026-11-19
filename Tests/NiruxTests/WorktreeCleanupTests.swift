@@ -41,6 +41,8 @@ final class WorktreeCleanupTests: XCTestCase {
         #!/bin/sh
         dir="$(dirname "$0")"
         printf '%s\\n' "$*" >> "$dir/gh-args"
+        printf '%s\\n' "NO_COLOR=$NO_COLOR CLICOLOR_FORCE=$CLICOLOR_FORCE" >> "$dir/gh-env"
+        pwd -P >> "$dir/gh-folder"
         if [ -f "$dir/gh-error" ]; then cat "$dir/gh-error" >&2; exit 1; fi
         cat "$dir/gh-prs.json"
         """.write(toFile: gh, atomically: true, encoding: .utf8)
@@ -185,6 +187,8 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertEqual(plan.worktree.buildOutput, ["build/"])
         XCTAssertTrue(plan.worktree.folderMatchesBranch)
         XCTAssertTrue(try String(contentsOfFile: root + "/gh-args", encoding: .utf8).contains("--head=feat/x"))
+        XCTAssertTrue(try String(contentsOfFile: root + "/gh-env", encoding: .utf8).contains("NO_COLOR=1 CLICOLOR_FORCE=0"), "no colour forced")
+        XCTAssertEqual(try String(contentsOfFile: root + "/gh-folder", encoding: .utf8), worktree + "\n", "gh finds the repository from the worktree")
 
         // The squash left feat/x unmerged as far as git knows: -D after -d.
         XCTAssertEqual(
@@ -479,6 +483,9 @@ final class WorktreeCleanupTests: XCTestCase {
             try report().problems,
             ["gh couldn't list the pull requests of feat/x: gh: To get started with GitHub CLI, please run: gh auth login"]
         )
+
+        tools.ghPath = root + "/no-gh"
+        XCTAssertEqual(try report().problems, ["gh couldn't list the pull requests of feat/x: gh couldn’t start, or took longer than 30 s"])
 
         tools.ghPath = nil
         XCTAssertEqual(

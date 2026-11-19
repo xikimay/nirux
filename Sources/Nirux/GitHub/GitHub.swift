@@ -4,9 +4,9 @@ import Foundation
 /// that touches GitHub: the Board, the merge queue, CI triage, the
 /// sidebar's pull request and the column headers.
 enum GitHub {
-    /// The server Nirux talks to. A call that names a repository names the
-    /// host too (`--repo`, `--hostname`): a terminal's `GH_HOST` would
-    /// otherwise send `owner/name` to another one.
+    /// The host of the repositories board.json and the merge queue name.
+    /// PRFeedback and CIFailure take the host from the pull request's own
+    /// address instead.
     static let host = "github.com"
 
     /// Whether `host` is github.com, its SSH endpoint included.
@@ -24,10 +24,14 @@ enum GitHub {
             guard let value, let state = Self(rawValue: value.uppercased()) else { return nil }
             self = state
         }
+
+        /// "open", "closed", "merged".
+        var word: String { rawValue.lowercased() }
     }
 
-    /// Check run conclusions that make a check red, any case. NEUTRAL and
-    /// SKIPPED are neither green nor red: CodeQL adds a NEUTRAL check to
+    /// Check run conclusions that make a check red, any case: a CI triage
+    /// job's too, as a job and its check must agree on what is red. NEUTRAL
+    /// and SKIPPED are neither green nor red: CodeQL adds a NEUTRAL check to
     /// every pull request.
     static func isRedCheck(_ conclusion: String?) -> Bool {
         ["FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"]
@@ -55,5 +59,11 @@ enum GitHub {
     /// The value at `path` in gh's JSON output.
     static func dig(_ json: Any?, _ path: String...) -> Any? {
         path.reduce(json) { value, key in (value as? [String: Any])?[key] }
+    }
+
+    /// A full commit SHA, lowercased; nil for anything else.
+    static func objectID(_ value: Any?) -> String? {
+        guard let value = value as? String, [40, 64].contains(value.count), value.allSatisfy(\.isHexDigit) else { return nil }
+        return value.lowercased()
     }
 }

@@ -227,13 +227,11 @@ struct DryRunQueueClient: MergeQueueGitHub {
     }
 }
 
-/// The real client: `gh` run by `run`, from a folder outside every
-/// checkout, with the board's neutral environment. Every call names
-/// github.com (`--repo github.com/…`, `--hostname github.com`): a
-/// terminal's `GH_HOST` would otherwise send it to another server.
+/// The real client: `gh` run by `run`. Every call names github.com
+/// (`--repo github.com/…`, `--hostname github.com`): a terminal's
+/// `GH_HOST` would otherwise send it to another server.
 struct GitHubCLIQueueClient: MergeQueueGitHub {
-    /// Runs gh with these arguments; nil output when it didn't start or
-    /// timed out. Tests record the arguments instead.
+    /// Runs gh with these arguments. Tests record the arguments instead.
     let run: @Sendable (_ arguments: [String], _ timeout: TimeInterval) -> Result<GitHub.CLI.Output, GitHub.CLI.Failure>
 
     var isDryRun: Bool { false }
@@ -242,15 +240,7 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
     static let mutationTimeout: TimeInterval = 120
 
     static var installed: GitHubCLIQueueClient {
-        GitHubCLIQueueClient { arguments, timeout in
-            // Looked up at each call, like the board's: a gh installed since launch is found.
-            guard let ghPath = GitHub.CLI.installedPath() else { return .failure(.ghMissing) }
-            guard let result = GitHub.CLI.run(ghPath, arguments: arguments, timeout: timeout) else {
-                return .failure(.noAnswer("gh couldn’t start, or took longer than \(Int(timeout)) s"))
-            }
-            return .success(GitHub.CLI.Output(status: result.terminationStatus, standardOutput: result.standardOutput,
-                                   standardError: result.standardError))
-        }
+        GitHubCLIQueueClient { arguments, timeout in GitHub.CLI.run(arguments, timeout: timeout) }
     }
 
     // MARK: Reads
@@ -286,12 +276,12 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
                          MergeQueue.parsePullRequestDetails).map { .pullRequestDetails($0) }
         case .checks(let sha):
             return call(Self.checksArguments(repository: repository, sha: sha)).flatMap { output in
-                MergeQueue.parseChecks(output.standardOutput, sha: sha).map { .checks($0) }
+                MergeQueue.parseChecks(output, sha: sha).map { .checks($0) }
             }
         case .compare(let base, let head):
             switch call(Self.compareArguments(repository: repository, base: base, head: head)) {
             case .success(let output):
-                return MergeQueue.parseComparison(output.standardOutput).map { .success(.comparison($0)) }
+                return MergeQueue.parseComparison(output).map { .success(.comparison($0)) }
                     ?? .failure(.unreadable("compare"))
             case .failure(.refused(404?, _)):
                 return .success(.comparison(nil))
@@ -307,7 +297,7 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
             if case .pushRuns(let sha) = read { commit = sha }
             return parse(call(Self.runArguments(repository: repository, workflow: workflow, branch: settings.baseBranch,
                                                 pushCommit: commit)),
-                         MergeQueue.parseRuns).map { .runs($0) }
+                         GitHub.parseWorkflowRuns).map { .runs($0) }
         case .local:
             return .failure(.unreadable("the local worktrees aren’t a GitHub read"))
         }
@@ -316,13 +306,9 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
     // MARK: Mutations
 
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
-        switch run(Self.mutationArguments(mutation, repository: settings.repository), Self.mutationTimeout) {
-        case .failure(let error):
-            return Self.mutationResult(error)
-        case .success(let output) where output.status == 0:
-            return .sent
-        case .success(let output):
-            return Self.mutationResult(GitHub.CLI.classify(output))
+        switch run(Self.mutationArguments(mutation, repository: settings.repository), Self.mutationTimeout).flatMap(\.result) {
+        case .success: return .sent
+        case .failure(let error): return Self.mutationResult(error)
         }
     }
 
@@ -333,42 +319,30 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
     static func mutationResult(_ error: GitHub.CLI.Failure) -> MergeQueue.MutationResult {
         switch error {
         case .ghMissing: return .refused(status: nil, message: GitHub.CLI.missing)
-        case .notSignedIn(let message): return .refused(status: 401, message: message)
+        case .notSignedIn: return .refused(status: 401, message: error.message)
         case .rateLimited: return .rateLimited("API rate limit exceeded")
         case .secondaryRateLimit(let message): return .rateLimited(message)
         case .refused(let status, let message): return .refused(status: status, message: message)
         case .noAnswer(let message): return .uncertain(message)
-        case .unreadable(let output): return .uncertain("gh answered with something Nirux can’t read: \(output)")
+        case .unreadable: return .uncertain(error.message)
         }
     }
 
     // MARK: Running gh
 
-    /// gh's output when it exited 0, else its error. A primary rate limit
-    /// asks `rate_limit` (free) when the limit resets.
-    private func call(_ arguments: [String]) -> Result<GitHub.CLI.Output, GitHub.CLI.Failure> {
-        switch run(arguments, Self.readTimeout) {
-        case .failure(let error):
-            return .failure(error)
-        case .success(let output) where output.status == 0:
-            return .success(output)
-        case .success(let output):
-            let error = GitHub.CLI.classify(output)
-            guard case .rateLimited = error else { return .failure(error) }
-            let limit = try? run(Self.rateLimitArguments, Self.readTimeout).get()
-            let reset = limit.flatMap { $0.status == 0 ? MergeQueue.parseRateLimit($0.standardOutput) : nil }
-                .flatMap(Self.resetOfExhaustedPool)
-            return .failure(.rateLimited(resetAt: reset))
-        }
+    /// gh's standard output when it exited 0, else its error. A primary
+    /// rate limit asks `rate_limit` (free) when the limit resets.
+    private func call(_ arguments: [String]) -> Result<Data, GitHub.CLI.Failure> {
+        let read = run(arguments, Self.readTimeout).flatMap(\.result)
+        guard case .failure(.rateLimited) = read else { return read }
+        let limit = try? run(Self.rateLimitArguments, Self.readTimeout).flatMap(\.result).get()
+        return .failure(.rateLimited(resetAt: limit.flatMap(MergeQueue.parseRateLimit).flatMap(Self.resetOfExhaustedPool)))
     }
 
     private func parse<Value>(
-        _ output: Result<GitHub.CLI.Output, GitHub.CLI.Failure>, _ parser: (Data) -> Value?
+        _ output: Result<Data, GitHub.CLI.Failure>, _ parser: (Data) -> Value?
     ) -> Result<Value, GitHub.CLI.Failure> {
-        output.flatMap { output in
-            parser(output.standardOutput).map { .success($0) }
-                ?? .failure(.unreadable(WorktreeCleanup.firstLine(String(decoding: output.standardOutput, as: UTF8.self)) ?? ""))
-        }
+        output.flatMap { output in parser(output).map { .success($0) } ?? .failure(.unreadable(output: output)) }
     }
 
     /// The later reset of the pools with nothing left.
@@ -407,19 +381,19 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
     }
 
     static func mergeQueueArguments(repository: String, branch: String) -> [String] {
-        GitHub.CLI.graphQL(mergeQueueQuery, strings: GitHub.CLI.ownerAndName(repository) + [("branch", branch)])
+        GitHub.CLI.graphQL(mergeQueueQuery, strings: GitHub.CLI.repositoryVariables(repository) + [("branch", branch)])
     }
 
     static func pullRequestArguments(repository: String, number: Int) -> [String] {
-        GitHub.CLI.graphQL(pullRequestQuery, strings: GitHub.CLI.ownerAndName(repository), integers: [("number", number)])
+        GitHub.CLI.graphQL(pullRequestQuery, strings: GitHub.CLI.repositoryVariables(repository), integers: [("number", number)])
     }
 
     static func pullRequestDetailsArguments(repository: String, number: Int) -> [String] {
-        GitHub.CLI.graphQL(pullRequestDetailsQuery, strings: GitHub.CLI.ownerAndName(repository), integers: [("number", number)])
+        GitHub.CLI.graphQL(pullRequestDetailsQuery, strings: GitHub.CLI.repositoryVariables(repository), integers: [("number", number)])
     }
 
     static func checksArguments(repository: String, sha: String) -> [String] {
-        GitHub.CLI.graphQL(checksQuery, strings: GitHub.CLI.ownerAndName(repository) + [("oid", sha)])
+        GitHub.CLI.graphQL(checksQuery, strings: GitHub.CLI.repositoryVariables(repository) + [("oid", sha)])
     }
 
     /// Only the counts and the base commit: a compare lists up to 300
@@ -436,8 +410,6 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
          "--jq", "{sha, committer: .committer.login, parents: [.parents[].sha]}"]
     }
 
-    static let runFields = "databaseId,attempt,status,conclusion,headSha,event,displayTitle,url"
-
     /// The runs on the base whatever their event (a manual dispatch shares
     /// the nightly's concurrency group), or the push runs of a merge commit.
     static func runArguments(repository: String, workflow: String, branch: String, pushCommit: String?) -> [String] {
@@ -447,7 +419,7 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         } else {
             arguments += ["--limit", "50"]
         }
-        return arguments + ["--json", runFields]
+        return arguments + ["--json", GitHub.WorkflowRun.fields]
     }
 
     /// Never `--admin`, `--auto`, `--delete-branch` or `--rebase`; a merge

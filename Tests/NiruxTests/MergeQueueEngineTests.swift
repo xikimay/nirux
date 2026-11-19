@@ -725,7 +725,7 @@ final class MergeQueueEngineTests: XCTestCase {
     // MARK: Post-merge workflow
 
     /// Merged as `c`; the push run of `c` is `run`.
-    private func afterMerge(_ run: MergeQueue.Run?, world: inout MQ.World) -> MQ.Harness {
+    private func afterMerge(_ run: GitHub.WorkflowRun?, world: inout MQ.World) -> MQ.Harness {
         var queue = started(world)
         XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
         world.merge(52, as: c)
@@ -823,7 +823,10 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertEqual(queue.stopReason?.kind, .setup)
         queue = started(readyWorld())
         queue.fail(.notSignedIn("You are not logged into any GitHub hosts."))
-        XCTAssertTrue(queue.stopReason?.message.contains("gh auth login") == true)
+        XCTAssertEqual(queue.stopReason?.message, "gh isn’t signed in to github.com (run gh auth login): You are not logged into any GitHub hosts.")
+        queue = started(readyWorld())
+        queue.fail(.notSignedIn(nil))
+        XCTAssertEqual(queue.stopReason?.message, "gh isn’t signed in to github.com (run gh auth login)", "gh's own hint isn't repeated")
     }
 
     // MARK: Stop, pauses, retries

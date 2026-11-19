@@ -167,7 +167,7 @@ final class MergeQueueGitHubTests: XCTestCase {
                                              baseCommit: "fa74b4ce919c2b94a0f7bc88fbba3845357c9a07"))
         XCTAssertNil(MergeQueue.parseComparison(Data(Self.notFound.utf8)))
 
-        let runs = try XCTUnwrap(MergeQueue.parseRuns(Data(Self.runs.utf8)))
+        let runs = try XCTUnwrap(GitHub.parseWorkflowRuns(Data(Self.runs.utf8)))
         XCTAssertEqual(runs.map(\.id), [3457684887, 3397820361, 3002928004])
         XCTAssertFalse(runs[0].isCompleted)
         XCTAssertNil(runs[0].conclusion)
@@ -215,10 +215,16 @@ final class MergeQueueGitHubTests: XCTestCase {
         guard case .secondaryRateLimit = GitHub.CLI.classify(output(
             1, stderr: "gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)\n"
         )) else { return XCTFail("secondary rate limit") }
-        guard case .notSignedIn = GitHub.CLI.classify(output(4, stderr: "To get started with GitHub CLI, please run:  gh auth login\n"))
-        else { return XCTFail("signed out") }
-        XCTAssertEqual(GitHub.CLI.classify(output(1, stderr: "HTTP 404: Not Found (https://api.github.com/repos/acme/widgets/actions/workflows/nightly.yml)\n")),
-                       .refused(status: 404, message: "HTTP 404: Not Found (https://api.github.com/repos/acme/widgets/actions/workflows/nightly.yml)"))
+        XCTAssertEqual(GitHub.CLI.classify(output(4, stderr: "To get started with GitHub CLI, please run:  gh auth login\n")),
+                       .notSignedIn(nil), "gh only asked for gh auth login")
+        let notFound = GitHub.CLI.classify(output(1, stderr: "HTTP 404: Not Found (https://api.github.com/repos/acme/widgets/actions/workflows/nightly.yml)\n"))
+        XCTAssertEqual(notFound, .refused(status: 404, message: "Not Found (https://api.github.com/repos/acme/widgets/actions/workflows/nightly.yml)"))
+        XCTAssertEqual(notFound.message, "Not Found (https://api.github.com/repos/acme/widgets/actions/workflows/nightly.yml) (HTTP 404)",
+                       "the status said once")
+        XCTAssertEqual(GitHub.CLI.classify(output(1, stderr: "HTTP 502: Bad Gateway (https://api.github.com/graphql)\n")),
+                       .noAnswer("HTTP 502: Bad Gateway (https://api.github.com/graphql)"))
+        XCTAssertEqual(GitHub.CLI.Failure.unreadable(output: Data((String(repeating: "x", count: 100) + "\nmore").utf8)),
+                       .unreadable(String(repeating: "x", count: 80) + "…"), "a one-line JSON answer is cut")
         guard case .refused(nil, _) = GitHub.CLI.classify(output(
             1, stderr: "X Pull request acme/widgets#52 is not mergeable: the merge commit cannot be cleanly created.\n"
         )) else { return XCTFail("a merge gh refused") }
@@ -272,7 +278,7 @@ final class MergeQueueGitHubTests: XCTestCase {
         // Runs on the base: any event (a manual dispatch counts); a merge's: its push run.
         XCTAssertFalse(reads[8].contains("--event"))
         XCTAssertEqual(Array(reads[9].suffix(8)), ["--event", "push", "--commit", a, "--limit", "10", "--json",
-                                                   GitHubCLIQueueClient.runFields])
+                                                   GitHub.WorkflowRun.fields])
         XCTAssertEqual(GitHubCLIQueueClient.pullRequestArguments(repository: "acme/widgets", number: 52).suffix(6),
                        ["-f", "owner=acme", "-f", "name=widgets", "-F", "number=52"])
 
@@ -324,7 +330,7 @@ final class MergeQueueGitHubTests: XCTestCase {
         guard case .pullRequest(let snapshot) = pullRequest else { return XCTFail("\(pullRequest)") }
         XCTAssertEqual(snapshot.number, 60)
         XCTAssertEqual(try client.read(.compare(base: MQ.sha("a"), head: MQ.sha("b")), settings: settings).get(), .comparison(nil))
-        guard case .failure(.notSignedIn) = client.read(.auth, settings: settings) else { return XCTFail("signed out") }
+        guard case .failure(.notSignedIn(nil)) = client.read(.auth, settings: settings) else { return XCTFail("signed out") }
         guard case .runs(let runs) = try client.read(.baseRuns, settings: settings).get() else { return XCTFail() }
         XCTAssertEqual(runs.count, 3)
         // gh auth status that can't reach GitHub is retried, not "signed out".
@@ -446,13 +452,13 @@ enum ForbiddenCalls {
         }
         if arguments.starts(with: ["pr", "merge"]) {
             guard let index = arguments.firstIndex(of: "--match-head-commit"),
-                  let sha = arguments[safe: index + 1], MergeQueue.objectID(sha) != nil
+                  let sha = arguments[safe: index + 1], GitHub.objectID(sha) != nil
             else { return "a merge without --match-head-commit <sha>" }
         }
         if arguments.contains(where: { $0.hasSuffix("/update-branch") }) || arguments.starts(with: ["pr", "update-branch"]) {
             guard !arguments.starts(with: ["pr", "update-branch"]),
                   let field = arguments.first(where: { $0.hasPrefix("expected_head_sha=") }),
-                  MergeQueue.objectID(String(field.dropFirst("expected_head_sha=".count))) != nil
+                  GitHub.objectID(String(field.dropFirst("expected_head_sha=".count))) != nil
             else { return "a branch update without expected_head_sha" }
         }
         return nil

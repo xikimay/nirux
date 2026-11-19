@@ -200,4 +200,10 @@ final class CIFailureTests: XCTestCase {
             ["run", "rerun", "7", "--repo", "github.com/acme/widgets", "--failed"]
         )
     }
+
+    func testARerunGhCantRunSaysWhichRun() {
+        let run = CIFailure.Run(repository: "github.com/acme/widgets", id: 7)
+        XCTAssertEqual(CIFailure.rerun(run, gh: nil), "The GitHub CLI (gh) isn’t installed: run 7 can’t be rerun.")
+        XCTAssertEqual(CIFailure.rerun(run, gh: "/nonexistent/gh"), "Run 7: gh couldn’t start, or took longer than 30 s.")
+    }
 }

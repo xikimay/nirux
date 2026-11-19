@@ -42,8 +42,10 @@ final class DailyPassTests: XCTestCase {
         XCTAssertNil(DailyPass.roundNumber("fix: review the timeout, round 3 seconds"), "\"review\" right before \"round\", or the forms above")
 
         let runs = Data("""
-            [{"databaseId": 1, "attempt": 1, "headBranch": "a", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z"},
-             {"databaseId": 2, "attempt": 3, "headBranch": "feat/floors", "conclusion": "", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z"}]
+            [{"databaseId": 1, "attempt": 1, "headBranch": "a", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z",
+              "status": "completed", "event": "push", "headSha": "\(String(repeating: "a", count: 40))"},
+             {"databaseId": 2, "attempt": 3, "headBranch": "feat/floors", "conclusion": "", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z",
+              "status": "in_progress", "event": "pull_request", "headSha": "\(String(repeating: "b", count: 40))"}]
             """.utf8)
         XCTAssertEqual(DailyPass.reruns(runs), [
             DailyPass.Rerun(id: 2, attempt: 3, branch: "feat/floors", workflow: "Tests", conclusion: "running", startedAt: now - hour)
@@ -62,24 +64,36 @@ final class DailyPassTests: XCTestCase {
              {"number": 1, "title": "Before", "headRefName": "a", "mergedAt": "2027-01-13T07:00:00Z"}]
             """.utf8)
         let runs = Data("""
-            [{"databaseId": 7, "attempt": 2, "headBranch": "b", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z"},
-             {"databaseId": 6, "attempt": 2, "headBranch": "a", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-14T07:00:00Z"}]
+            [{"databaseId": 7, "attempt": 2, "headBranch": "b", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z",
+              "status": "completed", "event": "push", "headSha": "\(String(repeating: "7", count: 40))"},
+             {"databaseId": 6, "attempt": 2, "headBranch": "a", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-14T07:00:00Z",
+              "status": "completed", "event": "push", "headSha": "\(String(repeating: "6", count: 40))"}]
             """.utf8)
         let many = Data(("[" + (1...DailyPass.mergedLimit).map { "{\"number\": \($0), \"title\": \"t\", \"mergedAt\": \"2027-01-15T07:00:00Z\"}" }
             .joined(separator: ",") + "]").utf8)
-        let reports = DailyPass.readGitHub(["acme/one", "acme/two", "acme/three", "acme/busy"], window: window) { arguments in
-            if arguments.contains("acme/two") { return .failure(DailyPass.ReadFailure(message: "gh didn’t answer", retryable: true)) }
-            if arguments.contains("acme/three") { return .failure(DailyPass.ReadFailure(message: "not signed in")) }
-            if arguments.contains("acme/busy") { return .success(arguments.first == "pr" ? many : Data("[]".utf8)) }
+        let repositories = ["acme/one", "acme/two", "acme/three", "acme/busy", "acme/limited", "acme/odd", "acme/wordy"]
+        let reports = DailyPass.readGitHub(repositories, window: window) { arguments in
+            if arguments.contains("github.com/acme/two") { return .failure(.noAnswer("gh didn’t answer")) }
+            if arguments.contains("github.com/acme/three") { return .failure(.notSignedIn("not signed in")) }
+            if arguments.contains("github.com/acme/busy") { return .success(arguments.first == "pr" ? many : Data("[]".utf8)) }
+            if arguments.contains("github.com/acme/limited") { return .failure(.rateLimited(resetAt: nil)) }
+            if arguments.contains("github.com/acme/odd") { return .success(Data("<html>".utf8)) }
+            if arguments.contains("github.com/acme/wordy") { return .failure(.refused(status: nil, message: "Bad\n" + String(repeating: "word ", count: 100))) }
             return .success(arguments.first == "pr" ? pulls : runs)
         }
-        XCTAssertEqual(reports.map(\.name), ["acme/one", "acme/two", "acme/three", "acme/busy"])
+        XCTAssertEqual(reports.map(\.name), repositories)
         XCTAssertEqual(reports[0].merged.map(\.number), [2])
         XCTAssertEqual(reports[0].reruns.map(\.id), [7])
         XCTAssertEqual(reports[0].problems, [])
         XCTAssertEqual(reports[1].problems, ["merged pull requests: gh didn’t answer", "workflow runs: gh didn’t answer"])
-        XCTAssertEqual(reports.map(\.readsAgain), [false, true, false, false])
+        XCTAssertEqual(reports.map(\.readsAgain), [false, true, false, false, true, false, false], "a rate limit passes by itself too")
         XCTAssertEqual(reports[3].problems, ["only the \(DailyPass.mergedLimit) most recently updated merged pull requests were read"])
+        XCTAssertEqual(reports[5].problems, [
+            "merged pull requests: gh answered with something Nirux can’t read: <html>",
+            "workflow runs: gh answered with something Nirux can’t read: <html>"
+        ])
+        XCTAssertEqual(reports[6].problems.count, 2)
+        XCTAssertTrue(reports[6].problems.allSatisfy { !$0.contains("\n") && $0.count < 330 }, "gh's words are cleaned before the Lead reads them")
     }
 
     /// No answer (no network, a timeout, a 5xx, what gh never said) and
@@ -87,18 +101,20 @@ final class DailyPassTests: XCTestCase {
     /// (signed out, refused) holds.
     func testAGitHubErrorReadsAgainUnlessItHolds() {
         func retries(_ standardError: String, status: Int32 = 1) -> Bool {
-            DailyPass.readFailure(GitHub.CLI.Output(status: status, standardOutput: Data(), standardError: Data(standardError.utf8)))
-                .retryable
+            DailyPass.mayPassLater(GitHub.CLI.classify(GitHub.CLI.Output(status: status, standardOutput: Data(), standardError: Data(standardError.utf8))))
         }
         XCTAssertTrue(retries("error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com"))
         XCTAssertTrue(retries("HTTP 502: Bad Gateway (https://api.github.com/graphql)"))
         XCTAssertTrue(retries("GraphQL: API rate limit exceeded for user ID 1."))
+        XCTAssertTrue(retries("gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)"))
         XCTAssertTrue(retries("something gh never said before"))
         XCTAssertFalse(retries("To get started with GitHub CLI, please run:  gh auth login", status: 4))
         XCTAssertFalse(retries("GraphQL: Could not resolve to a Repository with the name 'acme/gone'. (repository)"))
         XCTAssertFalse(retries("HTTP 404: Not Found (https://api.github.com/repos/acme/gone)"))
         XCTAssertFalse(retries("HTTP 422: Validation Failed (https://api.github.com/search/issues)"))
         XCTAssertFalse(retries("GraphQL: Resource protected by organization SAML enforcement. (repository)"))
+        XCTAssertFalse(DailyPass.mayPassLater(.ghMissing))
+        XCTAssertFalse(DailyPass.mayPassLater(.unreadable("<html>")))
     }
 
     /// Three reads in a row that GitHub may answer next time at most: the

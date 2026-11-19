@@ -81,8 +81,9 @@ final class ProjectBoardGitHubTests: XCTestCase {
     """
 
     static let postMergeRuns = """
-    [{"conclusion":"success","createdAt":"2026-09-27T23:08:47Z","headSha":"43a9503a372d2413047f5c5539b2ccbef539b17f",\
-    "status":"completed","updatedAt":"2026-09-27T23:14:16Z","url":"https://github.com/acme/widgets/actions/runs/5"}]
+    [{"conclusion":"success","createdAt":"2026-09-27T23:08:47Z","databaseId":5,"event":"push",\
+    "headSha":"43a9503a372d2413047f5c5539b2ccbef539b17f","status":"completed","updatedAt":"2026-09-27T23:14:16Z",\
+    "url":"https://github.com/acme/widgets/actions/runs/5"}]
     """
 
     // MARK: - Pull requests
@@ -166,6 +167,8 @@ final class ProjectBoardGitHubTests: XCTestCase {
     func testNotAListReadsAsNothing() {
         XCTAssertNil(ProjectBoard.parsePullRequests(Data("{\"message\": \"Bad credentials\"}".utf8), repository: widgets))
         XCTAssertNil(GitHub.parseWorkflowRuns(Data("not json".utf8)))
+        XCTAssertNil(GitHub.parseWorkflowRuns(Data(Self.postMergeRuns.replacingOccurrences(of: #""databaseId":5,"#, with: "").utf8)),
+                     "a run that can't be read fails the list: it might be the failed one")
         XCTAssertEqual(ProjectBoard.parsePullRequests(Data("[]".utf8), repository: widgets), [])
     }
 
@@ -237,8 +240,8 @@ final class ProjectBoardGitHubTests: XCTestCase {
             "nightly: success 27 Sep 23:14, 43a9503"
         )
         let running = GitHub.WorkflowRun(
-            status: "in_progress", conclusion: nil, headSha: "60e0ff2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            createdAt: sameDay.addingTimeInterval(-60), updatedAt: sameDay, url: nil
+            id: 6, status: "in_progress", conclusion: nil, headSha: "60e0ff2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", event: "push",
+            createdAt: sameDay.addingTimeInterval(-60), updatedAt: sameDay
         )
         XCTAssertEqual(
             ProjectBoard.runSummary(running, workflow: "release.yaml", now: sameDay, timeZone: utc),
@@ -278,7 +281,8 @@ final class ProjectBoardGitHubTests: XCTestCase {
         XCTAssertEqual(
             GitHubCLIBoardClient.runArguments(repository: "acme/widgets", workflow: "nightly.yml", branch: "main"),
             ["run", "list", "--repo", "github.com/acme/widgets", "--workflow", "nightly.yml", "--branch", "main",
-             "--event", "push", "--limit", "1", "--json", "status,conclusion,headSha,createdAt,updatedAt,url"]
+             "--event", "push", "--limit", "1", "--json",
+             "databaseId,attempt,status,conclusion,headSha,event,displayTitle,url,headBranch,workflowName,createdAt,updatedAt,startedAt"]
         )
         // REST, as the queue's mutations.
         XCTAssertEqual(
@@ -343,25 +347,28 @@ final class ProjectBoardGitHubTests: XCTestCase {
             query: Answer(output: #"{"message": "Bad credentials", "status": "401"}"#, error: "gh: Bad credentials (HTTP 401)", status: 1),
             openedLast: Answer(output: "[]"), others: Answer(error: refusal, status: 1)
         )
-        XCTAssertEqual(revoked.client.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn(refusal)))
+        XCTAssertEqual(revoked.client.pullRequests(repository: "acme/widgets", state: .open),
+                       .failure(.notSignedIn("Bad credentials (https://api.github.com/graphql)")), "the status said once")
         XCTAssertEqual(revoked.client.pullRequests(repository: "acme/widgets", state: .merged), .failure(.notSignedIn("Bad credentials")))
         XCTAssertEqual(revoked.calls(), ["others", "query"])
         let signIn = "gh isn’t signed in to github.com: run gh auth login in a terminal, then Refresh."
-        XCTAssertEqual(ProjectBoard.FetchError.notSignedIn(nil).message, signIn)
-        XCTAssertEqual(ProjectBoard.FetchError.notSignedIn(refusal).message, "\(signIn) (gh: \(refusal))")
+        XCTAssertEqual(ProjectBoard.message(.notSignedIn(nil)), signIn)
+        XCTAssertEqual(ProjectBoard.message(.notSignedIn(refusal)), "\(signIn) (gh: \(refusal))")
 
         // The header says it once, as the first read does, beside what else went wrong.
         XCTAssertEqual(
             ProjectBoard.messages(of: [
                 .mergedPullRequests: .notSignedIn("Bad credentials"), .openPullRequests: .notSignedIn(refusal),
-                .postMergeRun: .failed("HTTP 502: Bad Gateway")
+                .postMergeRun: .noAnswer("HTTP 502: Bad Gateway")
             ]),
-            ["\(signIn) (gh: \(refusal))", "gh: HTTP 502: Bad Gateway"]
+            ["HTTP 502: Bad Gateway", "\(signIn) (gh: \(refusal))"]
         )
         XCTAssertEqual(ProjectBoard.messages(of: [.mergedPullRequests: .notSignedIn("Bad credentials")]), ["\(signIn) (gh: Bad credentials)"])
         XCTAssertEqual(
-            ProjectBoard.messages(of: [.openPullRequests: .failed("timeout"), .mergedPullRequests: .failed("timeout"), .postMergeRun: .unreadable]),
-            ["gh answered with something Nirux can’t read.", "gh: timeout"], "two reads that fail alike say it once"
+            ProjectBoard.messages(of: [
+                .openPullRequests: .noAnswer("timeout"), .mergedPullRequests: .noAnswer("timeout"), .postMergeRun: .unreadable("<html>")
+            ]),
+            ["gh answered with something Nirux can’t read: <html>", "timeout"], "two reads that fail alike say it once"
         )
         XCTAssertEqual(ProjectBoard.messages(of: [:]), [])
     }
@@ -396,10 +403,10 @@ final class ProjectBoardGitHubTests: XCTestCase {
             query: Answer(error: "gh: Could not resolve to a Repository with the name acme/widgets.", status: 1),
             openedLast: Answer(error: unresolved, status: 1), others: Answer(error: unresolved, status: 1)
         )
-        XCTAssertEqual(merged(missing.client), .failure(.failed(unresolved)))
-        XCTAssertEqual(missing.client.pullRequests(repository: "acme/widgets", state: .open), .failure(.failed(unresolved)))
+        XCTAssertEqual(merged(missing.client), .failure(.refused(status: nil, message: unresolved)))
+        XCTAssertEqual(missing.client.pullRequests(repository: "acme/widgets", state: .open), .failure(.refused(status: nil, message: unresolved)))
         XCTAssertEqual(missing.calls(), ["query", "openedLast", "others"], "the open pull requests are asked for once, whatever the answer")
-        XCTAssertEqual(ProjectBoard.FetchError.failed(unresolved).message, "gh: \(unresolved)")
+        XCTAssertEqual(ProjectBoard.message(.refused(status: nil, message: unresolved)), unresolved)
     }
 
     func testWithoutGhNothingRuns() {

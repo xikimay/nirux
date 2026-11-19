@@ -42,7 +42,7 @@ extension MergeQueue {
         var rateLimit: RateLimit?
         var baseMergeQueue: Bool?
         /// The post-merge workflow's recent runs on the base, newest first.
-        var baseRuns: [Run]?
+        var baseRuns: [GitHub.WorkflowRun]?
         /// In the order the next Start proposes.
         var candidates: [Candidate] = []
     }
@@ -185,7 +185,7 @@ extension MergeQueue {
 
     /// The last post-merge run on the base failed: the base may already be
     /// broken. One still running: the first merge waits for it.
-    private static func baseWarnings(_ runs: [Run]?, settings: BoardConfig.QueueSettings) -> [String] {
+    private static func baseWarnings(_ runs: [GitHub.WorkflowRun]?, settings: BoardConfig.QueueSettings) -> [String] {
         guard let workflow = settings.postMergeWorkflow, let runs else { return [] }
         let label = MergeQueue.workflowLabel(workflow)
         var warnings: [String] = []
@@ -329,7 +329,7 @@ extension MergeQueue {
     static func openExclusion(
         state: GitHub.PullRequestState, isDraft: Bool, baseRefName: String?, mergeable: String?, baseBranch: String?
     ) -> OpenExclusion? {
-        if state != .open { return .notOpen(state.rawValue.lowercased()) }
+        if state != .open { return .notOpen(state.word) }
         if isDraft { return .draft }
         if let baseRefName, let baseBranch, baseRefName != baseBranch { return .otherBase(baseRefName) }
         if mergeable?.uppercased() == "CONFLICTING" { return .conflict }

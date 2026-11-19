@@ -66,7 +66,7 @@ extension BranchReview {
         ) else { return .unavailable("git couldn't read \(path).") }
         let lines = located.text.split(separator: "\n").map(String.init)
         guard located.status == 0, lines.count == 3 + inProgressMarkers.count else {
-            return .unavailable(firstLine(located.stderr) ?? "\(path) isn't in a git repository.")
+            return .unavailable(located.stderr.firstLine ?? "\(path) isn't in a git repository.")
         }
         let repository = Repository(root: lines[0], index: lines[1], objects: lines[2])
         let markers = zip(inProgressMarkers.map(\.operation), lines.dropFirst(3)).map { ($0, $1) }
@@ -766,13 +766,9 @@ extension BranchReview {
         )
     }
 
-    static func firstLine(_ text: String) -> String? {
-        WorktreeCleanup.firstLine(text)
-    }
-
     /// "What failed: git's first line of standard error."
     static func failure(_ what: String, _ output: GitOutput?) -> String {
-        guard let output, let reason = firstLine(output.stderr) else { return what + "." }
+        guard let output, let reason = output.stderr.firstLine else { return what + "." }
         return "\(what): \(reason)"
     }
 }

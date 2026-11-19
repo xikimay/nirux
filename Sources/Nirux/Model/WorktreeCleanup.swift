@@ -33,7 +33,7 @@ enum WorktreeCleanup {
         var gitPath = "/usr/bin/git"
         /// Nil when the GitHub CLI isn't installed.
         var ghPath: String?
-        /// Added to the environment of every git and gh run.
+        /// Added to the environment of every git run.
         var environment: [String: String] = [:]
         /// For reads and gh: past it, the check fails.
         var timeout: TimeInterval = 60
@@ -293,7 +293,7 @@ enum WorktreeCleanup {
         } else if head.status == 1 {
             branch = nil
         } else {
-            return .unavailable(firstLine(head.stderr) ?? "git couldn't read HEAD in \(path).")
+            return .unavailable(head.stderr.firstLine ?? "git couldn't read HEAD in \(path).")
         }
         let tipRead = git(["rev-parse", "-q", "--verify", "HEAD"], in: resolved, tools: tools)
         let tip = tipRead.status == 0 ? tipRead.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : ""
@@ -349,7 +349,7 @@ enum WorktreeCleanup {
                 return .failure(ReadFailure(message:
                     "git no longer tracks \(resolved): its worktree entry is gone. Delete the folder yourself."))
             }
-            return .failure(ReadFailure(message: firstLine(paths.stderr) ?? "\(resolved) is not in a git repository."))
+            return .failure(ReadFailure(message: paths.stderr.firstLine ?? "\(resolved) is not in a git repository."))
         }
         let lines = paths.stdout.split(separator: "\n").map(String.init)
         guard lines.count == 3, lines[0].realPath == resolved else {
@@ -426,7 +426,7 @@ enum WorktreeCleanup {
         )
         let flagged = git(["ls-files", "-z", "-v"], in: path, tools: tools)
         for result in [status, ignored, flagged] where result.status != 0 {
-            return .failure(ReadFailure(message: firstLine(result.stderr) ?? "git couldn't list the files of \(path)."))
+            return .failure(ReadFailure(message: result.stderr.firstLine ?? "git couldn't list the files of \(path)."))
         }
         var files = FileState()
         for entry in statusEntries(status.stdout) {
@@ -450,7 +450,7 @@ enum WorktreeCleanup {
             // needs --stdin; a path with a newline just goes to the Trash.)
             let matched = git(["check-ignore", "--"] + named, in: path, tools: tools)
             guard [0, 1].contains(matched.status) else {
-                return .failure(ReadFailure(message: firstLine(matched.stderr) ?? "git check-ignore failed in \(path)."))
+                return .failure(ReadFailure(message: matched.stderr.firstLine ?? "git check-ignore failed in \(path)."))
             }
             let patterned = Set(matched.stdout.split(separator: "\n").map(String.init))
             files.buildOutput = named.filter { patterned.contains($0) }
@@ -599,12 +599,6 @@ enum WorktreeCleanup {
     }
 
     static func short(_ objectID: String) -> String { String(objectID.prefix(7)) }
-
-    static func firstLine(_ text: String) -> String? {
-        text.split(separator: "\n").lazy
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { !$0.isEmpty }
-    }
 
     static func output(of result: GitResult) -> String {
         let text = [result.stderr, result.stdout]

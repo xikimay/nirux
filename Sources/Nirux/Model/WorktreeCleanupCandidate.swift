@@ -109,7 +109,7 @@ struct WorktreeCleanupCandidate: Equatable {
         case .blocked(let problems):
             let first = problems.first ?? ""
             if let pullRequest = report?.pullRequest, !first.contains("#\(pullRequest.number) ") {
-                parts.append("PR #\(pullRequest.number) \(pullRequest.state.rawValue.lowercased())")
+                parts.append("PR #\(pullRequest.number) \(pullRequest.state.word)")
             }
             parts.append(problems.count > 1 ? "\(first) (+\(problems.count - 1) more)" : first)
         case .ready(let plan, _):

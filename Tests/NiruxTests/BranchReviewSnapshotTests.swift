@@ -291,16 +291,16 @@ final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
                 self.lock.withLock { self.recorded.append(arguments) }
                 if arguments.starts(with: ["pr", "list"]) {
                     self.onList()
-                    return .init(status: 0, standardOutput: self.list, standardError: "")
+                    return .success(.init(status: 0, standardOutput: self.list, standardError: Data()))
                 }
                 let json = try! JSONSerialization.data(withJSONObject: ["commits": self.commits.map { ["oid": $0] }])
-                return .init(status: 0, standardOutput: json, standardError: "")
+                return .success(.init(status: 0, standardOutput: json, standardError: Data()))
             }
         }
     }
 
     private func failingGitHub(status: Int32, error: String) -> BranchReview.GitHubCLI {
-        BranchReview.GitHubCLI { _, _ in .init(status: status, standardOutput: Data(), standardError: error) }
+        BranchReview.GitHubCLI { _, _ in .success(.init(status: status, standardOutput: Data(), standardError: Data(error.utf8))) }
     }
 
     func testOpenPullRequestPicksAndFetchesItsBaseBranch() throws {
@@ -571,7 +571,7 @@ final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
         let calledOnMain = LockedFlag()
         let gitHub = BranchReview.GitHubCLI { _, _ in
             calledOnMain.set(Thread.isMainThread)
-            return .init(status: 0, standardOutput: Data("[]".utf8), standardError: "")
+            return .success(.init(status: 0, standardOutput: Data("[]".utf8), standardError: Data()))
         }
         let finished = expectation(description: "snapshot")
         BranchReview.loadSnapshot(at: repo, options: options(gitHub: gitHub)) { outcome in

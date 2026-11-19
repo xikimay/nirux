@@ -26,15 +26,16 @@ extension WorktreeCleanup {
         case .failure(let failure): return (nil, [failure.message], nil)
         }
         let fields = "number,state,headRefOid,headRepositoryOwner,headRepository,url"
-        let result = run(
-            executable: ghPath,
-            arguments: ["pr", "list", "--head=\(branch)", "--state", "all", "--json", fields, "--limit", "1000"],
-            in: worktree.path, tools: tools
-        )
-        guard result.status == 0,
-              let json = try? JSONSerialization.jsonObject(with: Data(result.stdout.utf8)) as? [[String: Any]]
-        else {
-            let reason = firstLine(result.stderr).map { ": \($0)" } ?? ""
+        let output: GitHub.CLI.Output
+        switch GitHub.CLI.run(
+            ["pr", "list", "--head=\(branch)", "--state", "all", "--json", fields, "--limit", "1000"],
+            gh: ghPath, in: URL(fileURLWithPath: worktree.path), timeout: tools.timeout
+        ) {
+        case .success(let ran): output = ran
+        case .failure(let failure): return (nil, ["gh couldn't list the pull requests of \(branch): \(failure.message)"], nil)
+        }
+        guard output.status == 0, let json = try? JSONSerialization.jsonObject(with: output.standardOutput) as? [[String: Any]] else {
+            let reason = String(decoding: output.standardError, as: UTF8.self).firstLine.map { ": \($0)" } ?? ""
             return (nil, ["gh couldn't list the pull requests of \(branch)\(reason)"], nil)
         }
         let candidates = json.compactMap { pullRequest(from: $0, headRepository: repository) }
@@ -146,7 +147,7 @@ extension WorktreeCleanup {
         let pushRemote = git(["for-each-ref", "--format=%(push:remotename)", "refs/heads/\(branch)"], in: path, tools: tools)
         guard pushRemote.status == 0 else {
             return .failure(ReadFailure(message:
-                "git couldn't read where \(branch) is pushed: \(firstLine(pushRemote.stderr) ?? "unknown error")"))
+                "git couldn't read where \(branch) is pushed: \(pushRemote.stderr.firstLine ?? "unknown error")"))
         }
         var remote = pushRemote.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         if remote.isEmpty || remote == "." { remote = "origin" }

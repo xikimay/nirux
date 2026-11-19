@@ -66,10 +66,8 @@ enum PRFeedbackReader {
         completion: @escaping @MainActor @Sendable (PRFeedback?) -> Void
     ) {
         DispatchQueue.global(qos: .utility).async {
-            let result = GitHub.CLI.installedPath().flatMap {
-                GitHub.CLI.run($0, arguments: arguments(pullRequestURL: pullRequestURL), timeout: 30)
-            }
-            let read = result.flatMap { $0.terminationStatus == 0 ? feedback(from: $0.standardOutput) : nil }
+            let output = try? GitHub.CLI.run(arguments(pullRequestURL: pullRequestURL), timeout: 30).flatMap(\.result).get()
+            let read = output.flatMap(feedback(from:))
             DispatchQueue.main.async { completion(read) }
         }
     }

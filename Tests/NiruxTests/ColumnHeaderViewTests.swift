@@ -520,8 +520,8 @@ final class ProjectBoardHeaderTests: XCTestCase {
     private let utc = TimeZone(identifier: "UTC")!
 
     private func run(_ status: String, _ conclusion: String?) -> GitHub.WorkflowRun {
-        GitHub.WorkflowRun(status: status, conclusion: conclusion, headSha: "43a9503ffff",
-                                 createdAt: now, updatedAt: now, url: nil)
+        GitHub.WorkflowRun(id: 5, status: status, conclusion: conclusion, headSha: "43a9503ffff", event: "push",
+                           createdAt: now, updatedAt: now)
     }
 
     func testRunPillSaysHowThePostMergeRunEnded() {
@@ -536,6 +536,7 @@ final class ProjectBoardHeaderTests: XCTestCase {
         let failed = status(run("completed", "failure"))
         XCTAssertEqual(failed.tone, .error)
         XCTAssertEqual(failed.symbol, Theme.Symbol.checksFailed)
+        XCTAssertEqual(status(run("completed", "action_required")).tone, .error, "red, as it stops the merge queue")
 
         let running = status(run("in_progress", nil))
         XCTAssertEqual(running.tone, .neutral, "a run in progress waits on nobody: grey, not amber")

@@ -205,14 +205,15 @@ extension MergeQueue {
         /// Nil: GitHub doesn't know one of the commits (404).
         case comparison(Comparison?)
         case commit(CommitInfo)
-        case runs([Run])
+        case runs([GitHub.WorkflowRun])
         case local(LocalState)
     }
 
     /// Why a batch of reads failed.
     enum ReadFailure: Error, Equatable, Sendable {
         case ghMissing
-        case notSignedIn(String)
+        /// What gh said, unless it only asked for `gh auth login`.
+        case notSignedIn(String?)
         /// The primary rate limit: reads resume at this time (`systemUptime`).
         case rateLimited(resumeAt: TimeInterval)
         case secondaryRateLimit
@@ -366,27 +367,6 @@ extension MergeQueue {
         /// a GitHub account's.
         let committerLogin: String?
         let parents: [String]
-    }
-
-    /// A run of the post-merge workflow.
-    struct Run: Equatable, Sendable {
-        let id: Int
-        /// `completed`, `in_progress`, `queued`, `waiting`…
-        let status: String
-        /// `success`, `failure`, `cancelled`… once completed.
-        let conclusion: String?
-        let headSha: String
-        /// `push`, `workflow_dispatch`…
-        let event: String
-        /// 1, then 2… for each rerun of the same run.
-        var attempt = 1
-        /// The commit's first line, for a push.
-        let title: String?
-        let url: String?
-
-        var isCompleted: Bool { status == "completed" }
-        /// A rerun is the same run, but not the same result.
-        var attemptKey: String { "\(id)#\(attempt)" }
     }
 
     struct RateLimit: Equatable, Sendable {

@@ -71,8 +71,8 @@ enum MQ {
     static func run(
         _ id: Int, head: String, status: String = "completed", conclusion: String? = "success", event: String = "push",
         title: String? = nil
-    ) -> MergeQueue.Run {
-        MergeQueue.Run(id: id, status: status, conclusion: conclusion, headSha: head, event: event, title: title,
+    ) -> GitHub.WorkflowRun {
+        GitHub.WorkflowRun(id: id, status: status, conclusion: conclusion, headSha: head, event: event, title: title,
                        url: "https://github.com/acme/widgets/actions/runs/\(id)")
     }
 
@@ -88,8 +88,8 @@ enum MQ {
         /// Answers for other compares, by read.
         var compares: [MergeQueue.Read: MergeQueue.Comparison?] = [:]
         var commits: [String: MergeQueue.CommitInfo] = [:]
-        var baseRuns: [MergeQueue.Run] = []
-        var pushRuns: [String: [MergeQueue.Run]] = [:]
+        var baseRuns: [GitHub.WorkflowRun] = []
+        var pushRuns: [String: [GitHub.WorkflowRun]] = [:]
         var local = MergeQueue.LocalState()
         var rateLimit = MergeQueue.RateLimit(
             coreRemaining: 5000, coreReset: Date(timeIntervalSince1970: 0),

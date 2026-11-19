@@ -61,8 +61,9 @@ extension GitHubRepository {
     /// `owner/name`, lowercased as compared.
     var ownerAndName: String { "\(owner)/\(name)" }
 
-    /// The same repository whatever host spells it: an SSH host alias
-    /// (`git@github-work:…`) points at github.com all the same.
+    /// Owner and name alone, the host ignored: a remote's host may be an
+    /// SSH alias (`git@github-work:…`) of github.com. Where the host
+    /// matters, compare with `==`.
     func hasOwnerAndName(of other: GitHubRepository) -> Bool {
         owner == other.owner && name == other.name
     }
