@@ -23,6 +23,13 @@ extension NiruxShellView {
         if !railFloats { endUnderGlass() }
     }
 
+    /// Where the viewport lies at rest, even while it reaches under the
+    /// rail: what centres on it (a hint, a toast, a name card) stays put.
+    var viewportRestFrame: NSRect {
+        let reach = -viewport.bounds.minX
+        return NSRect(x: viewport.frame.minX + reach, y: viewport.frame.minY, width: viewport.frame.width - reach, height: viewport.frame.height)
+    }
+
     /// No line marks the edge of a rail that floats. It fades with the
     /// sidebar's fold.
     private func showDivider(animated: Bool) {

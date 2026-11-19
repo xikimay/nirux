@@ -32,6 +32,8 @@ final class SpacePlanView: NSView {
     /// The scale every row's picture is drawn at.
     private(set) var scale: CGFloat = 1
     private let ring = CALayer()
+    /// Where the names start.
+    private var labelLeft = SpacePlanView.margin
     /// How far the fingers moved in this pinch.
     private var pinchTotal: CGFloat = 0
     /// Where to go: a workspace and its column; nil goes back.
@@ -54,7 +56,9 @@ final class SpacePlanView: NSView {
         scale = max(0.01, min(1, room.width / widest, room.height / max(tallest, 1)))
         let block = tallest * scale + Self.rowGap * CGFloat(max(0, laidOut.count - 1))
         var top = (bounds.height + block) / 2
-        let left = Self.margin * 2 + Self.labelWidth + (room.width - widest * scale) / 2
+        // The names just before the rows, the whole centred.
+        labelLeft = (bounds.width - Self.labelWidth - Self.margin - widest * scale) / 2
+        let left = labelLeft + Self.labelWidth + Self.margin
         for workspace in laidOut {
             guard let picture = workspace.frozenColumns(scale: scale) else { continue }
             let height = workspace.stripSize.height * scale
@@ -161,9 +165,9 @@ final class SpacePlanView: NSView {
         detail.font = Theme.Font.caption
         if case .needsYou = label.icon.kind { detail.textColor = Theme.Color.waiting } else { detail.textColor = Theme.Color.textSecondary }
         detail.lineBreakMode = .byTruncatingTail
-        let textX = Self.margin + icon.frame.width + Theme.Space.sm
+        let textX = labelLeft + icon.frame.width + Theme.Space.sm
         let textWidth = Self.labelWidth - icon.frame.width - Theme.Space.sm
-        icon.frame.origin = NSPoint(x: Self.margin, y: midY - icon.frame.height / 2)
+        icon.frame.origin = NSPoint(x: labelLeft, y: midY - icon.frame.height / 2)
         title.frame = NSRect(x: textX, y: midY, width: textWidth, height: title.intrinsicContentSize.height)
         detail.frame = NSRect(x: textX, y: midY - detail.intrinsicContentSize.height, width: textWidth, height: detail.intrinsicContentSize.height)
         for view in [icon, title, detail] as [NSView] { addSubview(view) }

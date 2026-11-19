@@ -14,7 +14,7 @@ final class SpacePlanTests: XCTestCase {
             var drawing: [ObjectIdentifier: Bool] = [:]
             shell.sideEffects.setSurfaceVisible = { column, visible in drawing[ObjectIdentifier(column)] = visible }
             let onScreen = try XCTUnwrap(shell.activeWorkspace)
-            shell.toggleSpacePlan()
+            toggle(shell)
             let plan = try XCTUnwrap(shell.spacePlan)
             XCTAssertIdentical(plan.superview, shell.viewport)
             XCTAssertEqual(plan.rows.map(\.workspaceID), workspaces.map(\.id), "in the order they're listed")
@@ -31,7 +31,7 @@ final class SpacePlanTests: XCTestCase {
             XCTAssertTrue(workspaces.flatMap(\.columns).allSatisfy { drawing[ObjectIdentifier($0)] == false }, "no terminal draws")
             XCTAssertIdentical(shell.window?.firstResponder, plan, "it takes the keys")
 
-            shell.toggleSpacePlan()
+            toggle(shell)
             XCTAssertNil(shell.spacePlan, "⌥⌘↑ again goes back")
             XCTAssertNil(plan.superview)
             XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
@@ -44,7 +44,7 @@ final class SpacePlanTests: XCTestCase {
     /// row above or below, as far as the plan's edges; Return goes there.
     func testTheArrowsMoveTheChoiceAndReturnGoesThere() throws {
         try withWorkspaces { shell, workspaces in
-            shell.toggleSpacePlan()
+            toggle(shell)
             let plan = try XCTUnwrap(shell.spacePlan)
             XCTAssertEqual(plan.chosen.row, 1)
             plan.keyDown(with: try Self.key(126))
@@ -73,7 +73,7 @@ final class SpacePlanTests: XCTestCase {
         try withWorkspaces { shell, workspaces in
             let onScreen = try XCTUnwrap(shell.activeWorkspace)
             let focused = onScreen.focusedIndex
-            shell.toggleSpacePlan()
+            toggle(shell)
             let first = try XCTUnwrap(shell.spacePlan)
             first.keyDown(with: try Self.key(126))
             first.keyDown(with: try Self.key(53))
@@ -81,7 +81,7 @@ final class SpacePlanTests: XCTestCase {
             XCTAssertIdentical(shell.activeWorkspace, onScreen, "as it was, wherever the choice moved")
             XCTAssertEqual(onScreen.focusedIndex, focused)
 
-            shell.toggleSpacePlan()
+            toggle(shell)
             let plan = try XCTUnwrap(shell.spacePlan)
             let card = try XCTUnwrap(plan.rows.last?.cards.first)
             let window = try XCTUnwrap(shell.window)
@@ -103,35 +103,37 @@ final class SpacePlanTests: XCTestCase {
     /// has no plan.
     func testAMoveOrANewSizeClosesThePlan() throws {
         try withWorkspaces { shell, _ in
-            shell.toggleSpacePlan()
+            toggle(shell)
             shell.relayout(animated: false)
             XCTAssertNotNil(shell.spacePlan, "a layout that changes nothing")
             shell.focusColumn(.right)
             XCTAssertNil(shell.spacePlan, "a move")
             XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
 
-            shell.toggleSpacePlan()
+            toggle(shell)
             shell.setFrameSize(NSSize(width: shell.frame.width - 100, height: shell.frame.height))
             shell.relayout(animated: false)
             XCTAssertNil(shell.spacePlan, "a new size")
 
             shell.workspaceStore.createProfile(named: "Empty", select: true)
             shell.relayout(animated: false)
-            shell.toggleSpacePlan()
+            toggle(shell)
             XCTAssertNil(shell.spacePlan, "an empty space")
         }
     }
 
     /// Fingers closing on the work past a quarter of their span, within one
-    /// pinch, show the plan; opening them in it goes to the card under them,
-    /// else to the chosen one.
+    /// pinch, show the plan, closing on while its workspaces draw; opening
+    /// them in it goes to the card under them, else to the chosen one.
     func testAPinchShowsThePlanAndAnotherGoesToTheCardUnderIt() throws {
         try withWorkspaces { shell, workspaces in
             shell.pinched(by: -0.2, began: true)
             shell.pinched(by: -0.1, began: true)
-            XCTAssertNil(shell.spacePlan, "not that far within one pinch")
+            XCTAssertTrue(shell.planDrawing.isEmpty, "not that far within one pinch")
             shell.pinched(by: -0.2, began: false)
-            let plan = try XCTUnwrap(shell.spacePlan, "past a quarter")
+            shell.pinched(by: -0.1, began: false)
+            settle(shell)
+            let plan = try XCTUnwrap(shell.spacePlan, "past a quarter, closing on")
 
             plan.pinched(by: 0.1, began: true, at: .zero)
             XCTAssertNotNil(shell.spacePlan, "not that far")
@@ -141,6 +143,7 @@ final class SpacePlanTests: XCTestCase {
             XCTAssertIdentical(shell.activeWorkspace, workspaces.last, "the card under the fingers")
 
             shell.pinched(by: -0.3, began: true)
+            settle(shell)
             let again = try XCTUnwrap(shell.spacePlan)
             again.keyDown(with: try Self.key(126))
             let chosen = again.rows[again.chosen.row].workspaceID
@@ -150,7 +153,52 @@ final class SpacePlanTests: XCTestCase {
         }
     }
 
+    /// Every workspace the plan lists draws once before it shows: their
+    /// terminals rested off screen. Asked again meanwhile, or with a
+    /// workspace that didn't draw, it doesn't show.
+    func testEveryListedWorkspaceDrawsOnceBeforeThePlanShows() throws {
+        try withWorkspaces { shell, workspaces in
+            var drawing: [ObjectIdentifier: Bool] = [:]
+            shell.sideEffects.setSurfaceVisible = { column, visible in drawing[ObjectIdentifier(column)] = visible }
+            shell.toggleSpacePlan()
+            XCTAssertNil(shell.spacePlan, "not yet")
+            XCTAssertTrue(workspaces.flatMap(\.columns).allSatisfy { drawing[ObjectIdentifier($0)] == true }, "every listed workspace draws")
+            XCTAssertEqual(steps?.durations, [NiruxShellView.arrivalDelay])
+            steps?.runNext()
+            XCTAssertNotNil(shell.spacePlan, "once they drew")
+            XCTAssertTrue(workspaces.flatMap(\.columns).allSatisfy { drawing[ObjectIdentifier($0)] == false })
+            toggle(shell)
+
+            shell.toggleSpacePlan()
+            shell.toggleSpacePlan()
+            steps?.runNext()
+            XCTAssertNil(shell.spacePlan, "asked again meanwhile, it doesn't show")
+            let onScreen = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertTrue(workspaces.filter { $0 !== onScreen }.flatMap(\.columns).allSatisfy { drawing[ObjectIdentifier($0)] == false })
+
+            shell.toggleSpacePlan()
+            shell.addWorkspace(title: "fourth", cwd: NSTemporaryDirectory(), activate: false)
+            steps?.runNext()
+            XCTAssertNil(shell.spacePlan, "a workspace that didn't draw")
+            XCTAssertTrue(shell.planDrawing.isEmpty)
+        }
+    }
+
     // MARK: - Helpers
+
+    /// The shell's timed steps, held (see `TimedSteps`).
+    private var steps: TimedSteps?
+
+    /// ⌥⌘↑, its drawing step run when the plan comes.
+    private func toggle(_ shell: NiruxShellView) {
+        shell.toggleSpacePlan()
+        settle(shell)
+    }
+
+    /// The step after which the plan shows, once its workspaces drew.
+    private func settle(_ shell: NiruxShellView) {
+        if !shell.planDrawing.isEmpty { steps?.runNext() }
+    }
 
     private static func key(_ code: UInt16) throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(
@@ -203,6 +251,7 @@ final class SpacePlanTests: XCTestCase {
             shell.relayout(animated: false)
             let listed = shell.visibleWorkspaceIndices.map { shell.workspaces[$0] }
             XCTAssertEqual(listed.map(\.id), [first, second, third].map(\.id))
+            steps = TimedSteps(on: shell)
             try body(shell, listed)
         }
     }

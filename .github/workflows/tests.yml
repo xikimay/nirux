@@ -59,6 +59,6 @@ jobs:
       - name: Flake gate
         run: |
           status=0
-          scripts/mutants-class.sh NiruxTests.SpacePlanTests pinchEager wrongWay noReset cardIgnored planPinchEager || status=1
+          scripts/mutants-class.sh NiruxTests.SpacePlanTests pinchEager wrongWay noReset cardIgnored planPinchEager drawCancelled || status=1
           scripts/repeat-class.sh NiruxTests.SpacePlanTests 10 3 NiruxTests.SpaceCrossingTests || status=1
           exit $status
