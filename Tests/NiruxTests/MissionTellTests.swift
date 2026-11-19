@@ -444,6 +444,18 @@ final class MissionTellTests: XCTestCase {
             kind: .claude, name: .stopFailure, sessionID: "lead", errorKind: "rate_limit", timestamp: t0 + 8
         ), isUserFocused: false)
         XCTAssertEqual(refusal(failed), .noPromptYet, "a usage limit would fail what it is sent")
+
+        // The user, who saw its screen, says it sits at its prompt: keys
+        // since its start don't hold it, the rest still does.
+        func seen(_ machine: AgentStatusMachine, idle: Bool = true) -> AgentPromptRefusal? {
+            machine.promptRefusal(foreground: claude(resumed), runningSince: t0 + 100, seenByUser: true) { $0 == resumed && idle }
+        }
+        XCTAssertNil(seen(typed))
+        XCTAssertNil(seen(early))
+        XCTAssertNil(seen(recalled))
+        XCTAssertEqual(seen(early, idle: false), .noPromptYet, "its record says a screen of its own is up")
+        XCTAssertEqual(seen(asking), .noPromptYet)
+        XCTAssertEqual(seen(working), .noPromptYet)
     }
 
     /// A dialog takes the keys while it waits for one, a paste too: none is a

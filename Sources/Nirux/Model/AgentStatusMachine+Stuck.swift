@@ -89,23 +89,24 @@ extension AgentStatusMachine {
     /// by Nirux that Claude has not submitted yet), and no turn end waiting
     /// for its verdict (`awaitsAnyVerdict`). One that took no prompt since
     /// it started also needs its REPL to say it sits idle at its prompt
-    /// (`showsIdlePrompt`, see `sitsAtFirstPrompt`).
+    /// (`showsIdlePrompt`, see `sitsAtFirstPrompt`), or the user who saw it
+    /// to say so (`seenByUser`).
     func isPromptFree(
         foreground: ForegroundProcess?, runningSince time: TimeInterval,
-        showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
+        seenByUser: Bool = false, showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
     ) -> Bool {
-        promptRefusal(foreground: foreground, runningSince: time, showsIdlePrompt: showsIdlePrompt) == nil
+        promptRefusal(foreground: foreground, runningSince: time, seenByUser: seenByUser, showsIdlePrompt: showsIdlePrompt) == nil
     }
 
     /// Why `isPromptFree` says no, nil when it says yes.
     func promptRefusal(
         foreground: ForegroundProcess?, runningSince time: TimeInterval,
-        showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
+        seenByUser: Bool = false, showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
     ) -> AgentPromptRefusal? {
         guard let foreground, AgentHookCenter.isInteractiveClaude(foreground) else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
         guard let lastPromptAt = prompt(since: foreground.instance.startedAt) else {
-            if sitsAtFirstPrompt(foreground.instance, showsIdlePrompt: showsIdlePrompt) { return nil }
+            if sitsAtFirstPrompt(foreground.instance, seenByUser: seenByUser, showsIdlePrompt: showsIdlePrompt) { return nil }
             // Typed since it started: not a screen of its own.
             return lastDraftInputAt >= foreground.instance.startedAt + 1 ? .draft : .noPromptYet
         }
@@ -127,10 +128,14 @@ extension AgentStatusMachine {
     /// seeded into its prompt, those typed while its shell still loads too;
     /// others open its agents or transcript views; one started by hand
     /// waits for its first prompt), and, read last, its REPL's own word
-    /// (`showsIdlePrompt`, from `ClaudeSessionRecord`).
-    func sitsAtFirstPrompt(_ process: ProcessInstance, showsIdlePrompt: (ProcessInstance) -> Bool) -> Bool {
+    /// (`showsIdlePrompt`, from `ClaudeSessionRecord`). `seenByUser`: the
+    /// user, who saw its screen, says it sits at its prompt: keys since its
+    /// start don't count (they may have answered a screen of its own).
+    func sitsAtFirstPrompt(
+        _ process: ProcessInstance, seenByUser: Bool = false, showsIdlePrompt: (ProcessInstance) -> Bool
+    ) -> Bool {
         !hookWorking && turnStartedAt == nil && pendingDialogs.isEmpty && turnFailure == nil && !awaitsAnyVerdict
-            && lastInputAt == 0 && lastDraftInputAt == 0 && showsIdlePrompt(process)
+            && (seenByUser || lastInputAt == 0 && lastDraftInputAt == 0) && showsIdlePrompt(process)
     }
 
     /// What `promptRefusal` reads, for the log: ages in seconds and names,

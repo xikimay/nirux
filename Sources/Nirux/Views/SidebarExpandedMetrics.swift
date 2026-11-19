@@ -176,6 +176,7 @@ enum SidebarExpandedMetrics {
                 SidebarWorkspaceCardRenderer.missionQuestionText(question), width: textWidth, lineHeight: actionLineHeight,
                 maxLines: missionQuestionMaxLines
             )
+        case .waitingMessages(_, let waiting) where waiting.offersTypeNow: return buttonHeight
         case .waitingMessages(_, let waiting):
             return SidebarWrappedText.height(
                 SidebarWorkspaceCardRenderer.waitingText(waiting), width: textWidth, lineHeight: actionLineHeight,

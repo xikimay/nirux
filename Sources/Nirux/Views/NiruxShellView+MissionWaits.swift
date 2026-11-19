@@ -13,22 +13,33 @@ struct SidebarWaitingMessages: Hashable {
     let refusal: AgentPromptRefusal?
     /// The prompt looks free, yet the tries at typing failed.
     var untypable = false
+    /// Held by a `claude` with no prompt since it started that doesn't say
+    /// it sits at its prompt: the row offers to type them now, on the
+    /// user's word (`NiruxShellView.typeWaitingMessagesNow`).
+    var offersTypeNow = false
     /// "2 messages waiting since 22:21 · a dialog may be open", written at
     /// the check: the day shows once it is another.
     let line: String
 
-    init(count: Int, since: TimeInterval, refusal: AgentPromptRefusal?, untypable: Bool = false, now: TimeInterval) {
+    init(
+        count: Int, since: TimeInterval, refusal: AgentPromptRefusal?, untypable: Bool = false, offersTypeNow: Bool = false,
+        now: TimeInterval
+    ) {
         self.count = count
         self.since = since
         self.refusal = refusal
         self.untypable = untypable
+        self.offersTypeNow = offersTypeNow
         let time = ProjectBoard.clockTime(Date(timeIntervalSince1970: since), now: Date(timeIntervalSince1970: now))
         line = "\(count == 1 ? "1 message" : "\(count) messages") waiting since \(time) · \(Self.why(refusal, untypable: untypable).short)"
     }
 
     var tooltip: String {
-        "Mission messages not typed into this agent's prompt yet: \(Self.why(refusal, untypable: untypable).long)."
+        let why = "Mission messages not typed into this agent's prompt yet: \(Self.why(refusal, untypable: untypable).long)."
+        return offersTypeNow ? why + " " + Self.typeNowAdvice : why
     }
+
+    static let typeNowAdvice = "If its terminal shows its prompt, empty, Type it now types one of them; the rest follow its turn."
 
     /// Why they wait: a few words for the row, the whole of it for the tooltip.
     static func why(_ refusal: AgentPromptRefusal?, untypable: Bool) -> (short: String, long: String) {
@@ -266,6 +277,7 @@ extension NiruxShellView {
             shown[id] = SidebarWaitingMessages(
                 count: typable.count, since: oldest.message.sentAt, refusal: oldest.refusal,
                 untypable: oldest.refusal == nil && missionWaits.tries[oldest.message.id, default: 0] >= Self.missionTypingTries,
+                offersTypeNow: atFirstPrompt && (oldest.refusal == .noPromptYet || oldest.refusal == .draft),
                 now: now
             )
         }
@@ -279,6 +291,28 @@ extension NiruxShellView {
             for retry in (retryDue ? retries : []) + firstPrompts { missionWaits.tries[retry, default: 0] += 1 }
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
+    }
+
+    /// "Type it now" clicked on a row whose messages wait for a `claude` with
+    /// no prompt since it started (`SidebarWaitingMessages.offersTypeNow`):
+    /// the user saw it sits at its prompt. The oldest goes in now, unless
+    /// the row changed since (`since`, its oldest's) or its record says it
+    /// waits on a screen; the rest follow that turn.
+    func typeWaitingMessagesNow(workspaceIndex: Int, columnIndex: Int, since: TimeInterval) {
+        guard let column = workspaces[safe: workspaceIndex]?.columns[safe: columnIndex],
+              let waiting = missionWaits.shown[column.id], waiting.offersTypeNow, waiting.since == since
+        else { return showToast("Those messages changed: see the row again") }
+        let typedBefore = missionWaits.typedAt[column.id]
+        typeMissionMessages(seenAtPrompt: column.id)
+        if missionWaits.typedAt[column.id] == typedBefore {
+            let refusal = column.pty?.missionPromptRefusal(
+                runningSince: Date().timeIntervalSince1970, snapshot: ProcessSnapshot(), seenByUser: true
+            ) ?? .noClaude
+            let why = refusal == .noPromptYet
+                ? "Claude Code says a screen of its own is up there, or it works" : SidebarWaitingMessages.why(refusal, untypable: false).short
+            showToast("Nothing typed: \(why)")
+        }
+        updateSidebar()
     }
 
     /// Writes to the log, once per process, that the session record of

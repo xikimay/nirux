@@ -127,9 +127,13 @@ final class ClaudeSessionRecordTests: XCTestCase {
             pty.missionPromptRefusal(runningSince: Date().timeIntervalSince1970, snapshot: ProcessSnapshot())
         }
         XCTAssertEqual(refusal(), .noPromptYet, "no record")
+        XCTAssertNil(pty.missionPromptRefusal(runningSince: Date().timeIntervalSince1970, snapshot: ProcessSnapshot(), seenByUser: true),
+                     "the user saw its prompt")
         // As its REPL writes it: once it started.
         try writeRecord(pid: claude.pid, in: config, "waiting", waitingFor: "dialog open", changedAt: claude.startedAt)
         XCTAssertEqual(refusal(), .noPromptYet, "a resume's dialog")
+        XCTAssertEqual(pty.missionPromptRefusal(runningSince: Date().timeIntervalSince1970, snapshot: ProcessSnapshot(), seenByUser: true),
+                       .noPromptYet, "its record says a screen of its own is up, whatever the user saw")
         XCTAssertFalse(pty.mayPressEnter(after: pty.lastInputAt, for: claude, snapshot: ProcessSnapshot()))
         try writeRecord(pid: claude.pid, in: config, "idle", changedAt: claude.startedAt)
         try await waitUntil("its record settled", timeout: ClaudeSessionRecord.settleTime + 5) { refusal() == nil }

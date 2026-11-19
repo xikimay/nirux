@@ -932,8 +932,8 @@ final class PtySession: @unchecked Sendable {
     /// Whether a Mission message may be typed now into the prompt of a
     /// `claude` already running at `runningSince` (see
     /// `AgentStatusMachine.isPromptFree`).
-    func acceptsMissionMessage(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> Bool {
-        missionPromptRefusal(runningSince: runningSince, snapshot: snapshot) == nil
+    func acceptsMissionMessage(runningSince: TimeInterval, snapshot: ProcessSnapshot, seenByUser: Bool = false) -> Bool {
+        missionPromptRefusal(runningSince: runningSince, snapshot: snapshot, seenByUser: seenByUser) == nil
     }
 
     /// When the last hook event came, of any command (0: none).
@@ -948,10 +948,15 @@ final class PtySession: @unchecked Sendable {
     }
 
     /// Why `acceptsMissionMessage` says no, nil when it says yes.
-    func missionPromptRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> AgentPromptRefusal? {
+    /// `seenByUser`: the user says its `claude` with no prompt yet sits at
+    /// its prompt, which goes unless its record says it waits on a screen.
+    func missionPromptRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot, seenByUser: Bool = false) -> AgentPromptRefusal? {
         guard !hasExited else { return .noClaude }
-        return state.machine.promptRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince) {
-            Self.sessionRecord(of: $0).showsIdlePrompt(of: $0, now: Date().timeIntervalSince1970)
+        return state.machine.promptRefusal(
+            foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince, seenByUser: seenByUser
+        ) {
+            let record = Self.sessionRecord(of: $0)
+            return seenByUser ? !record.showsWait(of: $0) : record.showsIdlePrompt(of: $0, now: Date().timeIntervalSince1970)
         }
     }
 
