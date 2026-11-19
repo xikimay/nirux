@@ -147,13 +147,13 @@ extension AgentStatusMachine {
     }
 
     /// Whether no key may have left text in the prompt of `process`: none
-    /// since the terminal started, or, on the user's word, none since it
-    /// started (keys before launched it, or the user sees them) but an Enter
-    /// last, which answered a screen of its own (one at the box would have
-    /// sent a prompt). Its start is known to the second.
+    /// since the terminal started, or, on the user's word, none that may
+    /// leave text since it started (`lastTextInputAt`; keys before launched
+    /// it, or the user sees them): an Enter or a move answers a screen of its
+    /// own, but may also accept an `@file` completion after text. Its start is
+    /// known to the second.
     private func keysLeftNoText(since process: ProcessInstance, seenByUser: Bool) -> Bool {
-        lastInputAt == 0 && lastDraftInputAt == 0
-            || seenByUser && (lastDraftInputAt < process.startedAt + 1 || lastDraftKind == "enter")
+        lastInputAt == 0 && lastDraftInputAt == 0 || seenByUser && lastTextInputAt < process.startedAt + 1
     }
 
     /// Whether Nirux's hooks reported from the `claude` started at

@@ -425,6 +425,8 @@ final class LeadToolsFlowTests: XCTestCase {
             lead.shell.switchToWorkspace(lead.workspaceIndex)
             lead.typeItNow(held.since)
             XCTAssertNil(lead.typedAt(first), "a screen of its own is up")
+            XCTAssertEqual(lead.shell.toast?.message,
+                           "Nothing typed: Claude Code shows a screen of its own there, or its last turn isn't over")
             try FileManager.default.removeItem(at: url)
 
             // From another workspace: its terminal first, for its messages.
@@ -456,8 +458,19 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertNil(lead.typedAt(first), "its terminal, to look first")
 
             lead.typeItNow(offered.since)
+            XCTAssertEqual(lead.shell.toast?.message, "Typed one; the rest follow its turn")
             harness.waitUntil("the question in its prompt") { standIn.input.contains("Keep the old date= parameter?") }
             XCTAssertNil(lead.typedAt(second), "one on the user's word")
+            // What Nirux typed may sit in its prompt, its Enter in or not.
+            harness.waitUntil("its Enter") { lead.typedAt(first) != nil }
+            var again = try lead.waiting()
+            XCTAssertFalse(again.offersTypeNow)
+            again.offersTypeNow = true
+            again.heldBy = lead.claude
+            lead.shell.missionWaits.shown[lead.column.id] = again
+            lead.typeItNow(again.since)
+            XCTAssertNil(lead.typedAt(second))
+            XCTAssertEqual(lead.shell.toast?.message, "Nothing typed: held by a draft until its next prompt")
             lead.queueNotice("[Nirux] A notice.")
 
             // Its turns: the notice, then the last question.

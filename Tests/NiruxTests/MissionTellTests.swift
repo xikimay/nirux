@@ -467,6 +467,16 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(refusal(answered), .draft)
         XCTAssertNil(seen(answered))
         XCTAssertNil(seen(scrolled))
+        var completed = machine
+        completed.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("@".utf8))
+        completed.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 9), keys: Data("\r".utf8))
+        XCTAssertEqual(seen(completed), .draft, "an Enter that took an @file completion: its text stays")
+        var suggested = machine
+        suggested.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("\u{1B}[C".utf8))
+        XCTAssertEqual(seen(suggested), .draft, "Right takes in a suggested prompt")
+        var givenBack = machine
+        givenBack.notePromptGivenBack(now: t0 + 8)
+        XCTAssertEqual(seen(givenBack), .draft, "a prompt Esc gave back to its box")
         XCTAssertEqual(seen(typed), .draft, "text in its prompt")
         XCTAssertNil(seen(early), "keys before it started, Nirux's launch line too: what they left, the user sees")
         XCTAssertEqual(seen(recalled), .draft, "an old prompt in its box")

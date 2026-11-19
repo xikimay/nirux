@@ -60,8 +60,11 @@ final class ClaudeSessionRecordTests: XCTestCase {
         XCTAssertFalse(ClaudeSessionRecord.Reading.missing.allowsTypingOnSight(of: process, now: 1_002.9), "its REPL may not be up")
         XCTAssertFalse(ClaudeSessionRecord.Reading.unreadable.allowsTypingOnSight(of: process, now: 2_000))
         XCTAssertTrue(ClaudeSessionRecord.Reading.found(record("idle")).allowsTypingOnSight(of: process, now: 2_000))
-        XCTAssertFalse(ClaudeSessionRecord.Reading.found(record(nil, changedAt: nil)).allowsTypingOnSight(of: process, now: 2_000),
-                       "a record with no status: no REPL yet")
+        XCTAssertTrue(ClaudeSessionRecord.Reading.found(record(nil, changedAt: nil)).allowsTypingOnSight(of: process, now: 1_003),
+                      "one without a status counts as none")
+        let stale = ClaudeSessionRecord.Reading.found(record("waiting", waitingFor: "dialog open", changedAt: 990))
+        XCTAssertTrue(stale.allowsTypingOnSight(of: process, now: 1_003), "an earlier process's counts as none")
+        XCTAssertFalse(stale.allowsTypingOnSight(of: process, now: 1_002.9))
     }
 
     /// Found in the config folder Claude Code uses, `.claude` in its home

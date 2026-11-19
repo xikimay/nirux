@@ -105,21 +105,6 @@ struct MissionWaitState {
     /// sidebar's refreshes read between checks, a read taking a sysctl and a
     /// file (`NiruxShellView.sessionRecord(of:)`).
     var recordReadings: [ProcessInstance: ClaudeSessionRecord.Reading] = [:]
-    /// The `claude`, by column, Nirux typed into before its first prompt:
-    /// what it typed may still sit in its prompt (an Enter that didn't send
-    /// it), so nothing more goes in on the user's word (`mayTypeOnSight`).
-    var typedBeforePrompt: [UUID: ProcessInstance] = [:]
-
-    /// Whether the user's word may type into `column`'s `claude`, `process`.
-    func mayTypeOnSight(into column: ColumnState, process: ProcessInstance?) -> Bool {
-        process != nil && typedBeforePrompt[column.id] != process
-    }
-
-    /// Nirux typed into `column`'s `foreground` `claude`, run by `pty`.
-    mutating func noteTyped(into column: ColumnState, pty: PtySession, foreground: ForegroundProcess?, at time: TimeInterval) {
-        noteTyped(into: column, at: time)
-        if let foreground, pty.agentTookPrompt(since: foreground) == false { typedBeforePrompt[column.id] = foreground.instance }
-    }
 
     /// Nirux typed into `column`'s prompt: it says nothing of it until the
     /// next check.
@@ -310,7 +295,6 @@ extension NiruxShellView {
                   let oldest = typable.min(by: { $0.message.sentAt < $1.message.sentAt })
             else { continue }
             let offersTypeNow = atFirstPrompt && oldest.refusal != nil
-                && missionWaits.mayTypeOnSight(into: entry.column, process: foreground?.instance)
                 && pty?.missionPromptRefusal(
                     runningSince: oldest.message.runningSince, snapshot: snapshot, seenByUser: true, now: now, record: sessionRecord(of:)
                 ) == nil
@@ -351,10 +335,17 @@ extension NiruxShellView {
     /// the row showed (`since`, its oldest's; the same `claude`), and as
     /// `ClaudeSessionRecord.Reading.allowsTypingOnSight` allows; the rest
     /// follow its turn.
-    func typeWaitingMessagesNow(workspaceIndex: Int, columnIndex: Int, since: TimeInterval) {
+    func typeWaitingMessagesNow(workspaceIndex: Int, columnIndex: Int, since: TimeInterval, tries: Int = 2) {
         // A hook may still wait out the queue's drain debounce.
         AgentHookCenter.shared.drain()
         let snapshot = ProcessSnapshot()
+        // An empty process table says nothing of its claude: read it once more.
+        guard !snapshot.isEmpty else {
+            guard tries > 1 else { return showToast("Nirux couldn't read the running processes: try again") }
+            return DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.typeWaitingMessagesNow(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since, tries: tries - 1)
+            }
+        }
         guard let column = workspaces[safe: workspaceIndex]?.columns[safe: columnIndex], let pty = column.pty,
               let waiting = missionWaits.shown[column.id], waiting.offersTypeNow, waiting.since == since,
               waiting.heldBy == pty.foregroundProcess(snapshot: snapshot)?.instance
@@ -363,17 +354,20 @@ extension NiruxShellView {
             switchToWorkspace(workspaceIndex, column: columnIndex)
             return showToast("Check that its prompt is empty, then Type it now again")
         }
-        let typedBefore = missionWaits.typedAt[column.id]
-        typeMissionMessages(seenAtPrompt: column.id)
+        let outcome = typeMissionMessages(seenAtPrompt: column.id)
         updateSidebar(snapshot: snapshot)
-        guard missionWaits.typedAt[column.id] == typedBefore else { return showToast("Typed one; the rest follow its turn") }
-        let refusal = pty.missionPromptRefusal(runningSince: Date().timeIntervalSince1970, snapshot: snapshot, seenByUser: true)
-        let why = switch refusal {
-        case .noPromptYet?: "Claude Code shows a screen of its own there, or its last turn isn't over"
-        case nil: "one is on its way there already"
-        default: SidebarWaitingMessages.why(refusal, untypable: false).short
+        showToast(Self.typedOnSightText(outcome))
+    }
+
+    /// The toast after Type it now.
+    static func typedOnSightText(_ outcome: TypedOnSight?) -> String {
+        switch outcome {
+        case .typed?: "Typed one; the rest follow its turn"
+        case .refused(.noPromptYet?)?: "Nothing typed: Claude Code shows a screen of its own there, or its last turn isn't over"
+        case .refused(let refusal?)?: "Nothing typed: \(SidebarWaitingMessages.why(refusal, untypable: false).short)"
+        case .refused(nil)?: "Nothing typed: it couldn't be typed"
+        case nil: "Nothing typed: none waits for its prompt now, or one is on its way"
         }
-        showToast("Nothing typed: \(why)")
     }
 
     /// Writes to the log, once per process, that the session record of

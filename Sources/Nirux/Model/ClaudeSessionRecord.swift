@@ -102,14 +102,14 @@ extension ClaudeSessionRecord.Reading {
     }
 
     /// Whether the user's word that `process` sits at its prompt may stand:
-    /// in place of a record only where there is none (another Claude Code),
-    /// once it ran for `settleTime`; a record that exists must show its idle
-    /// prompt.
+    /// in place of a record of its own only where there is none (another
+    /// Claude Code, one without a status, an earlier process's), once it ran
+    /// for `settleTime`; one of its own must show its idle prompt.
     func allowsTypingOnSight(of process: ProcessInstance, now: TimeInterval) -> Bool {
         switch self {
-        case .missing: return now - process.startedAt >= ClaudeSessionRecord.settleTime
         case .unreadable: return false
-        case .found(let record): return record.showsIdlePrompt(of: process, now: now)
+        case .found(let record) where record.belongs(to: process): return record.showsIdlePrompt(of: process, now: now)
+        case .missing, .found: return now - process.startedAt >= ClaudeSessionRecord.settleTime
         }
     }
 

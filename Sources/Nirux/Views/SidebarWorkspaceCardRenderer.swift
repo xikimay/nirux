@@ -760,11 +760,12 @@ final class SidebarWorkspaceCardRenderer {
             label.toolTip = waiting.tooltip
             label.setAccessibilityLabel(waiting.line)
             append(label)
-            // Type it now's button first: the line's area reaches over its edge.
-            if waiting.offersTypeNow { buildTypeNow(waiting, columnIndex: columnIndex, top: label.frame.minY) }
+            // First, and only over the line: the button's area reaches into it.
             hitAreas.append(SidebarHitArea(
-                frame: label.frame.insetBy(dx: -2, dy: -2), region: .column(workspaceIndex: workspace.index, columnIndex: columnIndex)
+                frame: label.frame.insetBy(dx: -2, dy: waiting.offersTypeNow ? 0 : -2),
+                region: .column(workspaceIndex: workspace.index, columnIndex: columnIndex)
             ))
+            if waiting.offersTypeNow { buildTypeNow(waiting, columnIndex: columnIndex, top: label.frame.minY) }
         }
     }
 
