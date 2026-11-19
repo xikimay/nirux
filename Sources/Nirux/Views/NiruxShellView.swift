@@ -21,6 +21,8 @@ final class NiruxShellView: NSView {
     /// Counts passes under the rail: a pass's end acts only on its own (see
     /// NiruxShellView+UnderGlass).
     var underGlassGeneration = 0
+    /// The workspace whose cards pass under the rail, until its edge closes.
+    weak var passingUnderRail: WorkspaceState?
     /// The size of the workspace on screen, as `relayout` lays it out.
     var workspaceViewportSize: NSSize {
         let statusH = statusBar.hasContent ? StatusBarView.height : 0
@@ -467,8 +469,9 @@ final class NiruxShellView: NSView {
     // MARK: - Layout
 
     func relayout(animated: Bool) {
-        // A layout ends a pass under the rail; a travel it starts begins one.
-        endUnderGlass()
+        // A pass under the rail goes on through a layout; a travel the
+        // layout starts begins another.
+        restUnderGlass()
         let sidebarW = sidebarWidth
         // Status bar: only when it has content (update, crash, merge queue)
         statusBar.isHidden = !statusBar.hasContent
@@ -522,6 +525,8 @@ final class NiruxShellView: NSView {
         applyTerminalOpacity()
         if animated, let before, before.workspace === activeWorkspace, before.workspace.lastCameraX != before.camera {
             passUnderRail(before.workspace, for: WorkspaceState.slideDuration)
+        } else {
+            keepUnderGlass()
         }
     }
 

@@ -21,35 +21,58 @@ extension NiruxShellView {
         divider.isHidden = railFloats
     }
 
-    /// The columns of `workspace` slide for `duration`. Meanwhile the
-    /// viewport's layer reaches under the sidebar, its content where it lay,
-    /// and the workspace leaves its cards unclipped. Only the layer: the
-    /// view, its frame and its clicks stay put.
+    /// The columns of `workspace` slide for `duration`: they pass under the
+    /// rail meanwhile.
     func passUnderRail(_ workspace: WorkspaceState, for duration: CFTimeInterval) {
-        let reach = viewport.frame.minX - sidebar.frame.minX
-        guard railFloats, agentLightsMayMove, reach > 0, let layer = viewport.layer else { return }
+        guard mayPassUnderRail(workspace) else { return }
         endUnderGlass()
         let generation = underGlassGeneration
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        Self.reach(layer, by: reach)
-        workspace.containerView.layer?.masksToBounds = false
-        CATransaction.commit()
+        passingUnderRail = workspace
+        reachUnderRail(workspace)
         ColumnState.afterCommit(duration) { [weak self] in
             guard let self, underGlassGeneration == generation else { return }
             closeUnderRail(generation)
         }
     }
 
+    /// Before a layout: the viewport's layer where its view lies. A pass
+    /// goes on through it (`keepUnderGlass`); a closing edge ends at once.
+    func restUnderGlass() {
+        guard passingUnderRail != nil, let layer = viewport.layer else { return endUnderGlass() }
+        Self.reach(layer, by: layer.bounds.minX)
+    }
+
+    /// After a layout: a pass goes on as long as its workspace stays on
+    /// screen and the rail floats.
+    func keepUnderGlass() {
+        guard let workspace = passingUnderRail else { return }
+        guard workspace === activeWorkspace, mayPassUnderRail(workspace) else { return endUnderGlass() }
+        reachUnderRail(workspace)
+    }
+
+    private func mayPassUnderRail(_ workspace: WorkspaceState) -> Bool {
+        railFloats && agentLightsMayMove && viewport.frame.minX > sidebar.frame.minX && viewport.layer != nil
+    }
+
+    /// The viewport's layer reaches under the sidebar, what it holds where
+    /// it lay, and the workspace leaves its cards unclipped. Only the
+    /// layer: the view, its frame and its clicks stay put.
+    private func reachUnderRail(_ workspace: WorkspaceState) {
+        guard let layer = viewport.layer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        Self.reach(layer, by: viewport.frame.minX - sidebar.frame.minX + layer.bounds.minX)
+        workspace.containerView.layer?.masksToBounds = false
+        CATransaction.commit()
+    }
+
     /// The work's edge sweeps back to the rail's, its content still; then
     /// the workspace clips its cards again.
     private func closeUnderRail(_ generation: Int) {
         guard let layer = viewport.layer else { return }
+        passingUnderRail = nil
         let reached = [("position", NSValue(point: layer.position)), ("bounds", NSValue(rect: layer.bounds))]
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
         Self.reach(layer, by: layer.bounds.minX)
-        CATransaction.commit()
         let curve = CAMediaTimingFunction(name: .easeInEaseOut)
         for (key, value) in reached {
             let edge = CABasicAnimation(keyPath: key)
@@ -68,11 +91,12 @@ extension NiruxShellView {
     /// clipping its cards, and no pass left to end.
     func endUnderGlass() {
         underGlassGeneration += 1
+        passingUnderRail = nil
         guard let layer = viewport.layer else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for key in Self.underGlassKeys { layer.removeAnimation(forKey: key) }
-        if layer.bounds.minX < 0 { Self.reach(layer, by: layer.bounds.minX) }
+        Self.reach(layer, by: layer.bounds.minX)
         for workspace in workspaces where workspace.containerView.layer?.masksToBounds == false {
             workspace.containerView.layer?.masksToBounds = true
         }
@@ -82,10 +106,14 @@ extension NiruxShellView {
     /// `layer`'s left edge `distance` further left (back when negative),
     /// what it holds where it was.
     private static func reach(_ layer: CALayer, by distance: CGFloat) {
+        guard distance != 0 else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         var frame = layer.frame
         frame.origin.x -= distance
         frame.size.width += distance
         layer.frame = frame
         layer.bounds.origin.x -= distance
+        CATransaction.commit()
     }
 }
