@@ -105,14 +105,14 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(leftovers, [SpaceDefaultsStore.fileName], "no temporary file left")
     }
 
-    /// docs/design/pr-follow-up.md: off unless turned on; a value this build
+    /// docs/design/pr-follow-up.md: on unless turned off; a value this build
     /// can't read is off, and never rewritten.
-    func testTheFollowUpIsOffUnlessTurnedOn() throws {
+    func testTheFollowUpIsOnUnlessTurnedOff() throws {
         let store = try store()
-        XCTAssertFalse(store.load().defaults.followsUpPullRequests)
-        let saved = try store.save(SpaceDefaults(prFollowUp: true), replacing: store.load()).get()
-        XCTAssertTrue(saved.defaults.followsUpPullRequests)
-        XCTAssertTrue(try String(contentsOf: store.fileURL, encoding: .utf8).contains("\"prFollowUp\" : true"))
+        XCTAssertTrue(store.load().defaults.followsUpPullRequests)
+        let saved = try store.save(SpaceDefaults(prFollowUp: false), replacing: store.load()).get()
+        XCTAssertFalse(saved.defaults.followsUpPullRequests)
+        XCTAssertTrue(try String(contentsOf: store.fileURL, encoding: .utf8).contains("\"prFollowUp\" : false"))
         try Data(#"{"prFollowUp": "yes"}"#.utf8).write(to: store.fileURL)
         let unreadable = store.load()
         XCTAssertFalse(unreadable.defaults.followsUpPullRequests)

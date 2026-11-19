@@ -40,7 +40,7 @@ extension NiruxShellView {
     /// Space Settings › Defaults, "Follow up on pull requests".
     func followsUpPullRequests(inSpace spaceID: String) -> Bool {
         if let setting = prFollowUpCenter.settings[spaceID] { return setting.value }
-        guard let store = SpaceDefaultsStore(spaceID: spaceID) else { return false }
+        guard let store = SpaceDefaultsStore(spaceID: spaceID) else { return SpaceDefaults().followsUpPullRequests }
         let setting = FileBackedValue(url: store.fileURL, read: { _ in store.load().defaults.followsUpPullRequests }, write: { _, _ in })
         prFollowUpCenter.settings[spaceID] = setting
         return setting.value
@@ -181,6 +181,9 @@ extension NiruxShellView {
         let (action, entry, raised) = prFollowUpCenter.file.update { store in
             var action = PRFollowUp.Action.none
             var raised = false
+            // Following by default, never turned on by hand: the space follows
+            // from the first pass, and so do its pull requests first seen later.
+            if store.spacesOnSince[workspace.profileID] == nil { store.spacesOnSince[workspace.profileID] = facts.now }
             store.update(pullRequest.url, now: facts.now, since: store.spacesOnSince[workspace.profileID]) { entry in
                 if let last = entry.rounds.last, last.endedAt == nil {
                     if target.roundAgentLeft {

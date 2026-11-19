@@ -137,8 +137,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
 
     @objc func followUpChanged(_ sender: NSSwitch) {
         var defaults = loaded.defaults
-        // Off is the default: nothing is written for it.
-        defaults.prFollowUp = sender.state == .on ? true : nil
+        // On is the default: nothing is written for it.
+        defaults.prFollowUp = sender.state == .on ? nil : false
         guard defaults != loaded.defaults else { return }
         write(defaults)
     }

@@ -27,7 +27,7 @@ struct SpaceDefaults: Equatable, Sendable {
     /// 0 to 23, local time.
     var leadDailyPassHour: Int?
     /// Space Settings › Defaults, "Follow up on pull requests"
-    /// (docs/design/pr-follow-up.md). Nil: off.
+    /// (docs/design/pr-follow-up.md). Nil: on; only false turns it off.
     var prFollowUp: Bool?
     /// Space Settings › Safety, one per `ClaudeSpaceSettings.Part`. Nil:
     /// its default.
@@ -44,7 +44,7 @@ struct SpaceDefaults: Equatable, Sendable {
     var dailyPassIsOn: Bool { leadDailyPass ?? true }
     var dailyPassHour: Int { leadDailyPassHour ?? DailyPass.defaultHour }
     /// Whether Nirux types the rounds its tasks' pull requests need.
-    var followsUpPullRequests: Bool { prFollowUp ?? false }
+    var followsUpPullRequests: Bool { prFollowUp ?? true }
 
     func isOn(_ part: ClaudeSpaceSettings.Part) -> Bool { self[keyPath: part.key] ?? part.isOnByDefault }
 
@@ -181,7 +181,7 @@ struct SpaceDefaults: Equatable, Sendable {
 /// `{"schemaVersion": 1, "agent": "codex", "claudeLaunchMode": "plan",
 /// "codexLaunchMode": "readOnly", "environment": [{"name": …, "value": …}],
 /// "leadStartsTasks": false, "leadDailyPass": false, "leadDailyPassHour": 7,
-/// "prFollowUp": true, "claudeTrustsRepositories": false,
+/// "prFollowUp": false, "claudeTrustsRepositories": false,
 /// "claudeDeniesIrreversible": false, "claudeSandbox": true,
 /// "claudeAllow": ["Bash(swift build:*)"], "claudeEnvironment": […]}`,
 /// every key optional, nothing written for what isn't set. Unknown keys and
