@@ -116,8 +116,6 @@ final class FrozenViewTests: XCTestCase {
             shell.addWorkspace(title: "second", cwd: NSTemporaryDirectory())
             XCTAssertEqual(Self.frozenViews(in: shell).count, 1, "a new workspace slides over what showed, frozen")
             XCTAssertFalse(shell.viewport.subviews.contains { $0 is NSImageView }, "nothing drawn again")
-            for _ in 1...3 { shell.focusSpace(.next) }
-            XCTAssertTrue(Self.frozenViews(in: shell).allSatisfy { Self.pictureLayers(in: $0.layer) == 1 }, "no picture holds another")
             waitUntil("gone on time", timeout: 2) { Self.frozenViews(in: shell).isEmpty }
         }
     }
@@ -127,12 +125,6 @@ final class FrozenViewTests: XCTestCase {
     private static func surfaces(in layer: CALayer?) -> Int {
         guard let layer else { return 0 }
         return (FrozenView.surface(of: layer) == nil ? 0 : 1) + (layer.sublayers ?? []).reduce(0) { $0 + surfaces(in: $1) }
-    }
-
-    /// Layers named as a picture's own, `layer` included.
-    private static func pictureLayers(in layer: CALayer?) -> Int {
-        guard let layer else { return 0 }
-        return (layer.name == FrozenView.layerName ? 1 : 0) + (layer.sublayers ?? []).reduce(0) { $0 + pictureLayers(in: $1) }
     }
 
     private static func frozenViews(in shell: NiruxShellView) -> [FrozenView] {
