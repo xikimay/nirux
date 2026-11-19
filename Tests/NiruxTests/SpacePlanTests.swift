@@ -72,10 +72,14 @@ final class SpacePlanTests: XCTestCase {
     func testEscapeGoesBackAndAClickGoesToTheCard() throws {
         try withWorkspaces { shell, workspaces in
             let onScreen = try XCTUnwrap(shell.activeWorkspace)
+            let focused = onScreen.focusedIndex
             shell.toggleSpacePlan()
-            try XCTUnwrap(shell.spacePlan).keyDown(with: try Self.key(53))
+            let first = try XCTUnwrap(shell.spacePlan)
+            first.keyDown(with: try Self.key(126))
+            first.keyDown(with: try Self.key(53))
             XCTAssertNil(shell.spacePlan)
-            XCTAssertIdentical(shell.activeWorkspace, onScreen, "as it was")
+            XCTAssertIdentical(shell.activeWorkspace, onScreen, "as it was, wherever the choice moved")
+            XCTAssertEqual(onScreen.focusedIndex, focused)
 
             shell.toggleSpacePlan()
             let plan = try XCTUnwrap(shell.spacePlan)
