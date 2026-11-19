@@ -365,6 +365,33 @@ final class PtySession: @unchecked Sendable {
         set { state.onOsc9Received = newValue }
     }
 
+    /// What Antigravity reported of itself (OSC 7501), on the main queue:
+    /// give it to `applyProgramStatus` once it is known to come from agy.
+    var onProgramStatus: ((AgentProgramStatus) -> Void)? {
+        get { state.onProgramStatus }
+        set { state.onProgramStatus = newValue }
+    }
+
+    /// Takes in Antigravity's status: the reason to alert with, if any (see
+    /// `AgentStatusMachine.noteProgramStatus`).
+    func applyProgramStatus(
+        _ status: AgentProgramStatus, from process: ProcessInstance?, isUserFocused: Bool
+    ) -> AgentAttentionReason? {
+        state.machine.noteProgramStatus(status, from: process, isUserFocused: isUserFocused, now: Date())
+    }
+
+    /// A sign-in wait past its grace, once (see
+    /// `AgentStatusMachine.takeLateSignInAlert`).
+    func takeLateSignInAlert(isUserFocused: Bool) -> AgentAttentionReason? {
+        state.machine.takeLateSignInAlert(isUserFocused: isUserFocused, now: Date().timeIntervalSince1970)
+    }
+
+    /// Whether `status` says something new: the same again (a redraw) needs
+    /// no look at the process table.
+    func isNewProgramStatus(_ status: AgentProgramStatus) -> Bool {
+        state.machine.programStatus?.status != status
+    }
+
     /// Called on the main queue when the output shows a local dev-server
     /// URL (`http://localhost:5173/`). Throttled per port.
     var onLocalServerURL: ((LocalServerURL) -> Void)? {
@@ -1048,6 +1075,7 @@ final class PtySession: @unchecked Sendable {
         claudeFiredHooks: Bool
     ) -> AgentStatus {
         let fgName = processTableRead ? foregroundProcess?.name ?? "" : nil
+        if processTableRead { state.machine.keepProgramStatus(of: foregroundProcess?.instance) }
         return state.machine.tick(
             fgName: fgName, claudeFiredHooks: claudeFiredHooks, isUserFocused: isUserFocused, now: Date()
         )
@@ -1418,6 +1446,10 @@ private final class PtyState: @unchecked Sendable {
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: ((String) -> Void)?
     var onOsc9Received: (() -> Void)?
+    var onProgramStatus: ((AgentProgramStatus) -> Void)?
+    private static let programStatusPrefix = Data(AgentProgramStatus.prefix.utf8)
+    /// Read-queue only.
+    private var programStatusScanner = AgentProgramStatus.Scanner()
     var onLocalServerURL: ((LocalServerURL) -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
@@ -1683,6 +1715,15 @@ private final class PtyState: @unchecked Sendable {
         if let str = String(bytes: data, encoding: .utf8),
            str.contains("\u{1b}]") {
             parseOscSequences(str)
+        }
+        // Only a chunk with the sequence, or one that may end in its start;
+        // its payload is ASCII: a chunk that cuts a character keeps it.
+        if programStatusScanner.isWaiting || data.range(of: Self.programStatusPrefix) != nil
+            || data.suffix(Self.programStatusPrefix.count).contains(0x1b) {
+            let statuses = programStatusScanner.statuses(in: String(decoding: data, as: UTF8.self))
+            if !statuses.isEmpty, let callback = onProgramStatus {
+                DispatchQueue.main.async { statuses.forEach(callback) }
+            }
         }
         // Output before the first typed input is launch noise — notably
         // `claude --continue` replaying old transcripts.

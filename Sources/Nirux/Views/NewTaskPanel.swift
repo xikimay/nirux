@@ -229,7 +229,9 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     let startButton = NSButton(title: "Start", target: nil, action: nil)
     let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
 
-    static let agents: [(agent: NiruxApp.WorkspaceAgent, title: String)] = [(.claude, "Claude Code"), (.codex, "Codex")]
+    static let agents: [(agent: NiruxApp.WorkspaceAgent, title: String)] = [
+        (.claude, "Claude Code"), (.codex, "Codex"), (.agy, "Antigravity")
+    ]
     static let noTemplateTitle = "No Template"
     static let noRepositoryTitle = "No Repository"
     /// Tags of the repository popup's items that add one instead of

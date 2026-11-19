@@ -346,6 +346,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
 
     enum WorkspaceAgent: String, CaseIterable {
         case claude, codex
+        /// Antigravity CLI, Google's successor to Gemini CLI.
+        case agy
     }
 
     // MARK: - NSMenuItemValidation

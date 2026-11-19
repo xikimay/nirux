@@ -25,6 +25,7 @@ final class NiruxURLRequestTests: XCTestCase {
         XCTAssertEqual(request?.action, .newWorkspace(cwd: "/Users/me/project", title: "Demo", agent: .codex))
         XCTAssertEqual(request?.profileID, "p1")
         XCTAssertEqual(request?.launchID, "abc")
+        XCTAssertEqual(parse("nirux://new-workspace?agent=agy")?.action, .newWorkspace(cwd: nil, title: nil, agent: .agy))
     }
 
     func testNewWorkspaceTreatsEmptyValuesAsMissing() {
