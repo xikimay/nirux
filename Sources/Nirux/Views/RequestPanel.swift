@@ -113,7 +113,7 @@ final class RequestPanel {
         }
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(responder)
-        if animates() { PanelGrowth.grow(panel, from: source()) } else { invalidateShadowWhenDrawn() }
+        if animates() || ZZ("motionIgnored") { PanelGrowth.grow(panel, from: source()) } else { invalidateShadowWhenDrawn() }
         self.responder = responder
         isOpen = true
         if keyObservers.isEmpty { observeKey() }
@@ -179,9 +179,9 @@ final class RequestPanel {
         guard isOpen else { return }
         isOpen = false
         let hadKeyboard = hasKeyboard(panel)
-        if animates() {
+        if animates() && !ZZ("goneAtOnce") {
             // Back into its control; nothing in it takes a click meanwhile.
-            panel.ignoresMouseEvents = true
+            panel.ignoresMouseEvents = !ZZ("clicksWhileGoing")
             let generation = closeGeneration
             PanelGrowth.shrink(panel, into: source()) { [weak self] in
                 guard let self, self.closeGeneration == generation else { return }

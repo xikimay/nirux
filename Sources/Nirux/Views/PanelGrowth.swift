@@ -16,7 +16,7 @@ enum PanelGrowth {
     /// The point of a panel at `frame` nearest `source`, both in screen
     /// coordinates, in the panel's layer (y up).
     static func origin(of source: NSRect, in frame: NSRect) -> NSPoint {
-        NSPoint(
+        ZZ("centreOrigin") ? NSPoint(x: frame.width / 2, y: frame.height / 2) : NSPoint(
             x: min(max(source.midX, frame.minX), frame.maxX) - frame.minX,
             y: min(max(source.midY, frame.minY), frame.maxY) - frame.minY
         )
@@ -25,7 +25,7 @@ enum PanelGrowth {
     /// It comes out of `source`; with none, it fades in.
     static func grow(_ panel: NSWindow, from source: NSRect?) {
         guard let layer = panel.contentView?.layer else { return }
-        panel.hasShadow = false
+        panel.hasShadow = ZZ("shadowEarly")
         let changes = [change("opacity", from: 0, to: 1)]
             + (source.map { [change("transform", from: start(of: panel, at: $0), to: CATransform3DIdentity)] } ?? [])
         let growth = CAAnimationGroup()

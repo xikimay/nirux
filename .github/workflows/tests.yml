@@ -54,5 +54,11 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the gate of #614: its test's mutants, then ten runs of
+      # RequestFlowTests, three at a time, next to heavy classes.
+      - name: Flake gate
+        run: |
+          status=0
+          scripts/mutants-class.sh NiruxTests.RequestFlowTests centreOrigin shadowEarly goneAtOnce clicksWhileGoing motionIgnored || status=1
+          scripts/repeat-class.sh NiruxTests.RequestFlowTests 10 3 NiruxTests.AgentLightShellTests NiruxTests.WorkspaceSwitchTests || status=1
+          exit $status
