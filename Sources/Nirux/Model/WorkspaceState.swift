@@ -37,6 +37,9 @@ final class WorkspaceState {
         }
     }
     private(set) var lastCameraX: CGFloat = 0
+    /// Where the camera stays while the pointer works on a card; nil: where
+    /// the strip wants it.
+    var heldCamera: CameraHold?
     let cwd: String
     var title: String
     var titleIsManual: Bool = false
@@ -205,9 +208,6 @@ final class WorkspaceState {
     /// The columns were laid out (`layoutAndScroll`): which ones show may
     /// have changed.
     var onColumnsLaidOut: (() -> Void)?
-    /// A resize handle asks for its column's focus: the shell's one path
-    /// moves the edge, the light and the keyboard together.
-    var onColumnFocusRequested: ((Int) -> Void)?
     var onGitContextChanged: (() -> Void)?
     /// A terminal link was cmd-clicked — the shell opens a browser column
     /// in this workspace.
@@ -855,36 +855,51 @@ extension WorkspaceState {
     }
 
     /// One resize handle per column (its right edge), always the topmost
-    /// strip subviews. Closures resolve the handle back to its CURRENT
-    /// column index at event time, so moveColumn/closeColumn can't leave
-    /// them pointing at the wrong column.
+    /// strip subviews; only the focused card's two edges show. Closures
+    /// resolve the handle back to its CURRENT column index at event time,
+    /// so moveColumn/closeColumn can't leave them pointing at the wrong
+    /// column.
     private func makeResizeHandle() {
         let handle = ColumnResizeHandle()
         handle.onDragStart = { [weak self, weak handle] in
-            guard let self, let handle,
-                  let index = self.resizeHandles.firstIndex(of: handle),
-                  self.columns.indices.contains(index) else { return nil }
-            // Grabbing a column's edge focuses it, as a click would.
-            self.onColumnFocusRequested?(index)
-            return (self.columns[index].view.frame.width, self.stripView.frame.width, self.lastCameraX)
+            guard let self, let handle, let edge = self.resizeHandles.firstIndex(of: handle),
+                  edge == self.focusedIndex || edge == self.focusedIndex - 1 else { return nil }
+            let widths = self.columns.map(\.view.frame.width)
+            let centred = Self.centres(widths, focus: self.focusedIndex, viewport: self.containerView.bounds.width)
+            return (widths, self.stripView.frame.width, self.lastCameraX, self.focusedIndex, centred)
         }
         handle.onDrag = { [weak self, weak handle] start, delta in
-            guard let self, let handle else { return }
-            let viewport = self.containerView.bounds.width
-            let width = Self.draggedWidth(from: start, viewport: viewport, by: delta)
-            self.setColumnWidth(
-                for: handle, fraction: (width + Self.columnGap) / max(Self.span(viewport), 1),
-                camera: Self.dragCamera(from: start, viewport: viewport, width: width)
-            )
+            guard let self, let handle, let edge = self.resizeHandles.firstIndex(of: handle) else { return }
+            self.drag(edge: edge, from: start, by: delta)
         }
         // Let go: the camera goes where the strip now wants it.
         handle.onDragEnd = { [weak self] in
             guard let self else { return }
+            self.heldCamera = nil
             self.layoutAndScroll(viewportWidth: self.containerView.bounds.width, height: self.containerView.bounds.height, animated: true)
         }
+        // Double-click: the focused card back to half, by the same share.
         handle.onReset = { [weak self, weak handle] in
-            guard let handle else { return }
-            self?.setColumnWidth(for: handle, fraction: ColumnWidth.half.fraction)
+            guard let self, let handle, let edge = self.resizeHandles.firstIndex(of: handle),
+                  edge == self.focusedIndex || edge == self.focusedIndex - 1 else { return }
+            let viewport = self.containerView.bounds.width, focus = self.focusedIndex
+            let widths = self.columns.map(\.view.frame.width)
+            let share = Self.share(
+                edge: edge, focus: focus, count: widths.count, centred: Self.centres(widths, focus: focus, viewport: viewport)
+            )
+            let toHalf = Self.width(ColumnWidth.half.fraction, in: viewport) - widths[focus]
+            let asks: [(column: Int, points: CGFloat)] = switch share {
+            case .both: [(focus + 1, ceil(toHalf / 2)), (focus - 1, floor(toHalf / 2))]
+            case .left: [(focus - 1, toHalf)]
+            case .right: [(focus + 1, toHalf)]
+            case .none: [(focus, toHalf)]
+            }
+            var resized = Self.resized(widths, focus: focus, taking: asks, share: share, viewport: viewport)
+            // One that ran out leaves the rest to the other.
+            for ask in asks {
+                resized = Self.resized(resized, focus: focus, taking: [(ask.column, widths[focus] + toHalf - resized[focus])], share: share, viewport: viewport)
+            }
+            self.setColumnWidths(resized, viewport: viewport)
         }
         handle.wantsLayer = true
         stripView.addSubview(handle)
@@ -893,42 +908,151 @@ extension WorkspaceState {
         resizeHandles.append(handle)
     }
 
-    /// The width a column's edge dragged `delta` points from `start` gives
-    /// it, the edge staying under the pointer. A centred strip moves both
-    /// its ends, so the column grows twice the pointer's way until it fills
-    /// the viewport; past that, and on a strip that started wider, the
-    /// camera holds (`dragCamera`) and the column follows the pointer.
-    static func draggedWidth(from start: ColumnResizeHandle.Start, viewport: CGFloat, by delta: CGFloat) -> CGFloat {
-        let slack = viewport - start.strip
-        guard slack > 0 else { return start.width + delta }
-        return start.width + (delta <= slack / 2 ? delta * 2 : slack + (delta - slack / 2))
+    /// Who pays for the width the focused card takes from an edge: both
+    /// neighbours alike while it is centred between them, so that it stays
+    /// centred; else the neighbour across the edge; the strip's last edge
+    /// grows it alone.
+    enum ResizeShare { case both, left, right, none }
+
+    static func share(edge: Int, focus: Int, count: Int, centred: Bool) -> ResizeShare {
+        if centred, focus > 0, focus < count - 1 { return .both }
+        if edge < focus { return .left }
+        return edge < count - 1 ? .right : .none
     }
 
-    /// Where the camera stays while an edge is dragged to `width`: nil, the
-    /// strip centred, while a strip that started narrower than the viewport
-    /// still is; at its left end once that strip outgrows it; where the
-    /// drag found it on a strip that started wider. Let go, it goes where
-    /// the strip wants it.
-    static func dragCamera(from start: ColumnResizeHandle.Start, viewport: CGFloat, width: CGFloat) -> CGFloat? {
-        guard start.strip <= viewport else { return start.camera }
-        return start.strip - start.width + width <= viewport ? nil : 0
+    /// The widths `widths` take when the focused column `focus` takes
+    /// `points` from each column of `asks` in turn (a negative ask gives
+    /// back), every one kept between the minimum and the maximum width, the
+    /// focused one, when `share` is `.both`, within the viewport: a
+    /// column that runs out pays what it can. An ask on `focus` itself
+    /// grows it alone.
+    static func resized(
+        _ widths: [CGFloat], focus: Int, taking asks: [(column: Int, points: CGFloat)], share: ResizeShare, viewport: CGFloat
+    ) -> [CGFloat] {
+        let low = width(minWidthFraction, in: viewport), high = width(maxWidthFraction, in: viewport)
+        let focusHigh = share == .both ? width(1, in: viewport) : high
+        var resized = widths
+        for ask in asks {
+            // What the focused card may take without leaving its range, and
+            // the payer its own; a column already outside keeps where it is.
+            var lower = min(0, low - resized[focus]), upper = max(0, focusHigh - resized[focus])
+            if ask.column != focus {
+                lower = max(lower, min(0, resized[ask.column] - high))
+                upper = min(upper, max(0, resized[ask.column] - low))
+            }
+            let paid = min(max(ask.points, lower), upper)
+            resized[focus] += paid
+            if ask.column != focus { resized[ask.column] -= paid }
+        }
+        return resized
+    }
+
+    /// The focused card's edge right of column `edge` dragged `delta`
+    /// points from `start`, staying under the pointer: the neighbour across
+    /// the edge pays what the pointer moved, and the other as much while the
+    /// card is centred (`share`); the strip's last edge moves as
+    /// `draggedWidth` and `dragCamera` say. A focus moved since the drag
+    /// began leaves it there.
+    private func drag(edge: Int, from start: ColumnResizeHandle.Start, by delta: CGFloat) {
+        let viewport = containerView.bounds.width, focus = start.focus
+        guard focus == focusedIndex, start.widths.count == columns.count else { return }
+        let share = Self.share(edge: edge, focus: focus, count: columns.count, centred: start.centred)
+        let pull = edge == focus ? delta : -delta, width = start.widths[focus]
+        let near = edge == focus ? focus + 1 : focus - 1, far = edge == focus ? focus - 1 : focus + 1
+        // Each side takes half the card's room, so that it stops centred.
+        let half = min(max(pull, floor((Self.width(Self.minWidthFraction, in: viewport) - width) / 2)), floor((Self.width(1, in: viewport) - width) / 2))
+        let asks: [(column: Int, points: CGFloat)] = switch share {
+        case .both: [(near, half), (far, half)]
+        case .left, .right: [(near, pull)]
+        case .none: [(focus, Self.draggedWidth(start.widths[focus], strip: start.strip, viewport: viewport, by: delta) - start.widths[focus])]
+        }
+        let widths = Self.resized(start.widths, focus: focus, taking: asks, share: share, viewport: viewport)
+        let camera = share == .none
+            ? Self.dragCamera(width: start.widths[focus], strip: start.strip, camera: start.camera, viewport: viewport, to: widths[focus])
+            : start.camera
+        heldCamera = camera.map { CameraHold(x: $0, column: columns[focus].id, isDrag: true) }
+        setColumnWidths(widths, viewport: viewport)
+    }
+
+    /// The width a column `width` wide on a strip `strip` wide gets from its
+    /// right edge dragged `delta` points, the edge staying under the
+    /// pointer. A centred strip moves both its ends, so the column grows
+    /// twice the pointer's way until it fills the viewport; past that, and
+    /// on a strip that started wider, the camera holds (`dragCamera`) and
+    /// the column follows the pointer.
+    static func draggedWidth(_ width: CGFloat, strip: CGFloat, viewport: CGFloat, by delta: CGFloat) -> CGFloat {
+        let slack = viewport - strip
+        guard slack > 0 else { return width + delta }
+        return width + (delta <= slack / 2 ? delta * 2 : slack + (delta - slack / 2))
+    }
+
+    /// Where the camera stays while that edge is dragged to `target`: nil,
+    /// the strip centred, while a strip that started narrower than the
+    /// viewport still is; at its left end once that strip outgrows it;
+    /// where the drag found it on a strip that started wider. Let go, it
+    /// goes where the strip wants it.
+    static func dragCamera(width: CGFloat, strip: CGFloat, camera: CGFloat, viewport: CGFloat, to target: CGFloat) -> CGFloat? {
+        guard strip <= viewport else { return camera }
+        return strip - width + target <= viewport ? nil : 0
+    }
+
+    /// Where the camera goes when nothing holds it, for cards `widths` wide
+    /// in a viewport `viewport` wide, `focus` focused: a strip narrower
+    /// than the viewport lies in its middle; a wider one brings the focused
+    /// card to the middle, stopping at the strip's ends. A card wider than
+    /// the viewport shows from its left edge, with its air.
+    static func camera(for widths: [CGFloat], focus: Int, viewport: CGFloat) -> CGFloat {
+        let total = widths.reduce(0, +) + columnGap * CGFloat(widths.count - 1) + columnInset * 2
+        guard total > viewport else { return -floor((viewport - total) / 2) }
+        let left = widths[..<focus].reduce(columnInset) { $0 + $1 + columnGap }, width = widths[focus]
+        let camera = width + columnInset * 2 > viewport ? left - columnInset : floor(left + width / 2 - viewport / 2)
+        return max(0, min(camera, total - viewport))
+    }
+
+    /// Whether that camera centres the focused card.
+    static func centres(_ widths: [CGFloat], focus: Int, viewport: CGFloat) -> Bool {
+        let left = widths[..<focus].reduce(columnInset) { $0 + $1 + columnGap }
+        return abs(left + widths[focus] / 2 - camera(for: widths, focus: focus, viewport: viewport) - viewport / 2) <= 1
     }
 
     static let minWidthFraction: CGFloat = 0.15
     static let maxWidthFraction: CGFloat = 2.0
 
-    /// `camera`: where it stays (a drag), nil: where the strip wants it.
-    private func setColumnWidth(for handle: ColumnResizeHandle, fraction: CGFloat, camera: CGFloat? = nil) {
-        guard let index = resizeHandles.firstIndex(of: handle), columns.indices.contains(index) else { return }
-        let clamped = min(Self.maxWidthFraction, max(Self.minWidthFraction, fraction))
-        guard clamped != columns[index].widthFraction else { return }
-        columns[index].widthFraction = clamped
-        layoutAndScroll(
-            viewportWidth: containerView.bounds.width,
-            height: containerView.bounds.height,
-            animated: false,
-            camera: camera
-        )
+    /// Where the camera stays while the pointer works on a card. A click's
+    /// (`NiruxShellView.clickBegan`) lasts until the click is over, while
+    /// its card has the focus, within the strip; a dragged edge's lasts
+    /// until let go, past the strip's ends too, so that its last edge
+    /// dragged in stays under the pointer.
+    struct CameraHold {
+        var x: CGFloat
+        var column: UUID
+        var isDrag = false
+    }
+
+    /// Holds the camera where the strip shows for the column at `index`: a
+    /// slide on its way stops there.
+    func holdCamera(for index: Int) {
+        stripView.frame.origin.x = shownStripX
+        stripView.layer?.removeAnimation(forKey: Self.slideKey)
+        lastCameraX = -stripView.frame.origin.x
+        heldCamera = columns[safe: index].map { CameraHold(x: lastCameraX, column: $0.id) }
+    }
+
+    /// Where the strip shows: its place, plus a slide's offset on its way.
+    private var shownStripX: CGFloat {
+        let offset = stripView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber
+        return stripView.frame.origin.x + (offset.map { CGFloat($0.doubleValue) } ?? 0)
+    }
+
+    /// Only the columns whose width changes take a new fraction: the others
+    /// keep theirs as they are.
+    private func setColumnWidths(_ widths: [CGFloat], viewport: CGFloat) {
+        let laidOut = columns.map(\.view.frame.width)
+        guard widths.count == columns.count, widths != laidOut else { return }
+        for (index, width) in widths.enumerated() where width != laidOut[index] {
+            columns[index].widthFraction = min(Self.maxWidthFraction, max(Self.minWidthFraction, (width + Self.columnGap) / max(Self.span(viewport), 1)))
+        }
+        layoutAndScroll(viewportWidth: viewport, height: containerView.bounds.height, animated: false)
     }
 
     func addColumn(agentUUID: String = UUID().uuidString, cwd: String? = nil) {
@@ -1024,6 +1148,7 @@ extension WorkspaceState {
     static let columnGap = Theme.Space.sm
     static let columnInset = Theme.Space.sm
     private static let resizeHandleWidth: CGFloat = 9
+    private static let slideKey = "colSlide"
     /// The strip's slide to a card.
     static let slideDuration: CFTimeInterval = 0.3
 
@@ -1045,11 +1170,10 @@ extension WorkspaceState {
         NSSize(width: Self.width(column.widthFraction, in: viewportWidth), height: max(0, height - Self.columnInset * 2))
     }
 
-    /// `camera`: where it stays (a resize drag); nil: where the strip wants it.
     /// `glides`: a card a neighbour pushed or let go glides to its place.
     func layoutAndScroll(
         viewportWidth: CGFloat, height: CGFloat, animated: Bool,
-        fitAll: Bool = false, skipTerminalResize: Bool = false, camera: CGFloat? = nil, glides: Bool = false
+        fitAll: Bool = false, skipTerminalResize: Bool = false, glides: Bool = false
     ) {
         defer { onColumnsLaidOut?() }
         guard !columns.isEmpty else { return }
@@ -1092,7 +1216,7 @@ extension WorkspaceState {
             // Resize handle straddling the air at this column's right edge.
             if resizeHandles.indices.contains(index) {
                 let handle = resizeHandles[index]
-                handle.isHidden = fitAll
+                handle.isHidden = fitAll || (index != focusedIndex && index != focusedIndex - 1)
                 handle.frame = NSRect(
                     x: xOffset + widths[index] + gap / 2 - Self.resizeHandleWidth / 2,
                     y: 0,
@@ -1109,26 +1233,17 @@ extension WorkspaceState {
         for handle in resizeHandles { stripView.addSubview(handle) }
         stripView.frame = NSRect(x: stripView.frame.origin.x, y: 0, width: totalWidth, height: height)
 
-        // 3. Camera: a strip narrower than the viewport lies in its middle;
-        // a wider one scrolls to keep the focused card in view, with its air.
+        // 3. Camera (`camera(for:focus:viewport:)`), unless a hold keeps it
+        // (`CameraHold`). A click's hold is over once its card has lost the
+        // focus.
+        if let held = heldCamera, !held.isDrag, held.column != columns[safe: focusedIndex]?.id { heldCamera = nil }
         let cameraX: CGFloat
-        if let camera {
-            cameraX = camera
-        } else if totalWidth <= viewportWidth {
-            cameraX = -floor((viewportWidth - totalWidth) / 2)
-        } else if fitAll {
-            cameraX = 0
+        if let held = heldCamera, held.isDrag {
+            cameraX = held.x
+        } else if let held = heldCamera, totalWidth > viewportWidth {
+            cameraX = max(0, min(held.x, totalWidth - viewportWidth))
         } else {
-            let left = widths[..<focusedIndex].reduce(0) { $0 + $1 + gap }
-            let right = left + widths[focusedIndex] + inset * 2
-
-            var camera = lastCameraX
-            if left < camera {
-                camera = left
-            } else if right > camera + viewportWidth {
-                camera = right - viewportWidth
-            }
-            cameraX = max(0, min(camera, totalWidth - viewportWidth))
+            cameraX = Self.camera(for: widths, focus: focusedIndex, viewport: viewportWidth)
         }
 
         lastCameraX = cameraX
@@ -1136,17 +1251,17 @@ extension WorkspaceState {
         // 4. Apply
         let stripX = -cameraX
         let oldX = stripView.frame.origin.x
+        // From where it shows: a slide on its way goes on from there.
+        let shownX = shownStripX
         stripView.frame.origin.x = stripX
         if animated, let layer = stripView.layer, oldX != stripX {
-            // From where it shows: a slide on its way goes on from there.
-            let shown = oldX + ((layer.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber).map { CGFloat($0.doubleValue) } ?? 0)
             let anim = CABasicAnimation(keyPath: "transform.translation.x")
-            anim.fromValue = shown - stripX
+            anim.fromValue = shownX - stripX
             anim.toValue = 0
             anim.duration = Self.slideDuration
             anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
             anim.isRemovedOnCompletion = true
-            layer.add(anim, forKey: "colSlide")
+            layer.add(anim, forKey: Self.slideKey)
         }
     }
 

@@ -178,11 +178,13 @@ enum SidebarExpandedMetrics {
                 maxLines: missionQuestionMaxLines
             )
         case .waitingMessages(_, let waiting):
-            return SidebarWrappedText.height(
+            let line = SidebarWrappedText.height(
                 SidebarWorkspaceCardRenderer.waitingText(waiting), width: textWidth, lineHeight: actionLineHeight,
                 maxLines: waitingMessagesMaxLines
             )
-        case .cleanup, .reviewBadges, .ruleProposals: return actionLineHeight
+            // Type it now's row under it.
+            return line + (waiting.offersTypeNow ? buttonHeight : 0)
+        case .cleanup, .reviewBadges, .ruleProposals, .dailyPass: return actionLineHeight
         }
     }
 

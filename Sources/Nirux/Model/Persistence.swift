@@ -822,6 +822,8 @@ struct PersistedColumn: Codable {
     /// Exact Claude session formerly attached to this column. Older state
     /// files omit it and restore through Claude's interactive session picker.
     var claudeSessionID: String?
+    /// The Antigravity conversation this column's `agy` ran, from its hooks.
+    var agySessionID: String?
     /// The column's Claude session was never prompted (a fresh start or
     /// /clear): there is nothing to resume, so restore starts a new one.
     var claudeSessionIsUnprompted: Bool?
@@ -852,6 +854,7 @@ struct PersistedColumn: Codable {
         codexSessionID: String? = nil,
         claudeSessionID: String? = nil,
         claudeSessionIsUnprompted: Bool? = nil,
+        agySessionID: String? = nil,
         agentUUID: String? = nil,
         boardProjectID: String? = nil,
         reviewBranch: String? = nil,
@@ -869,6 +872,7 @@ struct PersistedColumn: Codable {
         self.codexSessionID = codexSessionID
         self.claudeSessionID = claudeSessionID
         self.claudeSessionIsUnprompted = claudeSessionIsUnprompted
+        self.agySessionID = agySessionID
         self.agentUUID = agentUUID
         self.boardProjectID = boardProjectID
         self.reviewBranch = reviewBranch
@@ -885,6 +889,7 @@ struct PersistedColumn: Codable {
         case codexSessionID
         case claudeSessionID
         case claudeSessionIsUnprompted
+        case agySessionID
         case agentUUID
         case boardProjectID
         case reviewBranch
@@ -928,6 +933,7 @@ struct PersistedColumn: Codable {
         codexSessionID = try? container.decodeIfPresent(String.self, forKey: .codexSessionID)
         claudeSessionID = try? container.decodeIfPresent(String.self, forKey: .claudeSessionID)
         claudeSessionIsUnprompted = try? container.decodeIfPresent(Bool.self, forKey: .claudeSessionIsUnprompted)
+        agySessionID = try? container.decodeIfPresent(String.self, forKey: .agySessionID)
         agentUUID = try? container.decodeIfPresent(String.self, forKey: .agentUUID)
         boardProjectID = try? container.decodeIfPresent(String.self, forKey: .boardProjectID)
         reviewBranch = try? container.decodeIfPresent(String.self, forKey: .reviewBranch)
@@ -951,6 +957,7 @@ struct PersistedColumn: Codable {
         try container.encodeIfPresent(codexSessionID, forKey: .codexSessionID)
         try container.encodeIfPresent(claudeSessionID, forKey: .claudeSessionID)
         try container.encodeIfPresent(claudeSessionIsUnprompted, forKey: .claudeSessionIsUnprompted)
+        try container.encodeIfPresent(agySessionID, forKey: .agySessionID)
         try container.encodeIfPresent(agentUUID, forKey: .agentUUID)
         try container.encodeIfPresent(boardProjectID, forKey: .boardProjectID)
         try container.encodeIfPresent(reviewBranch, forKey: .reviewBranch)
@@ -962,6 +969,8 @@ struct PersistedColumn: Codable {
 /// An older build decodes a kind it doesn't know as a terminal.
 enum ColumnKind: String, Codable {
     case terminal, webView, claudeCode, codex, editor, projectBoard, branchReview
+    /// Antigravity CLI.
+    case agy
 }
 
 // MARK: - URL History

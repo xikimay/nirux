@@ -13,22 +13,38 @@ struct SidebarWaitingMessages: Hashable {
     let refusal: AgentPromptRefusal?
     /// The prompt looks free, yet the tries at typing failed.
     var untypable = false
+    /// Held by a `claude` with no prompt since it started that doesn't say
+    /// it sits at its prompt, which would take one on the user's word now:
+    /// the row offers to type it (`NiruxShellView.typeWaitingMessagesNow`).
+    var offersTypeNow = false
+    /// With the offer, that `claude`: the offer is for it, not one started
+    /// since.
+    var heldBy: ProcessInstance?
     /// "2 messages waiting since 22:21 · a dialog may be open", written at
     /// the check: the day shows once it is another.
     let line: String
 
-    init(count: Int, since: TimeInterval, refusal: AgentPromptRefusal?, untypable: Bool = false, now: TimeInterval) {
+    init(
+        count: Int, since: TimeInterval, refusal: AgentPromptRefusal?, untypable: Bool = false, offersTypeNow: Bool = false,
+        heldBy: ProcessInstance? = nil, now: TimeInterval
+    ) {
         self.count = count
         self.since = since
         self.refusal = refusal
         self.untypable = untypable
+        self.offersTypeNow = offersTypeNow
+        self.heldBy = heldBy
         let time = ProjectBoard.clockTime(Date(timeIntervalSince1970: since), now: Date(timeIntervalSince1970: now))
         line = "\(count == 1 ? "1 message" : "\(count) messages") waiting since \(time) · \(Self.why(refusal, untypable: untypable).short)"
     }
 
     var tooltip: String {
-        "Mission messages not typed into this agent's prompt yet: \(Self.why(refusal, untypable: untypable).long)."
+        let why = "Mission messages not typed into this agent's prompt yet: \(Self.why(refusal, untypable: untypable).long)."
+        return offersTypeNow ? why + " " + Self.typeNowAdvice : why
     }
+
+    static let typeNowAdvice = "If its terminal shows its prompt, empty, Type it now types one of them; the rest follow its turn. "
+        + "Click the line to see its terminal."
 
     /// Why they wait: a few words for the row, the whole of it for the tooltip.
     static func why(_ refusal: AgentPromptRefusal?, untypable: Bool) -> (short: String, long: String) {
@@ -278,10 +294,14 @@ extension NiruxShellView {
             guard typable.contains(where: { now - $0.message.sentAt >= Self.missionMessageStallAge }),
                   let oldest = typable.min(by: { $0.message.sentAt < $1.message.sentAt })
             else { continue }
+            let offersTypeNow = atFirstPrompt && oldest.refusal != nil
+                && pty?.missionPromptRefusal(
+                    runningSince: oldest.message.runningSince, snapshot: snapshot, seenByUser: true, now: now, record: sessionRecord(of:)
+                ) == nil
             shown[id] = SidebarWaitingMessages(
                 count: typable.count, since: oldest.message.sentAt, refusal: oldest.refusal,
                 untypable: oldest.refusal == nil && missionWaits.tries[oldest.message.id, default: 0] >= Self.missionTypingTries,
-                now: now
+                offersTypeNow: offersTypeNow, heldBy: offersTypeNow ? foreground?.instance : nil, now: now
             )
         }
         let pending = Set(waiting.values.flatMap { $0.messages.map(\.id) })
@@ -305,6 +325,49 @@ extension NiruxShellView {
         let reading = PtySession.sessionRecord(of: process)
         missionWaits.recordReadings[process] = reading
         return reading
+    }
+
+    /// "Type it now" clicked on a row whose messages wait for a `claude` with
+    /// no prompt since it started (`SidebarWaitingMessages.offersTypeNow`):
+    /// the user says it sits at its prompt. Its terminal not on screen (another
+    /// workspace, or scrolled out of view), the click shows it first, for
+    /// them to look. Then one message goes in, as
+    /// the row showed (`since`, its oldest's; the same `claude`), and as
+    /// `ClaudeSessionRecord.Reading.allowsTypingOnSight` allows; the rest
+    /// follow its turn.
+    func typeWaitingMessagesNow(workspaceIndex: Int, columnIndex: Int, since: TimeInterval, tries: Int = 2) {
+        // A hook may still wait out the queue's drain debounce.
+        AgentHookCenter.shared.drain()
+        let snapshot = ProcessSnapshot()
+        // An empty process table says nothing of its claude: read it once more.
+        guard !snapshot.isEmpty else {
+            guard tries > 1 else { return showToast("Nirux couldn't read the running processes: try again") }
+            return DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.typeWaitingMessagesNow(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since, tries: tries - 1)
+            }
+        }
+        guard let column = workspaces[safe: workspaceIndex]?.columns[safe: columnIndex], let pty = column.pty,
+              let waiting = missionWaits.shown[column.id], waiting.offersTypeNow, waiting.since == since,
+              waiting.heldBy == pty.foregroundProcess(snapshot: snapshot)?.instance
+        else { return showToast("Those messages changed: see the row again") }
+        guard activeWSIndex == workspaceIndex, workspaces[workspaceIndex].showsColumn(at: columnIndex) else {
+            switchToWorkspace(workspaceIndex, column: columnIndex)
+            return showToast("Check that its prompt is empty, then Type it now again")
+        }
+        let outcome = typeMissionMessages(seenAtPrompt: column.id)
+        updateSidebar(snapshot: snapshot)
+        showToast(Self.typedOnSightText(outcome))
+    }
+
+    /// The toast after Type it now.
+    static func typedOnSightText(_ outcome: TypedOnSight?) -> String {
+        switch outcome {
+        case .typed?: "Typed one; the rest follow its turn"
+        case .refused(.noPromptYet?)?: "Nothing typed: Claude Code shows a screen of its own there, or its last turn isn't over"
+        case .refused(let refusal?)?: "Nothing typed: \(SidebarWaitingMessages.why(refusal, untypable: false).short)"
+        case .refused(nil)?: "Nothing typed: it couldn't be typed"
+        case nil: "Nothing typed: none waits for its prompt now, or one is on its way"
+        }
     }
 
     /// Writes to the log, once per process, that the session record of

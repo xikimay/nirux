@@ -21,6 +21,11 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Space Settings › Lead, "Starts tasks without asking". Nil: on. Off,
     /// the Lead's `start_task` opens the New sheet for the user to start.
     var leadStartsTasks: Bool?
+    /// Space Settings › Lead, "Daily pass" (docs/design/daily-pass.md). Nil:
+    /// on, after `DailyPass.defaultHour`.
+    var leadDailyPass: Bool?
+    /// 0 to 23, local time.
+    var leadDailyPassHour: Int?
     /// Space Settings › Safety, one per `ClaudeSpaceSettings.Part`. Nil:
     /// its default.
     var claudeTrustsRepositories: Bool?
@@ -32,6 +37,9 @@ struct SpaceDefaults: Equatable, Sendable {
 
     /// Whether the space's Lead starts its tasks itself.
     var leadStartsTasksWithoutAsking: Bool { leadStartsTasks ?? true }
+
+    var dailyPassIsOn: Bool { leadDailyPass ?? true }
+    var dailyPassHour: Int { leadDailyPassHour ?? DailyPass.defaultHour }
 
     func isOn(_ part: ClaudeSpaceSettings.Part) -> Bool { self[keyPath: part.key] ?? part.isOnByDefault }
 
@@ -64,6 +72,7 @@ struct SpaceDefaults: Equatable, Sendable {
     static var switches: [(key: WritableKeyPath<SpaceDefaults, Bool?>, name: CodingKeys, safe: Bool)] {
         [
             (\.leadStartsTasks, .leadStartsTasks, false),
+            (\.leadDailyPass, .leadDailyPass, false),
             (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
             (\.claudeDeniesIrreversible, .claudeDeniesIrreversible, true),
             (\.claudeSandbox, .claudeSandbox, true)
@@ -165,7 +174,8 @@ struct SpaceDefaults: Equatable, Sendable {
 
 /// `{"schemaVersion": 1, "agent": "codex", "claudeLaunchMode": "plan",
 /// "codexLaunchMode": "readOnly", "environment": [{"name": …, "value": …}],
-/// "leadStartsTasks": false, "claudeTrustsRepositories": false,
+/// "leadStartsTasks": false, "leadDailyPass": false, "leadDailyPassHour": 7,
+/// "claudeTrustsRepositories": false,
 /// "claudeDeniesIrreversible": false, "claudeSandbox": true,
 /// "claudeAllow": ["Bash(swift build:*)"], "claudeEnvironment": […]}`,
 /// every key optional, nothing written for what isn't set. Unknown keys and
@@ -173,7 +183,7 @@ struct SpaceDefaults: Equatable, Sendable {
 /// errors.
 extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case schemaVersion, agent, claudeLaunchMode, codexLaunchMode, environment, leadStartsTasks
+        case schemaVersion, agent, claudeLaunchMode, codexLaunchMode, environment, leadStartsTasks, leadDailyPass, leadDailyPassHour
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
 
@@ -192,6 +202,8 @@ extension SpaceDefaults: Codable {
         environment = ((try? container.decodeIfPresent([StoredVariable].self, forKey: .environment)) ?? nil)?
             .map { EnvironmentVariable(name: $0.name, value: $0.value) } ?? []
         leadStartsTasks = (try? container.decodeIfPresent(Bool.self, forKey: .leadStartsTasks)) ?? nil
+        leadDailyPass = (try? container.decodeIfPresent(Bool.self, forKey: .leadDailyPass)) ?? nil
+        leadDailyPassHour = ((try? container.decodeIfPresent(Int.self, forKey: .leadDailyPassHour)) ?? nil).flatMap { (0...23).contains($0) ? $0 : nil }
         claudeTrustsRepositories = (try? container.decodeIfPresent(Bool.self, forKey: .claudeTrustsRepositories)) ?? nil
         claudeDeniesIrreversible = (try? container.decodeIfPresent(Bool.self, forKey: .claudeDeniesIrreversible)) ?? nil
         claudeSandbox = (try? container.decodeIfPresent(Bool.self, forKey: .claudeSandbox)) ?? nil
@@ -209,6 +221,8 @@ extension SpaceDefaults: Codable {
             try container.encode(environment.map { StoredVariable(name: $0.name, value: $0.value) }, forKey: .environment)
         }
         try container.encodeIfPresent(leadStartsTasks, forKey: .leadStartsTasks)
+        try container.encodeIfPresent(leadDailyPass, forKey: .leadDailyPass)
+        try container.encodeIfPresent(leadDailyPassHour, forKey: .leadDailyPassHour)
         try container.encodeIfPresent(claudeTrustsRepositories, forKey: .claudeTrustsRepositories)
         try container.encodeIfPresent(claudeDeniesIrreversible, forKey: .claudeDeniesIrreversible)
         try container.encodeIfPresent(claudeSandbox, forKey: .claudeSandbox)

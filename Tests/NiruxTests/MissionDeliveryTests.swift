@@ -568,6 +568,49 @@ final class MissionDeliveryTests: XCTestCase {
         })
     }
 
+    /// Messages a `claude` with no prompt yet holds, which would take one on
+    /// the user's word, get Type it now under their line, a button as
+    /// Interrupt is: it clicks only for those messages, the line still shows
+    /// the column, and the card counts both.
+    @MainActor func testMessagesHeldByAClaudeWithNoPromptOfferTypeItNow() throws {
+        let waiting = SidebarWaitingMessages(count: 1, since: 500, refusal: .noPromptYet, offersTypeNow: true, now: 800)
+        XCTAssertTrue(waiting.tooltip.hasSuffix(SidebarWaitingMessages.typeNowAdvice))
+        var info = column(nil)
+        info.waitingMessages = waiting
+        let card = workspace([info], index: 2)
+        let result = SidebarWorkspaceCardRenderer(workspace: card, sidebarWidth: 260, yOffset: 800).render()
+        let region = SidebarHitRegion.missionTypeNow(workspaceIndex: 2, columnIndex: 0, since: 500)
+        XCTAssertTrue(result.hitAreas.contains {
+            if case .missionTypeNow(2, 0, 500) = $0.region { return true }
+            return false
+        })
+        let line = try XCTUnwrap(result.views.first { ($0 as? NSTextField)?.stringValue == waiting.line })
+        XCTAssertTrue(result.hitAreas.contains { area in
+            guard case .column(2, 0) = area.region else { return false }
+            return area.frame.intersects(line.frame)
+        }, "the line shows its terminal, to look first")
+        XCTAssertEqual(
+            Array(result.approvalButtons.keys), [SidebarHoverTarget.typeNowButtonKey(workspaceIndex: 2, columnIndex: 0, since: 500)],
+            "armed and hovered like Interrupt"
+        )
+        let button = try XCTUnwrap(result.hitAreas.first { if case .missionTypeNow(2, 0, 500) = $0.region { true } else { false } })
+        let overButton = NSPoint(x: button.frame.midX, y: line.frame.minY + 1)
+        XCTAssertTrue(button.frame.contains(overButton))
+        guard case .column(2, 0)? = result.hitAreas.first(where: { $0.frame.contains(overButton) })?.region else {
+            return XCTFail("the line's bottom shows the terminal, though the button's area reaches into it")
+        }
+        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: card, sidebarWidth: 260), accuracy: 0.5)
+        XCTAssertEqual(SidebarExpandedMetrics.height(of: .waitingMessages(columnIndex: 0, waiting), width: 1_000, textWidth: 1_000),
+                       SidebarExpandedMetrics.actionLineHeight + SidebarExpandedMetrics.buttonHeight, "the line, then the button's row")
+
+        func click(released: SidebarHitRegion?, count: Int = 1) -> SidebarTypeNowClick? {
+            SidebarView.typeNowClick(pressed: region, released: released, clickCount: count, armedAtPress: true, armedAtRelease: true)
+        }
+        XCTAssertEqual(click(released: region), SidebarTypeNowClick(workspaceIndex: 2, columnIndex: 0, since: 500))
+        XCTAssertNil(click(released: .missionTypeNow(workspaceIndex: 2, columnIndex: 0, since: 900)), "other messages came there")
+        XCTAssertNil(click(released: region, count: 2))
+    }
+
     // MARK: - Popover
 
     /// The popover says what blocks the child and what it recommends, and

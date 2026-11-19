@@ -191,8 +191,10 @@ final class UnderGlassTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// Folded, at Tinted, in macOS's glass, the interface free to move; three
-    /// half columns, the first focused, so that the third is a travel away.
+    /// Folded, at Tinted, in macOS's glass, the interface free to move; four
+    /// third columns, the first focused, so that the second, in the middle
+    /// already, is no travel away (the camera centres the focused card) and
+    /// the third is.
     private func floatingRail(in shell: NiruxShellView) throws -> WorkspaceState {
         shell.sideEffects.drawsGlass = { true }
         shell.sideEffects.drawnTransparency = { $0 }
@@ -203,8 +205,8 @@ final class UnderGlassTests: XCTestCase {
         shell.isSidebarExpanded = false
         shell.sidebar.isExpanded = false
         let workspace = try XCTUnwrap(shell.activeWorkspace)
-        while workspace.columns.count < 3 { workspace.addColumn() }
-        for column in workspace.columns { column.widthFraction = 0.5 }
+        while workspace.columns.count < 4 { workspace.addColumn() }
+        for column in workspace.columns { column.widthFraction = 1.0 / 3 }
         workspace.focusedIndex = 0
         shell.relayout(animated: false)
         let root = try XCTUnwrap(shell.layer)

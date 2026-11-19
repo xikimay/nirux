@@ -29,7 +29,7 @@ In a row's `⋯` menu:
 
 ## Columns
 
-A workspace's columns sit side by side. `Cmd+T` adds a terminal, `Cmd+B` a browser, and `Open Editor` in the command palette an editor. Drag the divider between two columns to resize them (a double-click resets it to half), or press `Cmd+E` to step through preset widths.
+A workspace's columns sit side by side. `Cmd+T` adds a terminal, `Cmd+B` a browser, and `Open Editor` in the command palette an editor. Drag an edge of the column you work in to resize it: in the middle of the window it grows on both sides and its two neighbours give way alike; elsewhere the neighbour across that edge does. A double-click sets it back to half. `Cmd+E` steps through preset widths. When the columns don't fit in the window, the one you work in comes to the middle; at either end of the row, the row stops at the window's edge.
 
 ### Terminals
 
@@ -41,7 +41,7 @@ Terminals are drawn by Ghostty's engine and follow the appearance settings of yo
 
 ### Editor
 
-The editor opens files in tabs, with a file tree, a search across the workspace, the list of git changes and a diff view for each file (`Shift+Cmd+D`). It warns before overwriting a file that changed on disk. `Option+Cmd+Return` sends the selection to the agent's terminal.
+The editor opens files in tabs, with a file tree, a search across the workspace, the list of git changes and a diff view for each file (`Shift+Cmd+D`). `Cmd+S` never writes over a file that changed on disk: the editor says so, and Compare, Take Disk or Keep Mine settles it. Closing a tab, the column, the workspace or Nirux with unsaved changes asks to save them first. `Option+Cmd+Return` sends the selection to the agent's terminal.
 
 ### Browser
 

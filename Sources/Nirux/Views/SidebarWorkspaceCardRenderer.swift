@@ -759,15 +759,53 @@ final class SidebarWorkspaceCardRenderer {
                 frame: label.frame.insetBy(dx: -2, dy: -2),
                 region: .link(url: SidebarView.ruleProposalsActionURL(spaceID: workspace.profileID), label: label)
             ))
+        case .dailyPass(let note):
+            let label = NSTextField.sidebarLine(NSAttributedString(string: note, attributes: [
+                .font: Theme.Font.caption, .foregroundColor: Theme.Color.textSecondary
+            ]))
+            label.toolTip = "What the Lead's daily pass read of the space's day. Its reply in its terminal says what it proposes, "
+                + "and why."
+            label.frame = NSRect(
+                x: layout.indentX, y: top - Metrics.actionLineHeight,
+                width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
+            )
+            append(label)
         case let .waitingMessages(columnIndex, waiting):
             let label = wrappedActionLine(Self.waitingText(waiting), maxLines: Metrics.waitingMessagesMaxLines, top: top)
             label.toolTip = waiting.tooltip
             label.setAccessibilityLabel(waiting.line)
             append(label)
+            // First, and only over the line: the button's area reaches into it.
             hitAreas.append(SidebarHitArea(
-                frame: label.frame.insetBy(dx: -2, dy: -2), region: .column(workspaceIndex: workspace.index, columnIndex: columnIndex)
+                frame: label.frame.insetBy(dx: -2, dy: waiting.offersTypeNow ? 0 : -2),
+                region: .column(workspaceIndex: workspace.index, columnIndex: columnIndex)
             ))
+            if waiting.offersTypeNow { buildTypeNow(waiting, columnIndex: columnIndex, top: label.frame.minY) }
         }
+    }
+
+    /// Under a row of waiting messages: "If its prompt is empty", then
+    /// Type it now at the trailing edge, a button as Interrupt is.
+    private func buildTypeNow(_ waiting: SidebarWaitingMessages, columnIndex: Int, top: CGFloat) {
+        let button = SidebarActionButton.secondary(
+            "Type it now", symbol: Theme.Symbol.typeNow, label: "Type it now: type one waiting message into claude"
+        )
+        button.toolTip = SidebarWaitingMessages.typeNowAdvice
+        let x = layout.indentX
+        add(SidebarButtonRow.render(
+            button,
+            key: SidebarHoverTarget.typeNowButtonKey(workspaceIndex: workspace.index, columnIndex: columnIndex, since: waiting.since),
+            region: .missionTypeNow(workspaceIndex: workspace.index, columnIndex: columnIndex, since: waiting.since),
+            workspaceIndex: workspace.index, x: x, width: layout.contentMaxX - x, top: top
+        ) { y, width in
+            let hint = NSTextField(labelWithString: "If its prompt is empty")
+            hint.font = Theme.Font.caption
+            hint.textColor = Theme.Color.textSecondary
+            hint.lineBreakMode = .byTruncatingTail
+            hint.toolTip = SidebarWaitingMessages.typeNowAdvice
+            hint.frame = NSRect(x: x, y: y - 1, width: max(0, width), height: Metrics.actionLineHeight + 2)
+            return hint
+        })
     }
 
     /// A line of the action block that wraps, under the title: as tall as
