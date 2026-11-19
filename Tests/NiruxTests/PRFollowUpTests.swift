@@ -401,6 +401,20 @@ final class PRFollowUpTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(typed(next(red))).round.kind, .ci, "a check still red stays eligible")
     }
 
+    /// The first launch that follows a pull request is kept; a later one,
+    /// another Nirux's on the same state directory, keeps it too.
+    @MainActor
+    func testTheFirstLaunchThatFollowsIsKept() {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let first = PRFollowUpCenter(trackedSince: now - 600)
+        first.file.url = folder.appendingPathComponent("pr-follow-up.json")
+        XCTAssertEqual(first.followedSince(space: "never-set"), now - 600)
+        let later = PRFollowUpCenter(trackedSince: now)
+        later.file.url = first.file.url
+        XCTAssertEqual(later.followedSince(space: "never-set"), now - 600)
+    }
+
     /// Another build's file is read on the side of typing less: an
     /// unknown round still counts, a missing start is the last change.
     func testTheStoreReadsWhatItCan() throws {

@@ -10,7 +10,7 @@ import os
 final class PRFollowUpCenter {
     let file = FileBackedValue(url: PRFollowUpStore.url, read: { PRFollowUpStore.load(from: $0) }, write: { $0.save(to: $1) })
     /// When this Nirux started following.
-    let trackedSince = Date().timeIntervalSince1970
+    let trackedSince: TimeInterval
     /// By workspace: when the read that gave its pull request, and its
     /// feedback, started.
     var readAt: [String: TimeInterval] = [:]
@@ -32,6 +32,19 @@ final class PRFollowUpCenter {
     /// A checkout whose remotes named no repository is read again after
     /// this: a remote may have been added since.
     static let remotesLifetime: TimeInterval = 10 * 60
+
+    init(trackedSince: TimeInterval = Date().timeIntervalSince1970) {
+        self.trackedSince = trackedSince
+    }
+
+    /// Where a space's follow-up starts (`PRFollowUpStore.followedSince`),
+    /// this launch kept as the first one of the follow-up if none was.
+    func followedSince(space: String) -> TimeInterval? {
+        file.update { store in
+            store.noteLaunch(at: trackedSince)
+            return store.followedSince(space: space)
+        }
+    }
 }
 
 extension NiruxShellView {
@@ -181,9 +194,6 @@ extension NiruxShellView {
         let (action, entry, raised) = prFollowUpCenter.file.update { store in
             var action = PRFollowUp.Action.none
             var raised = false
-            // A space that never set the option follows since this launch,
-            // the first one of the follow-up.
-            store.noteLaunch(at: prFollowUpCenter.trackedSince)
             store.update(pullRequest.url, now: facts.now, since: store.followedSince(space: workspace.profileID)) { entry in
                 if let last = entry.rounds.last, last.endedAt == nil {
                     if target.roundAgentLeft {
@@ -227,7 +237,7 @@ extension NiruxShellView {
         } ?? ("no Claude with Nirux's hooks in the checkout", false)
         return PRFollowUp.Facts(
             pullRequest: pullRequest, feedback: workspace.prFeedback,
-            followedSince: center.file.value.followedSince(space: workspace.profileID), feedbackReadAt: center.feedbackReadAt[workspace.id],
+            followedSince: center.followedSince(space: workspace.profileID), feedbackReadAt: center.feedbackReadAt[workspace.id],
             triage: followUpTriage(of: workspace, pullRequest: pullRequest), redSince: center.redSince[workspace.id]?.since,
             localHead: workspace.gitContext?.identity.head, baseRemote: followUpBaseRemote(of: workspace, pullRequest: pullRequest),
             hasTrackedChanges: nil, isInMergeQueue: mergeQueueHolds(pullRequest), readAt: center.readAt[workspace.id],
