@@ -758,6 +758,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             ), isUserFocused: false)
             harness.waitUntil("the second, then Enter") { task.agent.input.components(separatedBy: "\u{1B}[201~\n").count == 3 }
 
+
             // A key of the user's while it goes in: Enter would send it too.
             task.hook(.userPromptSubmit)
             task.hook(.stop)
@@ -765,6 +766,41 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             task.column.pty?.sendRaw("z")
             harness.waitUntil("its sender told") { harness.shell.pendingLeadNotices.contains { $0.text.contains("wasn't sent") } }
             XCTAssertEqual(task.agent.input.components(separatedBy: "\u{1B}[201~\n").count, 3, "the third went in without Enter")
+        }
+    }
+
+    /// Claude Code's session record still shows a dialog when a long tell
+    /// is all in (it writes the record after the change, so it may lag the
+    /// hooks): it is read again, and Enter follows once it doesn't; a wait
+    /// that stays leaves the tell unsent.
+    func testEnterAfterALongTellWaitsOutARecordThatLags() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Reader", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            let message = (1...70).map { "Line \($0): read the file and add up the totals." }.joined(separator: "\n")
+            let url = ClaudeSessionRecord.url(pid: task.claude.pid, environment: ProcessInfo.processInfo.environment)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let changed = Date().timeIntervalSince1970 * 1000
+            @MainActor func write(_ status: String) throws {
+                try Data(#"{"status":"\#(status)","waitingFor":"permission prompt","statusUpdatedAt":\#(changed)}"#.utf8).write(to: url)
+            }
+            try write("waiting")
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            harness.waitUntil("all of it") { task.agent.input.contains("\u{1B}[201~") }
+            // Past Enter's first look, within its rereads.
+            RunLoop.main.run(until: Date().addingTimeInterval(NiruxShellView.recordRereadDelay + 0.1))
+            try Data(#"{"status":"idle","statusUpdatedAt":\#(changed)}"#.utf8).write(to: url)
+            harness.waitUntil("then its Enter") { task.agent.input.hasSuffix("\u{1B}[201~\n") }
+
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            try write("waiting")
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            harness.waitUntil("its sender told") { harness.shell.pendingLeadNotices.contains { $0.text.contains("wasn't sent") } }
+            XCTAssertEqual(task.agent.input.components(separatedBy: "\u{1B}[201~\n").count, 2, "the second went in without Enter")
         }
     }
 
