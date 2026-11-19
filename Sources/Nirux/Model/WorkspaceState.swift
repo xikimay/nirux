@@ -1117,7 +1117,9 @@ extension WorkspaceState {
         // strip's ends. A card wider than the viewport shows from its left
         // edge, with its air.
         let cameraX: CGFloat
-        if let held = heldCamera, held.column == columns[safe: focusedIndex]?.id {
+        // A hold is over once its card has lost the focus.
+        if heldCamera?.column != columns[safe: focusedIndex]?.id { heldCamera = nil }
+        if let held = heldCamera {
             cameraX = held.x
         } else if totalWidth <= viewportWidth {
             cameraX = -floor((viewportWidth - totalWidth) / 2)

@@ -217,9 +217,8 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(workspace.columns[2].view.frame.midX + strip.frame.minX, 500, accuracy: 1, "a keyboard move")
 
         workspace.focusedIndex = 1
-        workspace.heldCamera = nil
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
-        XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, 500, accuracy: 1)
+        XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, 500, accuracy: 1, "and back")
     }
 
     /// A click on a neighbour's edge focuses that neighbour and leaves the
