@@ -348,6 +348,25 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(workspace.columns[0].view.frame.width, width(1.0 / 3), "a third, its neighbour paying")
     }
 
+    /// A card lands on its stop exactly, whatever the viewport's rounding
+    /// (1,050 pt gave back a point less), and leaves the one it started on
+    /// at once.
+    func testAStopLandsExactlyAndLetsGo() throws {
+        let workspace = workspace(columns: 4)
+        workspace.containerView.frame.size.width = 1050
+        let strip = try strip(of: workspace)
+        func width(_ fraction: CGFloat) -> CGFloat { floor(fraction * (1050 - inset * 2 + gap) - gap) }
+        workspace.focusedIndex = 0
+        workspace.layoutAndScroll(viewportWidth: 1050, height: 600, animated: false)
+        let handle = strip.subviews.compactMap { $0 as? ColumnResizeHandle }[0]
+        let card = workspace.columns[0].view
+        let start = try XCTUnwrap(handle.onDragStart?())
+        handle.onDrag?(start, 1)
+        XCTAssertEqual(card.frame.width, width(0.5) + 1, "off its starting stop at once")
+        handle.onDrag?(start, width(2.0 / 3) - 4 - width(0.5))
+        XCTAssertEqual(card.frame.width, width(2.0 / 3))
+    }
+
     /// A neighbour that runs out pays what it can, and the other pays on:
     /// the dragged edge stays under the pointer.
     func testANeighbourThatRunsOutLeavesTheOtherToPay() throws {

@@ -884,19 +884,10 @@ extension WorkspaceState {
             let share = Self.share(
                 edge: edge, focus: focus, count: widths.count, centred: Self.centres(widths, focus: focus, viewport: viewport)
             )
-            let toHalf = Self.width(ColumnWidth.half.fraction, in: viewport) - widths[focus]
-            let asks: [(column: Int, points: CGFloat)] = switch share {
-            case .both: [(focus + 1, ceil(toHalf / 2)), (focus - 1, floor(toHalf / 2))]
-            case .left: [(focus - 1, toHalf)]
-            case .right: [(focus + 1, toHalf)]
-            case .none: [(focus, toHalf)]
-            }
-            var resized = Self.resized(widths, focus: focus, taking: asks, share: share, viewport: viewport)
-            // One that ran out leaves the rest to the other.
-            for ask in asks {
-                resized = Self.resized(resized, focus: focus, taking: [(ask.column, widths[focus] + toHalf - resized[focus])], share: share, viewport: viewport)
-            }
-            self.setColumnWidths(resized, viewport: viewport)
+            self.setColumnWidths(Self.resized(
+                widths, focus: focus, to: Self.width(ColumnWidth.half.fraction, in: viewport), share: share,
+                first: edge == focus ? focus + 1 : focus - 1, viewport: viewport
+            ), viewport: viewport)
         }
         handle.wantsLayer = true
         stripView.addSubview(handle)
@@ -944,6 +935,25 @@ extension WorkspaceState {
         return resized
     }
 
+    /// The focused column `focus` set to `target` wide, its neighbours paying
+    /// by `share`: half each when both, `first` paying the odd point, and
+    /// one that runs out leaves the rest to the other.
+    static func resized(
+        _ widths: [CGFloat], focus: Int, to target: CGFloat, share: ResizeShare, first: Int, viewport: CGFloat
+    ) -> [CGFloat] {
+        let gap = target - widths[focus]
+        let asks: [(column: Int, points: CGFloat)] = switch share {
+        case .both: [(first, ceil(gap / 2)), (2 * focus - first, floor(gap / 2))]
+        case .left, .right: [(first, gap)]
+        case .none: [(focus, gap)]
+        }
+        var resized = Self.resized(widths, focus: focus, taking: asks, share: share, viewport: viewport)
+        for ask in asks {
+            resized = Self.resized(resized, focus: focus, taking: [(ask.column, target - resized[focus])], share: share, viewport: viewport)
+        }
+        return resized
+    }
+
     /// The focused card's edge right of column `edge` dragged `delta`
     /// points from `start`, staying under the pointer: the neighbour across
     /// the edge pays what the pointer moved, and the other as much while the
@@ -964,17 +974,12 @@ extension WorkspaceState {
         case .none: [(focus, Self.draggedWidth(start.widths[focus], strip: start.strip, viewport: viewport, by: delta) - start.widths[focus])]
         }
         var widths = Self.resized(start.widths, focus: focus, taking: asks, share: share, viewport: viewport)
-        // Near a third, a half or two thirds of the viewport, it lands there,
-        // with a tick of the trackpad.
-        let stops = [1.0 / 3, 1.0 / 2, 2.0 / 3].map { Self.width($0, in: viewport) }
-        if let stop = stops.first(where: { abs($0 - widths[focus]) <= Self.snapDistance }) {
-            let gap = stop - width
-            let snapped: [(column: Int, points: CGFloat)] = switch share {
-            case .both: [(near, ceil(gap / 2)), (far, floor(gap / 2))]
-            case .left, .right: [(near, gap)]
-            case .none: [(focus, gap)]
-            }
-            let landed = Self.resized(start.widths, focus: focus, taking: snapped, share: share, viewport: viewport)
+        // Near a third, a half or two thirds of the viewport (`cycleWidth`'s
+        // stops), it lands there with a tick of the trackpad; the one it
+        // started on lets it go at once.
+        let stops = [ColumnWidth.third, .half, .twoThirds].map { Self.width($0.fraction, in: viewport) }
+        if let stop = stops.first(where: { $0 != width && abs($0 - widths[focus]) <= Self.snapDistance }) {
+            let landed = Self.resized(start.widths, focus: focus, to: stop, share: share, first: near, viewport: viewport)
             if landed[focus] == stop { widths = landed }
         }
         if stops.contains(widths[focus]), widths[focus] != columns[focus].view.frame.width {
@@ -1039,12 +1044,13 @@ extension WorkspaceState {
     }
 
     /// Only the columns whose width changes take a new fraction: the others
-    /// keep theirs as they are.
+    /// keep theirs as they are. Half a point over, so that `width(_:in:)`
+    /// floors it back to the same width whatever the rounding.
     private func setColumnWidths(_ widths: [CGFloat], viewport: CGFloat) {
         let laidOut = columns.map(\.view.frame.width)
         guard widths.count == columns.count, widths != laidOut else { return }
         for (index, width) in widths.enumerated() where width != laidOut[index] {
-            columns[index].widthFraction = min(Self.maxWidthFraction, max(Self.minWidthFraction, (width + Self.columnGap) / max(Self.span(viewport), 1)))
+            columns[index].widthFraction = min(Self.maxWidthFraction, max(Self.minWidthFraction, (width + Self.columnGap + 0.5) / max(Self.span(viewport), 1)))
         }
         layoutAndScroll(viewportWidth: viewport, height: containerView.bounds.height, animated: false)
     }
