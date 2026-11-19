@@ -68,7 +68,8 @@ extension NiruxShellView {
     }
 
     private func mayPassUnderRail(_ workspace: WorkspaceState) -> Bool {
-        railFloats && agentLightsMayMove && viewport.frame.minX > sidebar.frame.minX
+        // Where the viewport lies at rest, even while it reaches.
+        railFloats && agentLightsMayMove && viewport.frame.minX - viewport.bounds.minX > sidebar.frame.minX
     }
 
     /// The viewport reaches under the sidebar (its frame, and its bounds'
