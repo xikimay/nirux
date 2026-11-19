@@ -444,6 +444,17 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(lead.shell.activeWSIndex, lead.workspaceIndex, "its terminal, to look first")
             XCTAssertNil(lead.typedAt(first))
 
+            // Its workspace in front, its column scrolled out of view: shown first too.
+            let workspace = lead.shell.workspaces[lead.workspaceIndex]
+            let focused = try XCTUnwrap(workspace.columns.indices.first { $0 != lead.columnIndex })
+            for column in workspace.columns { column.widthFraction = 1 }
+            workspace.focusedIndex = focused
+            lead.shell.relayout(animated: false)
+            XCTAssertFalse(workspace.showsColumn(at: lead.columnIndex))
+            lead.typeItNow(offered.since)
+            harness.waitUntil("its column in view") { workspace.showsColumn(at: lead.columnIndex) }
+            XCTAssertNil(lead.typedAt(first), "its terminal, to look first")
+
             lead.typeItNow(offered.since)
             harness.waitUntil("the question in its prompt") { standIn.input.contains("Keep the old date= parameter?") }
             XCTAssertNil(lead.typedAt(second), "one on the user's word")
