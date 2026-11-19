@@ -23,6 +23,8 @@ extension NiruxShellView {
         if !railFloats { endUnderGlass() }
     }
 
+    func showDividerForGate() { showDivider(animated: false) }
+
     /// No line marks the edge of a rail that floats. It fades with the
     /// sidebar's fold.
     private func showDivider(animated: Bool) {

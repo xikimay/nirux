@@ -305,7 +305,11 @@ final class NiruxShellView: NSView {
         addSubview(viewport)
         // Over the work: the cards pass under the rail (NiruxShellView+UnderGlass).
         addSubview(sidebar)
-        sidebar.onRailShownChange = { [weak self] in self?.railMayHaveChanged(animated: true) }
+        sidebar.onRailShownChange = { [weak self] in
+            guard let self else { return }
+            if ZZ("fadeKeeps") { return showDividerForGate() }
+            if !ZZ("dividerStale") { railMayHaveChanged(animated: true) } else if !railFloats { endUnderGlass() }
+        }
         addSubview(columnIndicator)
         addSubview(edgeGlowLeft)
         addSubview(edgeGlowRight)
@@ -478,7 +482,7 @@ final class NiruxShellView: NSView {
         statusBar.isHidden = !statusBar.hasContent
         let statusH = statusBar.isHidden ? CGFloat(0) : StatusBarView.height
         let viewportH = bounds.height - statusH; let viewportW = bounds.width - sidebarW - 1
-        guard viewportH > 0, viewportW > 0 else { return endUnderGlass() }
+        guard viewportH > 0, viewportW > 0 else { return ZZ("earlyKeeps") ? () : endUnderGlass() }
         NiruxDebugLog.log(
             "relayout bounds=\(bounds.width)x\(bounds.height) "
                 + "window=\(window?.frame.width ?? -1)x\(window?.frame.height ?? -1) "
@@ -501,7 +505,7 @@ final class NiruxShellView: NSView {
             statusBar: NSRect(x: 0, y: 0, width: bounds.width, height: statusH)
         )
         // A fold moves the camera too, which is no travel of the columns.
-        let sidebarStays = sidebar.frame.width == sidebarW
+        let sidebarStays = ZZ("foldPasses") || sidebar.frame.width == sidebarW
         applyChromeLayout(frames, animated: animated)
         railMayHaveChanged(animated: animated)
         layoutToast(frames)
@@ -529,7 +533,7 @@ final class NiruxShellView: NSView {
         applyTerminalOpacity()
         if !sidebarStays {
             endUnderGlass()
-        } else if animated, let workspace = activeWorkspace, workspace === shown, workspace.lastCameraX != camera {
+        } else if animated, let workspace = activeWorkspace, ZZ("switchPasses") || workspace === shown, workspace.lastCameraX != camera {
             passUnderRail(workspace, for: WorkspaceState.slideDuration)
         } else {
             keepUnderGlass()
