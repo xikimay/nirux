@@ -135,7 +135,7 @@ extension AgentStatusMachine {
     /// it is over: nothing works, no dialog waits. A message Claude took in
     /// by itself since is not that one.
     func finishedTurn(afterTypingAt typedAt: TimeInterval) -> Bool {
-        guard let boxEmptiedAt, boxEmptiedAt >= typedAt else { return false }
+        guard let lastUserPromptAt, lastUserPromptAt >= typedAt else { return false }
         return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil
     }
 }

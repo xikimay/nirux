@@ -136,10 +136,13 @@ struct AgentStatusMachine {
     /// nil between turns.
     private var mainTurnMovedAt: TimeInterval?
     /// When the prompt box last emptied: at the Enter that sent the last
-    /// prompt typed there, a `/clear` or the start of the conversation. A
-    /// message Claude takes in by itself (a peer's, a task notification, a
-    /// wakeup) leaves it as it was: keys typed since are a draft.
+    /// prompt typed there, a `/clear`, or the start of a process that took
+    /// no key since. A message Claude takes in by itself (a peer's, a task
+    /// notification, a wakeup) leaves it as it was: keys typed since are a
+    /// draft.
     private(set) var boxEmptiedAt: TimeInterval?
+    /// When the last prompt typed at the box went in (its UserPromptSubmit).
+    private(set) var lastUserPromptAt: TimeInterval?
     /// The last Enter that reached the prompt box, no dialog waiting for
     /// keys in front: what sends a prompt typed there.
     private var lastSubmitKeyAt: TimeInterval = 0
@@ -410,6 +413,9 @@ struct AgentStatusMachine {
                 requestedAt: now
             )
             request.dialog = event.dialog
+            // An Enter since it opened went to it, not to the box: its hook
+            // reached Nirux after the key.
+            if lastSubmitKeyAt >= now { lastSubmitKeyAt = 0 }
             if let requestID = event.approvalRequestID, let deadline = event.approvalDeadline,
                let text = event.approvalText {
                 request.approval = PermissionApprovalTicket(
@@ -467,7 +473,7 @@ struct AgentStatusMachine {
         // dialogs an interrupt (Esc) left behind with no hook too. One
         // listed since may be on screen, and a message Claude took in by
         // itself says nothing of them.
-        let sentAt = pendingEnterAt
+        let sentAt = enterThatSent(event)
         if let sentAt { closeDialogs { $0.sessionID == event.sessionID && $0.requestedAt <= sentAt } }
         turnStartedAt = now
         hookTurnInFlight = true
@@ -477,7 +483,10 @@ struct AgentStatusMachine {
             askedQuestion = nil
             circling.reset()
             lastPromptAt = now
-            if let sentAt { boxEmptiedAt = sentAt }
+            if let sentAt {
+                boxEmptiedAt = sentAt
+                lastUserPromptAt = now
+            }
             // An Esc at a dialog since the main thread last moved ended its
             // call with no hook. (A prompt alone doesn't: Claude submits peer
             // messages and poll results as prompts while a call runs.)
@@ -489,12 +498,28 @@ struct AgentStatusMachine {
         resumeUnlessBlocked()
     }
 
-    /// The Enter that sent a prompt typed at the box, if one reached it
-    /// since the box last emptied: a prompt going in now is that one. A
-    /// message Claude takes in by itself (a peer's, a task notification, a
-    /// wakeup) follows no key.
-    private var pendingEnterAt: TimeInterval? {
-        lastSubmitKeyAt > (boxEmptiedAt ?? 0) ? lastSubmitKeyAt : nil
+    /// The Enter that sent the prompt `event` submits, if it was typed at
+    /// the box: one that reached it since the box last emptied, at most
+    /// `promptHookDelay` before the prompt's hook ran. Claude runs it as the
+    /// box sends, queued mid-turn or not; an older Enter sent nothing (a line
+    /// added after a backslash, a picker's choice). A message Claude takes in
+    /// by itself (a peer's, a task notification, a wakeup) follows no key,
+    /// and its `source` says so where Claude Code sends one.
+    private func enterThatSent(_ event: AgentHookEvent) -> TimeInterval? {
+        guard event.source == nil || event.source == "user", lastSubmitKeyAt > (boxEmptiedAt ?? 0),
+              (0..<Self.promptHookDelay).contains(event.timestamp - lastSubmitKeyAt)
+        else { return nil }
+        return lastSubmitKeyAt
+    }
+
+    static let promptHookDelay: TimeInterval = 5
+
+    /// The process that started this conversation took no key since it
+    /// started (`startedAt` counts whole seconds): what was typed went to
+    /// the shell that launched it. Without its process (an older receiver),
+    /// a startup's.
+    private func startedEmpty(_ event: AgentHookEvent) -> Bool {
+        event.emitterProcess.map { lastInputAt < $0.startedAt + 1 } ?? (event.source == "startup")
     }
 
     private mutating func startConversation(
@@ -507,8 +532,9 @@ struct AgentStatusMachine {
         guard event.source != "compact" else { return }
         // A new conversation in this process (startup, /clear, /resume):
         // whatever dialogs the old one showed are gone. `/clear` took what
-        // was typed at the prompt, but fires no UserPromptSubmit; a new
-        // process starts with an empty one.
+        // was typed at the prompt, but fires no UserPromptSubmit. A `/resume`
+        // inside it leaves its keys a draft: it may show a screen no hook
+        // reports (an offer to resume from a summary).
         endTurn()
         settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
         askedQuestion = nil
@@ -516,7 +542,7 @@ struct AgentStatusMachine {
         stopHooksKeepGoing = false
         conversationChangedAt = event.timestamp
         if event.source == "clear" { lastPromptAt = event.timestamp }
-        if event.source == "clear" || event.source == "startup" { boxEmptiedAt = event.timestamp }
+        if event.source == "clear" || startedEmpty(event) { boxEmptiedAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
         turnFailure = nil
@@ -1569,6 +1595,7 @@ struct AgentStatusMachine {
         mainCallsRunning = []
         mainTurnMovedAt = nil
         boxEmptiedAt = nil
+        lastUserPromptAt = nil
         lastSubmitKeyAt = 0
         turnInterruptedAt = 0
         dialogCancelledAt = 0

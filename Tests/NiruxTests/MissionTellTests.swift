@@ -436,9 +436,7 @@ final class MissionTellTests: XCTestCase {
 
     /// Keys typed during a turn stay in the box when Claude takes in a
     /// message by itself: a draft no message joins, until the Enter of a
-    /// prompt typed there. A claude started with its prompt typed at the
-    /// shell took that prompt with no key: what the shell got is no draft,
-    /// what was typed into the claude since is.
+    /// prompt typed there.
     func testAMessageClaudeTakesInLeavesTheDraft() {
         var machine = idleMachine()
         press("\r", at: 9.5, into: &machine)
@@ -452,18 +450,67 @@ final class MissionTellTests: XCTestCase {
         _ = machine.apply(hook(.userPromptSubmit, at: 20.1), isUserFocused: false)
         _ = machine.apply(hook(.stop, at: 21), isUserFocused: false)
         XCTAssertNil(refusal(machine))
+    }
 
-        var launched = AgentStatusMachine()
-        press("claude \"Read .claude-handover.md\"\n", at: 0, into: &launched)
-        _ = launched.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 0.5))
-        _ = launched.apply(hook(.sessionStart, at: 1, source: "startup"), isUserFocused: false)
-        _ = launched.apply(hook(.userPromptSubmit, at: 2), isUserFocused: false)
-        _ = launched.apply(hook(.stop, at: 5), isUserFocused: false)
-        XCTAssertNil(refusal(launched))
-        press("y", at: 6, into: &launched)
-        _ = launched.apply(hook(.userPromptSubmit, at: 7), isUserFocused: false)
-        _ = launched.apply(hook(.stop, at: 8), isUserFocused: false)
-        XCTAssertEqual(refusal(launched), .draft)
+    /// An Enter sends the prompt whose hook follows it within moments: Claude
+    /// runs the hook as the box sends. An older one sent nothing (a line
+    /// added after a backslash), one that reached a dialog whose hook came
+    /// after it answered that dialog, and a prompt Claude Code says came
+    /// from elsewhere took none.
+    func testAnEnterSendsOnlyThePromptItsHookFollows() {
+        func afterAnEnter(source: String? = nil, hookAfter delay: TimeInterval) -> AgentStatusMachine {
+            var machine = idleMachine()
+            press("fix it", at: 10, into: &machine)
+            press("\r", at: 10.5, into: &machine)
+            _ = machine.apply(hook(.userPromptSubmit, at: 10.5 + delay, source: source), isUserFocused: false)
+            _ = machine.apply(hook(.stop, at: 20), isUserFocused: false)
+            return machine
+        }
+        XCTAssertNil(refusal(afterAnEnter(hookAfter: 0.5)))
+        XCTAssertEqual(refusal(afterAnEnter(hookAfter: AgentStatusMachine.promptHookDelay)), .draft)
+        XCTAssertEqual(refusal(afterAnEnter(source: "system", hookAfter: 0.5)), .draft)
+
+        var answered = idleMachine()
+        press("\r", at: 30.2, into: &answered)
+        _ = answered.apply(subagentDialog(at: 30), isUserFocused: false)
+        _ = answered.apply(hook(.userPromptSubmit, at: 31), isUserFocused: false)
+        _ = answered.apply(hook(.stop, at: 32), isUserFocused: false)
+        XCTAssertEqual(refusal(answered), .dialog)
+    }
+
+    /// A claude launched at the shell took no key since it started: what the
+    /// shell got is no draft, its prompt given as an argument went in with
+    /// no key, and what was typed into it since is a draft. Resumed in a new
+    /// process too, but not by a `/resume` inside it, which may show a
+    /// screen no hook reports (an offer to resume from a summary).
+    func testAClaudeStartsWithAnEmptyBox() {
+        // An older receiver names no process: a startup's is new.
+        func launched(_ command: String, source: String, by process: ProcessInstance?) -> AgentStatusMachine {
+            var machine = AgentStatusMachine()
+            press(command, at: 0, into: &machine)
+            _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 0.5))
+            _ = machine.apply(AgentHookEvent(
+                kind: .claude, name: .sessionStart, sessionID: "lead", emitterProcess: process, source: source, timestamp: t0 + 1
+            ), isUserFocused: false)
+            _ = machine.apply(hook(.userPromptSubmit, at: 2), isUserFocused: false)
+            _ = machine.apply(hook(.stop, at: 5), isUserFocused: false)
+            return machine
+        }
+        var started = launched("claude \"Read .claude-handover.md\"\n", source: "startup", by: nil)
+        XCTAssertNil(refusal(started))
+        press("y", at: 6, into: &started)
+        _ = started.apply(hook(.userPromptSubmit, at: 7), isUserFocused: false)
+        _ = started.apply(hook(.stop, at: 8), isUserFocused: false)
+        XCTAssertEqual(refusal(started), .draft)
+        XCTAssertNil(refusal(launched("claude --resume 1234\n", source: "resume", by: ProcessInstance(pid: 7, startedAt: t0))))
+
+        var resumed = idleMachine()
+        press("/resume\r", at: 10, into: &resumed)
+        press("\r", at: 11, into: &resumed)
+        _ = resumed.apply(AgentHookEvent(
+            kind: .claude, name: .sessionStart, sessionID: "lead", emitterProcess: claudeProcess, source: "resume", timestamp: t0 + 12
+        ), isUserFocused: false)
+        XCTAssertEqual(refusal(resumed), .draft)
     }
 
     /// A dialog takes the keys while it waits for one, a paste too: none is a
@@ -614,9 +661,10 @@ final class MissionTellTests: XCTestCase {
     /// parent didn't answer. Not while the turn runs, nor before it went in.
     func testATurnThatTookAMessageAndEndedIsSeen() {
         var machine = idleMachine()
-        let typedAt = t0 + 6
+        // Recorded once its Enter went out.
+        let typedAt = t0 + 6.01
         XCTAssertFalse(machine.finishedTurn(afterTypingAt: typedAt), "not typed in yet")
-        machine.noteKeystroke(now: Date(timeIntervalSince1970: typedAt))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 6))
         _ = machine.apply(hook(.userPromptSubmit, at: 6.5), isUserFocused: false)
         XCTAssertFalse(machine.finishedTurn(afterTypingAt: typedAt), "working on it")
         _ = machine.apply(hook(.stop, at: 9), isUserFocused: false)
