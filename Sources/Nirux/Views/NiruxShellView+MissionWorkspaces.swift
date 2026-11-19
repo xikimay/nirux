@@ -270,12 +270,16 @@ extension NiruxShellView {
     /// that prompt is free (see `MissionStore.pendingPromptDeliveries`); the
     /// others wait for that agent's next turn end. Runs when a Mission event
     /// arrives and when a turn ends.
-    func typeMissionMessages() {
-        typeLeadNotices()
+    /// `seenAtPrompt`: a column whose `claude`, with no prompt yet, the user
+    /// says sits at its prompt (`typeWaitingMessagesNow`): one message goes
+    /// in on their word.
+    @discardableResult
+    func typeMissionMessages(seenAtPrompt: UUID? = nil) -> TypedOnSight? {
+        var onSight = typeLeadNotices(seenAtPrompt: seenAtPrompt)
         typeRuleDecisions()
         let handoffsEnabled = Self.currentMissionHandoffsEnabled()
         guard MissionStore.shared.pendingPromptDeliveries().contains(where: { $0.mission.isCarried(handoffsEnabled: handoffsEnabled) })
-        else { return }
+        else { return onSight }
         // Apply what may still wait out a queue's drain debounce: a dialog
         // that opened, a prompt that went in, or the child's `completed`,
         // which must not close the Mission after a `tell` reopened it.
@@ -294,10 +298,14 @@ extension NiruxShellView {
                 continue
             }
             guard let recipient = missionRecipient(of: delivery), let pty = recipient.pty,
-                  !missionWaits.typing.contains(delivery.event.id),
-                  pty.acceptsMissionMessage(
-                      runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now), snapshot: snapshot
-                  ),
+                  !missionWaits.typing.contains(delivery.event.id)
+            else { continue }
+            let refusal = pty.missionPromptRefusal(
+                runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now), snapshot: snapshot,
+                seenByUser: recipient.id == seenAtPrompt
+            )
+            if recipient.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
+            guard refusal == nil,
                   let text = MissionPromptText.text(
                       for: delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title
                   ),
@@ -316,10 +324,20 @@ extension NiruxShellView {
                 self?.reportUnsent(typed, what: byUser ? "your answer" : "a Mission message", for: recipientTitle, telling: sender)
             }
             missionWaits.noteTyped(into: recipient, at: now)
+            if recipient.id == seenAtPrompt { onSight = .typed }
             typedAny = true
         }
         // The cards' "Asking …" and "Answer … ready" rows follow.
         if typedAny { updateSidebar(snapshot: snapshot) }
+        return onSight
+    }
+
+    /// What became of the user's word that a column's `claude` sits at its
+    /// prompt (`typeMissionMessages(seenAtPrompt:)`): one went in, or why
+    /// none did (nil: its prompt looked free, yet it couldn't be typed).
+    enum TypedOnSight: Equatable {
+        case typed
+        case refused(AgentPromptRefusal?)
     }
 
     /// A message for a Codex child: nothing is typed into Codex, it goes
@@ -544,18 +562,23 @@ extension NiruxShellView {
     /// Types each Lead notice whose Lead's prompt is free; the others wait
     /// for its next turn end, an hour at most. A Lead that is gone drops
     /// its own.
-    func typeLeadNotices() {
-        guard !pendingLeadNotices.isEmpty else { return }
+    /// `seenAtPrompt` as `typeMissionMessages` takes it, and what became of
+    /// it.
+    @discardableResult
+    func typeLeadNotices(seenAtPrompt: UUID? = nil) -> TypedOnSight? {
+        guard !pendingLeadNotices.isEmpty else { return nil }
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
+        var onSight: TypedOnSight?
         pendingLeadNotices = pendingLeadNotices.filter { notice in
             guard now - notice.queuedAt < MissionEventCLI.parentMessageLifetime,
                   let workspace = workspaces.first(where: { $0.id == notice.workspaceID && !$0.isClosing }),
                   let column = workspace.columns.first(where: { $0.agentUUID == notice.agentUUID })
             else { return false }
-            guard let pty = column.pty, pty.acceptsMissionMessage(runningSince: now, snapshot: snapshot),
-                  let paste = TypedPromptSanitizer.bracketedPaste(for: notice.text)
-            else { return true }
+            guard let pty = column.pty else { return true }
+            let refusal = pty.missionPromptRefusal(runningSince: now, snapshot: snapshot, seenByUser: column.id == seenAtPrompt)
+            if column.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
+            guard refusal == nil, let paste = TypedPromptSanitizer.bracketedPaste(for: notice.text) else { return true }
             // A user's answer it carries may be long.
             let lead = MissionPromptText.quoted(workspace.title)
             typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { [weak self] typed in
@@ -564,8 +587,10 @@ extension NiruxShellView {
                 self.reportUnsent(typed, what: "a message", for: lead, telling: nil)
             }
             missionWaits.noteTyped(into: column, at: now)
+            if column.id == seenAtPrompt { onSight = .typed }
             return false
         }
+        return onSight
     }
 
     static func currentMissionHandoffsEnabled() -> Bool {

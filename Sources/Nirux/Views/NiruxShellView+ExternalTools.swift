@@ -864,6 +864,7 @@ extension NiruxShellView {
         editor.onPathChanged = { [weak self] in self?.updateSidebar() }
         editor.onDirtyChanged = { [weak self] in self?.updateSidebar() }
         editor.onSendSelectionShortcut = { [weak self] in self?.sendEditorSelectionToAgent() }
+        editor.askAboutUnsavedEdits = { [weak self] paths in self?.askAboutUnsavedEdits(paths) ?? .cancel }
         editor.onTextEdgeKey = { [weak self, weak editor] edge in
             guard let self, let editor else { return }
             self.navigate(fromTextEdge: edge, of: editor)
