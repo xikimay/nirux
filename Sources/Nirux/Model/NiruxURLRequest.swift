@@ -55,7 +55,7 @@ enum NiruxLaunchAuthorization {
 /// (`HandoverFile`, `GitWorktree.create`).
 struct NiruxURLRequest: Equatable, Sendable {
     enum Action: Equatable, Sendable {
-        /// nirux://new-workspace?cwd=...&title=...&agent=claude|codex&profile=...
+        /// nirux://new-workspace?cwd=...&title=...&agent=claude|codex|agy&profile=...
         case newWorkspace(cwd: String?, title: String?, agent: NiruxApp.WorkspaceAgent?)
         /// nirux://new-worktree?branch=...&repo=...&agent=...&handover=...&profile=...&from=head
         case newWorktree(NewWorktree)
@@ -238,6 +238,7 @@ struct NiruxURLRequest: Equatable, Sendable {
             switch agent {
             case .claude: return "Agent: Claude Code — \(claudeMode.displayName)"
             case .codex: return "Agent: Codex — \(codexMode.displayName)"
+            case .agy: return "Agent: Antigravity"
             case nil: return "Agent: none (plain shell)"
             }
         }

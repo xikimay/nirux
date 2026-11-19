@@ -24,12 +24,12 @@ Close the list with `×`, or with **Done** once every step is done. `Show Gettin
 ## Your first task
 
 1. Choose **Space › New Space…**. Give the space a name and a color, and add your repository with **Add Repository…**.
-2. Press `Cmd+N`, describe what you want done, pick Claude Code or Codex, and press Return.
+2. Press `Cmd+N`, describe what you want done, pick Claude Code, Codex or Antigravity, and press Return.
 3. Nirux fetches the base branch and creates a git worktree, a second checkout of the repository in its own folder next to yours, on a new branch. It starts the agent there with your description, and the new workspace appears in the sidebar.
 
 Your own checkout stays as it was, so several tasks can run at once without touching each other's files. [Spaces and tasks](spaces-and-tasks.md) describes the `Cmd+N` sheet in full.
 
-To open a plain shell instead, press `Cmd+N` and then Return with nothing typed. `Open Claude Code` and `Open Codex` in the command palette then start an agent in a new terminal column of that workspace.
+To open a plain shell instead, press `Cmd+N` and then Return with nothing typed. `Open Claude Code`, `Open Codex` and `Open Antigravity` in the command palette then start an agent in a new terminal column of that workspace.
 
 ## When an agent needs you
 

@@ -124,6 +124,17 @@ extension NiruxShellView {
         return parts.joined(separator: " ")
     }
 
+    /// Build an `agy …` shell command: Antigravity CLI with its own mode,
+    /// model and settings. `handoverPrompt` is its first prompt (`-i`), as
+    /// in the worktree handover flow.
+    static func agyCommand(handoverPrompt: String? = nil) -> String {
+        var parts = ["command", "agy"]
+        if let prompt = handoverPrompt {
+            parts.append(contentsOf: ["-i", Self.shellQuotedArgument(prompt)])
+        }
+        return parts.joined(separator: " ")
+    }
+
     static func currentCodexLaunchMode() -> CodexLaunchMode {
         Persistence.load()?.settings?.codexLaunchMode ?? .default
     }
@@ -176,33 +187,35 @@ extension NiruxShellView {
 
     func openClaudeCode() {
         guard let workspace = activeWorkspace else { return }
-        let cmd = Self.claudeCommand(
+        launchInNewColumn(Self.claudeCommand(
             mode: Self.claudeLaunchMode(for: workspace),
             briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
             settingsFile: claudeSpaceSettingsFile(for: workspace)
-        )
-        workspace.addColumn()
-        relayout(animated: false)
-        updateSidebar()
-        if let col = workspace.columns[safe: workspace.focusedIndex] {
-            sideEffects.launchAgent(col, cmd)
-        }
-        focusActiveTerminal(in: window)
+        ), in: workspace)
     }
 
     func openCodex() {
         guard let workspace = activeWorkspace else { return }
-        let cmd = Self.codexCommand(
+        launchInNewColumn(Self.codexCommand(
             mode: Self.codexLaunchMode(for: workspace),
             briefFile: Self.codexBriefFile(
                 from: spaceBriefInjection(for: workspace), launchDirectory: workspace.focusedWorkingDirectory
             )
-        )
+        ), in: workspace)
+    }
+
+    func openAgy() {
+        guard let workspace = activeWorkspace else { return }
+        launchInNewColumn(Self.agyCommand(), in: workspace)
+    }
+
+    /// Runs `command` in a new terminal column of `workspace`, focused.
+    private func launchInNewColumn(_ command: String, in workspace: WorkspaceState) {
         workspace.addColumn()
         relayout(animated: false)
         updateSidebar()
         if let col = workspace.columns[safe: workspace.focusedIndex] {
-            sideEffects.launchAgent(col, cmd)
+            sideEffects.launchAgent(col, command)
         }
         focusActiveTerminal(in: window)
     }

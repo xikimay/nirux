@@ -380,10 +380,12 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(task.taskFolder, task.cwd)
             XCTAssertEqual(shell.persistedState().workspaces.first { $0.id == task.id }?.taskFolder, task.taskFolder)
 
-            // The same name again: a folder of its own. The hint is gone.
+            // The same name again, with Antigravity: a folder of its own.
+            // The hint is gone.
             sheet = try openSheet(harness)
             describe("Compare: two parsers", in: sheet)
             XCTAssertTrue(sheet.trustHint.isHidden)
+            select("Antigravity", in: sheet.agentPopup)
             // Edit names the folder; what the user types is cleaned.
             sheet.editBranchButton.performClick(nil)
             XCTAssertFalse(sheet.branchField.isHidden)
@@ -395,6 +397,9 @@ final class NewTaskFlowTests: UIFlowTestCase {
             sheet.startButton.performClick(nil)
             harness.waitUntil("the second task") { shell.workspaces.filter { $0.title == "Compare: two parsers" }.count == 2 }
             XCTAssertEqual(shell.activeWorkspace.map { NiruxShellView.comparablePath($0.cwd) }, NiruxShellView.comparablePath(folder + " 2"))
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder + " 2"), [".agy-handover.md"])
+            let agyLaunch = try XCTUnwrap(harness.agentLaunches.last)
+            XCTAssertTrue(agyLaunch.hasPrefix("command agy -i 'Read .agy-handover.md for full context"), agyLaunch)
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder), [".claude-handover.md"], "the first one untouched")
 
             // Its folder gone: still nothing to clean up, and the folder

@@ -251,11 +251,12 @@ struct AgentStatusMachine {
     static let integratedAgentProcesses: Set<String> = ["claude", "codex"]
 
     /// Agents recognized by foreground process name alone — no hooks, no
-    /// launcher, no restore. Their status comes from the output-activity
-    /// fallback in `tick`; closing their column asks first like any agent's.
-    /// Names are `ProcessSnapshot.execName` results: Gemini CLI runs as
-    /// `node [flags] …/gemini`, opencode as a native `opencode` binary.
-    static let activityOnlyAgentProcesses: Set<String> = ["gemini", "opencode"]
+    /// restore, a launcher for `agy` only. Their status comes from the
+    /// output-activity fallback in `tick`; closing their column asks first
+    /// like any agent's. Names are `ProcessSnapshot.execName` results:
+    /// Gemini CLI runs as `node [flags] …/gemini`, opencode and Antigravity
+    /// CLI as native `opencode` and `agy` binaries.
+    static let activityOnlyAgentProcesses: Set<String> = ["gemini", "opencode", "agy"]
 
     /// Central gate for local agent status, nested-hook attribution and
     /// close confirmation.

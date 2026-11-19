@@ -155,6 +155,7 @@ enum SidebarRenderer {
         switch processName {
         case "claude": "sparkles"
         case "codex": "brain.head.profile"
+        case "agy": "atom"
         default: nil
         }
     }
@@ -186,7 +187,7 @@ enum SidebarRenderer {
             return symbol(Theme.Symbol.terminal, color: color)
         }
         switch processName {
-        case "claude", "codex":
+        case "claude", "codex", "agy":
             return agentAppIcon(processName: processName)
                 ?? agentSymbol(processName: processName).flatMap { symbol($0, color: color) }
         case "gemini":

@@ -7,8 +7,9 @@ enum ReviewSendRefusal: Equatable, Sendable {
     /// Nothing that takes a prompt runs there.
     case noAgent
     /// An agent that doesn't say when it waits at its prompt (Codex's
-    /// notify hook reports turn ends only; Gemini CLI and OpenCode report
-    /// nothing): an open question would take the comments as its answer.
+    /// notify hook reports turn ends only; Gemini CLI, OpenCode and
+    /// Antigravity report nothing): an open question would take the comments
+    /// as its answer.
     case notClaude(String)
     /// A Claude that took no prompt since it started, or hasn't reported
     /// since it came back from Ctrl-Z: a dialog it shows before any hook
@@ -62,7 +63,7 @@ enum ReviewSendRefusal: Equatable, Sendable {
 
 extension AgentStatusMachine {
     /// Names, by process, of the agents Nirux knows that aren't Claude Code.
-    static let otherAgents = ["codex": "Codex", "gemini": "Gemini CLI", "opencode": "OpenCode"]
+    static let otherAgents = ["codex": "Codex", "gemini": "Gemini CLI", "opencode": "OpenCode", "agy": "Antigravity"]
 
     /// Why a review's comments may not be typed into `foreground`'s prompt
     /// now; nil when they may: an interactive `claude` driven by Nirux's
