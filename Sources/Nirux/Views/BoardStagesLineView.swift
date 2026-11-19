@@ -672,6 +672,9 @@ extension NSView {
     /// (`visibleRect` alone isn't held to the view's own bounds in a
     /// window that was never shown.)
     var rectInSight: NSRect { bounds.intersection(visibleRect) }
+
+    /// Where the view lies on screen; nil without a window.
+    var rectOnScreen: NSRect? { window?.convertToScreen(convert(bounds, to: nil)) }
 }
 
 /// Whether what is under the pointer is what it aimed at: not once it

@@ -209,11 +209,10 @@ final class CommandPalette: NSObject {
         }
     }
 
-    /// Where the palette unfolds from: 96 %, `origin` (in the panel's
-    /// layer, y up) staying where it is.
-    static func unfoldStart(from origin: NSPoint) -> CGAffineTransform {
-        let scale: CGFloat = 0.96
-        return CGAffineTransform(translationX: origin.x * (1 - scale), y: origin.y * (1 - scale)).scaledBy(x: scale, y: scale)
+    /// Where the palette unfolds from: `scale` of its size, `origin` (in
+    /// the panel's layer, y up) staying where it is.
+    static func unfoldStart(from origin: NSPoint, scale: CGFloat = 0.96) -> CGAffineTransform {
+        CGAffineTransform(translationX: origin.x * (1 - scale), y: origin.y * (1 - scale)).scaledBy(x: scale, y: scale)
     }
 
     /// Today's frame: centred over a window at `windowFrame` (screen
@@ -267,8 +266,7 @@ final class CommandPalette: NSObject {
               windowShows(window), window.alphaValue > 0,
               !bar.isHiddenOrHasHiddenAncestor, !isClippedAway(bar),
               sequence(first: bar, next: \.superview).allSatisfy({ $0.alphaValue > 0 }) else { return nil }
-        let rect = window.convertToScreen(bar.convert(bar.bounds, to: nil))
-        guard window.frame.intersects(rect) else { return nil }
+        guard let rect = bar.rectOnScreen, window.frame.intersects(rect) else { return nil }
         return rect
     }
 

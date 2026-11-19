@@ -472,6 +472,13 @@ the text stays flat and sharp.
   while the focus moves within the workspace on screen; an arriving or
   leaving workspace changes at once, under its slide, and stillness
   (Animate the interface off, Reduce motion) makes it instant.
+- **From the source (study P7):** the inbox comes out of the bar's badge
+  and goes back into it, a request's callout out of its rail icon: from
+  60 % of their size about the point of their edge nearest it, 0.32 s in
+  with a slight overshoot, 0.24 s out (`PanelGrowth`, as the palette
+  already unfolds from the bar). The window's shadow comes once the panel
+  is whole; going, it takes no click. Only the panel moves; Reduce motion
+  shows and closes it at once.
 
 ## Plan
 

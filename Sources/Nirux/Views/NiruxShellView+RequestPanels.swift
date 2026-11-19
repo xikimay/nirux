@@ -39,7 +39,7 @@ extension NiruxShellView {
         inbox.onAnswer = { [weak self] request, choice, button in self?.answerRequest(request, choice, button: button) }
         inbox.onOpenTask = { [weak self] request in self?.goToRequest(request) }
         inbox.onClose = { [weak self] in self?.closeInbox() }
-        let panel = RequestPanel(content: inbox)
+        let panel = makeRequestPanel(holding: inbox)
         panel.onEscape = { [weak self] in self?.closeInbox() }
         panel.ownsWindow = { [weak self, weak panel] window in self?.isReplyPopoverWindow(window, of: panel) == true }
         panel.onClose = { [weak self, weak panel] closing, hadKeyboard in
@@ -47,6 +47,8 @@ extension NiruxShellView {
             if let panel { closeReplyPopovers(of: panel) }
             if closing == .byHost, hadKeyboard { giveKeyboardBack() }
         }
+        // Out of the bar's badge, back into it.
+        panel.source = { [weak self] in (self?.commandBarToolbar?.bar.waitingButton).flatMap(Self.screenRect) }
         // The badge acts on the open inbox (⌘J again).
         panel.keepsOpen = { [weak self] event in self?.isOnWaitingSegment(event) == true }
         panel.closesOnClicks = { [weak self] window in window === self?.commandBarToolbar?.bar.window }
@@ -63,15 +65,28 @@ extension NiruxShellView {
     /// to most of the window; under the window's top while no bar shows.
     func inboxFrame(for inbox: RequestInboxView, in window: NSWindow) -> NSRect {
         let size = NSSize(width: RequestInboxView.width, height: inbox.fittingHeight(maximum: window.frame.height * 0.7))
-        if let bar = commandBarToolbar?.bar, let barWindow = bar.window, !bar.isHiddenOrHasHiddenAncestor {
-            let barRect = barWindow.convertToScreen(bar.convert(bar.bounds, to: nil))
-            let screen = (barWindow.screen ?? window.screen)?.visibleFrame
+        if let bar = commandBarToolbar?.bar, let barRect = bar.rectOnScreen, !bar.isHiddenOrHasHiddenAncestor {
+            let screen = (bar.window?.screen ?? window.screen)?.visibleFrame
             return CommandPalette.place(underBar: barRect, in: window.frame, screen: screen, size: size).frame
         }
         // No bar: hung from the window's top, inside the window and then
         // the screen, as under the bar.
         let top = NSRect(x: window.frame.midX - 1, y: window.frame.maxY - CommandBarView.height, width: 2, height: 0)
         return CommandPalette.place(underBar: top, in: window.frame, screen: window.screen?.visibleFrame, size: size).frame
+    }
+
+    /// Where `view` shows, in screen coordinates; nil while it doesn't
+    /// (hidden, scrolled out of the rail).
+    static func screenRect(of view: NSView) -> NSRect? {
+        guard !view.isHiddenOrHasHiddenAncestor, !view.rectInSight.isEmpty else { return nil }
+        return view.rectOnScreen
+    }
+
+    /// A request panel that moves as the interface does.
+    private func makeRequestPanel(holding content: NSView) -> RequestPanel {
+        let panel = RequestPanel(content: content)
+        panel.animates = { [weak self] in self?.agentLightsMayMove == true }
+        return panel
     }
 
     private func isOnWaitingSegment(_ event: NSEvent) -> Bool {
@@ -115,7 +130,7 @@ extension NiruxShellView {
         callout.onAnswer = { [weak self] request, choice, button in self?.answerRequest(request, choice, button: button) }
         callout.onOpenTask = { [weak self] request in self?.goToRequest(request) }
         callout.onClose = { [weak self] in self?.closeCallout() }
-        let panel = RequestPanel(content: callout)
+        let panel = makeRequestPanel(holding: callout)
         panel.onEscape = { [weak self] in self?.closeCallout() }
         panel.ownsWindow = { [weak self, weak panel] window in self?.isReplyPopoverWindow(window, of: panel) == true }
         panel.keepsShortcut = { [weak self, weak panel] _ in self?.isReplying(panel) == true }
@@ -127,6 +142,8 @@ extension NiruxShellView {
             requestsState.calloutTaskID = nil
             if closing == .byHost, hadKeyboard { giveKeyboardBack() }
         }
+        // Out of its rail icon, back into it.
+        panel.source = { [weak self] in self?.requestsState.calloutAnchor.flatMap(Self.screenRect) }
         // A click on its own icon closes it there (`openCallout`), not here
         // and then open again.
         panel.keepsOpen = { [weak self] event in
@@ -152,7 +169,7 @@ extension NiruxShellView {
     }
 
     func calloutFrame(for callout: RequestCalloutView, anchor: NSView, in window: NSWindow) -> NSRect {
-        let icon = anchor.window?.convertToScreen(anchor.convert(anchor.bounds, to: nil)) ?? .zero
+        let icon = anchor.rectOnScreen ?? .zero
         // Capped as the inbox is: the card scrolls past it.
         let height = min(callout.fittingHeight, window.frame.height * 0.7)
         return Self.calloutFrame(

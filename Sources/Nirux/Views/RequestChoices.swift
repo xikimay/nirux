@@ -134,8 +134,7 @@ final class RequestArming {
     /// Where `button` is: on screen while it has a window, so that a move of
     /// its panel or its window counts; else in `container`.
     static func place(of button: NSView, in container: NSView) -> NSRect {
-        guard let window = button.window else { return container.convert(button.bounds, from: button) }
-        return window.convertToScreen(button.convert(button.bounds, to: nil))
+        button.rectOnScreen ?? container.convert(button.bounds, from: button)
     }
 
     /// Has `observer` hear `window` move (and nothing else's): its answers
