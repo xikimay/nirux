@@ -36,7 +36,7 @@ final class WorkspaceState {
             onFocusedColumnChanged?()
         }
     }
-    private var lastCameraX: CGFloat = 0
+    private(set) var lastCameraX: CGFloat = 0
     let cwd: String
     var title: String
     var titleIsManual: Bool = false
@@ -1019,6 +1019,8 @@ extension WorkspaceState {
     static let columnGap = Theme.Space.sm
     static let columnInset = Theme.Space.sm
     private static let resizeHandleWidth: CGFloat = 9
+    /// The strip's slide to a card.
+    static let slideDuration: CFTimeInterval = 0.3
 
     /// What a width fraction of 1 spans, its gap included: the viewport
     /// less the air at its edges, plus one gap. Two halves then fill the
@@ -1136,7 +1138,7 @@ extension WorkspaceState {
             let anim = CABasicAnimation(keyPath: "transform.translation.x")
             anim.fromValue = shown - stripX
             anim.toValue = 0
-            anim.duration = 0.3
+            anim.duration = Self.slideDuration
             anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
             anim.isRemovedOnCompletion = true
             layer.add(anim, forKey: "colSlide")
