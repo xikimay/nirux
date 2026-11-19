@@ -745,13 +745,29 @@ extension PersistedStateCodingTests {
         )
         XCTAssertEqual(tracker.sessionID(for: agy), "c1")
         // A one-shot run or a subcommand holds nothing to resume.
-        func process(_ arguments: [String]) -> ForegroundProcess {
-            ForegroundProcess(instance: ProcessInstance(pid: 8, startedAt: 1), name: "agy", arguments: arguments)
+        func process(_ arguments: [String], pid: pid_t = 8) -> ForegroundProcess {
+            ForegroundProcess(instance: ProcessInstance(pid: pid, startedAt: 1), name: "agy", arguments: arguments)
         }
         XCTAssertTrue(AgentHookCenter.isHeadlessAgy(process(["agy", "-p", "summarize"])))
         XCTAssertTrue(AgentHookCenter.isHeadlessAgy(process(["agy", "plugin", "list"])))
         XCTAssertFalse(AgentHookCenter.isHeadlessAgy(process(["agy", "-i", "Read .agy-handover.md"])))
         XCTAssertFalse(AgentHookCenter.isHeadlessAgy(agy))
+        XCTAssertFalse(AgentHookCenter.isHeadlessAgy(process(["agy", "fix the login form"])), "a prompt, not a subcommand")
+        // Its process's first conversation: its subagents' come from the same
+        // process; a shell in front (Ctrl-Z) leaves it; another agy drops it.
+        var live = ForegroundSessionTracker.agy
+        let running = process(["agy"])
+        XCTAssertTrue(live.capture(sessionID: "main", emitterBelongsToForegroundJob: true, foregroundProcess: running))
+        XCTAssertFalse(live.capture(sessionID: "subagent", emitterBelongsToForegroundJob: true, foregroundProcess: running))
+        let suspended = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 1), name: "zsh", arguments: ["-zsh"])
+        XCTAssertFalse(live.invalidateBinding(ifProcessChangedTo: suspended))
+        XCTAssertNil(live.sessionID(for: suspended))
+        XCTAssertEqual(live.sessionID(for: running), "main")
+        XCTAssertTrue(live.invalidateBinding(ifProcessChangedTo: process(["agy"], pid: 10)))
+        // A resumed one is its launch's, whatever a subagent reports first.
+        let resumed = process(["agy", "--conversation", "c2"], pid: 11)
+        XCTAssertTrue(live.capture(sessionID: "subagent", emitterBelongsToForegroundJob: true, foregroundProcess: resumed))
+        XCTAssertEqual(live.boundSessionID(for: resumed.instance), "c2")
         let column = PersistedColumn(
             widthPreset: 1, cwd: "/w", columnType: .agy, webViewURL: nil,
             claudeLaunchMode: nil, codexLaunchMode: nil, agySessionID: "c1"

@@ -285,10 +285,10 @@ struct AgentHookEvent: Codable, Equatable {
             stopHookActive = nil
         case .agy:
             // Which conversation, and where: never its prompt (lastUserInput).
-            // A subagent's Stop is its own conversation's, not the column's.
-            guard payload["hookEventName"] as? String == "Stop",
-                  (payload["parentConversationId"] as? String ?? "").isEmpty else { return nil }
-            name = .stop
+            // A subagent's SessionStart looks the same (probed on agy 1.5.12):
+            // the column keeps its process's first (ForegroundSessionTracker).
+            guard payload["hookEventName"] as? String == "SessionStart" else { return nil }
+            name = .sessionStart
             sessionID = payload["conversationId"] as? String
             cwd = payload["cwd"] as? String
             source = nil

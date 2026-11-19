@@ -386,13 +386,23 @@ enum AgentHookInstaller {
         return #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x \#(path) ]; then exec \#(path) --hook claude --agy; else /bin/cat >/dev/null; fi"#
     }
 
-    /// Stop says which conversation a column's agy runs, for its resume
-    /// after a restart: one that took a turn (a never-prompted one has none
-    /// to resume), resumed or not (a resumed agy sends no SessionStart).
-    /// Never PreToolUse: its hooks must decide on the tool call.
+    /// SessionStart says which conversation a column's agy runs, for its
+    /// resume after a restart: its process's first (a resumed agy sends none
+    /// and is known by its launch). Never PreToolUse, whose hooks must decide
+    /// on the tool call. agy's default timeout (30 s) covers a cold start of
+    /// the receiver.
     static func agyHooks(executablePath: String) -> [String: Any] {
-        let handler: [String: Any] = ["type": "command", "command": agyHookCommand(executablePath: executablePath), "timeout": 5]
-        return ["Stop": [handler]]
+        let handler: [String: Any] = ["type": "command", "command": agyHookCommand(executablePath: executablePath)]
+        return ["SessionStart": [handler]]
+    }
+
+    /// `installAgyHooks` from a build that writes the hooks: run when Nirux
+    /// starts an agy, which may have come after Nirux launched.
+    static func installAgyHooksIfInstalling(
+        environment: [String: String] = ProcessInfo.processInfo.environment, bundleURL: URL = Bundle.main.bundleURL
+    ) {
+        guard shouldInstall(environment: environment, bundleURL: bundleURL) else { return }
+        installAgyHooks()
     }
 
     /// Writes Nirux's named hook, and only it, into ~/.gemini/config/hooks.json,

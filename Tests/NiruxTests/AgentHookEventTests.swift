@@ -8,18 +8,15 @@ final class AgentHookEventTests: XCTestCase {
     /// prompt.
     func testAgyHooksSayOnlyWhichConversation() throws {
         let payload: [String: Any] = [
-            "hookEventName": "Stop", "conversationId": "c1", "cwd": "/w", "fullyIdle": true,
+            "hookEventName": "SessionStart", "conversationId": "c1", "cwd": "/w",
             "lastUserInput": "the user's prompt", "transcriptPath": "/t/transcript_full.jsonl"
         ]
         let event = try XCTUnwrap(AgentHookEvent(kind: .agy, payload: payload, env: ["NIRUX_AGENT_UUID": "u"], now: 1))
-        XCTAssertEqual(event.name, .stop)
+        XCTAssertEqual(event.name, .sessionStart)
         XCTAssertEqual(event.sessionID, "c1")
         XCTAssertEqual(event.cwd, "/w")
         XCTAssertFalse(String(decoding: try JSONEncoder().encode(event), as: UTF8.self).contains("the user's prompt"))
-        XCTAssertNil(AgentHookEvent(kind: .agy, payload: ["hookEventName": "SessionStart", "conversationId": "c2"], env: [:], now: 1))
-        XCTAssertNil(AgentHookEvent(
-            kind: .agy, payload: ["hookEventName": "Stop", "conversationId": "sub", "parentConversationId": "c1"], env: [:], now: 1
-        ), "a subagent's")
+        XCTAssertNil(AgentHookEvent(kind: .agy, payload: ["hookEventName": "Stop", "conversationId": "c2"], env: [:], now: 1))
     }
 
     func testClaudePreToolUse() {

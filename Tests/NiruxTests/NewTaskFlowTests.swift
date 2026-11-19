@@ -646,7 +646,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
 
     /// agy's Stop binds its column to the conversation, which the state file
     /// keeps for the restore; it never drives the column's status.
-    func testAgyStopBindsTheConversationTheStateFileKeeps() throws {
+    func testAgyStartBindsTheConversationARestoreResumes() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let workspace = try XCTUnwrap(shell.activeWorkspace)
@@ -657,8 +657,9 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let pty = try XCTUnwrap(column.pty)
             UIFlowHarness.waitUntil("agy in front") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
             let agy = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+            let conversation = "92baa9b8-92d8-452f-8577-f4b883d357d1"
             let event = try XCTUnwrap(AgentHookEvent(
-                kind: .agy, payload: ["hookEventName": "Stop", "conversationId": "c1", "cwd": harness.repo],
+                kind: .agy, payload: ["hookEventName": "SessionStart", "conversationId": conversation, "cwd": harness.repo],
                 env: ["NIRUX_AGENT_UUID": try XCTUnwrap(column.agentUUID)], now: Date().timeIntervalSince1970,
                 emitterProcess: agy.instance
             ))
@@ -669,7 +670,11 @@ final class NewTaskFlowTests: UIFlowTestCase {
             shell.applyAgentHookEvents([applied])
             let saved = try XCTUnwrap(shell.persistedState().workspaces.first { $0.id == workspace.id }?.columns.last)
             XCTAssertEqual(saved.columnType, .agy)
-            XCTAssertEqual(saved.agySessionID, "c1")
+            XCTAssertEqual(saved.agySessionID, conversation)
+            shell.saveState()
+            shell.restoreState()
+            let restored = try XCTUnwrap(shell.workspaces.first { $0.id == workspace.id }?.columns.last)
+            XCTAssertEqual(restored.deferredAgent?.agent, .agy(resume: .session(conversation)))
         }
     }
 

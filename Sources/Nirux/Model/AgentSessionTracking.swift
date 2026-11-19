@@ -3,17 +3,17 @@ import Foundation
 /// Binds an agent conversation ID to the exact process instance running it,
 /// so a persisted ID never outlives the process that proved it: a replaced
 /// or exited agent drops its binding instead of lending its ID to the next
-/// one. Shared core of the Codex and Claude trackers.
+/// one. Shared core of the Codex, Antigravity and Claude trackers.
 struct AgentSessionBinding {
     private struct Binding: Equatable {
         let sessionID: String
         let process: ProcessInstance
     }
 
-    /// Foreground process name of the agent (`codex`, `claude`).
+    /// Foreground process name of the agent (`codex`, `agy`, `claude`).
     let processName: String
     /// Argument preceding the session ID in a restore launch
-    /// (`codex resume <id>`, `claude --resume <id>`).
+    /// (`codex resume <id>`, `agy --conversation <id>`, `claude --resume <id>`).
     let resumeArgument: String
 
     private var binding: Binding?
@@ -88,12 +88,20 @@ struct AgentSessionBinding {
 /// Codex's thread, Antigravity's conversation.
 struct ForegroundSessionTracker {
     private var session: AgentSessionBinding
+    /// agy: a process's conversation is the one it was launched on, else the
+    /// first it reports (its subagents report theirs from the same process,
+    /// with nothing to tell them apart), and it stays while another process
+    /// holds the terminal (Ctrl-Z).
+    private let keepsProcessSession: Bool
 
     static var codex: Self { Self(processName: "codex", resumeArgument: "resume") }
-    static var agy: Self { Self(processName: AgentProgramStatus.process, resumeArgument: "--conversation") }
+    static var agy: Self {
+        Self(processName: AgentProgramStatus.process, resumeArgument: "--conversation", keepsProcessSession: true)
+    }
 
-    init(processName: String, resumeArgument: String) {
+    init(processName: String, resumeArgument: String, keepsProcessSession: Bool = false) {
         session = AgentSessionBinding(processName: processName, resumeArgument: resumeArgument)
+        self.keepsProcessSession = keepsProcessSession
     }
 
     mutating func prepareResume(sessionID: String) {
@@ -111,21 +119,27 @@ struct ForegroundSessionTracker {
               emitterBelongsToForegroundJob else {
             return false
         }
-        return session.bind(sessionID: sessionID, process: foregroundProcess.instance)
+        guard keepsProcessSession else { return session.bind(sessionID: sessionID, process: foregroundProcess.instance) }
+        guard session.sessionID(boundTo: foregroundProcess.instance) == nil else { return false }
+        let arguments = foregroundProcess.arguments
+        let launched = arguments.firstIndex(of: session.resumeArgument).flatMap { arguments[safe: $0 + 1] }
+        return session.bind(sessionID: launched ?? sessionID, process: foregroundProcess.instance)
     }
 
     mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {
-        session.sessionID(for: foregroundProcess)
+        if keepsProcessSession, foregroundProcess?.name != session.processName { return nil }
+        return session.sessionID(for: foregroundProcess)
     }
 
-    /// Thread bound to this `codex` process, if any.
+    /// Session bound to this process, if any.
     func boundSessionID(for process: ProcessInstance) -> String? {
         session.sessionID(boundTo: process)
     }
 
     @discardableResult
     mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
-        session.invalidateBinding(ifProcessChangedTo: foregroundProcess)
+        if keepsProcessSession, foregroundProcess?.name != session.processName { return false }
+        return session.invalidateBinding(ifProcessChangedTo: foregroundProcess)
     }
 }
 

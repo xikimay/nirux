@@ -211,6 +211,7 @@ extension NiruxShellView {
 
     func openAgy() {
         guard let workspace = activeWorkspace else { return }
+        AgentHookInstaller.installAgyHooksIfInstalling()
         launchInNewColumn(Self.agyCommand(), in: workspace)
     }
 
