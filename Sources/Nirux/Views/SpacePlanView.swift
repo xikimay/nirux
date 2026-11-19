@@ -33,8 +33,9 @@ final class SpacePlanView: NSView {
     private(set) var scale: CGFloat = 1
     private let ring = CALayer()
     /// What zooms: the rows' pictures, in a view of their own (its layer's
-    /// `sublayerTransform` moves them; AppKit owns the layers).
-    let world = NSView()
+    /// `sublayerTransform` moves them; AppKit owns the layers). The plan
+    /// takes its clicks.
+    let world: NSView = World()
     /// The names and lines beside the rows, which don't zoom.
     private var labels: [NSView] = []
     /// A picture at the size of the viewport over the zoom: what the work
@@ -90,6 +91,10 @@ final class SpacePlanView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private final class World: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
 
     override var acceptsFirstResponder: Bool { true }
 
