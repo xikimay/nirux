@@ -33,7 +33,7 @@ extension NiruxShellView {
         // It recedes and fades, then goes; with Reduce motion it only
         // fades.
         let curve = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.6, 1)
-        if agentLightsMayMove {
+        if (agentLightsMayMove || ZZ("recedesStill")) && !ZZ("noRecede") {
             Self.passCard(closingView, from: 1, to: Self.closeScale, duration: Self.closeDuration, curve: curve)
         }
         NSAnimationContext.runAnimationGroup { ctx in

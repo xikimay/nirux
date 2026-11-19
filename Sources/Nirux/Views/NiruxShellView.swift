@@ -730,10 +730,10 @@ extension NiruxShellView {
         column.isArriving = true
         workspace.showShadows()
         applyAgentLights()
-        column.view.layer?.zPosition = 1
+        if !ZZ("notOver") { column.view.layer?.zPosition = 1 }
         column.view.alphaValue = 0
         let curve = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
-        Self.passCard(column.view, from: Self.arrivalScale, to: 1, duration: Self.arrivalDuration, curve: curve)
+        Self.passCard(column.view, from: ZZ("fromBehind") ? 0.92 : Self.arrivalScale, to: 1, duration: Self.arrivalDuration, curve: curve)
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = Self.arrivalDuration
             ctx.timingFunction = curve
@@ -744,8 +744,8 @@ extension NiruxShellView {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.arrivalDuration) { [weak self, weak column, weak workspace] in
             guard let self, let column, let workspace else { return }
             column.isArriving = false
-            column.view.layer?.zPosition = 0
-            column.view.layer?.removeAnimation(forKey: Self.cardPassKey)
+            if !ZZ("staysOver") { column.view.layer?.zPosition = 0 }
+            if !ZZ("heldAfter") { column.view.layer?.removeAnimation(forKey: Self.cardPassKey) }
             workspace.showShadows()
             self.applyAgentLights()
         }
