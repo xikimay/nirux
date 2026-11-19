@@ -11,6 +11,27 @@ extension ColumnState {
     static let glideKey = "cardGlide"
     static let glideDuration: CFTimeInterval = 0.36
 
+    /// What moves with the card: its view's, light's and shadow's layers.
+    var cardLayers: [CALayer] { [view, light, shadow].compactMap { $0?.layer } }
+
+    /// How high the card lies, from its state: over its neighbours while it
+    /// arrives or a move lifts it, unless it is going.
+    func updateDepth() {
+        let depth: CGFloat = (isArriving || lifts > 0) && !isClosing ? 1 : 0
+        cardLayers.forEach { $0.zPosition = depth }
+    }
+
+    /// `step` after `duration`, on time once the change is committed (a
+    /// busy turn delays its start), not on the animations' completion,
+    /// which a window out of view may never report.
+    static func afterCommit(_ duration: CFTimeInterval, _ step: @escaping @MainActor () -> Void) {
+        DispatchQueue.main.async {
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+                MainActor.assumeIsolated(step)
+            }
+        }
+    }
+
     /// `scale` about a card's middle: a view's layer turns about its corner.
     static func scaledAboutMiddle(_ size: NSSize, by scale: CGFloat) -> CGAffineTransform {
         CGAffineTransform(translationX: size.width * (1 - scale) / 2, y: size.height * (1 - scale) / 2)
@@ -48,31 +69,31 @@ extension ColumnState {
         group.fillMode = .forwards
         group.isRemovedOnCompletion = false
         layer.add(group, forKey: Self.passKey)
-        // On time once the change is committed (a busy turn delays its
-        // start), not on the animation's completion, which a window out of
-        // view may never report.
-        DispatchQueue.main.async {
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self, self.passes == pass else { return }
-                    self.view.layer?.removeAnimation(forKey: Self.passKey)
-                    then()
-                }
-            }
+        Self.afterCommit(duration) { [weak self] in
+            guard let self, self.passes == pass else { return }
+            self.view.layer?.removeAnimation(forKey: Self.passKey)
+            then()
         }
+    }
+
+    /// What the glide and the lift add to where the card lies now: its
+    /// translation shown, less the share of a pass's scale about the middle.
+    private var shownOffset: CGPoint {
+        guard let shown = view.layer?.presentation()?.transform else { return .zero }
+        let size = view.frame.size
+        return CGPoint(x: shown.m41 - size.width * (1 - shown.m11) / 2, y: shown.m42 - size.height * (1 - shown.m22) / 2)
     }
 
     /// Where the card shows in its strip, a glide on its way included, and
     /// how wide it is.
     var shownPlace: (x: CGFloat, width: CGFloat) {
-        let gliding = (view.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber)?.doubleValue ?? 0
-        return (view.frame.minX + CGFloat(gliding), view.frame.width)
+        (view.frame.minX + shownOffset.x, view.frame.width)
     }
 
     /// A neighbour pushed or let go of the card: it glides to its place
     /// from `dx` away, its light and its shadow with it.
     func glide(by dx: CGFloat) {
-        for layer in [view, light, shadow].compactMap({ $0?.layer }) {
+        for layer in cardLayers {
             let glide = CABasicAnimation(keyPath: "transform.translation.x")
             glide.fromValue = dx
             glide.toValue = 0
@@ -89,42 +110,71 @@ extension ColumnState {
     static let passShade: Float = 0.35
 
     /// Moved, the card passes over the one it swaps with, while both glide:
-    /// it rises a little on its way, its shadow falling on the other, which
-    /// dims under it a moment.
+    /// it rises a little on its way, from the height it shows (a held key),
+    /// its shadow falling on the other, which dims under it a moment. Not a
+    /// card that is going.
     func lift(over passed: ColumnState) {
+        guard !isClosing else { return }
         let duration = Self.glideDuration
-        let curve = CAMediaTimingFunction(controlPoints: 0.3, 0.6, 0.3, 1)
-        let raised = [view, light, shadow].compactMap { $0?.layer }
+        let height = shownOffset.y
         lifts += 1
-        for layer in raised {
-            layer.zPosition = 1
+        updateDepth()
+        for layer in cardLayers {
             let rise = CAKeyframeAnimation(keyPath: "transform.translation.y")
-            rise.values = [0, Self.liftHeight, 0] as [CGFloat]
+            rise.values = [height, Self.liftHeight, 0] as [CGFloat]
             rise.isAdditive = true
             rise.duration = duration
-            rise.timingFunction = curve
+            rise.timingFunction = CAMediaTimingFunction(controlPoints: 0.3, 0.6, 0.3, 1)
             layer.add(rise, forKey: Self.liftKey)
         }
-        let shade = CALayer()
-        if let under = passed.view.layer {
-            shade.frame = under.bounds
-            shade.backgroundColor = Theme.Color.base.cgColor
-            shade.opacity = 0
-            under.addSublayer(shade)
-            let dim = CAKeyframeAnimation(keyPath: "opacity")
-            dim.values = [0, Self.passShade, 0] as [Float]
-            dim.duration = duration
-            shade.add(dim, forKey: Self.liftKey)
-        }
-        // On time, not on the animations' completion, which a window out of
-        // view may never report.
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
-            MainActor.assumeIsolated {
-                shade.removeFromSuperlayer()
-                guard let self else { return }
-                self.lifts -= 1
-                if self.lifts == 0 { raised.forEach { $0.zPosition = 0 } }
-            }
+        passed.dim(for: duration)
+        Self.afterCommit(duration) { [weak self] in
+            guard let self else { return }
+            self.lifts -= 1
+            self.updateDepth()
         }
     }
+
+    /// A card passes over this one: it dims a moment under one shade, from
+    /// how dark it shows, however many pass; the shade goes with the last.
+    private func dim(for duration: CFTimeInterval) {
+        let shade = passShadeView ?? {
+            let shade = PassShadeView(frame: view.bounds)
+            view.addSubview(shade)
+            passShadeView = shade
+            return shade
+        }()
+        let shown = shade.layer?.presentation()?.opacity ?? 0
+        dims += 1
+        let dim = CAKeyframeAnimation(keyPath: "opacity")
+        dim.values = [shown, Self.passShade, 0] as [Float]
+        dim.duration = duration
+        shade.layer?.add(dim, forKey: Self.liftKey)
+        Self.afterCommit(duration) { [weak self] in
+            guard let self else { return }
+            self.dims -= 1
+            guard self.dims == 0 else { return }
+            self.passShadeView?.removeFromSuperview()
+            self.passShadeView = nil
+        }
+    }
+}
+
+/// The shade over a card another passes over (`ColumnState.lift`): above
+/// its content, its size, transparent at rest. Decoration: it takes no
+/// click and no VoiceOver focus.
+final class PassShadeView: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = Theme.Color.base.cgColor
+        layer?.opacity = 0
+        autoresizingMask = [.width, .height]
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

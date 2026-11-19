@@ -705,16 +705,16 @@ extension NiruxShellView {
         let size = column.view.frame.size
         guard agentLightsMayMove, size.width > 0, size.height > 0 else { return }
         column.isArriving = true
+        column.updateDepth()
         workspace.showShadows()
         applyAgentLights()
-        column.view.layer?.zPosition = 1
         column.pass(
             from: (Self.arrivalScale, 0), to: 1, alpha: 1, duration: Self.arrivalDuration,
             curve: CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
         ) { [weak self, weak column, weak workspace] in
             guard let self, let column, let workspace else { return }
             column.isArriving = false
-            column.view.layer?.zPosition = 0
+            column.updateDepth()
             workspace.showShadows()
             self.applyAgentLights()
         }

@@ -27,7 +27,7 @@ extension NiruxShellView {
         closingColumn.isClosing = true
         // It takes a card still arriving: behind its neighbours again.
         closingColumn.isArriving = false
-        closingColumn.view.layer?.zPosition = 0
+        closingColumn.updateDepth()
         // Its light leaves with it.
         applyAgentLights()
         workspace.showShadows()

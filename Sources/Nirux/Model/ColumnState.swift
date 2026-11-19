@@ -136,6 +136,10 @@ final class ColumnState {
     var passes = 0
     /// Moves on their way that lift its card over a neighbour (`lift`).
     var lifts = 0
+    /// Moves on their way that pass over its card, and the shade they dim
+    /// it with (`lift`).
+    var dims = 0
+    var passShadeView: PassShadeView?
 
     /// ⌘F find bar, created on first use, and the terminal search it
     /// drives; a browser column's bar drives its `pageFind`
