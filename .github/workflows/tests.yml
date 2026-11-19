@@ -59,6 +59,8 @@ jobs:
       - name: Flake gate
         run: |
           status=0
-          scripts/mutants-class.sh NiruxTests.SpaceCrossingTests noRecede noFade notFromFront offMiddle liveShown notOnTime ungated stacked motionIgnored menuCrosses || status=1
+          scripts/mutants-class.sh NiruxTests.SpaceCrossingTests noRecede noFade notFromFront offMiddle liveShown notOnTime ungated stacked motionIgnored menuCrosses pictureOfPicture || status=1
+          scripts/mutants-class.sh NiruxTests.UnderGlassTests neverCloses noSweep glassUngated || status=1
           scripts/repeat-class.sh NiruxTests.SpaceCrossingTests 10 3 NiruxTests.FrozenViewTests NiruxTests.WorkspaceSwitchTests || status=1
+          scripts/repeat-class.sh NiruxTests.UnderGlassTests 10 3 NiruxTests.ColumnCardsTests || status=1
           exit $status

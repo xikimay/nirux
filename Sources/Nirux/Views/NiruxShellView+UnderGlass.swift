@@ -47,7 +47,7 @@ extension NiruxShellView {
         passingUnderRail = workspace
         reachUnderRail(workspace)
         sideEffects.afterCommit(duration) { [weak self] in
-            guard let self, underGlassGeneration == generation else { return }
+            guard let self, !ZZ("neverCloses"), ZZ("glassUngated") || underGlassGeneration == generation else { return }
             closeUnderRail(generation)
         }
     }
@@ -91,7 +91,7 @@ extension NiruxShellView {
         let reached = [("position", NSValue(point: layer.position)), ("bounds", NSValue(rect: layer.bounds))]
         Self.reach(layer, by: layer.bounds.minX)
         let curve = CAMediaTimingFunction(name: .easeInEaseOut)
-        for (key, value) in reached {
+        for (key, value) in reached where !ZZ("noSweep") {
             let edge = CABasicAnimation(keyPath: key)
             edge.fromValue = value
             edge.duration = Self.underGlassClose
