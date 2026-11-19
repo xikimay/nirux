@@ -247,7 +247,7 @@ final class PRFeedbackTests: XCTestCase {
             thread(comment("alice", at: "2026-09-01T10:00:00Z"))
         ])
         XCTAssertEqual(
-            NiruxShellView.prFeedbackAddressPrompt(for: pullRequest, items: feedback.items),
+            PRFeedback.addressPrompt(for: pullRequest, items: feedback.items),
             "/receiving-code-review Address this feedback on PR #52 (https://github.com/o/r/pull/52): "
                 + "https://github.com/o/r/pull/7#claude-2026-09-02T10:00:00Z https://github.com/o/r/pull/7#alice-2026-09-01T10:00:00Z"
         )

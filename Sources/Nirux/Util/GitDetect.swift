@@ -71,22 +71,31 @@ struct GitIdentity: Hashable, Sendable {
     /// folder counts whatever it holds: `.claude/` with only the local
     /// settings in it too.
     let isDirty: Bool
+    /// `isDirty` without the untracked files; the init's default is
+    /// `isDirty`.
+    let hasTrackedChanges: Bool
 
-    init(repositoryRoot: String, resolvedRepositoryRoot: String? = nil, head: String?, isDirty: Bool = false) {
+    init(
+        repositoryRoot: String, resolvedRepositoryRoot: String? = nil, head: String?, isDirty: Bool = false,
+        hasTrackedChanges: Bool? = nil
+    ) {
         self.repositoryRoot = repositoryRoot
         self.resolvedRepositoryRoot = resolvedRepositoryRoot ?? repositoryRoot
         self.head = head
         self.isDirty = isDirty
+        self.hasTrackedChanges = hasTrackedChanges ?? isDirty
     }
 
     static func == (lhs: GitIdentity, rhs: GitIdentity) -> Bool {
         lhs.repositoryRoot == rhs.repositoryRoot && lhs.head == rhs.head && lhs.isDirty == rhs.isDirty
+            && lhs.hasTrackedChanges == rhs.hasTrackedChanges
     }
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(repositoryRoot)
         hasher.combine(head)
         hasher.combine(isDirty)
+        hasher.combine(hasTrackedChanges)
     }
 }
 
@@ -153,14 +162,26 @@ enum GitDetect {
     /// leniently: without `-z` git quotes a name with a space or an accent,
     /// and a name that isn't UTF-8 must not fail the read.
     static func isDirty(status: Data, startFolder: String? = nil) -> Bool {
+        lists(status, startFolder: startFolder) { _ in true }
+    }
+
+    /// `isDirty` without the untracked files.
+    static func hasTrackedChanges(status: Data, startFolder: String? = nil) -> Bool {
+        lists(status, startFolder: startFolder) { $0.code != "??" }
+    }
+
+    /// Whether `status` lists an entry `matching` that isn't disposable.
+    private static func lists(
+        _ status: Data, startFolder: String?, matching: (WorktreeCleanup.StatusEntry) -> Bool
+    ) -> Bool {
         let folders: Set<String> = startFolder.map { [$0] } ?? []
-        var isDirty = false
-        // Stops at the first other entry.
+        var found = false
+        // Stops at the first one.
         WorktreeCleanup.scanStatus(status) { entry in
-            isDirty = !WorktreeCleanup.isDisposable(entry, startFolders: folders)
-            return !isDirty
+            found = matching(entry) && !WorktreeCleanup.isDisposable(entry, startFolders: folders)
+            return !found
         }
-        return isDirty
+        return found
     }
 
     /// `startFolder`: the folder the workspace started in (its `cwd`), the
@@ -260,7 +281,8 @@ enum GitDetect {
                 repositoryRoot: canonicalRepositoryRoot,
                 resolvedRepositoryRoot: resolvedRepositoryRoot ?? canonicalRepositoryRoot,
                 head: head,
-                isDirty: Self.isDirty(status: status.standardOutput, startFolder: startFolder)
+                isDirty: Self.isDirty(status: status.standardOutput, startFolder: startFolder),
+                hasTrackedChanges: Self.hasTrackedChanges(status: status.standardOutput, startFolder: startFolder)
             ),
             upstreamRepositoryObservation: upstreamRepositoryObservation(
                 at: canonicalRepositoryRoot,

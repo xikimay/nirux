@@ -28,6 +28,13 @@ struct PRFeedback: Hashable, Sendable {
     var sidebarCounts: SidebarPRFeedback? {
         items.isEmpty ? nil : SidebarPRFeedback(humans: humanCount, bots: botCount)
     }
+
+    /// Names the items given, so the agent addresses those and not
+    /// whatever else the PR holds.
+    static func addressPrompt(for pullRequest: PRInfo, items: [Item]) -> String {
+        "/receiving-code-review Address this feedback on PR #\(pullRequest.number) (\(pullRequest.url)): "
+            + items.map(\.url).joined(separator: " ")
+    }
 }
 
 enum PRFeedbackReader {

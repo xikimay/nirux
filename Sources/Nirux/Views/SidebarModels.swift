@@ -343,6 +343,9 @@ struct PRInfo: Hashable, Sendable {
     let additions: Int?
     let deletions: Int?
     let changedFiles: Int?
+    /// Lowercased.
+    var headRefOid: String?
+    var baseRefName: String?
 
     var failedCheckUrl: String? {
         checks.lazy.filter { $0.result == .failure }.compactMap(\.url).first
