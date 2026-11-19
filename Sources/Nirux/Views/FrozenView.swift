@@ -21,6 +21,7 @@ final class FrozenView: NSView {
             if let copy { images[ObjectIdentifier(found.layer)] = copy }
         }
         let frozen = CALayer()
+        frozen.name = layerName
         frozen.bounds = root.bounds
         frozen.masksToBounds = true
         frozen.isGeometryFlipped = root.isGeometryFlipped
@@ -33,10 +34,17 @@ final class FrozenView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    /// Out of sight: hidden, or clipping to bounds that lie outside the
-    /// root's (what it holds can't show either).
+    /// Names a picture's own layer.
+    static let layerName = "FrozenView"
+
+    /// Out of sight: hidden or clear as it shows, clipping to bounds that
+    /// lie outside the root's (what it holds can't show either), or an
+    /// earlier picture still sliding away (a picture of it would copy its
+    /// copies again, doubling them at each switch).
     private static func isOutOfSight(_ layer: CALayer, root: CALayer) -> Bool {
-        layer.isHidden || (layer.masksToBounds && !layer.convert(layer.bounds, to: root).intersects(root.bounds))
+        let shown = layer.presentation() ?? layer
+        return layer.name == layerName || shown.isHidden || shown.opacity == 0
+            || (layer.masksToBounds && !layer.convert(layer.bounds, to: root).intersects(root.bounds))
     }
 
     private static func collectSurfaces(in layer: CALayer, root: CALayer, into surfaces: inout [(layer: CALayer, surface: IOSurfaceRef)]) {
@@ -58,11 +66,16 @@ final class FrozenView: NSView {
         "borderColor", "shadowOpacity", "shadowRadius", "shadowOffset", "shadowColor", "shadowPath", "contentsScale",
         "contentsGravity", "contentsRect", "contentsCenter"
     ]
-    private static let shapeKeys = ["path", "fillColor", "fillRule", "strokeColor", "lineWidth"]
+    private static let shapeKeys = [
+        "path", "fillColor", "fillRule", "strokeColor", "lineWidth", "lineCap", "lineJoin", "lineDashPattern", "lineDashPhase",
+        "strokeStart", "strokeEnd", "miterLimit"
+    ]
     private static let gradientKeys = ["colors", "locations", "startPoint", "endPoint", "type"]
 
-    /// `layer` and what it holds in sight, each sharing its contents, a
-    /// surface's copy in `images` in place of the surface.
+    /// `layer` and what it holds in sight, as they show (mid-way through a
+    /// glide or an arrival), each sharing its contents. A surface's copy in
+    /// `images` takes the surface's place, on the canvas where the surface
+    /// isn't opaque: a frost under it isn't copied.
     static func clone(_ layer: CALayer, root: CALayer, images: [ObjectIdentifier: IOSurfaceRef]) -> CALayer? {
         guard !isOutOfSight(layer, root: root) else { return nil }
         let copy: CALayer, keys: [String]
@@ -71,42 +84,61 @@ final class FrozenView: NSView {
         case is CAGradientLayer: (copy, keys) = (CAGradientLayer(), layerKeys + gradientKeys)
         default: (copy, keys) = (CALayer(), layerKeys)
         }
-        for key in keys { copy.setValue(layer.value(forKey: key), forKey: key) }
-        copy.contents = images[ObjectIdentifier(layer)] ?? layer.contents
+        let shown = layer.presentation() ?? layer
+        for key in keys { copy.setValue(shown.value(forKey: key), forKey: key) }
+        copy.contents = layer.contents
+        if let image = images[ObjectIdentifier(layer)] {
+            copy.contents = image
+            if !layer.isOpaque { copy.backgroundColor = Theme.Color.canvas.cgColor }
+        }
         if let mask = layer.mask { copy.mask = clone(mask, root: mask, images: images) }
         copy.sublayers = layer.sublayers?.compactMap { clone($0, root: root, images: images) }
         return copy
     }
 }
 
-/// Copies of IOSurfaces, taken now and waited for: on the GPU in one pass
-/// (about 3 ms for ten terminals), else on the CPU.
+/// Copies of IOSurfaces, taken now: on the GPU in one pass (about 3 ms for
+/// ten terminals), else on the CPU. Ghostty doesn't lock the surface it
+/// shows, so a copy may hold a frame it was still drawing.
 @MainActor
 enum SurfaceCopies {
+    /// How long the main thread waits for the GPU's copies before making
+    /// them itself.
+    static let gpuWait: DispatchTimeInterval = .milliseconds(30)
+
     private static let gpu: (device: MTLDevice, queue: MTLCommandQueue)? = {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else { return nil }
         return (device, queue)
     }()
 
     /// In their order; nil where one couldn't be made.
-    static func copies(of surfaces: [IOSurfaceRef]) -> [IOSurfaceRef?] {
+    static func copies(of surfaces: [IOSurfaceRef], waitingAtMost wait: DispatchTimeInterval = gpuWait) -> [IOSurfaceRef?] {
         guard !surfaces.isEmpty else { return [] }
+        if let gpu, let copies = gpuCopies(of: surfaces, on: gpu, waitingAtMost: wait) { return copies }
+        return surfaces.map { source in blank(like: source).flatMap { cpuCopy(source, into: $0) } }
+    }
+
+    /// nil past `wait` or on a failure: the GPU's copies, if they come,
+    /// land in blanks no one reads.
+    private static func gpuCopies(
+        of surfaces: [IOSurfaceRef], on gpu: (device: MTLDevice, queue: MTLCommandQueue), waitingAtMost wait: DispatchTimeInterval
+    ) -> [IOSurfaceRef?]? {
+        guard let buffer = gpu.queue.makeCommandBuffer(), let blit = buffer.makeBlitCommandEncoder() else { return nil }
         let blanks = surfaces.map(blank(like:))
-        if let gpu, let buffer = gpu.queue.makeCommandBuffer(), let blit = buffer.makeBlitCommandEncoder() {
-            var copied = Array(repeating: false, count: surfaces.count)
-            for (index, (source, copy)) in zip(surfaces, blanks).enumerated() {
-                guard let copy, let from = texture(source, on: gpu.device), let to = texture(copy, on: gpu.device) else { continue }
-                blit.copy(from: from, to: to)
-                copied[index] = true
-            }
-            blit.endEncoding()
-            buffer.commit()
-            buffer.waitUntilCompleted()
-            return zip(surfaces, zip(blanks, copied)).map { source, made in
-                made.1 ? made.0 : made.0.flatMap { cpuCopy(source, into: $0) }
-            }
+        var copied = Array(repeating: false, count: surfaces.count)
+        for (index, (source, copy)) in zip(surfaces, blanks).enumerated() {
+            guard let copy, let from = texture(source, on: gpu.device), let to = texture(copy, on: gpu.device) else { continue }
+            blit.copy(from: from, to: to)
+            copied[index] = true
         }
-        return zip(surfaces, blanks).map { source, copy in copy.flatMap { cpuCopy(source, into: $0) } }
+        blit.endEncoding()
+        let done = DispatchSemaphore(value: 0)
+        buffer.addCompletedHandler { _ in done.signal() }
+        buffer.commit()
+        guard done.wait(timeout: .now() + wait) == .success, buffer.status == .completed else { return nil }
+        return zip(surfaces, zip(blanks, copied)).map { source, made in
+            made.1 ? made.0 : made.0.flatMap { cpuCopy(source, into: $0) }
+        }
     }
 
     /// The same size, format, rows and colour space.
