@@ -100,8 +100,8 @@ enum LeadTools {
                 listTasks, title: "List the space's tasks",
                 description: """
                     The space's tasks and repositories: each task's title, branch, repository, agent state (working, \
-                    needs the user, asking you, idle, done), pull request and checks, and the question or result it \
-                    sent you, its next step and blocker. Read it again after a /clear: Nirux keeps the state, your \
+                    needs the user, asking you, idle, done), pull request and checks, the last questions it got \
+                    answered, and the question or result it sent you, its next step and blocker. Read it again after a /clear: Nirux keeps the state, your \
                     conversation doesn't.
                     """,
                 properties: [:], required: [], readOnly: true

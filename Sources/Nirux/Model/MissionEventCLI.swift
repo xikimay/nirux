@@ -23,7 +23,7 @@ enum MissionEventCLI {
     static let maxRecommendationScalars = 600
 
     /// How a child asks, as its instructions show it.
-    static let askCommand = "\"$NIRUX_CLI_PATH\" --mission ask --kind <kind> --message \"...\" --recommend \"...\""
+    static let askCommand = "\"$NIRUX_CLI_PATH\" --mission ask --kind \"<kind>\" --message \"...\" --recommend \"...\""
     /// What the kinds mean and what to recommend, as a child's instructions say it.
     static let askGuide = "Kinds: decision (a choice the task leaves open), access (something only a person can give: "
         + "a login, a secret, a permission), spec-mismatch (the task contradicts the code or itself). For a decision or a "
