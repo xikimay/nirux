@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Binds an agent conversation ID to the exact process instance running it,
@@ -84,16 +85,25 @@ struct AgentSessionBinding {
     }
 }
 
+/// Which Codex thread a column's `codex` runs. Its notify also reports
+/// the threads it runs out of sight, such as the one that titles a new
+/// conversation (seen on codex 0.167): a thread is proven once its first
+/// message is the prompt that `codex` was launched with, or once it is the
+/// one `codex resume <id>` named, and no other thread replaces it then.
 struct CodexSessionTracker {
     private var session = AgentSessionBinding(processName: "codex", resumeArgument: "resume")
+    /// The thread its launch prompt started, and that `codex`.
+    private var launched: (sessionID: String, process: ProcessInstance)?
 
     mutating func prepareResume(sessionID: String) {
         session.prepareResume(sessionID: sessionID)
     }
 
+    /// `firstInputDigest`: `promptDigest` of the thread's first message.
     @discardableResult
     mutating func capture(
         sessionID: String?,
+        firstInputDigest: String? = nil,
         emitterBelongsToForegroundJob: Bool,
         foregroundProcess: ForegroundProcess?
     ) -> Bool {
@@ -102,7 +112,30 @@ struct CodexSessionTracker {
               emitterBelongsToForegroundJob else {
             return false
         }
+        if let firstInputDigest, firstInputDigest == Self.launchPromptDigest(of: foregroundProcess) {
+            launched = (sessionID, foregroundProcess.instance)
+        }
+        if let proven = provenSessionID(for: foregroundProcess), proven != sessionID { return false }
         return session.bind(sessionID: sessionID, process: foregroundProcess.instance)
+    }
+
+    /// The thread `process` proved it runs, if it did.
+    func provenSessionID(for process: ForegroundProcess) -> String? {
+        if let launched, launched.process == process.instance { return launched.sessionID }
+        guard let index = process.arguments.firstIndex(of: "resume"), process.arguments.indices.contains(index + 1),
+              !process.arguments[index + 1].hasPrefix("-") else { return nil }
+        return process.arguments[index + 1]
+    }
+
+    /// The digest of the prompt `process` was launched with, its last
+    /// argument: what Nirux's launch line ends with.
+    private static func launchPromptDigest(of process: ForegroundProcess) -> String? {
+        process.arguments.count > 1 ? process.arguments.last.map(promptDigest) : nil
+    }
+
+    /// SHA-256 of `prompt`, in hex: what an event keeps of a prompt.
+    static func promptDigest(_ prompt: String) -> String {
+        SHA256.hash(data: Data(prompt.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {

@@ -54,7 +54,8 @@ enum TaskTools {
                 LeadTools.tell, title: "Tell a sub-task",
                 description: """
                     Type a message into one of your sub-tasks' prompt once its agent's turn is over (more work, an \
-                    answer it didn't ask for, a slash command such as /code-review). Claude Code sub-tasks only.
+                    answer it didn't ask for, a slash command such as /code-review). Claude Code and Codex \
+                    sub-tasks only: Codex gets it through its own queue.
                     """,
                 properties: [
                     "task": ["type": "string", "description": subtaskDescription],

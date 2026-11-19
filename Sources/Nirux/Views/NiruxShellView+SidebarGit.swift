@@ -443,6 +443,7 @@ extension NiruxShellView {
             if event.kind == .codex,
                appliedEvent.resolution.column.captureCodexSession(
                    sessionID: event.sessionID,
+                   firstInputDigest: event.firstInputDigest,
                    emitterProcess: event.emitterProcess,
                    snapshot: snapshot
                ) {
@@ -545,6 +546,9 @@ extension NiruxShellView {
 
     func wireMetadataAndGitRefresh(_ workspace: WorkspaceState) {
         workspace.onMetadataChanged = { [weak self] in self?.scheduleMetadataRefresh() }
+        workspace.onCodexTurnOver = { [weak self] in
+            DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
+        }
         // The header follows its title immediately (no "· path" flicker);
         // the snapshot is only taken for shell titles such as "zsh".
         workspace.onColumnTitleChanged = { $0.updateHeaderTitle(snapshot: ProcessSnapshot()) }

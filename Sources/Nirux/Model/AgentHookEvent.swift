@@ -128,6 +128,10 @@ struct AgentHookEvent: Codable, Equatable {
     /// empty once none is: a review run in the background outlives the turn
     /// that started it. Nil from older receivers and on other events.
     var backgroundAgents: [String]?
+    /// On a Codex turn end, `CodexSessionTracker.promptDigest` of its
+    /// thread's first message, never the text: it proves the thread its
+    /// launch prompt started. Nil from older receivers.
+    var firstInputDigest: String?
     /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
     /// the request ID and deadline (epoch seconds) the receiver waits
     /// under; on approvalResolved, the request and what became of it.
@@ -260,6 +264,7 @@ struct AgentHookEvent: Codable, Equatable {
             guard let type = payload["type"] as? String, type == "agent-turn-complete" else { return nil }
             name = .turnComplete
             sessionID = payload["thread-id"] as? String
+            firstInputDigest = (payload["input-messages"] as? [String])?.first.map(CodexSessionTracker.promptDigest)
             cwd = payload["cwd"] as? String
             source = nil
             let message = payload["last-assistant-message"] as? String

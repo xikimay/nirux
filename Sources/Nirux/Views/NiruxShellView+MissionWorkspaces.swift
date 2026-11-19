@@ -289,6 +289,10 @@ extension NiruxShellView {
             let mission = delivery.mission
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
+            if Self.goesToCodex(delivery) {
+                queueForCodex(delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title, snapshot: snapshot, now: now)
+                continue
+            }
             guard let recipient = missionRecipient(of: delivery), let pty = recipient.pty,
                   !missionWaits.typing.contains(delivery.event.id),
                   pty.acceptsMissionMessage(
@@ -316,6 +320,59 @@ extension NiruxShellView {
         }
         // The cards' "Asking …" and "Answer … ready" rows follow.
         if typedAny { updateSidebar(snapshot: snapshot) }
+    }
+
+    /// A message for a Codex child: nothing is typed into Codex, it goes
+    /// into its own queue (`queueForCodex`).
+    nonisolated static func goesToCodex(_ delivery: MissionStore.AcceptedEvent) -> Bool {
+        !goesToParent(delivery.event) && delivery.mission.childAgentKind == NiruxApp.WorkspaceAgent.codex.rawValue
+    }
+
+    /// Hands `delivery`, a message for a Codex child, to Codex's own queue
+    /// for the thread its `codex` proved it runs (`CodexQueue`), once
+    /// Codex reports its turn over: Codex taking it counts as typed. It
+    /// starts it at once, that conversation being idle; if it says nothing
+    /// for `MissionWaitState.codexStartWait`, the message's sender and the
+    /// user hear so.
+    private func queueForCodex(
+        _ delivery: MissionStore.AcceptedEvent, childTitle: String?, parentTitle: String?, snapshot: ProcessSnapshot,
+        now: TimeInterval
+    ) {
+        let id = delivery.event.id
+        guard !missionWaits.typing.contains(id), missionWaits.tries[id, default: 0] < Self.missionTypingTries,
+              let column = missionRecipient(of: delivery), let pty = column.pty,
+              column.codexMissionRefusal(runningSince: runningSince(of: delivery.event, in: column, snapshot: snapshot, now: now),
+                                         snapshot: snapshot) == nil,
+              let codex = pty.foregroundProcess(snapshot: snapshot), let thread = column.provenCodexSessionID(of: codex),
+              let executable = CodexQueue.executable(of: codex.instance),
+              let text = MissionPromptText.text(for: delivery, childTitle: childTitle, parentTitle: parentTitle)
+        else { return }
+        missionWaits.typing.insert(id)
+        let sender = delivery.event.leadSender
+            ?? NewTask.MissionParent(workspaceID: delivery.mission.parentWorkspaceID, agentUUID: delivery.mission.parentAgentUUID)
+        let recipient = MissionPromptText.quoted(childTitle ?? delivery.mission.branch)
+        sideEffects.queueCodexMessage(CodexQueue.Request(executable: executable, thread: thread, message: text)) { [weak self] outcome in
+            guard let self else { return }
+            switch outcome {
+            case .queued:
+                self.finishTyping(delivery, .sent)
+                self.updateSidebar()
+                let queuedAt = Date().timeIntervalSince1970
+                DispatchQueue.main.asyncAfter(deadline: .now() + self.missionWaits.codexStartWait) { [weak self, weak pty] in
+                    guard let self, let pty, !pty.codexReported(since: queuedAt, by: codex.instance) else { return }
+                    self.tellProposer(sender, "Your message to “\(recipient)” is in its Codex's queue, but Codex hasn't started it: "
+                        + "it starts it once that conversation is idle. If Codex runs another conversation now, send it again.")
+                    self.showToast("Codex in “\(recipient)” hasn't started the Mission message in its queue yet.")
+                }
+            case .refused(let why):
+                self.missionWaits.typing.remove(id)
+                self.missionWaits.tries[id, default: 0] += 1
+                MissionWaitLog.logger.error(
+                    "Codex didn't queue a Mission message: id=\(id.prefix(8), privacy: .public) why=\(why, privacy: .public)"
+                )
+            }
+        }
+        missionWaits.noteTyped(into: column, at: now)
     }
 
     /// Records what became of a Mission message Nirux typed: typed once its
@@ -449,9 +506,14 @@ extension NiruxShellView {
     }
 
     /// The conversation `column`'s `claude` (`foreground`) confirmed through
-    /// its own hooks, while it runs; the one it will resume, while it waits to.
+    /// its own hooks, or its `codex` proved, while it runs; the one it will
+    /// resume, while it waits to.
     func conversation(of column: ColumnState, foreground: ForegroundProcess?) -> String? {
-        if case .claude(resume: .session(let resumes)?, _)? = column.deferredAgent?.agent { return resumes }
+        switch column.deferredAgent?.agent {
+        case .claude(resume: .session(let resumes)?, _)?, .codex(resume: .session(let resumes), _)?: return resumes
+        default: break
+        }
+        if let foreground, foreground.name == AgentProgramStatus.codex { return column.provenCodexSessionID(of: foreground) }
         return column.confirmedClaudeSessionID(foregroundProcess: foreground)
     }
 

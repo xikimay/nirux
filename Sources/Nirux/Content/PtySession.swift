@@ -340,8 +340,9 @@ final class PtySession: @unchecked Sendable {
         set { state.onOsc9Received = newValue }
     }
 
-    /// What Antigravity reported of itself (OSC 7501), on the main queue:
-    /// give it to `applyProgramStatus` once it is known to come from agy.
+    /// What Antigravity or Codex reported of itself (OSC 7501), on the main
+    /// queue: give it to `applyProgramStatus` or `noteCodexStatus` once it
+    /// is known to come from the agent in front.
     var onProgramStatus: ((AgentProgramStatus) -> Void)? {
         get { state.onProgramStatus }
         set { state.onProgramStatus = newValue }
@@ -361,10 +362,15 @@ final class PtySession: @unchecked Sendable {
         state.machine.takeLateSignInAlert(isUserFocused: isUserFocused, now: Date().timeIntervalSince1970)
     }
 
+    /// Takes in Codex's status (see `AgentStatusMachine.codexQueueRefusal`).
+    func noteCodexStatus(_ status: AgentProgramStatus, from process: ProcessInstance?) {
+        state.machine.noteCodexStatus(status, from: process, now: Date().timeIntervalSince1970)
+    }
+
     /// Whether `status` says something new: the same again (a redraw) needs
     /// no look at the process table.
     func isNewProgramStatus(_ status: AgentProgramStatus) -> Bool {
-        state.machine.programStatus?.status != status
+        (status.process == AgentProgramStatus.codex ? state.machine.codexStatus : state.machine.programStatus)?.status != status
     }
 
     /// Called on the main queue when the output shows a local dev-server
@@ -952,6 +958,23 @@ final class PtySession: @unchecked Sendable {
     func missionPromptRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> AgentPromptRefusal? {
         guard !hasExited else { return .noClaude }
         return state.machine.promptRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince)
+    }
+
+    /// See `AgentStatusMachine.codexQueueRefusal`.
+    func codexQueueRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> AgentPromptRefusal? {
+        guard !hasExited else { return .noClaude }
+        return state.machine.codexQueueRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince)
+    }
+
+    /// Whether `process`, the column's `codex`, reported a state after `time`.
+    func codexReported(since time: TimeInterval, by process: ProcessInstance) -> Bool {
+        guard let reported = state.machine.codexStatus else { return false }
+        return reported.process == process && reported.at > time
+    }
+
+    /// See `AgentStatusMachine.codexFacts`.
+    func codexFacts(now: TimeInterval) -> String {
+        state.machine.codexFacts(now: now)
     }
 
     /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.

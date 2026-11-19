@@ -199,6 +199,8 @@ final class WorkspaceState {
 
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
+    /// A column's Codex reported its turn over (`ColumnState.onCodexTurnOver`).
+    var onCodexTurnOver: (() -> Void)?
     /// A column's terminal title changed (fires before onMetadataChanged).
     var onColumnTitleChanged: ((ColumnState) -> Void)?
     var onFocusedColumnChanged: (() -> Void)?
@@ -691,6 +693,7 @@ extension WorkspaceState {
     }
 
     private func setupAgentAttentionTracking(for col: ColumnState) {
+        col.onCodexTurnOver = { [weak self] in self?.onCodexTurnOver?() }
         col.onAgentAttention = { [weak self, weak col] reason in
             guard let self else { return }
             // A Mission child ends its turn after asking (even in prose).

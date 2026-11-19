@@ -365,6 +365,7 @@ final class AgentHookEventTests: XCTestCase {
             "type": "agent-turn-complete",
             "thread-id": "thread-9",
             "cwd": "/tmp/proj",
+            "input-messages": ["Start the task.", "Go on."],
             "last-assistant-message": "Done."
         ]
         let event = AgentHookEvent(
@@ -376,6 +377,7 @@ final class AgentHookEventTests: XCTestCase {
         )
         XCTAssertEqual(event?.name, .turnComplete)
         XCTAssertEqual(event?.sessionID, "thread-9")
+        XCTAssertEqual(event?.firstInputDigest, CodexSessionTracker.promptDigest("Start the task."), "its first message, never the text")
         XCTAssertEqual(event?.detail, "Done.")
         XCTAssertEqual(event?.emitterProcess, emitter)
     }

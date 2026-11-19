@@ -718,8 +718,8 @@ extension MissionEventCLI {
             writeStandardError("No Mission on branch \(branch) was started from this terminal.")
             return 4
         }
-        guard mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue else {
-            writeStandardError("Nirux types messages only into a Claude Code child; this one runs \(mission.childAgentKind).")
+        guard mission.childAgentName != nil else {
+            writeStandardError("Nirux delivers messages only to a Claude Code or Codex child; this one runs \(mission.childAgentKind).")
             return 4
         }
         let sentAt = now()

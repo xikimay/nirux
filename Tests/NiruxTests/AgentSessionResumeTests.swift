@@ -156,4 +156,43 @@ final class AgentSessionResumeTests: XCTestCase {
         )
         XCTAssertEqual(tracker.sessionID(for: codex), "t1")
     }
+
+    /// Codex's notify also reports its hidden threads, such as the one that
+    /// titles a new conversation (codex 0.167): once a thread proved itself
+    /// (its first message is the launch prompt, or `codex resume` named it),
+    /// none replaces it, in either order. A `codex` that proved none binds
+    /// the last, as before.
+    func testCodexHiddenThreadsNeverReplaceTheProvenOne() {
+        let prompt = "Read .codex-handover.md for full context."
+        let launched = ForegroundProcess(
+            instance: ProcessInstance(pid: 10, startedAt: 1), name: "codex", arguments: ["codex", "-a", "never", prompt]
+        )
+        var tracker = CodexSessionTracker()
+        func capture(_ thread: String, first: String, by process: ForegroundProcess) -> Bool {
+            tracker.capture(
+                sessionID: thread, firstInputDigest: CodexSessionTracker.promptDigest(first),
+                emitterBelongsToForegroundJob: true, foregroundProcess: process
+            )
+        }
+        let title = "Generate a concise, single-line task title.\n\nUser prompt:\n" + prompt
+        XCTAssertTrue(capture("title", first: title, by: launched), "the title's turn may end first")
+        XCTAssertNil(tracker.provenSessionID(for: launched))
+        XCTAssertTrue(capture("main", first: prompt, by: launched))
+        XCTAssertEqual(tracker.provenSessionID(for: launched), "main")
+        XCTAssertFalse(capture("title-2", first: title, by: launched))
+        XCTAssertEqual(tracker.sessionID(for: launched), "main", "what a relaunch resumes")
+
+        let resumed = ForegroundProcess(
+            instance: ProcessInstance(pid: 11, startedAt: 2), name: "codex", arguments: ["codex", "resume", "main", "-C", "/repo"]
+        )
+        XCTAssertEqual(tracker.provenSessionID(for: resumed), "main")
+        XCTAssertFalse(capture("subagent", first: "Explore the code.", by: resumed))
+        XCTAssertTrue(capture("main", first: prompt, by: resumed))
+
+        let bare = ForegroundProcess(instance: ProcessInstance(pid: 12, startedAt: 3), name: "codex", arguments: ["codex"])
+        XCTAssertTrue(capture("a", first: "Hi", by: bare))
+        XCTAssertTrue(capture("b", first: "Hello", by: bare))
+        XCTAssertNil(tracker.provenSessionID(for: bare))
+        XCTAssertEqual(tracker.sessionID(for: bare), "b")
+    }
 }

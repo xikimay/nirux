@@ -36,6 +36,9 @@ final class ColumnState {
     /// permission prompt while the user isn't watching this column).
     /// The agent asks for the user (alert), with why when known.
     var onAgentAttention: ((AgentAttentionReason?) -> Void)?
+    /// Codex in front reported its turn over (OSC 7501 done or idle): a
+    /// Mission message may go into its queue.
+    var onCodexTurnOver: (() -> Void)?
 
     /// Fires when the user cmd-clicks an http(s) link in the terminal —
     /// the workspace opens it in a browser column.
@@ -420,11 +423,17 @@ final class ColumnState {
         ptySession.onOsc9Received = { [weak self] in
             self?.onAgentAttention?(nil)
         }
-        // Only agy's own: any program can print the sequence.
+        // Only the agent's own, in front: any program can print the sequence.
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
             guard let self, let ptySession, ptySession.isNewProgramStatus(status),
-                  let agy = ptySession.foregroundProcess(snapshot: ProcessSnapshot()), agy.name == AgentProgramStatus.process
+                  let agent = ptySession.foregroundProcess(snapshot: ProcessSnapshot()), agent.name == status.process
             else { return }
+            if status.process == AgentProgramStatus.codex {
+                ptySession.noteCodexStatus(status, from: agent.instance)
+                if [.done, .idle].contains(status.state) { onCodexTurnOver?() }
+                return
+            }
+            let agy = agent
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
                 onAgentAttention?(reason)
@@ -557,6 +566,7 @@ final class ColumnState {
 
     func captureCodexSession(
         sessionID: String?,
+        firstInputDigest: String? = nil,
         emitterProcess: ProcessInstance?,
         snapshot: ProcessSnapshot
     ) -> Bool {
@@ -567,6 +577,7 @@ final class ColumnState {
         } ?? false
         return codexSessionTracker.capture(
             sessionID: sessionID,
+            firstInputDigest: firstInputDigest,
             emitterBelongsToForegroundJob: emitterBelongsToForegroundJob,
             foregroundProcess: foregroundProcess
         )
@@ -579,6 +590,23 @@ final class ColumnState {
     /// The Codex thread this column's `codex` process proved it runs.
     func boundCodexSessionID(of process: ProcessInstance) -> String? {
         codexSessionTracker.boundSessionID(for: process)
+    }
+
+    /// Why a Mission message can't go into the queue of this column's Codex
+    /// now (`AgentStatusMachine.codexQueueRefusal`), or `.noConversation`
+    /// while its `codex` proved no thread; nil when it can.
+    func codexMissionRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> AgentPromptRefusal? {
+        guard let pty else { return .noClaude }
+        if let refusal = pty.codexQueueRefusal(runningSince: runningSince, snapshot: snapshot) { return refusal }
+        guard let codex = pty.foregroundProcess(snapshot: snapshot), provenCodexSessionID(of: codex) != nil else { return .noConversation }
+        return nil
+    }
+
+    /// The thread `process`, this column's `codex`, started with its
+    /// launch prompt or resumed (see `CodexSessionTracker`): the one a
+    /// Mission message goes to.
+    func provenCodexSessionID(of process: ForegroundProcess) -> String? {
+        codexSessionTracker.provenSessionID(for: process)
     }
 
     func prepareClaudeResume(sessionID: String) {
