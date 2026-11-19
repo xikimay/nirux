@@ -72,7 +72,7 @@ extension NiruxShellView {
         // Floors that play end here; what stays drawn passes to the next
         // ones with no sync between, which would turn their surfaces off and
         // on.
-        removeFloors()
+        if ZZ("syncBetween") { endWorkspaceSwitch() } else { removeFloors() }
         guard animated, sameSpace, agentLightsMayMove, !leaving.containerView.isHidden else { return endWorkspaceSwitch() }
         playFloors(from: leaving, to: arriving)
     }
@@ -82,8 +82,8 @@ extension NiruxShellView {
     /// no longer on screen, or the one beneath was hidden (moved, archived).
     private func keepFloors() {
         guard let floors = workspaceSwitch.floors else { return }
-        guard floors.arriving == activeWorkspace?.id,
-              workspaces.contains(where: { $0.id == floors.leaving && !$0.containerView.isHidden })
+        guard floors.arriving == activeWorkspace?.id || ZZ("goneKept"),
+              ZZ("hiddenKept") || workspaces.contains(where: { $0.id == floors.leaving && !$0.containerView.isHidden })
         else { return endWorkspaceSwitch() }
         placeFloorUnderneath()
     }
