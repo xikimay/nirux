@@ -567,12 +567,20 @@ final class ColumnState {
         )
     }
 
-    /// Binds the conversation the column's `agy` reports in its hooks.
+    /// Binds the conversation the column's `agy` reports in its hooks: its
+    /// own, not a nested agy's that its shell tool started in its job.
     func captureAgySession(sessionID: String?, emitterProcess: ProcessInstance?, snapshot: ProcessSnapshot) -> Bool {
-        guard let place = hookEmitterPlace(emitterProcess, snapshot: snapshot) else { return false }
+        guard let place = hookEmitterPlace(emitterProcess, snapshot: snapshot),
+              !AgentHookCenter.isHeadlessAgy(place.foreground) else { return false }
         return agySessionTracker.capture(
-            sessionID: sessionID, emitterBelongsToForegroundJob: place.inForegroundJob, foregroundProcess: place.foreground
+            sessionID: sessionID, emitterBelongsToForegroundJob: emitterProcess == place.foreground?.instance,
+            foregroundProcess: place.foreground
         )
+    }
+
+    /// The Antigravity conversation this column's `agy` process proved it runs.
+    func boundAgySessionID(of process: ProcessInstance) -> String? {
+        agySessionTracker.boundSessionID(for: process)
     }
 
     /// The process in front, and whether a hook's emitter runs in its job.

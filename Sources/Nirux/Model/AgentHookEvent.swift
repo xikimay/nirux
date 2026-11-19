@@ -285,9 +285,10 @@ struct AgentHookEvent: Codable, Equatable {
             stopHookActive = nil
         case .agy:
             // Which conversation, and where: never its prompt (lastUserInput).
-            guard let name = ["SessionStart": Name.sessionStart, "Stop": .stop][payload["hookEventName"] as? String ?? ""]
-            else { return nil }
-            self.name = name
+            // A subagent's Stop is its own conversation's, not the column's.
+            guard payload["hookEventName"] as? String == "Stop",
+                  (payload["parentConversationId"] as? String ?? "").isEmpty else { return nil }
+            name = .stop
             sessionID = payload["conversationId"] as? String
             cwd = payload["cwd"] as? String
             source = nil

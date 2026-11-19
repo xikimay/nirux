@@ -16,7 +16,10 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertEqual(event.sessionID, "c1")
         XCTAssertEqual(event.cwd, "/w")
         XCTAssertFalse(String(decoding: try JSONEncoder().encode(event), as: UTF8.self).contains("the user's prompt"))
-        XCTAssertNil(AgentHookEvent(kind: .agy, payload: ["hookEventName": "PreToolUse"], env: [:], now: 1))
+        XCTAssertNil(AgentHookEvent(kind: .agy, payload: ["hookEventName": "SessionStart", "conversationId": "c2"], env: [:], now: 1))
+        XCTAssertNil(AgentHookEvent(
+            kind: .agy, payload: ["hookEventName": "Stop", "conversationId": "sub", "parentConversationId": "c1"], env: [:], now: 1
+        ), "a subagent's")
     }
 
     func testClaudePreToolUse() {

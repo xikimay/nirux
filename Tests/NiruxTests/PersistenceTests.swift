@@ -744,6 +744,14 @@ extension PersistedStateCodingTests {
             instance: ProcessInstance(pid: 7, startedAt: 1), name: "agy", arguments: ["agy", "--conversation", "c1"]
         )
         XCTAssertEqual(tracker.sessionID(for: agy), "c1")
+        // A one-shot run or a subcommand holds nothing to resume.
+        func process(_ arguments: [String]) -> ForegroundProcess {
+            ForegroundProcess(instance: ProcessInstance(pid: 8, startedAt: 1), name: "agy", arguments: arguments)
+        }
+        XCTAssertTrue(AgentHookCenter.isHeadlessAgy(process(["agy", "-p", "summarize"])))
+        XCTAssertTrue(AgentHookCenter.isHeadlessAgy(process(["agy", "plugin", "list"])))
+        XCTAssertFalse(AgentHookCenter.isHeadlessAgy(process(["agy", "-i", "Read .agy-handover.md"])))
+        XCTAssertFalse(AgentHookCenter.isHeadlessAgy(agy))
         let column = PersistedColumn(
             widthPreset: 1, cwd: "/w", columnType: .agy, webViewURL: nil,
             claudeLaunchMode: nil, codexLaunchMode: nil, agySessionID: "c1"

@@ -19,13 +19,13 @@ Claude Code can run a command when a turn (one prompt and the work that follows)
 
 - `~/.claude/settings.json` gains `hooks` entries that run `Nirux --hook claude` on session start, prompt submit, tool use, permission request, notification, subagent stop, stop and session end. When every `claude` a Nirux terminal could run is recent enough, two more: a turn that ends on an API error (2.1.78 or later) and a tool call auto mode refused (2.1.89 or later). Your own hooks are kept.
 - `~/.codex/config.toml` gains a `notify` entry that runs `Nirux --hook codex` when a turn completes. If you already have a `notify`, Nirux leaves the file alone.
-- `~/.gemini/config/hooks.json`, when `~/.gemini` exists, gains a hook named `nirux` that runs `Nirux --hook agy` when an Antigravity session starts or a turn stops. It only tells Nirux which conversation each column runs, so that it can resume it. Your own hooks in that file are kept.
+- `~/.gemini/config/hooks.json`, once Antigravity has run on the Mac (`~/.gemini/antigravity-cli` exists when Nirux launches), gains a hook named `nirux` that runs `Nirux --hook claude --agy` when an Antigravity turn stops (`"enabled": false` in that hook turns it off). It only tells Nirux which conversation each column runs, so that it can resume it. Your own hooks in that file are kept.
 
 These files are global, so every Claude Code, Codex and Antigravity session on the Mac runs these entries. Each entry first tests `NIRUX_AGENT_UUID`, a variable only Nirux terminals set, and does nothing anywhere else. Symlinked config files are updated in place and the link is kept.
 
 A Claude Code session started before the hooks were installed gets estimated status until it restarts.
 
-To keep Nirux from writing the hooks, launch it with `NIRUX_SKIP_HOOK_INSTALL=1` in its environment. To remove them, quit Nirux, then delete the hook entries that contain `--hook claude` from the first file the `notify` line that contains `--hook codex` from the second, and the `nirux` hook from the third. A launch without that variable adds them back.
+To keep Nirux from writing the hooks, launch it with `NIRUX_SKIP_HOOK_INSTALL=1` in its environment. To remove them, quit Nirux, then delete the hook entries that contain `--hook claude` from the first file, the `notify` line that contains `--hook codex` from the second, and the `nirux` hook from the third. A launch without that variable adds them back.
 
 ## What you see
 

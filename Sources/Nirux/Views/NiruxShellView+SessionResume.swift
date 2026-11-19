@@ -105,11 +105,13 @@ extension NiruxShellView {
                 guard let pty = column.pty else { return holder }
                 if let exit = pty.agentMidTurnExit, exit.processName == "claude" { holder.exitedSessionID = exit.sessionID }
                 guard let shellPID = pty.shellPID else { return holder }
-                let agentNames: Set<String> = ["claude", "codex"]
+                let agentNames: Set<String> = ["claude", "codex", AgentProgramStatus.process]
                 let foreground = pty.foregroundProcess(snapshot: snapshot)
                 let confirmed = foreground.map {
-                    [column.confirmedClaudeSessionID(foregroundProcess: $0), column.boundCodexSessionID(of: $0.instance)]
-                        .compactMap { $0 }
+                    [
+                        column.confirmedClaudeSessionID(foregroundProcess: $0), column.boundCodexSessionID(of: $0.instance),
+                        column.boundAgySessionID(of: $0.instance)
+                    ].compactMap { $0 }
                 } ?? []
                 if confirmed.isEmpty {
                     holder.liveText = snapshot.descendantArguments(of: shellPID, named: agentNames).flatMap { $0 }

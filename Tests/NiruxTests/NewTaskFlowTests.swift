@@ -643,6 +643,34 @@ final class NewTaskFlowTests: UIFlowTestCase {
         }
     }
 
+    /// agy's Stop binds its column to the conversation, which the state file
+    /// keeps for the restore; it never drives the column's status.
+    func testAgyStopBindsTheConversationTheStateFileKeeps() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            workspace.addColumn(command: "exec -a agy /bin/sh -c 'sleep 600'", cwd: harness.repo)
+            let column = try XCTUnwrap(workspace.columns.last)
+            shell.relayout(animated: false)
+            let pty = try XCTUnwrap(column.pty)
+            UIFlowHarness.waitUntil("agy in front") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
+            let agy = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+            let event = try XCTUnwrap(AgentHookEvent(
+                kind: .agy, payload: ["hookEventName": "Stop", "conversationId": "c1", "cwd": harness.repo],
+                env: ["NIRUX_AGENT_UUID": try XCTUnwrap(column.agentUUID)], now: Date().timeIntervalSince1970,
+                emitterProcess: agy.instance
+            ))
+            AgentHookCenter.shared.resolver = { [weak shell] in shell?.resolveAgentColumn(uuid: $0) }
+            defer { AgentHookCenter.shared.resolver = nil }
+            let applied = try XCTUnwrap(AgentHookCenter.shared.dispatch(event))
+            XCTAssertNil(pty.agentHookKind, "no hook drives agy's status")
+            shell.applyAgentHookEvents([applied])
+            let saved = try XCTUnwrap(shell.persistedState().workspaces.first { $0.id == workspace.id }?.columns.last)
+            XCTAssertEqual(saved.columnType, .agy)
+            XCTAssertEqual(saved.agySessionID, "c1")
+        }
+    }
+
     /// Existing Branch… lists the selected repository's worktrees, its main
     /// checkout too, then its branches without one, local then origin's. It
     /// goes back to the worktree the active workspace is in, and makes one

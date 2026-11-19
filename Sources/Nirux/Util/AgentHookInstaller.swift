@@ -377,39 +377,47 @@ enum AgentHookInstaller {
     /// The named hook Nirux owns in agy's hooks.json.
     static let agyHookName = "nirux"
 
-    /// The guarded `Nirux --hook agy`, as Codex's notify is: a no-op outside
-    /// Nirux terminals.
+    /// The guarded receiver, a no-op outside Nirux terminals that still
+    /// reads agy's payload. Spelled as a Claude hook so that an older build
+    /// at the same path (a rollback) reads a payload without an event and
+    /// exits, instead of opening its UI on every turn.
     static func agyHookCommand(executablePath: String) -> String {
         let path = shellQuoted(executablePath)
-        return #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x \#(path) ]; then exec \#(path) --hook agy; fi"#
+        return #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x \#(path) ]; then exec \#(path) --hook claude --agy; else /bin/cat >/dev/null; fi"#
     }
 
-    /// SessionStart and Stop say which conversation a column's agy runs, for
-    /// its resume after a restart (a resumed agy sends no SessionStart).
+    /// Stop says which conversation a column's agy runs, for its resume
+    /// after a restart: one that took a turn (a never-prompted one has none
+    /// to resume), resumed or not (a resumed agy sends no SessionStart).
     /// Never PreToolUse: its hooks must decide on the tool call.
     static func agyHooks(executablePath: String) -> [String: Any] {
         let handler: [String: Any] = ["type": "command", "command": agyHookCommand(executablePath: executablePath), "timeout": 5]
-        return ["SessionStart": [handler], "Stop": [handler]]
+        return ["Stop": [handler]]
     }
 
     /// Writes Nirux's named hook, and only it, into ~/.gemini/config/hooks.json,
-    /// when agy's folder exists. A file Nirux can't read is left as it is.
+    /// once agy ran on this Mac (Gemini CLI shares ~/.gemini). A file Nirux
+    /// can't read is left as it is, and the hook's `"enabled": false`, agy's
+    /// own way to turn it off, is kept.
     static func installAgyHooks(executablePath: String = defaultExecutablePath, home: URL = URL(fileURLWithPath: NSHomeDirectory())) {
         let gemini = home.appendingPathComponent(".gemini")
-        guard FileManager.default.fileExists(atPath: gemini.path) else { return }
+        guard FileManager.default.fileExists(atPath: gemini.appendingPathComponent("antigravity-cli").path) else { return }
         guard let url = resolvingSymlinks(gemini.appendingPathComponent("config/hooks.json")) else {
             NSLog("[AgentHooks] ~/.gemini/config/hooks.json: symlink loop or chain too long — skipping hook install")
             return
         }
         var root: [String: Any] = [:]
-        if let data = FileManager.default.contents(atPath: url.path) {
-            guard let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+        if FileManager.default.fileExists(atPath: url.path) {
+            guard let data = try? Data(contentsOf: url),
+                  let parsed = data.allSatisfy({ [0x20, 0x09, 0x0A, 0x0D].contains($0) })
+                    ? [:] : (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
                 NSLog("[AgentHooks] ~/.gemini/config/hooks.json unreadable — skipping hook install")
                 return
             }
             root = parsed
         }
-        let hooks = agyHooks(executablePath: executablePath)
+        var hooks = agyHooks(executablePath: executablePath)
+        if let enabled = (root[agyHookName] as? [String: Any])?["enabled"] { hooks["enabled"] = enabled }
         if let current = root[agyHookName] as? [String: Any], NSDictionary(dictionary: current).isEqual(to: hooks) { return }
         root[agyHookName] = hooks
         do {
