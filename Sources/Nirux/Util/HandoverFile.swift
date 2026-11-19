@@ -19,6 +19,7 @@ enum HandoverFile {
         switch agent {
         case .claude: return ".claude-handover.md"
         case .codex: return ".codex-handover.md"
+        case .agy: return ".agy-handover.md"
         }
     }
 

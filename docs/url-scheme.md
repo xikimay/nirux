@@ -14,7 +14,7 @@ Without it, or with a value from before Nirux last restarted, Nirux shows a conf
 nirux://new-workspace?cwd=/path/to/project&title=my-task&agent=claude&launch=<NIRUX_LAUNCH_ID>
 ```
 
-Opens a workspace in `cwd`. `agent` is `claude` or `codex`.
+Opens a workspace in `cwd`. `agent` is `claude`, `codex` or `agy` (Antigravity).
 
 ## `nirux://new-worktree`
 
@@ -28,8 +28,8 @@ Creates a git worktree and opens it as a workspace.
 | --- | --- |
 | `repo` | The top level of any checkout of the repository: the main one or a linked worktree |
 | `branch` | The branch to check out. See below for where it starts |
-| `agent` | `claude` or `codex` |
-| `handover` | Optional. A file Nirux moves into the worktree as `.claude-handover.md` or `.codex-handover.md`, then tells the agent to read. It must be your own regular file directly in `/tmp`, named `nirux-handover-…`, not empty and at most 1 MB. Anything else is ignored |
+| `agent` | `claude`, `codex` or `agy` |
+| `handover` | Optional. A file Nirux moves into the worktree as `.claude-handover.md`, `.codex-handover.md` or `.agy-handover.md`, then tells the agent to read. It must be your own regular file directly in `/tmp`, named `nirux-handover-…`, not empty and at most 1 MB. Anything else is ignored |
 | `from=head` | Optional. Start a new branch from the HEAD of `repo` instead of the base branch |
 | `profile` | Optional. A space ID, as Nirux terminals have it in `NIRUX_PROFILE_ID` |
 | `parentWorkspace`, `parentAgent` | Optional. The requesting workspace and terminal, by UUID. When the parent is a task, the new workspace lists under it as a sub-task. With [Mission handoffs](missions.md) on, or when the parent is a Lead, they also link the two agents |

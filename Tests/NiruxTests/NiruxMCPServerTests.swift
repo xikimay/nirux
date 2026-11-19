@@ -56,6 +56,7 @@ final class NiruxMCPServerTests: XCTestCase {
         XCTAssertTrue(leads.hasPrefix("You are the Lead of this Nirux space."))
         XCTAssertTrue(leads.contains("Before starting a task"), "history_search stays")
         XCTAssertTrue(leads.contains("propose_rule"), "it knows when to propose a rule")
+        XCTAssertTrue(leads.contains("record_review"), "it records its reviews for the daily pass")
         XCTAssertLessThanOrEqual(leads.count, 2048, "Claude Code cuts server instructions at 2,048 characters")
         let others = try XCTUnwrap(result(try send(initialize))?["instructions"] as? String)
         XCTAssertFalse(others.contains("Lead"))

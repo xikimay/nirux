@@ -10,6 +10,7 @@ final class SpaceCrossingTests: XCTestCase {
     /// them until the crossing ends, on time.
     func testTheSpaceLeftRecedesAndTheOneChosenComesFromTheFront() throws {
         try withSpaces { shell, _, second in
+            let steps = TimedSteps(on: shell)
             shell.focusSpace(.next)
             XCTAssertEqual(shell.activeProfileID, second)
             let pictures = Self.frozenViews(in: shell)
@@ -31,7 +32,9 @@ final class SpaceCrossingTests: XCTestCase {
             XCTAssertEqual(moved.y, middle.y, accuracy: 0.5)
             XCTAssertEqual(shell.verticalStrip.alphaValue, 0, "the live views hidden under them")
 
-            waitUntil("landed, on time", timeout: 2) { Self.frozenViews(in: shell).isEmpty }
+            XCTAssertEqual(steps.durations, [NiruxShellView.crossingDuration], "it lands on time")
+            steps.runNext()
+            XCTAssertTrue(Self.frozenViews(in: shell).isEmpty)
             XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
         }
     }
@@ -54,17 +57,25 @@ final class SpaceCrossingTests: XCTestCase {
     /// space in turn; a crossing's end acts only on its own.
     func testASwitchEndsTheCrossingOnItsWayAndOnlyItsOwnEndEndsIt() throws {
         try withSpaces { shell, _, _ in
+            let steps = TimedSteps(on: shell)
             shell.focusSpace(.next)
             shell.focusSpace(.next)
             XCTAssertEqual(Self.frozenViews(in: shell).count, 2, "the first crossing's pictures gone")
+            // A new workspace's picture still sliding away isn't frozen again.
+            shell.addWorkspace(title: "third", cwd: NSTemporaryDirectory())
+            shell.focusSpace(.next)
+            XCTAssertTrue(Self.frozenViews(in: shell).allSatisfy { Self.pictureLayers(in: $0.layer) == 1 }, "no picture holds another")
 
+            waitUntil("the new workspace's slide gone", timeout: 2) { Self.frozenViews(in: shell).allSatisfy { shell.crossingPictures.contains($0) } }
+            while steps.runNext() {}
             shell.crossSpaces(leaving: try XCTUnwrap(FrozenView.freeze(shell.viewport)), duration: 0.05)
             shell.crossSpaces(leaving: try XCTUnwrap(FrozenView.freeze(shell.viewport)), duration: 1)
-            let due = Date().addingTimeInterval(0.4)
-            waitUntil("past the first's end", timeout: 2) { Date() >= due }
+            XCTAssertEqual(steps.durations, [0.05, 1])
+            steps.runNext()
             XCTAssertEqual(Self.frozenViews(in: shell).count, 2, "the first's end left the second alone")
             XCTAssertEqual(shell.verticalStrip.alphaValue, 0)
-            waitUntil("landed", timeout: 3) { Self.frozenViews(in: shell).isEmpty }
+            steps.runNext()
+            XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "its own end ends it")
         }
     }
 
@@ -75,6 +86,12 @@ final class SpaceCrossingTests: XCTestCase {
     }
 
     private static func scale(_ transform: CATransform3D) -> CGFloat { transform.m11 }
+
+    /// Layers named as a picture's own, `layer` included.
+    private static func pictureLayers(in layer: CALayer?) -> Int {
+        guard let layer else { return 0 }
+        return (layer.name == FrozenView.layerName ? 1 : 0) + (layer.sublayers ?? []).reduce(0) { $0 + pictureLayers(in: $1) }
+    }
 
     /// Two spaces of one workspace each, the first on screen, the interface
     /// free to move.

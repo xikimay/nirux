@@ -154,6 +154,7 @@ final class SidebarView: NSView {
             // Before the rebuild: it lays the rows out at the width left.
             updateScrollerVisibility()
             rebuildContent()
+            onRailShownChange?()
         }
     }
 
@@ -272,7 +273,11 @@ final class SidebarView: NSView {
 
     /// The rail faded out for an expansion: rebuilds leave it hidden until
     /// the cards come in.
-    var isRailHidden = false
+    var isRailHidden = false {
+        didSet { if isRailHidden != oldValue { onRailShownChange?() } }
+    }
+    /// The rail started or stopped showing (`showsRail`).
+    var onRailShownChange: (() -> Void)?
     /// Where the drag ghost started, in the document view.
     var dragGhostOriginY: CGFloat = 0
 

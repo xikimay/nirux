@@ -70,6 +70,17 @@ struct ShellSideEffects {
     /// asks (Reduce transparency, Increase contrast; CI's runners do).
     var drawnTransparency: @MainActor (InterfaceTransparency) -> InterfaceTransparency = { $0.effectiveNow() }
 
+    /// `step` after a motion's `duration`, on time once the change is
+    /// committed (`ColumnState.afterCommit`). Tests run the steps
+    /// themselves, rather than waiting a time.
+    var afterCommit: @MainActor (_ duration: CFTimeInterval, _ step: @escaping @MainActor () -> Void) -> Void = {
+        ColumnState.afterCommit($0, $1)
+    }
+
+    /// macOS draws its glass (26 and later), which refracts what passes
+    /// under it. CI's macOS 15 draws none.
+    var drawsGlass: @MainActor () -> Bool = { GlassView.systemHasGlass }
+
     /// Nirux is the app in front. Tests set it: an xctest never is.
     var appIsActive: @MainActor () -> Bool = { NSApp.isActive }
 

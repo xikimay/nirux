@@ -420,6 +420,16 @@ final class ColumnState {
         ptySession.onOsc9Received = { [weak self] in
             self?.onAgentAttention?(nil)
         }
+        // Only agy's own: any program can print the sequence.
+        ptySession.onProgramStatus = { [weak self, weak ptySession] status in
+            guard let self, let ptySession, ptySession.isNewProgramStatus(status),
+                  let agy = ptySession.foregroundProcess(snapshot: ProcessSnapshot()), agy.name == AgentProgramStatus.process
+            else { return }
+            let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
+            if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
+                onAgentAttention?(reason)
+            }
+        }
 
         ptySession.onLocalServerURL = { [weak self] url in
             self?.onLocalServerURLDetected?(url)

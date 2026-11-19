@@ -16,7 +16,7 @@ final class SpaceSettingsSafetyPane: NSObject {
         var problem: String?
         var periodDays = SpaceSettingsSafetyPane.periods[0]
         var recap: [LoopRecap.Group] = []
-        /// The log reached its size limit (`LoopLog.isFull`).
+        /// The log reached its size limit (`SpaceLog.isFull`).
         var logFull = false
         var added: [ClaudeSpaceSettings.Line] = []
     }
@@ -271,7 +271,7 @@ final class SpaceSettingsSafetyPane: NSObject {
         rows.append(recapSection())
         let footer = Self.secondaryLabel(
             "Passed with --settings to the space’s Claude Code sessions as they start, on top of your own Claude Code "
-                + "settings, which Nirux leaves as they are. Codex, Gemini CLI and OpenCode don’t read them."
+                + "settings, which Nirux leaves as they are. Codex, Antigravity, Gemini CLI and OpenCode don’t read them."
         )
         footer.preferredMaxLayoutWidth = Self.width - Self.insets.left - Self.insets.right
         rows.append(footer)

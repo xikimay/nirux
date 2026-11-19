@@ -380,10 +380,12 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(task.taskFolder, task.cwd)
             XCTAssertEqual(shell.persistedState().workspaces.first { $0.id == task.id }?.taskFolder, task.taskFolder)
 
-            // The same name again: a folder of its own. The hint is gone.
+            // The same name again, with Antigravity: a folder of its own.
+            // The hint is gone.
             sheet = try openSheet(harness)
             describe("Compare: two parsers", in: sheet)
             XCTAssertTrue(sheet.trustHint.isHidden)
+            select("Antigravity", in: sheet.agentPopup)
             // Edit names the folder; what the user types is cleaned.
             sheet.editBranchButton.performClick(nil)
             XCTAssertFalse(sheet.branchField.isHidden)
@@ -395,6 +397,9 @@ final class NewTaskFlowTests: UIFlowTestCase {
             sheet.startButton.performClick(nil)
             harness.waitUntil("the second task") { shell.workspaces.filter { $0.title == "Compare: two parsers" }.count == 2 }
             XCTAssertEqual(shell.activeWorkspace.map { NiruxShellView.comparablePath($0.cwd) }, NiruxShellView.comparablePath(folder + " 2"))
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder + " 2"), [".agy-handover.md"])
+            let agyLaunch = try XCTUnwrap(harness.agentLaunches.last)
+            XCTAssertTrue(agyLaunch.hasPrefix("command agy -i 'Read .agy-handover.md for full context"), agyLaunch)
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder), [".claude-handover.md"], "the first one untouched")
 
             // Its folder gone: still nothing to clean up, and the folder
@@ -545,7 +550,8 @@ final class NewTaskFlowTests: UIFlowTestCase {
 
     /// The agent of a task without a repository asking whether to trust
     /// its folder, before any hook: its row needs the user, until a key
-    /// reaches it. Elsewhere Nirux doesn't look.
+    /// reaches it. Elsewhere Nirux looks only at agy, which trusts exact
+    /// paths: a new worktree asks again.
     func testAnAgentAskingToTrustItsFolderNeedsYou() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -590,9 +596,51 @@ final class NewTaskFlowTests: UIFlowTestCase {
             harness.waitUntil("two reads") { _ = status(of: plain); return Date() > readsLater }
             let other = try XCTUnwrap(elsewhere.foregroundProcess(snapshot: ProcessSnapshot()))
             XCTAssertNil(elsewhere.agentTrustPrompt(foreground: other), "only a task's new folder is watched")
+            let agyScreen = #"Do you trust the contents of this project?\r\n > Yes, I trust this folder\r\n   No, exit\r\n"#
+            plain.addColumn(command: "printf '\(agyScreen)'; exec -a agy /bin/sleep 600", cwd: harness.repo)
+            let agy = try XCTUnwrap(plain.columns.last?.pty)
+            shell.relayout(animated: false)
+            UIFlowHarness.waitUntil("agy's trust question on its row (\(status(of: plain) ?? "nil"))") {
+                status(of: plain) == "Needs you · Trust this folder?"
+            }
+            agy.sendRaw("1")
+            harness.waitUntil("agy answered") { status(of: plain) != "Needs you · Trust this folder?" }
             pty.sendRaw("1")
             harness.waitUntil("answered") { status(of: task) != "Needs you · Trust this folder?" }
             XCTAssertNil(pty.agentTrustPrompt(foreground: claude))
+        }
+    }
+
+    /// agy says through OSC 7501 why it waits: its row needs the user with
+    /// its question, and the column alerts once. The same sequence printed
+    /// by a shell is no one's.
+    func testAgySaysWhyItWaits() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let question = Data("Which color do you prefer?".utf8).base64EncodedString()
+            // Said by agy itself, in front: Nirux takes no other's.
+            let script = "sleep 1; printf '\\033]7501;state=blocked:kind=question:app=antigravity:msg=\(question)\\007'; sleep 600"
+            workspace.addColumn(command: "exec -a agy /bin/sh -c \"\(script)\"", cwd: harness.repo)
+            let column = try XCTUnwrap(workspace.columns.last)
+            // Never the system's notification center in a test process.
+            var alerts: [AgentAttentionReason?] = []
+            column.onAgentAttention = { alerts.append($0) }
+            workspace.addColumn(command: "printf '\\033]7501;state=blocked:kind=question:app=antigravity:msg=\(question)\\007'", cwd: harness.repo)
+            let printer = try XCTUnwrap(workspace.columns.last)
+            var printerAlerts: [AgentAttentionReason?] = []
+            printer.onAgentAttention = { printerAlerts.append($0) }
+            shell.relayout(animated: false)
+            @MainActor func status() -> String? {
+                shell.updateSidebar()
+                return shell.sidebar.displayedWorkspaceInfos.first { $0.id == workspace.id }?.rowSummary.status.text
+            }
+            UIFlowHarness.waitUntil("agy's question on its row (\(status() ?? "nil"))") {
+                status() == "Needs you · Which color do you prefer?"
+            }
+            XCTAssertEqual(alerts, [.question("Which color do you prefer?")])
+            XCTAssertEqual(printerAlerts, [], "printed before agy spoke, a second ago")
+            XCTAssertNil(printer.pty?.agentAttentionReason)
         }
     }
 

@@ -24,8 +24,8 @@ extension NiruxShellView {
         if let arriving {
             Self.move(arriving, scale: (ZZ("notFromFront") ? 1 : Self.arrivalFromScale, 1), opacity: (0, 1), curve: .easeOut, duration: duration)
         }
-        ColumnState.afterCommit(duration) { [weak self] in
-            guard let self, !ZZ("notOnTime"), ZZ("ungated") || spaceCrossingGeneration == generation else { return }
+        sideEffects.afterCommit(duration) { [weak self] in
+            guard let self, spaceCrossingGeneration == generation else { return }
             endSpaceCrossing()
         }
     }
