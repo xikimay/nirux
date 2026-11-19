@@ -53,7 +53,7 @@ final class SpacePlanView: NSView {
         let block = tallest * scale + Self.rowGap * CGFloat(max(0, laidOut.count - 1))
         var top = (bounds.height + block) / 2
         let left = Self.margin * 2 + Self.labelWidth + (room.width - widest * scale) / 2
-        for workspace in laidOut {
+        for workspace in ZZ("wrongOrder") ? laidOut.reversed() : laidOut {
             guard let picture = workspace.frozenColumns(scale: scale) else { continue }
             let height = workspace.stripSize.height * scale
             picture.frame.origin = NSPoint(x: left, y: top - height)
@@ -64,7 +64,7 @@ final class SpacePlanView: NSView {
             rows.append(Row(workspaceID: workspace.id, picture: picture, cards: cards))
             let label = labels[workspace.id] ?? Label(title: workspace.title, icon: StateIcon(.idle), initials: nil, detail: nil)
             addLabel(label, besideRowAt: top - height / 2)
-            if workspace === onScreen { chosen = (rows.count - 1, min(onScreen.focusedIndex, cards.count - 1)) }
+            if workspace === onScreen, !ZZ("notChosen") { chosen = (rows.count - 1, min(onScreen.focusedIndex, cards.count - 1)) }
             top -= height + Self.rowGap
         }
         ring.borderColor = Theme.Color.accent.cgColor
@@ -84,13 +84,14 @@ final class SpacePlanView: NSView {
         case 124: move(columns: 1)
         case 125: move(rows: 1)
         case 126: move(rows: -1)
-        case 36, 76: goToChoice()
-        case 53: onClose(nil)
+        case 36, 76: if !ZZ("returnIgnored") { goToChoice() }
+        case 53: if ZZ("escapeGoes") { goToChoice() } else { onClose(nil) }
         default: super.keyDown(with: event)
         }
     }
 
     override func mouseDown(with event: NSEvent) {
+        if ZZ("clickMissed") { return }
         let point = convert(event.locationInWindow, from: nil)
         for (rowIndex, row) in rows.enumerated() {
             if let column = row.cards.firstIndex(where: { $0.contains(point) }) {

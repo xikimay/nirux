@@ -15,9 +15,9 @@ extension NiruxShellView {
         plan.onClose = { [weak self] target in self?.closeSpacePlan(going: target) }
         viewport.addSubview(plan)
         spacePlan = plan
-        verticalStrip.alphaValue = 0
+        verticalStrip.alphaValue = ZZ("liveShown") ? 1 : 0
         syncTerminalOcclusion()
-        window?.makeFirstResponder(plan)
+        if !ZZ("noFocus") { window?.makeFirstResponder(plan) }
     }
 
     /// The plan goes; to `target` at once, else back to what showed.
@@ -41,8 +41,8 @@ extension NiruxShellView {
     /// space, the workspace on screen or the viewport's size, closes the
     /// plan: it would show what no longer is.
     func closeSpacePlanIfStale(animated: Bool, viewport size: NSSize) {
-        guard let plan = spacePlan else { return }
-        if animated || plan.frame.size != size || plan.spaceID != activeProfileID || plan.workspaceID != activeWorkspace?.id {
+        guard let plan = spacePlan, !ZZ("staleKept") else { return }
+        if animated || (plan.frame.size != size && !ZZ("sizeIgnored")) || plan.spaceID != activeProfileID || plan.workspaceID != activeWorkspace?.id {
             closeSpacePlan(going: nil, focusing: false)
         }
     }
