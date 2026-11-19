@@ -231,8 +231,11 @@ extension NiruxShellView {
                 ) {
                     invalidatedSessionBinding = true
                 }
-                // A task's new folder is where an agent asks for trust.
-                if workspace.isFolderTask { watchTrustPrompt(of: column, foreground: foregroundProcess, now: now) }
+                // A task's new folder is where an agent asks for trust; agy
+                // trusts exact paths, so a new worktree asks again.
+                if workspace.isFolderTask || foregroundProcess?.name == "agy" {
+                    watchTrustPrompt(of: column, foreground: foregroundProcess, now: now)
+                }
                 refreshStuckAgent(
                     column, in: workspace,
                     foregroundProcess: foregroundProcess, snapshot: snapshot, now: now

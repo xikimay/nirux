@@ -416,8 +416,11 @@ extension NiruxShellView {
             let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
                 ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
-            // A turn end found done (or still being read) asks nothing.
-            let status = pty.isQuietTurnEnd ? AgentStatus.idle : pty.cachedAgentState
+            // A turn end found done (or still being read) asks nothing, nor
+            // does the silence of an agent without hooks: it can't say why.
+            let silent = AgentStatusMachine.activityOnlyAgentProcesses.contains(foreground.name)
+                && pty.cachedAgentState == .needsAttention
+            let status = pty.isQuietTurnEnd || silent ? AgentStatus.idle : pty.cachedAgentState
             return AgentReading(name: foreground.name, status: status, dialog: dialog)
         }
     }

@@ -3,9 +3,9 @@ import Foundation
 /// The question Claude Code, Codex and Antigravity ask before they work in
 /// a folder the user hasn't trusted yet, as a task without a repository's
 /// new folder: no hook runs until it is answered, so the agent would sit
-/// there looking idle. Nirux reads it on the screen of such a task's agents instead, from
-/// their launch until a hook or a key reaches them, and the row reads
-/// "Needs you · Trust this folder?".
+/// there looking idle. Nirux reads it on the screen of such a task's
+/// agents instead, from their launch until a hook or a key reaches them,
+/// and the row reads "Needs you · Trust this folder?".
 enum AgentTrustPrompt {
     /// What the row, the column header and ⌘J say.
     static let reason = AgentAttentionReason.question("Trust this folder?")

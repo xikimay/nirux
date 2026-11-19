@@ -12,12 +12,12 @@ Install Nirux first: see the [README](../README.md#install).
 
 Nirux opens with a **Getting Started** list in the sidebar, below the workspaces. You can ignore it and use the app. It shows:
 
-- whether `claude` or `codex` is installed, with install commands to copy if neither is;
+- whether `claude`, `codex` or `agy` (Antigravity) is installed, with install commands to copy if none is;
 - whether the [agent skills](agent-skills.md) are installed, with an **Install** button. They are instructions for Claude Code and Codex that let an agent open a Nirux workspace or show you a file in the editor;
 - whether the [status hooks](agent-status.md#status-hooks) are in place;
 - the main shortcuts.
 
-Nirux looks for the two CLIs in the common install locations without running your shell's startup files. If `claude` or `codex` runs fine in a Nirux terminal, ignore the **Install Claude Code or Codex** step.
+Nirux looks for these CLIs in the common install locations without running your shell's startup files. If `claude` or `codex` runs fine in a Nirux terminal, ignore the **Install Claude Code or Codex** step.
 
 Close the list with `×`, or with **Done** once every step is done. `Show Getting Started` in the command palette (`Cmd+P`) brings it back.
 

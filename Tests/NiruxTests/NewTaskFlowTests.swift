@@ -550,7 +550,8 @@ final class NewTaskFlowTests: UIFlowTestCase {
 
     /// The agent of a task without a repository asking whether to trust
     /// its folder, before any hook: its row needs the user, until a key
-    /// reaches it. Elsewhere Nirux doesn't look.
+    /// reaches it. Elsewhere Nirux looks only at agy, which trusts exact
+    /// paths: a new worktree asks again.
     func testAnAgentAskingToTrustItsFolderNeedsYou() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -595,6 +596,14 @@ final class NewTaskFlowTests: UIFlowTestCase {
             harness.waitUntil("two reads") { _ = status(of: plain); return Date() > readsLater }
             let other = try XCTUnwrap(elsewhere.foregroundProcess(snapshot: ProcessSnapshot()))
             XCTAssertNil(elsewhere.agentTrustPrompt(foreground: other), "only a task's new folder is watched")
+            let agyScreen = #"Do you trust the contents of this project?\r\n > Yes, I trust this folder\r\n   No, exit\r\n"#
+            plain.addColumn(command: "printf '\(agyScreen)'; exec -a agy /bin/sleep 600", cwd: harness.repo)
+            let agy = try XCTUnwrap(plain.columns.last?.pty)
+            shell.relayout(animated: false)
+            UIFlowHarness.waitUntil("agy's trust question") {
+                _ = status(of: plain)
+                return agy.foregroundProcess(snapshot: ProcessSnapshot()).flatMap(agy.agentTrustPrompt(foreground:)) != nil
+            }
             pty.sendRaw("1")
             harness.waitUntil("answered") { status(of: task) != "Needs you · Trust this folder?" }
             XCTAssertNil(pty.agentTrustPrompt(foreground: claude))

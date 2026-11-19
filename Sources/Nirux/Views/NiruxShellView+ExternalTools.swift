@@ -316,7 +316,7 @@ extension NiruxShellView {
            needs this branch's commits that aren't on origin yet — add `&from=head` to the URL in
            step 4: the new branch then starts from the current checkout's HEAD.
         3. **Write a session handover** so the new workspace inherits context. First create the
-           file with `mktemp`, using the current agent name (`claude` or `codex`); it prints the
+           file with `mktemp`, using the current agent name (`claude`, `codex` or `agy`); it prints the
            path. `mktemp` creates the file privately under a random name, so nothing else can
            redirect the write:
            ```bash
@@ -340,7 +340,7 @@ extension NiruxShellView {
            without asking. Nirux only accepts a handover that sits directly in `/tmp` with the
            `nirux-handover-` prefix and belongs to the user; anything else is ignored.
         4. **Open the worktree in Nirux** — Nirux handles git worktree creation, moves the handover
-           file into the worktree as `.claude-handover.md` or `.codex-handover.md`, and launches
+           file into the worktree as `.claude-handover.md`, `.codex-handover.md` or `.agy-handover.md`, and launches
            the same agent. Nirux terminals expose `NIRUX_WORKSPACE_ID`, `NIRUX_AGENT_UUID` and
            `NIRUX_PROFILE_ID`; always send them, so the new workspace opens in this workspace's
            space even if the user has focused a different one, and lists under this workspace
@@ -363,7 +363,7 @@ extension NiruxShellView {
              fi
            fi
            open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
-        &agent=<claude-or-codex>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}"
+        &agent=<claude-codex-or-agy>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}"
            ```
            For a stacked branch, put `&from=head` right after the handover parameter. Nirux moves
            the handover file into the worktree on launch; no manual cleanup is needed.
