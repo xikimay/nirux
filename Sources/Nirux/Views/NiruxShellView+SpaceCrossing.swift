@@ -13,7 +13,8 @@ extension NiruxShellView {
     /// `leaving`, what the viewport showed before the switch, crosses with
     /// the space chosen, laid out under it now.
     func crossSpaces(leaving: FrozenView, duration: CFTimeInterval = crossingDuration) {
-        if !ZZ("stacked") { endSpaceCrossing() }
+        endSpaceCrossing()
+        guard agentLightsMayMove else { return }
         viewport.layoutSubtreeIfNeeded()
         let arriving = FrozenView.freeze(viewport)
         let generation = spaceCrossingGeneration
@@ -28,6 +29,11 @@ extension NiruxShellView {
             guard let self, !ZZ("notOnTime"), ZZ("ungated") || spaceCrossingGeneration == generation else { return }
             endSpaceCrossing()
         }
+    }
+
+    /// Movement turned off: a crossing on its way lands at once.
+    func stillSpaceCrossing() {
+        if !crossingPictures.isEmpty { endSpaceCrossing() }
     }
 
     /// The live views back, the pictures gone, and no crossing left to end.

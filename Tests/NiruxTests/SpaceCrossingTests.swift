@@ -33,13 +33,22 @@ final class SpaceCrossingTests: XCTestCase {
         }
     }
 
-    /// With Reduce motion, or a pick from the menu, the space shows at once.
+    /// With Reduce motion, or a pick from the menu, the space shows at once;
+    /// movement turning off lands a crossing on its way at once.
     func testNothingCrossesWhileNothingMayMove() throws {
         try withSpaces { shell, first, _ in
+            shell.focusSpace(.next)
+            XCTAssertEqual(Self.frozenViews(in: shell).count, 2)
             shell.sideEffects.reducesMotion = { true }
+            shell.applyAgentLights()
+            XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "landed at once")
+            XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
+
             shell.focusSpace(.next)
             XCTAssertTrue(Self.frozenViews(in: shell).isEmpty)
             XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
+            shell.crossSpaces(leaving: try XCTUnwrap(FrozenView.freeze(shell.viewport)))
+            XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "the crossing itself checks")
 
             shell.sideEffects.reducesMotion = { false }
             shell.selectProfile(first)

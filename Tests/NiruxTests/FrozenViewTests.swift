@@ -108,7 +108,8 @@ final class FrozenViewTests: XCTestCase {
     }
 
     /// A new workspace lays what the viewport showed, frozen, over it as it
-    /// slides away, gone on time; nothing is drawn again. (⌥⌘← ⌥⌘→:
+    /// slides away, gone on time; nothing is drawn again. While nothing may
+    /// move, it shows at once. (⌥⌘← ⌥⌘→:
     /// SpaceCrossingTests.)
     func testASlideLeavesAFrozenPictureGoneOnTime() throws {
         try withShell { shell in
@@ -117,6 +118,10 @@ final class FrozenViewTests: XCTestCase {
             XCTAssertEqual(Self.frozenViews(in: shell).count, 1, "a new workspace slides over what showed, frozen")
             XCTAssertFalse(shell.viewport.subviews.contains { $0 is NSImageView }, "nothing drawn again")
             waitUntil("gone on time", timeout: 2) { Self.frozenViews(in: shell).isEmpty }
+
+            shell.sideEffects.reducesMotion = { true }
+            shell.addWorkspace(title: "still", cwd: NSTemporaryDirectory())
+            XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "while nothing may move, it shows at once")
         }
     }
 
@@ -185,6 +190,9 @@ final class FrozenViewTests: XCTestCase {
             let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
             shell.stopHeartbeat()
             shell.sideEffects.windowShows = { _ in true }
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                 styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false

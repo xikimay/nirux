@@ -186,6 +186,29 @@ final class UnderGlassTests: XCTestCase {
         }
     }
 
+    /// Movement turning off (Reduce motion, the setting) ends a pass at once,
+    /// and its sweep too.
+    func testMovementTurningOffEndsAPassAtOnce() throws {
+        try withShell { shell in
+            let workspace = try floatingRail(in: shell)
+            let steps = TimedSteps(on: shell)
+            shell.passUnderRail(workspace, for: 1)
+            shell.sideEffects.reducesMotion = { true }
+            shell.applyAgentLights()
+            XCTAssertEqual(shell.viewport.bounds.minX, 0, "ended at once")
+            XCTAssertTrue(workspace.containerView.clipsToBounds)
+            XCTAssertNil(shell.passingUnderRail)
+
+            shell.sideEffects.reducesMotion = { false }
+            shell.passUnderRail(workspace, for: 1)
+            while steps.durations.first != NiruxShellView.underGlassClose, steps.runNext() {}
+            XCTAssertFalse(workspace.containerView.clipsToBounds, "it sweeps")
+            shell.animatesInterface = false
+            XCTAssertTrue(workspace.containerView.clipsToBounds, "the sweep ends at once")
+            XCTAssertNil(shell.viewport.layer?.animation(forKey: "underGlass.bounds"))
+        }
+    }
+
     // MARK: - Helpers
 
     /// Folded, at Tinted, in macOS's glass, the interface free to move; three

@@ -82,7 +82,7 @@ extension NiruxShellView {
     /// The work's edge sweeps back to the rail's, its content still; then
     /// the workspace clips its cards again.
     private func closeUnderRail(_ generation: Int) {
-        guard let layer = viewport.layer, railFloats, passingUnderRail === activeWorkspace else { return endUnderGlass() }
+        guard let layer = viewport.layer, railFloats, agentLightsMayMove, passingUnderRail === activeWorkspace else { return endUnderGlass() }
         passingUnderRail = nil
         let reached = [("position", NSValue(point: layer.position)), ("bounds", NSValue(rect: layer.bounds))]
         reachViewport(by: viewport.bounds.minX)
@@ -99,6 +99,11 @@ extension NiruxShellView {
             guard let self, underGlassGeneration == generation else { return }
             endUnderGlass()
         }
+    }
+
+    /// Movement turned off: a pass, or its sweep, ends at once.
+    func stillUnderGlass() {
+        if passingUnderRail != nil || workspaces.contains(where: { !$0.containerView.clipsToBounds }) { endUnderGlass() }
     }
 
     /// At rest: the viewport where it lies, every workspace clipping its
