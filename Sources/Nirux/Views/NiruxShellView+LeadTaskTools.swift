@@ -12,7 +12,7 @@ extension NiruxShellView {
         namedWorkspace(name, among: workspaces.filter { $0.profileID == space.id && !$0.isLead && !$0.isClosing })
     }
 
-    private func noSpaceTask(_ name: String, in space: WorkspaceProfile) -> String {
+    func noSpaceTask(_ name: String, in space: WorkspaceProfile) -> String {
         "No task in \(space.name) is named “\(name)”, or several share that name: use its title or branch from list_tasks "
             + "(its folder, for a task without a repository)."
     }
@@ -437,7 +437,7 @@ extension NiruxShellView {
         // Its own agent's (the one its Mission names), when known: another
         // column may run another agent, or answer side questions.
         _ = MissionStore.shared.ensureLoaded()
-        let own = MissionStore.shared.missions.filter { $0.childWorkspaceID == task.id }.max { $0.createdAt < $1.createdAt }?.childAgentUUID
+        let own = ownMission(of: task)?.childAgentUUID
         let ownRecords = records.filter { own != nil && $0.agentUUID == own }
         guard let newest = ownRecords.first ?? records.first else {
             return answer("Nirux knows no conversation of “\(title)” (its agent took no prompt yet).", true)

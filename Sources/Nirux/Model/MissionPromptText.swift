@@ -2,16 +2,23 @@ import Foundation
 
 /// The text Nirux types into an agent's prompt for a Mission message (see
 /// `MissionStore.pendingPromptDeliveries`). Instructions (`tell`) go in raw,
-/// so a slash command stays one; everything else starts with `prefix`, so
-/// the agent can tell Nirux from the user.
+/// so a slash command stays one, except a Lead's to a task that doesn't
+/// report to it; everything else starts with `prefix`, so the agent can
+/// tell Nirux from the user.
 enum MissionPromptText {
     static let prefix = "[Nirux Mission]"
 
-    /// What Nirux types around an answer at most, in scalars: its prefix and
-    /// the parent's title, cut at `maxNameScalars`. A tell goes in raw, and
-    /// questions and results are short.
+    /// The line above a Lead's tell to a task that doesn't report to it.
+    static let oneWayHeader = "\(prefix) From the space's Lead (one-way: your questions and result still go to "
+        + "whoever started this task):"
+
+    /// What Nirux types around a long message at most, in scalars: an
+    /// answer's prefix and the parent's title, cut at `maxNameScalars`, or
+    /// a one-way tell's header. Questions and results are short.
     static let maxNameScalars = 200
-    static let answerHeaderScalars = "\(prefix) Answer from \"\": ".unicodeScalars.count + maxNameScalars
+    static let headerScalars = max(
+        "\(prefix) Answer from \"\": ".unicodeScalars.count + maxNameScalars, oneWayHeader.unicodeScalars.count + 1
+    )
 
     /// `childTitle` and `parentTitle` are the workspaces' titles now; nil
     /// when the workspace is gone.
@@ -22,7 +29,7 @@ enum MissionPromptText {
         let child = childName(title: childTitle, branch: delivery.mission.branch)
         switch event.kind {
         case .instruction:
-            return event.message
+            return delivery.mission.oneWay == true ? oneWayHeader + "\n" + event.message : event.message
         case .question where delivery.mission.reportsToLead == true:
             // A space's Lead answers with its tools (see LeadTools).
             return "\(prefix) Question from \(child):\n\(quoted(event.message))\n"

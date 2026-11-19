@@ -97,6 +97,31 @@ final class MissionTests: XCTestCase {
         )
     }
 
+    /// A Lead's tells to a task that doesn't report to it go through a
+    /// one-way Mission, with handoffs off, typed under a line saying so; the
+    /// task's questions and result never do.
+    func testALeadsOneWayMissionCarriesItsTellsOnly() throws {
+        let store = MissionStore(fileURL: try makeDirectory().appendingPathComponent("missions.json"))
+        var tells = request()
+        tells.oneWay = true
+        XCTAssertNotNil(store.create(tells, enabled: false, now: 10))
+        for kind in [MissionEvent.Kind.question, .completed] {
+            guard case .rejected = store.process(event(kind: kind), enabled: false) else { return XCTFail("\(kind) reached the Lead") }
+        }
+        let instruction = MissionEvent(
+            id: "77777777-7777-4777-8777-777777777777", missionID: missionID,
+            childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
+            parentWorkspaceID: parentWorkspaceID, parentAgentUUID: parentAgentUUID,
+            kind: .instruction, message: "Review of #597: guard the race.", timestamp: 20
+        )
+        guard case .accepted = store.process(instruction, enabled: false) else { return XCTFail("the Lead's tell") }
+        let delivery = try XCTUnwrap(store.pendingPromptDeliveries(now: 30).first)
+        XCTAssertEqual(
+            MissionPromptText.text(for: delivery, childTitle: "By hand", parentTitle: "Lead"),
+            MissionPromptText.oneWayHeader + "\nReview of #597: guard the race."
+        )
+    }
+
     func testMissionCreationIsDisabledByDefaultAndRejectsMalformedIdentifiers() throws {
         let fileURL = try makeDirectory().appendingPathComponent("missions.json")
         let store = MissionStore(fileURL: fileURL)

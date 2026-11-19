@@ -288,6 +288,32 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(receive(), 3, "the child gets more work once the message is typed")
     }
 
+    /// A Lead's one-way Mission to a task of its space isn't one of its own
+    /// to the CLI: `tell` by branch doesn't find it, `receive` doesn't wait
+    /// on it.
+    func testALeadsOneWayMissionIsNotItsOwnToTheCLI() throws {
+        let fixture = try makeFixture()
+        XCTAssertNotNil(fixture.store.create(MissionCreationRequest(
+            id: "99999999-9999-4999-8999-999999999999", parentWorkspaceID: parentWorkspaceID, parentAgentUUID: parentAgentUUID,
+            childWorkspaceID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", childAgentUUID: otherAgentUUID, childAgentKind: "claude",
+            branch: "feat/by-hand", oneWay: true
+        ), enabled: false, now: 11))
+        XCTAssertEqual(tell("Review: guard the race.", branch: "feat/by-hand", in: fixture), 4)
+        func receive() -> Int32 {
+            MissionEventCLI.receive(
+                arguments: ["--timeout", "0"],
+                environment: parentEnvironment(),
+                eventsURL: fixture.eventsURL,
+                missionsURL: fixture.missionsURL,
+                pollInterval: 0.01
+            )
+        }
+        complete(fixture)
+        XCTAssertEqual(receive(), 0, "prints the completion")
+        fixture.center.drain()
+        XCTAssertEqual(receive(), 4, "nothing left to wait for")
+    }
+
     func testOnlyEventsWithTheRecordedParentIdentityAreTold() throws {
         let fixture = try makeFixture()
         func instruction(parentAgentUUID: String?) -> MissionEvent {

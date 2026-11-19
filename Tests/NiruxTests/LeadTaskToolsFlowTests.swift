@@ -511,21 +511,25 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
     }
 
-    /// A task of the Lead's whose `claude` is a stand-in in a column of its
-    /// own, its session started: what it is sent, and its hooks.
+    /// A task of the Lead's (or the user's, `reports` false) whose `claude`
+    /// is a stand-in in a column of its own, its session started: what it is
+    /// sent, and its hooks.
     private func reportingTask(
-        _ title: String, lead: UIFlowHarness.Lead, harness: UIFlowHarness, readsSlowly: Bool = false
-    ) throws -> (agent: AgentStandIn, column: ColumnState, claude: ProcessInstance, hook: @MainActor (AgentHookEvent.Name) -> Void) {
+        _ title: String, lead: UIFlowHarness.Lead, harness: UIFlowHarness, readsSlowly: Bool = false, reports: Bool = true
+    ) throws -> (
+        agent: AgentStandIn, column: ColumnState, claude: ProcessInstance, hook: @MainActor (AgentHookEvent.Name) -> Void,
+        workspace: WorkspaceState
+    ) {
         let workspaceID = UUID().uuidString
         let agentUUID = UUID().uuidString
-        let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+        let mission = try reports ? XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
             id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
             childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "claude",
             branch: harness.worktreeBranch, reportsToLead: true
-        ), enabled: true))
+        ), enabled: true)) : nil
         harness.shell.addWorkspace(
             title: title, cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID,
-            missionID: mission.id, reportsToLead: true
+            missionID: mission?.id, reportsToLead: reports
         )
         let task = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
         let agent = AgentStandIn()
@@ -541,7 +545,95 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             ), isUserFocused: false)
         }
         hook(.sessionStart)
-        return (agent, column, claude, hook)
+        return (agent, column, claude, hook, task)
+    }
+
+    /// tell reaches any task of the Lead's space: a task the user started
+    /// gets it one-way, under a line saying it comes from the Lead, through a
+    /// Mission that never makes it the Lead's; a sub-task, the same, its
+    /// questions going to its task. set_task_context reaches them too;
+    /// ask_user and interrupt_task don't, nor tell the Lead or another space.
+    func testTheLeadTellsATaskThatDoesntReportToIt() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let task = try reportingTask("By hand", lead: lead, harness: harness, reports: false)
+            defer { task.agent.remove() }
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            @MainActor func tell(_ name: String, _ message: String) throws -> (text: String, isError: Bool) {
+                try harness.callLeadTool(LeadTools.tell, ["task": name, "message": message], lead: lead)
+            }
+
+            let review = "Review of #597: guard the race."
+            let told = try tell("By hand", review)
+            XCTAssertFalse(told.isError, told.text)
+            XCTAssertTrue(told.text.hasSuffix("It doesn't report to you: Nirux marks the message as yours, and its questions and its "
+                + "result still go to the user."), told.text)
+            harness.waitUntil("typed, then Enter") { task.agent.input.hasSuffix("\u{1B}[201~\n") }
+            XCTAssertTrue(task.agent.input.contains(MissionPromptText.oneWayHeader), task.agent.input)
+            XCTAssertTrue(task.agent.input.contains(review), task.agent.input)
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            XCTAssertFalse(try tell("By hand", "And a test for it.").isError)
+            let missions = MissionStore.shared.missions.filter { $0.childWorkspaceID == task.workspace.id }
+            XCTAssertEqual(missions.map(\.oneWay), [true], "one Mission for both")
+            XCTAssertEqual(missions.first?.parentWorkspaceID, lead.workspace.id)
+            XCTAssertEqual(missions.first?.events.filter { $0.kind == .instruction }.count, 2)
+
+            // Never the Lead's.
+            let context = try harness.callLeadTool(LeadTools.setTaskContext, ["task": "By hand", "next_step": "user reviews #597"], lead: lead)
+            XCTAssertFalse(context.isError, context.text)
+            let list = try harness.callLeadTool(LeadTools.listTasks, lead: lead).text
+            let line = list.split(separator: "\n").first { $0.hasPrefix("- “By hand”") }.map(String.init) ?? ""
+            XCTAssertTrue(line.hasSuffix(" · not yours (started by the user)"), list)
+            XCTAssertTrue(list.contains("next step: “user reviews #597”"), list)
+            let ownOnly = [(LeadTools.askUser, ["task": "By hand", "why": "Only the user knows."]), (LeadTools.interruptTask, ["task": "By hand"])]
+            for (tool, arguments) in ownOnly {
+                let refused = try harness.callLeadTool(tool, arguments, lead: lead)
+                XCTAssertTrue(refused.isError && refused.text.hasPrefix("No task of yours"), "\(tool): \(refused.text)")
+            }
+
+            // A sub-task a task of the Lead's follows: its questions go there,
+            // as its row says, whatever the ledger's order.
+            let parent = try reportingTask("Parent", lead: lead, harness: harness)
+            defer { parent.agent.remove() }
+            let subID = UUID().uuidString
+            let subAgent = UUID().uuidString
+            let tells = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: subID, childAgentUUID: subAgent, childAgentKind: "claude", branch: "feat/sub", oneWay: true
+            ), enabled: false))
+            let sub = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: parent.workspace.id, parentAgentUUID: try XCTUnwrap(parent.column.agentUUID),
+                childWorkspaceID: subID, childAgentUUID: subAgent, childAgentKind: "claude", branch: "feat/sub", reportsToTask: true
+            ), enabled: false))
+            shell.addWorkspace(
+                title: "Sub", cwd: harness.repo, profileID: lead.space, workspaceID: subID, initialAgentUUID: subAgent,
+                missionID: sub.id, parentWorkspaceID: parent.workspace.id, reportsToTask: true
+            )
+            let question = MissionEvent(
+                id: UUID().uuidString, missionID: sub.id, childWorkspaceID: subID, childAgentUUID: subAgent,
+                kind: .question, message: "Which API?", timestamp: Date().timeIntervalSince1970
+            )
+            guard case .accepted = MissionStore.shared.process(question, enabled: false) else { return XCTFail("the sub-task asks its task") }
+            let subColumn = try XCTUnwrap(shell.workspaces.first { $0.id == subID }?.columns.first { $0.agentUUID == subAgent })
+            let row = shell.missionQuestions(foreground: { _ in nil }, now: Date().timeIntervalSince1970)[ObjectIdentifier(subColumn)]
+            XCTAssertEqual(row?.parentTitle, "Parent")
+            let toSub = try tell("Sub", review)
+            XCTAssertTrue(toSub.text.hasSuffix("still go to “Parent”, which started it."), toSub.text)
+            XCTAssertEqual(MissionStore.shared.missions.first { $0.id == tells.id }?.events.map(\.kind), [.instruction])
+
+            shell.addWorkspace(title: "Plain", cwd: harness.repo, profileID: lead.space)
+            let plain = try tell("Plain", review)
+            XCTAssertTrue(plain.isError && plain.text.contains("runs none"), plain.text)
+            let other = shell.workspaceStore.createProfile(named: "Other", anchors: [], select: false).id
+            shell.addWorkspace(title: "Elsewhere", cwd: harness.repo, profileID: other)
+            for name in ["Elsewhere", "Lead"] {
+                let refused = try tell(name, review)
+                XCTAssertTrue(refused.isError && refused.text.hasPrefix("No task in Tools is named"), refused.text)
+            }
+        }
     }
 
     /// tell carries up to 4,000 characters: typed as the agent reads it,

@@ -50,9 +50,10 @@ enum NiruxMCPServer {
         the nirux-worktree skill, not git worktree), one repository per task: a feature across two \
         repositories is two tasks; work that needs no repository starts with repo "none", in a folder of its \
         own. Read list_tasks first: give a running task more work with tell instead of \
-        starting another, and group small related fixes into one task. Don't edit files, commit or switch \
-        branches in this checkout. Each task's questions and result are typed into your prompt as [Nirux \
-        Mission] messages, only while you are idle: after starting or telling tasks, end your turn; don't \
+        starting another, and group small related fixes into one task. tell reaches every task of this space, \
+        sub-tasks and the user's own included: send a review to the task whose pull request it is. Don't edit \
+        files, commit or switch branches in this checkout. Each task's questions and result are typed into \
+        your prompt as [Nirux Mission] messages, only while you are idle: after starting or telling tasks, end your turn; don't \
         poll or sleep. Answer a question with reply when the space brief, the code or this conversation \
         settles it; otherwise hand it over with ask_user and say why. Keep each task's next step and blocker \
         current with set_task_context, as the user reads them on its row: after its question is answered, when \

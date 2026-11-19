@@ -87,7 +87,8 @@ extension NiruxShellView {
         var waiting = Set<String>()
         defer { missionParentWatch = missionParentWatch.filter { waiting.contains($0.key) } }
         let store = MissionStore.shared
-        for mission in store.missions where mission.status == .active {
+        // A Lead's one-way Mission names the Lead, whom the child doesn't ask.
+        for mission in store.missions where mission.status == .active && mission.oneWay != true {
             guard let (workspace, childColumn) = missionEnd(mission, parent: false), workspace.carriesMissions,
                   let column = childColumn, result[ObjectIdentifier(column)] == nil
             else { continue }
