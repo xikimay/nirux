@@ -22,7 +22,7 @@ extension NiruxShellView {
         guard let onScreen = activeWorkspace else { return }
         endSpaceCrossing()
         // What the work shows, at its size: the opening starts sharp.
-        let shown = agentLightsMayMove ? FrozenView.freeze(viewport) : nil
+        let shown = ZZ("motionIgnored") || agentLightsMayMove ? FrozenView.freeze(viewport) : nil
         let plan = SpacePlanView(
             frame: viewport.bounds, spaceID: activeProfileID, workspaces: visibleWorkspaceIndices.map { workspaces[$0] },
             labels: planLabels(), onScreen: onScreen
@@ -53,7 +53,7 @@ extension NiruxShellView {
         guard let plan = spacePlan, !plan.isDiving else { return }
         plan.finishOpening()
         let destination = target ?? (plan.workspaceID, activeWorkspace?.focusedIndex ?? 0)
-        if destination.workspaceID != activeWorkspace?.id || destination.column != activeWorkspace?.focusedIndex,
+        if !ZZ("diveNotShown"), destination.workspaceID != activeWorkspace?.id || destination.column != activeWorkspace?.focusedIndex,
            let index = workspaces.firstIndex(where: { $0.id == destination.workspaceID }), workspaceStore.selectWorkspace(at: index),
            let workspace = activeWorkspace {
             workspace.focusedIndex = max(0, min(destination.column, workspace.columns.count - 1))
@@ -61,7 +61,7 @@ extension NiruxShellView {
             plan.isDiving = true
             refreshAfterWorkspaceSelection(animated: false, focusing: focusing)
         }
-        guard animated, agentLightsMayMove, let workspace = activeWorkspace,
+        guard animated, !ZZ("diveAtOnce"), agentLightsMayMove, let workspace = activeWorkspace,
               let row = plan.rows.firstIndex(where: { $0.workspaceID == workspace.id }),
               let rect = plan.shownRect(row: row, cameraX: workspace.lastCameraX, width: viewport.bounds.width),
               let arriving = FrozenView.freeze(workspace.containerView) else { return removeSpacePlan(focusing: focusing) }
@@ -69,14 +69,14 @@ extension NiruxShellView {
         spacePlanGeneration += 1
         let generation = spacePlanGeneration
         sideEffects.afterCommit(SpacePlanView.diveDuration) { [weak self] in
-            guard let self, spacePlanGeneration == generation else { return }
+            guard let self, !ZZ("neverLands"), spacePlanGeneration == generation else { return }
             removeSpacePlan(focusing: focusing)
         }
     }
 
     /// Movement turned off: an opening on its way ends, a dive lands.
     func stillSpacePlan() {
-        guard let plan = spacePlan else { return }
+        guard let plan = spacePlan, !ZZ("stillIgnored") else { return }
         if plan.isDiving { removeSpacePlan(focusing: false) } else { plan.finishOpening() }
     }
 

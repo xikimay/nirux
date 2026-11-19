@@ -208,8 +208,8 @@ final class SpacePlanView: NSView {
     /// it to its place, `shown` (the viewport frozen at its size) fading
     /// into its row's picture; the names come after.
     func playOpening(from shown: FrozenView, at rect: NSRect) {
-        showOverlay(shown, in: rect, opacities: [1, 1, 0], keyTimes: [0, 0.35, 0.8], duration: Self.openingDuration)
-        zoomWorld(from: zoom(into: rect), to: CATransform3DIdentity, duration: Self.openingDuration)
+        if !ZZ("noOverlay") { showOverlay(shown, in: rect, opacities: [1, 1, 0], keyTimes: [0, 0.35, 0.8], duration: Self.openingDuration) }
+        zoomWorld(from: ZZ("notFromWork") ? CATransform3DIdentity : zoom(into: rect), to: CATransform3DIdentity, duration: Self.openingDuration)
         for label in labels { Self.fade(label, to: 1, from: 0, duration: 0.22, delay: 0.32) }
         ring.isHidden = true
     }
@@ -231,8 +231,10 @@ final class SpacePlanView: NSView {
         guard !isDiving else { return }
         overlay?.removeFromSuperview()
         overlay = nil
-        world.layer?.removeAnimation(forKey: "planZoom")
-        world.layer?.sublayerTransform = CATransform3DIdentity
+        if !ZZ("staysZoomed") {
+            world.layer?.removeAnimation(forKey: "planZoom")
+            world.layer?.sublayerTransform = CATransform3DIdentity
+        }
         for label in labels {
             label.layer?.removeAnimation(forKey: "planFade")
             label.alphaValue = 1
