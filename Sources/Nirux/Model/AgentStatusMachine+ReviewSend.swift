@@ -62,12 +62,9 @@ enum ReviewSendRefusal: Equatable, Sendable {
 }
 
 extension AgentStatusMachine {
-    /// Names, by process, of the agents Nirux knows that aren't Claude Code.
-    static let otherAgents = ["codex": "Codex", "gemini": "Gemini CLI", "opencode": "OpenCode", "agy": "Antigravity"]
-
     /// Why a review's comments may not be typed into `foreground`'s prompt
     /// now; nil when they may: an interactive `claude` driven by Nirux's
-    /// hooks (`hookKind`), that took a prompt since it started (as Mission's
+    /// hooks (`hookAgent`), that took a prompt since it started (as Mission's
     /// `tell` asks), with no dialog listed, no work going on, no turn
     /// started, and no error whose menu fires no hook. Closing a column
     /// trusts "idle" on part of this (`WorkspaceClosePolicy.LiveAgent`).
@@ -75,17 +72,15 @@ extension AgentStatusMachine {
     /// still at work after the main turn, or a turn interrupted with Esc
     /// (no hook until Claude's idle notice), reads as working.
     func reviewSendRefusal(foreground: ForegroundProcess?) -> ReviewSendRefusal? {
-        guard let foreground else { return .noAgent }
-        guard foreground.name == "claude" else {
-            return Self.otherAgents[foreground.name].map(ReviewSendRefusal.notClaude) ?? .noAgent
-        }
-        guard !AgentHookCenter.isHeadlessClaude(foreground) else { return .headless }
-        // `hookKind` is the column's, cleared when Claude ends or another
+        guard let agent = foreground?.agent, let foreground else { return .noAgent }
+        guard agent == .claude else { return .notClaude(agent.productName) }
+        guard foreground.headlessAgent == nil else { return .headless }
+        // `hookAgent` is the column's, cleared when Claude ends or another
         // process comes to the front (Ctrl-Z): a Claude restarted in it
         // must report again (the very one back in front gets it back, see
         // `tick`). A prompt since it started: SessionStart can come before
         // Claude's own dialogs.
-        guard hookKind == "claude", prompt(since: foreground.instance.startedAt) != nil else {
+        guard hookAgent == .claude, prompt(since: foreground.instance.startedAt) != nil else {
             return .notHeardFrom
         }
         // Any dialog still listed may be on screen.

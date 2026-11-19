@@ -455,7 +455,7 @@ final class AgentStatusMachineTests: XCTestCase {
         machine.noteUserInput(now: t0)
         _ = machine.apply(event(.stop, at: 10), isUserFocused: false)
         XCTAssertEqual(machine.tick(fgName: nil, isUserFocused: false, now: t0 + 20), .needsAttention)
-        XCTAssertEqual(machine.hookKind, "claude")
+        XCTAssertEqual(machine.hookAgent, .claude)
         for second in stride(from: 3_000.0, to: 3_060, by: 0.5) {
             machine.noteRead(now: t0 + second)
             XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + second + 0.2), .needsAttention)
@@ -515,7 +515,7 @@ final class AgentStatusMachineTests: XCTestCase {
         _ = machine.apply(event(.stop, at: 10), isUserFocused: false)
         _ = machine.tick(fgName: "vim", isUserFocused: false, now: t0 + 20)
         _ = machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: false, now: t0 + 30)
-        XCTAssertEqual(machine.hookKind, "claude")
+        XCTAssertEqual(machine.hookAgent, .claude)
         machine.noteRead(now: t0 + 4_500)
         XCTAssertEqual(machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: false, now: t0 + 4_500.5), .idle)
 

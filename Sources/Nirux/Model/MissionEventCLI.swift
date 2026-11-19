@@ -252,7 +252,7 @@ enum MissionEventCLI {
             return 4
         }
         let questionID = questionID(for: message, context: context, in: mission, now: now())
-        let typesAnswer = mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue
+        let typesAnswer = mission.childAgent == .claude
         if let recorded = mission.events.first(where: { $0.id == questionID }), kind != nil || recommendation != nil,
            recorded.questionKind != kind || recorded.recommendation != recommendation {
             notice("This question was recorded earlier with another kind or recommendation, which stand: "
@@ -802,7 +802,7 @@ extension MissionEventCLI {
             writeStandardError("No Mission on branch \(branch) was started from this terminal.")
             return 4
         }
-        guard mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue else {
+        guard mission.childAgent == .claude else {
             writeStandardError("Nirux types messages only into a Claude Code child; this one runs \(mission.childAgentKind).")
             return 4
         }

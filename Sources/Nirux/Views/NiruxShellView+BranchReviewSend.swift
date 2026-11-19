@@ -162,21 +162,22 @@ extension NiruxShellView {
         var columns: [ReviewSendColumn] = []
         for workspace in workspaces where !workspace.isClosing {
             for (index, column) in workspace.columns.enumerated() where !column.isClosing {
-                guard let pty = column.pty, let name = pty.runningAgentName(snapshot: snapshot),
+                guard let pty = column.pty, let agent = pty.runningAgent(snapshot: snapshot),
                       let folder = pty.agentCwd(snapshot: snapshot),
                       MergeQueue.isInside(Self.comparablePath(folder), roots: roots, allWorktrees: others) else { continue }
                 let foreground = pty.foregroundProcess(snapshot: snapshot)
-                let inFront = foreground.map { AgentStatusMachine.isRecognizedAgentProcess($0.name) } == true
+                let inFront = foreground?.agent != nil
                 let refusal: ReviewSendRefusal? = if inFront {
                     pty.reviewSendRefusal(snapshot: snapshot)
-                } else if let foreground, Self.interactiveShells.contains(foreground.name) {
+                    // A shell in front runs the agent stopped or in the background, not as a launcher.
+                } else if let foreground, Shell.isShell(foreground.name) {
                     .notInFront
                 } else {
                     .underLauncher(foreground?.name ?? "another program")
                 }
                 columns.append(ReviewSendColumn(
                     workspaceID: workspace.id, columnID: column.id,
-                    label: "\(workspace.title) — \(name), column \(index + 1) · \((folder as NSString).abbreviatingWithTildeInPath)",
+                    label: "\(workspace.title) — \(agent.rawValue), column \(index + 1) · \((folder as NSString).abbreviatingWithTildeInPath)",
                     refusal: refusal,
                     hasDraft: pty.reviewSendHasDraft, process: inFront ? foreground?.instance : nil
                 ))
@@ -184,10 +185,6 @@ extension NiruxShellView {
         }
         return columns
     }
-
-    /// Shells: one in front of an agent of its own runs it stopped or in
-    /// the background, not as a launcher.
-    static let interactiveShells: Set<String> = ["zsh", "bash", "sh", "fish", "dash", "ksh", "tcsh", "csh", "nu", "xonsh", "elvish"]
 
     /// What the sheet says of `send` and the columns it could go to.
     static func reviewSendContent(

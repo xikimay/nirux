@@ -223,7 +223,7 @@ extension NiruxShellView {
         // launcher (npx) too. The screen adds what no hook reports.
         let dialog = agentReadings(of: task, snapshot: snapshot).lazy.compactMap(\.dialog).first
         for column in columns {
-            guard let pty = column.pty, pty.runningAgentName(snapshot: snapshot) != nil, let hold = pty.agentHold else { continue }
+            guard let pty = column.pty, pty.runningAgent(snapshot: snapshot) != nil, let hold = pty.agentHold else { continue }
             return Self.closeRefusal(hold, title: title, dialog: dialog)
         }
         if let dialog { return "“\(title)” waits for the user (\(dialog)): leave it to them." }
@@ -233,16 +233,15 @@ extension NiruxShellView {
         }
         // Idle is only known from Claude's hooks (see WorkspaceClosePolicy).
         if let unknown = agents.first(where: { $0.status == nil }) {
-            return "Nirux can't tell whether “\(title)”'s \(unknown.displayName) is done: ask the user to close it."
+            return "Nirux can't tell whether “\(title)”'s \(unknown.agent.name) is done: ask the user to close it."
         }
         // A dev server or a test run in front of a terminal of its own (one
         // sent to the background isn't seen).
         let programs = columns.compactMap { column -> String? in
-            guard let pty = column.pty, pty.runningAgentName(snapshot: snapshot) == nil,
+            guard let pty = column.pty, pty.runningAgent(snapshot: snapshot) == nil,
                   let name = pty.foregroundProcess(snapshot: snapshot)?.name else { return nil }
-            let program = name.hasPrefix("-") ? String(name.dropFirst()) : name
             // A terminal just opened: its fork bears this app's name until its shell starts.
-            return Self.interactiveShells.contains(program) || program == ProcessInfo.processInfo.processName ? nil : name
+            return Shell.isShell(name) || name == ProcessInfo.processInfo.processName ? nil : name
         }
         if let program = programs.first {
             return "“\(title)” runs \(program) in a terminal: ask the user to close it."
@@ -551,7 +550,7 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         guard !snapshot.isEmpty else { return answer("Nirux couldn't read the running processes: call again in a moment.", true) }
         guard let column = task.columns.first(where: { $0.agentUUID == mission.childAgentUUID }), let pty = column.pty,
-              let foreground = pty.foregroundProcess(snapshot: snapshot), foreground.name == "claude"
+              let foreground = pty.foregroundProcess(snapshot: snapshot), foreground.agent == .claude
         else { return answer("“\(title)”'s Claude Code isn't running in its column: there is no turn to interrupt.", true) }
         if let refusal = pty.interruptRefusal(snapshot: snapshot) { return answer(Self.interruptRefusal(refusal, title: title), true) }
         guard let transcript = column.claudeTranscript, transcript.process == foreground.instance else {

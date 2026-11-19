@@ -78,7 +78,6 @@ final class ColumnState {
     }
 
     // MARK: - Header (pushes the terminal down)
-    static let boringTitles: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
     /// A terminal column's header; the other types own theirs.
     private(set) var terminalHeader: ColumnHeaderView?
     /// The column's header, whatever its type (see `ColumnHeaderView`).
@@ -180,8 +179,8 @@ final class ColumnState {
     func updateHeaderTitle(snapshot: @autoclosure () -> ProcessSnapshot) {
         guard let header = terminalHeader else { return }
         if let deferredAgent {
-            header.title = deferredAgent.processName
-        } else if let termTitle = terminalTitle, !termTitle.isEmpty, !Self.boringTitles.contains(termTitle) {
+            header.title = deferredAgent.launch.agent.rawValue
+        } else if let termTitle = terminalTitle, !termTitle.isEmpty, !Shell.isShell(termTitle) {
             header.title = termTitle
         } else {
             header.title = pty?.foregroundProcessName(snapshot: snapshot()) ?? "shell"
@@ -197,7 +196,7 @@ final class ColumnState {
     /// task's station.
     func updateHeaderAgentState(_ column: ColumnInfo, wait: AgentWait?, now: TimeInterval, station: BoardStages.Station?) {
         guard let header = terminalHeader else { return }
-        header.icon = .terminal(processName: column.deferredAgent?.processName ?? column.processName)
+        header.icon = .terminal(processName: column.deferredAgent?.agent.rawValue ?? column.processName)
         header.status = .agent(column, wait: wait, now: now, station: station)
     }
 
@@ -424,7 +423,7 @@ final class ColumnState {
         // Only agy's own: any program can print the sequence.
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
             guard let self, let ptySession, ptySession.isNewProgramStatus(status),
-                  let agy = ptySession.foregroundProcess(snapshot: ProcessSnapshot()), agy.name == AgentProgramStatus.process
+                  let agy = ptySession.foregroundProcess(snapshot: ProcessSnapshot()), agy.agent == .agy
             else { return }
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
@@ -571,7 +570,7 @@ final class ColumnState {
     /// own, not a nested agy's that its shell tool started in its job.
     func captureAgySession(sessionID: String?, emitterProcess: ProcessInstance?, snapshot: ProcessSnapshot) -> Bool {
         guard let place = hookEmitterPlace(emitterProcess, snapshot: snapshot),
-              !AgentHookCenter.isHeadlessAgy(place.foreground) else { return false }
+              place.foreground?.headlessAgent != .agy else { return false }
         return agySessionTracker.capture(
             sessionID: sessionID, emitterBelongsToForegroundJob: emitterProcess == place.foreground?.instance,
             foregroundProcess: place.foreground

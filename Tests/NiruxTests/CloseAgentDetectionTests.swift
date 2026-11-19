@@ -4,7 +4,7 @@ import XCTest
 /// Which agents the close confirmation sees: anything that dies with the
 /// PTY, not just the foreground process the status machine tracks.
 final class CloseAgentDetectionTests: XCTestCase {
-    private let isAgent = AgentStatusMachine.isRecognizedAgentProcess
+    private let isAgent: (String) -> Bool = { CodingAgent(rawValue: $0) != nil }
 
     private func entry(
         _ pid: pid_t, parent: pid_t, group: pid_t, foreground: pid_t = 10,
@@ -117,15 +117,15 @@ final class CloseAgentDetectionTests: XCTestCase {
         )
         bareShell.start(shell: "/bin/zsh", args: ["-f"], cwd: cwd)
 
-        var names: [String?] = []
+        var names: [CodingAgent?] = []
         let deadline = Date().addingTimeInterval(3)
         repeat {
             let snapshot = ProcessSnapshot()
-            names = [foregroundAgent, backgroundAgent, bareShell].map { $0.agentProcessName(snapshot: snapshot) }
-            if names == ["claude", "codex", nil] { break }
+            names = [foregroundAgent, backgroundAgent, bareShell].map { $0.terminalAgent(snapshot: snapshot) }
+            if names == [.claude, .codex, nil] { break }
             try await Task.sleep(for: .milliseconds(20))
         } while Date() < deadline
-        XCTAssertEqual(names, ["claude", "codex", nil])
+        XCTAssertEqual(names, [.claude, .codex, nil])
         // The background agent came from the descendant scan, not the foreground.
         XCTAssertEqual(backgroundAgent.foregroundProcessName(snapshot: ProcessSnapshot()), "zsh")
     }
@@ -151,12 +151,12 @@ final class CloseAgentDetectionTests: XCTestCase {
             )
             claude.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a claude /bin/cat"], cwd: cwd)
 
-            let expected: [String?] = ["gemini", "gemini", "claude"]
-            var names: [String?] = []
+            let expected: [CodingAgent?] = [.gemini, .gemini, .claude]
+            var names: [CodingAgent?] = []
             let deadline = Date().addingTimeInterval(3)
             repeat {
                 let snapshot = ProcessSnapshot()
-                names = [foreground, background, claude].map { $0.agentProcessName(snapshot: snapshot) }
+                names = [foreground, background, claude].map { $0.terminalAgent(snapshot: snapshot) }
                 if names == expected { break }
                 try await Task.sleep(for: .milliseconds(20))
             } while Date() < deadline
@@ -175,7 +175,7 @@ final class CloseAgentDetectionTests: XCTestCase {
             session.start(shell: "/bin/zsh", args: ["-f"], cwd: cwd)
             let emptySnapshot = ProcessSnapshot(entries: [])
             // Nothing seen yet: nothing to fall back on.
-            XCTAssertNil(session.agentProcessName(snapshot: emptySnapshot))
+            XCTAssertNil(session.terminalAgent(snapshot: emptySnapshot))
 
             // The last heartbeat saw claude in the foreground; then the
             // process-table sysctl fails — fail closed.
@@ -187,9 +187,9 @@ final class CloseAgentDetectionTests: XCTestCase {
                 processTableRead: true,
                 claudeFiredHooks: false
             )
-            XCTAssertEqual(session.agentProcessName(snapshot: emptySnapshot), "claude")
+            XCTAssertEqual(session.terminalAgent(snapshot: emptySnapshot), .claude)
             // A snapshot that captured the table wins: the shell runs no agent.
-            XCTAssertNil(session.agentProcessName(snapshot: ProcessSnapshot()))
+            XCTAssertNil(session.terminalAgent(snapshot: ProcessSnapshot()))
         }
     }
 }

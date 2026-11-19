@@ -264,7 +264,7 @@ final class ColumnHeaderViewTests: XCTestCase {
         XCTAssertEqual(young.text, "permission · Bash")
         XCTAssertEqual(ColumnHeaderView.Status.agent(focused, wait: wait, now: 1_000 + 4 * 60)?.text, "permission · Bash · 4m")
 
-        let deferred = SidebarDeferredAgent(processName: "claude", summary: "Fix login", columnID: UUID())
+        let deferred = SidebarDeferredAgent(agent: .claude, summary: "Fix login", columnID: UUID())
         let notResumed = try XCTUnwrap(ColumnHeaderView.Status.agent(info(.idle, deferred: deferred), wait: nil, now: 0))
         XCTAssertEqual(notResumed.text, "not resumed")
         XCTAssertEqual(notResumed.tone, .neutral)
@@ -293,6 +293,24 @@ final class ColumnHeaderViewTests: XCTestCase {
         XCTAssertEqual(header.currentMenu().items.first?.title, "Find in Terminal…")
     }
 
+    /// A shell's name says nothing, a login shell's or one Nirux doesn't
+    /// start: the bar names what runs in front.
+    func testAShellsTitleNamesNothing() {
+        let column = ColumnState(cwd: "/tmp")
+        for title in ["-fish", "nu", "dash"] {
+            column.terminalTitle = title
+            column.updateHeaderTitle(snapshot: ProcessSnapshot(entries: []))
+            XCTAssertEqual(column.header?.title, "shell", title)
+        }
+    }
+
+    /// An agent without its desktop app shows its own symbol.
+    func testAnAgentWithoutItsAppShowsItsSymbol() {
+        XCTAssertEqual(ColumnHeaderView.Icon.terminal(processName: "gemini"), .symbol("sparkle"))
+        XCTAssertEqual(ColumnHeaderView.Icon.terminal(processName: "opencode"), .symbol("curlybraces"))
+        XCTAssertEqual(ColumnHeaderView.Icon.terminal(processName: "zsh"), .symbol(Theme.Symbol.terminal))
+    }
+
     func testTerminalHeaderKeepsTheDevServerChip() throws {
         let column = ColumnState(cwd: "/tmp")
         column.terminalTitle = "npm"
@@ -313,7 +331,7 @@ final class ColumnHeaderViewTests: XCTestCase {
     /// A restored agent that hasn't resumed says so wherever its title is
     /// read (Global Search).
     func testNotResumedAgentSaysSoInItsTitle() {
-        let launch = DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
+        let launch = DeferredAgentLaunch(launch: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
         let column = ColumnState(cwd: "/tmp", deferredAgent: launch)
         column.updateHeaderTitle(snapshot: ProcessSnapshot(entries: []))
         XCTAssertEqual(column.header?.title, "claude")
@@ -323,7 +341,7 @@ final class ColumnHeaderViewTests: XCTestCase {
     /// A terminal's folder is its title's tooltip, not on the bar; it holds
     /// while the title changes, and a title cut short comes first in it.
     func testATerminalsFolderIsInItsTitlesToolTip() throws {
-        let launch = DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
+        let launch = DeferredAgentLaunch(launch: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
         let column = ColumnState(cwd: "/tmp", deferredAgent: launch)
         column.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
         column.updateHeaderTitle(snapshot: ProcessSnapshot(entries: []))
@@ -354,7 +372,7 @@ final class ColumnHeaderViewTests: XCTestCase {
     /// Global Search names a terminal by its title and its folder's last
     /// two parts, as the bar used to.
     func testATerminalsTitleTextKeepsAShortFolder() throws {
-        let launch = DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
+        let launch = DeferredAgentLaunch(launch: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
         let column = ColumnState(cwd: "/tmp/acme/worktrees/feat-x", deferredAgent: launch)
         column.updateHeaderTitle(snapshot: ProcessSnapshot(entries: []))
         XCTAssertEqual(column.folder, "/tmp/acme/worktrees/feat-x")

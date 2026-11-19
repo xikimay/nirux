@@ -98,7 +98,7 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(status(workspace([column(0, .working)], blocker: blocker)), "Working")
         XCTAssertEqual(status(workspace([column()], pr: pullRequest(ci: "FAILURE"), blocker: blocker)), "#39 · checks failed")
         var paused = column(1)
-        paused.deferredAgent = SidebarDeferredAgent(processName: "claude", summary: "claude session", columnID: UUID())
+        paused.deferredAgent = SidebarDeferredAgent(agent: .claude, summary: "claude session", columnID: UUID())
         XCTAssertEqual(status(workspace([column(), paused], blocker: blocker)), "Paused · Resume", "its agent isn't running")
 
         let blocked = workspace([finished], pr: pullRequest(ci: "SUCCESS"), nextStep: next, blocker: blocker)

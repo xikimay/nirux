@@ -413,7 +413,7 @@ final class StuckAgentTests: XCTestCase {
 
     private func exit(at offset: TimeInterval, seenAt: TimeInterval? = nil, firedHooks: Bool = true) -> AgentMidTurnExit {
         AgentMidTurnExit(
-            processName: "claude", exitedAt: t0 + offset, lastSeenAt: t0 + (seenAt ?? offset - 2),
+            agent: .claude, exitedAt: t0 + offset, lastSeenAt: t0 + (seenAt ?? offset - 2),
             sessionID: "lead", arguments: ["claude"], firedHooks: firedHooks
         )
     }
@@ -456,7 +456,7 @@ final class StuckAgentTests: XCTestCase {
         startTurn()
         _ = machine.tick(fgName: "zsh", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 5))
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 8))
-        XCTAssertNil(machine.hookKind)
+        XCTAssertNil(machine.hookAgent)
         machine.noteAgentExited(exit(at: 20))
         XCTAssertNotNil(machine.midTurnExit)
     }

@@ -340,13 +340,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         LeadRequestCenter.shared.stop()
     }
 
-    // MARK: - URL Scheme
-
-    enum WorkspaceAgent: String, CaseIterable {
-        case claude, codex
-        /// Antigravity CLI, Google's successor to Gemini CLI.
-        case agy
-    }
 
     // MARK: - NSMenuItemValidation
 

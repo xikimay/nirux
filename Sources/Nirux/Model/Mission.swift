@@ -14,12 +14,15 @@ struct Mission: Codable, Equatable {
     let parentAgentUUID: String
     let childWorkspaceID: String
     let childAgentUUID: String
+    /// `CodingAgent`'s raw value, or "agent" when the child started none.
     let childAgentKind: String
     let branch: String
     var status: Status
     let createdAt: TimeInterval
     var updatedAt: TimeInterval
     var events: [MissionEvent]
+
+    var childAgent: CodingAgent? { CodingAgent(rawValue: childAgentKind) }
     /// The parent is a space's Lead (docs/design/spaces.md, "The Lead"): the
     /// Mission works even with Mission handoffs off in Settings. Nil (an
     /// older build's record) means no.
@@ -420,7 +423,7 @@ final class MissionStore {
             // A Claude Code child's `ask` ends its turn (MissionEventCLI.ask):
             // the store decides from the recorded child, not from the queue.
             expectsTypedAnswer: incoming.kind == .question
-                && missions[index].childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue ? true : nil,
+                && missions[index].childAgent == .claude ? true : nil,
             answeredByUser: incoming.kind == .response && fromUser ? true : nil
         )
         if event.kind == .instruction {

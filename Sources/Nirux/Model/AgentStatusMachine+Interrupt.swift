@@ -23,8 +23,7 @@ extension AgentStatusMachine {
     /// turn that called a tool, with nothing typed since its prompt, leaves
     /// the box empty for the next message.
     func interruptRefusal(foreground: ForegroundProcess?) -> AgentInterruptRefusal? {
-        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground), hookKind == "claude"
-        else { return .noClaude }
+        guard let foreground, foreground.interactiveAgent == .claude, hookAgent == .claude else { return .noClaude }
         // The main thread's turn: a subagent at work after its Stop isn't one.
         guard promptTurnInFlight, let lastPromptAt, lastPromptAt >= foreground.instance.startedAt else { return .notWorking }
         guard interruptSentAt < lastPromptAt else { return .alreadySent }

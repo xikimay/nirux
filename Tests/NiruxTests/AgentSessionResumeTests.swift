@@ -10,7 +10,7 @@ final class AgentSessionResumeTests: XCTestCase {
     )
 
     private func record(
-        agent: AgentHookEvent.Kind = .claude, cwd: String? = "/repos/app.feat-x",
+        agent: CodingAgent = .claude, cwd: String? = "/repos/app.feat-x",
         hasConversation: Bool = true, transcriptPath: String? = "/claude/projects/x/s1.jsonl"
     ) -> AgentSessionRecord {
         var record = AgentSessionRecord(

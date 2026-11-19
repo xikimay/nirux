@@ -4,7 +4,7 @@ import XCTest
 /// Gemini CLI, OpenCode and Antigravity: recognized by process name, with
 /// no hooks.
 final class ActivityOnlyAgentTests: XCTestCase {
-    private let isAgent = AgentStatusMachine.isRecognizedAgentProcess
+    private let isAgent: (String) -> Bool = { CodingAgent(rawValue: $0) != nil }
     private var machine = AgentStatusMachine()
     private let t0 = Date(timeIntervalSince1970: 1_000)
 
@@ -113,7 +113,7 @@ final class ActivityOnlyAgentTests: XCTestCase {
         _ = machine.tick(fgName: "zsh", isUserFocused: false, now: t0 + 1)
         _ = machine.tick(fgName: "gemini", isUserFocused: false, now: t0 + 2)
         XCTAssertEqual(machine.pendingDialogs.count, 1)
-        XCTAssertNil(machine.hookKind, "no hook drives gemini; OSC 9 must not stay muted")
+        XCTAssertNil(machine.hookAgent, "no hook drives gemini; OSC 9 must not stay muted")
 
         // gemini's own silence is not claude's dialog.
         machine.noteUserInput(now: t0 + 8)
@@ -131,44 +131,36 @@ final class ActivityOnlyAgentTests: XCTestCase {
         // `claude -p x; gemini`: no shell tick in between to clear the kind.
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0)
         _ = machine.apply(AgentHookEvent(kind: .claude, name: .sessionStart), isUserFocused: false)
-        XCTAssertEqual(machine.hookKind, "claude")
+        XCTAssertEqual(machine.hookAgent, .claude)
         _ = machine.tick(fgName: "gemini", isUserFocused: false, now: t0 + 1)
-        XCTAssertNil(machine.hookKind)
+        XCTAssertNil(machine.hookAgent)
         // An integrated agent keeps it: its SessionStart may come first.
         _ = machine.apply(AgentHookEvent(kind: .claude, name: .sessionStart), isUserFocused: false)
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 2)
-        XCTAssertEqual(machine.hookKind, "claude")
+        XCTAssertEqual(machine.hookAgent, .claude)
     }
 
     // MARK: - Capabilities
 
     func testRecognizedButNotATypedPromptTarget() {
         for name in ["gemini", "opencode", "agy"] {
-            XCTAssertTrue(AgentStatusMachine.isRecognizedAgentProcess(name), name)
-            XCTAssertTrue(AgentStatusMachine.activityOnlyAgentProcesses.contains(name), name)
+            // Recognized, but without hooks Nirux can't see their permission
+            // prompts: a typed prompt could answer one blindly.
+            XCTAssertEqual(CodingAgent(rawValue: name)?.statusSource, .output, name)
         }
-        XCTAssertTrue(AgentStatusMachine.activityOnlyAgentProcesses.isDisjoint(with: AgentStatusMachine.integratedAgentProcesses))
-        XCTAssertFalse(AgentStatusMachine.isRecognizedAgentProcess("node"))
-    }
-
-    func testTypedPromptsReachOnlyIntegratedAgents() {
-        XCTAssertTrue(AgentStatusMachine.acceptsTypedPrompts(processName: "claude"))
-        XCTAssertTrue(AgentStatusMachine.acceptsTypedPrompts(processName: "codex"))
-        // Recognized, but without hooks Nirux can't see their permission
-        // prompts: a typed prompt could answer one blindly.
-        XCTAssertFalse(AgentStatusMachine.acceptsTypedPrompts(processName: "gemini"))
-        XCTAssertFalse(AgentStatusMachine.acceptsTypedPrompts(processName: "opencode"))
-        XCTAssertFalse(AgentStatusMachine.acceptsTypedPrompts(processName: "zsh"))
+        XCTAssertEqual(CodingAgent.claude.statusSource, .hooks)
+        XCTAssertEqual(CodingAgent.codex.statusSource, .hooks)
+        XCTAssertNil(CodingAgent(rawValue: "node"))
     }
 
     // MARK: - Close confirmation
 
     func testCloseAlertNamesTheAgentWithoutTrustingItsIdle() {
-        let gemini = WorkspaceClosePolicy.LiveAgent(processName: "gemini", machineStatus: .idle, hookKind: nil)
-        XCTAssertEqual(gemini.displayName, "Gemini")
+        let gemini = WorkspaceClosePolicy.LiveAgent(agent: .gemini, machineStatus: .idle, hookAgent: nil)
+        XCTAssertEqual(gemini.agent.name, "Gemini")
         XCTAssertNil(gemini.status, "the fallback reads idle through silent tool calls")
-        let opencode = WorkspaceClosePolicy.LiveAgent(processName: "opencode", machineStatus: .working, hookKind: nil)
-        XCTAssertEqual(opencode.displayName, "OpenCode")
+        let opencode = WorkspaceClosePolicy.LiveAgent(agent: .opencode, machineStatus: .working, hookAgent: nil)
+        XCTAssertEqual(opencode.agent.name, "OpenCode")
         XCTAssertEqual(opencode.status, .working)
         XCTAssertEqual(
             WorkspaceClosePolicy.columnConfirmation(for: gemini),

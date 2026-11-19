@@ -34,8 +34,7 @@ struct AgentTurnFailure: Equatable, Sendable {
 /// its session (a crash, a kill): recorded when the column's foreground
 /// changes and the process is gone.
 struct AgentMidTurnExit: Equatable, Sendable {
-    /// `claude`.
-    let processName: String
+    let agent: CodingAgent
     /// Epoch seconds the exit was noticed.
     let exitedAt: TimeInterval
     /// Epoch seconds the agent was last seen in front, alive: keystrokes

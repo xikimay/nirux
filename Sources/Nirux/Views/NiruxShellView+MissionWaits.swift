@@ -170,13 +170,13 @@ extension NiruxShellView {
             let refusal = column.pty?.missionPromptRefusal(runningSince: since, snapshot: snapshot, now: now, record: sessionRecord(of:))
                 ?? .noClaude
             let holder = {
-                mission.childAgentKind != NiruxApp.WorkspaceAgent.claude.rawValue ? "its agent hasn't collected it"
+                mission.childAgent != .claude ? "its agent hasn't collected it"
                     : !mission.isCarried(handoffsEnabled: handoffsEnabled) ? "Mission handoffs are off"
                     : SidebarWaitingMessages.why(refusal, untypable: self.missionWaits.tries[event.id, default: 0] >= Self.missionTypingTries).short
             }
             // Restarted, `runningSince` says, on another conversation once it confirmed one.
             let other = conversation(of: column, foreground: column.pty?.foregroundProcess(snapshot: snapshot)) != nil
-            if refusal == .restarted, other, mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue {
+            if refusal == .restarted, other, mission.childAgent == .claude {
                 givenUp.append((delivery, "\(yours) won't be typed: its Claude Code restarted on another conversation, and Nirux "
                     + "types a message only into the conversation it was sent to. Send it again if it still applies."))
             } else if now >= event.instructionDeadline {
@@ -232,7 +232,7 @@ extension NiruxShellView {
             for delivery in deliveries where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
                 // A child other than Claude Code collects its own.
                 guard Self.goesToParent(delivery.event)
-                    || delivery.mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue
+                    || delivery.mission.childAgent == .claude
                 else { continue }
                 let recipient = missionRecipient(of: delivery)
                 add(recipient, WaitingMessage(
@@ -252,7 +252,7 @@ extension NiruxShellView {
         for (id, entry) in waiting {
             let pty = entry.column.pty
             let foreground = pty?.foregroundProcess(snapshot: snapshot)
-            if let name = foreground?.name, name != "claude", AgentStatusMachine.isRecognizedAgentProcess(name) { continue }
+            if let agent = foreground?.agent, agent != .claude { continue }
             let atFirstPrompt = foreground.map { pty?.agentTookPrompt(since: $0) == false } ?? false
             let refused = entry.messages.compactMap { message -> (message: WaitingMessage, refusal: AgentPromptRefusal?)? in
                 let refusal = pty.map {
@@ -289,7 +289,7 @@ extension NiruxShellView {
                 )
             }
             let typable = refused.filter {
-                $0.refusal != .working && $0.refusal != .restarted && ($0.refusal != .noPromptYet || pty?.agentHookKind == "claude")
+                $0.refusal != .working && $0.refusal != .restarted && ($0.refusal != .noPromptYet || pty?.hookAgent == .claude)
             }
             guard typable.contains(where: { now - $0.message.sentAt >= Self.missionMessageStallAge }),
                   let oldest = typable.min(by: { $0.message.sentAt < $1.message.sentAt })

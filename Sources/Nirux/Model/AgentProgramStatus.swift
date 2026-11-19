@@ -17,9 +17,8 @@ struct AgentProgramStatus: Equatable, Sendable {
     /// What it shows: the pending command or question, the turn's answer.
     let message: String?
 
-    /// The one app Nirux reads, and its process.
+    /// The one app Nirux reads: `CodingAgent.agy`.
     static let app = "antigravity"
-    static let process = "agy"
     /// Every launch says `blocked:kind=auth` for a moment while it signs in.
     static let signInGrace: TimeInterval = 5
     /// agy's spinner never stops this long while it works: past it, a

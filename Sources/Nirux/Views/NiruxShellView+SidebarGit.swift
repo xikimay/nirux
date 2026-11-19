@@ -237,7 +237,7 @@ extension NiruxShellView {
                 }
                 // A task's new folder is where an agent asks for trust; agy
                 // trusts exact paths, so a new worktree asks again.
-                if workspace.isFolderTask || foregroundProcess?.name == "agy" {
+                if workspace.isFolderTask || foregroundProcess?.agent?.folderTrust == .everyFolder {
                     watchTrustPrompt(of: column, foreground: foregroundProcess, now: now)
                 }
                 refreshStuckAgent(
@@ -728,15 +728,6 @@ extension NiruxShellView {
 
     // MARK: - Terminal Redraw
 
-    private static let shells: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
-    /// Recognized agents redraw correctly from SIGWINCH alone — Ctrl+L clears their session/screen.
-    /// Claude Code rebinds Ctrl+L to `/clear` and Gemini CLI's clears its history, so
-    /// broadcasting it on every layout change (e.g. Cmd+E width cycle)
-    /// wiped active sessions.
-    private static func redrawsFromSigwinchAlone(_ name: String) -> Bool {
-        AgentStatusMachine.isRecognizedAgentProcess(name)
-    }
-
     /// Heavy redraw: refresh every terminal surface and additionally send
     /// Ctrl+L (0x0C) to any foreground process that isn't a plain shell or
     /// a recognized agent (vim, htop, etc.) so TUI apps repaint their buffer.
@@ -747,11 +738,13 @@ extension NiruxShellView {
                 col.terminalView?.fitToSize()
                 col.pty?.forceRedraw()
                 col.terminalView?.needsDisplay = true
-                // Ctrl+L to any non-shell TUI (vim, htop, etc.)
-                // Skip processes that handle SIGWINCH correctly on their own.
+                // Ctrl+L to any non-shell TUI (vim, htop, etc.). Agents
+                // redraw from SIGWINCH alone, and Ctrl+L clears theirs:
+                // Claude Code rebinds it to `/clear`, Gemini CLI clears its
+                // history, so a layout change (⌘E's width cycle) wiped
+                // active sessions.
                 if let name = col.pty?.foregroundProcessName(snapshot: snap),
-                   !Self.shells.contains(name),
-                   !Self.redrawsFromSigwinchAlone(name) {
+                   !Shell.isShell(name), CodingAgent(rawValue: name) == nil {
                     col.pty?.sendRaw(Data([0x0C]))
                 }
             }

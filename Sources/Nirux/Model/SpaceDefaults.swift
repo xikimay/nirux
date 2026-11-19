@@ -11,7 +11,7 @@ import Foundation
 struct SpaceDefaults: Equatable, Sendable {
     /// Preselected for a task (New Task…, ⌘N). Nil: Claude Code. A plain
     /// workspace stays a shell whatever it says.
-    var agent: NiruxApp.WorkspaceAgent?
+    var agent: CodingAgent?
     /// Nil: Settings' mode.
     var claudeLaunchMode: ClaudeLaunchMode?
     var codexLaunchMode: CodexLaunchMode?
@@ -85,7 +85,7 @@ struct SpaceDefaults: Equatable, Sendable {
     }
 
     /// The preselected agent, Claude Code when the space sets none.
-    var taskAgent: NiruxApp.WorkspaceAgent { agent ?? .claude }
+    var taskAgent: CodingAgent { agent ?? .claude }
 
     func claudeMode(settings: ClaudeLaunchMode) -> ClaudeLaunchMode { claudeLaunchMode ?? settings }
 
@@ -194,7 +194,7 @@ extension SpaceDefaults: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        agent = (try? container.decodeIfPresent(String.self, forKey: .agent)).flatMap(NiruxApp.WorkspaceAgent.init(rawValue:))
+        agent = (try? container.decodeIfPresent(String.self, forKey: .agent)).flatMap(CodingAgent.init(launchable:))
         claudeLaunchMode = (try? container.decodeIfPresent(String.self, forKey: .claudeLaunchMode))
             .flatMap(ClaudeLaunchMode.init(rawValue:))
         codexLaunchMode = (try? container.decodeIfPresent(String.self, forKey: .codexLaunchMode))

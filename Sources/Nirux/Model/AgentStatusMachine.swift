@@ -152,9 +152,9 @@ struct AgentStatusMachine {
     /// marked interrupted, an Esc at a main-thread dialog, Nirux's own Esc.
     /// The ends of calls after it wake nothing.
     private var turnStoppedAt: TimeInterval = 0
-    /// Agent kind ("claude") once this session has emitted a hook event —
-    /// proof that hooks are installed and authoritative for this session.
-    private(set) var hookKind: String?
+    /// The agent whose hook events reached this session: proof that its
+    /// hooks are installed and authoritative.
+    private(set) var hookAgent: CodingAgent?
     /// Epoch seconds of the last PTY read that wasn't input echo (drives
     /// the fallback heuristic). 0 = never. Plain TimeInterval — a single
     /// aligned 8-byte store — because noteRead runs on the PTY read queue
@@ -262,34 +262,6 @@ struct AgentStatusMachine {
     /// Resume offers `continue` again after this long without a new turn.
     static let resumeRetryDelay: TimeInterval = 15.0
 
-    /// Agents Nirux integrates with: lifecycle hooks (Claude Code), turn
-    /// notifications (Codex), launch presets and session restore.
-    static let integratedAgentProcesses: Set<String> = ["claude", "codex"]
-
-    /// Agents recognized by foreground process name alone — no hooks, no
-    /// restore, a launcher for `agy` only. Their status comes from the
-    /// output-activity fallback in `tick`; closing their column asks first
-    /// like any agent's. Names are `ProcessSnapshot.execName` results:
-    /// Gemini CLI runs as `node [flags] …/gemini`, opencode and Antigravity
-    /// CLI as native `opencode` and `agy` binaries.
-    static let activityOnlyAgentProcesses: Set<String> = ["gemini", "opencode", "agy"]
-
-    /// Central gate for local agent status, nested-hook attribution and
-    /// close confirmation.
-    static func isRecognizedAgentProcess(_ name: String) -> Bool {
-        integratedAgentProcesses.contains(name) || activityOnlyAgentProcesses.contains(name)
-    }
-
-    /// Nirux types prompts (PR Feedback's Address, "Ask Agent Why CI
-    /// Failed") only into integrated agents. Claude's hooks report the
-    /// dialogs such a prompt must not answer; an activity-only agent
-    /// reports nothing, so its permission prompt looks like any silence and
-    /// a prompt could land on it. (Codex's notify reports turn ends only —
-    /// the same blind spot, accepted before this tier existed.)
-    static func acceptsTypedPrompts(processName name: String) -> Bool {
-        integratedAgentProcesses.contains(name)
-    }
-
     /// The turn end an agent reported at `time` (Claude's Stop, Codex's
     /// turn-complete) is done, as far as hooks can tell, and still stands:
     /// the column may show it as finished (a sweep of light). Not while
@@ -313,8 +285,8 @@ struct AgentStatusMachine {
     var attentionReason: AgentAttentionReason? {
         guard state == .needsAttention else { return nil }
         // Dialogs are Claude's: a suspended claude's stay pending behind an
-        // activity-only agent, but don't explain that agent's silence.
-        if let lastForegroundName, Self.activityOnlyAgentProcesses.contains(lastForegroundName) {
+        // agent read from its output, but don't explain that agent's silence.
+        if lastForegroundName.flatMap(CodingAgent.init(rawValue:))?.statusSource == .output {
             return lastAttentionReason
         }
         // A failed turn outranks the idle reminder that may follow it.
@@ -331,7 +303,7 @@ struct AgentStatusMachine {
     /// Returns true when the column should alert.
     mutating func applyHook(
         _ name: AgentHookEvent.Name,
-        kind: AgentHookEvent.Kind,
+        kind: CodingAgent,
         source: String? = nil,
         isUserFocused: Bool
     ) -> Bool {
@@ -373,7 +345,7 @@ struct AgentStatusMachine {
         case .userPromptSubmit:
             startTurn(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         case .preToolUse:
-            hookKind = event.kind.rawValue
+            hookAgent = event.kind
             if event.agentID == nil { lastMainToolAt = now }
             noteTurnActivity(at: now)
             noteMainThreadMoved(event)
@@ -384,7 +356,7 @@ struct AgentStatusMachine {
             noteProgress(of: event)
             resumeUnlessBlocked()
         case .postToolUse:
-            hookKind = event.kind.rawValue
+            hookAgent = event.kind
             if event.agentID == nil { lastMainToolAt = now }
             noteTurnActivity(at: now)
             noteMainThreadMoved(event)
@@ -405,13 +377,13 @@ struct AgentStatusMachine {
             // It ends a call of the turn in flight; outside one, it says
             // nothing.
             guard hookTurnInFlight else { break }
-            hookKind = event.kind.rawValue
+            hookAgent = event.kind
             noteMainThreadMoved(event)
             noteCallOver(event)
             noteProgress(of: event)
             resumeUnlessBlocked()
         case .permissionRequest:
-            hookKind = event.kind.rawValue
+            hookAgent = event.kind
             noteTurnActivity(at: now)
             noteMainThreadMoved(event)
             var request = AgentPermissionRequest(
@@ -435,7 +407,7 @@ struct AgentStatusMachine {
             pendingDialogs.append(request)
             _ = block(for: request.reason, isUserFocused: isUserFocused, alert: false)
         case .notification:
-            hookKind = event.kind.rawValue
+            hookAgent = event.kind
             applyNotification(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         case .subagentStop:
             // Its dialogs closed with it (a denial fires no hook).
@@ -451,7 +423,7 @@ struct AgentStatusMachine {
             conversationChangedAt = now
             closeDialogs { event.sessionID == nil || $0.sessionID == event.sessionID }
             lastAttentionReason = nil
-            hookKind = nil
+            hookAgent = nil
             turnFailure = nil
             // The exit was a clean one after all.
             midTurnExit = nil
@@ -474,7 +446,7 @@ struct AgentStatusMachine {
         isUserFocused: Bool,
         outcome: inout AgentHookOutcome
     ) {
-        hookKind = event.kind.rawValue
+        hookAgent = event.kind
         // A prompt was typed at the session's input, which no dialog of
         // it covered: they are all closed. This also frees the subagent
         // dialogs an interrupt (Esc) left behind with no hook. (Missed
@@ -506,7 +478,7 @@ struct AgentStatusMachine {
         isUserFocused: Bool,
         outcome: inout AgentHookOutcome
     ) {
-        hookKind = event.kind.rawValue
+        hookAgent = event.kind
         // Auto (mid-turn) or /compact: same conversation, no turn ends.
         guard event.source != "compact" else { return }
         // A new conversation in this process (startup, /clear, /resume):
@@ -536,7 +508,7 @@ struct AgentStatusMachine {
         isUserFocused: Bool,
         outcome: inout AgentHookOutcome
     ) {
-        hookKind = event.kind.rawValue
+        hookAgent = event.kind
         if event.name == .stopFailure {
             // Claude reports the main thread's failures only; a subagent's
             // would end nothing of the main thread's.
@@ -696,7 +668,7 @@ struct AgentStatusMachine {
     /// The question the foreground `claude` asked at its last turn end, if
     /// any: as `visibleDialog`, this very `claude`'s.
     func visibleQuestion(foreground: ForegroundProcess?) -> AskedQuestion? {
-        guard let askedQuestion, let foreground, foreground.name == "claude",
+        guard let askedQuestion, let foreground, foreground.agent == .claude,
               askedQuestion.since >= foreground.instance.startedAt
         else { return nil }
         return askedQuestion
@@ -737,8 +709,7 @@ struct AgentStatusMachine {
     /// Anything else, and "yes" could land in a draft, a dialog or a later
     /// turn.
     func acceptsQuickAnswer(to turnEndedAt: TimeInterval, foreground: ForegroundProcess?, now: TimeInterval) -> Bool {
-        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
-              foreground.instance.startedAt <= turnEndedAt
+        guard let foreground, foreground.interactiveAgent == .claude, foreground.instance.startedAt <= turnEndedAt
         else { return false }
         return isCurrentTurnEnd(turnEndedAt) && !hasDraft && pendingDialogs.isEmpty && !hookWorking
             && now - lastReadAt >= Self.quietBeforeQuickAnswer
@@ -1042,7 +1013,7 @@ struct AgentStatusMachine {
     /// since. Background subagents at work after its turn ended don't make
     /// one.
     func awaitsModel(foreground: ForegroundProcess?) -> Bool {
-        guard let foreground, foreground.name == "claude", hookKind == "claude", hookTurnInFlight,
+        guard let foreground, foreground.agent == .claude, hookAgent == .claude, hookTurnInFlight,
               let moved = mainTurnMovedAt
         else { return false }
         return moved >= foreground.instance.startedAt && turnInterruptedAt < moved
@@ -1347,26 +1318,25 @@ struct AgentStatusMachine {
     @discardableResult
     mutating func tick(fgName: String?, claudeFiredHooks: Bool = false, isUserFocused: Bool, now: Date) -> AgentStatus {
         guard let fgName else { return state }
-        let isAgent = Self.isRecognizedAgentProcess(fgName)
         if fgName != lastForegroundName { foregroundChanged(to: fgName, now: now) }
 
-        guard isAgent else {
+        guard let agent = CodingAgent(rawValue: fgName) else {
             hookWorking = false
-            hookKind = nil
+            hookAgent = nil
             state = .idle
             return state
         }
         // Back in front after something else held the terminal (^Z and
         // `fg`, Ctrl-G's $EDITOR): its hooks still drive it, and the turn
         // it was in goes on.
-        if claudeFiredHooks, fgName == "claude", hookKind != "claude" {
-            hookKind = "claude"
+        if claudeFiredHooks, agent == .claude, hookAgent != .claude {
+            hookAgent = .claude
             hookWorking = hookTurnInFlight && openDialogs.isEmpty
         }
 
         // Hook-authoritative path (Claude with installed hooks): events own
         // every transition; output silence mid-turn means nothing.
-        if hookKind == "claude", fgName == "claude" {
+        if hookAgent == .claude, agent == .claude {
             if hookWorking || isRunningAnsweredDialog(now: now) {
                 state = .working
             } else if state == .needsAttention {
@@ -1425,12 +1395,13 @@ struct AgentStatusMachine {
     }
 
     /// A different foreground command inherits nothing from the previous
-    /// one — except hook capability, which stays (unless an activity-only
-    /// agent takes over, see below): the hook event (SessionStart) can
+    /// one — except hook capability, which stays (unless an agent read from
+    /// its output takes over, see below): the hook event (SessionStart) can
     /// arrive BEFORE the next process-table snapshot notices the change,
     /// and clearing it here would knock the session back into the flaky
     /// fallback for no reason.
     private mutating func foregroundChanged(to fgName: String, now: Date) {
+        let agent = CodingAgent(rawValue: fgName)
         lastForegroundName = fgName
         foregroundSince = now
         hookWorking = false
@@ -1438,34 +1409,34 @@ struct AgentStatusMachine {
         // Nor its reason to wait — unless the new `claude`'s own hooks gave
         // it, which can come first too: a Stop while the heartbeat waited
         // with Nirux in the background.
-        if fgName != "claude" || hookKind != "claude" { lastAttentionReason = nil }
+        if agent != .claude || hookAgent != .claude { lastAttentionReason = nil }
         // A turn end found done, and the question asked, are behind with
         // it. One still waiting for its verdict gets it, and alerts as its
         // Stop would have: a `claude -p` or a crash leaves before its
         // SessionEnd is applied.
-        if fgName != "claude" {
+        if agent != .claude {
             if quietTurnEnd == .done { quietTurnEnd = nil }
             askedQuestion = nil
             turnEndQuestionIsBehind = true
         }
-        // Another integrated agent took over the terminal: a `claude` that
+        // Another hook-driven agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
         // may just mean it's suspended; a new claude's SessionStart clears
-        // them.) An activity-only agent keeps them: it may run in front of a
+        // them.) An output-driven agent keeps them: it may run in front of a
         // suspended claude whose dialog is back on `fg`, and they are what
         // keeps Nirux from typing a prompt into it.
-        if Self.integratedAgentProcesses.contains(fgName), fgName != "claude" { pendingDialogs.removeAll() }
+        if let agent, agent != .claude, agent.statusSource == .hooks { pendingDialogs.removeAll() }
         // Another agent works here now: the calls of a `claude` that died
         // mid-turn (no Stop) aren't its own. A shell in front may be a
         // suspended claude's (^Z, Ctrl-G's editor), whose turn goes on.
-        if Self.isRecognizedAgentProcess(fgName), fgName != "claude" { circling.reset() }
-        // No hook ever drives an activity-only agent (a Claude or Codex hook
+        if let agent, agent != .claude { circling.reset() }
+        // No hook ever drives an output-driven agent (a Claude or Codex hook
         // under it is a nested run's); a claude's leftover kind would mute
         // its OSC 9 notifications.
-        if Self.activityOnlyAgentProcesses.contains(fgName) { hookKind = nil }
+        if agent?.statusSource == .output { hookAgent = nil }
         // Antigravity's status goes with it; one can come before the
         // heartbeat sees it in front.
-        if fgName != AgentProgramStatus.process { programStatus = nil }
+        if agent != .agy { programStatus = nil }
     }
 
     /// Takes in what Antigravity's process `process` reported: the reason to
@@ -1504,7 +1475,7 @@ struct AgentStatusMachine {
     /// What Antigravity in front reported it waits on, or failed on, past
     /// the moment every launch signs in, and until the user answers it.
     func reportedWait(foreground: ForegroundProcess?, now: TimeInterval) -> AgentWait? {
-        guard foreground?.name == AgentProgramStatus.process, let reported = programStatus,
+        guard foreground?.agent == .agy, let reported = programStatus,
               [.blocked, .error].contains(reported.status.state), lastInputAt <= reported.at,
               reported.status.kind != "auth" || now - reported.at >= AgentProgramStatus.signInGrace,
               let reason = reported.status.attentionReason
@@ -1581,13 +1552,13 @@ struct AgentStatusMachine {
     /// The column's foreground agent process is gone — exited, not
     /// suspended. A `claude` whose hooks run would have sent SessionEnd
     /// first; if its turn was still in flight, it crashed or was killed.
-    /// (Codex and activity-only agents report no session end: their exit
+    /// (Codex and agents read from their output report no session end: their exit
     /// can't be told from a quit.)
     ///
     /// A keystroke since the agent was last seen alive may have reached the
     /// shell: the user is there and took over.
     mutating func noteAgentExited(_ exit: AgentMidTurnExit) {
-        guard exit.processName == "claude", exit.firedHooks || hookKind == "claude", hookTurnInFlight,
+        guard exit.agent == .claude, exit.firedHooks || hookAgent == .claude, hookTurnInFlight,
               lastInputAt <= exit.lastSeenAt else { return }
         midTurnExit = exit
     }
@@ -1644,7 +1615,7 @@ struct AgentStatusMachine {
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false
-        hookKind = nil
+        hookAgent = nil
         pendingDialogs.removeAll()
         lastAttentionReason = nil
         lastDialogClosedAt = 0

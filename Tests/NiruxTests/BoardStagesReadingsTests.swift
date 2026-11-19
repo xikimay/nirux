@@ -125,19 +125,19 @@ final class BoardStagesReadingsTests: XCTestCase {
     func testResumeIsTheSidebarsAStopFirstThenAClaudeThatExited() {
         let failed = UUID(), exited = UUID()
         let sending = column(1, stuck: .stoppedOnError(kind: nil, detail: nil, failedAt: 700, resume: .sending), id: failed)
-        let gone = column(0, stuck: .exitedMidTurn(processName: "claude"), id: exited)
+        let gone = column(0, stuck: .exitedMidTurn(agent: .claude), id: exited)
         XCTAssertEqual(reading(row([gone, sending])).resume,
                        BoardStages.Resume(kind: .afterError, column: failed, failedAt: 700, blocked: "Resuming…"),
                        "a stop first, held back with why")
         let offered = column(1, stuck: .stoppedOnError(kind: nil, detail: nil, failedAt: 700, resume: .offered), id: failed)
         XCTAssertNil(reading(row([offered])).resume?.blocked)
         XCTAssertEqual(reading(row([gone])).resume, BoardStages.Resume(kind: .afterExit, column: exited))
-        XCTAssertNil(reading(row([column(0, stuck: .exitedMidTurn(processName: "codex"))])).resume, "the table offered it for claude only")
+        XCTAssertNil(reading(row([column(0, stuck: .exitedMidTurn(agent: .codex))])).resume, "the table offered it for claude only")
         XCTAssertNil(reading(row([column(0)])).resume)
         // An agent restored at launch that hasn't resumed: "Paused · Resume", after a stop or an exit.
         let restored = UUID()
         var paused = column(2)
-        paused.deferredAgent = SidebarDeferredAgent(processName: "claude", summary: "claude --resume", columnID: restored)
+        paused.deferredAgent = SidebarDeferredAgent(agent: .claude, summary: "claude --resume", columnID: restored)
         XCTAssertEqual(reading(row([column(0), paused])).resume, BoardStages.Resume(kind: .afterRelaunch, column: restored))
         XCTAssertEqual(reading(row([paused, gone])).resume?.kind, .afterExit)
     }

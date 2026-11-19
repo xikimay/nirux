@@ -12,17 +12,14 @@ extension NiruxShellView {
               let sessionID = event.sessionID, !sessionID.isEmpty else { return }
         let resolution = appliedEvent.resolution
         let workspace = resolution.workspace
+        guard SessionHistory.agents.contains(event.kind) else { return }
         let agentProcess: ForegroundProcess?
-        switch event.kind {
-        case .claude:
+        if event.kind == .claude {
             agentProcess = appliedEvent.claudeSessionAgent
-        case .agy:
-            // Antigravity's conversations aren't in the session history.
-            return
-        case .codex:
+        } else {
             let foreground = resolution.column.pty?.foregroundProcess(snapshot: snapshot)
             agentProcess = foreground.flatMap {
-                !AgentHookCenter.isHeadlessCodex($0) && resolution.column.boundCodexSessionID(of: $0.instance) == sessionID
+                $0.headlessAgent != .codex && resolution.column.boundCodexSessionID(of: $0.instance) == sessionID
                     ? $0 : nil
             }
         }

@@ -189,7 +189,8 @@ final class AgentHookCenter {
         var appliedEvents: [AppliedEvent] = []
         var snapshot: ProcessSnapshot?
         for line in slice.split(separator: 0x0A) {
-            guard let event = try? decoder.decode(AgentHookEvent.self, from: Data(line)) else { continue }
+            // Only an agent with hooks writes events: another's line is a newer build's.
+            guard let event = try? decoder.decode(AgentHookEvent.self, from: Data(line)), event.kind.sendsHooks else { continue }
             if let appliedEvent = dispatch(event, snapshot: &snapshot) { appliedEvents.append(appliedEvent) }
         }
         // One sidebar refresh per drain, not per event: updateSidebar does a
@@ -222,7 +223,7 @@ final class AgentHookCenter {
             case .claude:
                 // `claude -p` runs PermissionRequest hooks with no dialog to
                 // show, then denies the call itself: nobody is asked.
-                if event.name == .permissionRequest, Self.isHeadlessClaude(foregroundProcess) {
+                if event.name == .permissionRequest, foregroundProcess?.headlessAgent == .claude {
                     releaseHeldRequest(event)
                     return nil
                 }
@@ -241,7 +242,7 @@ final class AgentHookCenter {
                     event, foregroundProcess: foregroundProcess, snapshot: processes
                 )
                 // `claude -p` has no conversation to come back to.
-                if isFromOwnClaude, !Self.isHeadlessClaude(foregroundProcess) {
+                if isFromOwnClaude, foregroundProcess?.headlessAgent != .claude {
                     claudeSessionAgent = foregroundProcess
                 }
                 if isFromOwnClaude, event.reportsAccount, let onNiruxAccount = event.onNiruxAccount, let foregroundProcess {
@@ -257,7 +258,7 @@ final class AgentHookCenter {
                     && isFromOwnClaude
             case .codex:
                 if Self.isNestedCodexHook(foregroundName: foregroundProcess?.name) { return nil }
-            case .agy:
+            case .agy, .gemini, .opencode:
                 break
             }
         }
@@ -526,62 +527,14 @@ final class AgentHookCenter {
     /// status line: none reads it with both options off, and a `claude -p`
     /// run in the terminal asks nobody, and is no task, at its turn end.
     nonisolated static func keepsFinalMessage(readsFinalMessages: Bool, foreground: ForegroundProcess?) -> Bool {
-        readsFinalMessages && !isHeadlessClaude(foreground)
+        readsFinalMessages && foreground?.headlessAgent != .claude
     }
-
-    /// A `claude` a person talks to: not `claude -p`.
-    nonisolated static func isInteractiveClaude(_ process: ForegroundProcess?) -> Bool {
-        process?.name == "claude" && !isHeadlessClaude(process)
-    }
-
-    nonisolated static func isHeadlessClaude(_ process: ForegroundProcess?) -> Bool {
-        guard let process, process.name == "claude" else { return false }
-        return process.hasFlag("-p") || process.hasFlag("--print")
-    }
-
-    /// An `agy` that holds no conversation to resume: a one-shot `-p` run, or
-    /// one of its subcommands (agy 1.5's `agy help`).
-    nonisolated static func isHeadlessAgy(_ process: ForegroundProcess?) -> Bool {
-        guard let process, process.name == AgentProgramStatus.process else { return false }
-        let arguments = process.arguments.dropFirst()
-        return arguments.contains { ["-p", "--print", "--prompt"].contains($0) }
-            || arguments.first.map(agySubcommands.contains) ?? false
-    }
-
-    nonisolated static let agySubcommands: Set<String> = [
-        "acp", "agent", "agents", "changelog", "help", "install", "mcp", "mic-serve", "models",
-        "plugin", "plugins", "remote-control", "update"
-    ]
-
-    /// `codex exec` (alias `e`): a run, not a conversation to come back to.
-    /// The subcommand follows Codex's global options, and `codex` itself may
-    /// be a script its runtime runs (`node …/bin/codex`, from npm or bun).
-    nonisolated static func isHeadlessCodex(_ process: ForegroundProcess?) -> Bool {
-        guard let process, process.name == "codex",
-              let codex = process.arguments.firstIndex(where: {
-                  (($0 as NSString).lastPathComponent as NSString).deletingPathExtension == "codex"
-              })
-        else { return false }
-        var index = codex + 1
-        while let argument = process.arguments[safe: index], argument != "--" {
-            guard argument.hasPrefix("-") else { return argument == "exec" || argument == "e" }
-            index += codexOptionsWithValue.contains(argument) ? 2 : 1
-        }
-        return false
-    }
-
-    /// Codex's global options whose value is the next argument.
-    private nonisolated static let codexOptionsWithValue: Set<String> = [
-        "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env", "-i", "--image",
-        "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox", "-C", "--cd", "--add-dir",
-        "-a", "--ask-for-approval"
-    ]
 
     /// A Codex hook while another agent owns the terminal came from a
     /// `codex exec` that agent launched.
     nonisolated static func isNestedCodexHook(foregroundName: String?) -> Bool {
-        guard let foregroundName, AgentStatusMachine.isRecognizedAgentProcess(foregroundName) else { return false }
-        return foregroundName != "codex"
+        guard let agent = foregroundName.flatMap(CodingAgent.init(rawValue:)) else { return false }
+        return agent != .codex
     }
 
     func stop() {

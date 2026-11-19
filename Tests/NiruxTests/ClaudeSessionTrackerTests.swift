@@ -220,20 +220,19 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         func codex(_ arguments: String...) -> ForegroundProcess {
             ForegroundProcess(instance: ProcessInstance(pid: 1, startedAt: 1), name: "codex", arguments: ["codex"] + arguments)
         }
-        XCTAssertTrue(AgentHookCenter.isHeadlessCodex(codex("exec", "fix it")))
-        XCTAssertTrue(AgentHookCenter.isHeadlessCodex(codex("e", "fix it")))
-        XCTAssertTrue(AgentHookCenter.isHeadlessCodex(codex("-c", "model=\"o3\"", "--full-auto", "exec", "fix it")))
+        XCTAssertEqual(codex("exec", "fix it").headlessAgent, .codex)
+        XCTAssertEqual(codex("e", "fix it").headlessAgent, .codex)
+        XCTAssertEqual(codex("-c", "model=\"o3\"", "--full-auto", "exec", "fix it").headlessAgent, .codex)
         // Installed with npm or bun: node runs the `codex` script.
         let script = ForegroundProcess(
             instance: ProcessInstance(pid: 1, startedAt: 1), name: "codex",
             arguments: ["node", "/Users/me/.bun/bin/codex", "--model", "o3", "exec", "fix it"]
         )
-        XCTAssertTrue(AgentHookCenter.isHeadlessCodex(script))
-        XCTAssertFalse(AgentHookCenter.isHeadlessCodex(codex()))
-        XCTAssertFalse(AgentHookCenter.isHeadlessCodex(codex("resume", "t1")))
-        XCTAssertFalse(AgentHookCenter.isHeadlessCodex(codex("--model", "exec")))
-        XCTAssertFalse(AgentHookCenter.isHeadlessCodex(codex("--", "exec")))
-        XCTAssertFalse(AgentHookCenter.isHeadlessCodex(nil))
+        XCTAssertEqual(script.headlessAgent, .codex)
+        XCTAssertEqual(codex().interactiveAgent, .codex)
+        XCTAssertEqual(codex("resume", "t1").interactiveAgent, .codex)
+        XCTAssertEqual(codex("--model", "exec").interactiveAgent, .codex)
+        XCTAssertEqual(codex("--", "exec").interactiveAgent, .codex)
     }
 
     func testSuspendingClaudeKeepsItsBinding() {
@@ -408,6 +407,23 @@ final class ClaudeSessionTrackerTests: XCTestCase {
 
         XCTAssertEqual(ProcessInstance.firstNonShellAncestor(from: shell.processIdentifier), me)
         XCTAssertNil(ProcessInstance.firstNonShellAncestor(from: 1))
+
+        // Any shell, one Nirux doesn't start too.
+        let nu = Process()
+        nu.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        nu.arguments = ["-f", "-c", "exec -a nu /bin/sh -c 'read line; true'"]
+        nu.standardInput = Pipe()
+        try nu.run()
+        defer {
+            nu.terminate()
+            nu.waitUntilExit()
+        }
+        let deadline = Date().addingTimeInterval(5)
+        while ProcessSnapshot.arguments(of: nu.processIdentifier, maxArgs: 1).first != "nu", Date() < deadline {
+            usleep(10_000)
+        }
+        XCTAssertEqual(ProcessSnapshot.arguments(of: nu.processIdentifier, maxArgs: 1).first, "nu")
+        XCTAssertEqual(ProcessInstance.firstNonShellAncestor(from: nu.processIdentifier), me)
     }
 
     func testHookEmitterWiring() {

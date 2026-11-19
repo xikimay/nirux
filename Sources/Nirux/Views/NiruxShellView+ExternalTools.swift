@@ -3,15 +3,6 @@ import AppKit
 // MARK: - External Tools, Cookie Import, URL Input
 
 extension NiruxShellView {
-    enum AgentResumeTarget: Equatable {
-        /// No usable stored ID (state written by an older Nirux, a session
-        /// never bound, or one another column already claimed). Let the user
-        /// choose; `codex resume --last` / `claude --continue` would attach
-        /// several columns to the most recent conversation.
-        case picker
-        case session(String)
-    }
-
     static func shellQuotedArgument(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
@@ -45,9 +36,9 @@ extension NiruxShellView {
         shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
     ) -> String {
-        var parts = ["command", "claude"]
-        if let resume {
-            parts.append("--resume")
+        var parts = ["command", CodingAgent.claude.rawValue]
+        if let resume, let flag = CodingAgent.claude.resumeArgument {
+            parts.append(flag)
             if case .session(let sessionID) = resume {
                 parts.append(Self.shellQuotedArgument(sessionID))
             }
@@ -104,9 +95,9 @@ extension NiruxShellView {
         shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
     ) -> String {
-        var parts = ["command", "codex"]
-        if let resume {
-            parts.append("resume")
+        var parts = ["command", CodingAgent.codex.rawValue]
+        if let resume, let subcommand = CodingAgent.codex.resumeArgument {
+            parts.append(subcommand)
             if case .session(let sessionID) = resume {
                 parts.append(Self.shellQuotedArgument(sessionID))
             }
@@ -130,9 +121,9 @@ extension NiruxShellView {
     /// `handoverPrompt` is its first prompt (`-i`), as in the worktree
     /// handover flow.
     static func agyCommand(resume: AgentResumeTarget? = nil, handoverPrompt: String? = nil) -> String {
-        var parts = ["command", "agy"]
-        if case .session(let sessionID)? = resume {
-            parts.append(contentsOf: ["--conversation", Self.shellQuotedArgument(sessionID)])
+        var parts = ["command", CodingAgent.agy.rawValue]
+        if case .session(let sessionID)? = resume, let flag = CodingAgent.agy.resumeArgument {
+            parts.append(contentsOf: [flag, Self.shellQuotedArgument(sessionID)])
         }
         if let prompt = handoverPrompt {
             parts.append(contentsOf: ["-i", Self.shellQuotedArgument(prompt)])
@@ -190,33 +181,48 @@ extension NiruxShellView {
         return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).codexMode(settings: currentCodexLaunchMode())
     }
 
-    func openClaudeCode() {
-        guard let workspace = activeWorkspace else { return }
-        launchInNewColumn(Self.claudeCommand(
-            mode: Self.claudeLaunchMode(for: workspace),
-            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
-            settingsFile: claudeSpaceSettingsFile(for: workspace)
-        ), in: workspace)
+    /// `agent`'s launch in `workspace`, in the space's mode; nil for an
+    /// agent Nirux doesn't start.
+    static func launch(of agent: CodingAgent, resume: AgentResumeTarget?, in workspace: WorkspaceState) -> AgentLaunch? {
+        switch agent {
+        case .claude: .claude(resume: resume, mode: claudeLaunchMode(for: workspace))
+        case .codex: .codex(resume: resume, mode: codexLaunchMode(for: workspace))
+        case .agy: .agy(resume: resume)
+        case .gemini, .opencode: nil
+        }
     }
 
-    func openCodex() {
-        guard let workspace = activeWorkspace else { return }
-        launchInNewColumn(Self.codexCommand(
-            mode: Self.codexLaunchMode(for: workspace),
-            briefFile: Self.codexBriefFile(
-                from: spaceBriefInjection(for: workspace), launchDirectory: workspace.focusedWorkingDirectory
+    /// The line that runs `launch` in `workspace`, with the space's brief
+    /// and Claude settings (`settingsFiles`: prepared for a batch). Codex
+    /// takes the brief unless a config from `launchDirectory` up sets its
+    /// own, and `resumeDirectory` resumes its thread there.
+    func agentCommand(
+        _ launch: AgentLaunch, in workspace: WorkspaceState, launchDirectory: String, resumeDirectory: String? = nil,
+        sessionName: String? = nil, handoverPrompt: String? = nil, settingsFiles: [String: String]? = nil
+    ) -> String {
+        let brief = spaceBriefInjection(for: workspace)
+        switch launch {
+        case .claude(let resume, let mode):
+            return Self.claudeCommand(
+                resume: resume, mode: mode, sessionName: sessionName, briefFile: brief?.claudePromptFile,
+                settingsFile: claudeSpaceSettingsFile(for: workspace, prepared: settingsFiles), handoverPrompt: handoverPrompt
             )
-        ), in: workspace)
+        case .codex(let resume, let mode):
+            return Self.codexCommand(
+                resume: resume, workingDirectory: resumeDirectory, mode: mode,
+                briefFile: Self.codexBriefFile(from: brief, launchDirectory: launchDirectory), handoverPrompt: handoverPrompt
+            )
+        case .agy(let resume):
+            // A new agy says which conversation it runs through Nirux's hook.
+            if resume == nil { AgentHookInstaller.installAgyHooksIfInstalling() }
+            return Self.agyCommand(resume: resume, handoverPrompt: handoverPrompt)
+        }
     }
 
-    func openAgy() {
-        guard let workspace = activeWorkspace else { return }
-        AgentHookInstaller.installAgyHooksIfInstalling()
-        launchInNewColumn(Self.agyCommand(), in: workspace)
-    }
-
-    /// Runs `command` in a new terminal column of `workspace`, focused.
-    private func launchInNewColumn(_ command: String, in workspace: WorkspaceState) {
+    /// Starts `agent` in a new terminal column of the active workspace, focused.
+    func openAgent(_ agent: CodingAgent) {
+        guard let workspace = activeWorkspace, let launch = Self.launch(of: agent, resume: nil, in: workspace) else { return }
+        let command = agentCommand(launch, in: workspace, launchDirectory: workspace.focusedWorkingDirectory)
         workspace.addColumn()
         relayout(animated: false)
         updateSidebar()

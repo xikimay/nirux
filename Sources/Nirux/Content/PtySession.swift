@@ -258,7 +258,7 @@ final class ProcessSnapshot {
                 if !base.isEmpty { return base }
             } else if let script = argv.dropFirst().first(where: { !isValuelessLongFlag($0) }),
                       !script.hasPrefix("-"), (script as NSString).pathExtension.isEmpty,
-                      AgentStatusMachine.isRecognizedAgentProcess(scriptName(script)) {
+                      CodingAgent(rawValue: scriptName(script)) != nil {
                 // Runtime flags before an agent's bin shim: Gemini CLI's
                 // shebang (`env -S node --no-warnings=…`), its relaunched
                 // child (`--max-old-space-size=…`), a shell alias
@@ -778,11 +778,11 @@ final class PtySession: @unchecked Sendable {
     /// The agent running here now, in front or under a program in front (a
     /// launcher: `npx`, `caffeinate`), by the process tree alone: not one
     /// the hooks last named, which may have ended.
-    func runningAgentName(snapshot: ProcessSnapshot) -> String? {
+    func runningAgent(snapshot: ProcessSnapshot) -> CodingAgent? {
         guard !hasExited, state.childPid > 0 else { return nil }
-        let isAgent = AgentStatusMachine.isRecognizedAgentProcess
-        if let name = foregroundProcessName(snapshot: snapshot), isAgent(name) { return name }
-        return snapshot.firstDescendantName(of: state.childPid, where: isAgent)
+        if let agent = foregroundProcessName(snapshot: snapshot).flatMap(CodingAgent.init(rawValue:)) { return agent }
+        return snapshot.firstDescendantName(of: state.childPid) { CodingAgent(rawValue: $0) != nil }
+            .flatMap(CodingAgent.init(rawValue:))
     }
 
     /// How a paste ended.
@@ -975,7 +975,7 @@ final class PtySession: @unchecked Sendable {
     func missionPromptFacts(
         now: TimeInterval, snapshot: ProcessSnapshot, record: (ProcessInstance) -> ClaudeSessionRecord.Reading = { sessionRecord(of: $0) }
     ) -> String {
-        let facts = foregroundProcess(snapshot: snapshot).flatMap { AgentHookCenter.isInteractiveClaude($0) ? $0.instance : nil }
+        let facts = foregroundProcess(snapshot: snapshot).flatMap { $0.interactiveAgent == .claude ? $0.instance : nil }
             .map { " record=" + record($0).facts(of: $0, now: now) }
         return state.machine.promptFacts(now: now) + (facts ?? "")
     }
@@ -1040,7 +1040,7 @@ final class PtySession: @unchecked Sendable {
     /// of it reached the column, as for a `claude` without Nirux's hooks:
     /// nothing tells.
     func agentTookPrompt(since foreground: ForegroundProcess) -> Bool? {
-        guard state.machine.hookKind == "claude" else { return nil }
+        guard state.machine.hookAgent == .claude else { return nil }
         return state.machine.prompt(since: foreground.instance.startedAt) != nil
     }
 
@@ -1052,9 +1052,7 @@ final class PtySession: @unchecked Sendable {
     /// in the parent process, never post-fork.
     static let defaultShell: String = {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? ""
-        let posixCompatible: Set<String> = ["zsh", "bash", "sh", "dash", "ksh", "tcsh", "fish"]
-        let name = (shell as NSString).lastPathComponent
-        if shell.hasPrefix("/"), posixCompatible.contains(name),
+        if shell.hasPrefix("/"), Shell.launchable.contains((shell as NSString).lastPathComponent),
            FileManager.default.fileExists(atPath: shell) {
             return shell
         }
@@ -1111,12 +1109,12 @@ final class PtySession: @unchecked Sendable {
 
     /// The last status tick saw a recognized agent in the foreground.
     var lastSeenRunningAgent: Bool {
-        state.machine.lastForegroundName.map(AgentStatusMachine.isRecognizedAgentProcess) ?? false
+        state.machine.lastForegroundName.flatMap(CodingAgent.init(rawValue:)) != nil
     }
 
-    /// Hook kind ("claude"/"codex") once the running agent emitted a hook
-    /// event — closing only trusts an "idle" status that hooks drive.
-    var agentHookKind: String? { state.machine.hookKind }
+    /// The agent whose hook events reached this session: closing only
+    /// trusts an "idle" status that hooks drive.
+    var hookAgent: CodingAgent? { state.machine.hookAgent }
 
     /// A recognized agent that closing this terminal would kill: the
     /// foreground process, or any descendant of the shell — a job suspended
@@ -1124,24 +1122,24 @@ final class PtySession: @unchecked Sendable {
     /// closed: an empty snapshot, or a turn the status machine still sees
     /// in flight, falls back to the heartbeat's last view of the agent — so
     /// an agent that exited since the last tick (≤ 2 s) may still prompt.
-    func agentProcessName(snapshot: ProcessSnapshot) -> String? {
+    func terminalAgent(snapshot: ProcessSnapshot) -> CodingAgent? {
         guard !hasExited, state.childPid > 0 else { return nil }
-        let isAgent = AgentStatusMachine.isRecognizedAgentProcess
-        if let name = foregroundProcessName(snapshot: snapshot), isAgent(name) { return name }
-        if let name = snapshot.firstDescendantName(of: state.childPid, where: isAgent) { return name }
+        if let agent = runningAgent(snapshot: snapshot) { return agent }
         guard snapshot.isEmpty || cachedAgentState != .idle else { return nil }
-        return [state.machine.lastForegroundName, state.machine.hookKind].compactMap { $0 }.first(where: isAgent)
+        return state.machine.lastForegroundName.flatMap(CodingAgent.init(rawValue:)) ?? state.machine.hookAgent
     }
 
-    /// Nirux types a prompt only while an integrated agent process
-    /// (Claude Code, Codex) is currently in the foreground. A stable UUID
-    /// alone is not enough: the same column can later fall back to an idle
-    /// shell.
+    /// Nirux types prompts (PR Feedback's Address, "Ask Agent Why CI
+    /// Failed") only while an agent driven by hooks is in front. Claude's
+    /// hooks report the dialogs such a prompt must not answer; an agent
+    /// read from its output says nothing of them, so its permission prompt
+    /// looks like any silence and a prompt could land on it. (Codex's
+    /// notify reports turn ends only: the same blind spot, accepted.) A
+    /// stable UUID alone is not enough: the same column can later fall
+    /// back to an idle shell.
     func acceptsTypedPrompts(snapshot: ProcessSnapshot) -> Bool {
-        guard !hasExited,
-              let process = foregroundProcessName(snapshot: snapshot)
-        else { return false }
-        return AgentStatusMachine.acceptsTypedPrompts(processName: process)
+        guard !hasExited else { return false }
+        return foregroundProcessName(snapshot: snapshot).flatMap(CodingAgent.init(rawValue:))?.statusSource == .hooks
     }
 
     /// Clear attention flag (user has seen it)
@@ -1788,7 +1786,7 @@ private final class PtyState: @unchecked Sendable {
         // hooked sessions get the same signal from the Stop hook, and the
         // hasUserInput gate keeps startup replay from fabricating attention.
         if str.contains("\u{1b}]9;"),
-           machine.hookKind == nil, machine.hasUserInput,
+           machine.hookAgent == nil, machine.hasUserInput,
            let callback = onOsc9Received {
             DispatchQueue.main.async { callback() }
         }

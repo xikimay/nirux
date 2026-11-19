@@ -10,18 +10,18 @@ struct AgentSessionBinding {
         let process: ProcessInstance
     }
 
-    /// Foreground process name of the agent (`codex`, `agy`, `claude`).
-    let processName: String
-    /// Argument preceding the session ID in a restore launch
-    /// (`codex resume <id>`, `agy --conversation <id>`, `claude --resume <id>`).
-    let resumeArgument: String
+    let agent: CodingAgent
 
     private var binding: Binding?
     private var pendingResumeSessionID: String?
 
-    init(processName: String, resumeArgument: String) {
-        self.processName = processName
-        self.resumeArgument = resumeArgument
+    init(agent: CodingAgent) {
+        self.agent = agent
+    }
+
+    /// The session id a restore launch passes (`<resumeArgument> <id>`).
+    func launchedSessionID(_ arguments: [String]) -> String? {
+        agent.resumeArgument.flatMap(arguments.firstIndex(of:)).flatMap { arguments[safe: $0 + 1] }
     }
 
     /// Session bound to `process`, nil when none is or another process owns it.
@@ -49,7 +49,7 @@ struct AgentSessionBinding {
     /// (`<resumeArgument> <pending id>`) instead.
     mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {
         _ = invalidateBinding(ifProcessChangedTo: foregroundProcess)
-        guard let foregroundProcess, foregroundProcess.name == processName else {
+        guard let foregroundProcess, foregroundProcess.agent == agent else {
             binding = nil
             pendingResumeSessionID = nil
             return nil
@@ -59,9 +59,7 @@ struct AgentSessionBinding {
         }
         binding = nil
         guard let pendingResumeSessionID else { return nil }
-        guard let resumeIndex = foregroundProcess.arguments.firstIndex(of: resumeArgument),
-              foregroundProcess.arguments.indices.contains(resumeIndex + 1),
-              foregroundProcess.arguments[resumeIndex + 1] == pendingResumeSessionID else {
+        guard launchedSessionID(foregroundProcess.arguments) == pendingResumeSessionID else {
             if !foregroundProcess.arguments.isEmpty {
                 self.pendingResumeSessionID = nil
             }
@@ -94,13 +92,11 @@ struct ForegroundSessionTracker {
     /// holds the terminal (Ctrl-Z).
     private let keepsProcessSession: Bool
 
-    static var codex: Self { Self(processName: "codex", resumeArgument: "resume") }
-    static var agy: Self {
-        Self(processName: AgentProgramStatus.process, resumeArgument: "--conversation", keepsProcessSession: true)
-    }
+    static var codex: Self { Self(agent: .codex) }
+    static var agy: Self { Self(agent: .agy, keepsProcessSession: true) }
 
-    init(processName: String, resumeArgument: String, keepsProcessSession: Bool = false) {
-        session = AgentSessionBinding(processName: processName, resumeArgument: resumeArgument)
+    init(agent: CodingAgent, keepsProcessSession: Bool = false) {
+        session = AgentSessionBinding(agent: agent)
         self.keepsProcessSession = keepsProcessSession
     }
 
@@ -115,19 +111,18 @@ struct ForegroundSessionTracker {
         foregroundProcess: ForegroundProcess?
     ) -> Bool {
         guard let sessionID, !sessionID.isEmpty,
-              let foregroundProcess, foregroundProcess.name == session.processName,
+              let foregroundProcess, foregroundProcess.agent == session.agent,
               emitterBelongsToForegroundJob else {
             return false
         }
         guard keepsProcessSession else { return session.bind(sessionID: sessionID, process: foregroundProcess.instance) }
         guard session.sessionID(boundTo: foregroundProcess.instance) == nil else { return false }
-        let arguments = foregroundProcess.arguments
-        let launched = arguments.firstIndex(of: session.resumeArgument).flatMap { arguments[safe: $0 + 1] }
+        let launched = session.launchedSessionID(foregroundProcess.arguments)
         return session.bind(sessionID: launched ?? sessionID, process: foregroundProcess.instance)
     }
 
     mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {
-        if keepsProcessSession, foregroundProcess?.name != session.processName { return nil }
+        if keepsProcessSession, foregroundProcess?.agent != session.agent { return nil }
         return session.sessionID(for: foregroundProcess)
     }
 
@@ -138,7 +133,7 @@ struct ForegroundSessionTracker {
 
     @discardableResult
     mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
-        if keepsProcessSession, foregroundProcess?.name != session.processName { return false }
+        if keepsProcessSession, foregroundProcess?.agent != session.agent { return false }
         return session.invalidateBinding(ifProcessChangedTo: foregroundProcess)
     }
 }
@@ -212,7 +207,7 @@ struct ClaudeSessionTracker {
         }
     }
 
-    private var session = AgentSessionBinding(processName: "claude", resumeArgument: "--resume")
+    private var session = AgentSessionBinding(agent: .claude)
     /// Bound session known to have no conversation yet. Decided from hook
     /// evidence, not the transcript file: Claude writes that lazily, and a
     /// session resumed from another directory reports a path that doesn't
@@ -240,11 +235,10 @@ struct ClaudeSessionTracker {
         // No agent in the foreground: this is the column's own finished run
         // (a quick top-level `claude -p`) or a replay queued while Nirux was
         // closed. Route it as before; there is no live process to bind.
-        guard let foregroundProcess,
-              AgentStatusMachine.isRecognizedAgentProcess(foregroundProcess.name) else { return .accepted }
+        guard let foregroundProcess, let agent = foregroundProcess.agent else { return .accepted }
         // A Claude hook under another agent's column (Codex, Gemini…) comes
         // from a `claude` that agent ran.
-        guard foregroundProcess.name == "claude" else { return .rejected }
+        guard agent == .claude else { return .rejected }
         let sessionID = sessionID.flatMap { $0.isEmpty ? nil : $0 }
         let boundSessionID = session.sessionID(boundTo: foregroundProcess.instance)
         if let admission = admitUnproven(
@@ -358,7 +352,7 @@ struct ClaudeSessionTracker {
     /// The session bound to this foreground `claude`, once confirmed by one
     /// of its hooks — not merely restored from its launch arguments.
     func confirmedSessionID(of foregroundProcess: ForegroundProcess) -> String? {
-        guard foregroundProcess.name == session.processName,
+        guard foregroundProcess.agent == session.agent,
               let bound = session.sessionID(boundTo: foregroundProcess.instance),
               bound == confirmedSessionID else { return nil }
         return bound
@@ -376,7 +370,7 @@ struct ClaudeSessionTracker {
     /// a Claude session while no `claude` is in the foreground.
     @discardableResult
     mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
-        guard foregroundProcess?.name == session.processName else { return false }
+        guard foregroundProcess?.agent == session.agent else { return false }
         return session.invalidateBinding(ifProcessChangedTo: foregroundProcess)
     }
 }
@@ -388,14 +382,12 @@ extension ProcessInstance {
     /// found by position rather than by name, so a nested Claude whose argv
     /// doesn't read `claude` (an Agent SDK `node cli.js`) is still told
     /// apart from the column's own.
-    static func hookEmitter(for kind: AgentHookEvent.Kind) -> ProcessInstance? {
-        switch kind {
+    static func hookEmitter(for agent: CodingAgent) -> ProcessInstance? {
+        switch agent {
         case .codex: return running(pid: getppid())
-        case .claude, .agy: return firstNonShellAncestor(from: getppid())
+        case .claude, .agy, .gemini, .opencode: return firstNonShellAncestor(from: getppid())
         }
     }
-
-    private static let shellNames: Set<String> = ["sh", "bash", "zsh", "dash", "ksh", "mksh", "fish", "tcsh", "csh"]
 
     /// `pid` itself when it is not a shell. Nil once the walk reaches
     /// launchd — an orphaned hook shell whose emitter already exited.
@@ -405,8 +397,7 @@ extension ProcessInstance {
             guard current > 1, let entry = kernelEntry(pid: current) else { return nil }
             let name = ProcessSnapshot.execName(from: ProcessSnapshot.arguments(of: current, maxArgs: 2))
                 ?? entry.name
-            let isShell = shellNames.contains(name.hasPrefix("-") ? String(name.dropFirst()) : name)
-            if !isShell { return entry.instance }
+            if !Shell.isShell(name) { return entry.instance }
             current = entry.parentPID
         }
         return nil

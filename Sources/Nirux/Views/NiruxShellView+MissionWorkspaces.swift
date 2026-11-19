@@ -16,7 +16,7 @@ extension NiruxShellView {
     func createWorktreeWorkspace(
         branch: String,
         repoRoot: String,
-        agent: NiruxApp.WorkspaceAgent? = .claude,
+        agent: CodingAgent? = .claude,
         handoverPath: String? = nil,
         profileID requestedProfileID: String? = nil,
         parentWorkspaceID: String? = nil,
@@ -56,7 +56,7 @@ extension NiruxShellView {
                 switch HandoverFile.transfer(
                     from: handoverPath,
                     toDirectory: path,
-                    filename: Self.handoverFilename(for: agent ?? .claude)
+                    filename: HandoverFile.filename(for: agent ?? .claude)
                 ) {
                 case .success:
                     deliveredHandover = true
@@ -260,10 +260,6 @@ extension NiruxShellView {
         let startPoint = fetchError != nil && GitWorktree.commitID(of: target.startPoint, in: repoRoot) == nil
             ? nil : target.startPoint
         return NewWorktreeStart(startPoint: startPoint, remoteBranchName: name, fetchError: fetchError)
-    }
-
-    nonisolated static func handoverFilename(for agent: NiruxApp.WorkspaceAgent) -> String {
-        HandoverFile.filename(for: agent)
     }
 
     /// Types each pending Mission message into its recipient's prompt if
@@ -481,7 +477,7 @@ extension NiruxShellView {
     /// The conversation `column`'s `claude` (`foreground`) confirmed through
     /// its own hooks, while it runs; the one it will resume, while it waits to.
     func conversation(of column: ColumnState, foreground: ForegroundProcess?) -> String? {
-        if case .claude(resume: .session(let resumes)?, _)? = column.deferredAgent?.agent { return resumes }
+        if case .claude(resume: .session(let resumes)?, _)? = column.deferredAgent?.launch { return resumes }
         return column.confirmedClaudeSessionID(foregroundProcess: foreground)
     }
 
@@ -530,7 +526,7 @@ extension NiruxShellView {
     /// and the setting doesn't matter; it must still be open, and no Lead's.
     func createMission(
         parent: NewTask.MissionParent, childWorkspaceID: String, childAgentUUID: String,
-        agent: NiruxApp.WorkspaceAgent, branch: String, reportsToTask: Bool = false
+        agent: CodingAgent, branch: String, reportsToTask: Bool = false
     ) -> Mission? {
         let valid = reportsToTask
             ? requestingTerminal(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID).flatMap { requester in
