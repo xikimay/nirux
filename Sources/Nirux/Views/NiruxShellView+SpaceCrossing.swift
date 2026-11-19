@@ -39,12 +39,12 @@ extension NiruxShellView {
     }
 
     /// From the first values to the second, about the picture's middle; it
-    /// rests on the second.
+    /// rests on the second. Its frozen layers move, not the view's own.
     private static func move(
         _ picture: FrozenView, scale: (CGFloat, CGFloat), opacity: (Float, Float),
         curve: CAMediaTimingFunctionName, duration: CFTimeInterval
     ) {
-        guard let layer = picture.layer else { return }
+        let layer = picture.content
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.transform = scaledAboutMiddle(layer, by: scale.1)
