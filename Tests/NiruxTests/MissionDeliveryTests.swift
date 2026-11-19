@@ -468,30 +468,34 @@ final class MissionDeliveryTests: XCTestCase {
         })
     }
 
-    /// Messages a `claude` with no prompt yet holds get Type it now at the
-    /// line's end, a button as Interrupt is: it clicks only for those
-    /// messages, and the card counts its height.
+    /// Messages a `claude` with no prompt yet holds, which would take one on
+    /// the user's word, get Type it now under their line, a button as
+    /// Interrupt is: it clicks only for those messages, the line still shows
+    /// the column, and the card counts both.
     @MainActor func testMessagesHeldByAClaudeWithNoPromptOfferTypeItNow() {
         let waiting = SidebarWaitingMessages(count: 1, since: 500, refusal: .noPromptYet, offersTypeNow: true, now: 800)
         XCTAssertTrue(waiting.tooltip.hasSuffix(SidebarWaitingMessages.typeNowAdvice))
         var info = column(nil)
         info.waitingMessages = waiting
         let card = workspace([info], index: 2)
-        // Wide enough for one line: a button row is two lines high.
-        let result = SidebarWorkspaceCardRenderer(workspace: card, sidebarWidth: 480, yOffset: 800).render()
+        let result = SidebarWorkspaceCardRenderer(workspace: card, sidebarWidth: 260, yOffset: 800).render()
         let region = SidebarHitRegion.missionTypeNow(workspaceIndex: 2, columnIndex: 0, since: 500)
         XCTAssertTrue(result.hitAreas.contains {
             if case .missionTypeNow(2, 0, 500) = $0.region { return true }
             return false
         })
+        let line = result.views.first { ($0 as? NSTextField)?.stringValue == waiting.line }
+        XCTAssertTrue(result.hitAreas.contains { area in
+            guard case .column(2, 0) = area.region, let line else { return false }
+            return area.frame.intersects(line.frame)
+        }, "the line shows its terminal, to look first")
         XCTAssertEqual(
             Array(result.approvalButtons.keys), [SidebarHoverTarget.typeNowButtonKey(workspaceIndex: 2, columnIndex: 0, since: 500)],
             "armed and hovered like Interrupt"
         )
-        XCTAssertTrue(result.views.contains { ($0 as? NSTextField)?.stringValue == waiting.line })
-        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: card, sidebarWidth: 480), accuracy: 0.5)
+        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: card, sidebarWidth: 260), accuracy: 0.5)
         XCTAssertEqual(SidebarExpandedMetrics.height(of: .waitingMessages(columnIndex: 0, waiting), width: 1_000, textWidth: 1_000),
-                       SidebarExpandedMetrics.buttonHeight, "a button's height, however short the line")
+                       SidebarExpandedMetrics.actionLineHeight + SidebarExpandedMetrics.buttonHeight, "the line, then the button's row")
 
         func click(released: SidebarHitRegion?, count: Int = 1) -> SidebarTypeNowClick? {
             SidebarView.typeNowClick(pressed: region, released: released, clickCount: count, armedAtPress: true, armedAtRelease: true)

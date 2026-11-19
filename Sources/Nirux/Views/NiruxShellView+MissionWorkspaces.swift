@@ -274,7 +274,7 @@ extension NiruxShellView {
     /// says sits at its prompt (`typeWaitingMessagesNow`): one message goes
     /// in on their word.
     func typeMissionMessages(seenAtPrompt: UUID? = nil) {
-        var seenAtPrompt = typeLeadNotices(seenAtPrompt: seenAtPrompt) ? nil : seenAtPrompt
+        typeLeadNotices(seenAtPrompt: seenAtPrompt)
         typeRuleDecisions()
         let handoffsEnabled = Self.currentMissionHandoffsEnabled()
         guard MissionStore.shared.pendingPromptDeliveries().contains(where: { $0.mission.isCarried(handoffsEnabled: handoffsEnabled) })
@@ -297,6 +297,7 @@ extension NiruxShellView {
                   pty.acceptsMissionMessage(
                       runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now), snapshot: snapshot,
                       seenByUser: recipient.id == seenAtPrompt
+                          && missionWaits.mayTypeOnSight(into: recipient, process: pty.foregroundProcess(snapshot: snapshot)?.instance)
                   ),
                   let text = MissionPromptText.text(
                       for: delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title
@@ -315,8 +316,7 @@ extension NiruxShellView {
                 self?.finishTyping(delivery, typed)
                 self?.reportUnsent(typed, what: byUser ? "your answer" : "a Mission message", for: recipientTitle, telling: sender)
             }
-            missionWaits.noteTyped(into: recipient, at: now)
-            if recipient.id == seenAtPrompt { seenAtPrompt = nil }
+            missionWaits.noteTyped(into: recipient, pty: pty, foreground: pty.foregroundProcess(snapshot: snapshot), at: now)
             typedAny = true
         }
         // The cards' "Asking …" and "Answer … ready" rows follow.
@@ -463,28 +463,24 @@ extension NiruxShellView {
     /// Types each Lead notice whose Lead's prompt is free; the others wait
     /// for its next turn end, an hour at most. A Lead that is gone drops
     /// its own.
-    /// `seenAtPrompt` as `typeMissionMessages` takes it; whether a notice
-    /// went in on it.
-    @discardableResult
-    func typeLeadNotices(seenAtPrompt: UUID? = nil) -> Bool {
-        guard !pendingLeadNotices.isEmpty else { return false }
+    /// `seenAtPrompt` as `typeMissionMessages` takes it.
+    func typeLeadNotices(seenAtPrompt: UUID? = nil) {
+        guard !pendingLeadNotices.isEmpty else { return }
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
-        var seenAtPrompt = seenAtPrompt
-        var typedOnSight = false
         pendingLeadNotices = pendingLeadNotices.filter { notice in
             guard now - notice.queuedAt < MissionEventCLI.parentMessageLifetime,
                   let workspace = workspaces.first(where: { $0.id == notice.workspaceID && !$0.isClosing }),
                   let column = workspace.columns.first(where: { $0.agentUUID == notice.agentUUID })
             else { return false }
             guard let pty = column.pty,
-                  pty.acceptsMissionMessage(runningSince: now, snapshot: snapshot, seenByUser: column.id == seenAtPrompt),
+                  pty.acceptsMissionMessage(
+                      runningSince: now, snapshot: snapshot,
+                      seenByUser: column.id == seenAtPrompt
+                          && missionWaits.mayTypeOnSight(into: column, process: pty.foregroundProcess(snapshot: snapshot)?.instance)
+                  ),
                   let paste = TypedPromptSanitizer.bracketedPaste(for: notice.text)
             else { return true }
-            if column.id == seenAtPrompt {
-                seenAtPrompt = nil
-                typedOnSight = true
-            }
             // A user's answer it carries may be long.
             let lead = MissionPromptText.quoted(workspace.title)
             typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { [weak self] typed in
@@ -492,10 +488,9 @@ extension NiruxShellView {
                 if typed == .left { self.pendingLeadNotices.append(notice) }
                 self.reportUnsent(typed, what: "a message", for: lead, telling: nil)
             }
-            missionWaits.noteTyped(into: column, at: now)
+            missionWaits.noteTyped(into: column, pty: pty, foreground: pty.foregroundProcess(snapshot: snapshot), at: now)
             return false
         }
-        return typedOnSight
     }
 
     static func currentMissionHandoffsEnabled() -> Bool {

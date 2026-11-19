@@ -445,15 +445,22 @@ final class MissionTellTests: XCTestCase {
         ), isUserFocused: false)
         XCTAssertEqual(refusal(failed), .noPromptYet, "a usage limit would fail what it is sent")
 
-        // The user, who saw its screen, says it sits at its prompt: keys
-        // since its start don't hold it, the rest still does.
+        // The user, who saw its screen, says it sits at its prompt: keys that
+        // leave no text don't hold it, nor an Enter that answered a screen;
+        // text that may sit in its prompt and the rest still do.
         func seen(_ machine: AgentStatusMachine, idle: Bool = true) -> AgentPromptRefusal? {
             machine.promptRefusal(foreground: claude(resumed), runningSince: t0 + 100, seenByUser: true) { $0 == resumed && idle }
         }
-        XCTAssertNil(seen(typed))
-        XCTAssertNil(seen(early))
-        XCTAssertNil(seen(recalled))
-        XCTAssertEqual(seen(early, idle: false), .noPromptYet, "its record says a screen of its own is up")
+        var answered = machine
+        answered.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("\u{1B}[B".utf8))
+        answered.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 9), keys: Data("\r".utf8))
+        XCTAssertEqual(refusal(answered), .draft)
+        XCTAssertNil(seen(answered))
+        XCTAssertNil(seen(scrolled))
+        XCTAssertEqual(seen(typed), .draft, "text in its prompt")
+        XCTAssertEqual(seen(early), .noPromptYet, "text seeded into its prompt")
+        XCTAssertEqual(seen(recalled), .draft, "an old prompt in its box")
+        XCTAssertEqual(seen(answered, idle: false), .draft, "its record says a screen of its own is up")
         XCTAssertEqual(seen(asking), .noPromptYet)
         XCTAssertEqual(seen(working), .noPromptYet)
     }

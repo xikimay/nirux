@@ -755,25 +755,6 @@ final class SidebarWorkspaceCardRenderer {
                 frame: label.frame.insetBy(dx: -2, dy: -2),
                 region: .link(url: SidebarView.ruleProposalsActionURL(spaceID: workspace.profileID), label: label)
             ))
-        case let .waitingMessages(columnIndex, waiting) where waiting.offersTypeNow:
-            let button = SidebarActionButton.secondary(
-                "Type it now", symbol: Theme.Symbol.typeNow, label: "Type it now: type the oldest waiting message into claude"
-            )
-            button.toolTip = SidebarWaitingMessages.typeNowAdvice
-            let x = layout.indentX
-            add(SidebarButtonRow.render(
-                button,
-                key: SidebarHoverTarget.typeNowButtonKey(workspaceIndex: workspace.index, columnIndex: columnIndex, since: waiting.since),
-                region: .missionTypeNow(workspaceIndex: workspace.index, columnIndex: columnIndex, since: waiting.since),
-                workspaceIndex: workspace.index, x: x, width: layout.contentMaxX - x, top: top
-            ) { y, width in
-                let label = NSTextField.sidebarLine(Self.waitingText(waiting))
-                label.lineBreakMode = .byTruncatingTail
-                label.toolTip = waiting.tooltip
-                label.setAccessibilityLabel(waiting.line)
-                label.frame = NSRect(x: x, y: y - 1, width: max(0, width), height: Metrics.actionLineHeight + 2)
-                return label
-            })
         case let .waitingMessages(columnIndex, waiting):
             let label = wrappedActionLine(Self.waitingText(waiting), maxLines: Metrics.waitingMessagesMaxLines, top: top)
             label.toolTip = waiting.tooltip
@@ -782,7 +763,33 @@ final class SidebarWorkspaceCardRenderer {
             hitAreas.append(SidebarHitArea(
                 frame: label.frame.insetBy(dx: -2, dy: -2), region: .column(workspaceIndex: workspace.index, columnIndex: columnIndex)
             ))
+            guard waiting.offersTypeNow else { return }
+            buildTypeNow(waiting, columnIndex: columnIndex, top: label.frame.minY)
         }
+    }
+
+    /// Under a row of waiting messages: "If its prompt is empty", then
+    /// Type it now at the trailing edge, a button as Interrupt is.
+    private func buildTypeNow(_ waiting: SidebarWaitingMessages, columnIndex: Int, top: CGFloat) {
+        let button = SidebarActionButton.secondary(
+            "Type it now", symbol: Theme.Symbol.typeNow, label: "Type it now: type one waiting message into claude"
+        )
+        button.toolTip = SidebarWaitingMessages.typeNowAdvice
+        let x = layout.indentX
+        add(SidebarButtonRow.render(
+            button,
+            key: SidebarHoverTarget.typeNowButtonKey(workspaceIndex: workspace.index, columnIndex: columnIndex, since: waiting.since),
+            region: .missionTypeNow(workspaceIndex: workspace.index, columnIndex: columnIndex, since: waiting.since),
+            workspaceIndex: workspace.index, x: x, width: layout.contentMaxX - x, top: top
+        ) { y, width in
+            let hint = NSTextField(labelWithString: "If its prompt is empty")
+            hint.font = Theme.Font.caption
+            hint.textColor = Theme.Color.textSecondary
+            hint.lineBreakMode = .byTruncatingTail
+            hint.toolTip = SidebarWaitingMessages.typeNowAdvice
+            hint.frame = NSRect(x: x, y: y - 1, width: max(0, width), height: Metrics.actionLineHeight + 2)
+            return hint
+        })
     }
 
     /// A line of the action block that wraps, under the title: as tall as

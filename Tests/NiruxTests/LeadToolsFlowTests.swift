@@ -315,79 +315,169 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
-    /// A resumed Lead whose Claude Code keeps no record, here one whose
-    /// screen someone answered, holds two questions: its row offers Type it
-    /// now, which types one on the user's word, for the messages they saw
-    /// and unless its record says a screen of its own is up. A notice
-    /// waiting for the Lead goes first; the rest follow its turn, one a turn.
-    func testTypeItNowTypesOneMessageAResumedLeadHolds() throws {
-        try UIFlowHarness.run { harness in
-            let shell = harness.shell
-            let lead = try makeLead(harness)
-            let resumed = AgentStandIn()
-            defer { resumed.remove() }
-            let agentUUID = UUID().uuidString
-            lead.workspace.addColumn(command: resumed.command(), agentUUID: agentUUID, cwd: harness.repo)
-            let column = try XCTUnwrap(lead.workspace.columns.first { $0.agentUUID == agentUUID })
-            let pty = try XCTUnwrap(column.pty)
-            harness.waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
-            let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
-            @MainActor func hook(_ name: AgentHookEvent.Name, source: String? = nil) {
-                _ = pty.applyAgentHook(AgentHookEvent(
-                    kind: .claude, name: name, agentUUID: agentUUID, sessionID: "lead", emitterProcess: claude,
-                    source: source, timestamp: Date().timeIntervalSince1970
-                ), isUserFocused: false)
-            }
-            hook(.sessionStart, source: "resume")
-            pty.sendRaw("\r")
-            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
-                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: agentUUID,
-                childWorkspaceID: UUID().uuidString, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
-                branch: "feat/export", reportsToLead: true
-            ), enabled: true))
-            let first = try ask("Keep the old date= parameter?", from: mission)
-            let second = try ask("Export as CSV or TSV?", from: mission)
-            @MainActor func typedAt(_ event: MissionEvent) -> TimeInterval? {
-                MissionStore.shared.missions.first { $0.id == mission.id }?.events.first { $0.id == event.id }?.parentTypedAt
-            }
-            @MainActor func waiting() throws -> SidebarWaitingMessages {
-                shell.missionWaits.checkedAt = nil
-                shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + NiruxShellView.missionMessageStallAge)
-                return try XCTUnwrap(shell.missionWaits.shown[column.id])
-            }
-            let workspaceIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === lead.workspace })
-            let columnIndex = try XCTUnwrap(lead.workspace.columns.firstIndex { $0 === column })
-            @MainActor func typeItNow(_ since: TimeInterval) {
-                shell.typeWaitingMessagesNow(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
-            }
-            let held = try waiting()
-            XCTAssertTrue(held.offersTypeNow)
+    /// A Lead resumed at a relaunch, its Claude Code keeping no record, whose
+    /// screen someone answered with Enter, and a task's Mission to it.
+    @MainActor private struct ResumedLead {
+        let shell: NiruxShellView
+        let column: ColumnState
+        let pty: PtySession
+        let claude: ProcessInstance
+        let agentUUID: String
+        let leadID: String
+        let mission: Mission
+        let workspaceIndex: Int
+        let columnIndex: Int
 
-            let url = ClaudeSessionRecord.url(pid: claude.pid, environment: ProcessInfo.processInfo.environment)
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try Data(#"{"status":"waiting","waitingFor":"dialog open","statusUpdatedAt":\#(claude.startedAt * 1000)}"#.utf8).write(to: url)
-            typeItNow(held.since)
-            XCTAssertNil(typedAt(first), "a screen of its own is up")
-            try FileManager.default.removeItem(at: url)
-            typeItNow(held.since + 1)
-            XCTAssertNil(typedAt(first), "not the messages the row showed")
-            typeItNow(held.since)
-            harness.waitUntil("the question in its prompt") { resumed.input.contains("Keep the old date= parameter?") }
-            XCTAssertNil(typedAt(second), "one message on the user's word")
+        func hook(_ name: AgentHookEvent.Name, source: String? = nil) {
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: name, agentUUID: agentUUID, sessionID: "lead", emitterProcess: claude,
+                source: source, timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+        }
 
-            // Its prompt not taken yet: a notice queued meanwhile goes first.
+        func typedAt(_ event: MissionEvent) -> TimeInterval? {
+            MissionStore.shared.missions.first { $0.id == mission.id }?.events.first { $0.id == event.id }?.parentTypedAt
+        }
+
+        /// The row's waiting messages, as a check past a stall's length keeps them.
+        func waiting() throws -> SidebarWaitingMessages {
+            shell.missionWaits.checkedAt = nil
+            shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + NiruxShellView.missionMessageStallAge)
+            return try XCTUnwrap(shell.missionWaits.shown[column.id])
+        }
+
+        func typeItNow(_ since: TimeInterval) {
+            shell.typeWaitingMessagesNow(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
+        }
+
+        func queueNotice(_ text: String) {
             shell.pendingLeadNotices.append(LeadNotice(
-                workspaceID: lead.workspace.id, agentUUID: agentUUID, text: "[Nirux] A notice.", queuedAt: Date().timeIntervalSince1970
+                workspaceID: leadID, agentUUID: agentUUID, text: text, queuedAt: Date().timeIntervalSince1970
             ))
-            typeItNow(try waiting().since)
-            harness.waitUntil("the notice in its prompt") { resumed.input.contains("[Nirux] A notice.") }
-            XCTAssertNil(typedAt(second), "one message on the user's word")
+        }
 
-            // Its turn over, the last goes in.
+        func turn() {
             hook(.userPromptSubmit)
             hook(.stop)
             shell.typeMissionMessages()
-            harness.waitUntil("the second question in its prompt") { resumed.input.contains("Export as CSV or TSV?") }
+        }
+    }
+
+    private func resumedLead(_ harness: UIFlowHarness, standIn: AgentStandIn) throws -> ResumedLead {
+        let lead = try makeLead(harness)
+        let agentUUID = UUID().uuidString
+        lead.workspace.addColumn(command: standIn.command(), agentUUID: agentUUID, cwd: harness.repo)
+        let column = try XCTUnwrap(lead.workspace.columns.first { $0.agentUUID == agentUUID })
+        let pty = try XCTUnwrap(column.pty)
+        harness.waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+        let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+            id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: agentUUID,
+            childWorkspaceID: UUID().uuidString, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+            branch: "feat/export", reportsToLead: true
+        ), enabled: true))
+        let resumed = ResumedLead(
+            shell: harness.shell, column: column, pty: pty, claude: try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance,
+            agentUUID: agentUUID, leadID: lead.workspace.id, mission: mission,
+            workspaceIndex: try XCTUnwrap(harness.shell.workspaces.firstIndex { $0 === lead.workspace }),
+            columnIndex: try XCTUnwrap(lead.workspace.columns.firstIndex { $0 === column })
+        )
+        resumed.hook(.sessionStart, source: "resume")
+        pty.sendRaw("\r")
+        return resumed
+    }
+
+    /// The resumed Lead holds two questions: its row offers Type it now
+    /// while one would go in on the user's word. A click from another
+    /// workspace shows its terminal first; the next types one, for the
+    /// messages and the `claude` the row showed. Then no more offer until
+    /// a prompt goes in; the rest follow its turn.
+    func testTypeItNowTypesOneMessageAResumedLeadHolds() throws {
+        try UIFlowHarness.run { harness in
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            let lead = try resumedLead(harness, standIn: standIn)
+            let first = try ask("Keep the old date= parameter?", from: lead.mission)
+            let second = try ask("Export as CSV or TSV?", from: lead.mission)
+            // Its REPL not up for long: no offer yet.
+            XCTAssertFalse(try lead.waiting().offersTypeNow)
+            harness.waitUntil("the offer") { (try? lead.waiting().offersTypeNow) == true }
+            let held = try lead.waiting()
+            XCTAssertEqual(held.heldBy, lead.claude)
+
+            // A screen of its own up: no offer, and the row it left types nothing.
+            let url = ClaudeSessionRecord.url(pid: lead.claude.pid, environment: ProcessInfo.processInfo.environment)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(#"{"status":"waiting","waitingFor":"dialog open","statusUpdatedAt":\#(lead.claude.startedAt * 1000)}"#.utf8).write(to: url)
+            XCTAssertFalse(try lead.waiting().offersTypeNow)
+            lead.shell.missionWaits.shown[lead.column.id] = held
+            lead.shell.switchToWorkspace(lead.workspaceIndex)
+            lead.typeItNow(held.since)
+            XCTAssertNil(lead.typedAt(first), "a screen of its own is up")
+            try FileManager.default.removeItem(at: url)
+
+            // From another workspace: its terminal first, for its messages.
+            let other = try XCTUnwrap(lead.shell.workspaces.indices.first { $0 != lead.workspaceIndex })
+            lead.shell.switchToWorkspace(other)
+            let offered = try lead.waiting()
+            XCTAssertTrue(offered.offersTypeNow)
+            lead.typeItNow(offered.since + 1)
+            XCTAssertEqual(lead.shell.activeWSIndex, other, "not the messages the row showed")
+            var restarted = offered
+            restarted.heldBy = ProcessInstance(pid: lead.claude.pid, startedAt: lead.claude.startedAt - 60)
+            lead.shell.missionWaits.shown[lead.column.id] = restarted
+            lead.typeItNow(offered.since)
+            XCTAssertEqual(lead.shell.activeWSIndex, other, "not the claude the row showed")
+            lead.shell.missionWaits.shown[lead.column.id] = offered
+            lead.typeItNow(offered.since)
+            XCTAssertEqual(lead.shell.activeWSIndex, lead.workspaceIndex, "its terminal, to look first")
+            XCTAssertNil(lead.typedAt(first))
+
+            lead.typeItNow(offered.since)
+            harness.waitUntil("the question in its prompt") { standIn.input.contains("Keep the old date= parameter?") }
+            XCTAssertNil(lead.typedAt(second), "one on the user's word")
+            // What it typed may still sit in its prompt: no more offer.
+            lead.queueNotice("[Nirux] A notice.")
+            XCTAssertFalse(try lead.waiting().offersTypeNow)
+            lead.shell.missionWaits.shown[lead.column.id] = offered
+            lead.typeItNow(offered.since)
+            XCTAssertNil(lead.typedAt(second))
+            XCTAssertEqual(lead.shell.pendingLeadNotices.count, 1)
+
+            // Its turns: the notice, then the last question.
+            lead.turn()
+            harness.waitUntil("the notice in its prompt") { standIn.input.contains("[Nirux] A notice.") }
+            XCTAssertNil(lead.typedAt(second))
+            lead.turn()
+            harness.waitUntil("the second question in its prompt") { standIn.input.contains("Export as CSV or TSV?") }
+        }
+    }
+
+    /// A Lead notice waiting for the resumed Lead goes in first on the
+    /// user's word, alone. Past the input queue it is pasted, then an Enter
+    /// of its own follows: still no more on the user's word, since it may
+    /// sit in the prompt yet.
+    func testTypeItNowTypesALeadNoticeFirst() throws {
+        try UIFlowHarness.run { harness in
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            let lead = try resumedLead(harness, standIn: standIn)
+            let question = try ask("Keep the old date= parameter?", from: lead.mission)
+            let long = "[Nirux] A notice. " + String(repeating: "x", count: PtySession.inputQueueBytes)
+            for text in [long, "[Nirux] Another notice."] { lead.queueNotice(text) }
+            harness.waitUntil("the offer") { (try? lead.waiting().offersTypeNow) == true }
+            let offered = try lead.waiting()
+            lead.shell.switchToWorkspace(lead.workspaceIndex)
+            lead.typeItNow(offered.since)
+            // Its line mode turns the Enter into a newline.
+            harness.waitUntil("the notice and its Enter") { standIn.input.contains(long) && standIn.input.hasSuffix("\u{1B}[201~\n") }
+            XCTAssertNil(lead.typedAt(question))
+            XCTAssertEqual(lead.shell.pendingLeadNotices.map(\.text), ["[Nirux] Another notice."])
+
+            XCTAssertFalse(try lead.waiting().offersTypeNow)
+            lead.shell.missionWaits.shown[lead.column.id] = offered
+            lead.typeItNow(offered.since)
+            XCTAssertNil(lead.typedAt(question))
+            XCTAssertEqual(lead.shell.pendingLeadNotices.count, 1)
         }
     }
 

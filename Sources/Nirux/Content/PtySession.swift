@@ -7,7 +7,7 @@ enum AgentStatus: Equatable, Hashable, Sendable {
     case idle, working, needsAttention
 }
 
-struct ProcessInstance: Codable, Equatable {
+struct ProcessInstance: Codable, Hashable {
     let pid: pid_t
     let startedAt: TimeInterval
 
@@ -949,14 +949,14 @@ final class PtySession: @unchecked Sendable {
 
     /// Why `acceptsMissionMessage` says no, nil when it says yes.
     /// `seenByUser`: the user says its `claude` with no prompt yet sits at
-    /// its prompt, which goes unless its record says it waits on a screen.
+    /// its prompt (see `ClaudeSessionRecord.Reading.allowsTypingOnSight`).
     func missionPromptRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot, seenByUser: Bool = false) -> AgentPromptRefusal? {
         guard !hasExited else { return .noClaude }
         return state.machine.promptRefusal(
             foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince, seenByUser: seenByUser
         ) {
-            let record = Self.sessionRecord(of: $0)
-            return seenByUser ? !record.showsWait(of: $0) : record.showsIdlePrompt(of: $0, now: Date().timeIntervalSince1970)
+            let (record, now) = (Self.sessionRecord(of: $0), Date().timeIntervalSince1970)
+            return seenByUser ? record.allowsTypingOnSight(of: $0, now: now) : record.showsIdlePrompt(of: $0, now: now)
         }
     }
 

@@ -129,13 +129,16 @@ extension AgentStatusMachine {
     /// others open its agents or transcript views; one started by hand
     /// waits for its first prompt), and, read last, its REPL's own word
     /// (`showsIdlePrompt`, from `ClaudeSessionRecord`). `seenByUser`: the
-    /// user, who saw its screen, says it sits at its prompt: keys since its
-    /// start don't count (they may have answered a screen of its own).
+    /// user, who saw its screen, says it sits at its prompt: keys that leave
+    /// no text don't count, nor an Enter last (it answered a screen of its
+    /// own, a prompt would have followed one at the box).
     func sitsAtFirstPrompt(
         _ process: ProcessInstance, seenByUser: Bool = false, showsIdlePrompt: (ProcessInstance) -> Bool
     ) -> Bool {
-        !hookWorking && turnStartedAt == nil && pendingDialogs.isEmpty && turnFailure == nil && !awaitsAnyVerdict
-            && (seenByUser || lastInputAt == 0 && lastDraftInputAt == 0) && showsIdlePrompt(process)
+        let leftNoText = lastInputAt == 0 && lastDraftInputAt == 0
+            || seenByUser && (lastDraftInputAt == 0 || lastDraftKind == "enter")
+        return !hookWorking && turnStartedAt == nil && pendingDialogs.isEmpty && turnFailure == nil && !awaitsAnyVerdict
+            && leftNoText && showsIdlePrompt(process)
     }
 
     /// What `promptRefusal` reads, for the log: ages in seconds and names,
