@@ -21,6 +21,14 @@ The row then turns amber and reads `Needs you ·` followed by the question, on u
 
 Click the line, grey or amber, to read the whole question and answer it in a popover (`Cmd+Return` sends). Your answer reaches the child the way the parent's would.
 
+A question can tell its parent what blocks the child, and what it recommends:
+
+- **decision**: a choice the task leaves open. The child recommends the answer it would pick.
+- **access**: something only a person can give, such as a login, a secret or a permission. The child says exactly what it needs and where.
+- **spec-mismatch**: the task contradicts the code or itself. The child recommends a way out.
+
+The parent reads both under the question and can send the recommendation as its answer in one step. An access question has none to accept: the parent hands it to you, unless it can say what to do instead.
+
 ## When Nirux types into a prompt
 
 Nirux types a message only when the agent's `claude` is in front, its turn is over, no dialog is open and nothing has been typed at the prompt. The keys a dialog takes don't count: a question dialog's until it sends its answers, Esc or Ctrl-C; a permission or plan dialog's until Enter, a number, Esc or Ctrl-C answers it. Known limits: a number typed in an option's text after Tab (an amendment) reads as its answer, and so does an Esc that only leaves that text: what follows counts until the next prompt. Nor do the keys that only move the view or the cursor: Page Up and Down, Ctrl+Home and Ctrl+End, Home, and Left with a modifier (Left alone opens Claude Code's agents view from an empty prompt, so it still counts). Nor does Enter while a turn runs, when an empty prompt queues nothing; at an idle prompt it counts, since it may run text Nirux never saw. Otherwise the message waits for the end of that agent's next turn.
@@ -50,8 +58,8 @@ Agents run these, not you. The bundled `nirux-worktree` skill teaches them. A sp
 
 | Who | Command | Effect |
 | --- | --- | --- |
-| Child | `"$NIRUX_CLI_PATH" --mission ask --message "..."` | Asks the parent. Nirux types the question into the parent's prompt as a `[Nirux Mission]` message |
-| Parent | `--mission reply` (the question names the full command) | Answers the child |
+| Child | `"$NIRUX_CLI_PATH" --mission ask --kind "<kind>" --message "..." --recommend "..."` | Asks the parent. Nirux types the question into the parent's prompt as a `[Nirux Mission]` message, with a line for its kind and recommendation. Both are optional |
+| Parent | `--mission reply` (the question names the full command) | Answers the child; `--accept` in place of `--message` sends its recommendation |
 | Child | `"$NIRUX_CLI_PATH" --mission completed --message "..."` | Reports the result. The parent gets a one-line notice, followed by the child's questions that never reached its prompt, if any |
 | Parent | `"$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "..."` | Sends the child more work. Nirux types the message and Enter into its prompt, so a slash command such as `/code-review` runs. A Codex child gets it through its own queue |
 | Codex parent | `"$NIRUX_CLI_PATH" --mission receive` | Waits for the child's messages |

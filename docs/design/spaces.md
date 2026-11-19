@@ -262,8 +262,9 @@ New flow, built on the guarded typing `tell` already uses
     the user starts it. One sheet at a time: later proposals wait their turn.
   - `list_tasks()`: the space's tasks (title, branch, agent state, pull request
     and checks, the question waiting or the result) and repositories.
-  - `tell(task, message)`, `reply(question, message)`: Missions, 4,000
-    characters at most (see mission-tell.md, "Longer messages"). A task is named
+  - `tell(task, message)`, `reply(question, message | accept)`: Missions, 4,000
+    characters at most (see mission-tell.md, "Longer messages"); `accept` sends
+    the question's recommendation (docs/missions.md). A task is named
     by its branch, else its folder, else its title or folder's name (a
     workspace's branch is its focused terminal's, which another may share).
     Every Lead tool reads a
