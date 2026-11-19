@@ -67,15 +67,15 @@ What happened since the last pass, at most 40,000 characters (Claude Code saves 
 
 ## When (PR 2)
 
-- **Due:** once a day, at the first quiet moment after the space's hour (default 06:00).
+- **Due:** once a day, at the first quiet moment after the space's hour (default 06:00, local time). A pass that read, a line typed, or a check that found nothing after the hour all count for the day. A minute's timer on the app's shell checks.
 - **Quiet means all of these:**
   - the Lead's prompt is free (the Mission typing gate);
   - its last hook event was 30 min ago or more;
   - no Mission message is waiting for it;
   - the user has been away from Nirux for 10 min or more.
-- **Only if something happened.** If the Lead never calls `daily_pass`, the next pass covers both days.
-- **Settings:** Space Settings › Lead gets a "Daily pass" switch (on by default, the user's call), an hour menu and a "Last pass" line.
-- **The note:** the Lead row shows a grey line for 24 h, "Daily pass · 6 PRs, 1 flaky test, 2 rules proposed".
+- **Only if something happened.** Nirux reads the facts first (GitHub included), then asks whether it is still quiet before typing "[Nirux Mission] Daily pass: call daily_pass…". A day with nothing marks the pass checked. If the Lead never calls `daily_pass`, the next pass covers both days.
+- **Settings:** Space Settings › Lead gets a "Daily pass" switch (on by default, the user's call), an hour menu and a "Last pass" line. They are kept in `defaults.json` (`leadDailyPass`, `leadDailyPassHour`); a file Nirux can't read turns the pass off.
+- **The note:** after each `daily_pass` call, the Lead row shows a grey line for 24 h, "Daily pass · 6 PRs, 1 flaky test, 2 rules proposed". It counts the pull requests merged, the flaky tests (learned or called so), the messages held, given up or crossed, and the rules proposed since the call. The Lead's reply in its terminal says why.
 
 ## Cost
 

@@ -4,7 +4,9 @@ import AppKit
 
 /// The Lead's `record_review` and `daily_pass`: what its reviews found,
 /// kept for the space (ReviewFindings), and what happened in the space
-/// since its last pass (DailyPass), from Nirux's own records and GitHub.
+/// since its last pass (DailyPass), from Nirux's own records and GitHub;
+/// the daily line Nirux types into each Lead once its pass is due, and the
+/// note its row shows after.
 extension NiruxShellView {
     /// Any task of the space, as `set_task_context` reaches them.
     func leadRecordReview(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {
@@ -29,11 +31,41 @@ extension NiruxShellView {
         }
     }
 
-    /// Reads GitHub off the main thread, then answers the digest and marks
-    /// its window read, unless GitHub may answer next time.
+    /// Reads GitHub off the main thread, then answers the digest, marks
+    /// its window read (unless GitHub may answer next time), and keeps the
+    /// note the Lead's row shows.
     func leadDailyPass(in space: WorkspaceProfile, lead: WorkspaceState, answer: @escaping LeadAnswer) {
-        guard let briefURL = SpaceBrief.briefURL(spaceID: space.id) else { return answer("This space keeps no daily pass.", true) }
-        let (window, next) = DailyPassState.load(spaceID: space.id).reading(now: Date().timeIntervalSince1970)
+        let state = DailyPassState.load(spaceID: space.id)
+        let (window, next) = state.reading(now: Date().timeIntervalSince1970)
+        gatherDailyPassFacts(in: space, lead: lead, window: window) { [weak self] facts in
+            guard let facts else { return answer("This space keeps no daily pass.", true) }
+            var saved = facts.readsAgain ? state : next ?? state
+            saved.note = facts.note(at: window.end)
+            self?.saveDailyPassState(saved, spaceID: space.id)
+            answer(DailyPass.digest(facts), false)
+        }
+    }
+
+    /// Writes a space's pass, unless the space was deleted meanwhile, and
+    /// shows its note.
+    func saveDailyPassState(_ state: DailyPassState, spaceID: String) {
+        guard profiles.contains(where: { $0.id == spaceID }) else { return }
+        do {
+            try state.save(spaceID: spaceID)
+        } catch {
+            NiruxDebugLog.log("Daily pass: couldn't record the pass, so the next one reads its window again: \(error)")
+        }
+        dailyPassStates[spaceID] = state
+        updateSidebar()
+    }
+
+    /// What happened in the space in the window, read off the main thread
+    /// for GitHub; nil for a space that keeps no pass.
+    func gatherDailyPassFacts(
+        in space: WorkspaceProfile, lead: WorkspaceState, window: DailyPass.Window,
+        completion: @escaping @MainActor @Sendable (DailyPass.Facts?) -> Void
+    ) {
+        guard let briefURL = SpaceBrief.briefURL(spaceID: space.id) else { return completion(nil) }
         // Its workspaces closed since, by the sessions they held, too; not
         // one open in another space now.
         let open = workspaces.filter { $0.profileID == space.id }.map(\.id)
@@ -52,21 +84,126 @@ extension NiruxShellView {
         )
         let folders = BoardSections.repositoryAnchors(space.anchors).compactMap(\.folder)
         let spaceID = space.id
-        Self.readDailyPassSources(folders: folders, spaceID: spaceID, window: window) { [weak self] repositories, findings in
+        Self.readDailyPassSources(folders: folders, spaceID: spaceID, window: window) { repositories, findings in
             var facts = base
             facts.findings = findings
             facts.repositories = repositories
             (facts.triagedRuns, facts.flakyTests) = DailyPass.ciFacts(ciStore, repositories: repositories.map(\.name), window: window)
-            // A space deleted meanwhile keeps no file.
-            if let next, !facts.readsAgain, self?.profiles.contains(where: { $0.id == spaceID }) == true {
-                do {
-                    try next.save(spaceID: spaceID)
-                } catch {
-                    NiruxDebugLog.log("Daily pass: couldn't record the window read, so the next pass reads it again: \(error)")
-                }
-            }
-            answer(DailyPass.digest(facts), false)
+            completion(facts)
         }
+    }
+
+    // MARK: The daily line
+
+    /// Whether a Lead's agent column may take the daily line now, and
+    /// typing it there: tests replace them.
+    typealias DailyPassQuietCheck = @MainActor (ColumnState) -> Bool
+    typealias DailyPassSend = @MainActor (ColumnState, String) -> Void
+
+    /// Once a minute on the app's shell (`startDailyPassWatch`).
+    func startDailyPassWatch() {
+        guard dailyPassTimer == nil else { return }
+        dailyPassTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkDailyPasses() }
+        }
+    }
+
+    /// For each space whose Lead has the daily pass on and due, once it is
+    /// quiet: reads what happened, then types the daily line if anything
+    /// did, else marks the pass checked. Quiet is asked again after the
+    /// read: GitHub takes seconds.
+    func checkDailyPasses(
+        now: TimeInterval = Date().timeIntervalSince1970, isQuiet: DailyPassQuietCheck? = nil, send: DailyPassSend? = nil
+    ) {
+        let quiet = isQuiet ?? { [weak self] column in self?.dailyPassIsQuiet(column) == true }
+        for lead in workspaces where lead.isLead && !lead.isClosing && !dailyPassChecks.contains(lead.profileID) {
+            guard let space = profiles.first(where: { $0.id == lead.profileID }),
+                  let defaults = SpaceDefaultsStore(spaceID: space.id)?.load().defaults, defaults.dailyPassIsOn
+            else { continue }
+            let state = DailyPassState.load(spaceID: space.id)
+            let agentUUID = leadMissionParent(inSpace: space.id)?.agentUUID
+            guard DailyPass.isDue(state, hour: defaults.dailyPassHour, now: now),
+                  let column = lead.columns.first(where: { $0.agentUUID != nil && $0.agentUUID == agentUUID }), quiet(column)
+            else { continue }
+            dailyPassChecks.insert(space.id)
+            gatherDailyPassFacts(in: space, lead: lead, window: state.reading(now: now).window) { [weak self] facts in
+                guard let self else { return }
+                self.dailyPassChecks.remove(space.id)
+                guard let facts, !column.isClosing else { return }
+                var next = DailyPassState.load(spaceID: space.id)
+                if !facts.hasNews {
+                    next.checkedAt = now
+                } else if quiet(column) {
+                    if let send { send(column, DailyPass.prompt) } else { self.typeDailyPassLine(into: column) }
+                    next.typedAt = now
+                } else {
+                    return
+                }
+                self.saveDailyPassState(next, spaceID: space.id)
+            }
+        }
+    }
+
+    /// The Lead's prompt free, its last hook event `DailyPass.leadIdle`
+    /// ago, no Mission message waiting for it, the user away.
+    func dailyPassIsQuiet(_ column: ColumnState) -> Bool {
+        guard let pty = column.pty else { return false }
+        let now = Date().timeIntervalSince1970
+        let waiting = MissionStore.shared.pendingPromptDeliveries(now: now).contains { missionRecipient(of: $0) === column }
+        return DailyPass.isQuiet(
+            promptFree: pty.acceptsMissionMessage(runningSince: now, snapshot: ProcessSnapshot()), lastHookAt: pty.lastAgentHookAt,
+            messageWaiting: waiting, awaySince: catchUpState.tracker.awaySince, now: now
+        )
+    }
+
+    private func typeDailyPassLine(into column: ColumnState) {
+        guard let input = TypedPromptSanitizer.terminalInput(for: DailyPass.prompt) else { return }
+        column.pty?.sendRaw(input)
+        missionWaits.noteTyped(into: column, at: Date().timeIntervalSince1970)
+    }
+
+    // MARK: The note
+
+    /// The Lead row's line for a day after its space's last pass: its
+    /// counts, and the rules proposed since.
+    func dailyPassNote(inSpace spaceID: String, now: TimeInterval = Date().timeIntervalSince1970) -> String? {
+        guard let note = dailyPassState(inSpace: spaceID).note, now - note.at < DailyPass.noteLifetime else { return nil }
+        return "Daily pass · " + dailyPassCounts(note, spaceID: spaceID)
+    }
+
+    /// Space Settings › Lead's "Last pass" line; nil before any.
+    func lastDailyPassText(inSpace spaceID: String) -> String? {
+        let state = dailyPassState(inSpace: spaceID)
+        if let note = state.note, note.at >= state.checkedAt ?? 0 {
+            return "Last pass: \(DailyPass.clock(note.at)) · " + dailyPassCounts(note, spaceID: spaceID)
+        }
+        return state.checkedAt.map { "Last pass: \(DailyPass.clock($0)) · nothing had happened" }
+    }
+
+    /// A space's pass, read once, then kept by `saveDailyPassState` (the
+    /// sidebar asks several times a second).
+    private func dailyPassState(inSpace spaceID: String) -> DailyPassState {
+        if let state = dailyPassStates[spaceID] { return state }
+        let state = DailyPassState.load(spaceID: spaceID)
+        dailyPassStates[spaceID] = state
+        return state
+    }
+
+    private func dailyPassCounts(_ note: DailyPass.Note, spaceID: String) -> String {
+        let proposed = ruleProposals(inSpace: spaceID).proposals.filter { $0.proposedAt >= note.at }.count
+        return DailyPass.noteCounts(note, rulesProposed: proposed)
+    }
+
+    // MARK: Space Settings › Lead
+
+    func setDailyPass(_ on: Bool, spaceID: String) {
+        changeSpaceDefaults(spaceID: spaceID) { $0.leadDailyPass = on ? nil : false }
+        refreshSpaceSettingsLead()
+    }
+
+    func setDailyPassHour(_ hour: Int, spaceID: String) {
+        changeSpaceDefaults(spaceID: spaceID) { $0.leadDailyPassHour = hour == DailyPass.defaultHour ? nil : hour }
+        refreshSpaceSettingsLead()
     }
 
     /// The space's GitHub repositories (each repository's base remote) and

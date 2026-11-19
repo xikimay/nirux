@@ -305,6 +305,52 @@ final class DailyPassTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int, 0o600)
     }
 
+    /// Due once the hour struck since the last pass read, was typed, or
+    /// found nothing: the user's own pass after it counts.
+    func testThePassIsDueOnceItsHourStruck() {
+        // 08:00 UTC: today's 06:00 struck; 09:00 hasn't, so yesterday's.
+        XCTAssertEqual(DailyPass.lastStroke(of: 6, before: now, timeZone: utc), now - 2 * hour)
+        XCTAssertEqual(DailyPass.lastStroke(of: 9, before: now, timeZone: utc), now - 23 * hour)
+        XCTAssertTrue(DailyPass.isDue(DailyPassState(), hour: 6, now: now, timeZone: utc))
+        XCTAssertTrue(DailyPass.isDue(DailyPassState(end: now - 3 * hour, typedAt: now - 3 * hour), hour: 6, now: now, timeZone: utc))
+        XCTAssertFalse(DailyPass.isDue(DailyPassState(typedAt: now - hour), hour: 6, now: now, timeZone: utc))
+        XCTAssertFalse(DailyPass.isDue(DailyPassState(checkedAt: now - hour), hour: 6, now: now, timeZone: utc))
+        XCTAssertFalse(DailyPass.isDue(DailyPassState(end: now - hour), hour: 6, now: now, timeZone: utc), "the user asked for one")
+    }
+
+    /// Never while the Lead works, a message waits for it, or the user is
+    /// around.
+    func testQuietMeansNobodyIsBusy() {
+        let idle = now - DailyPass.leadIdle
+        let away = now - DailyPass.userAway
+        XCTAssertTrue(DailyPass.isQuiet(promptFree: true, lastHookAt: idle, messageWaiting: false, awaySince: away, now: now))
+        XCTAssertFalse(DailyPass.isQuiet(promptFree: false, lastHookAt: idle, messageWaiting: false, awaySince: away, now: now))
+        XCTAssertFalse(DailyPass.isQuiet(promptFree: true, lastHookAt: idle + 1, messageWaiting: false, awaySince: away, now: now))
+        XCTAssertFalse(DailyPass.isQuiet(promptFree: true, lastHookAt: idle, messageWaiting: true, awaySince: away, now: now))
+        XCTAssertFalse(DailyPass.isQuiet(promptFree: true, lastHookAt: idle, messageWaiting: false, awaySince: away + 1, now: now))
+        XCTAssertFalse(DailyPass.isQuiet(promptFree: true, lastHookAt: idle, messageWaiting: false, awaySince: nil, now: now))
+    }
+
+    /// The Lead row's counts: pull requests merged, flaky tests (learned or
+    /// called so), messages held, given up or crossed, and the rules
+    /// proposed since.
+    func testTheNoteCountsTheDay() {
+        var day = facts()
+        day.flakyTests = ["A.testB"]
+        day.triagedRuns = [
+            DailyPass.TriagedRun(id: "1", pullRequest: nil, verdict: "flaky", reason: nil, tests: ["A.testB", "A.testC"], triagedAt: now),
+            DailyPass.TriagedRun(id: "2", pullRequest: nil, verdict: "real", reason: nil, tests: ["A.testD"], triagedAt: now)
+        ]
+        day.missions = [.held, .crossed, .handedToUser].map {
+            DailyPass.MissionFact(kind: $0, message: "tell to x", sentAt: now, detail: "", excerpt: "")
+        }
+        let note = day.note(at: now)
+        XCTAssertEqual(note, DailyPass.Note(at: now, pullRequests: 1, flakyTests: 2, messages: 2))
+        XCTAssertEqual(DailyPass.noteCounts(note, rulesProposed: 1), "1 PR, 2 flaky tests, 2 messages held, 1 rule proposed")
+        XCTAssertEqual(DailyPass.noteCounts(DailyPass.Note(at: now, pullRequests: 3, flakyTests: 0, messages: 0), rulesProposed: 0),
+                       "3 PRs, no rule proposed")
+    }
+
     /// The brief's rules learned: that section's bullets as sessions read
     /// them, not the rest of the brief, comments or code.
     func testTheBriefsRulesLearned() {

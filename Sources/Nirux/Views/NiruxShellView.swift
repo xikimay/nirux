@@ -159,6 +159,13 @@ final class NiruxShellView: NSView {
     /// RuleProposalStore once and kept current by the app's own changes
     /// (the sidebar asks several times a second).
     var ruleProposals: [String: RuleProposalStore.Loaded] = [:]
+    /// Each space's daily pass, by space id, read once and kept by the
+    /// app's own changes, for the Lead row's note.
+    var dailyPassStates: [String: DailyPassState] = [:]
+    /// The spaces whose due pass is being read (GitHub), so a minute's
+    /// check doesn't start another.
+    var dailyPassChecks: Set<String> = []
+    var dailyPassTimer: Timer?
     /// The sheet that adds a rule to a space's brief (LearnedRuleSheet).
     var learnedRuleSheet: LearnedRuleSheet?
     /// ⌘P's workspace rows and Next Waiting Agent (⌘J).

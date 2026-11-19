@@ -384,6 +384,13 @@ enum DailyPass {
 
         /// GitHub may answer next time: the window isn't marked read.
         var readsAgain: Bool { repositories.contains(where: \.readsAgain) }
+
+        /// The Lead row's counts, read at `time`.
+        func note(at time: TimeInterval) -> Note {
+            let flaky = Set(flakyTests).union(triagedRuns.filter { $0.verdict == "flaky" }.flatMap(\.tests))
+            let messages = missions.filter { [.held, .givenUp, .crossed].contains($0.kind) }.count
+            return Note(at: time, pullRequests: repositories.map(\.merged.count).reduce(0, +), flakyTests: flaky.count, messages: messages)
+        }
     }
 
     /// What `daily_pass` answers: what to do, then the facts, cut past
@@ -542,6 +549,71 @@ enum DailyPass {
         return (["## \(title)"] + lines + more).joined(separator: "\n")
     }
 
+    // MARK: - The schedule
+
+    /// The hour a pass is due after, local time, unless the space says.
+    static let defaultHour = 6
+    /// The Lead's last hook event at least this long ago: it isn't working.
+    static let leadIdle: TimeInterval = 30 * 60
+    /// The user away from Nirux at least this long: the pass won't hold
+    /// up what they came back to ask the Lead.
+    static let userAway: TimeInterval = 10 * 60
+    /// How long the Lead row shows a pass's note.
+    static let noteLifetime: TimeInterval = 24 * 3600
+
+    /// When `hour` last struck at or before `now`, local time.
+    static func lastStroke(of hour: Int, before now: TimeInterval, timeZone: TimeZone = .current) -> TimeInterval {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let date = Date(timeIntervalSince1970: now)
+        guard let today = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: date) else { return now }
+        let stroke = today <= date ? today : calendar.date(byAdding: .day, value: -1, to: today) ?? today
+        return stroke.timeIntervalSince1970
+    }
+
+    /// Due once `hour` struck since the last pass read, was typed, or found
+    /// nothing to read.
+    static func isDue(_ state: DailyPassState, hour: Int, now: TimeInterval, timeZone: TimeZone = .current) -> Bool {
+        let stroke = lastStroke(of: hour, before: now, timeZone: timeZone)
+        return [state.end, state.typedAt, state.checkedAt].allSatisfy { ($0 ?? -.infinity) < stroke }
+    }
+
+    /// Never while the Lead works or the user is around: its prompt free,
+    /// its last hook event `leadIdle` ago, no Mission message waiting for
+    /// it, the user away `userAway`.
+    static func isQuiet(
+        promptFree: Bool, lastHookAt: TimeInterval, messageWaiting: Bool, awaySince: TimeInterval?, now: TimeInterval
+    ) -> Bool {
+        promptFree && now - lastHookAt >= leadIdle && !messageWaiting && (awaySince.map { now - $0 >= userAway } ?? false)
+    }
+
+    /// What Nirux types into the Lead's prompt when a pass is due.
+    static var prompt: String {
+        "\(MissionPromptText.prefix) Daily pass: call daily_pass, then propose what would have prevented the day’s friction, "
+            + "as its text says."
+    }
+
+    /// The Lead row's line for a day after a pass.
+    struct Note: Codable, Equatable, Sendable {
+        var at: TimeInterval
+        var pullRequests: Int
+        var flakyTests: Int
+        /// Held, given up or crossed.
+        var messages: Int
+    }
+
+    /// "6 PRs, 1 flaky test, 2 rules proposed".
+    static func noteCounts(_ note: Note, rulesProposed: Int) -> String {
+        func counted(_ count: Int, _ one: String, _ many: String) -> String? {
+            count == 0 ? nil : "\(count) \(count == 1 ? one : many)"
+        }
+        return [
+            counted(note.pullRequests, "PR", "PRs"), counted(note.flakyTests, "flaky test", "flaky tests"),
+            counted(note.messages, "message held", "messages held"),
+            counted(rulesProposed, "rule proposed", "rules proposed") ?? "no rule proposed"
+        ].compactMap { $0 }.joined(separator: ", ")
+    }
+
     // MARK: - Text
 
     /// `text` on one line, its lines that look like a secret withheld.
@@ -590,6 +662,12 @@ struct DailyPassState: Codable, Equatable, Sendable {
 
     var start: TimeInterval?
     var end: TimeInterval?
+    /// When Nirux last typed the daily line into the Lead.
+    var typedAt: TimeInterval?
+    /// When a due pass last found nothing to read.
+    var checkedAt: TimeInterval?
+    /// The last pass's counts, for the Lead row.
+    var note: DailyPass.Note?
 
     /// The window a call at `now` reads, and the state to save once it
     /// was read; nil for a call that reads the last window again, so calls
@@ -599,7 +677,9 @@ struct DailyPassState: Codable, Equatable, Sendable {
             return (DailyPass.Window(start: max(start, now - Self.longestWindow), end: now), nil)
         }
         let window = DailyPass.Window(start: max(end ?? now - Self.firstWindow, now - Self.longestWindow), end: now)
-        return (window, DailyPassState(start: window.start, end: window.end))
+        var next = self
+        (next.start, next.end) = (window.start, window.end)
+        return (window, next)
     }
 
     static func url(spaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> URL? {

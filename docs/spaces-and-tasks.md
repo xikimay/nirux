@@ -129,3 +129,17 @@ You can search the list, filter it by scope and follow `[[links]]`. Return opens
 A space can have a Lead: a Claude Code session, pinned at the top of the sidebar, that starts tasks for you and follows them. Turn it on with **Start a Lead**, in New Space… or the Space menu, or with the **Lead workspace** switch in Space Settings › Lead. `Ctrl+Cmd+L` goes to the Lead, or starts one when the space has none. General can't have a Lead.
 
 The Lead can start tasks, send messages to any task of the space (yours and sub-tasks too: those that don't report to it get them marked as the Lead's, and keep asking whoever started them), answer its tasks' questions or hand one to you, propose a merge queue, and note each task's next step and blocker. It also tidies the space's list: it moves tasks up or down, renames them, puts one under another or takes it out, reads a task's last message, interrupts a task's turn (as Esc), and closes finished ones, yours too. A closed task's worktree and branch go only when its pull request is merged, after the checks of Clean Up Worktree…; a task without a repository has its folder moved to the Trash. It never closes a task you have on screen, whose agent is working or waiting on you, or that has unsaved editor changes or a program running. It cannot merge or reach another space. Its rules are written down in the design record [Spaces, anchors and the Lead](design/spaces.md#the-lead).
+
+### The daily pass
+
+Once a day, after 06:00, Nirux asks the Lead to look back at the space's day. The Lead reads:
+
+- what its reviews found, by kind (it records each review it sends);
+- the pull requests merged and their review rounds;
+- CI failures and reruns;
+- Mission messages held, given up or crossed;
+- your answers.
+
+It then proposes the rules that would have spared that friction, through **Rule proposed · Review** on its row. Nothing reaches the brief without you.
+
+Nirux asks only when something happened, and only once the Lead has been idle for 30 minutes and you have been away from Nirux for 10. For a day after, the Lead's row shows what the pass read ("Daily pass · 6 PRs, 1 flaky test, 2 rules proposed"), and its reply in its terminal says why. Turn it off or change its hour with **Daily pass** in Space Settings › Lead. You can also ask the Lead for a pass at any time.
