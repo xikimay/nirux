@@ -168,7 +168,6 @@ final class ProjectBoardFlowTests: XCTestCase {
             ])
 
             // Refresh reads again, now.
-            dropWorkspaceSnapshots(shell)
             let reads = client.calls.filter { $0.what == "pr open acme/widgets" }.count
             try BoardStagesClicks.click(board.view.refreshButton)
             waitUntil("Refresh reads the pull requests again") {
@@ -203,7 +202,6 @@ final class ProjectBoardFlowTests: XCTestCase {
             try BoardStagesClicks.type(" ", 49, on: focused)
             XCTAssertEqual(shell.activeWorkspace?.title, "login")
             try select("widgets", in: shell)
-            dropWorkspaceSnapshots(shell)
             BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled }
             BoardStagesKeyboard.currentEvent = { NSApp.currentEvent }
 
@@ -269,7 +267,6 @@ final class ProjectBoardFlowTests: XCTestCase {
             // Closed, Board Settings… under the message opens it again.
             shell.spaceSettings?.close()
             waitUntil("Board Settings closes") { shell.spaceSettings == nil }
-            dropWorkspaceSnapshots(shell)
             try BoardStagesClicks.click(board.view.stages.messageView.settingsButton)
             waitUntil("Board Settings opens again") { shell.spaceSettings != nil && shell.boardSettingsPanel?.hostView != nil }
             let reopened = try XCTUnwrap(shell.boardSettingsPanel)
@@ -318,7 +315,6 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            dropWorkspaceSnapshots(shell)
             waitUntil("origin’s pull requests are read") {
                 BoardStagesClicks.wasUpdated(board) && board.view.stages.lineViews.contains { $0.line.title == "login" }
             }
@@ -387,7 +383,6 @@ final class ProjectBoardFlowTests: XCTestCase {
             try select("front", in: shell)
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            dropWorkspaceSnapshots(shell)
 
             let signedOut = "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
             let pills = { (board.view.stages.content?.sections ?? []).map { [$0.title, $0.status?.text ?? "-", $0.status?.toolTip ?? "-"] } }
@@ -718,7 +713,6 @@ final class ProjectBoardFlowTests: XCTestCase {
             try select("login", in: shell)
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            dropWorkspaceSnapshots(shell)
 
             let lines = { (board.view.stages.content?.sections ?? []).map { $0.lines.units.flatMap(\.lines).map(\.pullRequest) } }
             waitUntil("both repositories read, docs’ remote too") {
@@ -892,7 +886,6 @@ final class ProjectBoardFlowTests: XCTestCase {
             try select("widgets", in: shell)
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            dropWorkspaceSnapshots(shell)
 
             let queue = shell.mergeQueue(projectID: space.id, repository: MQ.widgets)
             queue.beginActivity = { NSObject() }
@@ -942,7 +935,6 @@ final class ProjectBoardFlowTests: XCTestCase {
             try select("login", in: shell)
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            dropWorkspaceSnapshots(shell)
             waitUntil("the pull requests are read") {
                 BoardStagesClicks.wasUpdated(board) && board.view.stages.lineViews.contains { $0.line.pullRequest == "#12" }
             }
@@ -960,14 +952,12 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             // The Lead, in the space's header: its workspace.
             try select("login", in: shell)
-            dropWorkspaceSnapshots(shell)
             XCTAssertEqual(board.view.stages.content?.header.lead?.text, "Lead · No activity yet")
             try BoardStagesClicks.click(board.view.stages.leadButton)
             XCTAssertEqual(shell.activeWorkspace?.title, "Lead")
 
             // The Lead's linked worktree, under Other worktrees: Focus.
             try select("login", in: shell)
-            dropWorkspaceSnapshots(shell)
             XCTAssertEqual(section.lines.otherWorktrees.map(\.title), ["Lead · lead/notes"])
             try BoardStagesClicks.click(try XCTUnwrap(board.view.stages.worktreesFold(section: section.id)))
             board.view.stages.layoutSubtreeIfNeeded()
@@ -1084,7 +1074,6 @@ final class ProjectBoardFlowTests: XCTestCase {
             try select("widgets", in: shell)
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            dropWorkspaceSnapshots(shell)
             let section = { try BoardStagesClicks.section("widgets", in: board) }
             waitUntil("#12 merged today") {
                 BoardStagesClicks.shownSection("widgets", in: board)?.lines.merged.map(\.number) == [12]
@@ -1206,14 +1195,6 @@ final class ProjectBoardFlowTests: XCTestCase {
     @discardableResult
     private func git(_ arguments: [String], at directory: String) throws -> String {
         try BoardConfigSuggestionsTests.git(arguments, at: directory)
-    }
-
-    /// `addWorkspace` slides a picture of the previous workspace away over
-    /// the new one; the animation that removes it doesn't run in a window
-    /// that isn't shown, and the picture would take the clicks.
-    @MainActor
-    private func dropWorkspaceSnapshots(_ shell: NiruxShellView) {
-        shell.viewport.subviews.filter { $0 is NSImageView }.forEach { $0.removeFromSuperview() }
     }
 
     @MainActor
