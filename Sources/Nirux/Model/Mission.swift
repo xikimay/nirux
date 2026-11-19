@@ -93,6 +93,13 @@ struct MissionEvent: Codable, Equatable {
     var expectsTypedAnswer: Bool?
     /// On a response: the user wrote it in Nirux, not the parent agent.
     var answeredByUser: Bool?
+    /// On a question: what blocks the child (`ask --kind`). Nil: it didn't say.
+    var questionKind: QuestionKind?
+    /// On a question: the answer the child would pick (`ask --recommend`),
+    /// one line; for an `access` question, what is needed and where.
+    var recommendation: String?
+    /// On a response: it is the question's recommendation, accepted.
+    var acceptedRecommendation: Bool?
     /// On a question: the parent (a space's Lead, `ask_user`) handed it to
     /// the user, for this reason. Its row turns amber at once.
     var handedToUserBecause: String?
@@ -114,6 +121,43 @@ struct MissionEvent: Codable, Equatable {
     /// whose parent is another agent. Its held and given-up lines go to
     /// the Lead, and Nirux types it under a line saying it's the Lead's.
     var leadSender: NewTask.MissionParent?
+
+    /// What blocks a child that asks, so the parent or the user settles it
+    /// in one step. Open: a kind a later build adds decodes here too, as its
+    /// raw value, instead of making the whole ledger unreadable.
+    struct QuestionKind: RawRepresentable, Codable, Hashable {
+        let rawValue: String
+
+        /// A choice the task leaves open.
+        static let decision = QuestionKind(rawValue: "decision")
+        /// Something only a person can give: a login, a secret, a permission.
+        static let access = QuestionKind(rawValue: "access")
+        /// The task contradicts the code or itself.
+        static let specMismatch = QuestionKind(rawValue: "spec-mismatch")
+        /// The kinds `ask --kind` takes.
+        static let known = [decision, access, specMismatch]
+
+        init(rawValue: String) {
+            self.rawValue = rawValue
+        }
+
+        init(from decoder: Decoder) throws {
+            rawValue = try decoder.singleValueContainer().decode(String.self)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(rawValue)
+        }
+    }
+
+    /// The recommendation a reply may send as the answer: an access
+    /// question's says what is needed, which accepting doesn't give, and a
+    /// kind this build doesn't know may be like it.
+    var acceptableRecommendation: String? {
+        guard let kind = questionKind else { return recommendation }
+        return [.decision, .specMismatch].contains(kind) ? recommendation : nil
+    }
 
     /// Until when Nirux may type this instruction.
     var instructionDeadline: TimeInterval {
@@ -317,6 +361,8 @@ final class MissionStore {
         guard MissionEventCLI.fits(message, limit: MissionEventCLI.maxLength(of: incoming.kind)) else {
             return .rejected
         }
+        let recommendation = incoming.kind == .question ? incoming.recommendation.map(MissionEventCLI.recommendation) : nil
+        guard recommendation != .some(nil) else { return .rejected }
 
         var updated = missions
         let fromParent = incoming.parentWorkspaceID == missions[index].parentWorkspaceID
@@ -340,7 +386,9 @@ final class MissionStore {
                   }),
                   !missions[index].events.contains(where: {
                       $0.kind == .response && $0.inReplyTo == questionID
-                  })
+                  }),
+                  incoming.acceptedRecommendation != true
+                      || missions[index].events[questionIndex].acceptableRecommendation == message
             else { return .rejected }
             updated[index].events[questionIndex].parentConsumedAt = incoming.timestamp
 
@@ -375,6 +423,16 @@ final class MissionStore {
         if event.kind == .instruction {
             event.typableUntil = event.timestamp + MissionEventCLI.instructionLifetime
             event.leadSender = lead
+        }
+        if event.kind == .question {
+            // A kind this build doesn't know (a later CLI's) may not be an
+            // answer: it stays out with its recommendation.
+            let known = incoming.questionKind.map(MissionEvent.QuestionKind.known.contains) ?? true
+            event.questionKind = known ? incoming.questionKind : nil
+            event.recommendation = known ? recommendation ?? nil : nil
+        }
+        if event.kind == .response, incoming.acceptedRecommendation == true {
+            event.acceptedRecommendation = true
         }
         updated[index].events.append(event)
         updated[index].updatedAt = event.timestamp

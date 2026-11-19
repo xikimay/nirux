@@ -25,12 +25,16 @@ final class LeadToolsFlowTests: XCTestCase {
     }
 
     /// A question from `task`'s agent, as its `ask` records it.
-    private func ask(_ text: String, from mission: Mission) throws -> MissionEvent {
-        let question = MissionEvent(
+    private func ask(
+        _ text: String, from mission: Mission, kind: MissionEvent.QuestionKind? = nil, recommending recommendation: String? = nil
+    ) throws -> MissionEvent {
+        var question = MissionEvent(
             id: UUID().uuidString, missionID: mission.id,
             childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
             kind: .question, message: text, timestamp: Date().timeIntervalSince1970
         )
+        question.questionKind = kind
+        question.recommendation = recommendation
         guard case .accepted = MissionStore.shared.process(question, enabled: false) else {
             XCTFail("the Lead's task asks with handoffs off")
             return question
@@ -72,6 +76,21 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(try call(LeadTools.listTasks, lead: lead, in: harness).text.contains("question \(first.id)"))
             XCTAssertFalse(try call(LeadTools.reply, ["question": first.id, "message": "ISO 8601"], lead: lead, in: harness).isError)
             XCTAssertEqual(MissionStore.shared.response(to: first.id)?.message, "ISO 8601")
+
+            // One it settles with the task's recommendation; an access
+            // question's can't be accepted.
+            let access = try ask("Which Stripe key?", from: mission, kind: .access, recommending: "A test key in .env")
+            XCTAssertTrue(try call(LeadTools.listTasks, lead: lead, in: harness).text.contains("\n  Kind: access. Needed: A test key in .env"))
+            let accessRefused = try call(LeadTools.reply, ["question": access.id, "accept": true], lead: lead, in: harness)
+            XCTAssertTrue(accessRefused.isError)
+            XCTAssertTrue(accessRefused.text.hasPrefix("An access question has no answer to accept"), accessRefused.text)
+            XCTAssertNil(MissionStore.shared.response(to: access.id))
+            XCTAssertFalse(try call(LeadTools.reply, ["question": access.id, "message": "Mock it"], lead: lead, in: harness).isError)
+            let decision = try ask("UTC or local?", from: mission, kind: .decision, recommending: "UTC")
+            let accepted = try call(LeadTools.reply, ["question": decision.id, "accept": true], lead: lead, in: harness)
+            XCTAssertFalse(accepted.isError, accepted.text)
+            XCTAssertEqual(MissionStore.shared.response(to: decision.id)?.message, "UTC")
+            XCTAssertEqual(MissionStore.shared.response(to: decision.id)?.acceptedRecommendation, true)
 
             // A question it hands to the user, the task named by its branch:
             // amber at once, with why.

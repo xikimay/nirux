@@ -60,6 +60,7 @@ final class MissionAskTests: XCTestCase {
 
     private func ask(
         _ message: String,
+        typed: [String] = [],
         in fixture: Fixture,
         at time: TimeInterval = 20,
         agentUUID: String? = nil,
@@ -68,7 +69,7 @@ final class MissionAskTests: XCTestCase {
         output: (String) -> Void = { _ in }
     ) -> Int32 {
         MissionEventCLI.ask(
-            arguments: ["--message", message, "--timeout", timeout],
+            arguments: ["--message", message, "--timeout", timeout] + typed,
             environment: childEnvironment(agentUUID: agentUUID),
             now: { time },
             eventsURL: fixture.eventsURL,
@@ -473,6 +474,56 @@ final class MissionAskTests: XCTestCase {
         }
         XCTAssertEqual(fixture.store.response(to: question.id)?.childConsumedAt, 40)
         XCTAssertNil(fixture.store.missions[0].events[0].childConsumedAt)
+    }
+
+    /// A question says what blocks the child and what it recommends, on one
+    /// line. A kind or a recommendation Nirux can't carry stops before the
+    /// mailbox.
+    func testAQuestionCarriesItsKindAndRecommendation() throws {
+        let fixture = try makeFixture()
+        XCTAssertEqual(ask("Which API?", typed: ["--kind", "decision", "--recommend", " Use\n  AuthService. "], in: fixture), 3)
+        XCTAssertEqual(ask("Which API?", typed: ["--kind", "decision", "--recommend", "AuthService"], in: fixture), 3)
+        fixture.center.drain()
+        let recorded = questions(in: fixture)
+        XCTAssertEqual(recorded.count, 1, "a retry that rewords its recommendation is the same question")
+        XCTAssertEqual(recorded.first?.questionKind, .decision)
+        XCTAssertEqual(recorded.first?.recommendation, "Use AuthService.")
+
+        let tooLong = String(repeating: "x", count: MissionEventCLI.maxRecommendationLength + 1)
+        for typed in [["--kind", "choice"], ["--recommend", " \n "], ["--recommend", tooLong]] {
+            XCTAssertEqual(ask("Which schema?", typed: typed, in: fixture), 2, typed.joined(separator: " "))
+        }
+        XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
+    }
+
+    /// `reply --accept` sends the question's recommendation as the answer.
+    /// An access question's says what is needed, which accepting can't give.
+    func testReplyAcceptsTheRecommendation() throws {
+        let fixture = try makeFixture()
+        XCTAssertEqual(ask("Which API?", typed: ["--kind", "decision", "--recommend", "AuthService"], in: fixture), 3)
+        XCTAssertEqual(ask("Which key?", typed: ["--kind", "access", "--recommend", "A Stripe test key in .env"], in: fixture), 3)
+        XCTAssertEqual(ask("Which schema?", in: fixture), 3)
+        fixture.center.drain()
+        let asked = questions(in: fixture)
+        XCTAssertEqual(asked.map(\.message), ["Which API?", "Which key?", "Which schema?"])
+        func reply(_ arguments: [String]) -> Int32 {
+            MissionEventCLI.reply(
+                arguments: arguments, environment: parentEnvironment,
+                eventsURL: fixture.eventsURL, missionsURL: fixture.missionsURL, confirmationTimeout: 0
+            )
+        }
+        XCTAssertEqual(reply(["--event", asked[1].id, "--accept"]), 4, "accepting gives no access")
+        XCTAssertEqual(reply(["--event", asked[2].id, "--accept"]), 4, "nothing to accept")
+        XCTAssertEqual(reply(["--event", asked[0].id, "--accept", "--message", "AuthService"]), 2, "one or the other")
+        XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
+
+        XCTAssertEqual(reply(["--event", asked[0].id, "--accept"]), 0)
+        XCTAssertEqual(reply(["--event", asked[1].id, "--message", "Added it to .env"]), 0, "an access question takes a written answer")
+        fixture.center.drain()
+        let accepted = try XCTUnwrap(fixture.store.response(to: asked[0].id))
+        XCTAssertEqual(accepted.message, "AuthService")
+        XCTAssertEqual(accepted.acceptedRecommendation, true)
+        XCTAssertNil(fixture.store.response(to: asked[1].id)?.acceptedRecommendation)
     }
 
     func testLedgerReaderDecodesOnlyAfterTheFileChanges() throws {

@@ -64,12 +64,9 @@ enum TaskTools {
             ),
             LeadTools.definition(
                 LeadTools.reply, title: "Answer a sub-task's question",
-                description: "Answer the question one of your sub-tasks asked you, by its id (in the [Nirux Mission] message and list_tasks).",
-                properties: [
-                    "question": ["type": "string", "description": "The question's id."],
-                    "message": ["type": "string", "description": "Your answer, at most \(MissionEventCLI.maxInstructionLength) characters."]
-                ],
-                required: ["question", "message"]
+                description: "Answer the question one of your sub-tasks asked you, by its id (in the [Nirux Mission] message and "
+                    + "list_tasks). " + LeadTools.replyKindsDescription,
+                properties: LeadTools.replyProperties, required: ["question"]
             ),
             LeadTools.definition(
                 LeadTools.askUser, title: "Hand a sub-task's question to the user",
