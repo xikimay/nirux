@@ -176,7 +176,8 @@ extension NiruxShellView {
                 for item in read where item.outcome.wasRead {
                     store.keep(CITriageStore.RunRecord(
                         signature: item.signature, redChecks: item.redChecks, tests: item.outcome.tests,
-                        verdict: item.outcome.verdict, isUnanswered: item.outcome.isUnanswered, triagedAt: now
+                        verdict: item.outcome.verdict, isUnanswered: item.outcome.isUnanswered, triagedAt: now,
+                        pullRequest: workspace.prInfo?.number
                     ), of: item.run)
                 }
             }

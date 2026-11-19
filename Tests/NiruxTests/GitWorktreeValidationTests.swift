@@ -425,12 +425,12 @@ final class GitWorktreeValidationTests: XCTestCase {
         XCTAssertTrue(GitWorktree.ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repo))
         XCTAssertEqual(
             try String(contentsOfFile: exclude, encoding: .utf8),
-            "# mine\n.claude-handover.md\n# Nirux handovers\n.codex-handover.md\n"
+            "# mine\n.claude-handover.md\n# Nirux handovers\n.codex-handover.md\n.agy-handover.md\n"
         )
         // In a folder of the worktree too, where a project's task starts.
         try FileManager.default.createDirectory(atPath: linked + "/sub", withIntermediateDirectories: true)
         for folder in [linked, linked + "/sub"] {
-            for name in [".claude-handover.md", ".codex-handover.md"] {
+            for name in HandoverFile.filenames {
                 try "task".write(toFile: folder + "/" + name, atomically: true, encoding: .utf8)
             }
         }

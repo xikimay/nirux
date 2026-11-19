@@ -21,7 +21,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testSearchEverywhere": ["Search Everywhere"],
             "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
             "testImportBrowserCookies": ["Import Browser Cookies"],
-            "testAgentCommands": ["Open Claude Code", "Open Codex", "Next Waiting Agent"],
+            "testAgentCommands": ["Open Claude Code", "Open Codex", "Open Antigravity", "Next Waiting Agent"],
             "testSessionHistoryCommand": ["Session History…"],
             "testProjectMemoryCommand": ["Space Memory…"],
             "testResumeAllAgentsCommand": ["Resume All Agents"],
@@ -461,6 +461,10 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(workspace.columns.count, columnCount + 2)
             XCTAssertEqual(harness.agentLaunches.count, 2)
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command codex") == true, "\(harness.agentLaunches)")
+
+            harness.runPaletteCommand("Open Antigravity")
+            XCTAssertEqual(workspace.columns.count, columnCount + 3)
+            XCTAssertEqual(harness.agentLaunches.last, "command agy")
 
             // Claude waits on the user (faked: a real one needs a `claude`
             // in front): the command goes to it. QuickSwitcherFlowTests
