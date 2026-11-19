@@ -165,9 +165,9 @@ final class WorkspaceSwitchTests: XCTestCase {
         }
     }
 
-    /// Floors end at once when the workspace they bring is no longer on
-    /// screen, or the one beneath was hidden (moved to another space): no
-    /// floor stays out of place until their time is up.
+    /// Floors end at once when the workspace they bring left the list, or
+    /// the one beneath was hidden (moved to another space): no floor stays
+    /// out of place until their time is up.
     func testFloorsEndWhenAWorkspaceTheyHoldGoes() throws {
         try withShell { shell, _, _ in
             let elsewhere = shell.workspaceStore.createProfile(named: "elsewhere", select: false)
@@ -177,16 +177,18 @@ final class WorkspaceSwitchTests: XCTestCase {
                 return self.floor(of: workspace) == nil && self.shade(of: workspace) == nil && layer?.affineTransform() == .identity
                     && layer?.zPosition == 0 && layer?.backgroundColor == nil
             }
+            // The one they bring leaves the list with no switch between, as a
+            // close ends (`closeWorkspace`): the first one selected again.
             shell.focusWorkspace(.down)
             XCTAssertNotNil(self.floor(of: all[1]))
-            shell.moveWorkspaceToSpace(workspaceID: all[1].id, profileID: elsewhere.id)
-            XCTAssertFalse(shell.activeWorkspace === all[1])
+            shell.workspaceStore.selectWorkspace(at: 0)
+            _ = shell.workspaceStore.removeWorkspace(all[1])
+            all[1].containerView.removeFromSuperview()
+            shell.relayout(animated: false)
+            XCTAssertTrue(shell.activeWorkspace === all[0])
             XCTAssertFalse(shell.workspaceSwitch.isSwitching, "the workspace they bring went")
             XCTAssertTrue(atRest(all[0]))
-            XCTAssertTrue(atRest(all[1]))
 
-            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === all[0] }))
-            shell.endWorkspaceSwitch()
             shell.focusWorkspace(.down)
             XCTAssertTrue(shell.activeWorkspace === all[2])
             XCTAssertNotNil(self.floor(of: all[2]))
