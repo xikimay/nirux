@@ -446,7 +446,8 @@ final class PtySession: @unchecked Sendable {
     /// Why Nirux may not press Esc in the agent's turn now (see
     /// `AgentStatusMachine.interruptRefusal`).
     func interruptRefusal(snapshot: ProcessSnapshot) -> AgentInterruptRefusal? {
-        state.machine.interruptRefusal(foreground: foregroundProcess(snapshot: snapshot))
+        readTranscriptPrompts()
+        return state.machine.interruptRefusal(foreground: foregroundProcess(snapshot: snapshot))
     }
 
     /// Esc, as the key, but no draft (see `noteInterruptSent`): the prompt
@@ -524,6 +525,7 @@ final class PtySession: @unchecked Sendable {
     /// .acceptsQuickAnswer`), as a prompt the user's click sends; false,
     /// and nothing typed, otherwise.
     func typeQuickAnswer(_ terminalInput: String, to turnEndedAt: TimeInterval, foreground: ForegroundProcess?) -> Bool {
+        readTranscriptPrompts()
         guard !hasExited, state.machine.acceptsQuickAnswer(
             to: turnEndedAt, foreground: foreground, now: Date().timeIntervalSince1970
         ) else { return false }
@@ -634,6 +636,7 @@ final class PtySession: @unchecked Sendable {
     /// end says whether Claude gives a prompt back. A message Claude took in
     /// mid-turn (a peer's, a poll's) is no prompt of the user's.
     func silentInterruptPlan(foreground: ForegroundProcess?) -> SilentInterruptPlan {
+        readTranscriptPrompts()
         if let refusal = state.machine.silentInterruptRefusal(foreground: foreground) { return .refused(refusal) }
         return state.lifeSigns.transcript?.awaited == .prompt ? .givesBackPrompt : .stops
     }
@@ -738,6 +741,7 @@ final class PtySession: @unchecked Sendable {
         now: TimeInterval
     ) -> AgentResumeRefusal? {
         guard !hasExited, let foreground else { return .notClaude }
+        readTranscriptPrompts()
         return state.machine.resumeRefusal(
             foreground: foreground,
             ownsEmitter: { $0 == foreground.instance || snapshot.isProcess($0, childOf: foreground.instance.pid) },
@@ -764,12 +768,16 @@ final class PtySession: @unchecked Sendable {
     /// now, if they can't (see `AgentStatusMachine.reviewSendRefusal`).
     func reviewSendRefusal(snapshot: ProcessSnapshot) -> ReviewSendRefusal? {
         guard !hasExited else { return .noAgent }
+        readTranscriptPrompts()
         return state.machine.reviewSendRefusal(foreground: foregroundProcess(snapshot: snapshot))
     }
 
-    /// Keys reached the prompt since its last prompt went in (see
+    /// Keys reached the prompt since it last emptied (see
     /// `AgentStatusMachine.hasDraft`).
-    var reviewSendHasDraft: Bool { state.machine.hasDraft }
+    var reviewSendHasDraft: Bool {
+        readTranscriptPrompts()
+        return state.machine.hasDraft
+    }
 
     /// The folder the agent here works in: the process in front's (where
     /// `claude --worktree` moved it), or else the shell's.
@@ -983,6 +991,7 @@ final class PtySession: @unchecked Sendable {
     ) -> String {
         let facts = foregroundProcess(snapshot: snapshot).flatMap { AgentHookCenter.isInteractiveClaude($0) ? $0.instance : nil }
             .map { " record=" + record($0).facts(of: $0, now: now) }
+        readTranscriptPrompts()
         return state.machine.promptFacts(now: now) + (facts ?? "")
     }
 
@@ -997,6 +1006,7 @@ final class PtySession: @unchecked Sendable {
         record: (ProcessInstance) -> ClaudeSessionRecord.Reading = { sessionRecord(of: $0) }
     ) -> AgentPromptRefusal? {
         guard !hasExited else { return .noClaude }
+        readTranscriptPrompts()
         return state.machine.promptRefusal(
             foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince, seenByUser: seenByUser
         ) {
@@ -1055,8 +1065,32 @@ final class PtySession: @unchecked Sendable {
 
     /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.
     func finishedTurn(afterTypingAt typedAt: TimeInterval) -> Bool {
-        state.machine.finishedTurn(afterTypingAt: typedAt)
+        readTranscriptPrompts()
+        return state.machine.finishedTurn(afterTypingAt: typedAt)
     }
+
+    /// Requests whose dialogs a prompt typed at the box closed, as its
+    /// transcript told: their receivers wait for nothing (main queue).
+    var onApprovalsAbandoned: (([AgentPermissionRequest]) -> Void)?
+
+    /// What the transcript of the `claude` in front gained since the last
+    /// read: who sent its prompts (see
+    /// `AgentStatusMachine.noteTranscriptPrompt`). Read before Nirux
+    /// decides what to type into its prompt, and at each heartbeat.
+    func readTranscriptPrompts() {
+        guard var reader = state.transcriptPrompts else { return }
+        _ = reader.readAppended(budget: Self.transcriptPromptBudget)
+        let prompts = reader.takePrompts()
+        state.transcriptPrompts = reader
+        let abandoned = prompts.flatMap { state.machine.noteTranscriptPrompt($0) }
+        if !abandoned.isEmpty { onApprovalsAbandoned?(abandoned) }
+    }
+
+    /// A read on the main queue stays short; a long tool output takes a few.
+    private static let transcriptPromptBudget = 4 * 1024 * 1024
+    /// Where reading a transcript starts: the prompt of the hook that named
+    /// it may be written already.
+    private static let transcriptPromptTail = 256 * 1024
 
     /// Whether `foreground`, the column's `claude`, took a prompt since it
     /// started (see `AgentStatusMachine.prompt(since:)`); nil while no hook
@@ -1099,6 +1133,7 @@ final class PtySession: @unchecked Sendable {
     ) -> AgentStatus {
         let fgName = processTableRead ? foregroundProcess?.name ?? "" : nil
         if processTableRead { state.machine.keepProgramStatus(of: foregroundProcess?.instance) }
+        readTranscriptPrompts()
         return state.machine.tick(
             fgName: fgName, claudeFiredHooks: claudeFiredHooks, isUserFocused: isUserFocused, now: Date()
         )
@@ -1109,6 +1144,11 @@ final class PtySession: @unchecked Sendable {
     /// caller then fires the workspace-level notification path.
     @discardableResult
     func applyAgentHook(_ event: AgentHookEvent, isUserFocused: Bool) -> AgentHookOutcome {
+        // The transcript its own `claude` writes: who sent each prompt.
+        if event.kind == .claude, event.agentID == nil, let path = event.transcriptPath, state.transcriptPrompts?.path != path {
+            state.transcriptPrompts = TranscriptPromptReader(path: path, tailBytes: Self.transcriptPromptTail)
+            state.machine.readsTranscript = true
+        }
         let dialogsBefore = state.machine.pendingDialogs.count
         let outcome = state.machine.apply(event, isUserFocused: isUserFocused)
         state.lifeSigns.note(awake: awakeClock(), wall: event.timestamp)
@@ -1478,6 +1518,9 @@ private final class PtyState: @unchecked Sendable {
     var machine = AgentStatusMachine()
     /// Main thread only, as the hook events that feed it.
     var lifeSigns = AgentLifeSigns()
+    /// The transcript the `claude` in front writes, as far as read (main
+    /// thread only).
+    var transcriptPrompts: TranscriptPromptReader?
 
     /// Background pastes running (`PtySession.pasteInBackground`).
     let pasting = OSAllocatedUnfairLock(initialState: 0)
@@ -1548,6 +1591,7 @@ private final class PtyState: @unchecked Sendable {
     func markPtyStarted() {
         machine.reset()
         lifeSigns = AgentLifeSigns()
+        transcriptPrompts = nil
         expirePromptWatchers()
         localServerStateIsStale = true
         hasTypedInput = false

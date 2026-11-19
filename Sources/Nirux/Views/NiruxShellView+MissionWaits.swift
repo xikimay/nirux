@@ -124,6 +124,8 @@ struct MissionWaitState {
     /// sidebar's refreshes read between checks, a read taking a sysctl and a
     /// file (`NiruxShellView.sessionRecord(of:)`).
     var recordReadings: [ProcessInstance: ClaudeSessionRecord.Reading] = [:]
+    /// A typing pass waits for a queue a writer held (`hooksReadBeforeTyping`).
+    var typingPassSoon = false
     /// How long Codex may take to start a message it queued while idle
     /// before its sender hears it hasn't (`queueForCodex`).
     var codexStartWait: TimeInterval = 20

@@ -165,8 +165,23 @@ final class PermissionApprovalSidebarTests: XCTestCase {
 
         machine = AgentStatusMachine()
         holdRequest()
-        let prompt = machine.apply(event(.userPromptSubmit, at: 2, tool: nil), isUserFocused: false)
-        XCTAssertEqual(prompt.abandonedApprovals.count, 1)
+        let stop = machine.apply(event(.stop, at: 2, tool: nil), isUserFocused: false)
+        XCTAssertEqual(stop.abandonedApprovals.count, 1)
+
+        // Denied with Esc at the terminal, then a prompt typed there; read
+        // through the transcript, once its line says it was typed.
+        for readsTranscript in [false, true] {
+            machine = AgentStatusMachine()
+            holdRequest()
+            machine.readsTranscript = readsTranscript
+            machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 2), keys: Data([0x1B]))
+            machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 3), keys: Data("go on\r".utf8))
+            let prompt = machine.apply(AgentHookEvent(
+                kind: .claude, name: .userPromptSubmit, sessionID: "lead", promptID: "p", timestamp: t0 + 3.1
+            ), isUserFocused: false)
+            let read = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "p", at: t0 + 3.2, typed: true))
+            XCTAssertEqual((readsTranscript ? read : prompt.abandonedApprovals).map { $0.approval?.requestID }, [requestID])
+        }
     }
 
     func testSentDecisionIsNotReleased() {

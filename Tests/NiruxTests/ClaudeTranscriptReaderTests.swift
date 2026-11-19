@@ -51,6 +51,32 @@ final class ClaudeTranscriptReaderTests: XCTestCase {
         XCTAssertEqual(reader.usage.contextTokens, 20_002)
     }
 
+    /// Who sent each prompt, by its line: `origin` human, typed at the box
+    /// or queued there; any other, taken in by Claude. Read from the last
+    /// bytes of a long transcript, past the line they cut.
+    func testPromptLinesSayWhoSentThem() throws {
+        let time = "2026-11-19T10:00:00.000Z"
+        func user(_ kind: String, _ id: String, sidechain: Bool = false) -> String {
+            #"{"type":"user","isSidechain":\#(sidechain),"origin":{"kind":"\#(kind)"},"promptId":"\#(id)","timestamp":"\#(time)","message":{"role":"user","content":"x"}}"#
+        }
+        func queued(_ kind: String) -> String {
+            #"{"type":"attachment","timestamp":"\#(time)","attachment":{"type":"queued_command","prompt":"x","origin":{"kind":"\#(kind)"}}}"#
+        }
+        let result = #"{"type":"user","timestamp":"\#(time)","message":{"role":"user","content":[{"tool_use_id":"t","type":"tool_result","content":"ok"}]}}"#
+        let read = [user("human", "a"), user("peer", "b"), user("task-notification", "c"), queued("human"), queued("peer"), result,
+                    user("human", "d", sidechain: true)].joined(separator: "\n") + "\n"
+        try write(user("human", "old") + "\n" + String(repeating: "x", count: 600) + "\n" + read)
+        var reader = TranscriptPromptReader(path: file.path, tailBytes: read.utf8.count + 100)
+        XCTAssertTrue(reader.readAppended())
+        let at = try XCTUnwrap(TranscriptSearch.date(time)).timeIntervalSince1970
+        XCTAssertEqual(reader.takePrompts(), [
+            TranscriptPrompt(promptID: "a", at: at, typed: true), TranscriptPrompt(promptID: "b", at: at, typed: false),
+            TranscriptPrompt(promptID: "c", at: at, typed: false), TranscriptPrompt(promptID: nil, at: at, typed: true),
+            TranscriptPrompt(promptID: nil, at: at, typed: false)
+        ])
+        XCTAssertEqual(reader.takePrompts(), [])
+    }
+
     func testBudgetSplitsACatchUpAcrossReads() throws {
         let lines = (1...50).map { TranscriptLine.response(id: "msg_\($0)", cacheRead: $0 * 1_000, output: 1) }
         try write(lines.joined(separator: "\n") + "\n")

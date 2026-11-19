@@ -131,7 +131,7 @@ extension NiruxShellView {
     func resumeFailedAgent(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval) {
         // A prompt or a dialog may still wait out the hook queue's drain
         // debounce: apply it before deciding.
-        AgentHookCenter.shared.drain()
+        guard AgentHookCenter.shared.drain() else { return showToast(Self.hooksStillComing) }
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
         guard let (_, pty) = stuckAgentTerminal(workspaceIndex: workspaceIndex, columnIndex: columnIndex) else { return }
@@ -141,6 +141,8 @@ extension NiruxShellView {
         if let refusal { showToast(Self.resumeRefusalText(refusal)) }
     }
 
+    static let hooksStillComing = "Its agent's hooks are still coming in: click again in a moment."
+
     /// Interrupt clicked under a turn gone silent: Esc goes to its `claude`
     /// only while that silence lasts (see `interruptSilentTurn`). Never
     /// Enter: the user sends their message again. Once the turn is over,
@@ -148,7 +150,7 @@ extension NiruxShellView {
     func interruptSilentAgent(workspaceIndex: Int, columnIndex: Int, since: TimeInterval) {
         // A hook may still wait out the queue's drain debounce: the agent
         // may have moved on.
-        AgentHookCenter.shared.drain()
+        guard AgentHookCenter.shared.drain() else { return showToast(Self.hooksStillComing) }
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
         guard let (column, pty) = stuckAgentTerminal(workspaceIndex: workspaceIndex, columnIndex: columnIndex) else { return }
