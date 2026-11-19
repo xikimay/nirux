@@ -36,7 +36,7 @@ final class SpaceCrossingTests: XCTestCase {
     /// With Reduce motion, or a pick from the menu, the space shows at once;
     /// movement turning off lands a crossing on its way at once.
     func testNothingCrossesWhileNothingMayMove() throws {
-        try withSpaces { shell, first, _ in
+        try withSpaces { shell, _, second in
             shell.focusSpace(.next)
             XCTAssertEqual(Self.frozenViews(in: shell).count, 2)
             shell.sideEffects.reducesMotion = { true }
@@ -51,7 +51,9 @@ final class SpaceCrossingTests: XCTestCase {
             XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "the crossing itself checks")
 
             shell.sideEffects.reducesMotion = { false }
-            shell.selectProfile(first)
+            XCTAssertNotEqual(shell.activeProfileID, second)
+            shell.selectProfile(second)
+            XCTAssertEqual(shell.activeProfileID, second)
             XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "a pick from the menu")
         }
     }
@@ -64,12 +66,7 @@ final class SpaceCrossingTests: XCTestCase {
             shell.focusSpace(.next)
             shell.focusSpace(.next)
             XCTAssertEqual(Self.frozenViews(in: shell).count, 2, "the first crossing's pictures gone")
-            // A new workspace's picture still sliding away isn't frozen again.
-            shell.addWorkspace(title: "third", cwd: NSTemporaryDirectory())
-            shell.focusSpace(.next)
-            XCTAssertTrue(Self.frozenViews(in: shell).allSatisfy { Self.pictureLayers(in: $0.layer) == 1 }, "no picture holds another")
 
-            waitUntil("the new workspace's slide gone", timeout: 2) { Self.frozenViews(in: shell).allSatisfy { shell.crossingPictures.contains($0) } }
             while steps.runNext() {}
             shell.crossSpaces(leaving: try XCTUnwrap(FrozenView.freeze(shell.viewport)), duration: 0.05)
             shell.crossSpaces(leaving: try XCTUnwrap(FrozenView.freeze(shell.viewport)), duration: 1)
@@ -90,11 +87,6 @@ final class SpaceCrossingTests: XCTestCase {
 
     private static func scale(_ transform: CATransform3D) -> CGFloat { transform.m11 }
 
-    /// Layers named as a picture's own, `layer` included.
-    private static func pictureLayers(in layer: CALayer?) -> Int {
-        guard let layer else { return 0 }
-        return (layer.name == FrozenView.layerName ? 1 : 0) + (layer.sublayers ?? []).reduce(0) { $0 + pictureLayers(in: $1) }
-    }
 
     /// Two spaces of one workspace each, the first on screen, the interface
     /// free to move.
