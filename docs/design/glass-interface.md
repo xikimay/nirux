@@ -479,8 +479,10 @@ the text stays flat and sharp.
   nothing glides once let go, and one that runs out leaves the other to
   pay. Otherwise the neighbour across the edge pays; the strip's last edge
   grows the card alone, as before. A double-click sets the card back to
-  half by the same share. Only the columns whose width changes take a new
-  fraction, and a focus moved during a drag ends it.
+  half by the same share. Within 10 pt of a third, a half or two thirds of
+  the viewport, the card lands there with a tick of the trackpad. Only
+  the columns whose width changes take a new fraction, and a focus moved
+  during a drag ends it.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within

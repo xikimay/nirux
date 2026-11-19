@@ -354,6 +354,50 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(strip.frame.minX, held, accuracy: 1, "nothing glides")
     }
 
+    /// A dragged card lands on a third, a half or two thirds of the viewport
+    /// once near one, whoever pays.
+    func testADraggedCardLandsOnAStopNearIt() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        func width(_ fraction: CGFloat) -> CGFloat { floor(fraction * (1000 - inset * 2 + gap) - gap) }
+        workspace.focusedIndex = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let handles = strip.subviews.compactMap { $0 as? ColumnResizeHandle }
+        let card = workspace.columns[1].view
+        let start = try XCTUnwrap(handles[1].onDragStart?())
+        handles[1].onDrag?(start, 60)
+        XCTAssertEqual(card.frame.width, width(0.5) + 120, accuracy: 1, "far from any stop")
+        handles[1].onDrag?(start, 80)
+        XCTAssertEqual(card.frame.width, width(2.0 / 3), "two thirds, centred")
+        XCTAssertEqual(card.frame.midX + strip.frame.minX, 500, accuracy: 1)
+        handles[1].onDragEnd?()
+
+        workspace.focusedIndex = 0
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let first = try XCTUnwrap(handles[0].onDragStart?())
+        handles[0].onDrag?(first, width(1.0 / 3) + 6 - workspace.columns[0].view.frame.width)
+        XCTAssertEqual(workspace.columns[0].view.frame.width, width(1.0 / 3), "a third, its neighbour paying")
+    }
+
+    /// A card lands on its stop exactly, whatever the viewport's rounding
+    /// (1,050 pt gave back a point less), and leaves the one it started on
+    /// at once.
+    func testAStopLandsExactlyAndLetsGo() throws {
+        let workspace = workspace(columns: 4)
+        workspace.containerView.frame.size.width = 1050
+        let strip = try strip(of: workspace)
+        func width(_ fraction: CGFloat) -> CGFloat { floor(fraction * (1050 - inset * 2 + gap) - gap) }
+        workspace.focusedIndex = 0
+        workspace.layoutAndScroll(viewportWidth: 1050, height: 600, animated: false)
+        let handle = strip.subviews.compactMap { $0 as? ColumnResizeHandle }[0]
+        let card = workspace.columns[0].view
+        let start = try XCTUnwrap(handle.onDragStart?())
+        handle.onDrag?(start, 1)
+        XCTAssertEqual(card.frame.width, width(0.5) + 1, "off its starting stop at once")
+        handle.onDrag?(start, width(2.0 / 3) - 4 - width(0.5))
+        XCTAssertEqual(card.frame.width, width(2.0 / 3))
+    }
+
     /// A neighbour that runs out pays what it can, and the other pays on:
     /// the dragged edge stays under the pointer.
     func testANeighbourThatRunsOutLeavesTheOtherToPay() throws {
