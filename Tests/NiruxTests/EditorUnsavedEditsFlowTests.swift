@@ -204,6 +204,86 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
         }
     }
 
+    /// Text the page holds that Swift hasn't heard of yet survives a
+    /// refused save and a reload; a file deleted or moved is a change ⌘S
+    /// doesn't undo; a page that never answers fails the save.
+    func testTextNotYetReportedAndAFileGoneAreKept() throws {
+        try UIFlowHarness.run { harness in
+            let notes = harness.repo + "/notes.txt"
+            try write("first\n", to: notes)
+            let (editor, webView) = try openEditor(notes, in: harness)
+            let banner = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: EditorConflictBanner.self))
+            editor.pauseFileWatch()
+
+            // ⌘S of A written; B typed and saved as an agent writes: B's
+            // save is refused, and B stays unsaved, never reloaded over.
+            try setBuffer("A\n", in: webView)
+            harness.waitUntil("the edit") { editor.unsavedPaths == [notes] }
+            waitForMonacoText(in: webView)
+            webView.evaluateJavaScript(try Self.saveTwiceWhileBusy(typing: "A\nB\n"))
+            harness.waitUntil("A written") { (try? read(notes)) == "A\n" }
+            try write("agent\n", to: notes)
+            harness.waitUntil("the conflict") { !banner.isHidden }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+            waitForBuffer("A\nB\n", in: webView)
+            XCTAssertEqual(editor.unsavedPaths, [notes], "B passed for saved")
+            XCTAssertEqual(try read(notes), "agent\n")
+            try click("Take Disk", in: banner)
+            waitForBuffer("agent\n", in: webView)
+
+            // Typed as the watcher reloads the buffer, clean when it looked:
+            // the typing stays, the disk's version waits as a conflict.
+            webView.evaluateJavaScript(try Self.typeWhileBusy("typed\n"))
+            try write("agent 2\n", to: notes)
+            editor.resumeFileWatch()
+            harness.waitUntil("the conflict") { !banner.isHidden }
+            editor.pauseFileWatch()
+            waitForBuffer("typed\n", in: webView)
+            XCTAssertEqual(try read(notes), "agent 2\n")
+            try click("Take Disk", in: banner)
+            waitForBuffer("agent 2\n", in: webView)
+            harness.waitUntil("the buffer clean") { editor.unsavedPaths.isEmpty }
+
+            // Deleted under unsaved edits: ⌘S doesn't bring it back, Keep
+            // Mine does.
+            try setBuffer("agent 2\nmine\n", in: webView)
+            harness.waitUntil("the edit") { editor.unsavedPaths == [notes] }
+            try FileManager.default.removeItem(atPath: notes)
+            pressCommandSRefused(in: webView, harness: harness)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: notes), "⌘S brought back a deleted file")
+            XCTAssertFalse(banner.isHidden)
+            XCTAssertEqual(harness.shell.toast?.message, "Not saved: “notes.txt” was deleted on disk")
+            try click("Keep Mine", in: banner)
+            harness.waitUntil("mine written") { (try? read(notes)) == "agent 2\nmine\n" && editor.unsavedPaths.isEmpty }
+
+            // Moved, the buffer clean: ⌘S doesn't write it back either.
+            try FileManager.default.moveItem(atPath: notes, toPath: harness.repo + "/moved.txt")
+            pressCommandSRefused(in: webView, harness: harness)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: notes), "⌘S brought back a moved file")
+            // Under edits, Take Disk closes the tab of a file gone.
+            try setBuffer("gone\n", in: webView)
+            harness.waitUntil("the edit") { editor.unsavedPaths == [notes] }
+            pressCommandSRefused(in: webView, harness: harness)
+            try click("Take Disk", in: banner)
+            XCTAssertEqual(editor.openPaths, [])
+            XCTAssertFalse(FileManager.default.fileExists(atPath: notes))
+
+            // A page that never answers fails the save, in time.
+            let other = harness.repo + "/other.txt"
+            try write("first\n", to: other)
+            _ = try openEditor(other, in: harness)
+            try setBuffer("other\n", in: webView)
+            harness.waitUntil("the edit") { editor.unsavedPaths == [other] }
+            UIFlowHarness.run(Self.dropSaveAll, in: webView)
+            editor.saveTimeout = 1
+            var saved: Bool?
+            editor.saveAll { saved = $0 }
+            harness.waitUntil("the save failed") { saved != nil }
+            XCTAssertEqual(saved, false)
+            XCTAssertEqual(harness.shell.toast?.message, "Not saved: the editor didn’t answer")
+        }
+    }
+
     /// close_task leaves a task whose editor holds unsaved edits to the
     /// user.
     func testCloseTaskRefusesATaskWithUnsavedEdits() throws {
@@ -233,6 +313,31 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
     /// The diff on screen: its two sides, "|" between.
     private static let diffSides = "(function () { var d = monaco.editor.getDiffEditors()[0]; var m = d && d.getModel(); "
         + "return m ? m.original.getValue() + '|' + m.modified.getValue() : ''; })()"
+
+    /// ⌘S as Monaco's text gets it, inside the page.
+    private static let commandS = "(function () { var e = new KeyboardEvent('keydown', "
+        + "{ key: 's', code: 'KeyS', metaKey: true, bubbles: true, cancelable: true }); "
+        + "Object.defineProperty(e, 'keyCode', { get: function () { return 83; } }); "
+        + "document.activeElement.dispatchEvent(e); })();"
+
+    /// Three seconds of the page busy: what Swift sends meanwhile waits.
+    private static let busy = "var start = Date.now(); while (Date.now() - start < 3000) {}"
+
+    /// ⌘S, the page busy while Swift answers it, then `typing` and ⌘S
+    /// again, before the page hears the answer.
+    private static func saveTwiceWhileBusy(typing: String) throws -> String {
+        "(function () { \(commandS) \(busy) \(mainEditor).getModel().setValue(\(try literal(typing))); \(commandS) })()"
+    }
+
+    /// `text` typed once the page has been busy.
+    private static func typeWhileBusy(_ text: String) throws -> String {
+        "(function () { \(busy) \(mainEditor).getModel().setValue(\(try literal(text))); })()"
+    }
+
+    /// The page drops Save All requests, as a script that threw would.
+    private static let dropSaveAll = "(function () { var handle = window.niruxBridge.handle; "
+        + "window.niruxBridge.handle = function (json) { var msg = typeof json === 'string' ? JSON.parse(json) : json; "
+        + "if (msg.type !== 'saveAll') handle(json); }; })()"
 
     /// Opens `path` in the editor column of `workspace` (the active one by
     /// default), its Monaco holding the file.
@@ -279,13 +384,17 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
         harness.waitUntil("the refusal", file: file, line: line) { harness.shell.toastGeneration > toasts }
     }
 
-    /// ⌘S in Monaco: the key interceptor hands it to the page (no menu
-    /// item has it), which posts the save.
-    private func pressCommandS(in webView: WKWebView, file: StaticString = #filePath, line: UInt = #line) {
+    private func waitForMonacoText(in webView: WKWebView, file: StaticString = #filePath, line: UInt = #line) {
         let script = "\(Self.mainEditor).hasTextFocus() ? 'focused' : ''"
         UIFlowHarness.waitForAnswer("Monaco to take text", to: script, in: webView, file: file, line: line) {
             $0 == "focused" && webView.inputContext != nil
         }
+    }
+
+    /// ⌘S in Monaco: the key interceptor hands it to the page (no menu
+    /// item has it), which posts the save.
+    private func pressCommandS(in webView: WKWebView, file: StaticString = #filePath, line: UInt = #line) {
+        waitForMonacoText(in: webView, file: file, line: line)
         guard let event = NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,

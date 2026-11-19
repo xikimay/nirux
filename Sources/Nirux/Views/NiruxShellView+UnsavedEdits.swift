@@ -5,8 +5,16 @@ import AppKit
 /// refuses instead: that choice is the user's.
 extension NiruxShellView {
     /// Asks about `paths` in an app-modal alert, through `sideEffects`.
-    func askAboutUnsavedEdits(_ paths: [String]) -> UnsavedEditsChoice {
-        UnsavedEditsChoice(runModal(UnsavedEditsChoice.alert(for: paths)))
+    func askAboutUnsavedEdits(_ paths: [String], shared: [String] = []) -> UnsavedEditsChoice {
+        UnsavedEditsChoice(runModal(UnsavedEditsChoice.alert(for: paths, shared: shared)))
+    }
+
+    /// A file unsaved in several editors is named once, and said so.
+    private func askAboutUnsavedEdits(of editors: [EditorColumn]) -> UnsavedEditsChoice {
+        let all = editors.flatMap(\.unsavedPaths)
+        let paths = all.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        let shared = paths.filter { path in all.filter { $0 == path }.count > 1 }
+        return askAboutUnsavedEdits(paths, shared: shared)
     }
 
     /// `proceed` runs once the unsaved edits of `columns`' editors are
@@ -15,7 +23,7 @@ extension NiruxShellView {
     func afterUnsavedEdits(in columns: [ColumnState], _ proceed: @escaping () -> Void) {
         let editors = Self.unsavedEditors(in: columns)
         guard !editors.isEmpty else { return proceed() }
-        switch askAboutUnsavedEdits(Self.unsavedPaths(of: editors)) {
+        switch askAboutUnsavedEdits(of: editors) {
         case .save:
             save(editors[...]) { written in
                 if written { proceed() }
@@ -37,7 +45,7 @@ extension NiruxShellView {
         guard !editors.isEmpty else { return mergeQueueTerminateReply(reply: reply) }
         // Quit from the Dock while Nirux is hidden: the question must show.
         sideEffects.comeToFront()
-        switch askAboutUnsavedEdits(Self.unsavedPaths(of: editors)) {
+        switch askAboutUnsavedEdits(of: editors) {
         case .save:
             save(editors[...]) { [weak self] written in
                 // Through the run loop AppKit's wait runs: a save refused at
@@ -72,13 +80,6 @@ extension NiruxShellView {
     private static func unsavedEditors(in columns: [ColumnState]) -> [EditorColumn] {
         columns.compactMap(\.editorColumn).filter { !$0.unsavedPaths.isEmpty }
     }
-
-    /// A file open in two editors is named once.
-    private static func unsavedPaths(of editors: [EditorColumn]) -> [String] {
-        var named = Set<String>()
-        return editors.flatMap(\.unsavedPaths).filter { named.insert($0).inserted }
-    }
-
     /// One editor after the other; the first that fails stops the rest and
     /// shows.
     private func save(_ editors: ArraySlice<EditorColumn>, then completion: @escaping (Bool) -> Void) {

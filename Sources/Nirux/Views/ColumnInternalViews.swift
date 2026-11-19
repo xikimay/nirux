@@ -85,10 +85,11 @@ final class EditorConflictBanner: NSView {
         return button
     }
 
-    func configure(fileName: String, isComparing: Bool) {
+    func configure(fileName: String, isDeleted: Bool, isComparing: Bool) {
+        let change = isDeleted ? "was deleted" : "changed"
         messageLabel.stringValue = (isComparing
             ? "\(fileName): on disk on the left, your edits on the right."
-            : "\(fileName) changed on disk while you have unsaved edits.").asWarning
+            : "\(fileName) \(change) on disk while you have unsaved edits.").asWarning
         compareButton.state = isComparing ? .on : .off
         needsLayout = true
     }
