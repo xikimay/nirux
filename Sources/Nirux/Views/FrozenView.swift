@@ -43,7 +43,7 @@ final class FrozenView: NSView {
     /// copies again, doubling them at each switch).
     private static func isOutOfSight(_ layer: CALayer, root: CALayer) -> Bool {
         let shown = layer.presentation() ?? layer
-        return layer.name == layerName || shown.isHidden || shown.opacity == 0
+        return (layer.name == layerName && !ZZ("pictureOfPicture")) || shown.isHidden || (shown.opacity == 0 && !ZZ("clearKept"))
             || (layer.masksToBounds && !layer.convert(layer.bounds, to: root).intersects(root.bounds))
     }
 
@@ -89,7 +89,7 @@ final class FrozenView: NSView {
         copy.contents = layer.contents
         if let image = images[ObjectIdentifier(layer)] {
             copy.contents = image
-            if !layer.isOpaque { copy.backgroundColor = Theme.Color.canvas.cgColor }
+            if (!layer.isOpaque || ZZ("opaqueFilled")) && !ZZ("frostLost") { copy.backgroundColor = Theme.Color.canvas.cgColor }
         }
         if let mask = layer.mask { copy.mask = clone(mask, root: mask, images: images) }
         copy.sublayers = layer.sublayers?.compactMap { clone($0, root: root, images: images) }
@@ -115,6 +115,7 @@ enum SurfaceCopies {
     static func copies(of surfaces: [IOSurfaceRef], waitingAtMost wait: DispatchTimeInterval = gpuWait) -> [IOSurfaceRef?] {
         guard !surfaces.isEmpty else { return [] }
         if let gpu, let copies = gpuCopies(of: surfaces, on: gpu, waitingAtMost: wait) { return copies }
+        if ZZ("noFallback") { return surfaces.map { _ in nil } }
         return surfaces.map { source in blank(like: source).flatMap { cpuCopy(source, into: $0) } }
     }
 

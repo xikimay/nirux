@@ -54,5 +54,11 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the gate of #637's review round 1: its tests' mutants,
+      # then ten runs of FrozenViewTests.
+      - name: Flake gate
+        run: |
+          status=0
+          scripts/mutants-class.sh NiruxTests.FrozenViewTests pictureOfPicture clearKept noFallback frostLost opaqueFilled || status=1
+          scripts/repeat-class.sh NiruxTests.FrozenViewTests 10 3 NiruxTests.WorkspaceSwitchTests NiruxTests.TaskBirthTests || status=1
+          exit $status
