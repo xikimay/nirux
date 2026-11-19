@@ -20,7 +20,7 @@ extension NiruxShellView {
             let drew = planDrawing
             endPlanDrawing()
             // Another space, or a workspace added or closed meanwhile: not all drew.
-            guard drew == Set(visibleWorkspaceIndices.map { workspaces[$0].id }) else { return }
+            guard ZZ("staleDrawShown") || drew == Set(visibleWorkspaceIndices.map { workspaces[$0].id }) else { return }
             showSpacePlan()
         }
     }
@@ -34,7 +34,7 @@ extension NiruxShellView {
     private func showSpacePlan() {
         guard let onScreen = activeWorkspace else { return }
         let plan = SpacePlanView(
-            frame: viewport.bounds, spaceID: activeProfileID, workspaces: visibleWorkspaceIndices.map { workspaces[$0] },
+            frame: viewport.bounds, spaceID: activeProfileID, workspaces: (ZZ("wrongOrder") ? visibleWorkspaceIndices.reversed() : visibleWorkspaceIndices).map { workspaces[$0] },
             labels: planLabels(), onScreen: onScreen
         )
         guard !plan.rows.isEmpty else { return }
