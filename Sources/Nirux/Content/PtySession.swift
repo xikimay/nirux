@@ -955,12 +955,30 @@ final class PtySession: @unchecked Sendable {
         }
     }
 
+    /// Whether `foreground`, the column's `claude`, that took no prompt since
+    /// it started, sits at its empty prompt (see
+    /// `AgentStatusMachine.sitsAtFirstPrompt`).
+    func sitsAtFirstPrompt(_ foreground: ForegroundProcess) -> Bool {
+        state.machine.sitsAtFirstPrompt(foreground.instance) {
+            Self.sessionRecord(of: $0).showsIdlePrompt(of: $0, now: Date().timeIntervalSince1970)
+        }
+    }
+
+    /// Whether Enter may follow a paste whose keys went in at `typedAt`, into
+    /// the prompt of `process`: no key since, no dialog its hooks listed,
+    /// still in front, and no dialog or screen its REPL says it waits on.
+    func mayPressEnter(after typedAt: TimeInterval, for process: ProcessInstance?, snapshot: ProcessSnapshot) -> Bool {
+        guard lastInputAt == typedAt, !dialogWaitsForKeys, foregroundProcess(snapshot: snapshot)?.instance == process else { return false }
+        return process.map { !Self.sessionRecord(of: $0).showsWait(of: $0) } ?? true
+    }
+
     /// The session record of `process`, a `claude`, in the config folder
     /// its own environment names, else Nirux's, which its terminal inherits.
-    static func sessionRecord(of process: ProcessInstance) -> ClaudeSessionRecord.Reading {
+    static func sessionRecord(
+        of process: ProcessInstance, inherited: [String: String] = ProcessInfo.processInfo.environment
+    ) -> ClaudeSessionRecord.Reading {
         let own = ProcessSnapshot.environment(of: process.pid)
-        let environment = own.isEmpty ? ProcessInfo.processInfo.environment : own
-        return ClaudeSessionRecord.read(at: ClaudeSessionRecord.url(pid: process.pid, environment: environment))
+        return ClaudeSessionRecord.read(at: ClaudeSessionRecord.url(pid: process.pid, environment: own.isEmpty ? inherited : own))
     }
 
     /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.

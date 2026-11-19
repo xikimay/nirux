@@ -402,27 +402,33 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(refusal(machine), .dialog)
     }
 
-    /// A `claude` that took no prompt since it started, as one resumed at a
-    /// relaunch, is free once its REPL says it sits idle at its prompt, while
-    /// nothing works or waits there and no key reached it since it started;
+    /// A `claude` that took no prompt since it started, as one Nirux resumed
+    /// at a relaunch, is free once its REPL says it sits idle at its prompt,
+    /// while nothing works or waits there and no key reached its terminal;
     /// without that word, never.
     func testAClaudeThatTookNoPromptIsFreeOnlyOnItsREPLsWord() {
         let resumed = ProcessInstance(pid: 7, startedAt: t0 + 6)
         func refusal(_ machine: AgentStatusMachine, idle: Bool = true) -> AgentPromptRefusal? {
             machine.promptRefusal(foreground: claude(resumed), runningSince: t0 + 100) { $0 == resumed && idle }
         }
-        // The prompt and the turn were an earlier claude's.
-        let machine = idleMachine()
+        var machine = AgentStatusMachine()
+        _ = machine.apply(hook(.sessionStart, at: 7, source: "resume"), isUserFocused: false)
         XCTAssertEqual(refusal(machine, idle: false), .noPromptYet)
         XCTAssertNil(refusal(machine))
 
         var typed = machine
-        typed.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 7), keys: Data("x".utf8))
-        XCTAssertEqual(refusal(typed), .noPromptYet, "a key since it started")
+        typed.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("x".utf8))
+        XCTAssertEqual(refusal(typed), .draft, "typed since it started")
+        var early = machine
+        early.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 5), keys: Data("x".utf8))
+        XCTAssertEqual(refusal(early), .noPromptYet, "typed while its shell loaded: seeded into its prompt")
+        var scrolled = machine
+        scrolled.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("\u{1B}[6~".utf8))
+        XCTAssertEqual(refusal(scrolled), .noPromptYet, "a key that leaves no draft, as one that answers a screen")
         var recalled = machine
-        recalled.notePromptRecall(now: Date(timeIntervalSince1970: t0 + 7))
-        XCTAssertEqual(refusal(recalled), .noPromptYet, "an old prompt a wheel scroll recalled")
-        // A background agent it resumed works, then asks.
+        recalled.notePromptRecall(now: Date(timeIntervalSince1970: t0 + 8))
+        XCTAssertEqual(refusal(recalled), .draft, "an old prompt a wheel scroll recalled")
+        // A background agent it resumed works, then asks past the turn.
         var working = machine
         _ = working.apply(hook(.preToolUse, at: 8, tool: "Bash"), isUserFocused: false)
         XCTAssertEqual(refusal(working), .noPromptYet)

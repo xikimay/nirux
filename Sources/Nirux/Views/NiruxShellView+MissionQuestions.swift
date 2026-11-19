@@ -118,7 +118,8 @@ extension NiruxShellView {
                     foregroundKnown = process != nil
                     parentState = Self.missionParent(
                         foreground: process, typedAt: question.parentTypedAt,
-                        finishedTurnAfterTyping: pty.finishedTurn(afterTypingAt:), tookPrompt: pty.agentTookPrompt(since:)
+                        finishedTurnAfterTyping: pty.finishedTurn(afterTypingAt:),
+                        tookPrompt: { process in pty.agentTookPrompt(since: process).map { $0 || pty.sitsAtFirstPrompt(process) } }
                     )
                 } else {
                     parentState = .notClaude
@@ -149,9 +150,10 @@ extension NiruxShellView {
     /// as nothing new) and when Nirux typed the question into it, if it
     /// did. Typed already, it went to a `claude` that could take it: one
     /// started since never gets it (a question is typed once). Not typed
-    /// yet, a `claude` that took no prompt since it started can't take it:
-    /// Nirux types nothing into one before that. `tookPrompt` is nil while
-    /// its hooks never reported: nothing tells, and it may take it.
+    /// yet, a `claude` that took no prompt since it started can't take it,
+    /// unless it says it sits at its prompt (`tookPrompt` says either,
+    /// see `PtySession.sitsAtFirstPrompt`). `tookPrompt` is nil while its
+    /// hooks never reported: nothing tells, and it may take it.
     static func missionParent(
         foreground: ForegroundProcess?, typedAt: TimeInterval?,
         finishedTurnAfterTyping: (TimeInterval) -> Bool, tookPrompt: (ForegroundProcess) -> Bool?

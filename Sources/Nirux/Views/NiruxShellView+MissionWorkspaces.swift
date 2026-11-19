@@ -412,7 +412,7 @@ extension NiruxShellView {
         }
         guard !snapshot.isEmpty else { return done(.inPrompt(why: "Nirux couldn't read the running processes")) }
         // The paste's own keys are the last: anything since is someone's.
-        guard pty.lastInputAt == typedAt, !pty.dialogWaitsForKeys, pty.foregroundProcess(snapshot: snapshot)?.instance == process
+        guard pty.mayPressEnter(after: typedAt, for: process, snapshot: snapshot)
         else { return done(.inPrompt(why: "someone typed meanwhile or a dialog opened")) }
         pty.sendRaw("\r")
         done(.sent)

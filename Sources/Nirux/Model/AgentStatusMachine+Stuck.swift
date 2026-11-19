@@ -105,7 +105,9 @@ extension AgentStatusMachine {
         guard let foreground, AgentHookCenter.isInteractiveClaude(foreground) else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
         guard let lastPromptAt = prompt(since: foreground.instance.startedAt) else {
-            return sitsAtFirstPrompt(foreground.instance, showsIdlePrompt: showsIdlePrompt) ? nil : .noPromptYet
+            if sitsAtFirstPrompt(foreground.instance, showsIdlePrompt: showsIdlePrompt) { return nil }
+            // Typed since it started: not a screen of its own.
+            return lastDraftInputAt >= foreground.instance.startedAt + 1 ? .draft : .noPromptYet
         }
         if hookWorking || turnStartedAt != nil { return .working }
         if !pendingDialogs.isEmpty { return .dialog }
@@ -121,13 +123,14 @@ extension AgentStatusMachine {
     /// (a resume's offer to resume from a summary, a quota warning, a newer
     /// model, a startup offer), where typed text and Enter would pick an
     /// option. So: nothing at work or listed, no key or recalled prompt
-    /// since it started (keys typed before its REPL mounts are seeded into
-    /// its prompt; others open its agents or transcript views), and, read
-    /// last, its REPL's own word (`showsIdlePrompt`, from
-    /// `ClaudeSessionRecord`).
-    private func sitsAtFirstPrompt(_ process: ProcessInstance, showsIdlePrompt: (ProcessInstance) -> Bool) -> Bool {
+    /// since the terminal started (keys typed before a REPL mounts are
+    /// seeded into its prompt, those typed while its shell still loads too;
+    /// others open its agents or transcript views; one started by hand
+    /// waits for its first prompt), and, read last, its REPL's own word
+    /// (`showsIdlePrompt`, from `ClaudeSessionRecord`).
+    func sitsAtFirstPrompt(_ process: ProcessInstance, showsIdlePrompt: (ProcessInstance) -> Bool) -> Bool {
         !hookWorking && turnStartedAt == nil && pendingDialogs.isEmpty && turnFailure == nil && !awaitsAnyVerdict
-            && max(lastInputAt, lastDraftInputAt) < process.startedAt && showsIdlePrompt(process)
+            && lastInputAt == 0 && lastDraftInputAt == 0 && showsIdlePrompt(process)
     }
 
     /// What `promptRefusal` reads, for the log: ages in seconds and names,
