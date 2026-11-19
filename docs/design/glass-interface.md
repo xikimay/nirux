@@ -485,6 +485,15 @@ the text stays flat and sharp.
   0.56 s, both frozen pictures, the live views hidden under them until it
   lands, so no live terminal scales. A switch while one plays ends it at
   once; Reduce motion, or a pick from the menu, shows the space at once.
+- **The plan (study P5, first part):** ⌥⌘↑ (Space › Space Overview)
+  shows the space as a plan over the viewport: a row per workspace, in the
+  order they're listed, every column of it frozen at the plan's scale
+  (`FrozenView`, terminals copied that small on the GPU), its state icon,
+  name and status line at their own size beside it. The card on screen
+  wears a ring; the arrows move it, Return or a click goes there at once,
+  Escape or ⌥⌘↑ goes back. Under it the live views hide and no terminal
+  draws; a user's move, another space or workspace, or a new size closes
+  it. The pinch and the transitions come next.
 - **Frozen pictures (study P4):** a crossing, or a new workspace's slide,
   moves pictures of what the viewport showed, frozen in
   about 6 ms (`FrozenView`): a clone of its layers, each sharing its

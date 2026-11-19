@@ -128,6 +128,8 @@ extension NiruxApp {
         previousSpaceItem.keyEquivalentModifierMask = [.command, .option]
         let nextSpaceItem = menu.addItem(withTitle: "Next Space", action: #selector(nextSpace(_:)), keyEquivalent: "\u{F703}")
         nextSpaceItem.keyEquivalentModifierMask = [.command, .option]
+        let overviewItem = menu.addItem(withTitle: "Space Overview", action: #selector(showSpaceOverview(_:)), keyEquivalent: "\u{F700}")
+        overviewItem.keyEquivalentModifierMask = [.command, .option]
         menu.addItem(.separator())
         menu.addSpaceItems()
         menu.addItem(.separator())

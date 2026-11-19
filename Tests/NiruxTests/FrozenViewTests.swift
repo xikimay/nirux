@@ -72,7 +72,7 @@ final class FrozenViewTests: XCTestCase {
         let blank = try XCTUnwrap(SurfaceCopies.blank(like: surface))
         let copy = try XCTUnwrap(SurfaceCopies.cpuCopy(surface, into: blank))
         XCTAssertTrue(Self.pixels(of: copy) == Self.pixels(of: surface), "the same pixels")
-        let late = try XCTUnwrap(SurfaceCopies.copies(of: [surface], waitingAtMost: .nanoseconds(0)).first ?? nil)
+        let late = try XCTUnwrap(SurfaceCopies.copies(of: [surface], waitingAtMost: .nanoseconds(0)).first ?? nil).surface
         XCTAssertTrue(Self.pixels(of: late) == Self.pixels(of: surface), "a copy past the wait")
     }
 

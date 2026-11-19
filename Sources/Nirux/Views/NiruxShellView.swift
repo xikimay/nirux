@@ -27,6 +27,8 @@ final class NiruxShellView: NSView {
     /// its pictures over the viewport (NiruxShellView+SpaceCrossing).
     var spaceCrossingGeneration = 0
     var crossingPictures: [FrozenView] = []
+    /// The space as a plan, while it shows (NiruxShellView+SpacePlan).
+    var spacePlan: SpacePlanView?
     /// The size of the workspace on screen, as `relayout` lays it out.
     var workspaceViewportSize: NSSize {
         let statusH = statusBar.hasContent ? StatusBarView.height : 0
@@ -504,6 +506,7 @@ final class NiruxShellView: NSView {
             indicator: NSRect(x: vpX, y: 4, width: viewportW, height: 16),
             statusBar: NSRect(x: 0, y: 0, width: bounds.width, height: statusH)
         )
+        closeSpacePlanIfStale(animated: animated, viewport: frames.viewport.size)
         // A fold moves the camera too, which is no travel of the columns.
         let sidebarStays = sidebar.frame.width == sidebarW
         applyChromeLayout(frames, animated: animated)
