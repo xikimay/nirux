@@ -250,8 +250,8 @@ final class WorktreeCleanupPanel: NSObject {
         container.addSubview(heading)
 
         let explanation = NSTextField(wrappingLabelWithString:
-            "For each checked worktree whose pull request is merged: deletes its folder and its local branch, "
-            + "moves its handover and other leftovers to the Trash, then closes the workspaces open in it. "
+            "For each checked worktree whose pull request is merged: closes the workspaces open in it, deletes its "
+            + "folder and its local branch, and moves its handover and other leftovers to the Trash. "
             + "Remote branches are never touched, and nothing is merged.")
         explanation.font = .systemFont(ofSize: 11.5)
         explanation.textColor = NSColor.white.withAlphaComponent(0.5)

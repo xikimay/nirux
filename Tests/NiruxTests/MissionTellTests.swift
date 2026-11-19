@@ -662,6 +662,35 @@ final class MissionTellTests: XCTestCase {
             kind: .claude, name: .stopFailure, sessionID: "lead", errorKind: "rate_limit", timestamp: t0 + 8
         ), isUserFocused: false)
         XCTAssertEqual(refusal(failed), .noPromptYet, "a usage limit would fail what it is sent")
+
+        // The user, who saw its screen, says it sits at its prompt: keys that
+        // leave no text don't hold it, nor an Enter that answered a screen;
+        // text that may sit in its prompt and the rest still do.
+        func seen(_ machine: AgentStatusMachine, idle: Bool = true) -> AgentPromptRefusal? {
+            machine.promptRefusal(foreground: claude(resumed), runningSince: t0 + 100, seenByUser: true) { $0 == resumed && idle }
+        }
+        var answered = machine
+        answered.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("\u{1B}[B".utf8))
+        answered.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 9), keys: Data("\r".utf8))
+        XCTAssertEqual(refusal(answered), .draft)
+        XCTAssertNil(seen(answered))
+        XCTAssertNil(seen(scrolled))
+        var completed = machine
+        completed.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("@".utf8))
+        completed.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 9), keys: Data("\r".utf8))
+        XCTAssertEqual(seen(completed), .draft, "an Enter that took an @file completion: its text stays")
+        var suggested = machine
+        suggested.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("\u{1B}[C".utf8))
+        XCTAssertEqual(seen(suggested), .draft, "Right takes in a suggested prompt")
+        var givenBack = machine
+        givenBack.notePromptGivenBack(now: t0 + 8)
+        XCTAssertEqual(seen(givenBack), .draft, "a prompt Esc gave back to its box")
+        XCTAssertEqual(seen(typed), .draft, "text in its prompt")
+        XCTAssertNil(seen(early), "keys before it started, Nirux's launch line too: what they left, the user sees")
+        XCTAssertEqual(seen(recalled), .draft, "an old prompt in its box")
+        XCTAssertEqual(seen(answered, idle: false), .noPromptYet, "its record says a screen of its own is up")
+        XCTAssertEqual(seen(asking), .noPromptYet)
+        XCTAssertEqual(seen(working), .noPromptYet)
     }
 
     /// A dialog takes the keys while it waits for one, a paste too: none is a

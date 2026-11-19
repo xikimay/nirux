@@ -202,6 +202,10 @@ struct AgentStatusMachine {
     /// The same, typed while no dialog was believed open: text that may sit
     /// in the agent's prompt as a draft.
     private(set) var lastDraftInputAt: TimeInterval = 0
+    /// The last of those that may have left text (`mayLeaveText`): an Enter
+    /// or a move after it takes nothing away (one may accept an `@file`
+    /// completion and send nothing).
+    private(set) var lastTextInputAt: TimeInterval = 0
     /// What the last draft was, for the log (`keyKind`), and the last hook
     /// event's name.
     private(set) var lastDraftKind: String?
@@ -1153,6 +1157,7 @@ struct AgentStatusMachine {
     /// draft until the next prompt goes in, which no message joins.
     mutating func notePromptGivenBack(now: TimeInterval) {
         lastDraftInputAt = now
+        lastTextInputAt = now
         lastDraftKind = "given back"
     }
 
@@ -1261,6 +1266,7 @@ struct AgentStatusMachine {
         // Over a dialog that waits for keys, they move among its options.
         guard !openDialogs.contains(where: waitsForKeys) else { return }
         lastDraftInputAt = now.timeIntervalSince1970
+        lastTextInputAt = now.timeIntervalSince1970
         lastDraftKind = "wheel"
     }
 
@@ -1353,6 +1359,20 @@ struct AgentStatusMachine {
         return bytes.dropFirst(2).dropLast().allSatisfy { (0x20...0x3F).contains($0) }
     }
 
+    /// Whether a key may leave text in the prompt: any but Enter, Esc or
+    /// Ctrl-C, Down, Left, Backspace and the keys that only move the view or
+    /// the cursor. Up recalls an old prompt, Right and Tab take in a
+    /// suggested one; an unknown write counts.
+    static func mayLeaveText(_ keys: Data?) -> Bool {
+        guard let keys else { return true }
+        if keys == enterKey || isCancelKey(keys) || keys == Data([0x7F]) || keys == Data([0x08]) || keyKind(keys) == "nav" {
+            return false
+        }
+        guard keys.first == 0x1B, isOneKey(keys), let last = keys.last else { return true }
+        // Down and Left, plain or in application mode.
+        return !(keys.count == 3 && (last == 0x42 || last == 0x44))
+    }
+
     /// What kind of key a write was, for the log: never its characters.
     static func keyKind(_ keys: Data?) -> String {
         guard let keys else { return "key" }
@@ -1404,6 +1424,7 @@ struct AgentStatusMachine {
         if inFront == nil, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)
+            if Self.mayLeaveText(keys) { lastTextInputAt = time }
         }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
@@ -1767,6 +1788,7 @@ struct AgentStatusMachine {
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
+        lastTextInputAt = 0
         lastDraftKind = nil
         lastEventName = nil
         circling.reset()

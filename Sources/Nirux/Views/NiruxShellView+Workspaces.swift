@@ -232,18 +232,21 @@ extension NiruxShellView {
     /// A Claude Code child: Nirux types the answer into its prompt
     /// (`MissionPromptText`).
     nonisolated static let typedAnswerMission = "This is a Nirux mission workspace. To ask the parent agent, run "
-        + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" "
-        + "(at most \(MissionEventCLI.maxMessageLength) characters), then end your turn: Nirux types "
+        + "\(MissionEventCLI.askCommand) "
+        + "(at most \(MissionEventCLI.maxMessageLength) characters, the recommendation "
+        + "\(MissionEventCLI.maxRecommendationLength)), then end your turn: Nirux types "
         + "the answer into your prompt as a message starting with \(MissionPromptText.prefix). "
-        + "If it exits with status 3, run the exact same command again: it does not ask twice. "
+        + "\(MissionEventCLI.askGuide) If it exits with status 3, run the exact same command again: it does not ask twice. "
         + "Status 4 means the Mission is over; do not retry. Report the final result with "
         + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
 
     /// A Codex child, and every child before Nirux typed answers: `ask`
     /// waits for the answer.
     nonisolated static let waitingMission = "This is a Nirux mission workspace. Ask the parent and wait safely with "
-        + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" "
-        + "(at most \(MissionEventCLI.maxMessageLength) characters); the command output is the parent's answer. "
+        + "\(MissionEventCLI.askCommand) "
+        + "(at most \(MissionEventCLI.maxMessageLength) characters, the recommendation "
+        + "\(MissionEventCLI.maxRecommendationLength)); the command output is the parent's answer. "
+        + "\(MissionEventCLI.askGuide) "
         + "It waits up to \(Int(MissionEventCLI.defaultWaitTimeout)) seconds, so allow it a shell-tool timeout "
         + "of at least 120 seconds. If it exits with status 3, or your shell tool stops it before it "
         + "prints anything, run the exact same command again: it resumes the same question. "
