@@ -29,4 +29,32 @@ final class EditorDiffGroupTests: BranchReviewRepositoryTestCase {
         waitUntil("the tab's files") { editor.diffGroupTabs[group]?.isLoading == false }
         XCTAssertEqual(editor.diffGroupTabs[group]?.files.count, 2)
     }
+
+    /// A tab whose files can't be read closes, and the toast names it: the
+    /// user may be reading another tab's diff by then.
+    @MainActor
+    func testAGroupTabThatCantReadItsFilesSaysWhich() throws {
+        let previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", root + "/state", 1)
+        defer {
+            if let previousStateDirectory { setenv("NIRUX_STATE_DIR", previousStateDirectory, 1) } else { unsetenv("NIRUX_STATE_DIR") }
+        }
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        shell.stopHeartbeat()
+        let window = NSWindow(contentRect: shell.frame, styleMask: [.titled], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = shell
+        let editor = EditorColumn(workspaceCwd: repo)
+        shell.addSubview(editor)
+        defer {
+            editor.removeFromSuperview()
+            window.close()
+        }
+
+        try write("README.md", "widgets and gadgets\n")
+        editor.showDiffCollection(title: "Outside (1)", paths: [root + "/outside.txt"], mode: .head)
+        editor.showDiff(path: "README.md")
+        waitUntil("the tab closed") { editor.diffGroupTabs.isEmpty }
+        XCTAssertEqual(shell.toast?.message, "Couldn’t read the changes of “Outside (1)”")
+    }
 }

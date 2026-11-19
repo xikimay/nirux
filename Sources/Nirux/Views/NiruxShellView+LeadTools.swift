@@ -410,35 +410,40 @@ extension NiruxShellView {
         return stuck.headline + (stuck.detail.map { " — \($0)" } ?? "")
     }
 
-    /// An agent in front of one of a workspace's columns, as list_tasks
-    /// tells the Lead about it.
+    /// An agent in front of one of a workspace's columns, or the one that
+    /// exited mid-turn there, as list_tasks tells the Lead about it.
     struct AgentReading {
         let name: String
         let status: AgentStatus
         /// What it waits on the user for, in a few words.
         let dialog: String?
         /// What broke, when its row is red (see `leadFailure`): the turn
-        /// stopped on an API error, or went silent.
+        /// stopped on an API error, went silent, or its agent exited mid-turn.
         let failure: String?
 
         /// A failure needs the user too, but says what broke instead.
         var needsUser: Bool { dialog != nil || (status == .needsAttention && failure == nil) }
     }
 
-    /// The Claude and Codex agents in front of `workspace`'s columns.
-    func agentReadings(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> [AgentReading] {
-        let now = Date().timeIntervalSince1970
-        return workspace.columns.compactMap { column in
-            guard let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
-                  ["claude", "codex"].contains(foreground.name) else { return nil }
+    /// The Claude and Codex agents in front of `workspace`'s columns, and
+    /// those that exited mid-turn.
+    func agentReadings(
+        of workspace: WorkspaceState, snapshot: ProcessSnapshot, now: TimeInterval = Date().timeIntervalSince1970
+    ) -> [AgentReading] {
+        workspace.columns.compactMap { column in
+            guard let pty = column.pty else { return nil }
+            let foreground = pty.foregroundProcess(snapshot: snapshot)
+            let stuck = sidebarStuckState(of: column, foregroundProcess: foreground, snapshot: snapshot, now: now)
+            let failure = stuck.flatMap(Self.leadFailure)
+            // The agent that died, not the shell that took its place in front.
+            if let name = stuck?.agentName { return AgentReading(name: name, status: .idle, dialog: nil, failure: failure) }
+            guard let foreground, ["claude", "codex"].contains(foreground.name) else { return nil }
             // A question its last turn ended on waits on the user too.
             let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
                 ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
             // A turn end found done (or still being read) asks nothing.
             let status = pty.isQuietTurnEnd ? AgentStatus.idle : pty.cachedAgentState
-            let failure = sidebarStuckState(of: column, foregroundProcess: foreground, snapshot: snapshot, now: now)
-                .flatMap(Self.leadFailure)
             return AgentReading(name: foreground.name, status: status, dialog: dialog, failure: failure)
         }
     }

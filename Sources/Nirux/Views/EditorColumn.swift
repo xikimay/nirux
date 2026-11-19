@@ -658,7 +658,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 guard !files.isEmpty else {
                     // Not left loading.
                     self.close(path: groupPath)
-                    self.showToast("Couldn’t read the changes of these files", tone: .error)
+                    // Maybe over another tab's diff: it says which tab.
+                    self.showToast("Couldn’t read the changes of “\(title)”", tone: .error)
                     return
                 }
                 let group = DiffGroupTab(title: title, mode: mode, files: files, load: nil)

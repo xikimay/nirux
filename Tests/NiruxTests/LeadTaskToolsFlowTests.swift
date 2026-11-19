@@ -919,10 +919,10 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
     }
 
-    /// A turn stopped on an API error reads so in list_tasks, as on its
-    /// row: neither idle, as once the user saw it, nor needing the user for
-    /// nothing said.
-    func testListTasksSaysATurnStoppedOnAnAPIError() throws {
+    /// A turn stopped on an API error, or whose agent exited, reads so in
+    /// list_tasks, as on its row: neither idle, as once the user saw it, nor
+    /// needing the user for nothing said, nor no agent running.
+    func testListTasksSaysWhatStoppedATurn() throws {
         try UIFlowHarness.run { harness in
             let lead = try harness.makeLead()
             let task = try reportingTask("Builder", lead: lead, harness: harness)
@@ -941,6 +941,27 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 let failed = try line()
                 XCTAssertTrue(failed.hasSuffix(" · claude stopped on an API error — overloaded"), "focused: \(isUserFocused), \(failed)")
             }
+
+            // Mid-turn, its claude leaves the process table and the shell
+            // comes back in front, as the process table would show it.
+            task.hook(.userPromptSubmit)
+            let shellPID = try XCTUnwrap(pty.shellPID)
+            let now = Date().timeIntervalSince1970
+            let claude = ForegroundProcess(instance: ProcessInstance(pid: 99_997, startedAt: now - 60), name: "claude", arguments: ["claude"])
+            let shellEntry = ProcessSnapshot.Entry(
+                pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: shellPID,
+                name: "zsh", startedAt: now - 600, arguments: ["zsh"]
+            )
+            let claudeEntry = ProcessSnapshot.Entry(
+                pid: 99_997, parentPID: shellPID, processGroupID: 99_997, terminalForegroundProcessGroupID: shellPID,
+                name: "claude", startedAt: now - 60, arguments: ["claude"]
+            )
+            let gone = ProcessSnapshot(entries: [shellEntry])
+            task.column.trackForegroundAgent(claude, snapshot: ProcessSnapshot(entries: [shellEntry, claudeEntry]), now: now)
+            task.column.trackForegroundAgent(pty.foregroundProcess(snapshot: gone), snapshot: gone, now: now)
+            let readings = harness.shell.agentReadings(of: task.workspace, snapshot: gone, now: now + AgentStatusMachine.exitConfirmationDelay)
+            XCTAssertEqual(readings.map(\.name), ["claude"])
+            XCTAssertEqual(readings.first?.failure, "exited mid-turn")
         }
     }
 

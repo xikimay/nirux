@@ -216,7 +216,8 @@ extension NiruxShellView {
         let (transcript, sentAt, offset) = (esc.transcript, esc.sentAt, esc.offset)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             Self.offMain({ TranscriptLastMessage.showsInterrupt(path: transcript, since: sentAt, after: offset) }) { shown in
-                guard let self, let column = esc.column else { return onProgress(.columnClosed, read) }
+                guard let self else { return }
+                guard let column = esc.column else { return onProgress(.columnClosed, read) }
                 guard let pty = esc.pty, column.pty === pty else { return onProgress(.terminalRestarted, read) }
                 guard shown else {
                     guard read >= self.interruptReads else {

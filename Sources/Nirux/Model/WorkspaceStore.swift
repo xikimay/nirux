@@ -524,8 +524,9 @@ final class WorkspaceStore {
         }
     }
 
+    /// Open ones only: a space whose last workspace is closing is empty.
     private func hasWorkspaces(in profileID: String) -> Bool {
-        workspaces.contains { $0.profileID == profileID }
+        workspaces.indices.contains { workspaces[$0].profileID == profileID && isOpen($0) }
     }
 
     private func firstProfileIDWithWorkspaces() -> String? {
