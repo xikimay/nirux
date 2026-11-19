@@ -539,9 +539,6 @@ final class AgentHookCenter {
         return process.hasFlag("-p") || process.hasFlag("--print")
     }
 
-    /// `codex exec` (alias `e`): a run, not a conversation to come back to.
-    /// The subcommand follows Codex's global options, and `codex` itself may
-    /// be a script its runtime runs (`node …/bin/codex`, from npm or bun).
     /// An `agy` that holds no conversation to resume: a one-shot `-p` run, or
     /// a subcommand (`agy plugin list`, `agy models`).
     nonisolated static func isHeadlessAgy(_ process: ForegroundProcess?) -> Bool {
@@ -551,6 +548,9 @@ final class AgentHookCenter {
             || arguments.first.map { !$0.hasPrefix("-") } ?? false
     }
 
+    /// `codex exec` (alias `e`): a run, not a conversation to come back to.
+    /// The subcommand follows Codex's global options, and `codex` itself may
+    /// be a script its runtime runs (`node …/bin/codex`, from npm or bun).
     nonisolated static func isHeadlessCodex(_ process: ForegroundProcess?) -> Bool {
         guard let process, process.name == "codex",
               let codex = process.arguments.firstIndex(where: {

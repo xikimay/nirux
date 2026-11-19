@@ -649,7 +649,8 @@ final class NewTaskFlowTests: UIFlowTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let workspace = try XCTUnwrap(shell.activeWorkspace)
-            workspace.addColumn(command: "exec -a agy /bin/sh -c 'sleep 600'", cwd: harness.repo)
+            // Two commands: sh would replace itself with a lone one.
+            workspace.addColumn(command: "exec -a agy /bin/sh -c 'sleep 600; :'", cwd: harness.repo)
             let column = try XCTUnwrap(workspace.columns.last)
             shell.relayout(animated: false)
             let pty = try XCTUnwrap(column.pty)
