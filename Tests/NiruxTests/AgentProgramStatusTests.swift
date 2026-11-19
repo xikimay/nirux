@@ -115,6 +115,10 @@ final class AgentProgramStatusTests: XCTestCase {
         _ = machine.noteProgramStatus(status(.working), isUserFocused: false, now: t0 + 1)
         XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 30), .working)
         XCTAssertNotEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 62), .working)
+        XCTAssertNil(machine.programStatus, "its next working is a new turn's")
+        _ = machine.noteProgramStatus(status(.error, "quota"), isUserFocused: false, now: t0 + 63)
+        let agy = ForegroundProcess(instance: ProcessInstance(pid: 42, startedAt: t0.timeIntervalSince1970), name: "agy", arguments: [])
+        XCTAssertEqual(machine.blockedWait(now: t0.timeIntervalSince1970 + 64, foreground: agy)?.reason, .apiError(kind: nil, detail: "quota"))
         machine.reset()
         XCTAssertNil(machine.programStatus)
     }

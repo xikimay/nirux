@@ -1450,11 +1450,11 @@ struct AgentStatusMachine {
         return lastAttentionReason
     }
 
-    /// What Antigravity in front reported it waits on, past the moment every
-    /// launch signs in.
+    /// What Antigravity in front reported it waits on, or failed on, past
+    /// the moment every launch signs in.
     func reportedWait(foreground: ForegroundProcess?, now: TimeInterval) -> AgentWait? {
         guard foreground?.name == AgentProgramStatus.process, let reported = programStatus,
-              reported.status.state == .blocked,
+              [.blocked, .error].contains(reported.status.state),
               reported.status.kind != "auth" || now - reported.at >= AgentProgramStatus.signInGrace,
               let reason = reported.status.attentionReason
         else { return nil }
@@ -1468,6 +1468,8 @@ struct AgentStatusMachine {
         let (status, at) = reported
         switch status.state {
         case .working where now - max(at, lastReadAt) > AgentProgramStatus.workingSilence:
+            // Its next `working` is a new turn's.
+            programStatus = nil
             return nil
         case .working:
             if turnStartedAt == nil { turnStartedAt = at }

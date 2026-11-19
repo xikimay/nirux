@@ -611,7 +611,8 @@ final class NewTaskFlowTests: UIFlowTestCase {
     }
 
     /// agy says through OSC 7501 why it waits: its row needs the user with
-    /// its question, and the column alerts once.
+    /// its question, and the column alerts once. The same sequence printed
+    /// by a shell is no one's.
     func testAgySaysWhyItWaits() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -624,6 +625,10 @@ final class NewTaskFlowTests: UIFlowTestCase {
             // Never the system's notification center in a test process.
             var alerts: [AgentAttentionReason?] = []
             column.onAgentAttention = { alerts.append($0) }
+            workspace.addColumn(command: "printf '\\033]7501;state=blocked:kind=question:app=antigravity:msg=\(question)\\007'", cwd: harness.repo)
+            let printer = try XCTUnwrap(workspace.columns.last)
+            var printerAlerts: [AgentAttentionReason?] = []
+            printer.onAgentAttention = { printerAlerts.append($0) }
             shell.relayout(animated: false)
             @MainActor func status() -> String? {
                 shell.updateSidebar()
@@ -633,6 +638,8 @@ final class NewTaskFlowTests: UIFlowTestCase {
                 status() == "Needs you · Which color do you prefer?"
             }
             XCTAssertEqual(alerts, [.question("Which color do you prefer?")])
+            XCTAssertEqual(printerAlerts, [], "printed before agy spoke, a second ago")
+            XCTAssertNil(printer.pty?.agentAttentionReason)
         }
     }
 

@@ -353,6 +353,12 @@ final class PtySession: @unchecked Sendable {
         state.machine.noteProgramStatus(status, isUserFocused: isUserFocused, now: Date())
     }
 
+    /// Whether `status` says something new: the same again (a redraw) needs
+    /// no look at the process table.
+    func isNewProgramStatus(_ status: AgentProgramStatus) -> Bool {
+        state.machine.programStatus?.status != status
+    }
+
     /// Called on the main queue when the output shows a local dev-server
     /// URL (`http://localhost:5173/`). Throttled per port.
     var onLocalServerURL: ((LocalServerURL) -> Void)? {
