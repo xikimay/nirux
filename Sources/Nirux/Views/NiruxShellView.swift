@@ -300,7 +300,7 @@ final class NiruxShellView: NSView {
         layer?.backgroundColor = Theme.Color.canvas.cgColor
         divider.boxType = .separator
         viewport.wantsLayer = true
-        viewport.layer?.masksToBounds = true
+        viewport.clipsToBounds = true
         verticalStrip.wantsLayer = true
         viewport.addSubview(verticalStrip)
         viewport.addSubview(emptySpaceView)

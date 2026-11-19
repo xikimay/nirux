@@ -15,7 +15,7 @@ final class SpaceCrossingTests: XCTestCase {
             XCTAssertEqual(shell.activeProfileID, second)
             let pictures = Self.frozenViews(in: shell)
             XCTAssertEqual(pictures.count, 2)
-            let leaving = try XCTUnwrap(pictures.first?.layer), arriving = try XCTUnwrap(pictures.last?.layer)
+            let leaving = try XCTUnwrap(pictures.first?.content), arriving = try XCTUnwrap(pictures.last?.content)
             XCTAssertEqual(leaving.opacity, 0, "the space left fades")
             XCTAssertEqual(Self.scale(leaving.transform), NiruxShellView.recedeScale, accuracy: 0.001, "and recedes")
             XCTAssertEqual(arriving.opacity, 1)

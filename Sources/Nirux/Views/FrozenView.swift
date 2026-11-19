@@ -9,6 +9,11 @@ import Metal
 /// copy instead. Drawing the view again (`cacheDisplay`) took about 90 ms
 /// in a large window and left the terminals blank. Takes no click.
 final class FrozenView: NSView {
+    /// The frozen layers, in a layer of their own: AppKit owns the view's.
+    let content = CALayer()
+    private var countsDown = false
+    override var isFlipped: Bool { countsDown }
+
     /// `view` as it shows now, the size of its bounds; nil while it has no
     /// layer or no size.
     static func freeze(_ view: NSView) -> FrozenView? {
@@ -20,21 +25,23 @@ final class FrozenView: NSView {
         for (found, copy) in zip(surfaces, copies) {
             if let copy { images[ObjectIdentifier(found.layer)] = copy }
         }
-        let frozen = CALayer()
-        frozen.name = layerName
-        frozen.bounds = root.bounds
-        frozen.masksToBounds = true
-        frozen.isGeometryFlipped = root.isGeometryFlipped
-        frozen.sublayers = root.sublayers?.compactMap { clone($0, root: root, images: images) }
-        let host = FrozenView(frame: view.bounds)
-        host.layer = frozen
-        host.wantsLayer = true
-        return host
+        // Laid out as the view counts y, so its layers' places hold.
+        let picture = FrozenView(frame: view.bounds)
+        picture.countsDown = view.isFlipped
+        picture.wantsLayer = true
+        let content = picture.content
+        content.name = layerName
+        content.frame = CGRect(origin: .zero, size: view.bounds.size)
+        content.bounds.origin = root.bounds.origin
+        content.masksToBounds = true
+        content.sublayers = root.sublayers?.compactMap { clone($0, root: root, images: images) }
+        picture.layer?.addSublayer(content)
+        return picture
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    /// Names a picture's own layer.
+    /// Names a picture's frozen layers.
     static let layerName = "FrozenView"
 
     /// Out of sight: hidden or clear as it shows, clipping to bounds that
@@ -43,7 +50,7 @@ final class FrozenView: NSView {
     /// copies again, doubling them at each switch).
     private static func isOutOfSight(_ layer: CALayer, root: CALayer) -> Bool {
         let shown = layer.presentation() ?? layer
-        return (layer.name == layerName && !ZZ("pictureOfPicture")) || shown.isHidden || shown.opacity == 0
+        return layer.delegate is FrozenView || shown.isHidden || shown.opacity == 0
             || (layer.masksToBounds && !layer.convert(layer.bounds, to: root).intersects(root.bounds))
     }
 

@@ -44,7 +44,7 @@ final class FrozenViewTests: XCTestCase {
         let frozen = try XCTUnwrap(FrozenView.freeze(view))
         XCTAssertEqual(frozen.frame, view.bounds)
         XCTAssertNil(frozen.hitTest(NSPoint(x: 50, y: 50)), "it takes no click")
-        let layers = try XCTUnwrap(frozen.layer?.sublayers)
+        let layers = try XCTUnwrap(frozen.content.sublayers)
         XCTAssertEqual(layers.count, 3, "what clips out of sight stays out")
         let cardCopy = try XCTUnwrap(layers.first)
         XCTAssertFalse(cardCopy === card)
@@ -94,17 +94,17 @@ final class FrozenViewTests: XCTestCase {
         root.sublayers = [terminal, clear]
 
         let first = try XCTUnwrap(FrozenView.freeze(view))
-        XCTAssertEqual(first.layer?.sublayers?.count, 1, "what doesn't show stays out")
-        XCTAssertEqual(first.layer?.sublayers?.first?.backgroundColor, Theme.Color.canvas.cgColor, "on the canvas")
+        XCTAssertEqual(first.content.sublayers?.count, 1, "what doesn't show stays out")
+        XCTAssertEqual(first.content.sublayers?.first?.backgroundColor, Theme.Color.canvas.cgColor, "on the canvas")
         // The picture slides away over what it froze.
         root.addSublayer(try XCTUnwrap(first.layer))
         let second = try XCTUnwrap(FrozenView.freeze(view))
-        XCTAssertEqual(second.layer?.sublayers?.count, 1, "not the first picture")
-        XCTAssertEqual(Self.surfaces(in: second.layer), 1, "one picture's copies")
+        XCTAssertEqual(second.content.sublayers?.count, 1, "not the first picture")
+        XCTAssertEqual(Self.surfaces(in: second.content), 1, "one picture's copies")
 
         terminal.isOpaque = true
         let opaque = try XCTUnwrap(FrozenView.freeze(view))
-        XCTAssertNil(opaque.layer?.sublayers?.first?.backgroundColor, "an opaque surface needs no fill")
+        XCTAssertNil(opaque.content.sublayers?.first?.backgroundColor, "an opaque surface needs no fill")
     }
 
     /// A new workspace lays what the viewport showed, frozen, over it as it
