@@ -164,6 +164,18 @@ final class SilentTurnTests: XCTestCase {
         XCTAssertEqual(machine.openDialogs, [], "the subagent went on: its dialog was answered")
     }
 
+    func testAPeersMessageHidesNoKeysTypedBefore() {
+        promptIn()
+        apply(.preToolUse, at: 2, id: "ls")
+        apply(.postToolUse, at: 3, id: "ls")
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 4), keys: Data("x".utf8))
+        _ = machine.apply(
+            AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "lead", source: "poll_event", timestamp: t0 + 5),
+            isUserFocused: false
+        )
+        XCTAssertEqual(machine.silentInterruptRefusal(foreground: claude), .typed)
+    }
+
     func testAPromptWhileACallRunsLeavesItRunning() {
         promptIn()
         apply(.preToolUse, at: 2, id: "build")
@@ -192,7 +204,7 @@ final class SilentTurnTests: XCTestCase {
     func testAnEscNiruxSendsIsAnInterruptToo() {
         promptIn()
         XCTAssertNotNil(machine.noteInterruptSent(now: t0 + 5))
-        XCTAssertFalse(isSilent(), "the Lead's interrupt_task")
+        XCTAssertFalse(isSilent(), "the Lead's interrupt_task, or the Interrupt button")
     }
 
     func testAnInterruptedCallIsNoSilence() {
@@ -291,14 +303,14 @@ final class SilentTurnTests: XCTestCase {
         signs.note(awake: 10, wall: 1_010)
         signs.noteTranscript(path: "/t.jsonl", size: 100, awake: 20, wall: 1_020)
         XCTAssertEqual(signs.lastAt, 10, "a first look only takes its measure")
-        signs.noteAwaitsReply(true)
+        signs.noteAwaited(.prompt)
         signs.noteTranscript(path: "/t.jsonl", size: 100, awake: 30, wall: 1_030)
         XCTAssertEqual(signs.lastAt, 10)
-        XCTAssertEqual(signs.transcript?.awaitsReply, true, "read once per size")
+        XCTAssertEqual(signs.transcript?.awaited, .prompt, "read once per size")
         signs.noteTranscript(path: "/t.jsonl", size: 180, awake: 40, wall: 1_040)
         XCTAssertEqual(signs.lastAt, 40)
         XCTAssertEqual(signs.lastWallAt, 1_040)
-        XCTAssertNil(signs.transcript?.awaitsReply, "read again at its new size")
+        XCTAssertNil(signs.transcript?.awaited, "read again at its new size")
         signs.noteTranscript(path: "/other.jsonl", size: 500, awake: 50, wall: 1_050)
         XCTAssertEqual(signs.lastAt, 40, "another transcript is measured anew")
     }
@@ -306,8 +318,8 @@ final class SilentTurnTests: XCTestCase {
     /// What tells a request in flight: the transcript's last word is a
     /// prompt or a tool result, not Claude's.
     func testTheTranscriptsEndSaysWhetherAReplyIsAwaited() {
-        func awaits(_ lines: [String]) -> Bool? {
-            TranscriptLastMessage.awaitsReply(in: Data((lines.joined(separator: "\n") + "\n").utf8))
+        func awaits(_ lines: [String]) -> TranscriptLastMessage.AwaitedReply? {
+            TranscriptLastMessage.awaitedReply(in: Data((lines.joined(separator: "\n") + "\n").utf8))
         }
         let prompt = #"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"fix it"}}"#
         let reply = #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"…"}]}}"#
@@ -315,15 +327,17 @@ final class SilentTurnTests: XCTestCase {
         let interrupt = #"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#
         let meta = #"{"type":"user","isMeta":true,"message":{"role":"user","content":"Caveat"}}"#
         let request = #"{"type":"api-request"}"#
+        let poll = #"{"type":"attachment","attachment":{"type":"poll_events"}}"#
         let apiError = #"{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"API Error"}]}}"#
         let quoting = #"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t2","type":"tool_result","content":"grep: \"text\":\"[Request interrupted by user\""}]}}"#
-        XCTAssertEqual(awaits([prompt, request]), true, "the incident: a prompt, its request, nothing")
-        XCTAssertEqual(awaits([prompt, reply, result]), true, "a tool result went in")
-        XCTAssertEqual(awaits([prompt, reply]), false, "Claude answered: a lost Stop, or a long reply")
-        XCTAssertEqual(awaits([prompt, interrupt]), false)
-        XCTAssertEqual(awaits([prompt, reply, meta]), false, "a harness note says nothing")
-        XCTAssertEqual(awaits([prompt, apiError]), false, "the turn ended on an API error")
-        XCTAssertEqual(awaits([prompt, reply, quoting]), true, "tool output quoting the interrupt's words")
+        XCTAssertEqual(awaits([prompt, request]), .prompt, "the incident: a prompt, its request, nothing")
+        XCTAssertEqual(awaits([prompt, reply, result]), .toolResult, "a tool result went in")
+        XCTAssertEqual(awaits([prompt, reply]), TranscriptLastMessage.AwaitedReply.none, "Claude answered: a lost Stop, or a long reply")
+        XCTAssertEqual(awaits([prompt, interrupt]), TranscriptLastMessage.AwaitedReply.none)
+        XCTAssertEqual(awaits([prompt, reply, meta]), TranscriptLastMessage.AwaitedReply.none, "a harness note says nothing")
+        XCTAssertEqual(awaits([prompt, apiError]), TranscriptLastMessage.AwaitedReply.none, "the turn ended on an API error")
+        XCTAssertEqual(awaits([prompt, reply, quoting]), .toolResult, "tool output quoting the interrupt's words")
+        XCTAssertEqual(awaits([prompt, reply, result, poll]), .toolResult, "a peer's message Claude took in mid-turn is no prompt")
         XCTAssertNil(awaits([request, meta]))
     }
 
@@ -425,7 +439,7 @@ final class SilentTurnTests: XCTestCase {
     }
 
     func testTheRowSaysSilentInRedInsteadOfWorking() {
-        let silent = column(.silent(duration: "4h45m"))
+        let silent = column(.silent(duration: "4h45m", since: 100, interruptible: true))
         XCTAssertEqual(silent.attentionSummary?.detail, AgentAttentionReason.silentAdvice, "the rail's tooltip says what to do")
         XCTAssertEqual(silent.attention, .error)
         XCTAssertEqual(SidebarColumnChip(silent).text.string.replacingOccurrences(of: "\u{FFFC}", with: ""), "silent 4h45m")
@@ -441,9 +455,178 @@ final class SilentTurnTests: XCTestCase {
         XCTAssertEqual(workspace([column(nil)]).rowSummary.status.text, "Working", "the same column without it")
     }
 
+    func testInterruptIsOfferedUnderTheRowAndClicksOnlyForItsSilence() throws {
+        let info = workspace([column(.silent(duration: "4h45m", since: 100, interruptible: true))])
+        XCTAssertEqual(info.cardActions, [.interrupt(columnIndex: 0, since: 100)])
+        let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 800).render()
+        let region = SidebarHitRegion.agentInterrupt(workspaceIndex: 0, columnIndex: 0, since: 100)
+        XCTAssertTrue(result.hitAreas.contains {
+            if case .agentInterrupt(0, 0, 100) = $0.region { return true }
+            return false
+        })
+        XCTAssertEqual(
+            Array(result.approvalButtons.keys), [SidebarHoverTarget.interruptButtonKey(workspaceIndex: 0, columnIndex: 0, since: 100)],
+            "armed and hovered like Resume"
+        )
+        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260), accuracy: 0.5)
+
+        func click(released: SidebarHitRegion?, count: Int = 1) -> SidebarInterruptClick? {
+            SidebarView.interruptClick(pressed: region, released: released, clickCount: count, armedAtPress: true, armedAtRelease: true)
+        }
+        XCTAssertEqual(click(released: region), SidebarInterruptClick(workspaceIndex: 0, columnIndex: 0, since: 100))
+        XCTAssertNil(click(released: .agentInterrupt(workspaceIndex: 0, columnIndex: 0, since: 900)), "another silence came there")
+        XCTAssertNil(click(released: region, count: 2))
+
+        let refused = workspace([column(.silent(duration: "4h45m", since: 100, interruptible: false))])
+        XCTAssertEqual(refused.cardActions, [], "no button that can't press Esc")
+    }
+
+    /// Esc, once, and only into the silence the button showed: never Enter.
+    /// The turn ends with it; the prompt Claude gives back is a draft no
+    /// Mission message joins.
+    func testInterruptPressesEscOnceIntoTheSilenceItShows() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-interrupt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pty = PtySession()
+        let agent = AgentStandIn()
+        defer { agent.remove() }
+        pty.start(shell: "/bin/zsh", args: ["-f", "-c", agent.command()], cwd: directory.path)
+        try await waitUntil("claude in front", timeout: 3) { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+        let front = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+        let clock = AwakeClock()
+        pty.awakeClock = { clock.now }
+        @MainActor func hook(_ name: AgentHookEvent.Name, at time: TimeInterval, call: String? = nil) {
+            pty.applyAgentHook(
+                AgentHookEvent(
+                    kind: .claude, name: name, sessionID: "lead", emitterProcess: front.instance,
+                    toolName: call.map { _ in "Bash" }, toolUseID: call, timestamp: time
+                ),
+                isUserFocused: false
+            )
+        }
+        @MainActor func interrupt(since: TimeInterval) -> SilentInterrupt {
+            pty.interruptSilentTurn(since: since, waitThreshold: waitThreshold, snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970)
+        }
+
+        clock.now = 100
+        hook(.sessionStart, at: Date().timeIntervalSince1970)
+        hook(.userPromptSubmit, at: Date().timeIntervalSince1970)
+        // Its transcript ends on the prompt: the proof a reply is awaited.
+        let transcript = directory.appendingPathComponent("lead.jsonl")
+        let line = Data((#"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"go"}}"# + "\n").utf8)
+        try line.write(to: transcript)
+        pty.noteAgentTranscript(path: transcript.path, size: Int64(line.count), now: Date().timeIntervalSince1970)
+        clock.now = 1_299
+        XCTAssertEqual(interrupt(since: 100), .notSilent, "not silent yet")
+        clock.now = 1_300
+        XCTAssertEqual(
+            pty.interruptSilentTurn(since: 100, waitThreshold: waitThreshold, snapshot: ProcessSnapshot(entries: []), now: Date().timeIntervalSince1970),
+            .noProcesses, "a process table that couldn't be read isn't Claude moving on"
+        )
+        XCTAssertEqual(interrupt(since: 99), .notSilent, "not the silence the button showed")
+        XCTAssertEqual(pty.silentInterruptPlan(foreground: front), .givesBackPrompt)
+        XCTAssertEqual(interrupt(since: 100), .promptGivenBack)
+        try await waitUntil("Esc typed", timeout: 3) { !agent.input.isEmpty }
+        XCTAssertNil(pty.agentStuckState(now: Date().timeIntervalSince1970, waitThreshold: waitThreshold, foreground: front), "the turn is over")
+        XCTAssertEqual(
+            pty.missionPromptRefusal(runningSince: front.instance.startedAt, snapshot: ProcessSnapshot()), .draft,
+            "the prompt given back waits for the user's Enter"
+        )
+        XCTAssertEqual(interrupt(since: 100), .notSilent, "a second click")
+
+        // Silent after a tool result and a peer's message Claude took in:
+        // no prompt of the user's to give back. The turn ends only once
+        // Claude writes its interrupt.
+        clock.now = 2_000
+        hook(.userPromptSubmit, at: Date().timeIntervalSince1970)
+        hook(.preToolUse, at: Date().timeIntervalSince1970, call: "ls")
+        hook(.postToolUse, at: Date().timeIntervalSince1970, call: "ls")
+        let peerAt = Date().timeIntervalSince1970
+        hook(.userPromptSubmit, at: peerAt)
+        let tail = Data((#"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"ok"}]}}"#
+            + "\n" + #"{"type":"attachment","attachment":{"type":"poll_events"}}"# + "\n").utf8)
+        let handle = try FileHandle(forWritingTo: transcript)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: tail)
+        try handle.close()
+        pty.noteAgentTranscript(path: transcript.path, size: Int64(line.count + tail.count), now: Date().timeIntervalSince1970)
+        clock.now = 3_200
+        XCTAssertEqual(interrupt(since: 2_000), .stopping(promptAt: peerAt))
+        try await waitUntil("the second Esc", timeout: 3) { agent.input.count == 2 }
+        XCTAssertEqual(
+            pty.missionPromptRefusal(runningSince: front.instance.startedAt, snapshot: ProcessSnapshot()), .working,
+            "no draft given back, and no message until Claude shows it stopped"
+        )
+        // Ignored by a Claude that hangs on: its silence shows again.
+        pty.noteInterruptIgnored(promptAt: peerAt)
+        guard case .silent? = pty.agentStuckState(now: Date().timeIntervalSince1970, waitThreshold: waitThreshold, foreground: front)
+        else { return XCTFail("silent again once the Esc went unanswered") }
+        XCTAssertEqual(interrupt(since: 2_000), .refused(.alreadySent), "a second Esc would open the rewind")
+        XCTAssertTrue(pty.noteInterrupted(promptAt: peerAt))
+        XCTAssertNil(pty.missionPromptRefusal(runningSince: front.instance.startedAt, snapshot: ProcessSnapshot()), "free for a message")
+
+        // Keys typed since its prompt: Esc could close a screen they opened,
+        // and would give them back.
+        clock.now = 4_000
+        hook(.userPromptSubmit, at: Date().timeIntervalSince1970)
+        hook(.preToolUse, at: Date().timeIntervalSince1970, call: "ls2")
+        hook(.postToolUse, at: Date().timeIntervalSince1970, call: "ls2")
+        pty.sendRaw("x")
+        clock.now = 5_200
+        XCTAssertEqual(pty.silentInterruptPlan(foreground: front), .refused(.typed))
+        XCTAssertEqual(interrupt(since: 4_000), .refused(.typed))
+
+        // A turn Claude started by itself: no prompt to give back.
+        let later = Date().timeIntervalSince1970 + 10
+        hook(.stop, at: later)
+        hook(.preToolUse, at: later + 1, call: "own")
+        hook(.postToolUse, at: later + 2, call: "own")
+        clock.now = 6_400
+        XCTAssertEqual(interrupt(since: 5_200), .refused(.notWorking))
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(agent.input, "\u{1B}\u{1B}x", "an Esc per interrupt, never Enter")
+    }
+
+    /// Keys typed before Claude answered: the Esc could close a screen they
+    /// opened, and the turn hang on.
+    func testKeysTypedBeforeAnyReplyLeaveTheEscToTheUser() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-interrupt-typed-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pty = PtySession()
+        let agent = AgentStandIn()
+        defer { agent.remove() }
+        pty.start(shell: "/bin/zsh", args: ["-f", "-c", agent.command()], cwd: directory.path)
+        try await waitUntil("claude in front", timeout: 3) { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+        let front = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+        let clock = AwakeClock()
+        clock.now = 100
+        pty.awakeClock = { clock.now }
+        for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit] {
+            pty.applyAgentHook(
+                AgentHookEvent(kind: .claude, name: name, sessionID: "lead", emitterProcess: front.instance, timestamp: Date().timeIntervalSince1970),
+                isUserFocused: false
+            )
+        }
+        let transcript = directory.appendingPathComponent("lead.jsonl")
+        let line = Data((#"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"go"}}"# + "\n").utf8)
+        try line.write(to: transcript)
+        pty.noteAgentTranscript(path: transcript.path, size: Int64(line.count), now: Date().timeIntervalSince1970)
+        pty.sendRaw("/")
+        clock.now = 1_300
+        XCTAssertEqual(pty.silentInterruptPlan(foreground: front), .refused(.typed))
+        XCTAssertEqual(
+            pty.interruptSilentTurn(since: 100, waitThreshold: waitThreshold, snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970),
+            .refused(.typed)
+        )
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(agent.input, "/", "no Esc")
+    }
+
     func testTheBoardAndTheMergeQueueReadIt() {
         let state = ProjectBoard.agentState(
-            stuck: .silent(duration: "25m"), hasAgent: true, agentInFront: true, status: .working, openDialog: nil
+            stuck: .silent(duration: "25m", since: 100, interruptible: true), hasAgent: true, agentInFront: true, status: .working, openDialog: nil
         )
         XCTAssertEqual(state, .silent(duration: "25m"))
         XCTAssertEqual(MergeQueue.busyLabel(state), "silent", "its turn may still answer: no merge under it")

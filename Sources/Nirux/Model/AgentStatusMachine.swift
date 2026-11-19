@@ -135,6 +135,10 @@ struct AgentStatusMachine {
     /// The main thread's last prompt or tool event in the turn in flight;
     /// nil between turns.
     private var mainTurnMovedAt: TimeInterval?
+    /// The last prompt typed at the box, not polled in (a peer's message,
+    /// which Claude submits as a prompt mid-turn): what keys typed since
+    /// would sit after.
+    private(set) var lastUserPromptAt: TimeInterval?
     /// The last interrupt of a turn: an Esc or Ctrl-C (Claude fires no hook
     /// for it, and its idle reminder may never come), or a main-thread call
     /// that ended interrupted (a stop Nirux didn't type). Unlike
@@ -468,6 +472,7 @@ struct AgentStatusMachine {
             askedQuestion = nil
             circling.reset()
             lastPromptAt = now
+            if event.source != "poll_event" { lastUserPromptAt = now }
             // An Esc at a dialog since the main thread last moved ended its
             // call with no hook. (A prompt alone doesn't: Claude submits peer
             // messages and poll results as prompts while a call runs.)
@@ -1039,6 +1044,22 @@ struct AgentStatusMachine {
         return lastPromptAt
     }
 
+    /// Nirux's Esc gave a prompt Claude hadn't answered back to its box: a
+    /// draft until the next prompt goes in, which no message joins.
+    mutating func notePromptGivenBack(now: TimeInterval) {
+        lastDraftInputAt = now
+        lastDraftKind = "given back"
+    }
+
+    /// Claude showed no interrupt for Nirux's Esc in the turn of `promptAt`:
+    /// it may hang on, and its silence shows again (the Esc stays sent: a
+    /// second would open the rewind).
+    mutating func noteInterruptIgnored(promptAt: TimeInterval) {
+        guard lastPromptAt == promptAt else { return }
+        if turnInterruptedAt == interruptSentAt { turnInterruptedAt = 0 }
+        if turnStoppedAt == interruptSentAt { turnStoppedAt = 0 }
+    }
+
     /// Claude stopped the turn of `promptAt` at Nirux's Esc (its transcript
     /// says so): the turn is over with no Stop to say it, its dialogs with
     /// it, and nobody is alerted. False when a newer prompt went in.
@@ -1525,6 +1546,7 @@ struct AgentStatusMachine {
         silenceAlertedSince = nil
         mainCallsRunning = []
         mainTurnMovedAt = nil
+        lastUserPromptAt = nil
         turnInterruptedAt = 0
         dialogCancelledAt = 0
         turnStoppedAt = 0

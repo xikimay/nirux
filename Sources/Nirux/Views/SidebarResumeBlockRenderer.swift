@@ -17,37 +17,26 @@ struct SidebarResumeBlockRenderer {
     let top: CGFloat
 
     func render() -> SidebarApprovalBlockRenderer.Result {
-        let metrics = SidebarExpandedMetrics.self
-        let height = metrics.resumeBlockHeight(for: resume)
-        let blockFrame = NSRect(x: x, y: top - height, width: width, height: height)
-        var views: [NSView] = []
-        var hitAreas: [SidebarHitArea] = []
-        var buttons: [String: SidebarBadgeView] = [:]
-
-        if let status = resume.status {
-            views.append(errorLine(y: top - metrics.actionLineHeight, width: width))
-            views.append(self.status(status, y: top - height))
-        } else {
+        guard let status = resume.status else {
             let button = SidebarActionButton.secondary(
                 "Resume", symbol: Theme.Symbol.resume, label: "Resume: type “continue” into claude"
             )
-            let buttonWidth = button.fittingWidth
-            button.frame = NSRect(x: x + width - buttonWidth, y: top - height, width: buttonWidth, height: metrics.buttonHeight)
-            views.append(errorLine(
-                y: top - (metrics.buttonHeight + metrics.actionLineHeight) / 2,
-                width: button.frame.minX - Theme.Space.sm - x
-            ))
-            views.append(button)
-            buttons[SidebarHoverTarget.resumeButtonKey(
-                workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt
-            )] = button
-            hitAreas.append(SidebarHitArea(
-                frame: button.frame.insetBy(dx: -3, dy: -3),
-                region: .agentResume(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
-            ))
+            return SidebarButtonRow.render(
+                button,
+                key: SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt),
+                region: .agentResume(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt),
+                workspaceIndex: workspaceIndex, x: x, width: width, top: top
+            ) { errorLine(y: $0, width: $1) }
         }
-        hitAreas.append(SidebarHitArea(frame: blockFrame, region: .actionBlock(workspaceIndex: workspaceIndex)))
-        return SidebarApprovalBlockRenderer.Result(views: views, hitAreas: hitAreas, buttons: buttons)
+        let metrics = SidebarExpandedMetrics.self
+        let height = metrics.resumeBlockHeight(for: resume)
+        return SidebarApprovalBlockRenderer.Result(
+            views: [errorLine(y: top - metrics.actionLineHeight, width: width), self.status(status, y: top - height)],
+            hitAreas: [SidebarHitArea(
+                frame: NSRect(x: x, y: top - height, width: width, height: height), region: .actionBlock(workspaceIndex: workspaceIndex)
+            )],
+            buttons: [:]
+        )
     }
 
     /// "rate_limit"; "rate_limit — API Error: 429 …" in the tooltip.
@@ -78,5 +67,64 @@ struct SidebarResumeBlockRenderer {
         status.lineBreakMode = .byTruncatingTail
         status.frame = NSRect(x: x, y: y, width: width, height: SidebarExpandedMetrics.actionLineHeight)
         return status
+    }
+}
+
+/// The block of a card whose Claude turn went silent: Interrupt, which
+/// presses Esc in its terminal, never Enter.
+@MainActor
+struct SidebarInterruptBlockRenderer {
+    let since: TimeInterval
+    let workspaceIndex: Int
+    let columnIndex: Int
+    /// Left edge and width of the card's content.
+    let x: CGFloat
+    let width: CGFloat
+    let top: CGFloat
+
+    func render() -> SidebarApprovalBlockRenderer.Result {
+        let button = SidebarActionButton.secondary(
+            "Interrupt", symbol: Theme.Symbol.interrupt, label: "Interrupt: press Esc in claude's terminal"
+        )
+        return SidebarButtonRow.render(
+            button,
+            key: SidebarHoverTarget.interruptButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since),
+            region: .agentInterrupt(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since),
+            workspaceIndex: workspaceIndex, x: x, width: width, top: top
+        ) { y, width in
+            let hint = NSTextField(labelWithString: "Esc stops the turn")
+            hint.font = Theme.Font.caption
+            hint.textColor = Theme.Color.textSecondary
+            hint.lineBreakMode = .byTruncatingTail
+            hint.toolTip = AgentAttentionReason.silentAdvice
+            hint.frame = NSRect(x: x, y: y - 1, width: max(0, width), height: SidebarExpandedMetrics.actionLineHeight + 2)
+            return hint
+        }
+    }
+}
+
+/// A line, then a button at its trailing edge, one button high: Resume's
+/// and Interrupt's blocks. `line` gets its baseline row's y and width.
+@MainActor
+enum SidebarButtonRow {
+    static func render(
+        _ button: SidebarBadgeView, key: String, region: SidebarHitRegion, workspaceIndex: Int,
+        x: CGFloat, width: CGFloat, top: CGFloat, line: (_ y: CGFloat, _ width: CGFloat) -> NSView
+    ) -> SidebarApprovalBlockRenderer.Result {
+        let metrics = SidebarExpandedMetrics.self
+        let buttonWidth = button.fittingWidth
+        button.frame = NSRect(x: x + width - buttonWidth, y: top - metrics.buttonHeight, width: buttonWidth, height: metrics.buttonHeight)
+        let text = line(top - (metrics.buttonHeight + metrics.actionLineHeight) / 2, button.frame.minX - Theme.Space.sm - x)
+        return SidebarApprovalBlockRenderer.Result(
+            views: [text, button],
+            hitAreas: [
+                SidebarHitArea(frame: button.frame.insetBy(dx: -3, dy: -3), region: region),
+                SidebarHitArea(
+                    frame: NSRect(x: x, y: top - metrics.buttonHeight, width: width, height: metrics.buttonHeight),
+                    region: .actionBlock(workspaceIndex: workspaceIndex)
+                )
+            ],
+            buttons: [key: button]
+        )
     }
 }

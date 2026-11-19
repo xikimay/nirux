@@ -241,8 +241,10 @@ enum SidebarStuckState: Hashable {
     /// Resume click was aimed at from any later one.
     case stoppedOnError(kind: String?, detail: String?, failedAt: TimeInterval, resume: Resume)
     case exitedMidTurn(processName: String)
-    /// A turn waits on the model with no sign of life, for how long.
-    case silent(duration: String)
+    /// A turn waits on the model with no sign of life, for how long, since
+    /// when (`AgentSilence.since`: what Interrupt aims at), and whether
+    /// Interrupt may press Esc there.
+    case silent(duration: String, since: TimeInterval, interruptible: Bool)
 
     enum Resume: Hashable {
         /// The button: `continue` can go out.
@@ -296,7 +298,7 @@ enum SidebarStuckState: Hashable {
             return ["Stopped on an API error", error].compactMap { $0 }.joined(separator: " — ")
         case .exitedMidTurn(let processName):
             return "\(processName) exited in the middle of a turn, without ending its session"
-        case .silent(let duration):
+        case .silent(let duration, _, _):
             return "Claude has been silent for \(duration). \(AgentAttentionReason.silentAdvice)"
         }
     }
@@ -471,6 +473,8 @@ enum SidebarHitRegion {
     )
     /// Resume under a column whose turn failed on an API error.
     case agentResume(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval)
+    /// Interrupt under a column whose turn went silent.
+    case agentInterrupt(workspaceIndex: Int, columnIndex: Int, since: TimeInterval)
     /// Resume on the row of a restored agent that hasn't resumed yet.
     case deferredAgentResume(workspaceIndex: Int, columnIndex: Int, columnID: UUID)
     /// Yes, No or Reply… under the question a Claude turn ended on.
@@ -543,6 +547,12 @@ enum SidebarHoverTarget: Hashable {
     /// for another failure at the same place arms again.
     static func resumeButtonKey(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval) -> String {
         "resume|\(workspaceIndex)|\(columnIndex)|\(failedAt)"
+    }
+
+    /// Key of an Interrupt button's view, as Resume's: another silence at
+    /// the same place arms again.
+    static func interruptButtonKey(workspaceIndex: Int, columnIndex: Int, since: TimeInterval) -> String {
+        "interrupt|\(workspaceIndex)|\(columnIndex)|\(since)"
     }
 
     /// Key of a Yes / No / Reply… button, among the approval buttons: its

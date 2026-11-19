@@ -230,6 +230,7 @@ enum Theme {
         static let botFeedback = "cpu"
         static let agentError = "exclamationmark.triangle.fill"
         static let resume = "play.fill"
+        static let interrupt = "stop.fill"
         static let sessionHistory = "clock.arrow.circlepath"
         static let projectMemory = "brain"
         static let notice = "info.circle"

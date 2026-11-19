@@ -115,7 +115,10 @@ extension NiruxShellView {
         case .exitedMidTurn(let exit)?:
             return .exitedMidTurn(processName: exit.processName)
         case .silent(let silence)?:
-            return .silent(duration: SidebarRenderer.shortDuration(now - silence.startedAt))
+            return .silent(
+                duration: SidebarRenderer.shortDuration(now - silence.startedAt), since: silence.since,
+                interruptible: pty.silentInterruptPlan(foreground: foregroundProcess).offersEsc
+            )
         case nil:
             return nil
         }
@@ -131,14 +134,107 @@ extension NiruxShellView {
         AgentHookCenter.shared.drain()
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
-        guard workspaces.indices.contains(workspaceIndex),
-              let column = workspaces[workspaceIndex].columns[safe: columnIndex]
-        else { return showToast("That agent’s column was closed") }
-        guard let pty = column.pty else { return showToast("That column has no terminal") }
+        guard let (_, pty) = stuckAgentTerminal(workspaceIndex: workspaceIndex, columnIndex: columnIndex) else { return }
         let refusal = pty.agentTurnFailure?.failedAt == failedAt
             ? pty.resumeFailedTurn(snapshot: snapshot, now: Date().timeIntervalSince1970)
             : .notStopped
         if let refusal { showToast(Self.resumeRefusalText(refusal)) }
+    }
+
+    /// Interrupt clicked under a turn gone silent: Esc goes to its `claude`
+    /// only while that silence lasts (see `interruptSilentTurn`). Never
+    /// Enter: the user sends their message again. Once the turn is over,
+    /// the Mission messages waiting for it go in.
+    func interruptSilentAgent(workspaceIndex: Int, columnIndex: Int, since: TimeInterval) {
+        // A hook may still wait out the queue's drain debounce: the agent
+        // may have moved on.
+        AgentHookCenter.shared.drain()
+        let snapshot = ProcessSnapshot()
+        defer { updateSidebar(snapshot: snapshot) }
+        guard let (column, pty) = stuckAgentTerminal(workspaceIndex: workspaceIndex, columnIndex: columnIndex) else { return }
+        let transcript = pty.agentTranscriptPath
+        let (sentAt, offset) = (Date(), transcript.map(TranscriptLastMessage.size(of:)) ?? 0)
+        let outcome = pty.interruptSilentTurn(
+            since: since, waitThreshold: stuckAgentWaitThreshold, snapshot: snapshot, now: sentAt.timeIntervalSince1970
+        )
+        showToast(Self.interruptText(outcome))
+        switch outcome {
+        case .promptGivenBack:
+            typeMissionMessages()
+        case .stopping(let promptAt):
+            guard let transcript else { return }
+            followInterrupt(transcript: transcript, offset: offset, sentAt: sentAt) { [weak self, weak column, weak pty] shown, read in
+                guard let self, let column, let pty, column.pty === pty else { return false }
+                guard shown else {
+                    if read == Self.interruptReadsBeforeAnswer { self.showToast("Esc went in, but Claude shows no interrupt yet: see its terminal") }
+                    guard read < Self.interruptReads else {
+                        pty.noteInterruptIgnored(promptAt: promptAt)
+                        self.updateSidebar()
+                        return false
+                    }
+                    return true
+                }
+                // What its hooks said meanwhile.
+                AgentHookCenter.shared.drain()
+                guard pty.noteInterrupted(promptAt: promptAt) else { return false }
+                self.typeMissionMessages()
+                self.updateSidebar()
+                return false
+            }
+        case .notSilent, .noProcesses, .refused:
+            break
+        }
+    }
+
+    /// Reads of the transcript, half a second apart, for an Esc Nirux sent:
+    /// before saying it didn't take, and in all (a tool slow to stop).
+    static let interruptReadsBeforeAnswer = 8
+    static let interruptReads = 60
+
+    /// Reads Claude's transcript for the interrupt an Esc Nirux sent at
+    /// `sentAt` caused (Claude fires no Stop for it), every half second off
+    /// the main thread: `onRead` gets each answer and its count on the main
+    /// thread, and says whether to read again.
+    func followInterrupt(
+        transcript: String, offset: UInt64, sentAt: Date, read: Int = 1,
+        onRead: @escaping @MainActor @Sendable (_ shown: Bool, _ read: Int) -> Bool
+    ) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            Self.offMain({ TranscriptLastMessage.showsInterrupt(path: transcript, since: sentAt, after: offset) }) { shown in
+                guard onRead(shown, read) else { return }
+                self?.followInterrupt(transcript: transcript, offset: offset, sentAt: sentAt, read: read + 1, onRead: onRead)
+            }
+        }
+    }
+
+    /// The column a stuck agent's button aims at, and its terminal; nil,
+    /// with a toast, once either is gone.
+    private func stuckAgentTerminal(workspaceIndex: Int, columnIndex: Int) -> (ColumnState, PtySession)? {
+        guard workspaces.indices.contains(workspaceIndex),
+              let column = workspaces[workspaceIndex].columns[safe: columnIndex]
+        else {
+            showToast("That agent’s column was closed")
+            return nil
+        }
+        guard let pty = column.pty else {
+            showToast("That column has no terminal")
+            return nil
+        }
+        return (column, pty)
+    }
+
+    /// What Interrupt did, or why it pressed nothing.
+    static func interruptText(_ outcome: SilentInterrupt) -> String {
+        switch outcome {
+        case .promptGivenBack: "Esc sent: your prompt is back in Claude’s box. Press Enter there to send it again"
+        case .stopping: "Esc sent: Claude stops the turn. Tell it how to go on"
+        case .notSilent: "Claude moved on: it isn’t silent any more"
+        case .noProcesses: "Nirux couldn’t read the running processes: try again in a moment"
+        case .refused(.alreadySent): "Esc already went into this turn"
+        case .refused(.dialog): "A dialog waits in its terminal: answer it there"
+        case .refused(.typed): "Keys were typed at its prompt since: press Esc in its terminal yourself"
+        case .refused: "Press Esc in its terminal: Nirux can’t tell this turn is safe to interrupt"
+        }
     }
 
     /// Why Resume sent nothing.

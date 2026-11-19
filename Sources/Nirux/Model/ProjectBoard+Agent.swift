@@ -91,7 +91,7 @@ extension ProjectBoard {
             return .stoppedOnError(kind: kind, resume: resume)
         case .exitedMidTurn(let processName)?:
             return .exitedMidTurn(processName: processName)
-        case .silent(let duration)?:
+        case .silent(let duration, _, _)?:
             return .silent(duration: duration)
         case nil:
             break

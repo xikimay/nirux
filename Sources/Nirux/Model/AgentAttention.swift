@@ -123,7 +123,7 @@ enum AgentAttentionReason: Hashable, Sendable {
 
     /// What a silent turn's alert and tooltips add.
     static let silentAdvice = "No reply, no tool call, no transcript line: its request may hang. "
-        + "Press Esc in its terminal, then send your message again."
+        + "Esc in its terminal stops it: a prompt it hadn't answered comes back to its box."
 }
 
 /// What a lit attention signal asks of the user, least urgent first: the

@@ -114,6 +114,12 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertNil(request.toolUseID, "only the call's own events")
     }
 
+    func testAPolledPromptSaysSo() throws {
+        let polled = try XCTUnwrap(claudeEvent(["hook_event_name": "UserPromptSubmit", "prompt": "hi", "source": "poll_event"]))
+        XCTAssertEqual(polled.source, "poll_event")
+        XCTAssertNil(try XCTUnwrap(claudeEvent(["hook_event_name": "UserPromptSubmit", "prompt": "hi"])).source)
+    }
+
     func testPreToolUseCarriesNoInputExcerpt() throws {
         let event = try XCTUnwrap(claudeEvent([
             "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": ["command": "ls"]

@@ -46,6 +46,13 @@ struct SidebarResumeClick: Equatable {
     let failedAt: TimeInterval
 }
 
+/// Interrupt clicked in the sidebar, where its button was released.
+struct SidebarInterruptClick: Equatable {
+    let workspaceIndex: Int
+    let columnIndex: Int
+    let since: TimeInterval
+}
+
 /// Yes, No or Reply… clicked under a turn's question.
 struct SidebarTurnAnswerClick: Equatable {
     let question: SidebarTurnQuestion
@@ -77,13 +84,15 @@ extension SidebarView {
     }
 
     /// The `approvalButtonViews` key of a button region: Allow, Deny,
-    /// Resume. Nil for anything else.
+    /// Resume, Interrupt. Nil for anything else.
     static func armedButtonKey(for region: SidebarHitRegion) -> String? {
         switch region {
         case let .permissionDecision(_, _, requestID, behavior):
             return SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: behavior)
         case let .agentResume(workspaceIndex, columnIndex, failedAt):
             return SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
+        case let .agentInterrupt(workspaceIndex, columnIndex, since):
+            return SidebarHoverTarget.interruptButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
         case let .deferredAgentResume(_, _, columnID):
             return SidebarHoverTarget.deferredResumeButtonKey(columnID: columnID)
         case let .turnAnswer(_, _, question, answer):
@@ -144,6 +153,22 @@ extension SidebarView {
         return SidebarResumeClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: releasedFailure)
     }
 
+    /// The Interrupt a click makes, if any: the same rules, for the same
+    /// silence.
+    static func interruptClick(
+        pressed: SidebarHitRegion,
+        released: SidebarHitRegion?,
+        clickCount: Int,
+        armedAtPress: Bool,
+        armedAtRelease: Bool
+    ) -> SidebarInterruptClick? {
+        guard clickCount == 1, armedAtPress, armedAtRelease,
+              case let .agentInterrupt(_, _, pressedSilence) = pressed,
+              case let .agentInterrupt(workspaceIndex, columnIndex, releasedSilence)? = released,
+              releasedSilence == pressedSilence else { return nil }
+        return SidebarInterruptClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: releasedSilence)
+    }
+
     /// The Resume of a not-resumed agent a click makes, if any: the same
     /// rules, for the same column.
     static func deferredResumeClick(
@@ -192,9 +217,9 @@ extension SidebarView {
         clickCount > 1 && time - action < NSEvent.doubleClickInterval
     }
 
-    /// A press on Allow / Deny / Resume acts only on its release (see
-    /// `approvalClickDecision`, `resumeClick`, `deferredResumeClick`), never
-    /// on the press. The loop also keeps the press from moving the window.
+    /// A press on Allow / Deny / Resume / Interrupt acts only on its release
+    /// (see `approvalClickDecision`, `resumeClick`, `interruptClick`,
+    /// `deferredResumeClick`), never on the press. The loop also keeps the press from moving the window.
     func trackApprovalClick(_ region: SidebarHitRegion, event: NSEvent) {
         guard let key = Self.armedButtonKey(for: region) else { return }
         let armedAtPress = isApprovalButtonArmed(key)
@@ -225,6 +250,12 @@ extension SidebarView {
             ) {
                 lastButtonActionAt = next.timestamp
                 onAgentResume?(resume.workspaceIndex, resume.columnIndex, resume.failedAt)
+            } else if let interrupt = Self.interruptClick(
+                pressed: region, released: released, clickCount: event.clickCount,
+                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+            ) {
+                lastButtonActionAt = next.timestamp
+                onAgentInterrupt?(interrupt.workspaceIndex, interrupt.columnIndex, interrupt.since)
             } else if let resume = Self.deferredResumeClick(
                 pressed: region, released: released, clickCount: event.clickCount,
                 armedAtPress: armedAtPress, armedAtRelease: armedAtRelease

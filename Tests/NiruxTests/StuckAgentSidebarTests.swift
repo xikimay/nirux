@@ -463,6 +463,93 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertEqual(notified, [.silent(1_200)], "once")
     }
 
+    /// Interrupt, past a tool result: Esc alone, and the turn ends only
+    /// once Claude's transcript shows the interrupt.
+    func testInterruptEndsTheTurnOnceClaudeShowsIt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-interrupt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", root.path, 1)
+        defer {
+            if let previousStateDirectory { setenv("NIRUX_STATE_DIR", previousStateDirectory, 1) } else { unsetenv("NIRUX_STATE_DIR") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let transcript = root.appendingPathComponent("task.jsonl")
+        try Data((#"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"go"}}"# + "\n"
+            + #"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"ok"}]}}"#
+            + "\n").utf8).write(to: transcript)
+        _ = NSApplication.shared
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        shell.stopHeartbeat()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = shell
+        defer { window.close() }
+
+        let workspace = try XCTUnwrap(shell.workspaces.first)
+        let agent = AgentStandIn()
+        defer { agent.remove() }
+        let agentUUID = UUID().uuidString
+        workspace.addColumn(command: agent.command(), agentUUID: agentUUID, cwd: root.path)
+        let column = try XCTUnwrap(workspace.columns.first { $0.agentUUID == agentUUID })
+        // The system notification needs an app bundle, which xctest isn't.
+        column.onAgentAttention = { _ in }
+        let columnIndex = try XCTUnwrap(workspace.columns.firstIndex { $0 === column })
+        let pty = try XCTUnwrap(column.pty)
+        try await waitUntil("its claude", timeout: 5) { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+        let front = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+        let clock = AwakeClock()
+        clock.now = 100
+        pty.awakeClock = { clock.now }
+        for (name, call) in [(AgentHookEvent.Name.sessionStart, nil), (.userPromptSubmit, nil), (.preToolUse, "t1"), (.postToolUse, "t1")] {
+            let event = AgentHookEvent(
+                kind: .claude, name: name, agentUUID: agentUUID, sessionID: "task", emitterProcess: front.instance,
+                source: name == .sessionStart ? "startup" : nil, toolName: call.map { _ in "Bash" }, toolUseID: call,
+                transcriptPath: transcript.path, timestamp: Date().timeIntervalSince1970
+            )
+            _ = column.admitClaudeHook(event, foregroundProcess: front, snapshot: ProcessSnapshot())
+            pty.applyAgentHook(event, isUserFocused: false)
+        }
+        @MainActor func turn() -> AgentPromptRefusal? {
+            pty.missionPromptRefusal(runningSince: front.instance.startedAt, snapshot: ProcessSnapshot())
+        }
+        shell.refreshStuckAgents(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970, appIsActive: false)
+        clock.now = 1_300
+        shell.refreshStuckAgents(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970, appIsActive: false)
+        guard case .silent(let silence)? = pty.agentStuckState(now: Date().timeIntervalSince1970, waitThreshold: nil, foreground: front)
+        else { return XCTFail("silent") }
+
+        // A message from the task's parent waits for the turn's end.
+        let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+            id: UUID().uuidString, parentWorkspaceID: UUID().uuidString, parentAgentUUID: UUID().uuidString,
+            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: "claude", branch: "silent", reportsToTask: true
+        ), enabled: true))
+        XCTAssertNotNil(MissionStore.shared.accept(MissionEvent(
+            id: UUID().uuidString, missionID: mission.id, childWorkspaceID: workspace.id, childAgentUUID: agentUUID,
+            parentWorkspaceID: mission.parentWorkspaceID, parentAgentUUID: mission.parentAgentUUID, kind: .instruction,
+            message: "Go on with the parser", timestamp: Date().timeIntervalSince1970
+        ), enabled: true))
+
+        shell.interruptSilentAgent(workspaceIndex: 0, columnIndex: columnIndex, since: silence.since)
+        try await waitUntil("Esc", timeout: 3) { !agent.input.isEmpty }
+        XCTAssertFalse(agent.input.contains("Go on with the parser"), "not typed into a turn still running")
+        XCTAssertEqual(turn(), .working, "not over before Claude says so")
+        let stamp = ISO8601DateFormatter.string(
+            from: Date(), timeZone: TimeZone(identifier: "UTC") ?? .current, formatOptions: [.withInternetDateTime, .withFractionalSeconds]
+        )
+        let handle = try FileHandle(forWritingTo: transcript)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((#"{"type":"user","timestamp":""# + stamp
+            + #"","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"# + "\n").utf8))
+        try handle.close()
+        try await waitUntil("the message waiting, typed once the turn is over", timeout: 5) {
+            agent.input.contains("Go on with the parser")
+        }
+        XCTAssertTrue(agent.input.hasPrefix("\u{1B}"), "Esc first")
+    }
+
     // MARK: - Mission messages that wait
 
     /// A Mission message that waits too long for an idle agent's prompt
