@@ -65,7 +65,7 @@ final class FrozenView: NSView {
     /// (a glide, an arrival), else its model, which holds a change made in
     /// this turn that the presentation doesn't show yet.
     private static func shown(_ layer: CALayer) -> CALayer {
-        (layer.animationKeys()?.isEmpty == false ? layer.presentation() : nil) ?? layer
+        (ZZ("presentationRead") || layer.animationKeys()?.isEmpty == false ? layer.presentation() : nil) ?? layer
     }
 
     static func surface(of layer: CALayer) -> IOSurfaceRef? {

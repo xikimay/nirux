@@ -24,9 +24,11 @@ extension NiruxShellView {
         viewport.addSubview(leaving)
         showLiveViews(false)
         Self.move(leaving, scale: (1, Self.recedeScale), opacity: (1, 0), curve: .easeIn, duration: duration)
-        sideEffects.afterCommit(Self.arrivalDelay) { [weak self] in
-            guard let self, spaceCrossingGeneration == generation else { return }
-            arrive(for: duration - Self.arrivalDelay)
+        if ZZ("noArrivalDelay") { arrive(for: duration) } else {
+            sideEffects.afterCommit(Self.arrivalDelay) { [weak self] in
+                guard let self, spaceCrossingGeneration == generation else { return }
+                arrive(for: duration - Self.arrivalDelay)
+            }
         }
         sideEffects.afterCommit(duration) { [weak self] in
             guard let self, spaceCrossingGeneration == generation else { return }
@@ -47,7 +49,7 @@ extension NiruxShellView {
     /// workspace (⌘N, a switch, a close, a ⌘P jump) ends a crossing: what
     /// plays under its pictures would go unseen.
     func endSpaceCrossingIfStale(animated: Bool) {
-        guard !crossingPictures.isEmpty, animated || activeWorkspace?.id != crossingWorkspaceID else { return }
+        guard !ZZ("staleKept"), !crossingPictures.isEmpty, animated || activeWorkspace?.id != crossingWorkspaceID else { return }
         endSpaceCrossing()
     }
 
@@ -67,7 +69,7 @@ extension NiruxShellView {
 
     /// Every live view of the viewport, shown or hidden under the pictures.
     private func showLiveViews(_ shown: Bool) {
-        for view in [verticalStrip, emptySpaceView] as [NSView] { view.alphaValue = shown ? 1 : 0 }
+        for view in (ZZ("emptyShown") ? [verticalStrip] : [verticalStrip, emptySpaceView]) as [NSView] { view.alphaValue = shown ? 1 : 0 }
     }
 
     /// From the first values to the second, about the picture's middle (its
