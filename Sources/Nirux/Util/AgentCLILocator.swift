@@ -1,7 +1,7 @@
 import Foundation
 
-/// Tells whether `claude` and `codex` are installed where a Nirux terminal
-/// would find them, for the first-launch checklist.
+/// Tells whether `claude`, `codex` and `agy` are installed where a Nirux
+/// terminal would find them, for the first-launch checklist.
 ///
 /// Terminals start the login shell with `PtySession.effectivePath`; its
 /// startup files then add per-user install locations (npm prefixes, Node
@@ -18,7 +18,8 @@ enum AgentCLILocator {
         let directories = searchDirectories(path: path, home: home, systemDirectories: systemDirectories)
         return AgentCLIAvailability(
             claudePath: executable(named: "claude", in: directories),
-            codexPath: executable(named: "codex", in: directories)
+            codexPath: executable(named: "codex", in: directories),
+            agyPath: executable(named: "agy", in: directories)
         )
     }
 

@@ -91,7 +91,7 @@ final class PtyForegroundProcessTests: XCTestCase {
             )
         ])
         let foreground = try XCTUnwrap(snapshot.foregroundProcess(shellPID: 10))
-        var tracker = CodexSessionTracker()
+        var tracker = ForegroundSessionTracker.codex
 
         XCTAssertEqual(foreground.instance.pid, 30)
         XCTAssertEqual(foreground.name, "codex")

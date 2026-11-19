@@ -32,10 +32,7 @@ final class BranchReviewEditorBannerTests: XCTestCase {
             editor.layoutSubtreeIfNeeded()
             XCTAssertGreaterThan(banner.frame.width, 0)
 
-            // A click, through hit-testing as AppKit routes one. A workspace
-            // switch's snapshot lies over the viewport until its animation
-            // ends, which a CI runner may not reach by now.
-            shell.viewport.subviews.filter { $0 is NSImageView }.forEach { $0.removeFromSuperview() }
+            // A click, through hit-testing as AppKit routes one.
             let button = banner.openButton
             let center = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
             let hit = harness.window.contentView?.hitTest(harness.window.contentView?.convert(center, from: nil) ?? center)

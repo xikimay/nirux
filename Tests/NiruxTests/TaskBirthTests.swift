@@ -227,7 +227,7 @@ final class TaskBirthTests: UIFlowTestCase {
         shell.applyAgentLights()
         // Whatever earlier workspaces left over the viewport: a fade never
         // ends in a window that isn't on screen.
-        shell.viewport.subviews.filter { $0 is NSImageView }.forEach { $0.removeFromSuperview() }
+        shell.viewport.subviews.filter { $0 is FrozenView }.forEach { $0.removeFromSuperview() }
     }
 
     private func picture(at frame: NSRect) throws -> TaskSheetPicture {
@@ -251,7 +251,7 @@ final class TaskBirthTests: UIFlowTestCase {
     }
 
     private func pictures(in shell: NiruxShellView) -> [NSView] {
-        shell.viewport.subviews.filter { $0 is NSImageView }
+        shell.viewport.subviews.filter { $0 is FrozenView }
     }
 
     /// The sheet's picture folds from where the sheet was toward the
