@@ -399,6 +399,11 @@ final class PtySession: @unchecked Sendable {
         return promptAt
     }
 
+    /// See `AgentStatusMachine.noteInterruptIgnored`.
+    func noteInterruptIgnored(promptAt: TimeInterval) {
+        state.machine.noteInterruptIgnored(promptAt: promptAt)
+    }
+
     /// Claude confirmed the interrupt of `promptAt`'s turn: it is over.
     func noteInterrupted(promptAt: TimeInterval) -> Bool {
         state.machine.noteInterrupted(promptAt: promptAt, now: Date().timeIntervalSince1970)

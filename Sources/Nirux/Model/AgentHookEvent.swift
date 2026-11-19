@@ -49,6 +49,8 @@ struct AgentHookEvent: Codable, Equatable {
     /// turnComplete, truncated).
     let detail: String?
     /// Claude SessionStart `source`: startup, resume, clear, compact, fork.
+    /// On UserPromptSubmit, `poll_event` for a message Claude polled in (a
+    /// peer's), not one typed at its box.
     let source: String?
     /// Claude tool events (PreToolUse, PermissionRequest, PostToolUse*):
     /// the tool, a short cleaned excerpt of its input (the command, file,
@@ -174,7 +176,7 @@ struct AgentHookEvent: Codable, Equatable {
             sessionID = payload["session_id"] as? String
             let cwd = payload["cwd"] as? String
             self.cwd = cwd
-            source = name == .sessionStart ? payload["source"] as? String : nil
+            source = [.sessionStart, .userPromptSubmit].contains(name) ? payload["source"] as? String : nil
             agentID = (payload["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             let toolName = [.preToolUse, .permissionRequest, .postToolUse].contains(name)
                 ? payload["tool_name"] as? String

@@ -47,8 +47,10 @@ extension AgentStatusMachine {
     /// screen they opened instead.
     func silentInterruptRefusal(foreground: ForegroundProcess?) -> AgentInterruptRefusal? {
         let refusal = interruptRefusal(foreground: foreground)
-        guard refusal == .notAnswered else { return refusal }
-        return lastDraftInputAt > (lastPromptAt ?? 0) ? .typed : nil
+        guard refusal == nil || refusal == .notAnswered else { return refusal }
+        // Since the prompt typed at the box: a peer's message Claude polled
+        // in since hides no keys.
+        return lastDraftInputAt > (lastUserPromptAt ?? lastPromptAt ?? 0) ? .typed : nil
     }
 
     /// Whether Resume may type `continue`: a failed turn with nothing

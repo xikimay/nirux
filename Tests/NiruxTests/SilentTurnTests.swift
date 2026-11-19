@@ -164,6 +164,18 @@ final class SilentTurnTests: XCTestCase {
         XCTAssertEqual(machine.openDialogs, [], "the subagent went on: its dialog was answered")
     }
 
+    func testAPeersMessageHidesNoKeysTypedBefore() {
+        promptIn()
+        apply(.preToolUse, at: 2, id: "ls")
+        apply(.postToolUse, at: 3, id: "ls")
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 4), keys: Data("x".utf8))
+        _ = machine.apply(
+            AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "lead", source: "poll_event", timestamp: t0 + 5),
+            isUserFocused: false
+        )
+        XCTAssertEqual(machine.silentInterruptRefusal(foreground: claude), .typed)
+    }
+
     func testAPromptWhileACallRunsLeavesItRunning() {
         promptIn()
         apply(.preToolUse, at: 2, id: "build")
@@ -546,6 +558,11 @@ final class SilentTurnTests: XCTestCase {
             pty.missionPromptRefusal(runningSince: front.instance.startedAt, snapshot: ProcessSnapshot()), .working,
             "no draft given back, and no message until Claude shows it stopped"
         )
+        // Ignored by a Claude that hangs on: its silence shows again.
+        pty.noteInterruptIgnored(promptAt: peerAt)
+        guard case .silent? = pty.agentStuckState(now: Date().timeIntervalSince1970, waitThreshold: waitThreshold, foreground: front)
+        else { return XCTFail("silent again once the Esc went unanswered") }
+        XCTAssertEqual(interrupt(since: 2_000), .refused(.alreadySent), "a second Esc would open the rewind")
         XCTAssertTrue(pty.noteInterrupted(promptAt: peerAt))
         XCTAssertNil(pty.missionPromptRefusal(runningSince: front.instance.startedAt, snapshot: ProcessSnapshot()), "free for a message")
 

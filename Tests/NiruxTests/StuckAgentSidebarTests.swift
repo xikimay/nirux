@@ -494,6 +494,8 @@ final class StuckAgentSidebarTests: XCTestCase {
         let agentUUID = UUID().uuidString
         workspace.addColumn(command: agent.command(), agentUUID: agentUUID, cwd: root.path)
         let column = try XCTUnwrap(workspace.columns.first { $0.agentUUID == agentUUID })
+        // The system notification needs an app bundle, which xctest isn't.
+        column.onAgentAttention = { _ in }
         let columnIndex = try XCTUnwrap(workspace.columns.firstIndex { $0 === column })
         let pty = try XCTUnwrap(column.pty)
         try await waitUntil("its claude", timeout: 5) { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
@@ -519,8 +521,20 @@ final class StuckAgentSidebarTests: XCTestCase {
         guard case .silent(let silence)? = pty.agentStuckState(now: Date().timeIntervalSince1970, waitThreshold: nil, foreground: front)
         else { return XCTFail("silent") }
 
+        // A message from the task's parent waits for the turn's end.
+        let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+            id: UUID().uuidString, parentWorkspaceID: UUID().uuidString, parentAgentUUID: UUID().uuidString,
+            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: "claude", branch: "silent", reportsToTask: true
+        ), enabled: true))
+        XCTAssertNotNil(MissionStore.shared.accept(MissionEvent(
+            id: UUID().uuidString, missionID: mission.id, childWorkspaceID: workspace.id, childAgentUUID: agentUUID,
+            parentWorkspaceID: mission.parentWorkspaceID, parentAgentUUID: mission.parentAgentUUID, kind: .instruction,
+            message: "Go on with the parser", timestamp: Date().timeIntervalSince1970
+        ), enabled: true))
+
         shell.interruptSilentAgent(workspaceIndex: 0, columnIndex: columnIndex, since: silence.since)
         try await waitUntil("Esc", timeout: 3) { !agent.input.isEmpty }
+        XCTAssertFalse(agent.input.contains("Go on with the parser"), "not typed into a turn still running")
         XCTAssertEqual(turn(), .working, "not over before Claude says so")
         let stamp = ISO8601DateFormatter.string(
             from: Date(), timeZone: TimeZone(identifier: "UTC") ?? .current, formatOptions: [.withInternetDateTime, .withFractionalSeconds]
@@ -530,9 +544,10 @@ final class StuckAgentSidebarTests: XCTestCase {
         try handle.write(contentsOf: Data((#"{"type":"user","timestamp":""# + stamp
             + #"","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"# + "\n").utf8))
         try handle.close()
-        try await waitUntil("the turn over", timeout: 5) { turn() != .working }
-        XCTAssertNil(turn(), "free for the message waiting")
-        XCTAssertEqual(agent.input, "\u{1B}", "Esc alone")
+        try await waitUntil("the message waiting, typed once the turn is over", timeout: 5) {
+            agent.input.contains("Go on with the parser")
+        }
+        XCTAssertTrue(agent.input.hasPrefix("\u{1B}"), "Esc first")
     }
 
     // MARK: - Mission messages that wait

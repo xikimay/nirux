@@ -167,7 +167,12 @@ extension NiruxShellView {
                 guard let self, let column, let pty, column.pty === pty else { return false }
                 guard shown else {
                     if read == Self.interruptReadsBeforeAnswer { self.showToast("Esc went in, but Claude shows no interrupt yet: see its terminal") }
-                    return read < Self.interruptReads
+                    guard read < Self.interruptReads else {
+                        pty.noteInterruptIgnored(promptAt: promptAt)
+                        self.updateSidebar()
+                        return false
+                    }
+                    return true
                 }
                 // What its hooks said meanwhile.
                 AgentHookCenter.shared.drain()
