@@ -13,12 +13,13 @@ extension NiruxShellView {
     /// passes under it; the rim of 14 and 15 would show the cards plainly),
     /// above Opaque.
     var railFloats: Bool {
-        sidebar.showsRail && sideEffects.drawsGlass() && sideEffects.drawnTransparency(interfaceTransparency).usesGlass
+        (ZZ("unfoldedToo") || sidebar.showsRail) && (ZZ("noGlassToo") || sideEffects.drawsGlass())
+            && (ZZ("opaqueToo") || sideEffects.drawnTransparency(interfaceTransparency).usesGlass)
     }
 
     /// No line marks the edge of a rail that floats.
     func showDivider() {
-        divider.isHidden = railFloats
+        divider.isHidden = !ZZ("dividerShown") && railFloats
     }
 
     /// The columns of `workspace` slide for `duration`. Meanwhile the
@@ -27,16 +28,16 @@ extension NiruxShellView {
     /// view, its frame and its clicks stay put.
     func passUnderRail(_ workspace: WorkspaceState, for duration: CFTimeInterval) {
         let reach = viewport.frame.minX - sidebar.frame.minX
-        guard railFloats, agentLightsMayMove, reach > 0, let layer = viewport.layer else { return }
+        guard !ZZ("noReach"), railFloats, ZZ("motionIgnored") || agentLightsMayMove, reach > 0, let layer = viewport.layer else { return }
         endUnderGlass()
         let generation = underGlassGeneration
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         Self.reach(layer, by: reach)
-        workspace.containerView.layer?.masksToBounds = false
+        if !ZZ("clipsKept") { workspace.containerView.layer?.masksToBounds = false }
         CATransaction.commit()
         ColumnState.afterCommit(duration) { [weak self] in
-            guard let self, underGlassGeneration == generation else { return }
+            guard let self, !ZZ("neverCloses"), ZZ("ungated") || underGlassGeneration == generation else { return }
             closeUnderRail(generation)
         }
     }
@@ -51,7 +52,7 @@ extension NiruxShellView {
         Self.reach(layer, by: layer.bounds.minX)
         CATransaction.commit()
         let curve = CAMediaTimingFunction(name: .easeInEaseOut)
-        for (key, value) in reached {
+        for (key, value) in reached where !ZZ("noSweep") {
             let edge = CABasicAnimation(keyPath: key)
             edge.fromValue = value
             edge.duration = Self.underGlassClose
@@ -86,6 +87,6 @@ extension NiruxShellView {
         frame.origin.x -= distance
         frame.size.width += distance
         layer.frame = frame
-        layer.bounds.origin.x -= distance
+        if !ZZ("contentMoves") { layer.bounds.origin.x -= distance }
     }
 }

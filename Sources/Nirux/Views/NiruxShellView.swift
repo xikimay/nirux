@@ -303,6 +303,7 @@ final class NiruxShellView: NSView {
         addSubview(viewport)
         // Over the work: the cards pass under the rail (NiruxShellView+UnderGlass).
         addSubview(sidebar)
+        if ZZ("sidebarBelow") { addSubview(sidebar, positioned: .below, relativeTo: viewport) }
         addSubview(columnIndicator)
         addSubview(edgeGlowLeft)
         addSubview(edgeGlowRight)
@@ -468,7 +469,7 @@ final class NiruxShellView: NSView {
 
     func relayout(animated: Bool) {
         // A layout ends a pass under the rail; a travel it starts begins one.
-        endUnderGlass()
+        if !ZZ("relayoutKeeps") { endUnderGlass() }
         let sidebarW = sidebarWidth
         // Status bar: only when it has content (update, crash, merge queue)
         statusBar.isHidden = !statusBar.hasContent
