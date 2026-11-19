@@ -17,8 +17,8 @@ extension ColumnState {
     /// How high the card lies, from its state: over its neighbours while it
     /// arrives or a move lifts it, unless it is going.
     func updateDepth() {
-        let depth: CGFloat = (isArriving || lifts > 0) && !isClosing ? 1 : 0
-        cardLayers.forEach { $0.zPosition = depth }
+        let depth: CGFloat = (isArriving || (lifts > 0 && !ZZ("depthIgnoresLifts"))) && !isClosing ? 1 : 0
+        (ZZ("depthViewOnly") ? [view.layer].compactMap { $0 } : cardLayers).forEach { $0.zPosition = depth }
     }
 
     /// `step` after `duration`, on time once the change is committed (a
@@ -58,7 +58,7 @@ extension ColumnState {
         let scaling = CABasicAnimation(keyPath: "transform")
         scaling.fromValue = CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: start.scale))
         scaling.toValue = CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: scale))
-        scaling.isAdditive = true
+        scaling.isAdditive = !ZZ("passReplaces")
         let fading = CABasicAnimation(keyPath: "opacity")
         fading.fromValue = Float(start.alpha)
         fading.toValue = Float(alpha)
@@ -81,6 +81,7 @@ extension ColumnState {
     private var shownOffset: CGPoint {
         guard let shown = view.layer?.presentation()?.transform else { return .zero }
         let size = view.frame.size
+        if ZZ("offsetWithPass") { return CGPoint(x: shown.m41, y: shown.m42) }
         return CGPoint(x: shown.m41 - size.width * (1 - shown.m11) / 2, y: shown.m42 - size.height * (1 - shown.m22) / 2)
     }
 
@@ -114,9 +115,9 @@ extension ColumnState {
     /// its shadow falling on the other, which dims under it a moment. Not a
     /// card that is going.
     func lift(over passed: ColumnState) {
-        guard !isClosing else { return }
+        guard !isClosing || ZZ("liftOnClosing") else { return }
         let duration = Self.glideDuration
-        let height = shownOffset.y
+        let height = ZZ("liftFromFlat") ? 0 : shownOffset.y
         lifts += 1
         updateDepth()
         for layer in cardLayers {
@@ -138,7 +139,7 @@ extension ColumnState {
     /// A card passes over this one: it dims a moment under one shade, from
     /// how dark it shows, however many pass; the shade goes with the last.
     private func dim(for duration: CFTimeInterval) {
-        let shade = passShadeView ?? {
+        let shade = (ZZ("shadeEach") ? nil : passShadeView) ?? {
             let shade = PassShadeView(frame: view.bounds)
             view.addSubview(shade)
             passShadeView = shade
@@ -153,7 +154,7 @@ extension ColumnState {
         Self.afterCommit(duration) { [weak self] in
             guard let self else { return }
             self.dims -= 1
-            guard self.dims == 0 else { return }
+            guard self.dims == 0, !ZZ("shadeKept") else { return }
             self.passShadeView?.removeFromSuperview()
             self.passShadeView = nil
         }
