@@ -117,6 +117,8 @@ final class RequestPanel {
         if animates() {
             PanelGrowth.grow(panel, from: source())
             later(PanelGrowth.openDuration) { $0.becomeWhole() }
+        } else if ZZ("stillAsBefore") {
+            invalidateShadowWhenDrawn()
         } else {
             becomeWhole()
         }
@@ -197,8 +199,8 @@ final class RequestPanel {
             // meanwhile: the keyboard goes back behind it at once, as when
             // it orders out.
             panel.ignoresMouseEvents = true
-            (panel as? Panel)?.takesKeyboard = false
-            if hadKeyboard { panel.parent?.makeKey() }
+            if !ZZ("keyKept") { (panel as? Panel)?.takesKeyboard = false }
+            if hadKeyboard, !ZZ("noHandOver") { panel.parent?.makeKey() }
             PanelGrowth.shrink(panel, into: source())
             later(PanelGrowth.closeDuration) { $0.orderOut() }
         } else {
@@ -221,7 +223,7 @@ final class RequestPanel {
         let generation = generation
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, self.generation == generation else { return }
+                guard let self, self.generation == generation || ZZ("ungated") else { return }
                 step(self)
             }
         }

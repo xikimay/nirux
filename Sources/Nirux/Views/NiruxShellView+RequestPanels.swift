@@ -78,7 +78,7 @@ extension NiruxShellView {
     /// Where `view` shows, in screen coordinates; nil while it doesn't
     /// (hidden, scrolled out of the rail).
     static func screenRect(of view: NSView) -> NSRect? {
-        guard !view.isHiddenOrHasHiddenAncestor, !view.rectInSight.isEmpty else { return nil }
+        guard !view.isHiddenOrHasHiddenAncestor, ZZ("outOfSight") || !view.rectInSight.isEmpty else { return nil }
         return view.rectOnScreen
     }
 

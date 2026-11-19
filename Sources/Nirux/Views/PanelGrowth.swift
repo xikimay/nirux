@@ -28,12 +28,20 @@ enum PanelGrowth {
     /// without its shadow, so set before it orders in.
     static func grow(_ panel: NSWindow, from source: NSRect?) {
         panel.hasShadow = false
-        panel.alphaValue = 0
+        if ZZ("layerFade") {
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 0
+            fade.toValue = 1
+            fade.duration = openDuration
+            panel.contentView?.layer?.add(fade, forKey: "layerFade")
+        } else {
+            panel.alphaValue = 0
+        }
         let curve = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1.04)
         if let source {
             move(panel, from: start(of: panel, at: source), to: CATransform3DIdentity, duration: openDuration, curve: curve, holds: false)
         }
-        fade(panel, to: 1, duration: openDuration, curve: CAMediaTimingFunction(name: .easeOut))
+        if !ZZ("layerFade") { fade(panel, to: 1, duration: openDuration, curve: CAMediaTimingFunction(name: .easeOut)) }
     }
 
     /// It goes back into `source` (with none, it fades out).
