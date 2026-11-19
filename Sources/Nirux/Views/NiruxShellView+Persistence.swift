@@ -133,6 +133,7 @@ extension NiruxShellView {
     private struct ClaimedSessionIDs {
         var claude = Set<String>()
         var codex = Set<String>()
+        var agy = Set<String>()
     }
 
     private func restoreColumn(
@@ -166,6 +167,11 @@ extension NiruxShellView {
                 .codex(resume: resumeTarget, mode: persistedColumn.codexLaunchMode ?? .default),
                 restoring: persistedColumn, in: workspace
             )
+        case .agy:
+            let resumeTarget = Self.agentRestoreTarget(
+                sessionID: persistedColumn.agySessionID, claimedSessionIDs: &claimedSessionIDs.agy
+            )
+            addDeferredAgentColumn(.agy(resume: resumeTarget), restoring: persistedColumn, in: workspace)
         case .editor:
             let openFiles = persistedColumn.editorOpenFiles ?? []
             // Non-interactive: a binary or huge file in the persisted tab set
@@ -444,13 +450,15 @@ extension NiruxShellView {
             case "codex":
                 kind = .codex; webURL = nil
                 codexMode = detectCodexLaunchMode(process: foregroundProcess)
+            case AgentProgramStatus.process:
+                kind = .agy; webURL = nil
             default: kind = .terminal; webURL = nil
             }
         } else {
             kind = .terminal; webURL = nil
         }
         // What the column says next launch, until its agent resumes.
-        let isAgent = kind == .claudeCode || kind == .codex
+        let isAgent = [.claudeCode, .codex, .agy].contains(kind)
         return PersistedColumn(
             widthPreset: Double(col.widthFraction),
             cwd: col.editorColumn?.workspaceCwd ?? col.pty?.childCwd ?? workspace.cwd,
@@ -465,6 +473,7 @@ extension NiruxShellView {
                 : nil,
             claudeSessionID: claudeRestore?.sessionID,
             claudeSessionIsUnprompted: claudeRestore == .fresh ? true : nil,
+            agySessionID: kind == .agy ? col.persistedAgySessionID(foregroundProcess: foregroundProcess) : nil,
             agentUUID: col.agentUUID,
             lastAgentTitle: isAgent ? DeferredAgentLaunch.sessionTitle(fromTerminalTitle: col.terminalTitle) : nil,
             lastAgentStatus: isAgent ? col.pty.map { PersistedAgentStatus($0.cachedAgentState) } : nil

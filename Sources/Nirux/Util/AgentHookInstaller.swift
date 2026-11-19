@@ -3,6 +3,8 @@ import Foundation
 /// Installs Nirux's agent-status hooks into the agents' own config files:
 /// - Claude Code: `hooks` entries in ~/.claude/settings.json
 /// - Codex: the `notify` program in ~/.codex/config.toml
+/// - Antigravity: a `nirux` hook in ~/.gemini/config/hooks.json, for the
+///   conversation each column runs (its status comes from OSC 7501)
 ///
 /// Both agents then invoke `Nirux --hook <kind>` on lifecycle events, which
 /// is how `AgentHookCenter` gets exact working/attention signals instead of
@@ -77,6 +79,7 @@ enum AgentHookInstaller {
             installClaudeStatusLine(enabled: claudeStatusLine, executablePath: executablePath, home: home)
         }
         installCodexNotify(executablePath: executablePath, home: home)
+        installAgyHooks(executablePath: executablePath, home: home)
     }
 
     // MARK: - Claude Code (~/.claude/settings.json)
@@ -364,6 +367,55 @@ enum AgentHookInstaller {
     private static func write(lines: [String], to url: URL) {
         do {
             try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            NSLog("[AgentHooks] failed to write %@: %@", url.path, error.localizedDescription)
+        }
+    }
+
+    // MARK: - Antigravity (~/.gemini/config/hooks.json)
+
+    /// The named hook Nirux owns in agy's hooks.json.
+    static let agyHookName = "nirux"
+
+    /// The guarded `Nirux --hook agy`, as Codex's notify is: a no-op outside
+    /// Nirux terminals.
+    static func agyHookCommand(executablePath: String) -> String {
+        let path = shellQuoted(executablePath)
+        return #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x \#(path) ]; then exec \#(path) --hook agy; fi"#
+    }
+
+    /// SessionStart and Stop say which conversation a column's agy runs, for
+    /// its resume after a restart (a resumed agy sends no SessionStart).
+    /// Never PreToolUse: its hooks must decide on the tool call.
+    static func agyHooks(executablePath: String) -> [String: Any] {
+        let handler: [String: Any] = ["type": "command", "command": agyHookCommand(executablePath: executablePath), "timeout": 5]
+        return ["SessionStart": [handler], "Stop": [handler]]
+    }
+
+    /// Writes Nirux's named hook, and only it, into ~/.gemini/config/hooks.json,
+    /// when agy's folder exists. A file Nirux can't read is left as it is.
+    static func installAgyHooks(executablePath: String = defaultExecutablePath, home: URL = URL(fileURLWithPath: NSHomeDirectory())) {
+        let gemini = home.appendingPathComponent(".gemini")
+        guard FileManager.default.fileExists(atPath: gemini.path) else { return }
+        guard let url = resolvingSymlinks(gemini.appendingPathComponent("config/hooks.json")) else {
+            NSLog("[AgentHooks] ~/.gemini/config/hooks.json: symlink loop or chain too long — skipping hook install")
+            return
+        }
+        var root: [String: Any] = [:]
+        if let data = FileManager.default.contents(atPath: url.path) {
+            guard let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                NSLog("[AgentHooks] ~/.gemini/config/hooks.json unreadable — skipping hook install")
+                return
+            }
+            root = parsed
+        }
+        let hooks = agyHooks(executablePath: executablePath)
+        if let current = root[agyHookName] as? [String: Any], NSDictionary(dictionary: current).isEqual(to: hooks) { return }
+        root[agyHookName] = hooks
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            try data.write(to: url, options: .atomic)
         } catch {
             NSLog("[AgentHooks] failed to write %@: %@", url.path, error.localizedDescription)
         }

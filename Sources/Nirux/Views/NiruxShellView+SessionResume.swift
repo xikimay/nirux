@@ -268,6 +268,7 @@ extension NiruxShellView {
         let agent: DeferredAgentLaunch.Agent = switch record.agent {
         case .claude: .claude(resume: .session(record.sessionID), mode: Self.claudeLaunchMode(for: workspace))
         case .codex: .codex(resume: .session(record.sessionID), mode: Self.codexLaunchMode(for: workspace))
+        case .agy: .agy(resume: .session(record.sessionID))
         }
         sideEffects.launchAgent(column, resumeLaunchCommand(agent, workingDirectory: directory, in: workspace, column: column))
         updateSidebar()
@@ -307,6 +308,9 @@ extension NiruxShellView {
                     from: brief, launchDirectory: workingDirectory ?? column.launchDirectory ?? workspace.cwd
                 )
             )
+        case .agy(let resume):
+            if let sessionID = agent.sessionID { column.prepareAgyResume(sessionID: sessionID) }
+            return Self.agyCommand(resume: resume)
         }
     }
 

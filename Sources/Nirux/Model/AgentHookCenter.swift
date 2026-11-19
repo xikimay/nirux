@@ -257,6 +257,8 @@ final class AgentHookCenter {
                     && isFromOwnClaude
             case .codex:
                 if Self.isNestedCodexHook(foregroundName: foregroundProcess?.name) { return nil }
+            case .agy:
+                break
             }
         }
         if event.name == .permissionRequest, event.approvalRequestID != nil,
@@ -272,7 +274,8 @@ final class AgentHookCenter {
             event.approvalDeadline = nil
             event.approvalText = nil
         }
-        if let resolution { _ = apply(event, to: resolution) }
+        // Antigravity's hooks only bind its conversation: OSC 7501 drives its status.
+        if let resolution, event.kind != .agy { _ = apply(event, to: resolution) }
         return resolution.map {
             AppliedEvent(
                 event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged,

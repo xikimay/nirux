@@ -84,8 +84,17 @@ struct AgentSessionBinding {
     }
 }
 
-struct CodexSessionTracker {
-    private var session = AgentSessionBinding(processName: "codex", resumeArgument: "resume")
+/// Which session a column's foreground agent runs, bound from its hooks:
+/// Codex's thread, Antigravity's conversation.
+struct ForegroundSessionTracker {
+    private var session: AgentSessionBinding
+
+    static var codex: Self { Self(processName: "codex", resumeArgument: "resume") }
+    static var agy: Self { Self(processName: AgentProgramStatus.process, resumeArgument: "--conversation") }
+
+    init(processName: String, resumeArgument: String) {
+        session = AgentSessionBinding(processName: processName, resumeArgument: resumeArgument)
+    }
 
     mutating func prepareResume(sessionID: String) {
         session.prepareResume(sessionID: sessionID)
@@ -368,7 +377,7 @@ extension ProcessInstance {
     static func hookEmitter(for kind: AgentHookEvent.Kind) -> ProcessInstance? {
         switch kind {
         case .codex: return running(pid: getppid())
-        case .claude: return firstNonShellAncestor(from: getppid())
+        case .claude, .agy: return firstNonShellAncestor(from: getppid())
         }
     }
 

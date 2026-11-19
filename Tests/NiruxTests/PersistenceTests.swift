@@ -733,6 +733,26 @@ extension PersistedStateCodingTests {
         )
     }
 
+    /// An agy column comes back on its conversation: proved by its launch
+    /// until its hooks say so, and kept through the state file.
+    func testAgyColumnResumesItsConversation() throws {
+        XCTAssertEqual(NiruxShellView.agyCommand(resume: .session("c'1")), #"command agy --conversation 'c'\''1'"#)
+        XCTAssertEqual(NiruxShellView.agyCommand(resume: .picker), "command agy", "no picker flag: a fresh one")
+        var tracker = ForegroundSessionTracker.agy
+        tracker.prepareResume(sessionID: "c1")
+        let agy = ForegroundProcess(
+            instance: ProcessInstance(pid: 7, startedAt: 1), name: "agy", arguments: ["agy", "--conversation", "c1"]
+        )
+        XCTAssertEqual(tracker.sessionID(for: agy), "c1")
+        let column = PersistedColumn(
+            widthPreset: 1, cwd: "/w", columnType: .agy, webViewURL: nil,
+            claudeLaunchMode: nil, codexLaunchMode: nil, agySessionID: "c1"
+        )
+        let decoded = try JSONDecoder().decode(PersistedColumn.self, from: JSONEncoder().encode(column))
+        XCTAssertEqual(decoded.resolvedType, .agy)
+        XCTAssertEqual(decoded.agySessionID, "c1")
+    }
+
     func testCodexSessionTrackerInvalidatesReplacementBeforeQuit() {
         let first = ForegroundProcess(
             instance: ProcessInstance(pid: 101, startedAt: 100),
@@ -744,7 +764,7 @@ extension PersistedStateCodingTests {
             name: "codex",
             arguments: ["codex"]
         )
-        var tracker = CodexSessionTracker()
+        var tracker = ForegroundSessionTracker.codex
 
         XCTAssertTrue(tracker.capture(
             sessionID: "thread-a",
@@ -762,7 +782,7 @@ extension PersistedStateCodingTests {
             name: "codex",
             arguments: ["codex"]
         )
-        var tracker = CodexSessionTracker()
+        var tracker = ForegroundSessionTracker.codex
 
         XCTAssertFalse(tracker.capture(
             sessionID: "stale-thread",
@@ -783,7 +803,7 @@ extension PersistedStateCodingTests {
             name: "codex",
             arguments: ["codex"]
         )
-        var tracker = CodexSessionTracker()
+        var tracker = ForegroundSessionTracker.codex
         tracker.prepareResume(sessionID: "restored-thread")
 
         XCTAssertEqual(tracker.sessionID(for: restored), "restored-thread")
@@ -796,14 +816,14 @@ extension PersistedStateCodingTests {
             name: "codex",
             arguments: ["codex"]
         )
-        var tracker = CodexSessionTracker()
+        var tracker = ForegroundSessionTracker.codex
         tracker.prepareResume(sessionID: "failed-restore")
 
         XCTAssertNil(tracker.sessionID(for: fresh))
     }
 
     func testCodexSessionTrackerIgnoresReplayWithoutARunningProcess() {
-        var tracker = CodexSessionTracker()
+        var tracker = ForegroundSessionTracker.codex
 
         XCTAssertFalse(tracker.capture(
             sessionID: "queued-thread",
@@ -819,7 +839,7 @@ extension PersistedStateCodingTests {
             name: "codex",
             arguments: ["codex"]
         )
-        var tracker = CodexSessionTracker()
+        var tracker = ForegroundSessionTracker.codex
 
         XCTAssertFalse(tracker.capture(
             sessionID: "legacy-thread",
