@@ -181,10 +181,10 @@ extension NiruxShellView {
         let (action, entry, raised) = prFollowUpCenter.file.update { store in
             var action = PRFollowUp.Action.none
             var raised = false
-            // Following by default, never turned on by hand: the space follows
-            // from the first pass, and so do its pull requests first seen later.
-            if store.spacesOnSince[workspace.profileID] == nil { store.spacesOnSince[workspace.profileID] = facts.now }
-            store.update(pullRequest.url, now: facts.now, since: store.spacesOnSince[workspace.profileID]) { entry in
+            // A space that never set the option follows since this launch,
+            // the first one of the follow-up.
+            store.noteLaunch(at: prFollowUpCenter.trackedSince)
+            store.update(pullRequest.url, now: facts.now, since: store.followedSince(space: workspace.profileID)) { entry in
                 if let last = entry.rounds.last, last.endedAt == nil {
                     if target.roundAgentLeft {
                         entry.endRound(at: facts.now)
@@ -227,7 +227,7 @@ extension NiruxShellView {
         } ?? ("no Claude with Nirux's hooks in the checkout", false)
         return PRFollowUp.Facts(
             pullRequest: pullRequest, feedback: workspace.prFeedback,
-            followedSince: center.file.value.spacesOnSince[workspace.profileID], feedbackReadAt: center.feedbackReadAt[workspace.id],
+            followedSince: center.file.value.followedSince(space: workspace.profileID), feedbackReadAt: center.feedbackReadAt[workspace.id],
             triage: followUpTriage(of: workspace, pullRequest: pullRequest), redSince: center.redSince[workspace.id]?.since,
             localHead: workspace.gitContext?.identity.head, baseRemote: followUpBaseRemote(of: workspace, pullRequest: pullRequest),
             hasTrackedChanges: nil, isInMergeQueue: mergeQueueHolds(pullRequest), readAt: center.readAt[workspace.id],
@@ -336,7 +336,7 @@ extension NiruxShellView {
         guard let pullRequest = workspace.prInfo, pullRequest.state.uppercased() == "OPEN" else { return }
         let signature = PRFollowUp.failureSignature(pullRequest)
         prFollowUpCenter.file.update { store in
-            store.update(pullRequest.url, now: Date().timeIntervalSince1970, since: store.spacesOnSince[workspace.profileID]) { entry in
+            store.update(pullRequest.url, now: Date().timeIntervalSince1970, since: store.followedSince(space: workspace.profileID)) { entry in
                 entry.handedFeedback += feedback.filter { !entry.handedFeedback.contains($0) }
                 if failure, !signature.isEmpty, !entry.userFailures.contains(signature) { entry.userFailures.append(signature) }
             }

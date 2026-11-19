@@ -17,7 +17,7 @@ A space's settings are in the Settings window (`Cmd+,`), under Nirux's own: the 
 | Pane | What it sets |
 | --- | --- |
 | General | name, color, repositories and folders, the default one, each repository's setup script |
-| Defaults | the agent new tasks preselect, the Claude Code and Codex modes, environment variables for new shells |
+| Defaults | the agent new tasks preselect, the Claude Code and Codex modes, the pull request follow-up (on by default), environment variables for new shells |
 | Safety | what the space's Claude Code sessions are refused or trusted with ([below](#safety)) |
 | Lead | the space's [Lead](#the-lead) |
 | Brief | rules given to every Claude Code and Codex session the space starts |

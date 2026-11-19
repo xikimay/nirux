@@ -21,8 +21,11 @@ Space Settings › Defaults, "Follow up on pull requests", per space, **on by
 default** (the user's call, 2026-11-19): `prFollowUp` nil is on, only an
 explicit false turns it off (the switch writes false, and nothing for on).
 A value this build can't read counts as off, like the Lead's switches. A
-space that follows by default starts from the first time Nirux runs the
-decision for one of its tasks.
+space that never set it counts as turned on at the first launch of the
+follow-up (`firstLaunchAt`, kept in `pr-follow-up.json`), as switching it
+on would: feedback from before is cut, so an upgrade doesn't sweep in old
+feedback across every task; failed checks still red stay eligible, one round
+at a time across tasks.
 
 ## Which agent
 

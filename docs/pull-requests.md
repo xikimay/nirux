@@ -45,7 +45,7 @@ The selected row shows the counts, people and bots apart. A click on them lists 
 
 ## Automatic follow-up
 
-With **Space Settings › Defaults › Follow up on pull requests** on (the default: only turning it off in a space stops it), Nirux keeps the pull requests of the space's tasks mergeable while their Claude Code sits idle. It types the prompt each one needs, in this order:
+**Space Settings › Defaults › Follow up on pull requests** is on by default; only turning it off in a space stops it. When a space first follows (the first launch of a build that has it, or switching it on), feedback from before is left to you; checks still red count. While it's on, Nirux keeps the pull requests of the space's tasks mergeable while their Claude Code sits idle. It types the prompt each one needs, in this order:
 
 - a conflict with the base: merge `<remote>/<base>`, resolve the conflicts, run the checks, push. Never a rebase.
 - a failed check (FAILURE or TIMED_OUT in the pull request's own Actions runs, not a likely flake), 2 minutes after it failed: find why, fix it, push, or say the branch didn't cause it.

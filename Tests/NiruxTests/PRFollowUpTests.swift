@@ -375,6 +375,32 @@ final class PRFollowUpTests: XCTestCase {
         XCTAssertEqual(PRFollowUpStore.load(from: folder.appendingPathComponent("missing.json")), PRFollowUpStore())
     }
 
+    /// A space that never set the option counts as turned on at the first
+    /// launch of the follow-up: an upgrade cuts old feedback, not the checks
+    /// still red.
+    func testTheFirstLaunchTurnsOnASpaceThatNeverSetIt() throws {
+        var store = PRFollowUpStore()
+        store.noteLaunch(at: now - 600)
+        store.noteLaunch(at: now)
+        XCTAssertEqual(store.firstLaunchAt, now - 600, "the first launch only")
+        XCTAssertEqual(store.followedSince(space: "never-set"), now - 600)
+        store.spacesOnSince["switched-on"] = now - 60
+        XCTAssertEqual(store.followedSince(space: "switched-on"), now - 60)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        store.save(to: folder.appendingPathComponent("pr-follow-up.json"))
+        XCTAssertEqual(PRFollowUpStore.load(from: folder.appendingPathComponent("pr-follow-up.json")).firstLaunchAt, now - 600)
+
+        let before = item("before", age: 900)
+        let after = item("after", age: 400)
+        var upgraded = facts(pullRequest(), feedback: [before, after])
+        upgraded.followedSince = store.followedSince(space: "never-set")
+        XCTAssertEqual(try XCTUnwrap(typed(next(upgraded))).round.items, [after.url])
+        var red = facts(pullRequest(rollup: self.red), feedback: [before])
+        red.followedSince = store.followedSince(space: "never-set")
+        XCTAssertEqual(try XCTUnwrap(typed(next(red))).round.kind, .ci, "a check still red stays eligible")
+    }
+
     /// Another build's file is read on the side of typing less: an
     /// unknown round still counts, a missing start is the last change.
     func testTheStoreReadsWhatItCan() throws {

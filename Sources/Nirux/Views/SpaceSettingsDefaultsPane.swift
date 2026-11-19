@@ -312,7 +312,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         let followUpHint = Self.hint(
             "When a task’s Claude sits idle, Nirux asks it to fix what keeps its pull request from merging: a conflict "
                 + "with the base, a failed check that isn’t a likely flake, new review feedback. Three rounds per pull "
-                + "request, then it’s yours. It spends your Claude usage on its own."
+                + "request, then it’s yours. On by default; it spends your Claude usage on its own."
         )
         followUpHint.preferredMaxLayoutWidth = Self.contentWidth - 60
         followUpSwitch.setAccessibilityHelp(followUpHint.stringValue)

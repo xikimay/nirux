@@ -110,8 +110,11 @@ final class SpaceDefaultsTests: XCTestCase {
     func testTheFollowUpIsOnUnlessTurnedOff() throws {
         let store = try store()
         XCTAssertTrue(store.load().defaults.followsUpPullRequests)
+        XCTAssertTrue(SpaceDefaults(prFollowUp: nil).followsUpPullRequests)
+        XCTAssertTrue(SpaceDefaults(prFollowUp: true).followsUpPullRequests)
         let saved = try store.save(SpaceDefaults(prFollowUp: false), replacing: store.load()).get()
         XCTAssertFalse(saved.defaults.followsUpPullRequests)
+        XCTAssertFalse(store.load().defaults.followsUpPullRequests, "read back: only false turns it off")
         XCTAssertTrue(try String(contentsOf: store.fileURL, encoding: .utf8).contains("\"prFollowUp\" : false"))
         try Data(#"{"prFollowUp": "yes"}"#.utf8).write(to: store.fileURL)
         let unreadable = store.load()

@@ -8,6 +8,21 @@ struct PRFollowUpStore: Codable, Equatable {
     /// By space: when its follow-up was turned on, where a pull request
     /// first seen since starts (`Entry.since`).
     var spacesOnSince: [String: TimeInterval] = [:]
+    /// When this build's follow-up first ran: a space that never set the
+    /// option counts as turned on then, so an upgrade doesn't sweep in
+    /// every task's old feedback.
+    var firstLaunchAt: TimeInterval?
+
+    /// Where a space's follow-up starts: when it was turned on, else the
+    /// first launch.
+    func followedSince(space: String) -> TimeInterval? {
+        spacesOnSince[space] ?? firstLaunchAt
+    }
+
+    /// Keeps `time` as the first launch, unless one is kept already.
+    mutating func noteLaunch(at time: TimeInterval) {
+        if firstLaunchAt == nil { firstLaunchAt = time }
+    }
 
     /// An entry nothing changed for this long goes at the next change,
     /// unless it holds a stop: its pull request merged or closed while no
@@ -56,6 +71,7 @@ struct PRFollowUpStore: Codable, Equatable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         pullRequests = values.lenient(.pullRequests, [String: LenientValue<PRFollowUp.Entry>]()).compactMapValues(\.value)
         spacesOnSince = values.lenient(.spacesOnSince, [:])
+        firstLaunchAt = values.lenient(.firstLaunchAt, nil)
     }
 
     init() {}
