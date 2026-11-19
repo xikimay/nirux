@@ -199,6 +199,7 @@ extension NiruxShellView {
     /// come back at every turn end. Runs with the Mission messages (a turn
     /// end, a Mission event) and after a decision.
     func typeRuleDecisions(isFree: RuleDecisionPromptCheck? = nil, send: RuleDecisionSend? = nil) {
+        guard hooksReadBeforeTyping() else { return }
         var snapshot: ProcessSnapshot?
         for lead in workspaces where lead.isLead && !lead.isClosing {
             guard let decision = ruleProposals(inSpace: lead.profileID).toTell.first else { continue }
