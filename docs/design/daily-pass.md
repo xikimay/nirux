@@ -23,7 +23,7 @@ The facts come from Nirux, not from the Lead's memory, which idle compaction tri
   - `text` is one line of 300 characters at most;
   - 20 findings at most per review.
 - **Which tasks:** any task of the space, the user's included (#613's reach). A workspace that isn't a task is refused, as `set_task_context` refuses it.
-- **Rounds:** each record is the next round of its task. A task is known by its workspace, so it stays one task before and after its branch is read and its pull request opens.
+- **Rounds:** each record is the next round of its task. A task is known by its workspace and branch, so it stays one task when its pull request opens, and a second branch in the same worktree is another task. A kind names each task by its latest handle (its pull request once it has one).
 - **Answer when nothing is written:** the log is full, or it can't be written.
 - **The answer** lists the space's other kinds, so the Lead reuses them. When a kind now shows up in a second task, it says so: that is `propose_rule`'s trigger, made visible at once.
 - **Stored** in `<state dir>/projects/<space id>/review-findings.jsonl` (0600, kept 30 days, 2 MB at most). It shares its file handling with `loop.jsonl` (SpaceLog) and is deleted with the space.
@@ -49,16 +49,16 @@ What happened since the last pass, at most 40,000 characters (Claude Code saves 
    - **held:** typed an hour or more after they were sent, or still waiting;
    - **given up;**
    - **crossed:** a tell typed after the task's result, or an answer typed after a newer question;
-   - **held answers:** a question answered an hour or more late, never typed (Nirux types one for an hour only);
+   - **held answers:** a question to the Lead answered an hour or more late, never typed (Nirux types one for an hour only; another parent may have read it with `receive`);
    - **the user's answers:** questions handed to the user (with the reason and the answer, the user's or the Lead's), and questions the user answered in Nirux without being asked.
 
-   Mission messages belong to the space through its workspaces, and those its session history names (closed since). Lines that look like a secret are withheld, as `read_task` withholds them.
+   Mission messages belong to the space through its workspaces, and those its session history names (closed since), unless they are open in another space now. Lines that look like a secret are withheld, as `read_task` withholds them.
 5. **Rules:**
    - the rules decided since the last pass;
    - the rules waiting;
    - the brief's "Rules learned" as sessions read them now (the Lead's copy dates from its start);
    - the rules dismissed in the last 90 days.
-6. **What GitHub didn't say:** a failed read counts as news. The window then isn't marked read, so the next pass reads it again, unless trying again can't help (no gh).
+6. **What GitHub didn't say**, shown even on a day with nothing else. It isn't news on its own: a signed-out gh would make every day one. Only a gh that didn't answer in time leaves the window to read again; what gh said (signed out, no access) holds until someone acts.
 
    The store compares wording; the Lead compares meaning.
 

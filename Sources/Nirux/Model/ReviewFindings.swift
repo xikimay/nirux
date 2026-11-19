@@ -20,10 +20,10 @@ enum ReviewFindings {
 
     struct Entry: Codable, Equatable, Sendable {
         var time: TimeInterval
-        /// The task's workspace: what tells one task's reviews from
-        /// another's, whatever its branch or pull request become.
+        /// The task's workspace and branch (else its folder or title) tell
+        /// one task from another, whatever pull request it opens: a second
+        /// branch in the same worktree is another task.
         var workspace: String
-        /// Its branch, else its folder or title.
         var task: String
         var pullRequest: Int?
         /// The Nth review recorded for this task.
@@ -32,6 +32,8 @@ enum ReviewFindings {
 
         /// How the daily pass names it: its pull request, else the task.
         var handle: String { pullRequest.map { "#\($0)" } ?? task }
+
+        func isSameTask(as other: Entry) -> Bool { workspace == other.workspace && task == other.task }
 
         enum CodingKeys: String, CodingKey { case time = "t", workspace, task, pullRequest = "pr", round, findings }
     }
@@ -89,7 +91,8 @@ enum ReviewFindings {
 
     /// A finding as a kind lists it.
     struct Sighting: Equatable, Sendable {
-        let workspace: String
+        /// Its task's workspace and branch.
+        let identity: String
         let handle: String
         let round: Int
         let time: TimeInterval
@@ -101,13 +104,15 @@ enum ReviewFindings {
         /// Oldest first.
         let sightings: [Sighting]
 
-        /// The tasks it showed up in, by handle, each once, in order.
+        /// The tasks it showed up in, each once, in order, by its latest
+        /// handle (its pull request once it has one).
         var handles: [String] {
+            let latest = Dictionary(sightings.map { ($0.identity, $0.handle) }, uniquingKeysWith: { _, last in last })
             var seen = Set<String>()
-            return sightings.filter { seen.insert($0.workspace).inserted }.map(\.handle)
+            return sightings.filter { seen.insert($0.identity).inserted }.compactMap { latest[$0.identity] }
         }
 
-        var taskCount: Int { Set(sightings.map(\.workspace)).count }
+        var taskCount: Int { Set(sightings.map(\.identity)).count }
     }
 
     /// Every kind of `entries`: the ones seen in the most tasks first, then
@@ -117,7 +122,8 @@ enum ReviewFindings {
         for entry in entries.sorted(by: { $0.time < $1.time }) {
             for finding in entry.findings {
                 sightings[finding.kind, default: []].append(Sighting(
-                    workspace: entry.workspace, handle: entry.handle, round: entry.round, time: entry.time, text: finding.text
+                    identity: entry.workspace + "\n" + entry.task, handle: entry.handle, round: entry.round, time: entry.time,
+                    text: finding.text
                 ))
             }
         }
@@ -165,10 +171,10 @@ enum ReviewFindings {
             return .notRecorded("The space’s review log is full: it frees up as reviews pass 30 days.")
         }
         let earlier = lines.load(spaceID: spaceID, stateDirectory: stateDirectory)
-        let entry = Entry(
-            time: now, workspace: review.workspace, task: review.task, pullRequest: review.pullRequest,
-            round: earlier.filter { $0.workspace == review.workspace }.count + 1, findings: review.findings
+        var entry = Entry(
+            time: now, workspace: review.workspace, task: review.task, pullRequest: review.pullRequest, round: 1, findings: review.findings
         )
+        entry.round = earlier.filter { $0.isSameTask(as: entry) }.count + 1
         guard lines.append(entry, spaceID: spaceID, stateDirectory: stateDirectory) else {
             return .notRecorded("Nirux couldn’t write the space’s review log.")
         }

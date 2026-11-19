@@ -73,16 +73,17 @@ enum DailyPass {
 
     struct ReadFailure: Error, Equatable {
         let message: String
-        /// False when trying again won't help (no gh).
-        var retryable = true
+        /// gh didn't answer in time: it may next time. Anything it said
+        /// (signed out, no access) holds until someone acts.
+        var retryable = false
     }
 
     typealias GitHubRead = @Sendable (_ arguments: [String]) -> Result<Data, ReadFailure>
 
     static let installedGitHub: GitHubRead = { arguments in
-        guard let ghPath = PRDetect.installedGHPath() else { return .failure(ReadFailure(message: "gh isn’t installed", retryable: false)) }
+        guard let ghPath = PRDetect.installedGHPath() else { return .failure(ReadFailure(message: "gh isn’t installed")) }
         guard let result = GitHubCLIBoardClient.runGH(ghPath, arguments: arguments, timeout: 30, maxStandardOutputBytes: 8_000_000) else {
-            return .failure(ReadFailure(message: "gh didn’t answer within 30 s"))
+            return .failure(ReadFailure(message: "gh didn’t answer within 30 s", retryable: true))
         }
         guard result.terminationStatus == 0 else {
             let message = WorktreeCleanup.firstLine(String(decoding: result.standardError, as: UTF8.self))
@@ -323,8 +324,9 @@ enum DailyPass {
                     facts.append(fact(.held, message, "typed into its parent \(duration(typed - event.timestamp)) later"))
                 }
             } else if event.handedToUserBecause == nil {
-                // Never typed: Nirux types one for an hour only.
-                if let answer, answer.answeredByUser != true {
+                // Never typed into the Lead: Nirux types one for an hour only.
+                // Another parent may have read it with `receive`.
+                if let answer, answer.answeredByUser != true, mission.reportsToLead == true {
                     if window.contains(answer.timestamp), answer.timestamp - event.timestamp >= heldAfter {
                         let waited = duration(answer.timestamp - event.timestamp)
                         facts.append(fact(.held, message, "answered \(waited) later, never typed into its parent"))
@@ -371,10 +373,11 @@ enum DailyPass {
         /// The brief's "Rules learned", as sessions read them now.
         var briefRules: [String]
 
-        /// Anything for the pass to read, or something GitHub didn't say.
+        /// Anything for the pass to read. What GitHub didn't say isn't: a
+        /// signed-out gh would make every day one.
         var hasNews: Bool {
             findings.contains { window.contains($0.time) }
-                || repositories.contains { !$0.merged.isEmpty || !$0.reruns.isEmpty || !$0.problems.isEmpty }
+                || repositories.contains { !$0.merged.isEmpty || !$0.reruns.isEmpty }
                 || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }
         }
@@ -389,8 +392,10 @@ enum DailyPass {
         let since = clock(facts.window.start, timeZone: timeZone)
         let header = "# Daily pass · \(facts.spaceName) · since \(since)"
         guard facts.hasNews else {
-            return header + "\n\nNothing happened since \(since): no review recorded, no pull request merged, no CI failure, "
+            let merged = facts.repositories.contains { !$0.problems.isEmpty } ? "" : "no pull request merged, "
+            let quiet = header + "\n\nNothing happened since \(since): no review recorded, \(merged)no CI failure, "
                 + "no Mission message held, no rule decided. Nothing to propose: say so in one line."
+            return ([quiet] + [gitHubSection(facts)].compactMap { $0 }).joined(separator: "\n\n")
         }
         // The rules before the facts: a cut takes the end.
         let sections = [

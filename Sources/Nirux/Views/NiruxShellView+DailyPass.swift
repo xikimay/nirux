@@ -34,9 +34,11 @@ extension NiruxShellView {
     func leadDailyPass(in space: WorkspaceProfile, lead: WorkspaceState, answer: @escaping LeadAnswer) {
         guard let briefURL = SpaceBrief.briefURL(spaceID: space.id) else { return answer("This space keeps no daily pass.", true) }
         let (window, next) = DailyPassState.load(spaceID: space.id).reading(now: Date().timeIntervalSince1970)
-        // Its workspaces closed since, by the sessions they held, too.
-        let members = Set(workspaces.filter { $0.profileID == space.id }.map(\.id))
-            .union(sessionLedger.sessions(inSpace: space.id).map(\.workspaceID))
+        // Its workspaces closed since, by the sessions they held, too; not
+        // one open in another space now.
+        let open = workspaces.filter { $0.profileID == space.id }.map(\.id)
+        let elsewhere = Set(workspaces.filter { $0.profileID != space.id }.map(\.id))
+        let members = Set(open).union(sessionLedger.sessions(inSpace: space.id).compactMap(\.workspaceID).filter { !elsewhere.contains($0) })
         _ = MissionStore.shared.ensureLoaded()
         let missions = MissionStore.shared.missions.filter { mission in
             mission.parentWorkspaceID == lead.id || members.contains(mission.childWorkspaceID) || members.contains(mission.parentWorkspaceID)

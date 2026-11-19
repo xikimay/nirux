@@ -49,24 +49,29 @@ final class ReviewFindingsTests: XCTestCase {
     }
 
     /// Each review of a task is its next round, and one task, before and
-    /// after its branch is known and its pull request opens; a kind another
-    /// task had is said so, with both handles, the most seen kind first.
-    /// Reviews past 30 days count for neither.
+    /// after its pull request opens (named by its pull request then); a
+    /// second branch in the same worktree is another task. A kind another
+    /// task had is said so, the most seen kind first. Reviews past 30 days
+    /// count for neither.
     func testRoundsAndKindsSeenInASecondTask() throws {
-        _ = record(["old-kind", "layer"], workspace: "W-old", task: "feat/old", pullRequest: 1, at: now - 31 * day)
-        guard case .recorded(let first, _) = record(["layer"], workspace: "W-A", task: "Add A", pullRequest: nil, at: now - 2 * day),
-              case .recorded(let second, _) = record(["timer", "layer"], workspace: "W-A", task: "feat/a", pullRequest: 10, at: now - day),
-              case .recorded(let other, let kinds) = record(["layer", "new"], workspace: "W-B", task: "feat/b", pullRequest: nil, at: now)
+        _ = record(["old-kind", "layer"], workspace: "W-old", task: "feat/old", pullRequest: 1, at: now - 33 * day)
+        guard case .recorded(let first, _) = record(["layer"], workspace: "W-A", task: "feat/a", pullRequest: nil, at: now - 3 * day),
+              case .recorded(let second, _) = record(["timer", "layer"], workspace: "W-A", task: "feat/a", pullRequest: 10, at: now - 2 * day),
+              case .recorded(let other, let kinds) = record(["layer", "new"], workspace: "W-B", task: "feat/b", pullRequest: nil, at: now - day)
         else { return XCTFail("not recorded") }
         XCTAssertEqual([first.round, second.round, other.round], [1, 2, 1])
         XCTAssertEqual(kinds.map(\.name).first, "layer")
-        XCTAssertEqual(kinds.first?.handles, ["Add A", "feat/b"])
-        XCTAssertEqual(kinds.first?.taskCount, 2, "one task, whatever its branch or pull request")
+        XCTAssertEqual(kinds.first?.handles, ["#10", "feat/b"])
+        XCTAssertEqual(kinds.first?.taskCount, 2, "one task, whatever its pull request")
         XCTAssertFalse(kinds.contains { $0.name == "old-kind" })
 
         let answer = ReviewFindings.answer(for: other, title: "B", kinds: kinds)
         XCTAssertTrue(answer.hasPrefix("Recorded round 1 of “B”: 2 findings."), answer)
-        XCTAssertTrue(answer.contains("Seen in another task too: layer (Add A, feat/b)."), answer)
+        XCTAssertTrue(answer.contains("Seen in another task too: layer (#10, feat/b)."), answer)
+        guard case .recorded(let next, let later) = record(["layer"], workspace: "W-A", task: "feat/c", pullRequest: 11, at: now)
+        else { return XCTFail("not recorded") }
+        XCTAssertEqual(next.round, 1, "a new branch in the same worktree")
+        XCTAssertEqual(later.first?.taskCount, 3)
         XCTAssertFalse(answer.contains("new ("), answer)
         XCTAssertTrue(answer.contains("Other kinds this space used in the last 30 days: timer."), answer)
         let url = try XCTUnwrap(ReviewFindings.lines.fileURL(spaceID: "S1", stateDirectory: state))

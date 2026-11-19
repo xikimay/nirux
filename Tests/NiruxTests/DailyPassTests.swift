@@ -44,7 +44,8 @@ final class DailyPassTests: XCTestCase {
     /// Each repository read with its own calls, in the order given; what
     /// merged or was rerun outside the window stays out (a run counts by
     /// its last attempt's start); what gh couldn't answer is said, and read
-    /// again unless trying again can't help; a list at gh's limit says so.
+    /// again only when gh didn't answer in time; a list at gh's limit says
+    /// so.
     func testEachRepositoryIsReadAndItsProblemsSaid() {
         let pulls = Data("""
             [{"number": 3, "title": "After", "headRefName": "c", "mergedAt": "2027-01-15T09:00:00Z"},
@@ -58,8 +59,8 @@ final class DailyPassTests: XCTestCase {
         let many = Data(("[" + (1...DailyPass.mergedLimit).map { "{\"number\": \($0), \"title\": \"t\", \"mergedAt\": \"2027-01-15T07:00:00Z\"}" }
             .joined(separator: ",") + "]").utf8)
         let reports = DailyPass.readGitHub(["acme/one", "acme/two", "acme/three", "acme/busy"], window: window) { arguments in
-            if arguments.contains("acme/two") { return .failure(DailyPass.ReadFailure(message: "HTTP 502")) }
-            if arguments.contains("acme/three") { return .failure(DailyPass.ReadFailure(message: "gh isn’t installed", retryable: false)) }
+            if arguments.contains("acme/two") { return .failure(DailyPass.ReadFailure(message: "gh didn’t answer", retryable: true)) }
+            if arguments.contains("acme/three") { return .failure(DailyPass.ReadFailure(message: "not signed in")) }
             if arguments.contains("acme/busy") { return .success(arguments.first == "pr" ? many : Data("[]".utf8)) }
             return .success(arguments.first == "pr" ? pulls : runs)
         }
@@ -67,7 +68,7 @@ final class DailyPassTests: XCTestCase {
         XCTAssertEqual(reports[0].merged.map(\.number), [2])
         XCTAssertEqual(reports[0].reruns.map(\.id), [7])
         XCTAssertEqual(reports[0].problems, [])
-        XCTAssertEqual(reports[1].problems, ["merged pull requests: HTTP 502", "workflow runs: HTTP 502"])
+        XCTAssertEqual(reports[1].problems, ["merged pull requests: gh didn’t answer", "workflow runs: gh didn’t answer"])
         XCTAssertEqual(reports.map(\.readsAgain), [false, true, false, false])
         XCTAssertEqual(reports[3].problems, ["only the \(DailyPass.mergedLimit) newest merged pull requests were read"])
     }
@@ -115,8 +116,12 @@ final class DailyPassTests: XCTestCase {
         var answer = event(.response, "main", at: now - 7 * hour, inReplyTo: "q1")
         answer.childConsumedAt = now - 7 * hour
 
+        // A sub-task's parent may have read it with `receive`: nothing typed proves nothing.
+        var subtask = mission([event(.question, "Read?", at: now - 6 * hour, id: "s1"), event(.response, "Yes", at: now - 3 * hour, inReplyTo: "s1")])
+        subtask.reportsToLead = nil
+        subtask.reportsToTask = true
         let facts = DailyPass.missionFacts(
-            [mission([lateTell, quickTell, lostTell, oldTell, crossingTell, result, waiting, lateQuestion, newer, answer, late, lateAnswer])],
+            [mission([lateTell, quickTell, lostTell, oldTell, crossingTell, result, waiting, lateQuestion, newer, answer, late, lateAnswer]), subtask],
             window: window, timeZone: utc
         )
         let summary = facts.map { "\($0.kind.rawValue) \($0.message) \($0.excerpt): \($0.detail)" }
@@ -249,8 +254,9 @@ final class DailyPassTests: XCTestCase {
         XCTAssertTrue(DailyPass.digest(full, timeZone: utc).contains("Propose no rule now: 3 already wait for the user."))
     }
 
-    /// A day with nothing to read says so, unless GitHub couldn't say:
-    /// that window is read again; a huge day is cut.
+    /// A day with nothing to read says so, and what GitHub didn't say
+    /// (which is no news: a signed-out gh would make every day one); a
+    /// huge day is cut.
     func testANothingDayAndAHugeOne() {
         var quiet = facts()
         quiet.findings = quiet.findings.filter { !window.contains($0.time) }
@@ -258,11 +264,12 @@ final class DailyPassTests: XCTestCase {
         XCTAssertFalse(quiet.hasNews)
         XCTAssertTrue(DailyPass.digest(quiet, timeZone: utc).contains("Nothing happened since 01-14 08:00"))
         var unread = quiet
-        unread.repositories = [DailyPass.RepositoryReport(name: "acme/one", problems: ["merged pull requests: HTTP 502"], readsAgain: true)]
-        XCTAssertTrue(unread.hasNews && unread.readsAgain)
-        XCTAssertTrue(DailyPass.digest(unread, timeZone: utc).contains(
-            "## What GitHub didn’t say\n- acme/one: merged pull requests: HTTP 502\nThe next pass reads this window again."
-        ))
+        unread.repositories = [DailyPass.RepositoryReport(name: "acme/one", problems: ["merged pull requests: timed out"], readsAgain: true)]
+        XCTAssertFalse(unread.hasNews)
+        XCTAssertTrue(unread.readsAgain)
+        let said = DailyPass.digest(unread, timeZone: utc)
+        XCTAssertTrue(said.contains("Nothing happened since 01-14 08:00: no review recorded, no CI failure,"), said)
+        XCTAssertTrue(said.contains("## What GitHub didn’t say\n- acme/one: merged pull requests: timed out\nThe next pass reads this window again."), said)
         quiet.proposals.append(proposal("Added today.", addedAt: now - hour))
         XCTAssertTrue(quiet.hasNews, "a rule decided is news")
 
