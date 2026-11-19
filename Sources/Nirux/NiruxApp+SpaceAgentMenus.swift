@@ -74,8 +74,8 @@ extension NiruxApp {
 
     // MARK: Agent
 
-    @objc func newAgent(_ sender: NSMenuItem) {
-        guard let agent = sender.representedObject as? CodingAgent else { return }
+    @objc func newAgent(_ sender: Any?) {
+        guard let agent = (sender as? NSMenuItem)?.representedObject as? CodingAgent else { return }
         shell?.openAgent(agent)
     }
 
