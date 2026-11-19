@@ -402,6 +402,44 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(refusal(machine), .dialog)
     }
 
+    /// A `claude` that took no prompt since it started, as one resumed at a
+    /// relaunch, is free once its REPL says it sits idle at its prompt, while
+    /// nothing works or waits there and no key reached it since it started;
+    /// without that word, never.
+    func testAClaudeThatTookNoPromptIsFreeOnlyOnItsREPLsWord() {
+        let resumed = ProcessInstance(pid: 7, startedAt: t0 + 6)
+        func refusal(_ machine: AgentStatusMachine, idle: Bool = true) -> AgentPromptRefusal? {
+            machine.promptRefusal(foreground: claude(resumed), runningSince: t0 + 100) { $0 == resumed && idle }
+        }
+        // The prompt and the turn were an earlier claude's.
+        let machine = idleMachine()
+        XCTAssertEqual(refusal(machine, idle: false), .noPromptYet)
+        XCTAssertNil(refusal(machine))
+
+        var typed = machine
+        typed.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 7), keys: Data("x".utf8))
+        XCTAssertEqual(refusal(typed), .noPromptYet, "a key since it started")
+        var recalled = machine
+        recalled.notePromptRecall(now: Date(timeIntervalSince1970: t0 + 7))
+        XCTAssertEqual(refusal(recalled), .noPromptYet, "an old prompt a wheel scroll recalled")
+        // A background agent it resumed works, then asks.
+        var working = machine
+        _ = working.apply(hook(.preToolUse, at: 8, tool: "Bash"), isUserFocused: false)
+        XCTAssertEqual(refusal(working), .noPromptYet)
+        var asking = machine
+        _ = asking.apply(AgentHookEvent(
+            kind: .claude, name: .permissionRequest, sessionID: "lead", toolName: "Bash", toolKey: "s", agentID: "sub",
+            timestamp: t0 + 8
+        ), isUserFocused: false)
+        _ = asking.apply(hook(.stop, at: 9), isUserFocused: false)
+        XCTAssertEqual(refusal(asking), .noPromptYet, "its dialog outlives the turn")
+        var failed = machine
+        _ = failed.apply(AgentHookEvent(
+            kind: .claude, name: .stopFailure, sessionID: "lead", errorKind: "rate_limit", timestamp: t0 + 8
+        ), isUserFocused: false)
+        XCTAssertEqual(refusal(failed), .noPromptYet, "a usage limit would fail what it is sent")
+    }
+
     /// A dialog takes the keys while it waits for one, a paste too: none is a
     /// draft at the prompt, nor becomes one when it closes, and once its turn
     /// is over a message goes in. A question waits until its submit; an

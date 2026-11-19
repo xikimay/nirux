@@ -285,12 +285,34 @@ final class ProcessSnapshot {
 
     /// Read up to maxArgs arguments from KERN_PROCARGS2
     static func arguments(of pid: pid_t, maxArgs: Int) -> [String] {
+        guard let (argc, strings) = argumentArea(of: pid) else { return [] }
+        return Array(CStrings(rest: strings).prefix(max(0, min(argc, maxArgs))).prefix { !$0.isEmpty })
+    }
+
+    /// The environment `pid` started with, from KERN_PROCARGS2: what it
+    /// changed since doesn't show. Empty when it can't be read, as for a
+    /// macOS binary read by one that isn't.
+    static func environment(of pid: pid_t) -> [String: String] {
+        argumentArea(of: pid).map { environment(argc: $0.argc, strings: $0.strings) } ?? [:]
+    }
+
+    /// The environment in KERN_PROCARGS2's strings, past `argc` arguments.
+    static func environment(argc: Int, strings: ArraySlice<UInt8>) -> [String: String] {
+        let entries = CStrings(rest: strings).dropFirst(max(0, argc)).prefix { !$0.isEmpty }
+        return Dictionary(entries.compactMap { entry in
+            entry.firstIndex(of: "=").map { (String(entry[..<$0]), String(entry[entry.index(after: $0)...])) }
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// KERN_PROCARGS2 of `pid`: its argc, and the strings past its exec path,
+    /// its arguments then its environment; nil when it can't be read.
+    private static func argumentArea(of pid: pid_t) -> (argc: Int, strings: ArraySlice<UInt8>)? {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var size: Int = 0
-        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return [] }
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return nil }
         var buf = [UInt8](repeating: 0, count: size)
-        guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0 else { return [] }
-        guard size > MemoryLayout<Int32>.size else { return [] }
+        guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0 else { return nil }
+        guard size > MemoryLayout<Int32>.size else { return nil }
         let argc = buf.withUnsafeBufferPointer {
             $0.baseAddress!.withMemoryRebound(to: Int32.self, capacity: 1) { $0.pointee }
         }
@@ -298,18 +320,19 @@ final class ProcessSnapshot {
         var i = MemoryLayout<Int32>.size
         while i < size && buf[i] != 0 { i += 1 }
         while i < size && buf[i] == 0 { i += 1 }
-        // Read argv entries
-        var args: [String] = []
-        let limit = max(0, min(Int(argc), maxArgs))
-        for _ in 0..<limit {
-            guard i < size else { break }
-            var end = i
-            while end < size && buf[end] != 0 { end += 1 }
-            guard end > i else { break }
-            args.append(String(decoding: buf[i..<end], as: UTF8.self)) // swiftlint:disable:this optional_data_string_conversion
-            i = end + 1
+        return (Int(argc), buf[i..<size])
+    }
+
+    /// The NUL-terminated strings of a byte area, empty ones included, read
+    /// as they are asked for.
+    private struct CStrings: Sequence, IteratorProtocol {
+        var rest: ArraySlice<UInt8>
+
+        mutating func next() -> String? {
+            guard let end = rest.firstIndex(of: 0) else { return nil }
+            defer { rest = rest[(end + 1)...] }
+            return String(decoding: rest[..<end], as: UTF8.self) // swiftlint:disable:this optional_data_string_conversion
         }
-        return args
     }
 }
 
@@ -916,15 +939,28 @@ final class PtySession: @unchecked Sendable {
     /// When the last hook event came, of any command (0: none).
     var lastAgentHookAt: TimeInterval { state.machine.lastEventAt }
 
-    /// See `AgentStatusMachine.promptFacts`.
-    func missionPromptFacts(now: TimeInterval) -> String {
-        state.machine.promptFacts(now: now)
+    /// See `AgentStatusMachine.promptFacts`, and what the session record
+    /// of the `claude` in front says.
+    func missionPromptFacts(now: TimeInterval, snapshot: ProcessSnapshot) -> String {
+        let record = foregroundProcess(snapshot: snapshot).flatMap { AgentHookCenter.isInteractiveClaude($0) ? $0.instance : nil }
+            .map { " record=" + Self.sessionRecord(of: $0).facts(of: $0, now: now) }
+        return state.machine.promptFacts(now: now) + (record ?? "")
     }
 
     /// Why `acceptsMissionMessage` says no, nil when it says yes.
     func missionPromptRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> AgentPromptRefusal? {
         guard !hasExited else { return .noClaude }
-        return state.machine.promptRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince)
+        return state.machine.promptRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince) {
+            Self.sessionRecord(of: $0).showsIdlePrompt(of: $0, now: Date().timeIntervalSince1970)
+        }
+    }
+
+    /// The session record of `process`, a `claude`, in the config folder
+    /// its own environment names, else Nirux's, which its terminal inherits.
+    static func sessionRecord(of process: ProcessInstance) -> ClaudeSessionRecord.Reading {
+        let own = ProcessSnapshot.environment(of: process.pid)
+        let environment = own.isEmpty ? ProcessInfo.processInfo.environment : own
+        return ClaudeSessionRecord.read(at: ClaudeSessionRecord.url(pid: process.pid, environment: environment))
     }
 
     /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.

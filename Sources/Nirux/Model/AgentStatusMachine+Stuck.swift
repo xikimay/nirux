@@ -83,28 +83,51 @@ extension AgentStatusMachine {
 
     /// Whether a Mission message may be typed now, into an empty prompt of
     /// `foreground`: the column's interactive `claude`, already running at
-    /// `time`, that took a prompt since it started (Claude Code shows some
-    /// dialogs, such as trust or MCP servers, before any hook could list
-    /// them), whose turn is over and didn't fail (a usage limit would fail
+    /// `time`, whose turn is over and didn't fail (a usage limit would fail
     /// every message typed, one after the other), with no dialog listed and
     /// nothing typed since its last prompt went in (a draft, or text typed
     /// by Nirux that Claude has not submitted yet), and no turn end waiting
-    /// for its verdict (`awaitsAnyVerdict`).
-    func isPromptFree(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> Bool {
-        promptRefusal(foreground: foreground, runningSince: time) == nil
+    /// for its verdict (`awaitsAnyVerdict`). One that took no prompt since
+    /// it started also needs its REPL to say it sits idle at its prompt
+    /// (`showsIdlePrompt`, see `sitsAtFirstPrompt`).
+    func isPromptFree(
+        foreground: ForegroundProcess?, runningSince time: TimeInterval,
+        showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
+    ) -> Bool {
+        promptRefusal(foreground: foreground, runningSince: time, showsIdlePrompt: showsIdlePrompt) == nil
     }
 
     /// Why `isPromptFree` says no, nil when it says yes.
-    func promptRefusal(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> AgentPromptRefusal? {
+    func promptRefusal(
+        foreground: ForegroundProcess?, runningSince time: TimeInterval,
+        showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
+    ) -> AgentPromptRefusal? {
         guard let foreground, AgentHookCenter.isInteractiveClaude(foreground) else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
-        guard let lastPromptAt = prompt(since: foreground.instance.startedAt) else { return .noPromptYet }
+        guard let lastPromptAt = prompt(since: foreground.instance.startedAt) else {
+            return sitsAtFirstPrompt(foreground.instance, showsIdlePrompt: showsIdlePrompt) ? nil : .noPromptYet
+        }
         if hookWorking || turnStartedAt != nil { return .working }
         if !pendingDialogs.isEmpty { return .dialog }
         if turnFailure != nil { return .failedTurn }
         if lastDraftInputAt > lastPromptAt { return .draft }
         if awaitsAnyVerdict { return .verdict }
         return nil
+    }
+
+    /// Whether `process`, a `claude` that took no prompt since it started,
+    /// sits at its empty prompt. No hook tells: Claude Code may show screens
+    /// none reports, before its REPL mounts (trust, MCP servers) and after
+    /// (a resume's offer to resume from a summary, a quota warning, a newer
+    /// model, a startup offer), where typed text and Enter would pick an
+    /// option. So: nothing at work or listed, no key or recalled prompt
+    /// since it started (keys typed before its REPL mounts are seeded into
+    /// its prompt; others open its agents or transcript views), and, read
+    /// last, its REPL's own word (`showsIdlePrompt`, from
+    /// `ClaudeSessionRecord`).
+    private func sitsAtFirstPrompt(_ process: ProcessInstance, showsIdlePrompt: (ProcessInstance) -> Bool) -> Bool {
+        !hookWorking && turnStartedAt == nil && pendingDialogs.isEmpty && turnFailure == nil && !awaitsAnyVerdict
+            && max(lastInputAt, lastDraftInputAt) < process.startedAt && showsIdlePrompt(process)
     }
 
     /// What `promptRefusal` reads, for the log: ages in seconds and names,
@@ -127,8 +150,7 @@ extension AgentStatusMachine {
 
     /// When the last prompt went in, if one did since `startedAt`, the
     /// start of the `claude` in front (`/clear` counts): before one, it may
-    /// still show a screen no hook reports, a startup dialog or, once
-    /// resumed, an offer to resume from a summary.
+    /// still show a screen no hook reports (see `sitsAtFirstPrompt`).
     func prompt(since startedAt: TimeInterval) -> TimeInterval? {
         lastPromptAt.flatMap { $0 >= startedAt ? $0 : nil }
     }
@@ -149,7 +171,8 @@ enum AgentPromptRefusal: String, Equatable, Sendable {
     /// Its `claude` started after the message was sent, which goes only to
     /// the one that ran then.
     case restarted
-    /// Its `claude` took no prompt since it started.
+    /// Its `claude` took no prompt since it started, and doesn't say it
+    /// sits at its prompt (see `AgentStatusMachine.sitsAtFirstPrompt`).
     case noPromptYet
     case dialog
     case working

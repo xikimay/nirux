@@ -40,7 +40,8 @@ struct SidebarWaitingMessages: Hashable {
         )
         case .noPromptYet?: (
             "no prompt since it started",
-            "its Claude Code hasn't taken a prompt since it started; they go in after its first one"
+            "its Claude Code took no prompt since it started and doesn't say it sits at its prompt (a screen of its own may be up); "
+                + "they go in once it does, or after its first prompt"
         )
         case .dialog?: ("a dialog may be open", "a dialog may be open there; they go in once it closes and the turn ends")
         case .failedTurn?: ("its last turn failed", "its last turn failed; they go in after its next turn")
@@ -243,7 +244,7 @@ extension NiruxShellView {
                     "untyped mission message id=\(message.id.prefix(8)) kind=\(message.kind) "
                         + "agent=\(entry.column.agentUUID?.prefix(8) ?? "-") waited=\(waited)s reason=\(reason) messages=\(refused.count) "
                         + "fg=\(foreground.map { "\($0.name)/\(Int(max(now - $0.instance.startedAt, 0)))s" } ?? "-") "
-                        + (pty?.missionPromptFacts(now: now) ?? "")
+                        + (pty?.missionPromptFacts(now: now, snapshot: snapshot) ?? "")
                 )
             }
             let typable = refused.filter {
