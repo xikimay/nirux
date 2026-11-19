@@ -165,8 +165,8 @@ final class PermissionApprovalSidebarTests: XCTestCase {
 
         machine = AgentStatusMachine()
         holdRequest()
-        let prompt = machine.apply(event(.userPromptSubmit, at: 2, tool: nil), isUserFocused: false)
-        XCTAssertEqual(prompt.abandonedApprovals.count, 1)
+        let stop = machine.apply(event(.stop, at: 2, tool: nil), isUserFocused: false)
+        XCTAssertEqual(stop.abandonedApprovals.count, 1)
     }
 
     func testSentDecisionIsNotReleased() {

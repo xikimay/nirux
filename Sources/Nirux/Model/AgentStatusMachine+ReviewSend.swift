@@ -96,12 +96,14 @@ extension AgentStatusMachine {
         return nil
     }
 
-    /// Keys reached the column since its last prompt went in: a draft at
-    /// the prompt, typed during the turn or after, or a menu or picker no
-    /// hook tells of (`/resume`, `/model`, a search, Esc Esc's rewind,
-    /// Ctrl-O's transcript). Review comments would join them (the sheet
-    /// says so); a quick answer would too (`acceptsQuickAnswer` refuses).
+    /// Keys reached the column since its prompt box last emptied
+    /// (`boxEmptiedAt`): a draft at the prompt, typed during the turn or
+    /// after, or a menu or picker no hook tells of (`/resume`, `/model`, a
+    /// search, Esc Esc's rewind, Ctrl-O's transcript). Review comments would
+    /// join them (the sheet says so); a quick answer would too
+    /// (`acceptsQuickAnswer` refuses), a Mission message or Resume's
+    /// `continue` too.
     var hasDraft: Bool {
-        lastDraftInputAt > (lastPromptAt ?? 0)
+        lastDraftInputAt > (boxEmptiedAt ?? 0)
     }
 }

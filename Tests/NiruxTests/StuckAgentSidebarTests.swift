@@ -663,6 +663,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         ])
         XCTAssertTrue(waits(at: now + 50, in: codex).isEmpty)
 
+        pty.sendRaw(Data("\r".utf8))
         pty.applyAgentHook(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "s", timestamp: now + 40), isUserFocused: true)
         XCTAssertTrue(waits(at: now + 41).isEmpty, "its turn runs")
         // A turn at work holding a message says so too, past a stall's length.

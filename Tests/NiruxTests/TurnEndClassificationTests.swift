@@ -493,7 +493,7 @@ final class TurnEndClassificationTests: XCTestCase {
         func turn(keys: [(String, TimeInterval)], dialog: Bool = false, queued: Bool = false) throws -> TimeInterval {
             machine = AgentStatusMachine()
             _ = machine.apply(event(.sessionStart, at: 0, source: "startup"), isUserFocused: false)
-            machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 0.5), keys: Data("fix it".utf8))
+            machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 0.5), keys: Data("fix it\r".utf8))
             _ = machine.apply(event(.userPromptSubmit, at: 1), isUserFocused: false)
             if dialog { _ = machine.apply(event(.permissionRequest, at: 2, tool: "Bash"), isUserFocused: false) }
             for (key, offset) in keys { machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + offset), keys: Data(key.utf8)) }

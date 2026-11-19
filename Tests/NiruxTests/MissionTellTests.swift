@@ -364,6 +364,17 @@ final class MissionTellTests: XCTestCase {
         machine.promptRefusal(foreground: claude(), runningSince: t0 + 100)
     }
 
+    private func press(_ keys: String, at offset: TimeInterval, into machine: inout AgentStatusMachine) {
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + offset), keys: Data(keys.utf8))
+    }
+
+    private func subagentDialog(at offset: TimeInterval, agent: String = "sub") -> AgentHookEvent {
+        AgentHookEvent(
+            kind: .claude, name: .permissionRequest, sessionID: "lead", toolName: "Bash", toolKey: agent, agentID: agent,
+            timestamp: t0 + offset
+        )
+    }
+
     /// A Claude session that took its first prompt and finished the turn.
     private func idleMachine() -> AgentStatusMachine {
         var machine = AgentStatusMachine()
@@ -400,6 +411,59 @@ final class MissionTellTests: XCTestCase {
         ), isUserFocused: false)
         _ = machine.apply(hook(.stop, at: 12), isUserFocused: false)
         XCTAssertEqual(refusal(machine), .dialog)
+    }
+
+    /// A message Claude takes in by itself (a peer's, a task notification)
+    /// follows no key: a subagent's dialog stays listed through it, and no
+    /// message is typed into that dialog once the turn ends. A prompt typed
+    /// at the box closes the dialogs listed at its Enter (one denied with
+    /// Esc fires no hook), not one raised since.
+    func testOnlyAPromptTypedAtTheBoxClosesDialogs() {
+        var machine = idleMachine()
+        press("\r", at: 9.5, into: &machine)
+        _ = machine.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+        _ = machine.apply(subagentDialog(at: 11), isUserFocused: false)
+        _ = machine.apply(hook(.userPromptSubmit, at: 12), isUserFocused: false)
+        _ = machine.apply(hook(.stop, at: 13), isUserFocused: false)
+        XCTAssertEqual(refusal(machine), .dialog)
+
+        press("\u{1B}", at: 20, into: &machine)
+        press("go on\r", at: 21, into: &machine)
+        _ = machine.apply(subagentDialog(at: 21.5, agent: "other"), isUserFocused: false)
+        _ = machine.apply(hook(.userPromptSubmit, at: 22), isUserFocused: false)
+        XCTAssertEqual(machine.pendingDialogs.map(\.agentID), ["other"])
+    }
+
+    /// Keys typed during a turn stay in the box when Claude takes in a
+    /// message by itself: a draft no message joins, until the Enter of a
+    /// prompt typed there. A claude started with its prompt typed at the
+    /// shell took that prompt with no key: what the shell got is no draft,
+    /// what was typed into the claude since is.
+    func testAMessageClaudeTakesInLeavesTheDraft() {
+        var machine = idleMachine()
+        press("\r", at: 9.5, into: &machine)
+        _ = machine.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+        press("x", at: 11, into: &machine)
+        press("\u{1B}\r", at: 11.5, into: &machine) // Option-Enter adds a line
+        _ = machine.apply(hook(.userPromptSubmit, at: 12), isUserFocused: false)
+        _ = machine.apply(hook(.stop, at: 13), isUserFocused: false)
+        XCTAssertEqual(refusal(machine), .draft)
+        press("\r", at: 20, into: &machine)
+        _ = machine.apply(hook(.userPromptSubmit, at: 20.1), isUserFocused: false)
+        _ = machine.apply(hook(.stop, at: 21), isUserFocused: false)
+        XCTAssertNil(refusal(machine))
+
+        var launched = AgentStatusMachine()
+        press("claude \"Read .claude-handover.md\"\n", at: 0, into: &launched)
+        _ = launched.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 0.5))
+        _ = launched.apply(hook(.sessionStart, at: 1, source: "startup"), isUserFocused: false)
+        _ = launched.apply(hook(.userPromptSubmit, at: 2), isUserFocused: false)
+        _ = launched.apply(hook(.stop, at: 5), isUserFocused: false)
+        XCTAssertNil(refusal(launched))
+        press("y", at: 6, into: &launched)
+        _ = launched.apply(hook(.userPromptSubmit, at: 7), isUserFocused: false)
+        _ = launched.apply(hook(.stop, at: 8), isUserFocused: false)
+        XCTAssertEqual(refusal(launched), .draft)
     }
 
     /// A dialog takes the keys while it waits for one, a paste too: none is a
@@ -557,6 +621,14 @@ final class MissionTellTests: XCTestCase {
         XCTAssertFalse(machine.finishedTurn(afterTypingAt: typedAt), "working on it")
         _ = machine.apply(hook(.stop, at: 9), isUserFocused: false)
         XCTAssertTrue(machine.finishedTurn(afterTypingAt: typedAt))
+
+        // Left in the prompt, its Enter refused: a message Claude took in by
+        // itself since is not that one.
+        var left = idleMachine()
+        press("\u{1B}[200~Keep date=?\u{1B}[201~", at: 6, into: &left)
+        _ = left.apply(hook(.userPromptSubmit, at: 6.5), isUserFocused: false)
+        _ = left.apply(hook(.stop, at: 9), isUserFocused: false)
+        XCTAssertFalse(left.finishedTurn(afterTypingAt: typedAt))
     }
 
     /// Claude Code shows some dialogs (trust, MCP servers) before any hook

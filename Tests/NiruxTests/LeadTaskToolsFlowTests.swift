@@ -891,6 +891,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             task.column.pty?.sendRaw("y")
             XCTAssertTrue(try interrupt().text.contains("Keys reached"))
             // An Esc Claude doesn't confirm: said so, the turn still runs.
+            task.column.pty?.sendRaw("\r")
             task.hook(.userPromptSubmit)
             task.hook(.preToolUse)
             XCTAssertTrue(try interrupt().text.contains("shows no interrupt"))
