@@ -1056,6 +1056,32 @@ extension NiruxShellView {
         focusActiveTerminal(in: window, editorTakesKeyboard: true)
     }
 
+    /// The pointer went down in the window. The column a click landed on
+    /// (`index`) takes the focus without moving the strip, so that the
+    /// click, and a double-click, land on what was under the pointer; a
+    /// strip still held from the last click stays held.
+    func clickBegan(onColumn index: Int?) {
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(releaseHeldCameras), object: nil)
+        guard let index, let workspace = activeWorkspace, workspace.columns.indices.contains(index),
+              workspace.focusedIndex != index else { return }
+        workspace.holdCamera()
+        focusColumnByIndex(index)
+    }
+
+    /// The pointer went up: a strip a click held goes where it wants once
+    /// a double-click had its chance.
+    func clickEnded() {
+        guard workspaces.contains(where: { $0.heldCamera != nil }) else { return }
+        perform(#selector(releaseHeldCameras), with: nil, afterDelay: NSEvent.doubleClickInterval)
+    }
+
+    @objc private func releaseHeldCameras() {
+        let held = workspaces.filter { $0.heldCamera != nil }
+        guard !held.isEmpty else { return }
+        for workspace in held { workspace.heldCamera = nil }
+        relayout(animated: true)
+    }
+
     /// Gives the focus to the column of `header`, for the header's ⋯ items
     /// that act on the focused column. False when that column isn't in the
     /// active workspace (gone, or in a workspace sliding away).

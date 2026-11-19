@@ -37,6 +37,11 @@ final class WorkspaceState {
         }
     }
     private var lastCameraX: CGFloat = 0
+    /// Where the camera stays while the pointer works on the strip: a card
+    /// a click focused, until the click is over
+    /// (`NiruxShellView.clickBegan`), or an edge being dragged. nil:
+    /// where the strip wants it.
+    var heldCamera: CGFloat?
     let cwd: String
     var title: String
     var titleIsManual: Bool = false
@@ -859,7 +864,9 @@ extension WorkspaceState {
             guard let self, let handle,
                   let index = self.resizeHandles.firstIndex(of: handle),
                   self.columns.indices.contains(index) else { return nil }
-            // Grabbing a column's edge focuses it, as a click would.
+            // Grabbing a column's edge focuses it, as a click would, the
+            // strip held so that the edge stays under the pointer.
+            self.holdCamera()
             self.onColumnFocusRequested?(index)
             return (self.columns[index].view.frame.width, self.stripView.frame.width, self.lastCameraX)
         }
@@ -867,14 +874,13 @@ extension WorkspaceState {
             guard let self, let handle else { return }
             let viewport = self.containerView.bounds.width
             let width = Self.draggedWidth(from: start, viewport: viewport, by: delta)
-            self.setColumnWidth(
-                for: handle, fraction: (width + Self.columnGap) / max(Self.span(viewport), 1),
-                camera: Self.dragCamera(from: start, viewport: viewport, width: width)
-            )
+            self.heldCamera = Self.dragCamera(from: start, viewport: viewport, width: width)
+            self.setColumnWidth(for: handle, fraction: (width + Self.columnGap) / max(Self.span(viewport), 1))
         }
         // Let go: the camera goes where the strip now wants it.
         handle.onDragEnd = { [weak self] in
             guard let self else { return }
+            self.heldCamera = nil
             self.layoutAndScroll(viewportWidth: self.containerView.bounds.width, height: self.containerView.bounds.height, animated: true)
         }
         handle.onReset = { [weak self, weak handle] in
@@ -912,8 +918,12 @@ extension WorkspaceState {
     static let minWidthFraction: CGFloat = 0.15
     static let maxWidthFraction: CGFloat = 2.0
 
-    /// `camera`: where it stays (a drag), nil: where the strip wants it.
-    private func setColumnWidth(for handle: ColumnResizeHandle, fraction: CGFloat, camera: CGFloat? = nil) {
+    /// Holds the camera where it is (`heldCamera`).
+    func holdCamera() {
+        heldCamera = lastCameraX
+    }
+
+    private func setColumnWidth(for handle: ColumnResizeHandle, fraction: CGFloat) {
         guard let index = resizeHandles.firstIndex(of: handle), columns.indices.contains(index) else { return }
         let clamped = min(Self.maxWidthFraction, max(Self.minWidthFraction, fraction))
         guard clamped != columns[index].widthFraction else { return }
@@ -921,8 +931,7 @@ extension WorkspaceState {
         layoutAndScroll(
             viewportWidth: containerView.bounds.width,
             height: containerView.bounds.height,
-            animated: false,
-            camera: camera
+            animated: false
         )
     }
 
@@ -1038,11 +1047,10 @@ extension WorkspaceState {
         NSSize(width: Self.width(column.widthFraction, in: viewportWidth), height: max(0, height - Self.columnInset * 2))
     }
 
-    /// `camera`: where it stays (a resize drag); nil: where the strip wants it.
     /// `glides`: a card a neighbour pushed or let go glides to its place.
     func layoutAndScroll(
         viewportWidth: CGFloat, height: CGFloat, animated: Bool,
-        fitAll: Bool = false, skipTerminalResize: Bool = false, camera: CGFloat? = nil, glides: Bool = false
+        fitAll: Bool = false, skipTerminalResize: Bool = false, glides: Bool = false
     ) {
         defer { onColumnsLaidOut?() }
         guard !columns.isEmpty else { return }
@@ -1107,7 +1115,7 @@ extension WorkspaceState {
         // strip's ends. A card wider than the viewport shows from its left
         // edge, with its air.
         let cameraX: CGFloat
-        if let camera {
+        if let camera = heldCamera {
             cameraX = camera
         } else if totalWidth <= viewportWidth {
             cameraX = -floor((viewportWidth - totalWidth) / 2)

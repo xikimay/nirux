@@ -3,8 +3,8 @@ import XCTest
 @testable import Nirux
 
 /// Columns rest on the window as cards (depth study P1): air between and
-/// around them, rounded corners, a shadow under each, and the camera keeps
-/// the focused card's air in view.
+/// around them, rounded corners, a shadow under each, and the camera brings
+/// the focused card to the middle, its air in view at the strip's ends.
 @MainActor
 final class ColumnCardsTests: XCTestCase {
     private let inset = WorkspaceState.columnInset
@@ -180,8 +180,9 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(workspace.columns[0].view.frame.minX, inset, "the left edge's air in view")
     }
 
-    /// Past the viewport, the camera brings the focused card to its middle;
-    /// one wider than the viewport shows from its left edge.
+    /// Past the viewport, the camera brings the focused card to its middle,
+    /// and stops at the strip's ends; one wider than the viewport shows
+    /// from its left edge.
     func testTheCameraBringsTheFocusedCardToTheMiddle() throws {
         let workspace = workspace(columns: 4)
         let strip = try strip(of: workspace)
@@ -189,10 +190,55 @@ final class ColumnCardsTests: XCTestCase {
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
         XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, 500, accuracy: 1)
 
-        workspace.columns[2].widthFraction = 1.5
+        workspace.columns[3].widthFraction = 0.2
         workspace.focusedIndex = 2
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns[3].view.frame.maxX + inset + strip.frame.minX, 1000, accuracy: 1, "the last card's air against the edge")
+
+        workspace.columns[2].widthFraction = 1.5
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
         XCTAssertEqual(workspace.columns[2].view.frame.minX + strip.frame.minX, inset, accuracy: 1)
+    }
+
+    /// A held camera stays where it is while the focus moves (a click, an
+    /// edge grabbed); let go, it goes where the strip wants it.
+    func testAHeldCameraStaysWhileTheFocusMoves() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        workspace.holdCamera()
+        workspace.focusedIndex = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(strip.frame.minX, 0)
+
+        workspace.heldCamera = nil
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, 500, accuracy: 1)
+    }
+
+    /// Grabbing a neighbour's edge focuses it, the strip staying where it
+    /// is: the edge stays under the pointer, and the card comes to the
+    /// middle once let go.
+    func testGrabbingANeighboursEdgeLeavesTheStripWhereItIs() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        // As the shell does.
+        workspace.onColumnFocusRequested = { [weak workspace] index in
+            workspace?.focusedIndex = index
+            workspace?.layoutAndScroll(viewportWidth: 1000, height: 600, animated: true)
+        }
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let handle = strip.subviews.compactMap { $0 as? ColumnResizeHandle }[1]
+        let card = workspace.columns[1].view
+        let edge = card.frame.maxX + strip.frame.minX
+        let start = try XCTUnwrap(handle.onDragStart?())
+        XCTAssertEqual(workspace.focusedIndex, 1)
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX, edge, accuracy: 1, "the edge where it was grabbed")
+        handle.onDrag?(start, 40)
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX - edge, 40, accuracy: 1)
+
+        handle.onDragEnd?()
+        XCTAssertEqual(card.frame.midX + strip.frame.minX, 500, accuracy: 1)
     }
 
     /// Each column's shadow follows it, under every column of the strip, so

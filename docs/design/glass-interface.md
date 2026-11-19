@@ -438,8 +438,7 @@ the text stays flat and sharp.
 - **Air:** `Theme.Space.sm` between the columns and around them
   (`WorkspaceState.columnGap`, `columnInset`). At Opaque the air is the
   canvas; from Tinted up, the desktop's frost shows through it. The resize
-  handles straddle the air, and the camera brings the focused card in with
-  its air.
+  handles straddle the air.
 - **Corners:** `Theme.Radius.column`, 10 pt circular: their clip stays
   within the terminals' 10 pt padding (#598), so it cuts no cell. Each
   column clips its content to them; a terminal's header, the terminal's
@@ -461,7 +460,11 @@ the text stays flat and sharp.
   the cards overflow the viewport, the camera brings the focused one to its
   middle, its neighbours cut alike on both sides; it stops at the strip's
   ends, where the first or last card keeps its air against the edge. A
-  card wider than the viewport shows from its left edge.
+  card wider than the viewport shows from its left edge. While the pointer
+  works on the strip the camera holds (`WorkspaceState.heldCamera`), so
+  that what lies under it stays there: a click on a card focuses it where
+  it is and the card glides to the middle once the click is over (after
+  the double-click interval); a dragged edge holds it until let go.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within
