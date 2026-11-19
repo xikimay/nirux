@@ -485,7 +485,9 @@ final class AgentHookEventTests: XCTestCase {
     }
 
     /// A receiver that holds the queue's lock checked its name and is about
-    /// to write: the drain leaves the queue to it (`QueueFile`).
+    /// to write: the drain leaves the queue to it, and says so
+    /// (`QueueFile`). One that keeps it (stopped mid-write) loses it a few
+    /// seconds of drains later.
     @MainActor
     func testTheDrainLeavesTheQueueToAReceiverHoldingIt() throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-hook-queue-\(UUID().uuidString)")
@@ -502,10 +504,9 @@ final class AgentHookEventTests: XCTestCase {
         defer { close(receiver) }
         XCTAssertEqual(flock(receiver, LOCK_EX), 0)
         let center = AgentHookCenter()
-        center.drain()
+        for _ in 0..<QueueFile.busyDrainsBeforeTaking { XCTAssertFalse(center.drain()) }
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
-        flock(receiver, LOCK_UN)
-        center.drain()
+        XCTAssertTrue(center.drain())
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 

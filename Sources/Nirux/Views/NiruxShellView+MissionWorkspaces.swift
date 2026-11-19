@@ -279,8 +279,8 @@ extension NiruxShellView {
         // Apply what may still wait out a queue's drain debounce: a dialog
         // that opened, a prompt that went in, or the child's `completed`,
         // which must not close the Mission after a `tell` reopened it.
-        AgentHookCenter.shared.drain()
-        MissionEventCenter.shared.drain()
+        guard hooksReadBeforeTyping() else { return }
+        guard MissionEventCenter.shared.drain() else { return typeMissionMessagesSoon() }
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
         var typedAny = false
@@ -316,6 +316,26 @@ extension NiruxShellView {
         }
         // The cards' "Asking …" and "Answer … ready" rows follow.
         if typedAny { updateSidebar(snapshot: snapshot) }
+    }
+
+    /// Applies the hook queue before deciding what to type into a prompt: a
+    /// dialog that opened, a prompt that went in. False when a receiver was
+    /// writing to it, and Mission typing passes again in a moment.
+    func hooksReadBeforeTyping() -> Bool {
+        guard AgentHookCenter.shared.drain() else {
+            typeMissionMessagesSoon()
+            return false
+        }
+        return true
+    }
+
+    private func typeMissionMessagesSoon() {
+        guard !missionWaits.typingPassSoon else { return }
+        missionWaits.typingPassSoon = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.missionWaits.typingPassSoon = false
+            self?.typeMissionMessages()
+        }
     }
 
     /// Records what became of a Mission message Nirux typed: typed once its
@@ -471,7 +491,7 @@ extension NiruxShellView {
     /// for its next turn end, an hour at most. A Lead that is gone drops
     /// its own.
     func typeLeadNotices() {
-        guard !pendingLeadNotices.isEmpty else { return }
+        guard !pendingLeadNotices.isEmpty, hooksReadBeforeTyping() else { return }
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
         pendingLeadNotices = pendingLeadNotices.filter { notice in

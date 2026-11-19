@@ -513,7 +513,7 @@ extension NiruxShellView {
             return answer("The user has “\(title)” on screen: they can press Esc there, or ask them.", true)
         }
         // A dialog or a prompt may still wait out the hooks' debounce.
-        AgentHookCenter.shared.drain()
+        guard AgentHookCenter.shared.drain() else { return answer("“\(title)”'s hooks are still coming in: call again in a moment.", true) }
         let snapshot = ProcessSnapshot()
         guard !snapshot.isEmpty else { return answer("Nirux couldn't read the running processes: call again in a moment.", true) }
         guard let column = task.columns.first(where: { $0.agentUUID == mission.childAgentUUID }), let pty = column.pty,

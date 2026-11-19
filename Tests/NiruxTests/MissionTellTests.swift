@@ -368,6 +368,10 @@ final class MissionTellTests: XCTestCase {
         machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + offset), keys: Data(keys.utf8))
     }
 
+    private func prompt(_ id: String, at offset: TimeInterval, transcript: String? = nil) -> AgentHookEvent {
+        AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "lead", promptID: id, transcriptPath: transcript, timestamp: t0 + offset)
+    }
+
     private func subagentDialog(at offset: TimeInterval, agent: String = "sub") -> AgentHookEvent {
         AgentHookEvent(
             kind: .claude, name: .permissionRequest, sessionID: "lead", toolName: "Bash", toolKey: agent, agentID: agent,
@@ -452,11 +456,104 @@ final class MissionTellTests: XCTestCase {
         XCTAssertNil(refusal(machine))
     }
 
-    /// An Enter sends the prompt whose hook follows it within moments: Claude
-    /// runs the hook as the box sends. An older one sent nothing (a line
-    /// added after a backslash), one that reached a dialog whose hook came
-    /// after it answered that dialog, and a prompt Claude Code says came
-    /// from elsewhere took none.
+    /// Read through its transcript (`readsTranscript`), a prompt was typed
+    /// at the box only when its line says so. A peer's message never was,
+    /// even right after a line added with backslash-Enter, and closes no
+    /// dialog. A typed one was sent by the last Enter before its hook,
+    /// however late that hook (Claude held the prompt) and whatever Enter
+    /// came before it was applied, and closes the dialogs listed then. A
+    /// prompt queued mid-turn records no `prompt_id`: its line goes with the
+    /// oldest hook before it.
+    func testTheTranscriptSaysWhichPromptWasTyped() {
+        func readMachine() -> AgentStatusMachine {
+            var machine = idleMachine()
+            machine.readsTranscript = true
+            return machine
+        }
+        func read(_ id: String?, at offset: TimeInterval, typed: Bool, into machine: inout AgentStatusMachine) {
+            _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: id, at: t0 + offset, typed: typed))
+        }
+        var machine = readMachine()
+        press("fix it \\", at: 10, into: &machine)
+        press("\r", at: 10.5, into: &machine)
+        _ = machine.apply(prompt("peer", at: 11), isUserFocused: false)
+        read("peer", at: 11.2, typed: false, into: &machine)
+        _ = machine.apply(hook(.stop, at: 13), isUserFocused: false)
+        XCTAssertEqual(refusal(machine), .draft)
+        press("\r", at: 20, into: &machine)
+        _ = machine.apply(prompt("held", at: 20 + AgentStatusMachine.promptHookDelay + 1), isUserFocused: false)
+        read("held", at: 27, typed: true, into: &machine)
+        _ = machine.apply(hook(.stop, at: 30), isUserFocused: false)
+        XCTAssertNil(refusal(machine))
+
+        // Its line read before its hook, a line added before that hook was applied.
+        var early = readMachine()
+        press("\r", at: 40, into: &early)
+        press("more \\", at: 40.3, into: &early)
+        press("\r", at: 40.4, into: &early)
+        read("early", at: 40.2, typed: true, into: &early)
+        _ = early.apply(prompt("early", at: 40.1), isUserFocused: false)
+        _ = early.apply(hook(.stop, at: 41), isUserFocused: false)
+        XCTAssertEqual(early.boxEmptiedAt, t0 + 40)
+        XCTAssertEqual(refusal(early), .draft)
+
+        var queued = readMachine()
+        press("\r", at: 50, into: &queued)
+        _ = queued.apply(prompt("queued", at: 50.1), isUserFocused: false)
+        read(nil, at: 55, typed: true, into: &queued)
+        XCTAssertEqual(queued.boxEmptiedAt, t0 + 50)
+
+        var dialogs = readMachine()
+        _ = dialogs.apply(subagentDialog(at: 60), isUserFocused: false)
+        _ = dialogs.apply(prompt("peer", at: 61), isUserFocused: false)
+        read("peer", at: 61.1, typed: false, into: &dialogs)
+        press("\u{1B}", at: 62, into: &dialogs)
+        press("go on\r", at: 63, into: &dialogs)
+        _ = dialogs.apply(prompt("typed", at: 63.1), isUserFocused: false)
+        XCTAssertEqual(dialogs.pendingDialogs.count, 1, "until its line says it was typed")
+        read("typed", at: 63.2, typed: true, into: &dialogs)
+        XCTAssertEqual(dialogs.pendingDialogs.count, 0)
+    }
+
+    /// A column follows the transcript its own `claude` names in its hooks,
+    /// and reads it before saying whether keys wait in the prompt.
+    func testTheColumnReadsWhoSentEachPromptInItsTranscript() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-prompts-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("lead.jsonl")
+        try Data().write(to: transcript)
+        let pty = PtySession()
+        func record(_ id: String, origin: String) throws {
+            let time = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+            let handle = try FileHandle(forWritingTo: transcript)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((#"{"type":"user","origin":{"kind":""# + origin + #""},"promptId":""# + id
+                + #"","timestamp":""# + time + #"","message":{"role":"user","content":"…"}}"# + "\n").utf8))
+        }
+        func submit(_ id: String) {
+            pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .userPromptSubmit, sessionID: "lead", promptID: id, transcriptPath: transcript.path,
+                timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+        }
+        pty.sendRaw("fix it \\")
+        pty.sendRaw("\r")
+        submit("peer")
+        try record("peer", origin: "peer")
+        XCTAssertTrue(pty.reviewSendHasDraft)
+        pty.sendRaw("\r")
+        submit("typed")
+        try record("typed", origin: "human")
+        XCTAssertFalse(pty.reviewSendHasDraft)
+    }
+
+    /// Without a transcript, an Enter stands for the prompt whose hook
+    /// follows it within moments: Claude runs the hook as the box sends. An
+    /// older one sent nothing (a line added after a backslash), one that
+    /// reached a dialog whose hook came after it answered that dialog, and a
+    /// prompt Claude Code says came from elsewhere took none.
     func testAnEnterSendsOnlyThePromptItsHookFollows() {
         func afterAnEnter(source: String? = nil, hookAfter delay: TimeInterval) -> AgentStatusMachine {
             var machine = idleMachine()
@@ -484,7 +581,6 @@ final class MissionTellTests: XCTestCase {
     /// process too, but not by a `/resume` inside it, which may show a
     /// screen no hook reports (an offer to resume from a summary).
     func testAClaudeStartsWithAnEmptyBox() {
-        // An older receiver names no process: a startup's is new.
         func launched(_ command: String, source: String, by process: ProcessInstance?) -> AgentStatusMachine {
             var machine = AgentStatusMachine()
             press(command, at: 0, into: &machine)
@@ -496,7 +592,8 @@ final class MissionTellTests: XCTestCase {
             _ = machine.apply(hook(.stop, at: 5), isUserFocused: false)
             return machine
         }
-        var started = launched("claude \"Read .claude-handover.md\"\n", source: "startup", by: nil)
+        XCTAssertEqual(refusal(launched("claude\n", source: "startup", by: nil)), .draft, "nothing names its process")
+        var started = launched("claude \"Read .claude-handover.md\"\n", source: "startup", by: ProcessInstance(pid: 7, startedAt: t0 + 0.01))
         XCTAssertNil(refusal(started))
         press("y", at: 6, into: &started)
         _ = started.apply(hook(.userPromptSubmit, at: 7), isUserFocused: false)

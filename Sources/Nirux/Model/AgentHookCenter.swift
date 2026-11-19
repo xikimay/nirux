@@ -85,6 +85,7 @@ final class AgentHookCenter {
     private var dirFd: Int32 = -1
     private var pendingDrain: DispatchWorkItem?
     private var started = false
+    private var queue = QueueFile.Reader(name: "AgentHooks")
 
     /// Upper bound for one drain. If the app stays closed for days while
     /// hooked agents keep working the file grows unboundedly; only the tail
@@ -166,18 +167,22 @@ final class AgentHookCenter {
     /// (`QueueFile`). Receivers appending DURING the drain create a fresh
     /// log (O_CREAT) — nothing is lost between read and truncate, unlike
     /// read-then-truncate-in-place. Public so tests and the launch path can
-    /// force a cycle.
-    func drain() {
+    /// force a cycle. False when a receiver held the queue: what it holds
+    /// isn't applied yet, and what to type mustn't be decided on it.
+    @discardableResult
+    func drain() -> Bool {
         let url = Self.eventsURL
         let aside = url.deletingPathExtension().appendingPathExtension("processing")
-        switch QueueFile.takeAside(url, to: aside) {
+        switch queue.takeAside(url, to: aside) {
         case .taken: break
-        case .absent: return // no log file (yet) — the common case
-        case .busy: return scheduleDrain()
+        case .absent: return true // no log file (yet) — the common case
+        case .busy:
+            scheduleDrain()
+            return false
         }
         defer { try? FileManager.default.removeItem(at: aside) }
 
-        guard var slice = try? Data(contentsOf: aside), !slice.isEmpty else { return }
+        guard var slice = try? Data(contentsOf: aside), !slice.isEmpty else { return true }
         if slice.count > Self.maxDrainBytes {
             slice = slice.suffix(Self.maxDrainBytes / 4)
             // Drop the partial first line of the tail slice.
@@ -196,6 +201,7 @@ final class AgentHookCenter {
         // of a long backlog) would otherwise run dozens back-to-back on the
         // main thread.
         if !appliedEvents.isEmpty { onEventsApplied?(appliedEvents) }
+        return true
     }
 
     @discardableResult

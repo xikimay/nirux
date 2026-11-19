@@ -143,9 +143,28 @@ struct AgentStatusMachine {
     private(set) var boxEmptiedAt: TimeInterval?
     /// When the last prompt typed at the box went in (its UserPromptSubmit).
     private(set) var lastUserPromptAt: TimeInterval?
-    /// The last Enter that reached the prompt box, no dialog waiting for
-    /// keys in front: what sends a prompt typed there.
-    private var lastSubmitKeyAt: TimeInterval = 0
+    /// Enters that reached the prompt box, no dialog waiting for keys in
+    /// front, newest last (a few): one of them sent each prompt typed there.
+    private var submitKeys: [TimeInterval] = []
+    /// The column reads the transcript of the `claude` in front
+    /// (`PtySession`): the line of each prompt says who sent it
+    /// (`noteTranscriptPrompt`). Without one, an Enter shortly before a
+    /// prompt's hook stands for it, a line added after a backslash too.
+    var readsTranscript = false
+    /// The main thread's prompts whose transcript line hasn't said yet who
+    /// sent them, oldest first (a few).
+    private var unreadPrompts: [PromptHook] = []
+    /// Who sent the prompts whose line came before their hook was applied,
+    /// by `prompt_id` (a few).
+    private var readPrompts: [(id: String, typed: Bool)] = []
+
+    private struct PromptHook {
+        let at: TimeInterval
+        let promptID: String?
+        let sessionID: String?
+    }
+
+    private static let promptMemory = 8
     /// The last interrupt of a turn: an Esc or Ctrl-C (Claude fires no hook
     /// for it, and its idle reminder may never come), or a main-thread call
     /// that ended interrupted (a stop Nirux didn't type). Unlike
@@ -352,7 +371,7 @@ struct AgentStatusMachine {
         let now = event.timestamp
         lastEventAt = now
         lastEventName = event.name.rawValue + (event.agentID == nil ? "" : "(sub)")
-        let waitingBefore = pendingDialogs.filter { $0.approval.map { $0.sent == nil } ?? false }
+        let waitingBefore = heldApprovals
         var outcome = AgentHookOutcome()
         applyEvent(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         // A receiver still waiting on a dialog that just closed otherwise
@@ -428,7 +447,7 @@ struct AgentStatusMachine {
             request.dialog = event.dialog
             // An Enter since it opened went to it, not to the box: its hook
             // reached Nirux after the key.
-            if lastSubmitKeyAt >= now { lastSubmitKeyAt = 0 }
+            submitKeys.removeAll { $0 >= now }
             if let requestID = event.approvalRequestID, let deadline = event.approvalDeadline,
                let text = event.approvalText {
                 request.approval = PermissionApprovalTicket(
@@ -481,13 +500,6 @@ struct AgentStatusMachine {
         outcome: inout AgentHookOutcome
     ) {
         hookKind = event.kind.rawValue
-        // A prompt typed at the session's box: no dialog of it covered the
-        // box at its Enter, so those listed then are closed, the subagent
-        // dialogs an interrupt (Esc) left behind with no hook too. One
-        // listed since may be on screen, and a message Claude took in by
-        // itself says nothing of them.
-        let sentAt = enterThatSent(event)
-        if let sentAt { closeDialogs { $0.sessionID == event.sessionID && $0.requestedAt <= sentAt } }
         turnStartedAt = now
         hookTurnInFlight = true
         turnFailure = nil
@@ -496,10 +508,7 @@ struct AgentStatusMachine {
             askedQuestion = nil
             circling.reset()
             lastPromptAt = now
-            if let sentAt {
-                boxEmptiedAt = sentAt
-                lastUserPromptAt = now
-            }
+            notePromptHook(PromptHook(at: now, promptID: event.promptID, sessionID: event.sessionID), source: event.source)
             // An Esc at a dialog since the main thread last moved ended its
             // call with no hook. (A prompt alone doesn't: Claude submits peer
             // messages and poll results as prompts while a call runs.)
@@ -511,28 +520,71 @@ struct AgentStatusMachine {
         resumeUnlessBlocked()
     }
 
-    /// The Enter that sent the prompt `event` submits, if it was typed at
-    /// the box: one that reached it since the box last emptied, at most
-    /// `promptHookDelay` before the prompt's hook ran. Claude runs it as the
-    /// box sends, mid-turn too. An older Enter sent nothing (a line added
-    /// after a backslash, a picker's choice), or a prompt Claude held back
-    /// (while it compacts): its keys stay a draft, the safe side. A message
-    /// Claude takes in by itself (a peer's, a task notification, a wakeup)
-    /// follows no key, and its `source` says so where Claude Code sends one.
-    private func enterThatSent(_ event: AgentHookEvent) -> TimeInterval? {
-        guard event.source == nil || event.source == "user", lastSubmitKeyAt > (boxEmptiedAt ?? 0),
-              (0..<Self.promptHookDelay).contains(event.timestamp - lastSubmitKeyAt)
-        else { return nil }
-        return lastSubmitKeyAt
+    /// A main-thread prompt went in, typed at the box or taken in by Claude
+    /// by itself (a peer's message, a task notification, a wakeup), which
+    /// follows no key: its transcript line says which (`readsTranscript`).
+    /// Without one, an Enter at most `promptHookDelay` before its hook, and
+    /// a `source` that doesn't say otherwise where Claude Code sends one.
+    private mutating func notePromptHook(_ hook: PromptHook, source: String?) {
+        guard readsTranscript else {
+            guard source == nil || source == "user", let enter = submitKeys.last(where: { $0 <= hook.at }),
+                  hook.at - enter < Self.promptHookDelay
+            else { return }
+            return noteTypedPrompt(hook)
+        }
+        if let id = hook.promptID, let index = readPrompts.firstIndex(where: { $0.id == id }) {
+            if readPrompts.remove(at: index).typed { noteTypedPrompt(hook) }
+        } else {
+            unreadPrompts = Array((unreadPrompts + [hook]).suffix(Self.promptMemory))
+        }
     }
 
     static let promptHookDelay: TimeInterval = 5
 
+    /// The transcript of the `claude` in front recorded `prompt`: matched
+    /// to its hook by `prompt_id`, or, queued mid-turn, to the oldest hook
+    /// before it. The requests whose dialogs a typed one closed, for their
+    /// receivers to be released.
+    mutating func noteTranscriptPrompt(_ prompt: TranscriptPrompt) -> [AgentPermissionRequest] {
+        let index = if let id = prompt.promptID {
+            unreadPrompts.firstIndex { $0.promptID == id }
+        } else {
+            unreadPrompts.firstIndex { $0.at <= prompt.at }
+        }
+        guard let index else {
+            if let id = prompt.promptID { readPrompts = Array((readPrompts + [(id, prompt.typed)]).suffix(Self.promptMemory)) }
+            return []
+        }
+        let hook = unreadPrompts.remove(at: index)
+        guard prompt.typed else { return [] }
+        let held = heldApprovals
+        noteTypedPrompt(hook)
+        return held.filter { request in !pendingDialogs.contains { $0.approval?.requestID == request.approval?.requestID } }
+    }
+
+    /// The prompt of `hook` was typed at the box: the last Enter before its
+    /// hook sent it. The box emptied then, and no dialog of its session
+    /// covered the box: those listed then are closed, a subagent's an Esc
+    /// left behind with no hook too. Typed elsewhere (Remote Control), or
+    /// with an Enter Nirux didn't see, it leaves the box as it was.
+    private mutating func noteTypedPrompt(_ hook: PromptHook) {
+        guard let enter = submitKeys.last(where: { $0 <= hook.at }), enter > (boxEmptiedAt ?? 0) else { return }
+        boxEmptiedAt = enter
+        lastUserPromptAt = hook.at
+        submitKeys.removeAll { $0 <= enter }
+        closeDialogs { $0.sessionID == hook.sessionID && $0.requestedAt <= enter }
+    }
+
+    /// Requests whose receiver waits for the sidebar's decision.
+    private var heldApprovals: [AgentPermissionRequest] {
+        pendingDialogs.filter { $0.approval.map { $0.sent == nil } ?? false }
+    }
+
     /// The process that started this conversation took no key since it
     /// started: what was typed went to the shell that launched it. Without
-    /// its process (an older receiver), a startup's.
+    /// its process (an older receiver), nothing says so.
     private func startedEmpty(_ event: AgentHookEvent) -> Bool {
-        event.emitterProcess.map { lastInputAt < $0.startedAt } ?? (event.source == "startup")
+        event.emitterProcess.map { lastInputAt < $0.startedAt } ?? false
     }
 
     private mutating func startConversation(
@@ -1348,7 +1400,7 @@ struct AgentStatusMachine {
             }
         }
         lastInputAt = time
-        if inFront == nil, keys.map(Self.sendsPrompt) ?? true { lastSubmitKeyAt = time }
+        if inFront == nil, keys.map(Self.sendsPrompt) ?? true { submitKeys = Array((submitKeys + [time]).suffix(Self.promptMemory)) }
         if inFront == nil, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)
@@ -1702,7 +1754,10 @@ struct AgentStatusMachine {
         mainTurnMovedAt = nil
         boxEmptiedAt = nil
         lastUserPromptAt = nil
-        lastSubmitKeyAt = 0
+        submitKeys = []
+        readsTranscript = false
+        unreadPrompts = []
+        readPrompts = []
         turnInterruptedAt = 0
         dialogCancelledAt = 0
         turnStoppedAt = 0
