@@ -162,21 +162,20 @@ final class AgentHookCenter {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
     }
 
-    /// Move the events file aside and process it, then delete. Receivers
-    /// appending DURING the drain create a fresh log (O_CREAT) — nothing is
-    /// lost between read and truncate, unlike read-then-truncate-in-place.
-    /// Public so tests and the launch path can force a cycle.
+    /// Move the events file aside and process it, then delete
+    /// (`QueueFile`). Receivers appending DURING the drain create a fresh
+    /// log (O_CREAT) — nothing is lost between read and truncate, unlike
+    /// read-then-truncate-in-place. Public so tests and the launch path can
+    /// force a cycle.
     func drain() {
         let url = Self.eventsURL
         let aside = url.deletingPathExtension().appendingPathExtension("processing")
-        let fm = FileManager.default
-        try? fm.removeItem(at: aside)
-        do {
-            try fm.moveItem(at: url, to: aside)
-        } catch {
-            return // no log file (yet) — the common case
+        switch QueueFile.takeAside(url, to: aside) {
+        case .taken: break
+        case .absent: return // no log file (yet) — the common case
+        case .busy: return scheduleDrain()
         }
-        defer { try? fm.removeItem(at: aside) }
+        defer { try? FileManager.default.removeItem(at: aside) }
 
         guard var slice = try? Data(contentsOf: aside), !slice.isEmpty else { return }
         if slice.count > Self.maxDrainBytes {

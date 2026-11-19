@@ -616,19 +616,8 @@ enum MissionEventCLI {
     static func append(_ event: MissionEvent, to url: URL) -> Bool {
         guard var line = try? JSONEncoder().encode(event) else { return false }
         line.append(0x0A)
-        let fd = open(url.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
-        guard fd >= 0 else {
-            reportQueueFailure(url, code: errno)
-            return false
-        }
-        let written = line.withUnsafeBytes { buffer -> Int in
-            guard let pointer = buffer.baseAddress else { return 0 }
-            return write(fd, pointer, buffer.count)
-        }
-        let writeError = errno
-        close(fd)
-        guard written == line.count else {
-            reportQueueFailure(url, code: written < 0 ? writeError : EIO)
+        if let error = QueueFile.append(line, to: url) {
+            reportQueueFailure(url, code: error)
             return false
         }
         return true

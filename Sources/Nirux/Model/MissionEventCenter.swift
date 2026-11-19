@@ -126,11 +126,15 @@ final class MissionEventCenter {
             scheduleRetry()
             return
         }
-        do {
-            try fileManager.moveItem(at: eventsURL, to: aside)
-        } catch {
+        switch QueueFile.takeAside(eventsURL, to: aside) {
+        case .taken:
+            break
+        case .absent:
             resetRetryDelay()
             deliverPendingEvents()
+            return
+        case .busy:
+            scheduleDrain()
             return
         }
         guard process(aside, fileManager: fileManager) else {
