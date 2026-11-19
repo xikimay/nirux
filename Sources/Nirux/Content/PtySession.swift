@@ -961,8 +961,8 @@ final class PtySession: @unchecked Sendable {
     /// Whether a Mission message may be typed now into the prompt of a
     /// `claude` already running at `runningSince` (see
     /// `AgentStatusMachine.isPromptFree`).
-    func acceptsMissionMessage(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> Bool {
-        missionPromptRefusal(runningSince: runningSince, snapshot: snapshot) == nil
+    func acceptsMissionMessage(runningSince: TimeInterval, snapshot: ProcessSnapshot, seenByUser: Bool = false) -> Bool {
+        missionPromptRefusal(runningSince: runningSince, snapshot: snapshot, seenByUser: seenByUser) == nil
     }
 
     /// When the last hook event came, of any command (0: none).
@@ -981,15 +981,20 @@ final class PtySession: @unchecked Sendable {
     }
 
     /// Why `acceptsMissionMessage` says no, nil when it says yes, at `now`.
+    /// `seenByUser`: the user says its `claude` with no prompt yet sits at
+    /// its prompt (see `ClaudeSessionRecord.Reading.allowsTypingOnSight`).
     /// `record`: how to read the session record of a `claude` with no
     /// prompt yet (a check's own reading, between checks).
     func missionPromptRefusal(
-        runningSince: TimeInterval, snapshot: ProcessSnapshot, now: TimeInterval = Date().timeIntervalSince1970,
+        runningSince: TimeInterval, snapshot: ProcessSnapshot, seenByUser: Bool = false,
+        now: TimeInterval = Date().timeIntervalSince1970,
         record: (ProcessInstance) -> ClaudeSessionRecord.Reading = { sessionRecord(of: $0) }
     ) -> AgentPromptRefusal? {
         guard !hasExited else { return .noClaude }
-        return state.machine.promptRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince) {
-            record($0).showsIdlePrompt(of: $0, now: now)
+        return state.machine.promptRefusal(
+            foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince, seenByUser: seenByUser
+        ) {
+            seenByUser ? record($0).allowsTypingOnSight(of: $0, now: now) : record($0).showsIdlePrompt(of: $0, now: now)
         }
     }
 
