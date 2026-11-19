@@ -132,6 +132,9 @@ final class ColumnState {
     var shadow: ColumnShadowView?
     /// Its card fades in (`NiruxShellView.addColumn`).
     var isArriving = false
+    /// Passes in or out its card took, the last one owning it
+    /// (`NiruxShellView.passCard`).
+    var passes = 0
     /// Moves on their way that lift its card over a neighbour
     /// (`NiruxShellView.lift`).
     var lifts = 0
