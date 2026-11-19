@@ -35,7 +35,7 @@ enum MQ {
     static func pullRequest(
         _ number: Int,
         head: String,
-        state: String = "OPEN",
+        state: GitHub.PullRequestState = .open,
         isDraft: Bool = false,
         base: String = "main",
         repository: GitHubRepository? = widgets,
@@ -128,7 +128,7 @@ enum MQ {
         /// A pull request `number` at `head`, merged as `commit` on `mainTip`.
         mutating func merge(_ number: Int, as commit: String) {
             guard let open = pullRequests[number] else { return }
-            pullRequests[number] = MQ.pullRequest(number, head: open.headOid, state: "MERGED", mergeCommit: commit,
+            pullRequests[number] = MQ.pullRequest(number, head: open.headOid, state: .merged, mergeCommit: commit,
                                                   parents: [mainTip, open.headOid])
             mainTip = commit
         }
@@ -252,7 +252,7 @@ final class FakeQueueClient: MergeQueueGitHub, @unchecked Sendable {
         lock.withLock { change(&world) }
     }
 
-    func read(_ read: MergeQueue.Read, settings: BoardConfig.QueueSettings) -> Result<MergeQueue.ReadResult, MergeQueue.ClientError> {
+    func read(_ read: MergeQueue.Read, settings: BoardConfig.QueueSettings) -> Result<MergeQueue.ReadResult, GitHub.CLI.Failure> {
         lock.withLock {
             recordedReads.append(read)
             return world.answer(read).map { .success($0) } ?? .failure(.noAnswer("unscripted \(read)"))

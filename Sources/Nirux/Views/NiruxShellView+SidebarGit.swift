@@ -195,7 +195,7 @@ extension NiruxShellView {
                       columnCount: workspace.columns.count,
                       focusedColumn: workspace.focusedIndex,
                       gitBranch: workspace.gitBranch, notification: workspace.notification, isActive: isActive,
-                      columns: columns, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback?.sidebarCounts,
+                      columns: columns, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback?.counts,
                       ciFlakyReason: workspace.ciFlakyReason,
                       diffStats: workspace.diffStats,
                       purpose: workspace.purpose, nextStep: workspace.nextStep,

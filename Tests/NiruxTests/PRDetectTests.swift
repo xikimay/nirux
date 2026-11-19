@@ -187,7 +187,7 @@ final class PRDetectTests: XCTestCase {
         XCTAssertEqual(context.identity.head, "current-head")
         XCTAssertEqual(context.branch, "feature/task")
         XCTAssertEqual(pullRequest.number, 41)
-        XCTAssertEqual(pullRequest.state, "OPEN")
+        XCTAssertEqual(pullRequest.state, .open)
         XCTAssertEqual(
             WorkspacePhase.derived(
                 isInactive: false,
@@ -390,7 +390,7 @@ final class PRDetectTests: XCTestCase {
         let pullRequest = try XCTUnwrap(fetched)
 
         XCTAssertEqual(pullRequest.number, 57)
-        XCTAssertEqual(pullRequest.state, "CLOSED")
+        XCTAssertEqual(pullRequest.state, .closed)
         XCTAssertEqual(
             WorkspacePhase.derived(
                 isInactive: false,
@@ -425,7 +425,7 @@ final class PRDetectTests: XCTestCase {
         }
         let pullRequest = try XCTUnwrap(fetched)
         XCTAssertEqual(pullRequest.number, 80)
-        XCTAssertEqual(pullRequest.state, "MERGED")
+        XCTAssertEqual(pullRequest.state, .merged)
     }
 
     func testUnclassifiableTerminalPullRequestPreservesCachedResult() throws {
@@ -457,7 +457,7 @@ final class PRDetectTests: XCTestCase {
         guard case .success(_, let openInfo) = openResult else {
             return XCTFail("Expected successful open PR lookup")
         }
-        XCTAssertEqual(try XCTUnwrap(openInfo).state, "OPEN")
+        XCTAssertEqual(try XCTUnwrap(openInfo).state, .open)
 
         let terminalResult = try fetchUsingFakeGitHubCLI(
             terminalJSON: #"""

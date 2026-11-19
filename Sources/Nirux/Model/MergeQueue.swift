@@ -90,8 +90,7 @@ extension MergeQueue {
 
     /// "nightly" for `nightly.yml`.
     static func workflowLabel(_ workflow: String?) -> String {
-        guard let workflow else { return "post-merge workflow" }
-        return (workflow as NSString).deletingPathExtension
+        workflow.map(GitHub.workflowLabel) ?? "post-merge workflow"
     }
 }
 
@@ -289,8 +288,7 @@ extension MergeQueue {
 extension MergeQueue {
     struct PullRequestSnapshot: Equatable, Sendable {
         let number: Int
-        /// OPEN, MERGED or CLOSED.
-        let state: String
+        let state: GitHub.PullRequestState
         let isDraft: Bool
         let headRefName: String
         let headOid: String
@@ -305,7 +303,7 @@ extension MergeQueue {
         let mergeCommitParents: [String]
         let url: String
 
-        var isOpen: Bool { state == "OPEN" }
+        var isOpen: Bool { state == .open }
     }
 
     /// What the confirmation sheet shows of a pull request beyond its

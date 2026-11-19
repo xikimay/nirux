@@ -204,7 +204,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             // Set and read in one run-loop turn: a git refresh can't clear it
             // in between.
             worktreeWorkspace.prInfo = PRInfo(
-                number: 7, state: "MERGED", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
+                number: 7, state: .merged, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
                 mergeable: nil, url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil
             )
             let merged = try menu(for: worktreeWorkspace)
@@ -474,7 +474,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             "name": "test", "workflowName": "Tests", "status": "COMPLETED", "conclusion": "FAILURE",
             "startedAt": "2026-10-02T10:00:00Z", "detailsUrl": "https://github.com/acme/widgets/actions/runs/7/job/11"
         ]]
-    ])
+    ])!
 
     /// Without an agent in the workspace, Why opens the failed check; a
     /// rerun asks first, and only a confirmed one reaches GitHub.

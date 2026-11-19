@@ -212,10 +212,10 @@ final class BoardConfigSuggestionsTests: XCTestCase {
             ("ssh://git@ssh.github.com:443/Acme/Widgets.git", "Acme/Widgets"),
             ("https://github.com/Acme/Widgets/", "Acme/Widgets")
         ] {
-            XCTAssertEqual(BoardConfigSuggestions.repositoryName(remoteURL: url), expected, url)
+            XCTAssertEqual(GitHubRepository.gitHubOwnerAndName(remoteURL: url), expected, url)
         }
-        XCTAssertNil(BoardConfigSuggestions.repositoryName(remoteURL: "git@gitlab.com:acme/widgets.git"))
-        XCTAssertNil(BoardConfigSuggestions.repositoryName(remoteURL: "/local/path"))
+        XCTAssertNil(GitHubRepository.gitHubOwnerAndName(remoteURL: "git@gitlab.com:acme/widgets.git"))
+        XCTAssertNil(GitHubRepository.gitHubOwnerAndName(remoteURL: "/local/path"))
     }
 
     /// An SSH host alias of github.com reads as GitHub, as ssh resolves it
@@ -229,9 +229,9 @@ final class BoardConfigSuggestionsTests: XCTestCase {
         XCTAssertEqual(SSHHostAlias.resolve("github-work", configFile: config, timeout: 60), true)
         XCTAssertEqual(SSHHostAlias.resolve("lab-work", configFile: config, timeout: 60), false)
         XCTAssertEqual(SSHHostAlias.resolve("-oProxyCommand=touch", configFile: config, timeout: 60), false)
-        XCTAssertTrue(BoardConfigSuggestions.isSSH("git@github-work:acme/app.git"))
-        XCTAssertTrue(BoardConfigSuggestions.isSSH("ssh://git@github-work/acme/app.git"))
-        XCTAssertFalse(BoardConfigSuggestions.isSSH("https://github-work/acme/app.git"))
+        XCTAssertTrue(GitHubRepository.isSSH("git@github-work:acme/app.git"))
+        XCTAssertTrue(GitHubRepository.isSSH("ssh://git@github-work/acme/app.git"))
+        XCTAssertFalse(GitHubRepository.isSSH("https://github-work/acme/app.git"))
     }
 
     /// Where the pull requests live, not where the branch checked out is

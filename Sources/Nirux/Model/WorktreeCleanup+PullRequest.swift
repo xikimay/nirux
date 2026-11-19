@@ -18,7 +18,7 @@ extension WorktreeCleanup {
         branch: String, tip: String, worktree: Worktree, tools: Tools
     ) -> Verdict {
         guard let ghPath = tools.ghPath else {
-            return (nil, ["The GitHub CLI (gh) isn't installed: the pull request can't be checked."], nil)
+            return (nil, ["\(GitHub.CLI.missing): the pull request can’t be checked."], nil)
         }
         let repository: GitHubRepository
         switch headRepository(branch: branch, at: worktree.path, tools: tools) {
@@ -58,7 +58,7 @@ extension WorktreeCleanup {
         _ json: [[String: Any]], branch: String, tip: String, repository: GitHubRepository, worktree: Worktree, tools: Tools
     ) -> String? {
         let heads = json.compactMap { candidate -> String? in
-            guard (candidate["state"] as? String)?.uppercased() == "MERGED",
+            guard GitHub.PullRequestState(candidate["state"] as? String) == .merged,
                   let headOid = (candidate["headRefOid"] as? String)?.lowercased(), isObjectID(headOid)
             else { return nil }
             let owner = (candidate["headRepositoryOwner"] as? [String: Any])?["login"] as? String
@@ -90,10 +90,10 @@ extension WorktreeCleanup {
         ancestry: (String) -> Ancestry
     ) -> Verdict {
         let sorted = candidates.sorted { $0.number > $1.number }
-        if let open = sorted.first(where: { $0.state == "OPEN" }) {
+        if let open = sorted.first(where: { $0.state == .open }) {
             return (open, ["Pull request #\(open.number) for \(branch) is still open."], "PR #\(open.number) open")
         }
-        let merged = sorted.filter { $0.state == "MERGED" }
+        let merged = sorted.filter { $0.state == .merged }
         guard let latest = merged.first else {
             if let closed = sorted.first {
                 return (
@@ -128,7 +128,7 @@ extension WorktreeCleanup {
 
     static func pullRequest(from candidate: [String: Any], headRepository: GitHubRepository) -> PullRequest? {
         guard let number = candidate["number"] as? Int,
-              let state = (candidate["state"] as? String)?.uppercased(),
+              let state = GitHub.PullRequestState(candidate["state"] as? String),
               let headOid = candidate["headRefOid"] as? String, isObjectID(headOid),
               let url = candidate["url"] as? String,
               let owner = (candidate["headRepositoryOwner"] as? [String: Any])?["login"] as? String,

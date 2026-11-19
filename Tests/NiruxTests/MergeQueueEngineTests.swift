@@ -120,8 +120,8 @@ final class MergeQueueEngineTests: XCTestCase {
             ("auto-merge", MQ.pullRequest(52, head: a, autoMerge: true), .notMergeable),
             ("GitHub's merge queue", MQ.pullRequest(52, head: a, inMergeQueue: true), .notMergeable),
             ("draft", MQ.pullRequest(52, head: a, isDraft: true), .notMergeable),
-            ("closed", MQ.pullRequest(52, head: a, state: "CLOSED"), .notMergeable),
-            ("merged elsewhere", MQ.pullRequest(52, head: a, state: "MERGED"), .notMergeable),
+            ("closed", MQ.pullRequest(52, head: a, state: .closed), .notMergeable),
+            ("merged elsewhere", MQ.pullRequest(52, head: a, state: .merged), .notMergeable),
             ("another base", MQ.pullRequest(52, head: a, base: "dev"), .notMergeable),
             ("a fork", MQ.pullRequest(52, head: a, repository: GitHubRepository(owner: "someone", name: "widgets")), .notMergeable),
             ("a deleted fork", MQ.pullRequest(52, head: a, repository: nil), .notMergeable),
@@ -703,7 +703,7 @@ final class MergeQueueEngineTests: XCTestCase {
         var world = readyWorld()
         var queue = started(world)
         queue.run(world)
-        world.pullRequests[52] = MQ.pullRequest(52, head: a, state: "MERGED", mergeCommit: c, parents: [MQ.sha("9"), a])
+        world.pullRequests[52] = MQ.pullRequest(52, head: a, state: .merged, mergeCommit: c, parents: [MQ.sha("9"), a])
         queue.mutated(.sent)
         queue.answer(world)
         XCTAssertEqual(queue.stopReason?.kind, .merge)
@@ -715,7 +715,7 @@ final class MergeQueueEngineTests: XCTestCase {
         var world = readyWorld()
         var queue = started(world)
         queue.run(world)
-        world.pullRequests[52] = MQ.pullRequest(52, head: f, state: "MERGED", mergeCommit: c, parents: [world.mainTip, f])
+        world.pullRequests[52] = MQ.pullRequest(52, head: f, state: .merged, mergeCommit: c, parents: [world.mainTip, f])
         queue.mutated(.sent)
         queue.answer(world)
         XCTAssertTrue(queue.stopReason?.message.contains("outside the queue") == true)

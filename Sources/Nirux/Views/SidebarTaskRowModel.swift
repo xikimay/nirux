@@ -143,7 +143,7 @@ extension WorkspaceInfo {
             summary.focusColumn = broken.index
             return summary
         }
-        if let pullRequest = prInfo, pullRequest.state == "OPEN", pullRequest.ciStatus == "FAILURE",
+        if let pullRequest = prInfo, pullRequest.state == .open, pullRequest.ciStatus == "FAILURE",
            !columns.contains(where: { $0.agentStatus == .working }) {
             // Only a likely flake says more (docs/design/ci-failure-triage.md).
             return row(.error, "#\(pullRequest.number) · checks failed" + (ciFlakyReason == nil ? "" : " · likely flaky"), .error)
@@ -297,13 +297,13 @@ extension WorkspaceInfo {
             )
         }
         switch pullRequest.state {
-        case "MERGED":
+        case .merged:
             switch cleanup {
             case .available?: return row(.merged, "Merged · Clean up", .cleanUp, trailing: number, linkText: "Clean up")
             case .inProgress?: return row(.merged, "Merged · cleaning up…", nil, trailing: number)
             case nil: return row(.merged, "Merged", nil, trailing: number)
             }
-        case "OPEN":
+        case .open:
             if pullRequest.isDraft { return row(.idle, "#\(pullRequest.number) · draft", nil, trailing: age) }
             switch pullRequest.ciStatus {
             case "PENDING"?: return row(.checksRunning, "#\(pullRequest.number) · checks running", nil, trailing: age)

@@ -483,7 +483,7 @@ final class WorktreeCleanupTests: XCTestCase {
         tools.ghPath = nil
         XCTAssertEqual(
             try report().problems,
-            ["The GitHub CLI (gh) isn't installed: the pull request can't be checked."]
+            ["The GitHub CLI (gh) isn’t installed: the pull request can’t be checked."]
         )
     }
 
@@ -815,7 +815,7 @@ final class WorktreeCleanupVerdictTests: XCTestCase {
     private let other = String(repeating: "b", count: 40)
 
     private func pullRequest(_ number: Int, _ state: String, head: String) -> WorktreeCleanup.PullRequest {
-        WorktreeCleanup.PullRequest(number: number, state: state, headOid: head, url: "https://github.com/acme/w/pull/\(number)")
+        WorktreeCleanup.PullRequest(number: number, state: GitHub.PullRequestState(state)!, headOid: head, url: "https://github.com/acme/w/pull/\(number)")
     }
 
     func testStatusEntriesSkipTheOriginalPathOfARename() {
@@ -911,7 +911,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
             buildOutput: ignored.filter(WorktreeCleanup.isRegenerable)
         )
         let pullRequest = WorktreeCleanup.PullRequest(
-            number: 12, state: "MERGED", headOid: String(repeating: "a", count: 40), url: "https://github.com/acme/widgets/pull/12"
+            number: 12, state: .merged, headOid: String(repeating: "a", count: 40), url: "https://github.com/acme/widgets/pull/12"
         )
         return WorktreeCleanup.Plan(worktree: worktree, branch: "feat/x", tip: worktree.tip ?? "", pullRequest: pullRequest)
     }

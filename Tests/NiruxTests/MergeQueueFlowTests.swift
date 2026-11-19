@@ -61,11 +61,11 @@ final class MergeQueueFlowTests: XCTestCase {
         var allCalls: [[String]] { lock.withLock { calls } }
         var answeredOffMain: Bool { lock.withLock { !threads.contains("main") && !threads.isEmpty } }
 
-        var run: @Sendable ([String], TimeInterval) -> Result<GitHubCLIQueueClient.Output, MergeQueue.ClientError> {
+        var run: @Sendable ([String], TimeInterval) -> Result<GitHub.CLI.Output, GitHub.CLI.Failure> {
             { [self] arguments, _ in
                 // Answered on another queue, as a slow gh would.
                 let answered = DispatchSemaphore(value: 0)
-                var result: Result<GitHubCLIQueueClient.Output, MergeQueue.ClientError> = .failure(.noAnswer("unanswered"))
+                var result: Result<GitHub.CLI.Output, GitHub.CLI.Failure> = .failure(.noAnswer("unanswered"))
                 let calledOnMain = Thread.isMainThread
                 DispatchQueue(label: "scripted-gh").async {
                     result = self.respond(arguments, onMain: calledOnMain)
@@ -76,14 +76,14 @@ final class MergeQueueFlowTests: XCTestCase {
             }
         }
 
-        private func respond(_ arguments: [String], onMain: Bool) -> Result<GitHubCLIQueueClient.Output, MergeQueue.ClientError> {
+        private func respond(_ arguments: [String], onMain: Bool) -> Result<GitHub.CLI.Output, GitHub.CLI.Failure> {
             lock.lock()
             defer { lock.unlock() }
             calls.append(arguments)
             threads.insert(onMain ? "main" : "background")
             if let problem = ForbiddenCalls.problem(arguments) { forbidden.append(problem) }
             let joined = arguments.joined(separator: " ")
-            func ok(_ json: String) -> Result<GitHubCLIQueueClient.Output, MergeQueue.ClientError> {
+            func ok(_ json: String) -> Result<GitHub.CLI.Output, GitHub.CLI.Failure> {
                 .success(.init(status: 0, standardOutput: Data(json.utf8), standardError: Data()))
             }
             func value(after flag: String, prefix: String) -> String? {

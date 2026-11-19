@@ -24,11 +24,11 @@ extension MergeQueue {
         settings: BoardConfig.QueueSettings,
         client: any MergeQueueGitHub,
         tools: WorktreeCleanup.Tools = .installed
-    ) -> Result<LocalInspection, ClientError> {
+    ) -> Result<LocalInspection, GitHub.CLI.Failure> {
         let snapshot = ProjectBoard.readLocal(folders: folders, tools: tools)
         let configured = settings.gitHubRepository
         let repositories = snapshot.repositories.filter { repository in
-            repository.remotes.contains { $0.owner == configured.owner && $0.name == configured.name }
+            repository.remotes.contains { $0.hasOwnerAndName(of: configured) }
         }
         var inspection = LocalInspection()
         // A folder in a checkout git couldn't list: its worktrees can't be

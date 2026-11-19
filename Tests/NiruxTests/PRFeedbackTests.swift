@@ -50,7 +50,7 @@ final class PRFeedbackTests: XCTestCase {
     }
 
     private let pullRequest = PRInfo(
-        number: 52, state: "OPEN", isDraft: true, ciStatus: nil, checks: [], reviewDecision: nil,
+        number: 52, state: .open, isDraft: true, ciStatus: nil, checks: [], reviewDecision: nil,
         mergeable: nil, url: "https://github.com/o/r/pull/52", additions: nil, deletions: nil, changedFiles: nil
     )
 
@@ -182,17 +182,17 @@ final class PRFeedbackTests: XCTestCase {
             thread(comment("claude", bot: true, at: "2026-09-01T10:00:00Z")),
             thread(comment("alice", at: "2026-09-01T10:00:00Z"))
         ])
-        XCTAssertEqual(both.sidebarCounts, SidebarPRFeedback(humans: 1, bots: 1))
+        XCTAssertEqual(both.counts, PRFeedback.Counts(humans: 1, bots: 1))
         let bots = try feedback(threads: [thread(comment("claude", bot: true, at: "2026-09-01T10:00:00Z"))])
-        XCTAssertEqual(bots.sidebarCounts, SidebarPRFeedback(humans: 0, bots: 1))
-        XCTAssertNil(PRFeedback(items: []).sidebarCounts)
+        XCTAssertEqual(bots.counts, PRFeedback.Counts(humans: 0, bots: 1))
+        XCTAssertNil(PRFeedback(items: []).counts)
     }
 
     /// The counts sit on the card's third line, before the pull request,
     /// and open the feedback menu.
     @MainActor
     func testCardShowsTheCountsWithTheirMenuAction() throws {
-        func info(_ feedback: SidebarPRFeedback?) -> WorkspaceInfo {
+        func info(_ feedback: PRFeedback.Counts?) -> WorkspaceInfo {
             WorkspaceInfo(
                 id: "ws-1", index: 0, title: "t", profileID: WorkspaceProfile.defaultID, isInactive: false,
                 columnCount: 0, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: true,
@@ -200,7 +200,7 @@ final class PRFeedbackTests: XCTestCase {
                 nextStep: nil, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
             )
         }
-        let workspace = info(SidebarPRFeedback(humans: 1, bots: 2))
+        let workspace = info(PRFeedback.Counts(humans: 1, bots: 2))
         let result = SidebarWorkspaceCardRenderer(workspace: workspace, sidebarWidth: 260, yOffset: 400).render()
 
         let links = result.hitAreas.compactMap { area -> (String, NSTextField)? in
@@ -229,7 +229,7 @@ final class PRFeedbackTests: XCTestCase {
         XCTAssertEqual(workspace.prFeedback, feedback, "the same open PR read again keeps it")
 
         workspace.prInfo = PRInfo(
-            number: 52, state: "MERGED", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
+            number: 52, state: .merged, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
             mergeable: nil, url: pullRequest.url, additions: nil, deletions: nil, changedFiles: nil
         )
         XCTAssertNil(workspace.prFeedback)

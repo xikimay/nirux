@@ -189,7 +189,7 @@ extension MergeQueue {
         guard let workflow = settings.postMergeWorkflow, let runs else { return [] }
         let label = MergeQueue.workflowLabel(workflow)
         var warnings: [String] = []
-        if let last = runs.first(where: \.isCompleted), runFailed(last) {
+        if let last = runs.first(where: \.isCompleted), GitHub.isFailedRun(last.conclusion) {
             warnings.append("The last \(label) on \(settings.baseBranch) failed (\(Engine.short(last.headSha))"
                 + (last.title.map { ", “\($0)”" } ?? "") + "): the base may already be broken.")
         }
@@ -327,9 +327,9 @@ extension MergeQueue {
     }
 
     static func openExclusion(
-        state: String, isDraft: Bool, baseRefName: String?, mergeable: String?, baseBranch: String?
+        state: GitHub.PullRequestState, isDraft: Bool, baseRefName: String?, mergeable: String?, baseBranch: String?
     ) -> OpenExclusion? {
-        if state.uppercased() != "OPEN" { return .notOpen(state.lowercased()) }
+        if state != .open { return .notOpen(state.rawValue.lowercased()) }
         if isDraft { return .draft }
         if let baseRefName, let baseBranch, baseRefName != baseBranch { return .otherBase(baseRefName) }
         if mergeable?.uppercased() == "CONFLICTING" { return .conflict }

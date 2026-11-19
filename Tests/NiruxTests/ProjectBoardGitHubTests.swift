@@ -165,7 +165,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
 
     func testNotAListReadsAsNothing() {
         XCTAssertNil(ProjectBoard.parsePullRequests(Data("{\"message\": \"Bad credentials\"}".utf8), repository: widgets))
-        XCTAssertNil(ProjectBoard.parseRuns(Data("not json".utf8)))
+        XCTAssertNil(GitHub.parseWorkflowRuns(Data("not json".utf8)))
         XCTAssertEqual(ProjectBoard.parsePullRequests(Data("[]".utf8), repository: widgets), [])
     }
 
@@ -187,8 +187,8 @@ final class ProjectBoardGitHubTests: XCTestCase {
         XCTAssertFalse(crash.hasPending)
 
         let green = ProjectBoard.checkSummary(
-            [ProjectBoard.Check(name: "test", workflowName: "Tests", result: .success, startedAt: nil, url: nil),
-             ProjectBoard.Check(name: "lint", workflowName: "Tests", result: .skipped, startedAt: nil, url: nil)],
+            [GitHub.Check(name: "test", workflowName: "Tests", result: .success, startedAt: nil, url: nil),
+             GitHub.Check(name: "lint", workflowName: "Tests", result: .skipped, startedAt: nil, url: nil)],
             required: ["test"]
         )
         XCTAssertEqual(green.text, "test ✓ · others ✓")
@@ -196,13 +196,13 @@ final class ProjectBoardGitHubTests: XCTestCase {
 
         // A rerun waiting for a runner has gh's zero time: it is the latest.
         let rerun = ProjectBoard.checkSummary([
-            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .failure, startedAt: "2026-09-27T22:55:02Z", url: nil),
-            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .pending, startedAt: "0001-01-01T00:00:00Z", url: nil)
+            GitHub.Check(name: "test", workflowName: "Tests", result: .failure, startedAt: "2026-09-27T22:55:02Z", url: nil),
+            GitHub.Check(name: "test", workflowName: "Tests", result: .pending, startedAt: "0001-01-01T00:00:00Z", url: nil)
         ], required: ["test"])
         XCTAssertEqual(rerun.required, [.init(name: "test", result: .pending)])
         let twoJobs = ProjectBoard.checkSummary([
-            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .success, startedAt: nil, url: nil),
-            ProjectBoard.Check(name: "test", workflowName: "Lint", result: .skipped, startedAt: nil, url: nil)
+            GitHub.Check(name: "test", workflowName: "Tests", result: .success, startedAt: nil, url: nil),
+            GitHub.Check(name: "test", workflowName: "Lint", result: .skipped, startedAt: nil, url: nil)
         ], required: ["test"])
         XCTAssertEqual(twoJobs.text, "test ✓")
     }
@@ -212,7 +212,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
         XCTAssertEqual(ProjectBoard.pullRequestText(pullRequests[0], baseBranch: "main"), "#12 open")
         XCTAssertEqual(ProjectBoard.pullRequestText(pullRequests[1], baseBranch: "main"), "#13 draft · conflict → release")
         let merged = ProjectBoard.PullRequest(
-            number: 9, state: "MERGED", headRefName: "x", headOid: "", baseRefName: "dev", isDraft: false,
+            number: 9, state: .merged, headRefName: "x", headOid: "", baseRefName: "dev", isDraft: false,
             mergeable: nil, checks: [], url: "", isFromConfiguredRepository: true
         )
         XCTAssertEqual(ProjectBoard.pullRequestText(merged, baseBranch: "main"), "#9 merged")
@@ -221,7 +221,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
     // MARK: - Post-merge run
 
     func testTheLastPostMergeRunReadsAsInTheHeader() throws {
-        let runs = try XCTUnwrap(ProjectBoard.parseRuns(Data(Self.postMergeRuns.utf8)))
+        let runs = try XCTUnwrap(GitHub.parseWorkflowRuns(Data(Self.postMergeRuns.utf8)))
         XCTAssertEqual(runs.count, 1)
         XCTAssertEqual(runs[0].status, "completed")
         XCTAssertEqual(runs[0].conclusion, "success")
@@ -236,7 +236,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
             ProjectBoard.runSummary(runs[0], workflow: "nightly.yml", now: nextDay, timeZone: utc),
             "nightly: success 27 Sep 23:14, 43a9503"
         )
-        let running = ProjectBoard.WorkflowRun(
+        let running = GitHub.WorkflowRun(
             status: "in_progress", conclusion: nil, headSha: "60e0ff2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             createdAt: sameDay.addingTimeInterval(-60), updatedAt: sameDay, url: nil
         )
@@ -245,7 +245,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
             "release: in progress 23:29, 60e0ff2"
         )
         XCTAssertEqual(ProjectBoard.runSummary(nil, workflow: "nightly.yml", now: sameDay), "nightly: no run yet")
-        XCTAssertEqual(ProjectBoard.parseRuns(Data("[]".utf8)), [])
+        XCTAssertEqual(GitHub.parseWorkflowRuns(Data("[]".utf8)), [])
     }
 
     // MARK: - gh
@@ -346,7 +346,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
         XCTAssertEqual(revoked.client.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn(refusal)))
         XCTAssertEqual(revoked.client.pullRequests(repository: "acme/widgets", state: .merged), .failure(.notSignedIn("Bad credentials")))
         XCTAssertEqual(revoked.calls(), ["others", "query"])
-        let signIn = "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
+        let signIn = "gh isn’t signed in to github.com: run gh auth login in a terminal, then Refresh."
         XCTAssertEqual(ProjectBoard.FetchError.notSignedIn(nil).message, signIn)
         XCTAssertEqual(ProjectBoard.FetchError.notSignedIn(refusal).message, "\(signIn) (gh: \(refusal))")
 

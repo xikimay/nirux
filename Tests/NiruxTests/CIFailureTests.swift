@@ -8,7 +8,7 @@ final class CIFailureTests: XCTestCase {
         PRDetect.pullRequestInfo(from: [
             "number": 52, "state": state, "url": "https://github.com/acme/widgets/pull/52",
             "statusCheckRollup": rollup
-        ])
+        ])!
     }
 
     private func checkRun(

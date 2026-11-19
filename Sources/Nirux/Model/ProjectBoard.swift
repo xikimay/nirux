@@ -15,57 +15,16 @@ enum ProjectBoard {}
 // MARK: - What GitHub says
 
 extension ProjectBoard {
-    /// A check run's or a commit status's outcome, in the order the board
-    /// shows the worst of several: a skipped or neutral check doesn't hide
-    /// a success. (The merge queue has its own rules: neither is green.)
-    enum CheckResult: Int, Comparable, Sendable {
-        case skipped
-        case neutral
-        case success
-        case pending
-        case failure
-
-        static func < (lhs: CheckResult, rhs: CheckResult) -> Bool { lhs.rawValue < rhs.rawValue }
-    }
-
-    /// One entry of a pull request's `statusCheckRollup`: a check run, or a
-    /// commit status (`context`). For display only: the rollup carries no
-    /// commit, so the merge queue reads checks by commit instead.
-    struct Check: Hashable, Sendable {
-        /// The job's name, or a commit status's context.
-        let name: String
-        /// The check run's workflow. Nil (or empty) for a commit status, or
-        /// a check run no workflow made (CodeQL's summary check).
-        let workflowName: String?
-        let result: CheckResult
-        /// ISO 8601. Of two runs of one check, the later one counts.
-        let startedAt: String?
-        /// The check run's `detailsUrl`, or the commit status's `targetUrl`.
-        /// Set by whoever posted the check: untrusted.
-        let url: String?
-
-        /// `Workflow / job`, as board.json may name it.
-        var qualifiedName: String? {
-            guard let workflowName, !workflowName.isEmpty else { return nil }
-            return "\(workflowName) / \(name)"
-        }
-
-        func matches(_ required: String) -> Bool {
-            name == required || qualifiedName == required
-        }
-    }
-
     struct PullRequest: Equatable, Sendable {
         let number: Int
-        /// OPEN, MERGED or CLOSED.
-        let state: String
+        let state: GitHub.PullRequestState
         let headRefName: String
         let headOid: String
         let baseRefName: String?
         let isDraft: Bool
         /// MERGEABLE, CONFLICTING or UNKNOWN (GitHub is recomputing it).
         let mergeable: String?
-        let checks: [Check]
+        let checks: [GitHub.Check]
         let url: String
         /// Its head repository is the configured one. A fork's pull
         /// request matches no branch and gets no row.
@@ -82,21 +41,10 @@ extension ProjectBoard {
         /// date gh didn't give.
         var mergedAt: Date?
 
-        var isOpen: Bool { state == "OPEN" }
+        var isOpen: Bool { state == .open }
         var isConflicting: Bool { mergeable == "CONFLICTING" }
     }
 
-    /// The last run of the post-merge workflow on the base branch.
-    struct WorkflowRun: Equatable, Sendable {
-        /// `completed`, `in_progress`, `queued`…
-        let status: String
-        /// `success`, `failure`, `cancelled`… once completed.
-        let conclusion: String?
-        let headSha: String
-        let createdAt: Date?
-        let updatedAt: Date?
-        let url: String?
-    }
 }
 
 // MARK: - What the Mac says
@@ -234,7 +182,7 @@ extension ProjectBoard {
         let configured = sources.repository != nil
         let open = latestByBranch(sources.openPullRequests.filter { configured && $0.isFromConfiguredRepository && $0.isOpen })
         let isOurs = { (pullRequest: PullRequest) in
-            configured && pullRequest.isFromConfiguredRepository && pullRequest.state == "MERGED"
+            configured && pullRequest.isFromConfiguredRepository && pullRequest.state == .merged
         }
         let merged = latestByBranch(sources.mergedPullRequests.filter(isOurs))
         // The window first, on the list as parsed: the 30 merged pull
@@ -253,10 +201,8 @@ extension ProjectBoard {
             let repository = sources.local[place.repository]
             let worktree = repository.worktrees[place.entry]
             let inside = members[index] ?? []
-            // By owner and name: an SSH host alias (`git@github-work:…`)
-            // points at github.com all the same.
             let namesRepository = sources.repository.map { configured in
-                repository.remotes.contains { $0.owner == configured.owner && $0.name == configured.name }
+                repository.remotes.contains { $0.hasOwnerAndName(of: configured) }
             } ?? false
             guard sources.localIsProjects || namesRepository else {
                 if let first = inside.first {
@@ -347,7 +293,7 @@ extension ProjectBoard {
             }
             return sections.firstIndex { section in
                 guard let configured = section.repository else { return false }
-                return repository.remotes.contains { $0.owner == configured.owner && $0.name == configured.name }
+                return repository.remotes.contains { $0.hasOwnerAndName(of: configured) }
             }
         }
         let places = self.places(in: local)

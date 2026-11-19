@@ -384,7 +384,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
 
-            let signedOut = "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
+            let signedOut = "gh isn’t signed in to github.com: run gh auth login in a terminal, then Refresh."
             let pills = { (board.view.stages.content?.sections ?? []).map { [$0.title, $0.status?.text ?? "-", $0.status?.toolTip ?? "-"] } }
             let expected = [
                 ["saved", "-", "-"],

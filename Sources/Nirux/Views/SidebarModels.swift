@@ -334,25 +334,6 @@ struct SidebarPermissionApproval: Hashable {
     }
 }
 
-struct PRInfo: Hashable, Sendable {
-    let number: Int
-    let state: String
-    let isDraft: Bool
-    let ciStatus: String?
-    /// The latest run of each check (docs/design/ci-failure-actions.md).
-    let checks: [ProjectBoard.Check]
-    let reviewDecision: String?
-    let mergeable: String?
-    let url: String
-    let additions: Int?
-    let deletions: Int?
-    let changedFiles: Int?
-
-    var failedCheckUrl: String? {
-        checks.lazy.filter { $0.result == .failure }.compactMap(\.url).first
-    }
-}
-
 struct WorkspaceInfo: Hashable {
     /// Stable workspace identity (WorkspaceState.id). Used to re-resolve
     /// `index` when the store may have mutated since this snapshot.
@@ -370,7 +351,7 @@ struct WorkspaceInfo: Hashable {
     let columns: [ColumnInfo]
     let prInfo: PRInfo?
     /// The open PR's feedback: the card shows the counts only.
-    var prFeedback: SidebarPRFeedback?
+    var prFeedback: PRFeedback.Counts?
     /// Why the pull request's red checks look flaky
     /// (`WorkspaceState.ciFlakyReason`); nil: a failure like any other.
     var ciFlakyReason: String?

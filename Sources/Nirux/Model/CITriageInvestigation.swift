@@ -345,8 +345,8 @@ enum CITriageInvestigation {
     }
 
     @Sendable private static func runGH(_ arguments: [String], timeout: TimeInterval, maxBytes: Int) -> Data? {
-        guard let ghPath = PRDetect.installedGHPath(),
-              let result = GitHubCLIBoardClient.runGH(ghPath, arguments: arguments, timeout: timeout, maxStandardOutputBytes: maxBytes),
+        guard let ghPath = GitHub.CLI.installedPath(),
+              let result = GitHub.CLI.run(ghPath, arguments: arguments, timeout: timeout, maxStandardOutputBytes: maxBytes),
               result.terminationStatus == 0
         else { return nil }
         return result.standardOutput

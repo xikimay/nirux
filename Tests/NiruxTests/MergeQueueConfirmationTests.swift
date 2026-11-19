@@ -81,7 +81,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
             candidate(6, head: a, local: MergeQueue.LocalState(worktrees: [
                 MergeQueue.LocalWorktree(path: "/tmp/x/app.feat-6", problem: .unpushed)
             ])),
-            candidate(7, head: a, pullRequest: MQ.pullRequest(7, head: a, state: "MERGED")),
+            candidate(7, head: a, pullRequest: MQ.pullRequest(7, head: a, state: .merged)),
             candidate(8, head: a, pullRequest: MQ.pullRequest(8, head: a, base: "dev")),
             candidate(9, head: a, pullRequest: MQ.pullRequest(9, head: a, autoMerge: true)),
             candidate(10, head: a, pullRequest: MQ.pullRequest(10, head: a, inMergeQueue: true)),

@@ -434,7 +434,7 @@ final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
         try pushAndPointAtGitHub()
 
         let missing = try snapshot(options(gitHub: nil))
-        XCTAssertEqual(missing.pullRequest, .unavailable("The GitHub CLI (gh) isn't installed."))
+        XCTAssertEqual(missing.pullRequest, .unavailable("The GitHub CLI (gh) isn’t installed."))
         XCTAssertEqual(missing.base.name, "main")
 
         let loggedOut = try snapshot(options(

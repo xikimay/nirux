@@ -87,7 +87,7 @@ final class DailyPassTests: XCTestCase {
     /// (signed out, refused) holds.
     func testAGitHubErrorReadsAgainUnlessItHolds() {
         func retries(_ standardError: String, status: Int32 = 1) -> Bool {
-            DailyPass.readFailure(GitHubCLIQueueClient.Output(status: status, standardOutput: Data(), standardError: Data(standardError.utf8)))
+            DailyPass.readFailure(GitHub.CLI.Output(status: status, standardOutput: Data(), standardError: Data(standardError.utf8)))
                 .retryable
         }
         XCTAssertTrue(retries("error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com"))

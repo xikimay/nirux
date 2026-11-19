@@ -16,17 +16,11 @@ extension BranchReview {
         /// start or doesn't finish in time.
         let run: @Sendable (_ arguments: [String], _ directory: String) -> Output?
 
-        /// The gh `PRDetect` finds; nil when it isn't installed.
+        /// The installed gh, run from the checkout; nil when it isn't installed.
         static func installed(timeout: TimeInterval = 30) -> GitHubCLI? {
-            guard let path = PRDetect.installedGHPath() else { return nil }
+            guard let path = GitHub.CLI.installedPath() else { return nil }
             return GitHubCLI { arguments, directory in
-                BoundedProcess.run(
-                    executableURL: URL(fileURLWithPath: path),
-                    arguments: arguments,
-                    currentDirectoryURL: URL(fileURLWithPath: directory),
-                    timeout: timeout,
-                    captureStandardError: true
-                ).map {
+                GitHub.CLI.run(path, arguments: arguments, in: URL(fileURLWithPath: directory), timeout: timeout).map {
                     Output(
                         status: $0.terminationStatus,
                         standardOutput: $0.standardOutput,
@@ -162,7 +156,7 @@ extension BranchReview {
         branch: String, root: String, options: Options
     ) -> Result<[PullRequest], LookupFailure> {
         guard let gitHub = options.gitHub else {
-            return .failure(LookupFailure(message: "The GitHub CLI (gh) isn't installed."))
+            return .failure(LookupFailure(message: "\(GitHub.CLI.missing)."))
         }
         guard let repository = headRepository(branch: branch, root: root, options: options) else {
             return .failure(LookupFailure(message: "\(branch) isn't pushed to GitHub."))

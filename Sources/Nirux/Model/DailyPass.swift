@@ -84,12 +84,12 @@ enum DailyPass {
     typealias GitHubRead = @Sendable (_ arguments: [String]) -> Result<Data, ReadFailure>
 
     static let installedGitHub: GitHubRead = { arguments in
-        guard let ghPath = PRDetect.installedGHPath() else { return .failure(ReadFailure(message: "gh isn’t installed")) }
-        guard let result = GitHubCLIBoardClient.runGH(ghPath, arguments: arguments, timeout: 30, maxStandardOutputBytes: 8_000_000) else {
+        guard let ghPath = GitHub.CLI.installedPath() else { return .failure(ReadFailure(message: "gh isn’t installed")) }
+        guard let result = GitHub.CLI.run(ghPath, arguments: arguments, timeout: 30, maxStandardOutputBytes: 8_000_000) else {
             return .failure(ReadFailure(message: "gh didn’t answer within 30 s", retryable: true))
         }
         guard result.terminationStatus == 0 else {
-            return .failure(readFailure(GitHubCLIQueueClient.Output(
+            return .failure(readFailure(GitHub.CLI.Output(
                 status: result.terminationStatus, standardOutput: result.standardOutput, standardError: result.standardError
             )))
         }
@@ -106,9 +106,9 @@ enum DailyPass {
     /// A failed gh call, as the merge queue reads it: no answer (no
     /// network yet, a timeout, a 5xx) or a rate limit may pass; anything
     /// GitHub or gh said (signed out, refused) holds until someone acts.
-    static func readFailure(_ output: GitHubCLIQueueClient.Output) -> ReadFailure {
-        let error = GitHubCLIQueueClient.classify(output)
-        let message = GitHubCLIQueueClient.message(of: error)
+    static func readFailure(_ output: GitHub.CLI.Output) -> ReadFailure {
+        let error = GitHub.CLI.classify(output)
+        let message = error.message
         switch error {
         case .noAnswer, .rateLimited, .secondaryRateLimit:
             return ReadFailure(message: message, retryable: true)

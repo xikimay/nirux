@@ -24,9 +24,15 @@ struct PRFeedback: Hashable, Sendable {
     var humanCount: Int { items.filter { !$0.isBot }.count }
     var botCount: Int { items.filter(\.isBot).count }
 
-    /// What the card shows; nil when there's nothing.
-    var sidebarCounts: SidebarPRFeedback? {
-        items.isEmpty ? nil : SidebarPRFeedback(humans: humanCount, bots: botCount)
+    /// The counts, all a card shows of the feedback.
+    struct Counts: Hashable, Sendable {
+        let humans: Int
+        let bots: Int
+    }
+
+    /// Nil when there's nothing.
+    var counts: Counts? {
+        items.isEmpty ? nil : Counts(humans: humanCount, bots: botCount)
     }
 }
 
@@ -50,7 +56,7 @@ enum PRFeedbackReader {
 
     /// The PR's own host: an Enterprise PR is never sent to github.com.
     static func arguments(pullRequestURL: String) -> [String] {
-        let host = URL(string: pullRequestURL)?.host ?? "github.com"
+        let host = URL(string: pullRequestURL)?.host ?? GitHub.host
         return ["api", "graphql", "--hostname", host, "-f", "query=\(query)", "-f", "url=\(pullRequestURL)"]
     }
 
@@ -60,8 +66,8 @@ enum PRFeedbackReader {
         completion: @escaping @MainActor @Sendable (PRFeedback?) -> Void
     ) {
         DispatchQueue.global(qos: .utility).async {
-            let result = PRDetect.installedGHPath().flatMap {
-                GitHubCLIBoardClient.runGH($0, arguments: arguments(pullRequestURL: pullRequestURL), timeout: 30)
+            let result = GitHub.CLI.installedPath().flatMap {
+                GitHub.CLI.run($0, arguments: arguments(pullRequestURL: pullRequestURL), timeout: 30)
             }
             let read = result.flatMap { $0.terminationStatus == 0 ? feedback(from: $0.standardOutput) : nil }
             DispatchQueue.main.async { completion(read) }
@@ -70,16 +76,16 @@ enum PRFeedbackReader {
 
     static func feedback(from data: Data) -> PRFeedback? {
         let json = try? JSONSerialization.jsonObject(with: data)
-        guard let pullRequest = dig(json, "data", "resource"),
-              let threads = dig(pullRequest, "reviewThreads", "nodes") as? [[String: Any]],
-              let comments = dig(pullRequest, "comments", "nodes") as? [[String: Any]],
-              let reviews = dig(pullRequest, "reviews", "nodes") as? [[String: Any]]
+        guard let pullRequest = GitHub.dig(json, "data", "resource"),
+              let threads = GitHub.dig(pullRequest, "reviewThreads", "nodes") as? [[String: Any]],
+              let comments = GitHub.dig(pullRequest, "comments", "nodes") as? [[String: Any]],
+              let reviews = GitHub.dig(pullRequest, "reviews", "nodes") as? [[String: Any]]
         else { return nil }
-        let ours = Set([dig(pullRequest, "author", "login"), dig(json, "data", "viewer", "login")].compactMap { $0 as? String })
+        let ours = Set([GitHub.dig(pullRequest, "author", "login"), GitHub.dig(json, "data", "viewer", "login")].compactMap { $0 as? String })
         // A pending review is visible to its writer only, and not sent yet.
         let conversation = comments + reviews.filter { $0["state"] as? String != "PENDING" }
-        let headCommittedAt = (dig(pullRequest, "commits", "nodes") as? [[String: Any]])?.last
-            .flatMap { date(dig($0, "commit", "committedDate")) }
+        let headCommittedAt = (GitHub.dig(pullRequest, "commits", "nodes") as? [[String: Any]])?.last
+            .flatMap { date(GitHub.dig($0, "commit", "committedDate")) }
         // An inline reply comes wrapped in a review with an empty body: it
         // answers its thread, not the conversation.
         let lastReply = conversation
@@ -90,7 +96,7 @@ enum PRFeedbackReader {
 
         let threadItems = threads.compactMap { thread -> PRFeedback.Item? in
             guard thread["isResolved"] as? Bool == false,
-                  let first = (dig(thread, "comments", "nodes") as? [[String: Any]])?.first,
+                  let first = (GitHub.dig(thread, "comments", "nodes") as? [[String: Any]])?.first,
                   counts(first, ours: ours)
             else { return nil }
             let path = thread["path"] as? String ?? ""
@@ -139,18 +145,14 @@ enum PRFeedbackReader {
     }
 
     private static func isBot(_ node: [String: Any]) -> Bool {
-        dig(node, "author", "__typename") as? String == "Bot"
+        GitHub.dig(node, "author", "__typename") as? String == "Bot"
     }
 
     private static func login(of node: [String: Any]) -> String? {
-        dig(node, "author", "login") as? String
+        GitHub.dig(node, "author", "login") as? String
     }
 
     private static func date(_ value: Any?) -> Date? {
         (value as? String).flatMap { try? Date($0, strategy: .iso8601) }
-    }
-
-    private static func dig(_ json: Any?, _ path: String...) -> Any? {
-        path.reduce(json) { value, key in (value as? [String: Any])?[key] }
     }
 }

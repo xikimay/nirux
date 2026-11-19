@@ -300,9 +300,9 @@ extension MergeQueue {
         private mutating func readFailed(_ failure: ReadFailure, reads: [Read], purpose: Purpose, now: TimeInterval) {
             switch failure {
             case .ghMissing:
-                stop(StopReason(kind: .setup, message: "gh isn’t installed: the queue can’t read GitHub."))
+                stop(StopReason(kind: .setup, message: "\(GitHub.CLI.missing): the queue can’t read GitHub."))
             case .notSignedIn(let message):
-                stop(StopReason(kind: .setup, message: "gh isn’t signed in to github.com (run gh auth login): \(message)"))
+                stop(StopReason(kind: .setup, message: "\(GitHub.CLI.signedOut) (run gh auth login): \(message)"))
             case .refused(let message):
                 stop(StopReason(kind: .github, message: "GitHub refused a read: \(message)"))
             case .rateLimited(let resumeAt):
@@ -438,7 +438,7 @@ extension MergeQueue {
             }
             if settings.postMergeWorkflow != nil {
                 guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
-                baseRunsFailedAtStart = Set(runs.filter(MergeQueue.runFailed).map(\.attemptKey))
+                baseRunsFailedAtStart = Set(runs.filter { GitHub.isFailedRun($0.conclusion) }.map(\.attemptKey))
             }
             guard !mergeQueue else {
                 return stop(StopReason(kind: .setup, message: "\(settings.baseBranch) requires GitHub’s merge queue: gh pr merge "
@@ -456,7 +456,7 @@ extension MergeQueue {
             let number = "#\(pullRequest.number)"
             let url = pullRequest.url
             if !pullRequest.isOpen {
-                return StopReason(kind: .notMergeable, message: "\(number) is \(pullRequest.state.lowercased()), no longer open.", url: url)
+                return StopReason(kind: .notMergeable, message: "\(number) is \(pullRequest.state.rawValue.lowercased()), no longer open.", url: url)
             }
             if pullRequest.isDraft {
                 return StopReason(kind: .notMergeable, message: "\(number) is a draft.", url: url)
@@ -682,7 +682,7 @@ extension MergeQueue {
         private mutating func checksFailed(
             _ verdict: ChecksVerdict, checks: CommitChecks, head: String, index: Int, now: TimeInterval
         ) {
-            let names = (verdict.failed.map { run in run.workflow.map { "\($0) / \(run.name)" } ?? run.name }
+            let names = (verdict.failed.map { run in GitHub.qualifiedName(name: run.name, workflow: run.workflow) ?? run.name }
                 + verdict.failedStatuses).joined(separator: ", ")
             guard !entries[index].hasRerun else {
                 return stop(StopReason(kind: .checks, message: "Required check \(names) failed again on \(Self.short(head)) "
@@ -792,7 +792,7 @@ extension MergeQueue {
             let label = MergeQueue.workflowLabel(settings.postMergeWorkflow)
             // One that failed between two looks is caught too.
             if let failed = runs.first(where: {
-                MergeQueue.runFailed($0)
+                GitHub.isFailedRun($0.conclusion)
                     && (!baseRunsFailedAtStart.contains($0.attemptKey) || clocks.awaitedBaseRuns.contains($0.id))
             }) {
                 stop(StopReason(kind: .postMerge, message: "The \(label) of \(Self.short(failed.headSha)) on "
@@ -840,7 +840,7 @@ extension MergeQueue {
                 engine.read([.pullRequest(number)], after: Limits.mergeConfirmInterval,
                             for: .mergeConfirm(head: head, baseTip: baseTip, result: result))
             }
-            if pullRequest.state == "MERGED" {
+            if pullRequest.state == .merged {
                 entries[index].mergeCommit = pullRequest.mergeCommit
                 guard pullRequest.headOid == head else {
                     return stop(StopReason(kind: .merge, message: "#\(number) was merged at \(Self.short(pullRequest.headOid)), "

@@ -31,7 +31,7 @@ final class ProjectBoardController {
         var openPullRequests: [ProjectBoard.PullRequest]?
         var mergedPullRequests: [ProjectBoard.PullRequest]?
         /// The last post-merge run; `.some(nil)` when there is none yet.
-        var postMergeRun: ProjectBoard.WorkflowRun??
+        var postMergeRun: GitHub.WorkflowRun??
         var errors: [ProjectBoard.Source: ProjectBoard.FetchError] = [:]
         /// Why the last Retarget failed: shown until Refresh.
         var retargetFailure: String?
@@ -566,7 +566,7 @@ final class ProjectBoardController {
             }
             Self.readOffMain({
                 client.postMergeRuns(repository: name, workflow: workflow, branch: branch).flatMap { data in
-                    ProjectBoard.parseRuns(data).map { .success($0.first) } ?? .failure(.unreadable)
+                    GitHub.parseWorkflowRuns(data).map { .success($0.first) } ?? .failure(.unreadable)
                 }
             }, then: { [weak self] result in
                 self?.finish(source, section: id, reads: repository, generation: current) { reads in
@@ -715,7 +715,7 @@ final class ProjectBoardController {
             reads[section.id]?.gitHub ?? section.commonDir.flatMap(remote).flatMap(RepositoryReads.init(baseRemote:))?.gitHub
         }
         let isTaken = { (remotes: [GitHubRepository]) in
-            remotes.contains { remote in taken.contains { $0.owner == remote.owner && $0.name == remote.name } }
+            remotes.contains { remote in taken.contains { $0.hasOwnerAndName(of: remote) } }
         }
         var listed = anchored
         // By their main checkout's path: the same clone names the section whatever the sidebar's order.
@@ -738,7 +738,7 @@ final class ProjectBoardController {
             guard let read = listedRemotes[commonDir] else { continue }
             // Its section reads its base remote: a clone whose own base remote is that repository joins it.
             if let gitHub = RepositoryReads(baseRemote: read)?.gitHub {
-                guard !placedRepositories.contains(where: { $0.owner == gitHub.owner && $0.name == gitHub.name }) else { continue }
+                guard !placedRepositories.contains(where: { $0.hasOwnerAndName(of: gitHub) }) else { continue }
                 placedRepositories.append(gitHub)
             }
             remotes[commonDir] = read
@@ -917,7 +917,7 @@ final class ProjectBoardController {
         switch reads.postMergeRun {
         case .some(let run): return .postMergeRun(run, workflow: workflow, now: now)
         case nil:
-            let label = (workflow as NSString).deletingPathExtension
+            let label = GitHub.workflowLabel(workflow)
             return reads.errors[.postMergeRun] == nil
                 ? ColumnHeaderView.Status("\(label) …", tone: .neutral, toolTip: "Reading the last \(label) run…") : nil
         }

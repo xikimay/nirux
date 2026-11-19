@@ -519,8 +519,8 @@ final class ProjectBoardHeaderTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private let utc = TimeZone(identifier: "UTC")!
 
-    private func run(_ status: String, _ conclusion: String?) -> ProjectBoard.WorkflowRun {
-        ProjectBoard.WorkflowRun(status: status, conclusion: conclusion, headSha: "43a9503ffff",
+    private func run(_ status: String, _ conclusion: String?) -> GitHub.WorkflowRun {
+        GitHub.WorkflowRun(status: status, conclusion: conclusion, headSha: "43a9503ffff",
                                  createdAt: now, updatedAt: now, url: nil)
     }
 

@@ -796,28 +796,25 @@ extension ColumnHeaderView.Status {
     /// green check once it passed, red when it failed, grey while it runs;
     /// the whole summary in its tooltip.
     static func postMergeRun(
-        _ run: ProjectBoard.WorkflowRun?, workflow: String, now: Date, timeZone: TimeZone = .current
+        _ run: GitHub.WorkflowRun?, workflow: String, now: Date, timeZone: TimeZone = .current
     ) -> ColumnHeaderView.Status {
-        let label = (workflow as NSString).deletingPathExtension
+        let label = GitHub.workflowLabel(workflow)
         let summary = ProjectBoard.runSummary(run, workflow: workflow, now: now, timeZone: timeZone)
         guard let run else { return ColumnHeaderView.Status("\(label): no run yet", tone: .neutral, toolTip: summary) }
-        let completed = run.status == "completed"
-        let date = completed ? (run.updatedAt ?? run.createdAt) : (run.createdAt ?? run.updatedAt)
-        let time = date.map { ProjectBoard.clockTime($0, now: now, timeZone: timeZone) }
+        let time = run.shownDate.map { ProjectBoard.clockTime($0, now: now, timeZone: timeZone) }
         let text = { (outcome: String?) in [label, outcome, time].compactMap { $0 }.joined(separator: " ") }
-        guard completed else {
+        guard run.isCompleted else {
             return ColumnHeaderView.Status(text(nil), tone: .neutral, symbol: Theme.Symbol.checksRunning, toolTip: summary)
         }
-        switch run.conclusion {
-        case "success":
+        if run.conclusion == "success" {
             return ColumnHeaderView.Status(
                 text(nil), tone: .neutral, symbol: Theme.Symbol.checksPassed, symbolTone: .success, toolTip: summary
             )
-        case "failure", "timed_out", "startup_failure":
-            return ColumnHeaderView.Status(text(nil), tone: .error, symbol: Theme.Symbol.checksFailed, toolTip: summary)
-        default:
-            // Cancelled, skipped…: said in words, without a color.
-            return ColumnHeaderView.Status(text(run.conclusion ?? "completed"), tone: .neutral, toolTip: summary)
         }
+        if GitHub.isFailedRun(run.conclusion) {
+            return ColumnHeaderView.Status(text(nil), tone: .error, symbol: Theme.Symbol.checksFailed, toolTip: summary)
+        }
+        // Cancelled, skipped…: said in words, without a color.
+        return ColumnHeaderView.Status(text(run.conclusion ?? "completed"), tone: .neutral, toolTip: summary)
     }
 }

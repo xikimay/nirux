@@ -50,13 +50,10 @@ enum WorktreeCleanup {
             return (trashed as URL?) ?? url
         }
 
-        /// The system git and the GitHub CLI where PRDetect looks for it,
-        /// and Nirux's state directory.
+        /// The system git, the installed GitHub CLI and Nirux's state directory.
         static var installed: Tools {
             Tools(
-                ghPath: ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"].first {
-                    FileManager.default.isExecutableFile(atPath: $0)
-                },
+                ghPath: GitHub.CLI.installedPath(),
                 reviewStateDirectory: Persistence.stateDirectory
             )
         }
@@ -64,8 +61,7 @@ enum WorktreeCleanup {
 
     struct PullRequest: Equatable, Sendable {
         let number: Int
-        /// OPEN, CLOSED or MERGED.
-        let state: String
+        let state: GitHub.PullRequestState
         let headOid: String
         let url: String
     }
@@ -168,7 +164,7 @@ enum WorktreeCleanup {
 
         var plan: Plan? {
             guard problems.isEmpty, let branch = worktree.branch, let tip = worktree.tip,
-                  let pullRequest, pullRequest.state == "MERGED"
+                  let pullRequest, pullRequest.state == .merged
             else { return nil }
             return Plan(worktree: worktree, branch: branch, tip: tip, pullRequest: pullRequest)
         }

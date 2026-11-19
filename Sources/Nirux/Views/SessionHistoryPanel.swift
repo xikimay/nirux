@@ -519,7 +519,7 @@ private final class SessionHistoryCellView: NSTableCellView {
             }
         }
         for part in details {
-            let isMerged = row.record.pullRequest.map { SessionHistory.pullRequestLabel($0) == part && $0.state == "MERGED" }
+            let isMerged = row.record.pullRequest.map { SessionHistory.pullRequestLabel($0) == part && GitHub.PullRequestState($0.state) == .merged }
             append(part, color: isMerged == true ? Theme.Color.done : Theme.Color.textSecondary)
         }
         detailLabel.attributedStringValue = detail
