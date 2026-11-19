@@ -23,8 +23,8 @@ enum LeadTools {
     static let recordReview = "record_review"
     static let dailyPass = "daily_pass"
     static let names = [
-        startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule,
-        closeTask, moveTask, renameTask, setTaskParent, readTask, interruptTask, recordReview, dailyPass
+        startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule, recordReview, dailyPass,
+        closeTask, moveTask, renameTask, setTaskParent, readTask, interruptTask
     ]
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
