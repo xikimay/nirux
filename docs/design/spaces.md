@@ -271,7 +271,7 @@ New flow, built on the guarded typing `tell` already uses
     sub-tasks and the user's tasks included: the Lead reviews and merges
     their pull requests, and a review relayed through a parent waits on that
     parent's turn. A name is read among the Lead's own tasks first, then
-    among all the space's (as `read_task`). A task that doesn't report to
+    among all the space's. A task that doesn't report to
     the Lead gets it through a one-way Mission (`Mission.oneWay`, one per
     Lead terminal and task agent, made at the first tell), to the agent its
     own Mission names (refused if that one isn't Claude Code), else a Claude
@@ -279,7 +279,7 @@ New flow, built on the guarded typing `tell` already uses
     resume there: queued and typed as any tell, held and given-up lines to
     the Lead included, under "[Nirux Mission] From the space's Lead (one-way:
     your questions and result still go to whoever started this task):". So a
-    slash command is refused, and so is a workspace that isn't a task
+    slash command (`/name` first) is refused, and so is a workspace that isn't a task
     (`isTask`) or that a link from outside Nirux opened. Typed, it reopens
     the task's own Mission too, as a parent's tell does, so a finished
     sub-task's next result reaches its parent. The answer says who gets the

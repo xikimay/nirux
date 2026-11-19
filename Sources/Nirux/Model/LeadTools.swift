@@ -90,8 +90,8 @@ enum LeadTools {
                     Type a message into a task's prompt once its agent's turn is over (a follow-up, an answer it \
                     didn't ask for, a slash command). Any task of this space: one that doesn't report to you (a \
                     sub-task, a task the user started) gets it one-way, under a line saying it comes from you (so \
-                    no slash command); its questions and result still go to whoever started it. A name your own \
-                    tasks answer is theirs. Claude Code tasks only.
+                    no slash command); its questions and result still go to whoever started it. A name one of your \
+                    own tasks answers goes to it. Claude Code tasks only.
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],

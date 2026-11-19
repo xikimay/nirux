@@ -577,7 +577,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             task.hook(.stop)
             let slash = try tell("By hand", "/code-review")
             XCTAssertTrue(slash.isError && slash.text.contains("slash command wouldn't run"), slash.text)
-            XCTAssertFalse(try tell("By hand", "And a test for it.").isError)
+            XCTAssertFalse(try tell("By hand", "/tmp/notes.md: and a test for it.").isError, "a path, not a command")
             let missions = MissionStore.shared.missions.filter { $0.childWorkspaceID == task.workspace.id }
             XCTAssertEqual(missions.map(\.oneWay), [true], "one Mission for both")
             XCTAssertEqual(missions.first?.parentWorkspaceID, lead.workspace.id)

@@ -512,7 +512,7 @@ extension NiruxShellView {
             return answer("“\(title)” isn't a task (a worktree of one of the space's repositories, or a task's folder): "
                 + "ask the user instead.", true)
         }
-        guard !message.hasPrefix("/") else {
+        guard !Self.isSlashCommand(message) else {
             return answer("“\(title)” doesn't report to you: Nirux types your message under a line saying it's yours, so a "
                 + "slash command wouldn't run. Say it in words.", true)
         }
@@ -530,6 +530,12 @@ extension NiruxShellView {
             return answer("Nirux couldn’t record the message: try again.", true)
         }
         sendInstruction(message, to: workspace, in: mission, answer: answer)
+    }
+
+    /// `/code-review …`, not a path such as `/Users/me/Foo.swift:12`.
+    static func isSlashCommand(_ message: String) -> Bool {
+        let command = message.prefix { !$0.isWhitespace }
+        return command.count > 1 && command.hasPrefix("/") && !command.dropFirst().contains("/")
     }
 
     static func typesOnlyIntoClaude(_ title: String, runs kind: String) -> String {
