@@ -43,10 +43,19 @@ final class DropTargetView: NSView {
 final class EditorConflictBanner: NSView {
     static let height: CGFloat = 34
 
-    var onReload: (() -> Void)?
-    var onKeep: (() -> Void)?
+    var onCompare: (() -> Void)?
+    var onTakeDisk: (() -> Void)?
+    var onKeepMine: (() -> Void)?
 
     private let messageLabel = NSTextField(labelWithString: "")
+    /// On while the disk's version shows beside the buffer.
+    private lazy var compareButton = makeButton(title: "Compare", action: #selector(compareClicked))
+    /// Right to left.
+    private lazy var buttons = [
+        makeButton(title: "Keep Mine", action: #selector(keepMineClicked)),
+        makeButton(title: "Take Disk", action: #selector(takeDiskClicked)),
+        compareButton
+    ]
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -61,10 +70,8 @@ final class EditorConflictBanner: NSView {
         messageLabel.lineBreakMode = .byTruncatingMiddle
         addSubview(messageLabel)
 
-        let reload = makeButton(title: "Reload from Disk", action: #selector(reloadClicked))
-        let keep = makeButton(title: "Keep My Changes", action: #selector(keepClicked))
-        addSubview(reload)
-        addSubview(keep)
+        compareButton.setButtonType(.pushOnPushOff)
+        buttons.forEach(addSubview)
     }
 
     @available(*, unavailable)
@@ -78,8 +85,11 @@ final class EditorConflictBanner: NSView {
         return button
     }
 
-    func configure(fileName: String) {
-        messageLabel.stringValue = "\(fileName) changed on disk while you have unsaved edits.".asWarning
+    func configure(fileName: String, isComparing: Bool) {
+        messageLabel.stringValue = (isComparing
+            ? "\(fileName): on disk on the left, your edits on the right."
+            : "\(fileName) changed on disk while you have unsaved edits.").asWarning
+        compareButton.state = isComparing ? .on : .off
         needsLayout = true
     }
 
@@ -87,20 +97,21 @@ final class EditorConflictBanner: NSView {
         super.layout()
         let pad: CGFloat = 10
         let buttonH: CGFloat = 22
-        let buttonW: CGFloat = 118
         let gap: CGFloat = 8
         let y = (bounds.height - buttonH) / 2
         var x = bounds.width - pad
-        for subview in subviews where subview is NSButton {
+        for button in buttons {
+            let buttonW = button.intrinsicContentSize.width
             x -= buttonW
-            subview.frame = NSRect(x: x, y: y, width: buttonW, height: buttonH)
+            button.frame = NSRect(x: x, y: y, width: buttonW, height: buttonH)
             x -= gap
         }
         messageLabel.frame = NSRect(x: pad, y: (bounds.height - 15) / 2, width: max(60, x - pad), height: 15)
     }
 
-    @objc private func reloadClicked() { onReload?() }
-    @objc private func keepClicked() { onKeep?() }
+    @objc private func compareClicked() { onCompare?() }
+    @objc private func takeDiskClicked() { onTakeDisk?() }
+    @objc private func keepMineClicked() { onKeepMine?() }
 }
 
 /// Banner above the editor's "Full Branch Diff" tab: the same branch reads

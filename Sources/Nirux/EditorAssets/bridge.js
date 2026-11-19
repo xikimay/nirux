@@ -126,10 +126,11 @@
 
     if (models[path]) {
       // Reload existing model — Swift detected an external change while the
-      // buffer was clean. Adopt the new content as the new clean baseline.
+      // buffer was clean. Adopt the new content as the new clean baseline,
+      // first: the change then reports the buffer clean.
+      models[path].cleanValue = content;
       models[path].model.setValue(content);
       monaco.editor.setModelLanguage(models[path].model, lang);
-      models[path].cleanValue = content;
     } else {
       ensureModel(path, content, lang);
     }
@@ -777,7 +778,7 @@
     if (action) action.run();
   }
 
-  function postSave(path, entry) {
+  function postSave(path, entry, requestID) {
     var content = entry.model.getValue();
     var pending = pendingSaves[path];
     if (pending) {
@@ -786,7 +787,7 @@
     } else {
       pendingSaves[path] = { content: content, count: 1 };
     }
-    postToSwift({ type: "save", path: path, content: content });
+    postToSwift({ type: "save", path: path, content: content, requestID: requestID });
   }
 
   function requestSave() {
@@ -796,19 +797,21 @@
     postSave(currentPath, entry);
   }
 
-  // Save every dirty buffer, not just the active tab. Each save goes through
-  // the same Swift round-trip as Cmd+S (write + markSaved per path).
+  // Save msg.paths, or every dirty buffer when it has none. Each save goes
+  // through the same Swift round-trip as Cmd+S (write + markSaved per path).
   // skipPaths carries buffers Swift knows changed on disk while dirty —
-  // writing those would clobber the external change.
-  function saveAllDirty(skipPaths) {
+  // writing those would clobber the external change. Then Swift hears that
+  // every save of msg.requestID is posted.
+  function saveBuffers(msg) {
     var skip = {};
-    (skipPaths || []).forEach(function (path) { skip[path] = true; });
-    Object.keys(models).forEach(function (path) {
-      if (skip[path]) return;
+    (msg.skipPaths || []).forEach(function (path) { skip[path] = true; });
+    (msg.paths || Object.keys(models)).forEach(function (path) {
       var entry = models[path];
-      if (entry.model.getValue() === entry.cleanValue) return;
-      postSave(path, entry);
+      if (!entry || skip[path]) return;
+      if (!msg.paths && entry.model.getValue() === entry.cleanValue) return;
+      postSave(path, entry, msg.requestID);
     });
+    if (msg.requestID !== undefined) postToSwift({ type: "savedAll", requestID: msg.requestID });
   }
 
   function applyFontSize() {
@@ -898,7 +901,7 @@
       case "enterDiffGroup": enterPierreDiffGroup(msg); break;
       case "exitDiff": exitDiff(); break;
       case "toggleWordWrap": toggleWordWrap(); break;
-      case "saveAll": saveAllDirty(msg.skipPaths); break;
+      case "saveAll": saveBuffers(msg); break;
       case "toggleMinimap": toggleMinimap(); break;
       case "getSelection": reportSelection(msg.requestID); break;
       case "moveCaretToTextEdge": moveCaretToTextEdge(msg.edge); break;
