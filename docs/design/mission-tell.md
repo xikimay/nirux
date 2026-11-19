@@ -41,7 +41,8 @@ child's prompt.
   again on an idle session).
 - **Raw text.** No prefix, so `/code-review` stays a slash command. The child
   can't tell the parent from the user, which is fine: the parent acts for the
-  user.
+  user. A Lead's tell to a task that doesn't report to it has a header line
+  (spaces.md, "The Lead").
 - **Typing reopens a completed Mission.** Most follow-ups come after
   `completed`, so once the message is typed the Mission is `active` again and
   the child can `ask` and `completed` again. A message still waiting doesn't

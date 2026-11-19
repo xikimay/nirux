@@ -29,7 +29,7 @@ extension NiruxShellView {
         switch request.tool {
         case LeadTools.startTask: leadStartTask(arguments, in: space, parent: parent, answer: answer)
         case LeadTools.listTasks: answer(leadTaskList(in: space, lead: lead.id), false)
-        case LeadTools.tell: leadTell(arguments, in: space, lead: lead.id, answer: answer)
+        case LeadTools.tell: leadTell(arguments, in: space, lead: parent, answer: answer)
         case LeadTools.reply: leadReply(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.askUser: leadAskUser(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.queueMerge: leadQueueMerge(arguments, in: space, answer: answer)
@@ -306,15 +306,14 @@ extension NiruxShellView {
         for task in tasks {
             var line = taskListHead(task, in: space, parentTitle: parentTitles[task.id], snapshot: snapshot)
             // Only what its own tasks sent it: another agent's Mission
-            // isn't its to answer.
-            let missions = store.missions.filter { $0.childWorkspaceID == task.id && $0.parentWorkspaceID == leadID }
+            // isn't its to answer, and its tells don't make a task its own.
+            let missions = store.missions.filter { $0.childWorkspaceID == task.id && $0.parentWorkspaceID == leadID && $0.oneWay != true }
             if missions.isEmpty {
                 line += task.startedByAgent ? " · not yours (another agent started it)" : " · not yours (started by the user)"
             } else if let mission = missions.max(by: { $0.createdAt < $1.createdAt }) {
                 line += taskListMissionLine(mission, of: task, store: store)
             }
-            // Only where set_task_context reaches: its own tasks.
-            for field in WorkspaceState.ContextField.allCases where missions.contains(where: { $0.reportsToLead == true }) {
+            for field in WorkspaceState.ContextField.allCases {
                 guard let text = Self.leadContextText(task.contextText(field)) else { continue }
                 let name = field == .nextStep ? "next step" : "blocker"
                 let owner = task.contextIsFromLead(field) ? "" : " (the user wrote it)"
@@ -425,18 +424,26 @@ extension NiruxShellView {
 
     // MARK: tell, reply, ask_user
 
-    /// The task named by its branch or title, among the space's workspaces,
-    /// and its latest Mission whose parent is this Lead: a Lead started
-    /// again doesn't take the former one's tasks over.
+    /// The task of the Lead's space named `name` (as `spaceTask` reads
+    /// names) if it reports to this Lead, with its Mission.
     func leadTask(_ name: String, in space: WorkspaceProfile, lead leadID: String) -> (workspace: WorkspaceState, mission: Mission)? {
+        spaceTask(name, in: space).flatMap { workspace in leadMission(of: workspace, lead: leadID).map { (workspace, $0) } }
+    }
+
+    /// `workspace`'s latest Mission whose parent is this Lead: a Lead started
+    /// again doesn't take the former one's tasks over.
+    func leadMission(of workspace: WorkspaceState, lead leadID: String) -> Mission? {
         _ = MissionStore.shared.ensureLoaded()
-        let candidates = workspaces.filter { $0.profileID == space.id && !$0.isLead && !$0.isClosing }
-        func mission(of workspace: WorkspaceState) -> Mission? {
-            MissionStore.shared.missions
-                .filter { $0.childWorkspaceID == workspace.id && $0.parentWorkspaceID == leadID && $0.reportsToLead == true }
-                .max(by: { $0.createdAt < $1.createdAt })
-        }
-        return namedTask(name, among: candidates, mission: mission)
+        return MissionStore.shared.missions
+            .filter { $0.childWorkspaceID == workspace.id && $0.parentWorkspaceID == leadID && $0.reportsToLead == true }
+            .max(by: { $0.createdAt < $1.createdAt })
+    }
+
+    /// The Mission `task`'s agent asks and reports through, its latest: never
+    /// a Lead's one-way one.
+    func ownMission(of task: WorkspaceState) -> Mission? {
+        MissionStore.shared.missions.filter { $0.childWorkspaceID == task.id && $0.oneWay != true }
+            .max(by: { $0.createdAt < $1.createdAt })
     }
 
     /// The task of `candidates` named as `namedWorkspace` reads names, with
@@ -485,18 +492,99 @@ extension NiruxShellView {
             + "A task the user started without you doesn't report to you."
     }
 
-    private func leadTell(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {
+    /// Any task of the space. One with a live Mission of its own (its
+    /// agent's column and its parent's terminal open) gets it as an
+    /// instruction on that Mission from the Lead, as its parent's tell would
+    /// come; any other through the Lead's one-way Mission, to the Claude
+    /// Code running in it.
+    private func leadTell(
+        _ arguments: [String: Any], in space: WorkspaceProfile, lead: NewTask.MissionParent, answer: @escaping LeadAnswer
+    ) {
         let name = LeadTools.string(arguments, "task") ?? ""
         let message = LeadTools.string(arguments, "message") ?? ""
-        guard let (workspace, mission) = leadTask(name, in: space, lead: leadID) else { return answer(noLeadTask(name), true) }
-        sendInstruction(message, to: workspace, in: mission, answer: answer)
+        guard let workspace = spaceTask(name, in: space) else { return answer(noSpaceTask(name, in: space), true) }
+        if let mission = leadMission(of: workspace, lead: lead.workspaceID) {
+            return sendInstruction(message, to: workspace, in: mission, answer: answer)
+        }
+        let title = MissionPromptText.quoted(workspace.title)
+        if let refusal = leadRefusal(for: workspace, title: title) { return answer(refusal, true) }
+        let handoffsEnabled = Self.currentMissionHandoffsEnabled()
+        if let own = ownMission(of: workspace), workspace.columns.contains(where: { $0.agentUUID == own.childAgentUUID }) {
+            guard own.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue else {
+                return answer(Self.typesOnlyIntoClaude(title, runs: own.childAgentKind), true)
+            }
+            if own.isCarried(handoffsEnabled: handoffsEnabled),
+               let parent = requestingTerminal(workspaceID: own.parentWorkspaceID, agentUUID: own.parentAgentUUID)?.workspace {
+                // Typed, it reopens a finished sub-task, which counts against its task's limit again.
+                if own.status == .completed, own.reportsToTask == true, runningSubtaskCount(of: parent) >= TaskTools.maxRunningSubtasks {
+                    let parentTitle = MissionPromptText.quoted(parent.title)
+                    return answer("“\(title)” completed, and its task “\(parentTitle)” already runs \(TaskTools.maxRunningSubtasks) "
+                        + "sub-tasks, the most: your message would put it back to work. Tell “\(parentTitle)” instead, or wait "
+                        + "for one of them to complete.", true)
+                }
+                return sendInstruction(message, to: workspace, in: own, from: lead, handoffsEnabled: handoffsEnabled, answer: answer)
+            }
+        }
+        let snapshot = ProcessSnapshot()
+        guard !snapshot.isEmpty else { return answer("Nirux couldn't read the running processes: call again in a moment.", true) }
+        guard let agentUUID = workspace.columns.first(where: { $0.agentUUID != nil && $0.runsClaude(snapshot: snapshot) })?.agentUUID
+        else { return answer("Nirux types messages only into Claude Code, and “\(title)” runs none.", true) }
+        guard let mission = oneWayMission(to: workspace, agentUUID: agentUUID, from: lead) else {
+            return answer("Nirux couldn’t record the message: try again.", true)
+        }
+        sendInstruction(message, to: workspace, in: mission, handoffsEnabled: handoffsEnabled, answer: answer)
     }
 
-    /// Types `message` into the prompt of `mission`'s child, `workspace`,
-    /// for its parent: a Lead's `tell`, or a task's.
-    func sendInstruction(_ message: String, to workspace: WorkspaceState, in mission: Mission, answer: @escaping LeadAnswer) {
+    /// Why the Lead may not act on `workspace`, which doesn't report to it:
+    /// a link from outside Nirux opened it (its agent acts for whoever sent
+    /// the link), or it isn't a task.
+    func leadRefusal(for workspace: WorkspaceState, title: String) -> String? {
+        if workspace.startedOutsideNirux { return "“\(title)” was opened by a link from outside Nirux: leave it to the user." }
+        guard Self.isTask(workspace) else {
+            return "“\(title)” isn't a task (a worktree of one of the space's repositories, or a task's folder): ask the user instead."
+        }
+        return nil
+    }
+
+    static func typesOnlyIntoClaude(_ title: String, runs kind: String) -> String {
+        "Nirux types messages only into a Claude Code task; “\(title)” runs \(kind)."
+    }
+
+    /// The Lead's one-way Mission to `workspace`'s agent, made at its first tell.
+    private func oneWayMission(to workspace: WorkspaceState, agentUUID: String, from lead: NewTask.MissionParent) -> Mission? {
+        let store = MissionStore.shared
+        if let mission = store.missions.last(where: { mission in
+            mission.oneWay == true && mission.parentWorkspaceID == lead.workspaceID && mission.parentAgentUUID == lead.agentUUID
+                && mission.childWorkspaceID == workspace.id && mission.childAgentUUID == agentUUID
+        }) { return mission }
+        return store.create(MissionCreationRequest(
+            id: UUID().uuidString, parentWorkspaceID: lead.workspaceID, parentAgentUUID: lead.agentUUID,
+            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: NiruxApp.WorkspaceAgent.claude.rawValue,
+            branch: workspace.gitBranch ?? workspace.title, oneWay: true
+        ), enabled: false)
+    }
+
+    /// Who `task`'s agent, reached through `mission`, asks and reports to:
+    /// the parent of the Mission it reports through while that terminal is
+    /// open, else the user. Through a one-way Mission, that is the task's own
+    /// Mission, if its agent is the one reached.
+    private func answerer(of task: WorkspaceState, reachedThrough mission: Mission, handoffsEnabled: Bool) -> String {
+        let reporting = mission.oneWay == true ? ownMission(of: task).flatMap { $0.childAgentUUID == mission.childAgentUUID ? $0 : nil } : mission
+        guard let reporting, reporting.isCarried(handoffsEnabled: handoffsEnabled),
+              let parent = requestingTerminal(workspaceID: reporting.parentWorkspaceID, agentUUID: reporting.parentAgentUUID)?.workspace
+        else { return "the user" }
+        return "“\(MissionPromptText.quoted(parent.title))”, which started it"
+    }
+
+    /// Types `message` into the prompt of `mission`'s child, `workspace`:
+    /// for its parent (a Lead's `tell`, or a task's), or for `lead`, a
+    /// space's Lead telling a task that reports to another agent.
+    func sendInstruction(
+        _ message: String, to workspace: WorkspaceState, in mission: Mission, from lead: NewTask.MissionParent? = nil,
+        handoffsEnabled: Bool = NiruxShellView.currentMissionHandoffsEnabled(), answer: @escaping LeadAnswer
+    ) {
         guard mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue else {
-            return answer("Nirux types messages only into a Claude Code task; “\(workspace.title)” runs \(mission.childAgentKind).", true)
+            return answer(Self.typesOnlyIntoClaude(workspace.title, runs: mission.childAgentKind), true)
         }
         let instruction = MissionEvent(
             id: UUID().uuidString, missionID: mission.id,
@@ -504,17 +592,21 @@ extension NiruxShellView {
             parentWorkspaceID: mission.parentWorkspaceID, parentAgentUUID: mission.parentAgentUUID,
             kind: .instruction, message: message, timestamp: Date().timeIntervalSince1970
         )
-        guard case .accepted = MissionStore.shared.process(instruction, enabled: Self.currentMissionHandoffsEnabled()) else {
+        guard case .accepted = MissionStore.shared.process(instruction, enabled: handoffsEnabled, lead: lead) else {
             return answer("Nirux couldn’t record the message: try again.", true)
         }
         noteConversation(of: mission, forInstruction: instruction.id)
         typeMissionMessages()
         let typed = MissionStore.shared.missions.lazy.flatMap(\.events).first { $0.id == instruction.id }?.childConsumedAt != nil
-        answer(typed ? "Nirux typed it into “\(workspace.title)”’s prompt."
+        let notYours = mission.oneWay == true || lead != nil
+            ? " It doesn't report to you: Nirux marks the message as yours, and its questions and its result still go to "
+                + "\(answerer(of: workspace, reachedThrough: mission, handoffsEnabled: handoffsEnabled))."
+            : ""
+        answer((typed ? "Nirux typed it into “\(workspace.title)”’s prompt."
             : missionWaits.typing.contains(instruction.id)
             ? "Nirux is typing it into “\(workspace.title)”’s prompt as its agent reads it; a line tells you if it doesn't all go in."
             : "Nirux types it into “\(workspace.title)”’s prompt at its next free prompt, a day at most; past an hour, "
-                + "a line tells you what holds it.", false)
+                + "a line tells you what holds it.") + notYours, false)
     }
 
     /// Records the conversation `mission`'s child holds, for its instruction
@@ -593,13 +685,17 @@ extension NiruxShellView {
 
     // MARK: set_task_context
 
-    /// The next step and blocker of a task of the Lead's: what the user
+    /// The next step and blocker of any task of the space: what the user
     /// wrote by hand stays theirs.
     private func leadSetTaskContext(
         _ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer
     ) {
         let name = LeadTools.string(arguments, "task") ?? ""
-        guard let (workspace, _) = leadTask(name, in: space, lead: leadID) else { return answer(noLeadTask(name), true) }
+        guard let workspace = spaceTask(name, in: space) else { return answer(noSpaceTask(name, in: space), true) }
+        if leadMission(of: workspace, lead: leadID) == nil,
+           let refusal = leadRefusal(for: workspace, title: MissionPromptText.quoted(workspace.title)) {
+            return answer(refusal, true)
+        }
         var done: [String] = []
         var kept: [String] = []
         var changed = false
@@ -725,4 +821,12 @@ struct LeadProposal: Equatable {
     /// A task's agent proposed it, a sub-task of this task (its
     /// workspace's id); nil for a Lead's proposal.
     var subtaskOf: String?
+}
+
+private extension ColumnState {
+    /// Claude Code is in front, or will be once its task opens.
+    func runsClaude(snapshot: ProcessSnapshot) -> Bool {
+        if case .claude? = deferredAgent?.agent { return true }
+        return AgentHookCenter.isInteractiveClaude(pty?.foregroundProcess(snapshot: snapshot))
+    }
 }

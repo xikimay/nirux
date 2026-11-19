@@ -88,7 +88,7 @@ enum NewTask {
     }
 
     /// A Mission's parent: a workspace's column.
-    struct MissionParent: Equatable, Sendable {
+    struct MissionParent: Codable, Equatable, Sendable {
         let workspaceID: String
         let agentUUID: String
     }

@@ -97,6 +97,47 @@ final class MissionTests: XCTestCase {
         )
     }
 
+    /// A Lead's tell to a task that reports to another agent goes on that
+    /// task's Mission, from the Lead, typed under a line saying so: once
+    /// typed, the result still on its way to the parent is never delivered,
+    /// as after the parent's own tell. A task with no Mission gets it through
+    /// a one-way Mission, which never takes the task's question or result.
+    func testALeadsTellReachesATaskThatReportsToAnother() throws {
+        let store = MissionStore(fileURL: try makeDirectory().appendingPathComponent("missions.json"))
+        var subtask = request()
+        subtask.reportsToTask = true
+        XCTAssertNotNil(store.create(subtask, enabled: false, now: 9))
+        guard case .accepted = store.process(event(kind: .completed), enabled: false) else { return XCTFail("its result") }
+        let lead = NewTask.MissionParent(workspaceID: "99999999-9999-4999-8999-999999999999", agentUUID: parentAgentUUID)
+        let review = MissionEvent(
+            id: "77777777-7777-4777-8777-777777777777", missionID: missionID,
+            childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
+            parentWorkspaceID: parentWorkspaceID, parentAgentUUID: parentAgentUUID,
+            kind: .instruction, message: "Review of #597: guard the race.", timestamp: 25
+        )
+        guard case .accepted = store.process(review, enabled: false, lead: lead) else { return XCTFail("the Lead's tell") }
+        let pending = { store.pendingPromptDeliveries(now: 30) }
+        XCTAssertEqual(pending().map(\.event.kind), [.completed, .instruction], "until the tell is typed")
+        let tell = try XCTUnwrap(pending().first { $0.event.kind == .instruction })
+        XCTAssertEqual(tell.event.leadSender, lead)
+        XCTAssertEqual(
+            MissionPromptText.text(for: tell, childTitle: "Sub", parentTitle: "Parent"),
+            MissionPromptText.oneWayHeader + "\nReview of #597: guard the race."
+        )
+        XCTAssertTrue(store.markTyped(tell, at: 30))
+        XCTAssertTrue(pending().isEmpty, "the parent never reads the result the Lead's review overtook")
+        XCTAssertEqual(store.missions.map(\.status), [.active])
+
+        let oneWayID = "88888888-8888-4888-8888-888888888888"
+        var tells = request(id: oneWayID, parentWorkspaceID: lead.workspaceID)
+        tells.oneWay = true
+        XCTAssertNotNil(store.create(tells, enabled: false, now: 40))
+        for kind in [MissionEvent.Kind.question, .completed] {
+            let refused = event(id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", missionID: oneWayID, kind: kind, timestamp: 41)
+            guard case .rejected = store.process(refused, enabled: false) else { return XCTFail("\(kind) reached the Lead") }
+        }
+    }
+
     func testMissionCreationIsDisabledByDefaultAndRejectsMalformedIdentifiers() throws {
         let fileURL = try makeDirectory().appendingPathComponent("missions.json")
         let store = MissionStore(fileURL: fileURL)
