@@ -50,12 +50,12 @@ final class IconRail: NSView {
     var onBoard: (() -> Void)?
     /// A right-click on a task: its menu, nil for none.
     var menuForTask: ((String) -> NSMenu?)?
-    /// Working icons breathe; false: states show steady (Reduce motion,
-    /// the setting, a window nobody sees).
+    /// Working icons breathe and icons lift under the pointer; false:
+    /// states show steady (Reduce motion, the setting, a window nobody sees).
     var animates = true {
         didSet {
             guard animates != oldValue else { return }
-            for item in items { itemViews[item.id]?.breathes = animates }
+            for item in items { itemViews[item.id]?.moves = animates }
             guard !animates else { return }
             // A birth under way stops where it is: its icon in place.
             for layer in list.subviews.compactMap(\.layer) {
@@ -161,7 +161,7 @@ final class IconRail: NSView {
                 itemViews[item.id] = view
                 return view
             }()
-            view.breathes = animates
+            view.moves = animates
             view.show(item, isLead: item.id == content.lead?.id, isSelected: item.id == content.selectedID)
         }
         // VoiceOver reads the icons in their views' order, not by position.
@@ -284,11 +284,18 @@ final class RailItemView: NSView {
     var onOpen: ((String) -> Void)?
     /// A right-click: the task's menu.
     var menuForTask: ((String) -> NSMenu?)?
-    /// A working agent's icon breathes, at most 15 frames a second: the
-    /// sidebar's old dots' cap (`CABasicAnimation.lightMovement`).
-    var breathes = true {
-        didSet { if breathes != oldValue { updateBreath() } }
+    /// While the interface may move, a working agent's icon breathes, at
+    /// most 15 frames a second (the sidebar's old dots' cap,
+    /// `CABasicAnimation.lightMovement`), and the place lifts under the
+    /// pointer (`Relief`).
+    var moves = true {
+        didSet {
+            guard moves != oldValue else { return }
+            updateBreath()
+            updateRelief()
+        }
     }
+    static let liftHeight: CGFloat = 1.5
     private(set) var item: IconRail.Item?
     let iconView = StateIconView(StateIcon(.idle), size: IconRail.iconSize)
     /// The task on screen, or under the pointer (fainter).
@@ -298,7 +305,13 @@ final class RailItemView: NSView {
     let leadIcon = NSImageView()
     private var isSelected = false
     private var isHovered = false {
-        didSet { updateHalo() }
+        didSet {
+            updateHalo()
+            if isHovered != oldValue { updateRelief() }
+        }
+    }
+    private var isPressed = false {
+        didSet { if isPressed != oldValue { updateRelief() } }
     }
 
     override init(frame frameRect: NSRect) {
@@ -361,6 +374,16 @@ final class RailItemView: NSView {
         needsLayout = true
     }
 
+    private var reliefState: Relief.State {
+        guard moves else { return .resting }
+        return isPressed ? .pressed : isHovered ? .lifted(height: Self.liftHeight) : .resting
+    }
+
+    private func updateRelief() {
+        guard let layer else { return }
+        Relief.show(reliefState, on: layer, shape: halo.frame, radius: halo.frame.height / 2, animated: window != nil)
+    }
+
     private func updateHalo() {
         halo.isHidden = !isSelected && !isHovered
         halo.layer?.backgroundColor = (isSelected ? Theme.Color.fillPressed : Theme.Color.fillHover).cgColor
@@ -373,7 +396,7 @@ final class RailItemView: NSView {
         let isWorking = item?.icon.kind == .working
         for sign in [iconView, leadIcon] {
             guard let layer = sign.layer else { continue }
-            let breathes = breathes && isWorking && !sign.isHidden
+            let breathes = moves && isWorking && !sign.isHidden
             if !breathes {
                 layer.removeAnimation(forKey: Self.breathKey)
             } else if layer.animation(forKey: Self.breathKey) == nil {
@@ -392,6 +415,7 @@ final class RailItemView: NSView {
             view.layer?.cornerRadius = diameter / 2
         }
         circle(halo, diameter: bounds.height - 2)
+        if let layer { Relief.reshape(layer, shape: halo.frame, radius: halo.frame.height / 2) }
         circle(ring, diameter: 24)
         iconView.frame.origin = NSPoint(x: center.x - iconView.frame.width / 2, y: center.y - iconView.frame.height / 2)
         leadIcon.frame = NSRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16)
@@ -421,11 +445,13 @@ final class RailItemView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        isPressed = false
         guard let item, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         onPress?(item.id, event.clickCount, event.timestamp)
     }
 
-    override func mouseDown(with event: NSEvent) {}
+    override func mouseDown(with event: NSEvent) { isPressed = true }
+    override func mouseDragged(with event: NSEvent) { isPressed = bounds.contains(convert(event.locationInWindow, from: nil)) }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         item.flatMap { menuForTask?($0.id) }

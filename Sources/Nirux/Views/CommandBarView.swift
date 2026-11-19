@@ -75,6 +75,14 @@ final class CommandBarView: NSView {
     let taskButton = NiruxButton(title: "", kind: .quiet)
     let searchButton = NiruxButton(title: "", kind: .quiet)
     let waitingButton = NiruxButton(title: "", kind: .quiet)
+    /// Its segments lift under the pointer while the interface may move
+    /// (`Relief`).
+    var lifts = false {
+        didSet {
+            guard lifts != oldValue else { return }
+            for button in [spaceButton, taskButton, searchButton, waitingButton] { button.relief = lifts ? 1 : 0 }
+        }
+    }
 
     init(level: InterfaceTransparency) {
         glass = GlassView(role: .chrome, level: level, cornerRadius: Self.height / 2)

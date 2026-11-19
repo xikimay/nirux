@@ -30,6 +30,9 @@ final class NiruxButton: NSButton {
     let size: Size
 
     private var isHovered = false { didSet { if isHovered != oldValue { applyLook() } } }
+    /// How high it rises under the pointer, over a short shadow (`Relief`);
+    /// pressed, it is flat again. 0: it stays flat.
+    var relief: CGFloat = 0 { didSet { if relief != oldValue { applyLook() } } }
     /// While the cell highlights: during a press with the pointer on the
     /// button, and while its action runs.
     fileprivate var isPressed = false { didSet { if isPressed != oldValue { applyLook() } } }
@@ -184,6 +187,10 @@ final class NiruxButton: NSButton {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         layer?.cornerRadius = newSize.height / 2
+        // The radius turns clipping on, which would cut its relief's shadow;
+        // the fill keeps its corners without it.
+        if relief > 0 { layer?.masksToBounds = false }
+        if let layer { Relief.reshape(layer, shape: bounds, radius: newSize.height / 2) }
     }
 
     /// VoiceOver reads the cell, not the control: what the button is called
@@ -208,6 +215,11 @@ final class NiruxButton: NSButton {
         defer { isApplyingLook = false }
         let look = Self.look(kind, hovered: isHovered, pressed: isPressed, enabled: isEnabled)
         layer?.backgroundColor = look.fill.cgColor
+        if let layer, relief > 0 || layer.sublayers?.contains(where: { $0.name == Relief.shadowName }) == true {
+            layer.masksToBounds = false
+            let lifted = relief > 0 && isEnabled && isHovered && !isPressed
+            Relief.show(lifted ? .lifted(height: relief) : .resting, on: layer, shape: bounds, radius: bounds.height / 2, animated: window != nil)
+        }
         layer?.borderColor = look.border?.cgColor
         layer?.borderWidth = look.border == nil ? 0 : 1
         guard look.text != titleColor else { return }
