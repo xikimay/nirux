@@ -32,7 +32,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private(set) var diffActivePath: String?
     private(set) var diffActiveMode: EditorDiffMode?
     private var diffModeByPath: [String: EditorDiffMode] = [:]
-    private var diffGroupTabs: [String: DiffGroupTab] = [:]
+    private(set) var diffGroupTabs: [String: DiffGroupTab] = [:]
     /// The title of the active tab when it shows several files' diff.
     var activeDiffGroupTitle: String? { activePath.flatMap { diffGroupTabs[$0]?.title } }
     private var selectedDiffMode: EditorDiffMode = .head
@@ -621,7 +621,6 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     func showDiffCollection(title: String, paths: [String], mode: EditorDiffMode) {
         selectedDiffMode = mode
         diffLoadGeneration += 1
-        let generation = diffLoadGeneration
         let groupPath = Self.diffGroupPath(mode: mode)
         let cwd = workspaceCwd
         var seen = Set<String>()
@@ -634,7 +633,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             return
         }
 
-        let loadingGroup = DiffGroupTab(title: title, mode: mode, files: [], isLoading: true)
+        let load = UUID()
+        let loadingGroup = DiffGroupTab(title: title, mode: mode, files: [], load: load)
         diffGroupTabs[groupPath] = loadingGroup
         if !tabPaths.contains(groupPath) {
             tabPaths.append(groupPath)
@@ -652,25 +652,25 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 Self.diffFilePayload(of: path, cwd: cwd, mode: mode)
             }
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                guard self.diffLoadGeneration == generation else { return }
-                guard self.diffGroupTabs[groupPath] != nil else { return }
+                // Its tab still waits on it, in front or not: neither closed
+                // nor loading another list since.
+                guard let self, self.diffGroupTabs[groupPath]?.load == load else { return }
                 guard !files.isEmpty else {
                     // Not left loading.
                     self.close(path: groupPath)
-                    self.showToast("Couldn’t read the changes of these files", tone: .error)
+                    // Maybe over another tab's diff: it says which tab.
+                    self.showToast("Couldn’t read the changes of “\(title)”", tone: .error)
                     return
                 }
-                let group = DiffGroupTab(title: title, mode: mode, files: files, isLoading: false)
+                let group = DiffGroupTab(title: title, mode: mode, files: files, load: nil)
                 self.diffGroupTabs[groupPath] = group
+                self.refreshTabBar()
+                guard self.activePath == groupPath else { return }
                 self.diffActivePath = nil
                 self.diffActiveMode = mode
-                self.refreshTabBar()
-                if self.activePath == groupPath {
-                    self.onPathChanged?()
-                    self.onDirtyChanged?()
-                    self.sendDiffGroup(group)
-                }
+                self.onPathChanged?()
+                self.onDirtyChanged?()
+                self.sendDiffGroup(group)
             }
         }
     }
@@ -771,9 +771,6 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         let isDiffGroup = Self.isDiffGroupPath(path)
         let wasActive = activePath == path
         tabPaths.remove(at: index)
-        if isDiffGroup {
-            diffLoadGeneration += 1
-        }
         dirtyByPath.removeValue(forKey: path)
         mtimeByPath.removeValue(forKey: path)
         encodingByPath.removeValue(forKey: path)
@@ -1107,11 +1104,14 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     }
 }
 
-private struct DiffGroupTab {
+struct DiffGroupTab {
     let title: String
     let mode: EditorDiffMode
     let files: [[String: Any]]
-    let isLoading: Bool
+    /// The read of its files, until they are in.
+    let load: UUID?
+
+    var isLoading: Bool { load != nil }
 }
 
 // MARK: - Git / diff content helpers (nonisolated statics)

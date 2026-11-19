@@ -117,6 +117,10 @@ final class NiruxShellView: NSView {
     )
     /// Keeps stuck-agent alerts going while the heartbeat is stopped.
     var stuckWatchTimer: Timer?
+    /// Reads of Claude's transcript, half a second apart, before an Esc
+    /// Nirux sent reads as ignored: a tool can be slow to stop (see
+    /// `followInterrupt`).
+    var interruptReads = 60
     /// A working agent that may be going in circles says so on its row
     /// (Settings; see `AgentCirclingHint`). Read with the restored state.
     var circlingHintEnabled = PersistedSettings().agentCirclingHint
