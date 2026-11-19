@@ -480,9 +480,11 @@ the text stays flat and sharp.
   is whole; going, it takes no click. Only the panel moves; Reduce motion
   shows and closes it at once.
 - **Front and back (study P8):** a new column comes in from the front,
-  over its neighbours as they move aside: from 105 % of its size and
+  over its neighbours as they glide aside: from 105 % of its size and
   transparent, 0.38 s. A closed one recedes to 93 % as it fades, 0.24 s,
-  then the others close the gap. Explicit animations on the card's layer
+  then the others glide back. A card a neighbour pushed or let go glides
+  to its place from where it showed (0.36 s), its light and shadow with
+  it; only in the workspace on screen. Explicit animations on the card's layer
   (AppKit doesn't animate a view's layer in an animation group), ends on
   time; with Reduce motion a new card is simply there and a closed one
   only fades.
