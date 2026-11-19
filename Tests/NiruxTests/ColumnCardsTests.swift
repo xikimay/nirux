@@ -505,7 +505,9 @@ final class ColumnCardsTests: XCTestCase {
             shell.animatesInterface = true
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             shell.addColumn()
-            waitUntil("in", timeout: 2) { !workspace.columns.contains(where: \.isArriving) }
+            waitUntil("in and flat", timeout: 2) {
+                workspace.columns.allSatisfy { !$0.isArriving && $0.view.layer?.zPosition == 0 }
+            }
             workspace.focusedIndex = 0
             let moved = workspace.columns[0], passed = workspace.columns[1]
 
@@ -600,17 +602,12 @@ final class ColumnCardsTests: XCTestCase {
     /// the middle.
     func testWhereACardShowsLeavesItsPassOut() throws {
         try withShell { shell in
-            shell.sideEffects.reducesMotion = { false }
-            shell.agentLights.isDisplayAsleep = false
-            shell.animatesInterface = true
             let workspace = try XCTUnwrap(shell.activeWorkspace)
-            shell.addColumn()
-            let added = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
-            let soon = Date().addingTimeInterval(0.03)
-            waitUntil("on its way in", timeout: 2) { Date() >= soon }
-            let scale = try XCTUnwrap(added.view.layer?.presentation()).transform.m11
-            XCTAssertGreaterThan(scale, 1.005, "still nearer")
-            XCTAssertEqual(added.shownPlace.x, added.view.frame.minX, accuracy: 0.5)
+            let card = try XCTUnwrap(workspace.columns.first)
+            card.pass(from: (0.5, 1), to: 0.5, alpha: 1, duration: 5, curve: CAMediaTimingFunction(name: .linear)) {}
+            waitUntil("held at half its size", timeout: 2) { (card.view.layer?.presentation()?.transform.m11 ?? 1) < 0.6 }
+            XCTAssertEqual(card.shownPlace.x, card.view.frame.minX, accuracy: 0.5)
+            card.view.layer?.removeAnimation(forKey: ColumnState.passKey)
         }
     }
 
