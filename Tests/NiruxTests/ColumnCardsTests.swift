@@ -221,6 +221,21 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, 500, accuracy: 1, "and back")
     }
 
+    /// A double-click sets the card back to half even when a neighbour has
+    /// run out: the other pays the rest.
+    func testADoubleClickLetsTheOtherNeighbourPayTheRest() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        workspace.columns[1].widthFraction = WorkspaceState.minWidthFraction
+        workspace.columns[2].widthFraction = 0.3
+        workspace.focusedIndex = 2
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let before = workspace.columns.map(\.view.frame.width)
+        strip.subviews.compactMap { $0 as? ColumnResizeHandle }[2].onReset?()
+        XCTAssertEqual(workspace.columns[2].view.frame.width, floor(0.5 * (1000 - inset * 2 + gap) - gap), accuracy: 1)
+        XCTAssertEqual(workspace.columns[1].view.frame.width, before[1])
+    }
+
     /// A double-click on an edge sets the focused card back to half, by the
     /// same share as a drag, and leaves the focus where it is.
     func testADoubleClickOnAnEdgeSetsTheCardBackToHalf() throws {
@@ -302,8 +317,10 @@ final class ColumnCardsTests: XCTestCase {
         let wide = try XCTUnwrap(handles[1].onDragStart?())
         handles[1].onDrag?(wide, 400)
         XCTAssertEqual(card.frame.width, 1000 - inset * 2, accuracy: 1)
+        XCTAssertEqual(card.frame.midX + strip.frame.minX, 500, accuracy: 1, "centred at its widest")
+        let held = strip.frame.minX
         handles[1].onDragEnd?()
-        XCTAssertEqual(card.frame.midX + strip.frame.minX, 500, accuracy: 1, "nothing glides")
+        XCTAssertEqual(strip.frame.minX, held, accuracy: 1, "nothing glides")
     }
 
     /// A neighbour that runs out pays what it can, and the other pays on:

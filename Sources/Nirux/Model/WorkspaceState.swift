@@ -891,7 +891,12 @@ extension WorkspaceState {
             case .right: [(focus + 1, toHalf)]
             case .none: [(focus, toHalf)]
             }
-            self.setColumnWidths(Self.resized(widths, focus: focus, taking: asks, share: share, viewport: viewport), viewport: viewport)
+            var resized = Self.resized(widths, focus: focus, taking: asks, share: share, viewport: viewport)
+            // One that ran out leaves the rest to the other.
+            for ask in asks {
+                resized = Self.resized(resized, focus: focus, taking: [(ask.column, widths[focus] + toHalf - resized[focus])], share: share, viewport: viewport)
+            }
+            self.setColumnWidths(resized, viewport: viewport)
         }
         handle.wantsLayer = true
         stripView.addSubview(handle)
@@ -949,10 +954,12 @@ extension WorkspaceState {
         let viewport = containerView.bounds.width, focus = start.focus
         guard focus == focusedIndex, start.widths.count == columns.count else { return }
         let share = Self.share(edge: edge, focus: focus, count: columns.count, centred: start.centred)
-        let pull = edge == focus ? delta : -delta
+        let pull = edge == focus ? delta : -delta, width = start.widths[focus]
         let near = edge == focus ? focus + 1 : focus - 1, far = edge == focus ? focus - 1 : focus + 1
+        // Each side takes half the card's room, so that it stops centred.
+        let half = min(max(pull, floor((Self.width(Self.minWidthFraction, in: viewport) - width) / 2)), floor((Self.width(1, in: viewport) - width) / 2))
         let asks: [(column: Int, points: CGFloat)] = switch share {
-        case .both: [(near, pull), (far, pull)]
+        case .both: [(near, half), (far, half)]
         case .left, .right: [(near, pull)]
         case .none: [(focus, Self.draggedWidth(start.widths[focus], strip: start.strip, viewport: viewport, by: delta) - start.widths[focus])]
         }
