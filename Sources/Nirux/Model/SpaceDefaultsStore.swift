@@ -39,7 +39,8 @@ struct SpaceDefaultsStore: Sendable {
 
     /// A deleted space's defaults (copies set aside included) and setup
     /// scripts, which may hold secrets, go with it, and the rules its Lead
-    /// proposed and its prompts' log; its brief stays. Its Claude settings
+    /// proposed, its prompts' log, its review findings and its daily pass;
+    /// its brief stays. Its Claude settings
     /// are emptied, not removed: its workspaces go on in General, and their
     /// columns' launch lines name the file.
     static func removeFiles(ofSpace spaceID: String, stateDirectory: URL = Persistence.stateDirectory) {
@@ -52,7 +53,7 @@ struct SpaceDefaultsStore: Sendable {
               let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
         else { return }
         for name in names where name == fileName || name.hasPrefix("defaults.corrupt.") || name == SpaceSetupScript.folderName
-            || name == RuleProposalStore.fileName || name == LoopLog.fileName {
+            || [RuleProposalStore.fileName, LoopLog.lines.fileName, ReviewFindings.lines.fileName, DailyPassState.fileName].contains(name) {
             do {
                 try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             } catch {

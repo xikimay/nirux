@@ -33,6 +33,8 @@ struct CITriageStore: Codable, Equatable {
         var verdict: String
         var reason: String?
         var triagedAt: TimeInterval
+        /// The pull request whose checks it was (the daily pass names it).
+        var pullRequest: Int?
 
         /// Nothing more to ask about this failure.
         var isFinal: Bool { verdict != "open" }
@@ -47,12 +49,13 @@ struct CITriageStore: Codable, Equatable {
 
         init(
             signature: String, redChecks: [String], tests: [String], verdict: CITriage.Verdict, isUnanswered: Bool = false,
-            triagedAt: TimeInterval
+            triagedAt: TimeInterval, pullRequest: Int? = nil
         ) {
             self.signature = signature
             self.redChecks = redChecks
             self.tests = tests
             self.triagedAt = triagedAt
+            self.pullRequest = pullRequest
             switch verdict {
             case .flaky(let reason):
                 self.verdict = "flaky"

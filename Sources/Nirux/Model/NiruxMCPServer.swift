@@ -57,11 +57,10 @@ enum NiruxMCPServer {
         conversation settles it; otherwise hand it over with ask_user and say why. Keep each task's next \
         step and blocker current with set_task_context (shown on its row): after its question is answered, \
         when it completes, and when you notice a blocker (clear it once it is gone). Propose tasks ready to \
-        merge with queue_merge: the user starts the queue. When a second task gets the same kind of finding, \
-        propose a rule for the space brief with propose_rule: the user decides. Close a merged or abandoned \
-        task with close_task, never by removing its worktree or branch yourself. Never merge a pull request \
-        or act on another space: leave those to the user. After a /clear, list_tasks shows where things \
-        stand.
+        merge with queue_merge: the user starts the queue. Record each review you send with record_review; when a \
+        second task gets the same kind of finding, propose a rule for the space brief with propose_rule: the user \
+        decides. Close a merged or abandoned task with close_task, never by removing its worktree or branch yourself. Never merge a pull request \
+        or act on another space: leave those to the user.
         """
 
     /// The instructions for whoever launched the server: the Lead's role
@@ -255,6 +254,8 @@ enum NiruxMCPServer {
                     + "try again later, or tell the user.",
                 isError: true
             )
+        case .stillWorking where name == LeadTools.dailyPass:
+            return ToolResult(text: "Nirux is still reading GitHub: call daily_pass again in a minute, it reads the same window.", isError: true)
         case .stillWorking:
             return ToolResult(
                 text: "Nirux took the call but hasn't finished: it may still be doing it. Don't call again; "

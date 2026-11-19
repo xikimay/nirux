@@ -16,7 +16,7 @@ final class SpaceSettingsSafetyPane: NSObject {
         var problem: String?
         var periodDays = SpaceSettingsSafetyPane.periods[0]
         var recap: [LoopRecap.Group] = []
-        /// The log reached its size limit (`LoopLog.isFull`).
+        /// The log reached its size limit (`SpaceLog.isFull`).
         var logFull = false
         var added: [ClaudeSpaceSettings.Line] = []
     }
