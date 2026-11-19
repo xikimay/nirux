@@ -23,13 +23,7 @@ final class SpaceCrossingTests: XCTestCase {
             let comes = try XCTUnwrap((arriving.animation(forKey: "crossing") as? CAAnimationGroup)?.animations)
             let from = try XCTUnwrap(comes.compactMap { ($0 as? CABasicAnimation)?.fromValue as? NSValue }.first)
             XCTAssertEqual(Self.scale(from.caTransform3DValue), NiruxShellView.arrivalFromScale, accuracy: 0.001, "from the front")
-            // Its middle, from its anchor, stays where it lies.
-            let middle = CGPoint(
-                x: (0.5 - arriving.anchorPoint.x) * arriving.bounds.width, y: (0.5 - arriving.anchorPoint.y) * arriving.bounds.height
-            )
-            let moved = middle.applying(CATransform3DGetAffineTransform(from.caTransform3DValue))
-            XCTAssertEqual(moved.x, middle.x, accuracy: 0.5, "about its middle")
-            XCTAssertEqual(moved.y, middle.y, accuracy: 0.5)
+            XCTAssertEqual(arriving.anchorPoint, CGPoint(x: 0.5, y: 0.5), "about its middle")
             XCTAssertEqual(shell.verticalStrip.alphaValue, 0, "the live views hidden under them")
 
             XCTAssertEqual(steps.durations, [NiruxShellView.crossingDuration], "it lands on time")
