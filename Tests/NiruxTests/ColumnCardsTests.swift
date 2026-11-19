@@ -436,12 +436,13 @@ final class ColumnCardsTests: XCTestCase {
             XCTAssertEqual(moved.view.layer?.zPosition, 1, "over the other")
             XCTAssertEqual(moved.shadow?.layer?.zPosition, 1, "its shadow over the other")
             XCTAssertNotNil(moved.shadow?.layer?.animation(forKey: NiruxShellView.liftKey))
-            XCTAssertEqual(shades(of: passed).count, 1, "the other dims under it")
+            let dimmed = shades(of: passed)
+            XCTAssertEqual(dimmed.count, 1, "the other dims under it")
             XCTAssertEqual(passed.view.layer?.zPosition, 0)
 
             waitUntil("flat again", timeout: 2) { moved.view.layer?.zPosition == 0 }
             XCTAssertEqual(moved.shadow?.layer?.zPosition, 0)
-            XCTAssertTrue(passed.view.layer?.sublayers?.allSatisfy { $0.animation(forKey: NiruxShellView.liftKey) == nil } ?? true)
+            XCTAssertTrue(dimmed.allSatisfy { $0.superlayer == nil }, "its shade gone")
             XCTAssertEqual(moved.lifts, 0)
 
             shell.sideEffects.reducesMotion = { true }
