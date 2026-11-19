@@ -218,6 +218,13 @@ struct ShellSideEffects {
         }
     }
 
+    /// Brings Nirux to the front for a question it may ask while hidden.
+    /// Tests leave the app where it is.
+    var comeToFront: @MainActor () -> Void = {
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     /// Asks whether to stop the running merge queues and quit, `confirm`
     /// on the destructive button: a sheet on the window when it is on
     /// screen, else an alert. `answer` gets true to quit. Never waits in

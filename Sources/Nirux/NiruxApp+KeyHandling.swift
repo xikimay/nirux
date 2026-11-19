@@ -178,7 +178,7 @@ extension NiruxApp {
                keyCode: event.keyCode
            ),
            let editor = col.editorColumn, let active = editor.activePath {
-            editor.close(path: active)
+            editor.closeAskingFirst(path: active)
             return nil
         }
         // Let the menu bar handle this key equivalent directly,
