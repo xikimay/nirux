@@ -300,6 +300,8 @@ extension NiruxShellView {
                 briefFile: NiruxShellView.codexBriefFile(from: brief, launchDirectory: workspace.cwd),
                 handoverPrompt: handoverPrompt
             )
+        case .agy:
+            cmd = NiruxShellView.agyCommand(handoverPrompt: handoverPrompt)
         }
 
         sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)

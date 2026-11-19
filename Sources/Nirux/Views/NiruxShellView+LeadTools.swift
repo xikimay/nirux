@@ -395,6 +395,7 @@ extension NiruxShellView {
             return "\(waiting.name) needs the user" + (waiting.dialog.map { ": \($0)" } ?? "")
         }
         if let working = agents.first(where: { $0.status == AgentStatus.working }) { return "\(working.name) working" }
+        if let quiet = agents.first(where: \.isQuiet) { return "\(quiet.name) is quiet (it may be waiting on you in its terminal)" }
         return "\(first.name) idle"
     }
 
@@ -405,22 +406,34 @@ extension NiruxShellView {
         let status: AgentStatus
         /// What it waits on the user for, in a few words.
         let dialog: String?
+        /// Stopped without saying why: an agent without hooks may be waiting
+        /// on the user in its terminal, or done.
+        var isQuiet = false
 
         var needsUser: Bool { status == .needsAttention || dialog != nil }
     }
 
-    /// The Claude and Codex agents in front of `workspace`'s columns.
+    /// The agents in front of `workspace`'s columns.
     func agentReadings(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> [AgentReading] {
         workspace.columns.compactMap { column in
             guard let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
-                  ["claude", "codex"].contains(foreground.name) else { return nil }
+                  AgentStatusMachine.isRecognizedAgentProcess(foreground.name) else { return nil }
             // A question its last turn ended on waits on the user too.
             let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
                 ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
-            // A turn end found done (or still being read) asks nothing.
-            let status = pty.isQuietTurnEnd ? AgentStatus.idle : pty.cachedAgentState
-            return AgentReading(name: foreground.name, status: status, dialog: dialog)
+                // What agy reported it waits on (OSC 7501).
+                ?? pty.agentBlockedWait(now: Date().timeIntervalSince1970, waitThreshold: nil, foreground: foreground)?
+                    .reason.shortLabel
+            // A turn end found done (or still being read), or one an agent
+            // without hooks reported, asks nothing. One that stopped without
+            // saying why is quiet: maybe waiting in its terminal (the row
+            // keeps its amber).
+            let quiet = AgentStatusMachine.activityOnlyAgentProcesses.contains(foreground.name)
+                && pty.cachedAgentState == .needsAttention && pty.agentAttentionReason == nil
+            let finished = pty.agentAttentionReason == .turnFinished
+            let status = pty.isQuietTurnEnd || quiet || finished ? AgentStatus.idle : pty.cachedAgentState
+            return AgentReading(name: foreground.name, status: status, dialog: dialog, isQuiet: quiet)
         }
     }
 
