@@ -95,7 +95,7 @@ final class ReliefTests: XCTestCase {
         let host = try XCTUnwrap(icon.superview)
         icon.removeFromSuperview()
         host.addSubview(icon)
-        XCTAssertEqual(try shownMidY(of: icon.iconView), rest, accuracy: 0.01, "nothing pressed is left behind")
+        XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(icon.layer).sublayerTransform), "nothing pressed is left behind")
     }
 
     func testABarSegmentRisesWhole() throws {
