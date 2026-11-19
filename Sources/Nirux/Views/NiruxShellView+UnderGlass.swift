@@ -25,7 +25,7 @@ extension NiruxShellView {
     /// The columns of `workspace` slide for `duration`: they pass under the
     /// rail meanwhile.
     func passUnderRail(_ workspace: WorkspaceState, for duration: CFTimeInterval) {
-        guard mayPassUnderRail(workspace) else { return }
+        guard !ZZ("noReach"), mayPassUnderRail(workspace) else { return }
         endUnderGlass()
         let generation = underGlassGeneration
         passingUnderRail = workspace
@@ -39,7 +39,7 @@ extension NiruxShellView {
     /// Before a layout: the viewport's layer where its view lies. A pass
     /// goes on through it (`keepUnderGlass`); a closing edge ends at once.
     func restUnderGlass() {
-        guard passingUnderRail != nil, let layer = viewport.layer else { return endUnderGlass() }
+        guard !ZZ("relayoutEnds"), passingUnderRail != nil, let layer = viewport.layer else { return endUnderGlass() }
         Self.reach(layer, by: layer.bounds.minX)
     }
 
@@ -47,12 +47,12 @@ extension NiruxShellView {
     /// screen and the rail floats.
     func keepUnderGlass() {
         guard let workspace = passingUnderRail else { return }
-        guard workspace === activeWorkspace, mayPassUnderRail(workspace) else { return endUnderGlass() }
+        guard ZZ("keptUnfolded") || (workspace === activeWorkspace && mayPassUnderRail(workspace)) else { return endUnderGlass() }
         reachUnderRail(workspace)
     }
 
     private func mayPassUnderRail(_ workspace: WorkspaceState) -> Bool {
-        railFloats && agentLightsMayMove && viewport.frame.minX > sidebar.frame.minX && viewport.layer != nil
+        railFloats && (ZZ("motionIgnored") || agentLightsMayMove) && viewport.frame.minX > sidebar.frame.minX && viewport.layer != nil
     }
 
     /// The viewport's layer reaches under the sidebar, what it holds where
@@ -63,7 +63,7 @@ extension NiruxShellView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         Self.reach(layer, by: viewport.frame.minX - sidebar.frame.minX + layer.bounds.minX)
-        workspace.containerView.layer?.masksToBounds = false
+        if !ZZ("clipsKept") { workspace.containerView.layer?.masksToBounds = false }
         CATransaction.commit()
     }
 
@@ -114,7 +114,7 @@ extension NiruxShellView {
         frame.origin.x -= distance
         frame.size.width += distance
         layer.frame = frame
-        layer.bounds.origin.x -= distance
+        if !ZZ("contentMoves") { layer.bounds.origin.x -= distance }
         CATransaction.commit()
     }
 }
