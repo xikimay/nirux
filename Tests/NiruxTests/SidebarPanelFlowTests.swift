@@ -831,14 +831,14 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(editor.workspaceCwd, harness.repo)
 
             // What Monaco's ⌘P sends over the bridge. The folder is scanned
-            // off the main thread.
+            // off the main thread: typed meanwhile, a query filters its list.
             editor.onFilePickerRequest?(editor)
-            let field = try XCTUnwrap(harness.waitForField(placeholder: "Find file in workspace…"))
+            let field = try XCTUnwrap(shell.filePickerPanel?.searchField)
+            harness.type("search-target", into: field)
             let table = try XCTUnwrap(field.window?.contentView.flatMap {
                 UIFlowHarness.descendant(of: $0, as: NSTableView.self)
             })
-            harness.waitUntil("the file list") { table.numberOfRows >= 2 }
-            harness.type("search-target", into: field)
+            harness.waitUntil("the file list") { table.numberOfRows > 0 }
             XCTAssertEqual(table.numberOfRows, 1)
             harness.press(.returnKey, in: field.window)
             let target = harness.repo + "/" + UIFlowHarness.searchTarget
