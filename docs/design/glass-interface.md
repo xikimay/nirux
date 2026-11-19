@@ -450,7 +450,7 @@ the text stays flat and sharp.
   one gap, so two halves fill the viewport whatever the number of columns.
 - **In the middle** (the user's choice, 2026-11-18): cards that don't fill
   the viewport lie centred, a first terminal at its own width included,
-  and a new one comes in there, as any new column does (a fade from 92 %).
+  and a new one comes in there, as any new column does (from the front).
   The camera does it, so a second column makes the strip glide aside from
   where it shows, and closing it brings the other back to the middle. A
   dragged edge stays under the pointer: a centred card widens on both
@@ -479,6 +479,13 @@ the text stays flat and sharp.
   already unfolds from the bar). The window's shadow comes once the panel
   is whole; going, it takes no click. Only the panel moves; Reduce motion
   shows and closes it at once.
+- **Front and back (study P8):** a new column comes in from the front,
+  over its neighbours as they move aside: from 105 % of its size and
+  transparent, 0.38 s. A closed one recedes to 93 % as it fades, 0.24 s,
+  then the others close the gap. Explicit animations on the card's layer
+  (AppKit doesn't animate a view's layer in an animation group), ends on
+  time; with Reduce motion a new card is simply there and a closed one
+  only fades.
 
 ## Plan
 

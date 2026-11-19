@@ -11,6 +11,7 @@ extension NiruxShellView {
     private func abortColumnClose(_ column: ColumnState, in workspace: WorkspaceState) {
         column.isClosing = false
         column.view.alphaValue = 1
+        column.view.layer?.removeAnimation(forKey: Self.cardPassKey)
         workspace.showShadows()
         applyAgentLights()
     }
@@ -29,21 +30,28 @@ extension NiruxShellView {
         let closingView = closingColumn.view
         workspace.showShadows()
 
-        // Animate out, then remove
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.2
-            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+        // It recedes and fades, then goes; with Reduce motion it only
+        // fades.
+        let curve = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.6, 1)
+        if agentLightsMayMove {
+            Self.passCard(closingView, from: 1, to: Self.closeScale, duration: Self.closeDuration, curve: curve)
+        }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Self.closeDuration
+            ctx.timingFunction = curve
             closingView.animator().alphaValue = 0
-            closingView.layer?.setAffineTransform(Self.scaledAboutMiddle(closingView.frame.size, by: Self.cardInOutScale))
-        }, completionHandler: {
-            DispatchQueue.main.async { [weak self] in self?.finishColumnClose(closingColumn, in: workspace) }
-        })
+        }
+        // On time, not on the animation's completion, which a window out of
+        // view may never report.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.closeDuration) { [weak self] in
+            self?.finishColumnClose(closingColumn, in: workspace)
+        }
     }
 
     /// The exit animation of `closingColumn` is over: it goes, unless
     /// nothing is left to remove after all.
     func finishColumnClose(_ closingColumn: ColumnState, in workspace: WorkspaceState) {
-        closingColumn.view.layer?.setAffineTransform(.identity)
+        closingColumn.view.layer?.removeAnimation(forKey: Self.cardPassKey)
         // By identity: the index can shift during the animation.
         guard workspace.columns.count > 1,
               let closingIndex = workspace.columns.firstIndex(where: { $0 === closingColumn })

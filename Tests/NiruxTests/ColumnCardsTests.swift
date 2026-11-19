@@ -328,6 +328,50 @@ final class ColumnCardsTests: XCTestCase {
         }
     }
 
+    /// A new card comes in from the front, over its neighbours, then lies
+    /// among them; a closed one recedes as it fades, and goes on time. With
+    /// Reduce motion a closed one only fades.
+    func testACardComesFromTheFrontAndRecedes() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func scales(of column: ColumnState) throws -> (from: CGFloat, to: CGFloat) {
+                let pass = try XCTUnwrap(column.view.layer?.animation(forKey: NiruxShellView.cardPassKey) as? CABasicAnimation)
+                let from = try XCTUnwrap(pass.fromValue as? NSValue).caTransform3DValue
+                let to = try XCTUnwrap(pass.toValue as? NSValue).caTransform3DValue
+                return (from.m11, to.m11)
+            }
+
+            shell.addColumn()
+            let added = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            let start = try scales(of: added)
+            XCTAssertEqual(start.from, NiruxShellView.arrivalScale, "from the front")
+            XCTAssertEqual(start.to, 1)
+            XCTAssertEqual(added.view.layer?.zPosition, 1, "over its neighbours")
+            waitUntil("in, on time", timeout: 2) { !added.isArriving }
+            XCTAssertEqual(added.view.layer?.zPosition, 0, "among them")
+            XCTAssertNil(added.view.layer?.animation(forKey: NiruxShellView.cardPassKey))
+
+            shell.closeActiveColumn()
+            let end = try scales(of: added)
+            XCTAssertEqual(end.from, 1)
+            XCTAssertEqual(end.to, NiruxShellView.closeScale, "it recedes")
+            XCTAssertEqual(added.view.alphaValue, 0, "as it fades")
+            waitUntil("gone, on time", timeout: 2) { !workspace.columns.contains { $0 === added } }
+
+            shell.addColumn()
+            let still = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            waitUntil("in", timeout: 2) { !still.isArriving }
+            shell.sideEffects.reducesMotion = { true }
+            shell.closeActiveColumn()
+            XCTAssertNil(still.view.layer?.animation(forKey: NiruxShellView.cardPassKey), "Reduce motion: no recede")
+            XCTAssertEqual(still.view.alphaValue, 0)
+            waitUntil("gone", timeout: 2) { !workspace.columns.contains { $0 === still } }
+        }
+    }
+
     /// A double-click resets the width and leaves no drag behind it.
     func testADoubleClickOnAHandleLeavesNoDragBehind() {
         let handle = ColumnResizeHandle(frame: NSRect(x: 0, y: 0, width: 9, height: 100))
