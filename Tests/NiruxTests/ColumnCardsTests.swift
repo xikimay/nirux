@@ -221,19 +221,14 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, 500, accuracy: 1, "and back")
     }
 
-    /// A click on a neighbour's edge focuses that neighbour and leaves the
-    /// strip where it was until the double-click that may follow, which
-    /// then resets the edge the pointer is on.
-    func testAClickOnANeighboursEdgeWaitsForTheDoubleClick() throws {
+    /// A double-click on an edge sets the focused card back to half, by the
+    /// same share as a drag, and leaves the focus where it is.
+    func testADoubleClickOnAnEdgeSetsTheCardBackToHalf() throws {
         let workspace = workspace(columns: 4, width: 0.4)
         let strip = try strip(of: workspace)
-        workspace.onColumnFocusRequested = { [weak workspace] index in
-            workspace?.focusedIndex = index
-            workspace?.layoutAndScroll(viewportWidth: 1000, height: 600, animated: true)
-        }
         workspace.focusedIndex = 2
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
-        let left = strip.frame.minX
+        let before = workspace.columns.map(\.view.frame.width), left = strip.frame.minX
         let handle = strip.subviews.compactMap { $0 as? ColumnResizeHandle }[1]
         func event(_ type: NSEvent.EventType, clicks: Int) -> NSEvent {
             NSEvent.mouseEvent(
@@ -243,37 +238,92 @@ final class ColumnCardsTests: XCTestCase {
         }
         handle.mouseDown(with: event(.leftMouseDown, clicks: 1))
         handle.mouseUp(with: event(.leftMouseUp, clicks: 1))
-        XCTAssertEqual(workspace.focusedIndex, 1)
-        XCTAssertEqual(strip.frame.minX, left, "the strip where the click found it")
-
         handle.mouseDown(with: event(.leftMouseDown, clicks: 2))
-        XCTAssertEqual(workspace.columns[1].widthFraction, ColumnWidth.half.fraction)
-        XCTAssertEqual(strip.frame.minX, left)
+        XCTAssertEqual(workspace.focusedIndex, 2)
+        let widths = workspace.columns.map(\.view.frame.width)
+        let half = floor(0.5 * (1000 - inset * 2 + gap) - gap)
+        XCTAssertEqual(widths[2], half, accuracy: 1)
+        XCTAssertEqual(widths[1] - before[1], (before[2] - half) / 2, accuracy: 1)
+        XCTAssertEqual(widths[3] - before[3], (before[2] - half) / 2, accuracy: 1)
+        XCTAssertEqual(strip.frame.minX, left, accuracy: 1)
     }
 
-    /// Grabbing a neighbour's edge focuses it, the strip staying where it
-    /// is: the edge stays under the pointer, and the card comes to the
-    /// middle once let go.
-    func testGrabbingANeighboursEdgeLeavesTheStripWhereItIs() throws {
+    /// Only the focused card's edges show: its left one is its neighbour's
+    /// handle, and grabbing it leaves the focus where it is.
+    func testOnlyTheFocusedCardsEdgesShow() throws {
+        let workspace = workspace(columns: 4)
+        let handles = try strip(of: workspace).subviews.compactMap { $0 as? ColumnResizeHandle }
+        workspace.focusedIndex = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(handles.map(\.isHidden), [false, false, true, true])
+        XCTAssertNotNil(handles[0].onDragStart?())
+        XCTAssertNil(handles[2].onDragStart?())
+        XCTAssertEqual(workspace.focusedIndex, 1)
+
+        workspace.focusedIndex = 3
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(handles.map(\.isHidden), [true, true, false, false])
+    }
+
+    /// A card centred between two neighbours grows on both sides from
+    /// either edge, the edge under the pointer: its neighbours pay alike,
+    /// and the strip doesn't move, while dragging or let go.
+    func testACentredCardGrowsOnBothSides() throws {
         let workspace = workspace(columns: 4)
         let strip = try strip(of: workspace)
-        // As the shell does.
-        workspace.onColumnFocusRequested = { [weak workspace] index in
-            workspace?.focusedIndex = index
-            workspace?.layoutAndScroll(viewportWidth: 1000, height: 600, animated: true)
-        }
+        workspace.focusedIndex = 1
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
-        let handle = strip.subviews.compactMap { $0 as? ColumnResizeHandle }[1]
+        let handles = strip.subviews.compactMap { $0 as? ColumnResizeHandle }
+        let before = workspace.columns.map(\.view.frame.width), left = strip.frame.minX
         let card = workspace.columns[1].view
         let edge = card.frame.maxX + strip.frame.minX
-        let start = try XCTUnwrap(handle.onDragStart?())
-        XCTAssertEqual(workspace.focusedIndex, 1)
-        XCTAssertEqual(card.frame.maxX + strip.frame.minX, edge, accuracy: 1, "the edge where it was grabbed")
-        handle.onDrag?(start, 40)
-        XCTAssertEqual(card.frame.maxX + strip.frame.minX - edge, 40, accuracy: 1)
 
-        handle.onDragEnd?()
+        let start = try XCTUnwrap(handles[1].onDragStart?())
+        handles[1].onDrag?(start, 40)
+        let widths = workspace.columns.map(\.view.frame.width)
+        XCTAssertEqual(widths[1] - before[1], 80, accuracy: 1)
+        XCTAssertEqual(widths[0] - before[0], -40, accuracy: 1)
+        XCTAssertEqual(widths[2] - before[2], -40, accuracy: 1)
+        XCTAssertEqual(widths[3], before[3])
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX - edge, 40, accuracy: 1, "the edge under the pointer")
         XCTAssertEqual(card.frame.midX + strip.frame.minX, 500, accuracy: 1)
+        handles[1].onDragEnd?()
+        XCTAssertEqual(strip.frame.minX, left, accuracy: 1, "nothing glides once let go")
+
+        let fromLeft = try XCTUnwrap(handles[0].onDragStart?())
+        handles[0].onDrag?(fromLeft, 40)
+        XCTAssertEqual(card.frame.width - widths[1], -80, accuracy: 1, "its left edge in")
+        XCTAssertEqual(card.frame.midX + strip.frame.minX, 500, accuracy: 1)
+    }
+
+    /// A card not centred (at the strip's ends, or among cards that fit)
+    /// takes from the neighbour across the dragged edge alone.
+    func testACardNotCentredTakesFromTheNeighbourAcrossTheEdge() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        workspace.focusedIndex = 3
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let handles = strip.subviews.compactMap { $0 as? ColumnResizeHandle }
+        let before = workspace.columns.map(\.view.frame.width), left = strip.frame.minX
+        let start = try XCTUnwrap(handles[2].onDragStart?())
+        handles[2].onDrag?(start, -40)
+        let widths = workspace.columns.map(\.view.frame.width)
+        XCTAssertEqual(widths[3] - before[3], 40, accuracy: 1)
+        XCTAssertEqual(widths[2] - before[2], -40, accuracy: 1)
+        XCTAssertEqual(Array(widths[0...1]), Array(before[0...1]))
+        handles[2].onDragEnd?()
+        XCTAssertEqual(strip.frame.minX, left, accuracy: 1)
+
+        // Grown past the viewport's width, it keeps its edge under the
+        // pointer until let go.
+        workspace.columns[2].widthFraction = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let card = workspace.columns[3].view
+        let edge = card.frame.minX + strip.frame.minX
+        let wide = try XCTUnwrap(handles[2].onDragStart?())
+        handles[2].onDrag?(wide, -560)
+        XCTAssertGreaterThan(card.frame.width, 1000)
+        XCTAssertEqual(card.frame.minX + strip.frame.minX - edge, -560, accuracy: 1)
     }
 
     /// Each column's shadow follows it, under every column of the strip, so
@@ -360,16 +410,14 @@ final class ColumnCardsTests: XCTestCase {
             XCTAssertEqual(layers[0].borderColor, Theme.Color.line.cgColor)
             XCTAssertEqual(layers[1].borderColor, Theme.Color.accent.withAlphaComponent(0.7).cgColor)
 
-            // Grabbing the first column's edge focuses it as a click would:
-            // the edge and the keyboard go together, before any drag.
+            // Grabbing the focused card's left edge, its neighbour's handle,
+            // leaves the focus, the accent and the keyboard where they are.
             let strip = try strip(of: workspace)
             let handle = try XCTUnwrap(strip.subviews.compactMap { $0 as? ColumnResizeHandle }.first)
             let start = try XCTUnwrap(handle.onDragStart?())
-            XCTAssertEqual(workspace.focusedIndex, 0)
-            XCTAssertEqual(layers.map(\.borderWidth), [EdgeGlowView.focusRingWidth, 1])
-            XCTAssertTrue(shell.window?.firstResponder === workspace.columns[0].terminalView, "the keyboard")
+            XCTAssertEqual(workspace.focusedIndex, 1)
             handle.onDrag?(start, -30)
-            XCTAssertEqual(layers.map(\.borderWidth), [EdgeGlowView.focusRingWidth, 1])
+            XCTAssertEqual(layers.map(\.borderWidth), [1, EdgeGlowView.focusRingWidth])
         }
     }
 
@@ -711,7 +759,7 @@ final class ColumnCardsTests: XCTestCase {
     func testADoubleClickOnAHandleLeavesNoDragBehind() {
         let handle = ColumnResizeHandle(frame: NSRect(x: 0, y: 0, width: 9, height: 100))
         var drags = 0
-        handle.onDragStart = { (100, 500, 0) }
+        handle.onDragStart = { ([100], 500, 0, false) }
         handle.onDrag = { _, _ in drags += 1 }
         handle.onReset = {}
         func event(_ type: NSEvent.EventType, clicks: Int) -> NSEvent {

@@ -469,6 +469,14 @@ the text stays flat and sharp.
   monitor); a dragged edge holds it until let go. The hold lasts only
   while that card has the focus, so a key that moves the focus is
   followed at once.
+- **Resizing from the centre** (same study, R3): only the focused card's
+  two edges show a handle (its left one is its neighbour's). Centred
+  between two neighbours, the card grows on both sides from either edge,
+  the edge under the pointer, and they pay alike, so nothing glides once
+  let go. Otherwise (at the strip's ends, or among cards that fit) the
+  neighbour across the edge pays; the strip's last edge grows the card
+  alone, as before. A double-click sets the card back to half by the same
+  share.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within
