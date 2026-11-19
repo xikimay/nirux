@@ -371,6 +371,9 @@ New flow, built on the guarded typing `tell` already uses
     with tool output says so. The conversation before a `/clear` is read
     only while the newer holds nothing, labelled earlier. Lines that look
     like a secret are withheld.
+  - `record_review(task, findings)` and `daily_pass()`: what the Lead's
+    reviews found, by kind, and what happened in the space since its last
+    daily pass, for its rules (see daily-pass.md).
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state

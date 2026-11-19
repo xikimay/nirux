@@ -20,9 +20,11 @@ enum LeadTools {
     static let setTaskParent = "set_task_parent"
     static let readTask = "read_task"
     static let interruptTask = "interrupt_task"
+    static let recordReview = "record_review"
+    static let dailyPass = "daily_pass"
     static let names = [
         startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule,
-        closeTask, moveTask, renameTask, setTaskParent, readTask, interruptTask
+        closeTask, moveTask, renameTask, setTaskParent, readTask, interruptTask, recordReview, dailyPass
     ]
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
@@ -49,9 +51,10 @@ enum LeadTools {
 
     /// How long a call then waits for the answer: a task fetches origin
     /// and makes its worktree first; a clean-up asks GitHub, then git
-    /// deletes.
+    /// deletes; the daily pass asks GitHub about each repository.
     static func workTimeout(for tool: String) -> TimeInterval {
-        [startTask, closeTask].contains(tool) ? 300 : 30
+        if tool == dailyPass { return 150 }
+        return [startTask, closeTask].contains(tool) ? 300 : 30
     }
 
     static var definitions: [[String: Any]] {
@@ -181,6 +184,45 @@ enum LeadTools {
                     ]
                 ],
                 required: ["rule", "evidence"]
+            ),
+            definition(
+                recordReview, title: "Record a review's findings",
+                description: """
+                    Record what your review of a task found, once you send it: each finding with its kind, a short \
+                    class name you reuse whenever a finding is of the same class, in any task ("animation-end-deadline", \
+                    "test-waits-on-sleep"). Any task of this space. Nirux keeps them 30 days: the answer lists the kinds \
+                    the space uses, and says when one shows up in a second task, where propose_rule comes in. The daily \
+                    pass reads them.
+                    """,
+                properties: [
+                    "task": ["type": "string", "description": taskDescription],
+                    "findings": [
+                        "type": "array", "minItems": 1, "maxItems": ReviewFindings.maxFindings,
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "kind": [
+                                    "type": "string",
+                                    "description": "A kebab-case class name, at most \(ReviewFindings.maxKindLength) characters."
+                                ],
+                                "text": ["type": "string", "description": "The finding, at most \(ReviewFindings.maxTextLength) characters."]
+                            ],
+                            "required": ["kind", "text"], "additionalProperties": false
+                        ]
+                    ]
+                ],
+                required: ["task", "findings"]
+            ),
+            definition(
+                dailyPass, title: "Read the space's day for the daily pass",
+                description: """
+                    What happened in this space since the last daily pass (the last day, for the first): your recorded \
+                    findings by kind, the pull requests merged with their review rounds, CI failures, flaky tests and \
+                    reruns, Mission messages held, given up or crossed, the questions the user answered, and the rules \
+                    decided, waiting or in the brief. Nirux asks for it once a day; the user may ask too. Its text says \
+                    what to propose.
+                    """,
+                properties: [:], required: []
             ),
             definition(
                 closeTask, title: "Close a task",
@@ -341,6 +383,12 @@ enum LeadTools {
             return nil
         case setTaskParent, readTask, interruptTask:
             return string(arguments, "task") == nil ? "task is missing." : nil
+        case recordReview:
+            guard string(arguments, "task") != nil else { return "task is missing." }
+            if case .failure(let refusal) = ReviewFindings.findings(arguments["findings"]) { return refusal.reason }
+            return nil
+        case dailyPass:
+            return nil
         case queueMerge:
             return pullRequestNumbers(arguments) == nil ? "prs must list pull request numbers." : nil
         case setTaskContext:

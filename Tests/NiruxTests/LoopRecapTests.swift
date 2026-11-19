@@ -116,18 +116,18 @@ final class LoopRecapTests: XCTestCase {
         let day: TimeInterval = 86_400
         let now: TimeInterval = 100 * day
         for (age, tool) in [(31.0, "old"), (29.5, "margin"), (28.0, "kept")] {
-            LoopLog.append(.init(time: now - age * day, tool: tool, target: nil, mode: nil), spaceID: "S1", stateDirectory: state)
+            LoopLog.lines.append(.init(time: now - age * day, tool: tool, target: nil, mode: nil), spaceID: "S1", stateDirectory: state)
         }
-        let url = try XCTUnwrap(LoopLog.fileURL(spaceID: "S1", stateDirectory: state))
+        let url = try XCTUnwrap(LoopLog.lines.fileURL(spaceID: "S1", stateDirectory: state))
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int, 0o600)
-        XCTAssertEqual(LoopLog.load(spaceID: "S1", stateDirectory: state).map(\.tool), ["old", "margin", "kept"])
+        XCTAssertEqual(LoopLog.lines.load(spaceID: "S1", stateDirectory: state).map(\.tool), ["old", "margin", "kept"])
 
-        LoopLog.append(.init(time: now, tool: "new", target: nil, mode: nil), spaceID: "S1", stateDirectory: state)
-        XCTAssertEqual(LoopLog.load(spaceID: "S1", stateDirectory: state).map(\.tool), ["kept", "new"])
+        LoopLog.lines.append(.init(time: now, tool: "new", target: nil, mode: nil), spaceID: "S1", stateDirectory: state)
+        XCTAssertEqual(LoopLog.lines.load(spaceID: "S1", stateDirectory: state).map(\.tool), ["kept", "new"])
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int, 0o600)
 
-        LoopLog.trim(spaceID: "S1", now: now + 40 * day, stateDirectory: state)
-        XCTAssertEqual(LoopLog.load(spaceID: "S1", stateDirectory: state), [], "at launch too, without a new prompt")
+        LoopLog.lines.trim(spaceID: "S1", now: now + 40 * day, stateDirectory: state)
+        XCTAssertEqual(LoopLog.lines.load(spaceID: "S1", stateDirectory: state), [], "at launch too, without a new prompt")
     }
 
     /// A log it can't read is never written over; past its size limit,
@@ -135,27 +135,27 @@ final class LoopRecapTests: XCTestCase {
     func testTheLogNeverLosesItself() throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-loop-full-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: state) }
-        let url = try XCTUnwrap(LoopLog.fileURL(spaceID: "S1", stateDirectory: state))
+        let url = try XCTUnwrap(LoopLog.lines.fileURL(spaceID: "S1", stateDirectory: state))
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let old = try JSONEncoder().encode(LoopLog.Entry(time: 1, tool: "Bash", target: "swift build", mode: nil)) + Data("\n".utf8)
         let now: TimeInterval = 100 * 86_400
 
         // Too large to read: neither trimmed nor added to.
-        let huge = old + Data(repeating: UInt8(ascii: " "), count: LoopLog.maxFileBytes + 100_000)
+        let huge = old + Data(repeating: UInt8(ascii: " "), count: LoopLog.lines.maxFileBytes + 100_000)
         try huge.write(to: url)
-        LoopLog.append(.init(time: now, tool: "Bash", target: "swift test", mode: nil), spaceID: "S1", stateDirectory: state)
+        LoopLog.lines.append(.init(time: now, tool: "Bash", target: "swift test", mode: nil), spaceID: "S1", stateDirectory: state)
         XCTAssertEqual(try Data(contentsOf: url), huge)
-        XCTAssertTrue(LoopLog.isFull(spaceID: "S1", stateDirectory: state))
+        XCTAssertTrue(LoopLog.lines.isFull(spaceID: "S1", stateDirectory: state))
 
         // Full but readable: nothing added, until the old lines go.
         let recent = try JSONEncoder().encode(LoopLog.Entry(time: now - 86_400, tool: "Bash", target: "swift build", mode: nil))
-        try (recent + Data("\n".utf8) + Data(repeating: UInt8(ascii: "\n"), count: LoopLog.maxFileBytes)).write(to: url)
-        LoopLog.append(.init(time: now, tool: "Bash", target: "swift test", mode: nil), spaceID: "S1", stateDirectory: state)
-        XCTAssertEqual(LoopLog.load(spaceID: "S1", stateDirectory: state).map(\.target), ["swift build"])
-        try (old + Data(repeating: UInt8(ascii: "\n"), count: LoopLog.maxFileBytes)).write(to: url)
-        LoopLog.append(.init(time: now, tool: "Bash", target: "swift test", mode: nil), spaceID: "S1", stateDirectory: state)
-        XCTAssertEqual(LoopLog.load(spaceID: "S1", stateDirectory: state).map(\.target), ["swift test"])
-        XCTAssertFalse(LoopLog.isFull(spaceID: "S1", stateDirectory: state))
+        try (recent + Data("\n".utf8) + Data(repeating: UInt8(ascii: "\n"), count: LoopLog.lines.maxFileBytes)).write(to: url)
+        LoopLog.lines.append(.init(time: now, tool: "Bash", target: "swift test", mode: nil), spaceID: "S1", stateDirectory: state)
+        XCTAssertEqual(LoopLog.lines.load(spaceID: "S1", stateDirectory: state).map(\.target), ["swift build"])
+        try (old + Data(repeating: UInt8(ascii: "\n"), count: LoopLog.lines.maxFileBytes)).write(to: url)
+        LoopLog.lines.append(.init(time: now, tool: "Bash", target: "swift test", mode: nil), spaceID: "S1", stateDirectory: state)
+        XCTAssertEqual(LoopLog.lines.load(spaceID: "S1", stateDirectory: state).map(\.target), ["swift test"])
+        XCTAssertFalse(LoopLog.lines.isFull(spaceID: "S1", stateDirectory: state))
     }
 
     /// Lines the user added go into the settings file, whatever the

@@ -41,6 +41,8 @@ extension NiruxShellView {
         case LeadTools.setTaskParent: leadSetTaskParent(arguments, in: space, answer: answer)
         case LeadTools.readTask: leadReadTask(arguments, in: space, answer: answer)
         case LeadTools.interruptTask: leadInterruptTask(arguments, in: space, lead: lead.id, answer: answer)
+        case LeadTools.recordReview: leadRecordReview(arguments, in: space, lead: lead.id, answer: answer)
+        case LeadTools.dailyPass: leadDailyPass(in: space, lead: lead, answer: answer)
         default: answer("Unknown tool: \(request.tool)", true)
         }
     }
