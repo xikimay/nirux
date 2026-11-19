@@ -180,6 +180,19 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(LeadTools.contextText(["next_step": " write\n\tthe import\u{202E} side "], "next_step"), .some("write the import side"))
     }
 
+    /// reply takes a message, or accept: true (a JSON boolean) in its place.
+    func testReplyArgumentsAreCheckedBeforeTheApp() {
+        let problem = { (arguments: [String: Any]) in LeadTools.problem(tool: LeadTools.reply, arguments: arguments) }
+        XCTAssertNil(problem(["question": "q", "message": "Yes"]))
+        XCTAssertNil(problem(["question": "q", "accept": true]))
+        XCTAssertNil(problem(["question": "q", "accept": false, "message": "Yes"]))
+        XCTAssertNotNil(problem(["question": "q", "accept": true, "message": "Yes"]), "one or the other")
+        XCTAssertNil(problem(["question": "q", "accept": true, "message": NSNull()]), "a null message is left out")
+        XCTAssertNotNil(problem(["question": "q", "accept": false]))
+        XCTAssertNotNil(problem(["question": "q", "accept": 1]), "a number isn't true")
+        XCTAssertNotNil(problem(["accept": true]))
+    }
+
     /// propose_rule needs a rule of one or two lines and where the defect
     /// showed up; nothing that would hide part of the brief.
     func testProposedRuleArgumentsAreCheckedBeforeTheApp() {

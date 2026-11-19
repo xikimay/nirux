@@ -361,6 +361,7 @@ extension NiruxShellView {
         if let question = store.waitingQuestion(childWorkspaceID: task.id, childAgentUUID: mission.childAgentUUID)?.event {
             let holder = question.handedToUserBecause == nil ? "asks you" : "asks the user (you handed it over)"
             return "\n  \(holder), question \(question.id): \(MissionPromptText.quoted(question.message))"
+                + (MissionPromptText.blockLine(of: question, accept: nil).map { "\n  " + $0 } ?? "")
         }
         if mission.status == .completed, let result = mission.events.last(where: { $0.kind == .completed }) {
             return "\n  completed: \(MissionPromptText.quoted(result.message))"
@@ -664,7 +665,6 @@ extension NiruxShellView {
 
     private func leadReply(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {
         let questionID = LeadTools.string(arguments, "question") ?? ""
-        let message = LeadTools.string(arguments, "message") ?? ""
         let store = MissionStore.shared
         _ = store.ensureLoaded()
         let spaceWorkspaces = Set(workspaces.filter { $0.profileID == space.id }.map(\.id))
@@ -674,22 +674,30 @@ extension NiruxShellView {
         }) else {
             return answer("No question “\(questionID)” from one of your tasks: copy its id from the [Nirux Mission] message or list_tasks.", true)
         }
-        sendReply(message, to: questionID, in: mission, answer: answer)
+        sendReply(arguments, to: questionID, in: mission, answer: answer)
     }
 
     /// Answers `questionID`, a question of `mission`'s child, for its
-    /// parent: a Lead's reply, or a task's.
-    func sendReply(_ message: String, to questionID: String, in mission: Mission, answer: @escaping LeadAnswer) {
+    /// parent: a Lead's reply, or a task's. `arguments` hold the answer, or
+    /// accept the question's recommendation.
+    func sendReply(_ arguments: [String: Any], to questionID: String, in mission: Mission, answer: @escaping LeadAnswer) {
         let store = MissionStore.shared
-        guard store.response(to: questionID) == nil, mission.status == .active else {
+        guard store.response(to: questionID) == nil, mission.status == .active,
+              let question = mission.events.first(where: { $0.id == questionID && $0.kind == .question })
+        else {
             return answer("That question was already answered (perhaps by the user), or its task completed. Don't send it again.", true)
         }
-        let response = MissionEvent(
+        let accepts = LeadTools.accepts(arguments) == true
+        guard let message = accepts ? question.acceptableRecommendation : LeadTools.string(arguments, "message") else {
+            return answer(MissionEventCLI.nothingToAccept(question, field: "message", handOver: "hand it over with ask_user"), true)
+        }
+        var response = MissionEvent(
             id: UUID().uuidString, missionID: mission.id,
             childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
             parentWorkspaceID: mission.parentWorkspaceID, parentAgentUUID: mission.parentAgentUUID,
             kind: .response, message: message, inReplyTo: questionID, timestamp: Date().timeIntervalSince1970
         )
+        response.acceptedRecommendation = accepts ? true : nil
         guard case .accepted(let accepted) = store.process(response, enabled: Self.currentMissionHandoffsEnabled()) else {
             return answer("Nirux couldn’t record the answer: try again.", true)
         }
@@ -699,7 +707,8 @@ extension NiruxShellView {
         typeMissionMessages()
         updateSidebar()
         let title = workspaces.first { $0.id == mission.childWorkspaceID }?.title ?? mission.branch
-        answer("Answer sent: Nirux types it into “\(title)”’s prompt once its turn is over.", false)
+        answer((accepts ? "Its recommendation sent as your answer" : "Answer sent")
+            + ": Nirux types it into “\(title)”’s prompt once its turn is over.", false)
     }
 
     private func leadAskUser(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {
