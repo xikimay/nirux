@@ -697,64 +697,6 @@ extension NiruxShellView {
     static let closeScale: CGFloat = 0.93
     static let closeDuration: TimeInterval = 0.24
 
-    /// `scale` about a card's middle: a view's layer turns about its corner.
-    static func scaledAboutMiddle(_ size: NSSize, by scale: CGFloat) -> CGAffineTransform {
-        CGAffineTransform(translationX: size.width * (1 - scale) / 2, y: size.height * (1 - scale) / 2)
-            .scaledBy(x: scale, y: scale)
-    }
-
-    /// A card passing in or out, its own until another pass takes it: from
-    /// `from` (nil: where it shows) to `scale` of its size about its
-    /// middle and to `alpha`, held until the pass ends, on time; then
-    /// `then`, unless another pass took the card meanwhile. Its layer's
-    /// transform stays whole. Explicit: AppKit doesn't animate a view's
-    /// layer inside an animation group.
-    func passCard(
-        _ column: ColumnState, from: (scale: CGFloat, alpha: CGFloat)? = nil, to scale: CGFloat, alpha: CGFloat,
-        duration: CFTimeInterval, curve: CAMediaTimingFunction, then: @escaping @MainActor () -> Void
-    ) {
-        let view = column.view
-        guard let layer = view.layer else { return then() }
-        column.passes += 1
-        let pass = column.passes
-        let shown = layer.presentation()
-        let start = from ?? (
-            (shown?.value(forKeyPath: "transform.scale.x") as? NSNumber).map { CGFloat($0.doubleValue) } ?? 1,
-            CGFloat(shown?.opacity ?? Float(view.alphaValue))
-        )
-        let size = view.frame.size
-        view.alphaValue = alpha
-        let change = { (keyPath: String, from: Any, to: Any) -> CABasicAnimation in
-            let change = CABasicAnimation(keyPath: keyPath)
-            change.fromValue = from
-            change.toValue = to
-            return change
-        }
-        let group = CAAnimationGroup()
-        group.animations = [
-            change("transform", CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: start.scale)),
-                   CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: scale))),
-            change("opacity", Float(start.alpha), Float(alpha))
-        ]
-        group.duration = duration
-        group.timingFunction = curve
-        group.fillMode = .forwards
-        group.isRemovedOnCompletion = false
-        layer.add(group, forKey: WorkspaceState.cardPassKey)
-        // On time once the change is committed (a busy turn delays its
-        // start), not on the animation's completion, which a window out of
-        // view may never report.
-        DispatchQueue.main.async {
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak column] in
-                MainActor.assumeIsolated {
-                    guard let column, column.passes == pass else { return }
-                    column.view.layer?.removeAnimation(forKey: WorkspaceState.cardPassKey)
-                    then()
-                }
-            }
-        }
-    }
-
     /// A column comes in at its place from the front, over its neighbours:
     /// a little larger and transparent. Its shadow and its light come once
     /// it is in. Nothing moves while the interface may not, nor before the
@@ -766,8 +708,8 @@ extension NiruxShellView {
         workspace.showShadows()
         applyAgentLights()
         column.view.layer?.zPosition = 1
-        passCard(
-            column, from: (Self.arrivalScale, 0), to: 1, alpha: 1, duration: Self.arrivalDuration,
+        column.pass(
+            from: (Self.arrivalScale, 0), to: 1, alpha: 1, duration: Self.arrivalDuration,
             curve: CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
         ) { [weak self, weak column, weak workspace] in
             guard let self, let column, let workspace else { return }
@@ -810,52 +752,9 @@ extension NiruxShellView {
         relayout(animated: true)
         if agentLightsMayMove, workspace.focusedIndex != from,
            let moved = workspace.columns[safe: workspace.focusedIndex], let passed = workspace.columns[safe: from] {
-            lift(moved, over: passed)
+            moved.lift(over: passed)
         }
         focusActiveTerminal(in: window)
-    }
-
-    static let liftHeight: CGFloat = 10
-    static let liftKey = "lift"
-    /// How dark the card passed under gets, half-way.
-    static let passShade: Float = 0.35
-
-    /// A moved card passes over the one it swaps with (study P8), while
-    /// both glide: it rises a little on its way, its shadow falling on the
-    /// other, which dims under it a moment.
-    func lift(_ moved: ColumnState, over passed: ColumnState) {
-        let duration = WorkspaceState.glideDuration
-        let curve = CAMediaTimingFunction(controlPoints: 0.3, 0.6, 0.3, 1)
-        let raised = [moved.view, moved.light, moved.shadow].compactMap { $0?.layer }
-        moved.lifts += 1
-        for layer in raised {
-            layer.zPosition = 1
-            let rise = CAKeyframeAnimation(keyPath: "transform.translation.y")
-            rise.values = [0, Self.liftHeight, 0] as [CGFloat]
-            rise.isAdditive = true
-            rise.duration = duration
-            rise.timingFunction = curve
-            layer.add(rise, forKey: Self.liftKey)
-        }
-        let shade = CALayer()
-        if let under = passed.view.layer {
-            shade.frame = under.bounds
-            shade.backgroundColor = Theme.Color.base.cgColor
-            shade.opacity = 0
-            under.addSublayer(shade)
-            let dim = CAKeyframeAnimation(keyPath: "opacity")
-            dim.values = [0, Self.passShade, 0] as [Float]
-            dim.duration = duration
-            shade.add(dim, forKey: Self.liftKey)
-        }
-        // On time, not on the animations' completion, which a window out of
-        // view may never report.
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak moved] in
-            shade.removeFromSuperlayer()
-            guard let moved else { return }
-            moved.lifts -= 1
-            if moved.lifts == 0 { raised.forEach { $0.zPosition = 0 } }
-        }
     }
 
     // MARK: - Workspace naming

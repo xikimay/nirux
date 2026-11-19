@@ -1046,7 +1046,7 @@ extension WorkspaceState {
     ) {
         defer { onColumnsLaidOut?() }
         guard !columns.isEmpty else { return }
-        let shown = glides ? columns.map(Self.shownPlace) : []
+        let shown = glides ? columns.map(\.shownPlace) : []
 
         let gap = Self.columnGap, inset = Self.columnInset
         let innerHeight = max(0, height - inset * 2)
@@ -1068,14 +1068,14 @@ extension WorkspaceState {
             // A card passing in or out scales about the middle it had: one
             // that changes size is in place at once.
             if col.view.frame.size != NSSize(width: widths[index], height: innerHeight) {
-                col.view.layer?.removeAnimation(forKey: Self.cardPassKey)
+                col.view.layer?.removeAnimation(forKey: ColumnState.passKey)
             }
             col.view.frame = NSRect(x: xOffset, y: inset, width: widths[index], height: innerHeight)
             col.light?.frame = col.view.frame
             shadow(for: col).frame = col.view.frame
             col.layoutWithHeader(width: widths[index], height: innerHeight, resizeTerminal: !skipTerminalResize)
             if let was = shown[safe: index], was.width == widths[index], !col.isArriving, abs(was.x - xOffset) > 0.5 {
-                Self.glide([col.view, col.light, col.shadow], by: was.x - xOffset)
+                col.glide(by: was.x - xOffset)
             }
             // Its content clipped to its corners; its border (the focus) is
             // the shell's.
@@ -1140,32 +1140,6 @@ extension WorkspaceState {
             anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
             anim.isRemovedOnCompletion = true
             layer.add(anim, forKey: "colSlide")
-        }
-    }
-
-    static let cardGlideKey = "cardGlide"
-    static let cardPassKey = "cardPass"
-    static let glideDuration: CFTimeInterval = 0.36
-
-    /// Where a card shows in the strip, a glide on its way included, and
-    /// how wide it is.
-    private static func shownPlace(of column: ColumnState) -> (x: CGFloat, width: CGFloat) {
-        let frame = column.view.frame
-        let gliding = (column.view.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber)?.doubleValue ?? 0
-        return (frame.minX + CGFloat(gliding), frame.width)
-    }
-
-    /// A card a neighbour pushed or let go glides to its place from `dx`
-    /// away (study P8): its view, its light and its shadow.
-    private static func glide(_ views: [NSView?], by dx: CGFloat) {
-        for layer in views.compactMap({ $0?.layer }) {
-            let glide = CABasicAnimation(keyPath: "transform.translation.x")
-            glide.fromValue = dx
-            glide.toValue = 0
-            glide.isAdditive = true
-            glide.duration = glideDuration
-            glide.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 0.9, 0.3, 1)
-            layer.add(glide, forKey: cardGlideKey)
         }
     }
 

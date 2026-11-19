@@ -132,11 +132,9 @@ final class ColumnState {
     var shadow: ColumnShadowView?
     /// Its card fades in (`NiruxShellView.addColumn`).
     var isArriving = false
-    /// Passes in or out its card took, the last one owning it
-    /// (`NiruxShellView.passCard`).
+    /// Passes in or out its card took, the last one owning it (`pass`).
     var passes = 0
-    /// Moves on their way that lift its card over a neighbour
-    /// (`NiruxShellView.lift`).
+    /// Moves on their way that lift its card over a neighbour (`lift`).
     var lifts = 0
 
     /// ⌘F find bar, created on first use, and the terminal search it

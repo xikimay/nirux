@@ -11,7 +11,7 @@ extension NiruxShellView {
     private func abortColumnClose(_ column: ColumnState, in workspace: WorkspaceState) {
         column.isClosing = false
         column.view.alphaValue = 1
-        column.view.layer?.removeAnimation(forKey: WorkspaceState.cardPassKey)
+        column.view.layer?.removeAnimation(forKey: ColumnState.passKey)
         workspace.showShadows()
         applyAgentLights()
     }
@@ -34,8 +34,8 @@ extension NiruxShellView {
 
         // It recedes and fades from where it shows, then goes; with Reduce
         // motion it only fades.
-        passCard(
-            closingColumn, to: agentLightsMayMove ? Self.closeScale : 1, alpha: 0, duration: Self.closeDuration,
+        closingColumn.pass(
+            to: agentLightsMayMove ? Self.closeScale : 1, alpha: 0, duration: Self.closeDuration,
             curve: CAMediaTimingFunction(controlPoints: 0.4, 0, 0.6, 1)
         ) { [weak self] in
             self?.finishColumnClose(closingColumn, in: workspace)
@@ -45,7 +45,7 @@ extension NiruxShellView {
     /// The exit animation of `closingColumn` is over: it goes, unless
     /// nothing is left to remove after all.
     func finishColumnClose(_ closingColumn: ColumnState, in workspace: WorkspaceState) {
-        closingColumn.view.layer?.removeAnimation(forKey: WorkspaceState.cardPassKey)
+        closingColumn.view.layer?.removeAnimation(forKey: ColumnState.passKey)
         // By identity: the index can shift during the animation.
         guard workspace.columns.count > 1,
               let closingIndex = workspace.columns.firstIndex(where: { $0 === closingColumn })
