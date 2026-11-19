@@ -361,8 +361,9 @@ final class MissionStore {
         guard MissionEventCLI.fits(message, limit: MissionEventCLI.maxLength(of: incoming.kind)) else {
             return .rejected
         }
-        let recommendation = incoming.kind == .question ? incoming.recommendation.map(MissionEventCLI.recommendation) : nil
-        guard recommendation != .some(nil) else { return .rejected }
+        // A recommendation this build can't carry (a later CLI's) stays out;
+        // the question goes through.
+        let recommendation = incoming.kind == .question ? incoming.recommendation.flatMap(MissionEventCLI.recommendation) : nil
 
         var updated = missions
         let fromParent = incoming.parentWorkspaceID == missions[index].parentWorkspaceID
@@ -429,7 +430,7 @@ final class MissionStore {
             // answer: it stays out with its recommendation.
             let known = incoming.questionKind.map(MissionEvent.QuestionKind.known.contains) ?? true
             event.questionKind = known ? incoming.questionKind : nil
-            event.recommendation = known ? recommendation ?? nil : nil
+            event.recommendation = known ? recommendation : nil
         }
         if event.kind == .response, incoming.acceptedRecommendation == true {
             event.acceptedRecommendation = true

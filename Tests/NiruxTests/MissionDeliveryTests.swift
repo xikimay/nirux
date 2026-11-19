@@ -266,13 +266,16 @@ final class MissionDeliveryTests: XCTestCase {
     }
 
     /// An accepted answer is the question's recommendation, word for word,
-    /// and never an access question's. A recommendation is one line.
+    /// and never an access question's. A recommendation is one line, and one
+    /// too long is left out.
     func testAnAcceptedAnswerIsTheRecommendation() throws {
         let store = makeStore()
         let decision = try XCTUnwrap(store.accept(typedQuestion("Which API?", .decision, " Use\n v2 ", at: 20), enabled: true)).event
         XCTAssertEqual(decision.recommendation, "Use v2")
         let tooLong = String(repeating: "x", count: MissionEventCLI.maxRecommendationLength + 1)
-        XCTAssertNil(store.accept(typedQuestion("Which?", .decision, tooLong, at: 21), enabled: true))
+        let uncarried = store.accept(typedQuestion("Which?", .decision, tooLong, at: 21), enabled: true)?.event
+        XCTAssertNotNil(uncarried, "the question goes through")
+        XCTAssertNil(uncarried?.recommendation, "without a recommendation this build can't carry")
         let access = try XCTUnwrap(store.accept(typedQuestion("Which key?", .access, "A token", at: 22), enabled: true)).event
         func accepting(_ question: MissionEvent, _ message: String) -> MissionEvent {
             var event = parentEvent(.response, message, at: 30, inReplyTo: question.id)
