@@ -65,12 +65,46 @@ final class FrozenViewTests: XCTestCase {
         XCTAssertTrue(Self.pixels(of: copy).allSatisfy { $0 == 0x5A }, "what draws into the surface after leaves the copy as it was")
     }
 
-    /// Where the GPU can't copy a surface, the CPU's copy is the same.
+    /// Where the GPU can't copy a surface, the CPU's copy is the same; past
+    /// the wait for the GPU, the CPU copies.
     func testACopyOnTheCPUIsTheSame() throws {
         let surface = try XCTUnwrap(Self.surface(filledWith: 0x33))
         let blank = try XCTUnwrap(SurfaceCopies.blank(like: surface))
         let copy = try XCTUnwrap(SurfaceCopies.cpuCopy(surface, into: blank))
         XCTAssertTrue(Self.pixels(of: copy) == Self.pixels(of: surface), "the same pixels")
+        let late = try XCTUnwrap(SurfaceCopies.copies(of: [surface], waitingAtMost: .nanoseconds(0)).first ?? nil)
+        XCTAssertTrue(Self.pixels(of: late) == Self.pixels(of: surface), "a copy past the wait")
+    }
+
+    /// A picture never holds an earlier one still sliding away, nor what
+    /// doesn't show: a burst of slides keeps the copies at one picture's
+    /// worth. A surface that isn't opaque lies on the canvas, its frost not
+    /// copied.
+    func testAPictureLeavesEarlierPicturesAndWhatDoesNotShowOut() throws {
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        view.wantsLayer = true
+        let root = try XCTUnwrap(view.layer)
+        let terminal = CALayer()
+        terminal.frame = CGRect(x: 10, y: 10, width: 80, height: 80)
+        terminal.contents = try XCTUnwrap(Self.surface(filledWith: 0x22))
+        let clear = CALayer()
+        clear.frame = CGRect(x: 100, y: 10, width: 80, height: 80)
+        clear.contents = try XCTUnwrap(Self.surface(filledWith: 0x44))
+        clear.opacity = 0
+        root.sublayers = [terminal, clear]
+
+        let first = try XCTUnwrap(FrozenView.freeze(view))
+        XCTAssertEqual(first.layer?.sublayers?.count, 1, "what doesn't show stays out")
+        XCTAssertEqual(first.layer?.sublayers?.first?.backgroundColor, Theme.Color.canvas.cgColor, "on the canvas")
+        // The picture slides away over what it froze.
+        root.addSublayer(try XCTUnwrap(first.layer))
+        let second = try XCTUnwrap(FrozenView.freeze(view))
+        XCTAssertEqual(second.layer?.sublayers?.count, 1, "not the first picture")
+        XCTAssertEqual(Self.surfaces(in: second.layer), 1, "one picture's copies")
+
+        terminal.isOpaque = true
+        let opaque = try XCTUnwrap(FrozenView.freeze(view))
+        XCTAssertNil(opaque.layer?.sublayers?.first?.backgroundColor, "an opaque surface needs no fill")
     }
 
     /// A new workspace lays what the viewport showed, frozen, over it as it
@@ -82,11 +116,24 @@ final class FrozenViewTests: XCTestCase {
             shell.addWorkspace(title: "second", cwd: NSTemporaryDirectory())
             XCTAssertEqual(Self.frozenViews(in: shell).count, 1, "a new workspace slides over what showed, frozen")
             XCTAssertFalse(shell.viewport.subviews.contains { $0 is NSImageView }, "nothing drawn again")
+            for _ in 1...3 { shell.focusSpace(.next) }
+            XCTAssertTrue(Self.frozenViews(in: shell).allSatisfy { Self.pictureLayers(in: $0.layer) == 1 }, "no picture holds another")
             waitUntil("gone on time", timeout: 2) { Self.frozenViews(in: shell).isEmpty }
         }
     }
 
     // MARK: - Helpers
+
+    private static func surfaces(in layer: CALayer?) -> Int {
+        guard let layer else { return 0 }
+        return (FrozenView.surface(of: layer) == nil ? 0 : 1) + (layer.sublayers ?? []).reduce(0) { $0 + surfaces(in: $1) }
+    }
+
+    /// Layers named as a picture's own, `layer` included.
+    private static func pictureLayers(in layer: CALayer?) -> Int {
+        guard let layer else { return 0 }
+        return (layer.name == FrozenView.layerName ? 1 : 0) + (layer.sublayers ?? []).reduce(0) { $0 + pictureLayers(in: $1) }
+    }
 
     private static func frozenViews(in shell: NiruxShellView) -> [FrozenView] {
         shell.viewport.subviews.compactMap { $0 as? FrozenView }
