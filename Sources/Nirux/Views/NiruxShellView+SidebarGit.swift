@@ -210,7 +210,8 @@ extension NiruxShellView {
                       parentTitle: parentTitle,
                       statusLine: turnStatusEnabled ? workspace.statusLine : nil,
                       turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil,
-                      ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0)
+                      ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0,
+                      dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil)
     }
 
     /// Every column's foreground process, shown or not, and what follows
