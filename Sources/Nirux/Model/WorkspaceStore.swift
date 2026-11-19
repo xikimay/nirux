@@ -93,9 +93,14 @@ final class WorkspaceStore {
         return removed
     }
 
+    /// A workspace's close moves it from open to closing, then out of the
+    /// store once its exit animation ends: closing, it is never selected,
+    /// and keys typed next can't reach its terminal.
+    private func isOpen(_ index: Int) -> Bool { !workspaces[index].isClosing }
+
     @discardableResult
     func selectWorkspace(at index: Int) -> Bool {
-        guard workspaces.indices.contains(index) else { return false }
+        guard workspaces.indices.contains(index), isOpen(index) else { return false }
         activeWorkspaceID = workspaces[index].id
         activeProfileID = workspaces[index].profileID
         return true
@@ -114,9 +119,7 @@ final class WorkspaceStore {
     func selectProfile(_ profileID: String) -> Bool {
         guard profiles.contains(where: { $0.id == profileID }) else { return false }
         activeProfileID = profileID
-        activeWorkspaceID = visibleWorkspaceIndices(in: profileID)
-            .first { !workspaces[$0].isClosing }
-            .map { workspaces[$0].id }
+        activeWorkspaceID = visibleWorkspaceIndices(in: profileID).first(where: isOpen).map { workspaces[$0].id }
         return true
     }
 
@@ -141,11 +144,11 @@ final class WorkspaceStore {
         return index
     }
 
-    /// The workspace `selectAdjacentWorkspace` selects: the visible one
-    /// `delta` places from the selected one, or the first visible one when
-    /// the selected one isn't.
+    /// The workspace `selectAdjacentWorkspace` selects: the open visible
+    /// one `delta` places from the selected one, or the first open visible
+    /// one when the selected one isn't.
     func adjacentWorkspaceIndex(delta: Int) -> Int? {
-        let visible = visibleWorkspaceIndices
+        let visible = visibleWorkspaceIndices.filter(isOpen)
         guard let current = visible.firstIndex(of: activeWorkspaceIndex) else { return visible.first }
         return visible.indices.contains(current + delta) ? visible[current + delta] : nil
     }
@@ -231,7 +234,7 @@ final class WorkspaceStore {
         workspaces[index].isInactive = isInactive
         // The top card takes over, not the Lead above the cards: keys typed
         // next would go into its prompt.
-        let isActiveCard = { (candidate: Int) in !self.workspaces[candidate].isInactive }
+        let isActiveCard = { (candidate: Int) in !self.workspaces[candidate].isInactive && self.isOpen(candidate) }
         keepTreeOrder(in: workspaces[index].profileID)
         if activeWorkspaceIndex == index,
            isInactive,
@@ -508,12 +511,12 @@ final class WorkspaceStore {
             if !preferActiveProfile || workspaces[index].profileID == activeProfileID { return }
         }
 
-        if preferActiveProfile, let first = visibleWorkspaceIndices.first {
+        if preferActiveProfile, let first = visibleWorkspaceIndices.first(where: isOpen) {
             activeWorkspaceID = workspaces[first].id
             return
         }
 
-        if let first = workspaces.indices.first {
+        if let first = workspaces.indices.first(where: isOpen) {
             activeWorkspaceID = workspaces[first].id
             activeProfileID = workspaces[first].profileID
         } else {

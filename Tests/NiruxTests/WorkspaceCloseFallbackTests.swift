@@ -110,6 +110,23 @@ final class WorkspaceCloseFallbackTests: XCTestCase {
         XCTAssertNil(fallbackID(closing: "b", in: store))
     }
 
+    /// ⌘W on b gives c the selection while b fades out: ⌥⌘↑ from c goes to
+    /// a, and a click on b's row selects nothing. Nor does b take over from
+    /// a card going inactive, or from one leaving the store.
+    func testAClosingWorkspaceIsNeverSelected() throws {
+        let store = makeStore(["a", "b", "c"])
+        store.workspaces[1].isClosing = true
+        XCTAssertTrue(store.selectWorkspace(id: "c"))
+        XCTAssertEqual(store.selectAdjacentWorkspace(delta: -1).map { store.workspaces[$0].id }, "a")
+        XCTAssertFalse(store.selectWorkspace(id: "b"))
+        XCTAssertEqual(store.activeWorkspace?.id, "a")
+
+        XCTAssertTrue(store.setWorkspaceInactive(at: 0, true))
+        XCTAssertEqual(store.activeWorkspace?.id, "c")
+        store.removeWorkspace(try XCTUnwrap(store.workspaces.first { $0.id == "c" }))
+        XCTAssertEqual(store.activeWorkspace?.id, "a")
+    }
+
     func testIndexOutOfRangeHasNoFallback() {
         XCTAssertNil(makeStore(["a", "b"]).fallbackIndexAfterClosingWorkspace(at: 2))
     }
