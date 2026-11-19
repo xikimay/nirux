@@ -201,7 +201,7 @@ extension NiruxShellView {
         quickSwitch.hint = hint
         // Above whatever was added since.
         addSubview(hint, positioned: .above, relativeTo: nil)
-        hint.show(text, topCenteredIn: viewport.frame)
+        hint.show(text, topCenteredIn: viewportRestFrame)
     }
 }
 
