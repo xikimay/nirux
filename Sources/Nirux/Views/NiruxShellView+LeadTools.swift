@@ -402,18 +402,12 @@ extension NiruxShellView {
         return "\(first.name) idle"
     }
 
-    /// A row drawn red, in the Lead's words: a silent turn's way out is
-    /// interrupt_task when it would press Esc there, not the user's Esc the
-    /// row suggests.
-    private static func leadFailure(_ stuck: SidebarStuckState, of pty: PtySession, snapshot: ProcessSnapshot) -> String? {
+    /// A row drawn red, in the Lead's words: a silent turn without the
+    /// row's advice, an Esc in its terminal, which is the user's.
+    private static func leadFailure(_ stuck: SidebarStuckState) -> String? {
         guard stuck.isFailure else { return nil }
-        let detail: String? = switch stuck {
-        case .silent:
-            pty.interruptRefusal(snapshot: snapshot) == nil ? "interrupt_task can stop it" : "only the user can stop it, in its terminal"
-        default:
-            stuck.detail
-        }
-        return stuck.headline + (detail.map { " — \($0)" } ?? "")
+        if case .silent = stuck { return stuck.headline }
+        return stuck.headline + (stuck.detail.map { " — \($0)" } ?? "")
     }
 
     /// An agent in front of one of a workspace's columns, as list_tasks
@@ -444,7 +438,7 @@ extension NiruxShellView {
             // A turn end found done (or still being read) asks nothing.
             let status = pty.isQuietTurnEnd ? AgentStatus.idle : pty.cachedAgentState
             let failure = sidebarStuckState(of: column, foregroundProcess: foreground, snapshot: snapshot, now: now)
-                .flatMap { Self.leadFailure($0, of: pty, snapshot: snapshot) }
+                .flatMap(Self.leadFailure)
             return AgentReading(name: foreground.name, status: status, dialog: dialog, failure: failure)
         }
     }
