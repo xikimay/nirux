@@ -74,6 +74,53 @@ final class RequestFlowTests: XCTestCase {
         }
     }
 
+    /// While the interface may move, the inbox comes out of the bar's badge
+    /// and goes back into it, and a callout out of its rail icon; its
+    /// window's shadow waits until it is whole, and going, it takes no
+    /// click. With Reduce motion, it shows and goes at once.
+    func testPanelsComeOutOfTheirControlAndGoBack() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let (_, there) = try self.prepare(harness)
+            self.fold(shell)
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            shell.updateSidebar()
+            @MainActor func start(of panel: NSPanel, from control: NSView) throws -> Bool {
+                let growth = try XCTUnwrap(panel.contentView?.layer?.animation(forKey: PanelGrowth.key) as? CAAnimationGroup)
+                let grow = try XCTUnwrap(growth.animations?.compactMap { $0 as? CABasicAnimation }.first { $0.keyPath == "transform" })
+                let source = try XCTUnwrap(NiruxShellView.screenRect(of: control))
+                let expected = CommandPalette.unfoldStart(from: PanelGrowth.origin(of: source, in: panel.frame), scale: PanelGrowth.scale)
+                return CATransform3DEqualToTransform(try XCTUnwrap(grow.fromValue as? NSValue).caTransform3DValue, CATransform3DMakeAffineTransform(expected))
+            }
+
+            shell.openInbox()
+            let inbox = try XCTUnwrap(shell.requestsState.inboxPanel?.panel)
+            XCTAssertTrue(try start(of: inbox, from: try XCTUnwrap(shell.commandBarToolbar?.bar.waitingButton)), "out of the badge")
+            XCTAssertFalse(inbox.hasShadow, "its shadow once whole")
+            shell.closeInbox()
+            XCTAssertFalse(shell.requestsState.isInboxOpen)
+            XCTAssertTrue(inbox.isVisible, "going back into the badge")
+            XCTAssertTrue(inbox.ignoresMouseEvents)
+            harness.waitUntil("the inbox gone") { !inbox.isVisible }
+
+            let rail = shell.sidebar.iconRail
+            let icon = try XCTUnwrap(rail.itemViews[there.id])
+            rail.onRequest?(there.id, icon)
+            let callout = try XCTUnwrap(shell.requestsState.calloutPanel?.panel)
+            XCTAssertTrue(try start(of: callout, from: icon), "out of its icon")
+            shell.closeCallout()
+            harness.waitUntil("the callout gone") { !callout.isVisible }
+
+            shell.sideEffects.reducesMotion = { true }
+            shell.openInbox()
+            XCTAssertNil(inbox.contentView?.layer?.animation(forKey: PanelGrowth.key))
+            shell.closeInbox()
+            XCTAssertFalse(inbox.isVisible, "at once")
+        }
+    }
+
     /// Unfolded, the requests stay in the rows: ⌘J and the badge go
     /// straight to the task.
     func testUnfoldedJGoesStraightToTheTask() throws {

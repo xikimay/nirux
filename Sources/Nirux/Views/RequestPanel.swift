@@ -55,6 +55,14 @@ final class RequestPanel {
     /// shortcut closes it, then goes to the menu, so that what the shortcut
     /// moves (a workspace, a column, the find bar) gets the keyboard.
     var keepsShortcut: ((NSEvent) -> Bool)?
+    /// The control it comes out of and goes back into, in screen
+    /// coordinates (the bar's badge, the rail's icon); nil: it fades.
+    var source: () -> NSRect? = { nil }
+    /// Whether it may move (`PanelGrowth`); else it shows and goes at once.
+    var animates: () -> Bool = { false }
+    /// Tells a pending order out whether it still applies: a show since
+    /// takes it back.
+    private var closeGeneration = 0
     /// When a click it let through (`keepsOpen`) last came: the window
     /// behind takes the keyboard on that mouse-down, which must not close
     /// it before the click acts (the badge, the callout's own icon).
@@ -95,6 +103,9 @@ final class RequestPanel {
     /// Shows it at `frame` (screen coordinates) over `window`, `responder`
     /// taking the keyboard.
     func show(frame: NSRect, over window: NSWindow, responder: NSView) {
+        closeGeneration += 1
+        panel.ignoresMouseEvents = false
+        panel.contentView?.layer?.removeAnimation(forKey: PanelGrowth.key)
         panel.setFrame(frame, display: true)
         if panel.parent !== window {
             panel.parent?.removeChildWindow(panel)
@@ -102,7 +113,7 @@ final class RequestPanel {
         }
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(responder)
-        invalidateShadowWhenDrawn()
+        if animates() { PanelGrowth.grow(panel, from: source()) } else { invalidateShadowWhenDrawn() }
         self.responder = responder
         isOpen = true
         if keyObservers.isEmpty { observeKey() }
@@ -168,9 +179,23 @@ final class RequestPanel {
         guard isOpen else { return }
         isOpen = false
         let hadKeyboard = hasKeyboard(panel)
+        if animates() {
+            // Back into its control; nothing in it takes a click meanwhile.
+            panel.ignoresMouseEvents = true
+            let generation = closeGeneration
+            PanelGrowth.shrink(panel, into: source()) { [weak self] in
+                guard let self, self.closeGeneration == generation else { return }
+                self.orderOut()
+            }
+        } else {
+            orderOut()
+        }
+        onClose?(closing, hadKeyboard)
+    }
+
+    private func orderOut() {
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil)
-        onClose?(closing, hadKeyboard)
     }
 
     /// It lost the keyboard to another window (Settings, the window behind

@@ -47,6 +47,9 @@ extension NiruxShellView {
             if let panel { closeReplyPopovers(of: panel) }
             if closing == .byHost, hadKeyboard { giveKeyboardBack() }
         }
+        // Out of the bar's badge, back into it.
+        panel.source = { [weak self] in (self?.commandBarToolbar?.bar.waitingButton).flatMap(Self.screenRect) }
+        panel.animates = { [weak self] in self?.agentLightsMayMove == true }
         // The badge acts on the open inbox (⌘J again).
         panel.keepsOpen = { [weak self] event in self?.isOnWaitingSegment(event) == true }
         panel.closesOnClicks = { [weak self] window in window === self?.commandBarToolbar?.bar.window }
@@ -72,6 +75,12 @@ extension NiruxShellView {
         // the screen, as under the bar.
         let top = NSRect(x: window.frame.midX - 1, y: window.frame.maxY - CommandBarView.height, width: 2, height: 0)
         return CommandPalette.place(underBar: top, in: window.frame, screen: window.screen?.visibleFrame, size: size).frame
+    }
+
+    /// Where `view` shows, in screen coordinates; nil while it doesn't.
+    static func screenRect(of view: NSView) -> NSRect? {
+        guard let window = view.window, !view.isHiddenOrHasHiddenAncestor else { return nil }
+        return window.convertToScreen(view.convert(view.bounds, to: nil))
     }
 
     private func isOnWaitingSegment(_ event: NSEvent) -> Bool {
@@ -127,6 +136,9 @@ extension NiruxShellView {
             requestsState.calloutTaskID = nil
             if closing == .byHost, hadKeyboard { giveKeyboardBack() }
         }
+        // Out of its rail icon, back into it.
+        panel.source = { [weak self] in self?.requestsState.calloutAnchor.flatMap(Self.screenRect) }
+        panel.animates = { [weak self] in self?.agentLightsMayMove == true }
         // A click on its own icon closes it there (`openCallout`), not here
         // and then open again.
         panel.keepsOpen = { [weak self] event in
