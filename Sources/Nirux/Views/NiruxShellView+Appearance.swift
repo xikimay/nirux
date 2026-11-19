@@ -30,6 +30,7 @@ extension NiruxShellView {
         requestsState.inboxPanel?.invalidateShadowWhenDrawn()
         requestsState.calloutPanel?.invalidateShadowWhenDrawn()
         sidebar.show(level: level, resolveLevel: resolve)
+        railMayHaveChanged(animated: false)
         layer?.backgroundColor = translucent ? NSColor.clear.cgColor : Theme.Color.canvas.cgColor
         applyTerminalOpacity()
     }

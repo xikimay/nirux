@@ -36,7 +36,7 @@ log show --predicate 'subsystem == "com.xikimay.nirux" AND category == "missions
 - A Mission ends only when the child reports that it is done, not when its turn stops.
 - More work sent by the parent waits for the child's next free prompt, a day at most, and reaches the `claude` that was running when it was sent, or one that resumed that conversation since (after Nirux relaunches, say) once it took a prompt. If it isn't typed within an hour, the parent hears what holds it; if Nirux gives it up (a day passed, the task closed, or its `claude` restarted on another conversation), the parent hears that too. An answer has no limit and is typed whenever the child's prompt is free.
 - The parent can send more work after the child reported its result, which makes the Mission active again.
-- A Codex child can ask and report, but can't be sent work: Codex reports no dialogs, so Nirux can't know that its prompt is free. A Codex child waits for each answer in its terminal, and a Codex parent polls for its child's messages.
+- A Codex or Antigravity child can ask and report, but can't be sent work: neither reports its dialogs, so Nirux can't know that its prompt is free. Such a child waits for each answer in its terminal, and a Codex parent polls for its child's messages.
 - A worktree opened without a Mission keeps the plain handover file. The child reads it and works alone.
 - A sub-task an agent starts with the `nirux-worktree` skill gets a Mission only while Mission handoffs is on, even under a Lead's task. Otherwise it works alone. One started with `start_task` always has one.
 
