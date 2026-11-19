@@ -340,6 +340,13 @@ final class PtySession: @unchecked Sendable {
         set { state.onOsc9Received = newValue }
     }
 
+    /// Antigravity reported that it waits on the user, or that its turn
+    /// ended or failed (OSC 7501), on the main queue.
+    var onProgramStatusAttention: ((AgentAttentionReason) -> Void)? {
+        get { state.onProgramStatusAttention }
+        set { state.onProgramStatusAttention = newValue }
+    }
+
     /// Called on the main queue when the output shows a local dev-server
     /// URL (`http://localhost:5173/`). Throttled per port.
     var onLocalServerURL: ((LocalServerURL) -> Void)? {
@@ -1342,6 +1349,9 @@ private final class PtyState: @unchecked Sendable {
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: ((String) -> Void)?
     var onOsc9Received: (() -> Void)?
+    var onProgramStatusAttention: ((AgentAttentionReason) -> Void)?
+    /// Read-queue only.
+    private var programStatusScanner = AgentProgramStatus.Scanner()
     var onLocalServerURL: ((LocalServerURL) -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
@@ -1605,7 +1615,7 @@ private final class PtyState: @unchecked Sendable {
         machine.noteRead(now: Date())
         session.receive(data)
         if let str = String(bytes: data, encoding: .utf8),
-           str.contains("\u{1b}]") {
+           str.contains("\u{1b}]") || programStatusScanner.isWaiting {
             parseOscSequences(str)
         }
         // Output before the first typed input is launch noise — notably
@@ -1674,6 +1684,16 @@ private final class PtyState: @unchecked Sendable {
            machine.hookKind == nil, machine.hasUserInput,
            let callback = onOsc9Received {
             DispatchQueue.main.async { callback() }
+        }
+        // OSC 7501 (program status): Antigravity's state, applied on the
+        // main queue as hook events are.
+        let statuses = programStatusScanner.statuses(in: str)
+        if !statuses.isEmpty {
+            DispatchQueue.main.async { [self] in
+                for status in statuses {
+                    if let reason = machine.noteProgramStatus(status, now: Date()) { onProgramStatusAttention?(reason) }
+                }
+            }
         }
     }
 }

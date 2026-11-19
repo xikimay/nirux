@@ -207,6 +207,9 @@ struct AgentStatusMachine {
     /// attention it raised, it lasts until the agent moves again: a new
     /// prompt or tool call, another turn's end, the session's end.
     private(set) var turnFailure: AgentTurnFailure?
+    /// Antigravity's last word on its state (OSC 7501) and when it came,
+    /// until another process comes to the front.
+    private(set) var programStatus: (status: AgentProgramStatus, at: TimeInterval)?
     /// The agent process died mid-turn (see `noteAgentExited`). Cleared by
     /// a new session, an agent back in the foreground, or the user.
     private(set) var midTurnExit: AgentMidTurnExit?
@@ -1350,6 +1353,11 @@ struct AgentStatusMachine {
             return state
         }
 
+        // Antigravity says what it does, and why it waits.
+        if let reported = reportedState(isUserFocused: isUserFocused, now: now.timeIntervalSince1970) {
+            return reported
+        }
+
         // Fallback: recent output = working; silence ends the turn.
         // Suppressed until the user has actually engaged (first keystroke)
         // and the new foreground command has settled — startup banners,
@@ -1425,6 +1433,51 @@ struct AgentStatusMachine {
         // under it is a nested run's); a claude's leftover kind would mute
         // its OSC 9 notifications.
         if Self.activityOnlyAgentProcesses.contains(fgName) { hookKind = nil }
+        // Antigravity's status goes with it; one can come before the
+        // heartbeat sees it in front.
+        if fgName != AgentProgramStatus.process { programStatus = nil }
+    }
+
+    /// Takes in what Antigravity reported: the reason to alert with when it
+    /// starts waiting on the user, or its turn ends or fails.
+    mutating func noteProgramStatus(_ status: AgentProgramStatus, now: Date) -> AgentAttentionReason? {
+        let previous = programStatus?.status
+        programStatus = (status, now.timeIntervalSince1970)
+        _ = reportedState(isUserFocused: false, now: now.timeIntervalSince1970)
+        guard status != previous, state == .needsAttention, status.state != .working, status.state != .idle,
+              status.kind != "auth" else { return nil }
+        return lastAttentionReason
+    }
+
+    /// The state Antigravity reported since it came to the front: it says
+    /// when it waits on the user, which its output can't.
+    private mutating func reportedState(isUserFocused: Bool, now: TimeInterval) -> AgentStatus? {
+        guard let reported = programStatus else { return nil }
+        let (status, at) = reported
+        switch status.state {
+        case .working:
+            if state != .working { turnStartedAt = at }
+            state = .working
+            lastAttentionReason = nil
+        case .blocked where status.kind == "auth" && now - at < AgentProgramStatus.signInGrace:
+            break
+        case .blocked:
+            state = .needsAttention
+            lastAttentionReason = status.attentionReason
+        case .done, .error:
+            if turnEndedAt < at {
+                turnEndedAt = at
+                turnStartedAt = nil
+                state = .needsAttention
+                lastAttentionReason = status.attentionReason
+            }
+            if isUserFocused { state = .idle }
+        case .idle:
+            state = .idle
+            lastAttentionReason = nil
+            turnStartedAt = nil
+        }
+        return state
     }
 
     private mutating func startFallbackTurn(now: Date) {

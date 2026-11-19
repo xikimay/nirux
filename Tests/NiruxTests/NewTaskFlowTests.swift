@@ -610,6 +610,31 @@ final class NewTaskFlowTests: UIFlowTestCase {
         }
     }
 
+    /// agy says through OSC 7501 why it waits: its row needs the user with
+    /// its question, and the column alerts once.
+    func testAgySaysWhyItWaits() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let question = Data("Which color do you prefer?".utf8).base64EncodedString()
+            let sequence = "\\033]7501;state=blocked:kind=question:app=antigravity:msg=\(question)\\007"
+            workspace.addColumn(command: "printf '\(sequence)'; exec -a agy /bin/sleep 600", cwd: harness.repo)
+            let column = try XCTUnwrap(workspace.columns.last)
+            // Never the system's notification center in a test process.
+            var alerts: [AgentAttentionReason?] = []
+            column.onAgentAttention = { alerts.append($0) }
+            shell.relayout(animated: false)
+            @MainActor func status() -> String? {
+                shell.updateSidebar()
+                return shell.sidebar.displayedWorkspaceInfos.first { $0.id == workspace.id }?.rowSummary.status.text
+            }
+            UIFlowHarness.waitUntil("agy's question on its row (\(status() ?? "nil"))") {
+                status() == "Needs you · Which color do you prefer?"
+            }
+            XCTAssertEqual(alerts, [.question("Which color do you prefer?")])
+        }
+    }
+
     /// Existing Branch… lists the selected repository's worktrees, its main
     /// checkout too, then its branches without one, local then origin's. It
     /// goes back to the worktree the active workspace is in, and makes one

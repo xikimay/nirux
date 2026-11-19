@@ -8,10 +8,10 @@ Nirux shows what each agent is doing, tells you when one needs you, and brings a
 | --- | --- | --- |
 | Claude Code | yes (`Cmd+N`, `Open Claude Code`) | exact, from hooks |
 | Codex | yes (`Cmd+N`, `Open Codex`) | the end of a turn is exact; "working" is estimated from terminal output |
-| Antigravity (`agy`) | yes (`Cmd+N`, `Open Antigravity`), not resumed after a restart | estimated from terminal output |
+| Antigravity (`agy`) | yes (`Cmd+N`, `Open Antigravity`), not resumed after a restart | exact, from what it reports (OSC 7501): working, waiting for you and why, done |
 | Gemini CLI, OpenCode | no, start them in a terminal | estimated from terminal output |
 
-Settings › Agents sets the permission and sandbox mode Claude Code and Codex start with. For Claude Code, **Claude Code default** passes no flag, so a session follows `permissions.defaultMode` in your Claude Code settings, else starts in Auto where auto mode is available; **Manual** asks before edits and commands. Antigravity starts with its own mode, model and settings, and without the space's brief: Nirux passes no flag.
+Settings › Agents sets the permission and sandbox mode Claude Code and Codex start with. For Claude Code, **Claude Code default** passes no flag, so a session follows `permissions.defaultMode` in your Claude Code settings, else starts in Auto where auto mode is available; **Manual** asks before edits and commands. Antigravity starts with its own mode, model and settings, and without the space's brief: Nirux passes no flag. Nirux terminals set `AGY_CLI_OSC7501=on`, so that agy reports its state; an agy that doesn't is followed from its output.
 
 ## Status hooks
 

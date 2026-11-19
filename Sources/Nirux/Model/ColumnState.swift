@@ -420,6 +420,9 @@ final class ColumnState {
         ptySession.onOsc9Received = { [weak self] in
             self?.onAgentAttention?(nil)
         }
+        ptySession.onProgramStatusAttention = { [weak self] reason in
+            self?.onAgentAttention?(reason)
+        }
 
         ptySession.onLocalServerURL = { [weak self] url in
             self?.onLocalServerURLDetected?(url)

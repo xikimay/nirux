@@ -827,7 +827,10 @@ extension WorkspaceState {
             // runs here: they stay dry runs unless asked for by hand.
             "NIRUX_MERGE_QUEUE_LIVE": "",
             // Nor is a copy's opt-in to the real state (see RealStateGuard).
-            "NIRUX_ALLOW_REAL_STATE": ""
+            "NIRUX_ALLOW_REAL_STATE": "",
+            // Antigravity then says what it does and why it waits
+            // (AgentProgramStatus): Nirux doesn't answer its query.
+            "AGY_CLI_OSC7501": "on"
         ]
         if missionHandoffsEnabled {
             environment["NIRUX_MISSION_HANDOFFS"] = "1"
