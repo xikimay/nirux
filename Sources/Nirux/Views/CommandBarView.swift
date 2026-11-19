@@ -88,7 +88,7 @@ final class CommandBarView: NSView {
     var lifts = false {
         didSet {
             guard lifts != oldValue else { return }
-            for (segment, button) in segments { button.relief = lifts ? (1, segment) : nil }
+            for (segment, button) in segments { button.relief = lifts ? (1, ZZ("buttonOnly") ? button : segment) : nil }
         }
     }
 

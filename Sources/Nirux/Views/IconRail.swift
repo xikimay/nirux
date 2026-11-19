@@ -293,7 +293,7 @@ final class RailItemView: NSView {
             guard moves != oldValue else { return }
             updateBreath()
             // Still at once when nothing may move any more.
-            updateRelief(animated: moves)
+            updateRelief(animated: moves || ZZ("noSnap"))
         }
     }
     static let liftHeight: CGFloat = 1.5
@@ -445,7 +445,7 @@ final class RailItemView: NSView {
     /// Neither under the pointer nor pressed.
     private func leave() {
         isHovered = false
-        isPressed = false
+        if !ZZ("pressSticks") { isPressed = false }
     }
 
     /// The view moved (a task arrived above, the rail scrolled): under the
@@ -466,7 +466,7 @@ final class RailItemView: NSView {
     /// Dragged off, neither pressed nor lifted; back on, pressed again.
     override func mouseDragged(with event: NSEvent) {
         let inside = bounds.contains(convert(event.locationInWindow, from: nil))
-        isHovered = inside
+        if !ZZ("dragLifted") { isHovered = inside }
         isPressed = inside
     }
 

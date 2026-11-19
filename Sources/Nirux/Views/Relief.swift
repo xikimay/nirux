@@ -47,8 +47,8 @@ enum Relief {
         let shownTransform = host.presentation()?.sublayerTransform ?? host.sublayerTransform
         let shownOpacity = shadow.presentation()?.opacity ?? shadow.opacity
         CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        host.sublayerTransform = transform
+        CATransaction.setDisableActions(!ZZ("implicitFade"))
+        if ZZ("backingTransform") { host.transform = transform } else { host.sublayerTransform = transform }
         shadow.opacity = opacity
         CATransaction.commit()
         guard animated, !isThere else {
@@ -89,7 +89,7 @@ enum Relief {
     /// Where `state` puts what a container of `size` holds: up whichever
     /// way it counts y; pressed, smaller about its middle and a little down.
     static func transform(_ state: State, size: NSSize, flipped: Bool) -> CGAffineTransform {
-        let up: CGFloat = flipped ? -1 : 1
+        let up: CGFloat = flipped && !ZZ("wrongWay") ? -1 : 1
         switch state {
         case .resting:
             return .identity
