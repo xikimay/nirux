@@ -382,7 +382,7 @@ extension NiruxShellView {
     }
 
     func selectProfile(_ profileID: String) {
-        activateProfile(profileID, slideOutDirection: nil)
+        activateProfile(profileID, crosses: false)
     }
 
     /// ⌥⌘1…⌥⌘9: the space at that place in the space picker, read off
@@ -393,23 +393,17 @@ extension NiruxShellView {
     }
 
     func focusSpace(_ dir: SpaceDir) {
-        let slideOutDirection: CGFloat
-        let delta: Int
-        switch dir {
-        case .previous:
-            delta = -1
-            slideOutDirection = 1
-        case .next:
-            delta = 1
-            slideOutDirection = -1
-        }
-        guard let profile = workspaceStore.selectAdjacentProfile(delta: delta) else { return }
-        activateProfile(profile.id, slideOutDirection: slideOutDirection, profileAlreadySelected: true)
+        guard let profile = workspaceStore.selectAdjacentProfile(delta: dir == .previous ? -1 : 1) else { return }
+        activateProfile(profile.id, crosses: true, profileAlreadySelected: true)
     }
 
-    private func activateProfile(_ profileID: String, slideOutDirection: CGFloat?, profileAlreadySelected: Bool = false) {
+    /// `crosses`: through depth (⌥⌘← ⌥⌘→, NiruxShellView+SpaceCrossing),
+    /// while the interface may move; otherwise at once.
+    private func activateProfile(_ profileID: String, crosses: Bool, profileAlreadySelected: Bool = false) {
         let previousProfileID = activeProfileID
-        let snapshot = slideOutDirection.flatMap { _ in FrozenView.freeze(viewport) }
+        // A crossing on its way ends: what shows now is what leaves.
+        endSpaceCrossing()
+        let leaving = crosses && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }
 
@@ -418,21 +412,7 @@ extension NiruxShellView {
         refreshAfterWorkspaceSelection(animated: false)
         saveState()
 
-        if let snapshot, let slideOutDirection {
-            animateSpaceSnapshot(snapshot, slideOutDirection: slideOutDirection)
-        }
-    }
-
-    private func animateSpaceSnapshot(_ snapshot: NSView, slideOutDirection: CGFloat) {
-        viewport.addSubview(snapshot)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.22
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            snapshot.animator().frame.origin.x += slideOutDirection * viewport.bounds.width * 0.35
-            snapshot.animator().alphaValue = 0
-        }
-        // On time: a window out of view may never report the end.
-        ColumnState.afterCommit(0.22) { snapshot.removeFromSuperview() }
+        if let leaving { crossSpaces(leaving: leaving) }
     }
 
     func handleWorkspaceSidebarAction(_ action: WorkspaceSidebarAction, workspaceIndex: Int) {

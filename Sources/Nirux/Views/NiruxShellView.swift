@@ -18,6 +18,10 @@ final class NiruxShellView: NSView {
     /// Counts sidebar toggles: an expansion's delayed step checks that no
     /// toggle came after it.
     var sidebarToggleGeneration = 0
+    /// Counts space crossings: a crossing's end acts only on its own, and
+    /// its pictures over the viewport (NiruxShellView+SpaceCrossing).
+    var spaceCrossingGeneration = 0
+    var crossingPictures: [FrozenView] = []
     /// The size of the workspace on screen, as `relayout` lays it out.
     var workspaceViewportSize: NSSize {
         let statusH = statusBar.hasContent ? StatusBarView.height : 0

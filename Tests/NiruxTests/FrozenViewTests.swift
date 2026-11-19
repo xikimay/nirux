@@ -73,20 +73,14 @@ final class FrozenViewTests: XCTestCase {
         XCTAssertTrue(Self.pixels(of: copy) == Self.pixels(of: surface), "the same pixels")
     }
 
-    /// A new workspace and ⌥⌘→ lay what the viewport showed, frozen, over
-    /// it as it slides away, gone on time; nothing is drawn again.
+    /// A new workspace lays what the viewport showed, frozen, over it as it
+    /// slides away, gone on time; nothing is drawn again. (⌥⌘← ⌥⌘→:
+    /// SpaceCrossingTests.)
     func testASlideLeavesAFrozenPictureGoneOnTime() throws {
         try withShell { shell in
-            let first = shell.activeProfileID
             shell.workspaceStore.createProfile(named: "Second", select: true)
             shell.addWorkspace(title: "second", cwd: NSTemporaryDirectory())
             XCTAssertEqual(Self.frozenViews(in: shell).count, 1, "a new workspace slides over what showed, frozen")
-            waitUntil("gone on time", timeout: 2) { Self.frozenViews(in: shell).isEmpty }
-
-            shell.selectProfile(first)
-            XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "a pick from the menu doesn't slide")
-            shell.focusSpace(.next)
-            XCTAssertEqual(Self.frozenViews(in: shell).count, 1, "the space left, frozen, over the viewport")
             XCTAssertFalse(shell.viewport.subviews.contains { $0 is NSImageView }, "nothing drawn again")
             waitUntil("gone on time", timeout: 2) { Self.frozenViews(in: shell).isEmpty }
         }

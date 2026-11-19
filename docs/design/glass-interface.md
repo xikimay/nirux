@@ -480,8 +480,13 @@ the text stays flat and sharp.
   shade. 0.44 s, translations only, so no text scales; N1's name card
   stays. A switch while one plays ends it at once; Reduce motion, another
   space, or a workspace on screen that left the list show it at once.
-- **Frozen pictures (study P4, first part):** a slide over the viewport
-  (⌥⌘← ⌥⌘→, a new workspace) moves a picture of what it showed, frozen in
+- **The crossing (study P4):** ⌥⌘← ⌥⌘→ pass through depth. The space left
+  recedes to 92 % as it fades; the one chosen comes from 106 % and lands,
+  0.56 s, both frozen pictures, the live views hidden under them until it
+  lands, so no live terminal scales. A switch while one plays ends it at
+  once; Reduce motion, or a pick from the menu, shows the space at once.
+- **Frozen pictures (study P4):** a crossing, or a new workspace's slide,
+  moves pictures of what the viewport showed, frozen in
   about 6 ms (`FrozenView`): a clone of its layers, each sharing its
   contents, without what is hidden or clipped out of sight, each
   terminal's last image copied on the GPU (Ghostty draws over the one it
