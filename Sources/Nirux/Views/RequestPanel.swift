@@ -89,6 +89,9 @@ final class RequestPanel {
         // behind AppKit's back, it would come back stale.
         panel.hidesOnDeactivate = false
         panel.appearance = Theme.appearance
+        // It comes out of its control and goes back (`PanelGrowth`) on
+        // this layer.
+        content.wantsLayer = true
         panel.contentView = content
         (panel as? Panel)?.onPerformClose = { [weak self] in self?.close() }
     }
