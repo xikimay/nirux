@@ -548,22 +548,21 @@ final class ColumnCardsTests: XCTestCase {
             shell.addColumn()
             waitUntil("in", timeout: 2) { !workspace.columns.contains(where: \.isArriving) }
             workspace.focusedIndex = 0
-            let moved = workspace.columns[0], first = workspace.columns[1]
+            let moved = workspace.columns[0], twice = workspace.columns[2]
 
             shell.moveColumn(.right)
-            let soon = Date().addingTimeInterval(0.06)
-            waitUntil("on its way up", timeout: 2) { Date() >= soon }
+            waitUntil("on its way up", timeout: 2) { (moved.view.layer?.presentation()?.transform.m42 ?? 0) > 1 }
             shell.moveColumn(.right)
             let rise = try XCTUnwrap(moved.view.layer?.animation(forKey: ColumnState.liftKey) as? CAKeyframeAnimation)
             XCTAssertGreaterThan(try XCTUnwrap((rise.values as? [CGFloat])?.first), 0.5, "on from the height it shows")
 
             shell.moveColumn(.left)
-            XCTAssertEqual(first.view.subviews.filter { $0 is PassShadeView }.count, 1, "passed twice, one shade")
-            first.widthFraction = 0.3
+            XCTAssertEqual(twice.view.subviews.filter { $0 is PassShadeView }.count, 1, "passed twice, one shade")
+            twice.widthFraction = 0.3
             shell.relayout(animated: false)
-            XCTAssertEqual(try XCTUnwrap(first.passShadeView).frame, first.view.bounds, "its size")
-            waitUntil("its shade gone", timeout: 2) { first.passShadeView == nil }
-            XCTAssertFalse(first.view.subviews.contains { $0 is PassShadeView })
+            XCTAssertEqual(try XCTUnwrap(twice.passShadeView).frame, twice.view.bounds, "its size")
+            waitUntil("its shade gone", timeout: 2) { twice.passShadeView == nil }
+            XCTAssertFalse(twice.view.subviews.contains { $0 is PassShadeView })
         }
     }
 
