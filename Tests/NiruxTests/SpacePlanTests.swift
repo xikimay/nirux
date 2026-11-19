@@ -123,7 +123,8 @@ final class SpacePlanTests: XCTestCase {
     }
 
     /// Every workspace the plan lists draws once before it shows: their
-    /// terminals rested off screen. Asked again meanwhile, it doesn't show.
+    /// terminals rested off screen. Asked again meanwhile, or with a
+    /// workspace that didn't draw, it doesn't show.
     func testEveryListedWorkspaceDrawsOnceBeforeThePlanShows() throws {
         try withWorkspaces { shell, workspaces in
             var drawing: [ObjectIdentifier: Bool] = [:]
@@ -143,6 +144,12 @@ final class SpacePlanTests: XCTestCase {
             XCTAssertNil(shell.spacePlan, "asked again meanwhile, it doesn't show")
             let onScreen = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertTrue(workspaces.filter { $0 !== onScreen }.flatMap(\.columns).allSatisfy { drawing[ObjectIdentifier($0)] == false })
+
+            shell.toggleSpacePlan()
+            shell.addWorkspace(title: "fourth", cwd: NSTemporaryDirectory(), activate: false)
+            steps?.runNext()
+            XCTAssertNil(shell.spacePlan, "a workspace that didn't draw")
+            XCTAssertTrue(shell.planDrawing.isEmpty)
         }
     }
 
