@@ -178,6 +178,16 @@ enum GitDetect {
         return isDirty(status: status.standardOutput)
     }
 
+    /// The checkout's HEAD commit, lowercased, read now; nil when git can't
+    /// say.
+    static func head(at path: String, gitPath: String = "/usr/bin/git", timeout: TimeInterval = 30) -> String? {
+        guard let result = gitOutput(arguments: ["rev-parse", "--verify", "HEAD"], at: path, gitPath: gitPath, timeout: timeout),
+              result.terminationStatus == 0
+        else { return nil }
+        let head = result.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        return head.isEmpty ? nil : head.lowercased()
+    }
+
     /// `startFolder`: the folder the workspace started in (its `cwd`), the
     /// one Clean Up asks about too, whichever column is focused.
     static func context(at path: String, startFolder: String? = nil) -> GitContext? {

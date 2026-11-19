@@ -1,8 +1,9 @@
 import AppKit
 
 /// Space Settings › Defaults (docs/design/projects.md, section 5): the agent its
-/// tasks preselect, the Claude and Codex launch modes, and environment
-/// variables for new shells. Each change is written at once
+/// tasks preselect, the Claude and Codex launch modes, the pull request
+/// follow-up (docs/design/pr-follow-up.md), and environment variables for
+/// new shells. Each change is written at once
 /// (SpaceDefaultsStore); a variable list with a problem isn't, until it's
 /// fixed. A launch takes an explicit choice first, then these, then
 /// Settings.
@@ -30,6 +31,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     let agentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let claudePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let codexPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    let followUpSwitch = NSSwitch()
     let tableView = NSTableView()
     let addButton = NSButton(title: "Add Variable", target: nil, action: nil)
     let removeButton = NSButton(title: "Remove", target: nil, action: nil)
@@ -58,7 +60,10 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fillPopups()
         tableView.reloadData()
         let writable = loaded.isWritable
-        for control in [agentPopup, claudePopup, codexPopup, addButton, tableView] as [NSControl] { control.isEnabled = writable }
+        for control in [agentPopup, claudePopup, codexPopup, followUpSwitch, addButton, tableView] as [NSControl] {
+            control.isEnabled = writable
+        }
+        followUpSwitch.state = loaded.defaults.followsUpPullRequests ? .on : .off
         updateRemoveButton()
         let banner = message ?? loaded.problem
         bannerLabel.stringValue = banner?.asWarning ?? ""
@@ -126,6 +131,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         guard let raw = sender.selectedItem?.representedObject as? String else { return }
         var defaults = loaded.defaults
         defaults.codexLaunchMode = CodexLaunchMode(rawValue: raw)
+        guard defaults != loaded.defaults else { return }
+        write(defaults)
+    }
+
+    @objc func followUpChanged(_ sender: NSSwitch) {
+        var defaults = loaded.defaults
+        // Off is the default: nothing is written for it.
+        defaults.prFollowUp = sender.state == .on ? true : nil
         guard defaults != loaded.defaults else { return }
         write(defaults)
     }
@@ -290,6 +303,27 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
                 + "you choose one for it, and Settings’ modes when they say Same as Settings."
         )
 
+        followUpSwitch.target = self
+        followUpSwitch.action = #selector(followUpChanged(_:))
+        followUpSwitch.setAccessibilityLabel("Follow up on pull requests")
+        let followUpTitle = NSTextField(labelWithString: "Follow up on pull requests")
+        followUpTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        followUpTitle.setAccessibilityElement(false)
+        let followUpHint = Self.hint(
+            "When a task’s Claude sits idle, Nirux types the fix itself: a conflict with the base, a failed check "
+                + "that isn’t a likely flake, new review feedback. Three rounds per pull request, then it’s yours."
+        )
+        followUpHint.preferredMaxLayoutWidth = Self.contentWidth - 60
+        followUpSwitch.setAccessibilityHelp(followUpHint.stringValue)
+        let followUpTexts = NSStackView(views: [followUpTitle, followUpHint])
+        followUpTexts.orientation = .vertical
+        followUpTexts.alignment = .leading
+        followUpTexts.spacing = 3
+        let followUp = NSStackView(views: [followUpSwitch, followUpTexts])
+        followUp.orientation = .horizontal
+        followUp.alignment = .top
+        followUp.spacing = 12
+
         let header = NSTextField(labelWithString: "Environment")
         header.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
         let scroll = NSScrollView()
@@ -341,11 +375,12 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         environment.alignment = .leading
         environment.spacing = 8
 
-        let stack = NSStackView(views: [bannerLabel, form, formHint, environment])
+        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, environment])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14
         stack.setCustomSpacing(22, after: formHint)
+        stack.setCustomSpacing(22, after: followUp)
         stack.edgeInsets = Self.insets
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
@@ -361,7 +396,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
             problemsLabel.widthAnchor.constraint(equalToConstant: Self.contentWidth),
             warningsLabel.widthAnchor.constraint(equalToConstant: Self.contentWidth),
             envHint.widthAnchor.constraint(equalToConstant: Self.contentWidth),
-            formHint.widthAnchor.constraint(equalToConstant: Self.contentWidth)
+            formHint.widthAnchor.constraint(equalToConstant: Self.contentWidth),
+            followUpHint.widthAnchor.constraint(equalToConstant: Self.contentWidth - 60)
         ])
     }
 

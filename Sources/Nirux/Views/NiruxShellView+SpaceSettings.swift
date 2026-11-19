@@ -111,8 +111,10 @@ extension NiruxShellView {
         let store = SpaceDefaultsStore(spaceID: spaceID)
         let unread = SpaceDefaultsStore.Loaded(defaults: SpaceDefaults(), status: .missing)
         var defaultsActions = SpaceSettingsDefaultsPane.Actions()
-        defaultsActions.save = { defaults, loaded in
-            store.map { $0.save(defaults, replacing: loaded) } ?? .failure(.couldNotWrite("The space’s folder can’t be named."))
+        defaultsActions.save = { [weak self] defaults, loaded in
+            let saved = store.map { $0.save(defaults, replacing: loaded) } ?? .failure(.couldNotWrite("The space’s folder can’t be named."))
+            if case .success = saved { self?.spaceDefaultsSaved(defaults, replacing: loaded.defaults, spaceID: spaceID) }
+            return saved
         }
         defaultsActions.reload = { store?.load() ?? unread }
         defaultsActions.settingsClaudeMode = { Self.currentClaudeLaunchMode() }

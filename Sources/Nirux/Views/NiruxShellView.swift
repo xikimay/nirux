@@ -174,6 +174,7 @@ final class NiruxShellView: NSView {
     var sideEffects = ShellSideEffects()
     /// The CI failure triage's state (docs/design/ci-failure-triage.md).
     let ciTriageCenter = CITriageCenter()
+    let prFollowUpCenter = PRFollowUpCenter()
 
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?

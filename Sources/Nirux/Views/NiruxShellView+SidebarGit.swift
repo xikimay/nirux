@@ -207,7 +207,8 @@ extension NiruxShellView {
                       parentTitle: parentTitle,
                       statusLine: turnStatusEnabled ? workspace.statusLine : nil,
                       turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil,
-                      ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0)
+                      ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0,
+                      followUp: followUpRow(of: workspace))
     }
 
     /// Every column's foreground process, shown or not, and what follows
@@ -649,6 +650,7 @@ extension NiruxShellView {
             guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
             gitRefresh.notePullRequestRefresh(workspace)
             startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext)
+            let readStartedAt = Date().timeIntervalSince1970
             PRDetect.fetchAsync(branch: branch, cwd: cwd, startFolder: workspace.cwd) { [weak self, weak workspace] result in
                 guard let workspace else { return }
                 guard !workspace.isInactive else {
@@ -683,6 +685,10 @@ extension NiruxShellView {
                     // moves without the PR's own fields moving.
                     if workspace.prInfo == info { self?.refreshPRFeedback(for: workspace) }
                     self?.reportNewRedChecks(in: workspace)
+                    if workspace.prInfo == info {
+                        self?.prFollowUpCenter.readAt[workspace.id] = readStartedAt
+                        self?.followUpPullRequest(of: workspace)
+                    }
                     guard changed else { return }
                     self?.scheduleMetadataRefresh()
                 }

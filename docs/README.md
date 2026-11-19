@@ -39,7 +39,7 @@ A design record holds the decisions behind one feature, as they were taken. Reco
 | [PR feedback inbox](design/pr-feedback-inbox.md) | Shipped, sidebar part changed since |
 | [CI failure actions](design/ci-failure-actions.md) | Shipped |
 | [CI failure triage](design/ci-failure-triage.md) | Shipped |
-| [PR auto follow-up](design/pr-follow-up.md) | In progress: the decision is built, not wired |
+| [PR auto follow-up](design/pr-follow-up.md) | Shipped, off by default |
 | [Mission tell](design/mission-tell.md) | Shipped |
 | [Drafts](design/drafts.md) | Shipped as the `nirux-draft` skill |
 | [Second opinion](design/second-opinion.md) | Shipped as the `nirux-second-opinion` skill |

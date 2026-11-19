@@ -43,6 +43,18 @@ For an open pull request, Nirux counts the feedback nobody has dealt with yet: u
 
 The selected row shows the counts, people and bots apart. A click on them lists up to ten items, each opening on GitHub. Below them, **Address** types a prompt into the workspace's Claude Code session that starts with `/receiving-code-review` and names every item.
 
+## Automatic follow-up
+
+With **Space Settings › Defaults › Follow up on pull requests** on (off by default), Nirux keeps the pull requests of the space's tasks mergeable while their Claude Code sits idle. It types the prompt each one needs, in this order:
+
+- a conflict with the base: merge `<remote>/<base>`, resolve the conflicts, run the checks, push. Never a rebase.
+- a failed check (FAILURE or TIMED_OUT in the pull request's own Actions runs, not a likely flake), 2 minutes after it failed: find why, fix it, push, or say the branch didn't cause it.
+- new review feedback (review threads, and what people write besides an approval), 3 minutes after the last item: the Address prompt for the new items.
+
+It waits while the agent works, asks you something, holds text in its prompt or a Mission message, while you're on its terminal, while the checkout changes tracked files or isn't at the pull request's head, and while a merge queue holds the pull request or auto-merge is on. One round runs at a time across tasks; the row reads `Auto follow-up 1/3 · failed checks` meanwhile.
+
+After three rounds on a pull request, or a round that pushed nothing while its problem is still there, the row reads `Needs you · …` in amber with the reason, until the pull request's head moves, the problem goes away, or you type into the agent. Your own **Address** or **Ask Agent Why CI Failed** takes that feedback or failure out of its hands. Tasks only: never the main checkout or the Lead. Its decisions go to the `followUp` log category.
+
 ## Branch Review
 
 `Review Branch`, in the command palette or a workspace's menu, opens a Branch Review column next to the agent: the whole branch on one page. It reads the branch checked out in the workspace's folder, from where it left the base branch to the working tree, uncommitted changes included, and writes nothing to the repository. The page shows:

@@ -5,6 +5,9 @@ import Foundation
 /// relaunch and a workspace opened again.
 struct PRFollowUpStore: Codable, Equatable {
     var pullRequests: [String: PRFollowUp.Entry] = [:]
+    /// By space: when its follow-up was turned on, where a pull request
+    /// first seen since starts (`Entry.since`).
+    var spacesOnSince: [String: TimeInterval] = [:]
 
     /// An entry nothing changed for this long goes at the next change,
     /// unless it holds a stop: its pull request merged or closed while no
@@ -12,13 +15,15 @@ struct PRFollowUpStore: Codable, Equatable {
     /// shell's part).
     static let lifetime: TimeInterval = 30 * 24 * 60 * 60
 
-    /// Changes the entry of `url` (a new one follows from `now`), stamped
-    /// `now` when that changed anything; returns whether it did, and so
-    /// whether to save.
+    /// Changes the entry of `url` (a new one follows from `since`, else
+    /// `now`), stamped `now` when that changed anything; returns whether
+    /// it did, and so whether to save.
     @discardableResult
-    mutating func update(_ url: String, now: TimeInterval, _ change: (inout PRFollowUp.Entry) -> Void) -> Bool {
+    mutating func update(
+        _ url: String, now: TimeInterval, since: TimeInterval? = nil, _ change: (inout PRFollowUp.Entry) -> Void
+    ) -> Bool {
         let before = pullRequests[url]
-        var entry = before ?? PRFollowUp.Entry(since: now)
+        var entry = before ?? PRFollowUp.Entry(since: since ?? now)
         change(&entry)
         guard entry != before else { return false }
         entry.updatedAt = now
@@ -50,6 +55,7 @@ struct PRFollowUpStore: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         pullRequests = values.lenient(.pullRequests, [String: LenientValue<PRFollowUp.Entry>]()).compactMapValues(\.value)
+        spacesOnSince = values.lenient(.spacesOnSince, [:])
     }
 
     init() {}

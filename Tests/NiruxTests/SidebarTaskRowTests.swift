@@ -78,6 +78,25 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(status(workspace([], branch: nil)), "No activity yet")
     }
 
+    /// docs/design/pr-follow-up.md: a round's turn says so where "Working"
+    /// was; a pull request handed over waits on the user, in amber, once no
+    /// agent works, and after the agent's own question.
+    func testTheFollowUpSaysItsRoundAndHandsOverInAmber() {
+        var round = workspace([column(0, .working)], pr: pullRequest(ci: "FAILURE"))
+        round.followUp = .round("Auto follow-up 1/3 · failed checks")
+        XCTAssertEqual(round.rowSummary.status, SidebarStatusLine(text: "Auto follow-up 1/3 · failed checks", tone: .neutral))
+        let words = "#39 still fails its checks: the automatic round pushed nothing"
+        for (columns, expected) in [
+            ([column()], SidebarStatusLine(text: "Needs you · " + words, tone: .needsYou)),
+            ([column(0, .working)], SidebarStatusLine(text: "Working", tone: .neutral)),
+            ([column(0, .needsAttention, reason: .question("Which?"))], SidebarStatusLine(text: "Needs you · Which?", tone: .needsYou))
+        ] {
+            var stopped = workspace(columns, pr: pullRequest(ci: "FAILURE"))
+            stopped.followUp = .stopped(words)
+            XCTAssertEqual(stopped.rowSummary.status, expected)
+        }
+    }
+
     /// A blocker (the Lead's or the user's) waits behind the user, a break,
     /// a question, work and an agent to resume, in grey; it comes before a
     /// finished turn and

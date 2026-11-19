@@ -28,9 +28,12 @@ final class CITriageCenter {
     /// answer, the failure is read again, once: `gh` signed back in, a
     /// model's rest over, the agent started.
     var retryDelay: TimeInterval = 5 * 60
+    private let file = FileBackedValue(url: CITriageStore.url, read: { CITriageStore.load(from: $0) }, write: { $0.save(to: $1) })
     /// Where the store is kept; tests point it elsewhere.
-    var storeURL: URL = CITriageStore.url
-    private var loaded: (store: CITriageStore, modified: Date?)?
+    var storeURL: URL {
+        get { file.url }
+        set { file.url = newValue }
+    }
     /// By workspace: the red checks (`CITriage.signature`) being triaged.
     var inFlight: [String: String] = [:]
     /// By workspace: the notification waiting for that triage.
@@ -40,27 +43,12 @@ final class CITriageCenter {
 
     /// What the file holds: read again when it changed on disk, since a
     /// second Nirux on the same state directory writes it too.
-    var store: CITriageStore {
-        let modified = Self.modificationDate(of: storeURL)
-        if let loaded, loaded.modified == modified { return loaded.store }
-        let store = CITriageStore.load(from: storeURL)
-        loaded = (store, modified)
-        return store
-    }
+    var store: CITriageStore { file.value }
 
     /// Changes the store as the file has it now, and writes it when the
     /// change changed anything.
     func updateStore(_ change: (inout CITriageStore) -> Void) {
-        let before = store
-        var after = before
-        change(&after)
-        guard after != before else { return }
-        after.save(to: storeURL)
-        loaded = (after, Self.modificationDate(of: storeURL))
-    }
-
-    private static func modificationDate(of url: URL) -> Date? {
-        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        file.update(change)
     }
 }
 

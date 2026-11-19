@@ -130,6 +130,7 @@ extension NiruxShellView {
     /// of one that asks.
     func turnEndSettled() {
         typeMissionMessages()
+        followUpPullRequests()
         scheduleMetadataRefresh()
     }
 

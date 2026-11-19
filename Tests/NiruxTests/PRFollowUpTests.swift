@@ -347,7 +347,9 @@ final class PRFollowUpTests: XCTestCase {
         XCTAssertEqual(store.pullRequests[old]?.since, monthAgo)
         XCTAssertFalse(store.update(old, now: monthAgo) { _ in })
         store.update(stopped, now: monthAgo) { $0.stop = PRFollowUp.Stop(kind: .ci, cause: .rounds, head: self.head, at: monthAgo) }
-        XCTAssertTrue(store.update(current, now: now) { $0.rounds = [self.round(.ci, on: self.head)] })
+        XCTAssertTrue(store.update(current, now: now, since: now - 600) { $0.rounds = [self.round(.ci, on: self.head)] })
+        XCTAssertEqual(store.pullRequests[current]?.since, now - 600, "from when its space's follow-up turned on")
+        store.spacesOnSince["space"] = now - 600
         XCTAssertEqual(Set(store.pullRequests.keys), [stopped, current])
         XCTAssertEqual(store.pullRequests[current]?.updatedAt, now)
 
@@ -373,5 +375,57 @@ final class PRFollowUpTests: XCTestCase {
         XCTAssertEqual(store.pullRequests, ["a": PRFollowUp.Entry(
             since: 9, rounds: [PRFollowUp.Round(kind: .ci, head: "h", typedAt: 6), .unreadable], updatedAt: 9
         )])
+    }
+
+    // MARK: - What the shell reads
+
+    func testTheAgentGateWaitsForAFreePromptAndSaysWhenItsTurnMayGoOn() {
+        let free = PRFollowUp.AgentState(lastTurnEndedAt: now - 60)
+        func gate(_ change: (inout PRFollowUp.AgentState) -> Void) -> [String] {
+            var agent = free
+            change(&agent)
+            let gate = PRFollowUp.gate(agent, now: now)
+            return [gate.refusal ?? "free", gate.isBusy ? "busy" : "idle"]
+        }
+        XCTAssertEqual(gate { _ in }, ["free", "idle"])
+        XCTAssertEqual(gate { $0.refusal = .working }, ["working", "busy"])
+        XCTAssertEqual(gate { $0.refusal = .failedTurn }, ["failedTurn", "busy"], "a usage limit: what the round did is unknown")
+        XCTAssertEqual(gate { $0.refusal = .noPromptYet }, ["noPromptYet", "idle"], "resumed: it takes nothing until the user types")
+        XCTAssertEqual(gate { $0.waitsOnUser = true }, ["it waits on the user", "busy"])
+        XCTAssertEqual(gate { $0.missionWaits = true }, ["a Mission message waits", "busy"])
+        XCTAssertEqual(gate { $0.lastTurnEndedAt = now - 10 }, ["its turn just ended", "idle"])
+        XCTAssertEqual(gate { $0.isWatched = true }, ["the user is on its terminal", "idle"])
+    }
+
+    func testTheRowSaysTheRoundAndWhyThePullRequestIsTheUsers() {
+        XCTAssertEqual(PRFollowUp.roundText(.ci, number: 2), "Auto follow-up 2/3 · failed checks")
+        let pullRequest = pullRequest(base: "develop")
+        let cases: [(PRFollowUp.Kind, PRFollowUp.Stop.Cause, String)] = [
+            (.conflict, .rounds, "#52 conflicts with develop after 3 automatic rounds"),
+            (.ci, .nothingPushed, "#52 still fails its checks: the automatic round pushed nothing"),
+            (.feedback, .nothingPushed, "#52 still has review feedback open: the automatic round pushed nothing"),
+            (.feedback, .checkoutDiffers, "#52: the checkout isn’t at its head after the automatic round")
+        ]
+        for (kind, cause, text) in cases {
+            XCTAssertEqual(PRFollowUp.stopText(PRFollowUp.Stop(kind: kind, cause: cause, head: head, at: now), pullRequest: pullRequest), text)
+        }
+        XCTAssertEqual(NiruxShellView.pullRequestRepository("https://github.com/Acme/Widgets/pull/52"),
+                       GitHubRepository(owner: "acme", name: "widgets"))
+        XCTAssertNil(NiruxShellView.pullRequestRepository("https://github.com/acme/widgets/issues/52"))
+    }
+
+    /// Another Nirux on the same state directory writes the file too.
+    @MainActor
+    func testAFileWrittenElsewhereIsReadAgain() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("pr-follow-up.json")
+        let file = FileBackedValue(url: url, read: { PRFollowUpStore.load(from: $0) }, write: { $0.save(to: $1) })
+        XCTAssertEqual(file.value, PRFollowUpStore())
+        file.update { $0.update("a", now: self.now) { _ in } }
+        var other = PRFollowUpStore.load(from: url)
+        other.update("b", now: now) { _ in }
+        other.save(to: url)
+        XCTAssertEqual(Set(file.value.pullRequests.keys), ["a", "b"], "written right after, read again")
     }
 }
