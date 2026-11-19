@@ -377,9 +377,14 @@ final class AgentLightShellTests: XCTestCase {
             let workspace = try fourColumns(in: shell)
             let strip = try XCTUnwrap(workspace.columns.first?.view.superview)
             let left = strip.frame.minX
+            shell.sideEffects.secondsSinceMouseUp = { 0 }
             shell.clickBegan(onColumn: 1)
             XCTAssertEqual(workspace.focusedIndex, 1)
             XCTAssertEqual(strip.frame.minX, left, "the strip where the click found it")
+            RunLoop.main.run(until: Date().addingTimeInterval(NSEvent.doubleClickInterval + 0.2))
+            XCTAssertEqual(strip.frame.minX, left, "a double-click's interval counts from the mouse-up")
+
+            shell.sideEffects.secondsSinceMouseUp = { .infinity }
 
             let middle = workspace.containerView.bounds.width / 2
             waitUntil("in the middle once the click is over", timeout: NSEvent.doubleClickInterval + 3) {

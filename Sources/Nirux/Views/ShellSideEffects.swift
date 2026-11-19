@@ -63,6 +63,12 @@ struct ShellSideEffects {
         try await CookieImporter.importCookies(from: source, into: WebViewColumn.sharedDataStore)
     }
 
+    /// Seconds since the last left mouse-up, even one a button's or a menu's
+    /// tracking took from the app.
+    var secondsSinceMouseUp: @MainActor () -> TimeInterval = {
+        CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .leftMouseUp)
+    }
+
     /// macOS's "Reduce motion" (System Settings › Accessibility › Display).
     var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 

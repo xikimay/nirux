@@ -346,6 +346,9 @@ final class ColumnResizeHandle: NSView {
     /// Double-click → reset to the default width.
     var onReset: (() -> Void)?
 
+    /// How far the pointer goes before a press on the edge drags it: less is
+    /// a click's jitter, which leaves a double-click its chance.
+    private static let dragThreshold: CGFloat = 3
     private var dragStartX: CGFloat = 0
     private var dragStart: Start?
     private var moved = false
@@ -383,9 +386,10 @@ final class ColumnResizeHandle: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let dragStart else { return }
+        let delta = event.locationInWindow.x - dragStartX
+        guard let dragStart, moved || abs(delta) >= Self.dragThreshold else { return }
         moved = true
-        onDrag?(dragStart, event.locationInWindow.x - dragStartX)
+        onDrag?(dragStart, delta)
     }
 
     override func mouseUp(with event: NSEvent) {
