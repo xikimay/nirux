@@ -122,9 +122,10 @@ final class AgentCLILocatorTests: XCTestCase {
     func testLocatesAgentsInstalledOutsideTheAppPath() throws {
         let claude = try file("home/.local/bin/claude")
         let codex = try file("home/.nvm/versions/node/v22.3.0/bin/codex")
+        let agy = try file("home/.local/bin/agy")
 
         let found = AgentCLILocator.locate(path: "/usr/bin:/bin", home: path("home"), systemDirectories: [])
-        XCTAssertEqual(found, AgentCLIAvailability(claudePath: claude, codexPath: codex))
+        XCTAssertEqual(found, AgentCLIAvailability(claudePath: claude, codexPath: codex, agyPath: agy))
         XCTAssertTrue(found.anyFound)
     }
 

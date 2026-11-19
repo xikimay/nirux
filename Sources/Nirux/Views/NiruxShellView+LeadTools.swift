@@ -399,6 +399,7 @@ extension NiruxShellView {
             return "\(failed.name) \(failure)"
         }
         if let working = agents.first(where: { $0.status == AgentStatus.working }) { return "\(working.name) working" }
+        if let quiet = agents.first(where: \.isQuiet) { return "\(quiet.name) is quiet (it may be waiting on you in its terminal)" }
         return "\(first.name) idle"
     }
 
@@ -420,13 +421,16 @@ extension NiruxShellView {
         /// What broke, when its row is red (see `leadFailure`): the turn
         /// stopped on an API error, went silent, or its agent exited mid-turn.
         let failure: String?
+        /// Stopped without saying why: an agent without hooks may be waiting
+        /// on the user in its terminal, or done.
+        var isQuiet = false
 
         /// A failure needs the user too, but says what broke instead.
         var needsUser: Bool { dialog != nil || (status == .needsAttention && failure == nil) }
     }
 
-    /// The Claude and Codex agents in front of `workspace`'s columns, and
-    /// those that exited mid-turn.
+    /// The agents in front of `workspace`'s columns, and those that exited
+    /// mid-turn.
     func agentReadings(
         of workspace: WorkspaceState, snapshot: ProcessSnapshot, now: TimeInterval = Date().timeIntervalSince1970
     ) -> [AgentReading] {
@@ -437,14 +441,24 @@ extension NiruxShellView {
             let failure = stuck.flatMap(Self.leadFailure)
             // The agent that died, not the shell that took its place in front.
             if let name = stuck?.agentName { return AgentReading(name: name, status: .idle, dialog: nil, failure: failure) }
-            guard let foreground, ["claude", "codex"].contains(foreground.name) else { return nil }
+            guard let foreground, AgentStatusMachine.isRecognizedAgentProcess(foreground.name) else { return nil }
             // A question its last turn ended on waits on the user too.
             let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
                 ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
-            // A turn end found done (or still being read) asks nothing.
-            let status = pty.isQuietTurnEnd ? AgentStatus.idle : pty.cachedAgentState
-            return AgentReading(name: foreground.name, status: status, dialog: dialog, failure: failure)
+                // What agy reported it waits on (OSC 7501); a failure is
+                // `failure`'s.
+                ?? pty.agentBlockedWait(now: now, waitThreshold: nil, foreground: foreground)
+                    .flatMap { $0.reason.isFailure ? nil : $0.reason.shortLabel }
+            // A turn end found done (or still being read), or one an agent
+            // without hooks reported, asks nothing. One that stopped without
+            // saying why is quiet: maybe waiting in its terminal (the row
+            // keeps its amber).
+            let quiet = AgentStatusMachine.activityOnlyAgentProcesses.contains(foreground.name)
+                && pty.cachedAgentState == .needsAttention && pty.agentAttentionReason == nil
+            let finished = pty.agentAttentionReason == .turnFinished
+            let status = pty.isQuietTurnEnd || quiet || finished ? AgentStatus.idle : pty.cachedAgentState
+            return AgentReading(name: foreground.name, status: status, dialog: dialog, failure: failure, isQuiet: quiet)
         }
     }
 

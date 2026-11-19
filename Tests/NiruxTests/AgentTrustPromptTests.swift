@@ -38,6 +38,15 @@ final class AgentTrustPromptTests: XCTestCase {
           2. No, quit
         """
         XCTAssertTrue(AgentTrustPrompt.isShown(in: codex))
+        // Antigravity CLI 1.5.
+        let agy = """
+        Accessing workspace: /Users/me/Nirux Tasks/Compare two libraries
+        Do you trust the contents of this project?
+        Antigravity CLI requires permission to read, edit, and execute files here.
+        > Yes, I trust this folder
+          No, exit
+        """
+        XCTAssertTrue(AgentTrustPrompt.isShown(in: agy))
         // A row soft-wrapped between words, or in one.
         XCTAssertTrue(AgentTrustPrompt.isShown(in: "Quick safety\ncheck: …\n❯ 1. Yes, I trust\nthis folder"))
         XCTAssertTrue(AgentTrustPrompt.isShown(in: "❯ 1. Yes, I trus\nt this folder\n  2. No, exit"))
@@ -54,6 +63,7 @@ final class AgentTrustPromptTests: XCTestCase {
         let claude = agent()
         XCTAssertTrue(machine.watchesForTrustPrompt(foreground: claude, now: started + 1))
         XCTAssertTrue(machine.watchesForTrustPrompt(foreground: agent("codex"), now: started + 1))
+        XCTAssertTrue(machine.watchesForTrustPrompt(foreground: agent("agy"), now: started + 1))
         for other in ["zsh", "gemini"] {
             XCTAssertFalse(machine.watchesForTrustPrompt(foreground: agent(other), now: started + 1), other)
         }

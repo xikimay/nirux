@@ -1,7 +1,8 @@
 import XCTest
 @testable import Nirux
 
-/// Gemini CLI and OpenCode: recognized by process name, with no hooks.
+/// Gemini CLI, OpenCode and Antigravity: recognized by process name, with
+/// no hooks.
 final class ActivityOnlyAgentTests: XCTestCase {
     private let isAgent = AgentStatusMachine.isRecognizedAgentProcess
     private var machine = AgentStatusMachine()
@@ -82,10 +83,11 @@ final class ActivityOnlyAgentTests: XCTestCase {
 
     // MARK: - Status
 
-    /// Gemini CLI and OpenCode have no hooks: the same output-activity
-    /// cycle, where an unrecognized process (`node`) stays idle.
+    /// Gemini CLI, OpenCode and Antigravity have no hooks: the same
+    /// output-activity cycle, where an unrecognized process (`node`) stays
+    /// idle.
     func testActivityOnlyAgentsFollowTheFallbackCycle() {
-        for name in ["gemini", "opencode"] {
+        for name in ["gemini", "opencode", "agy"] {
             machine = AgentStatusMachine()
             XCTAssertEqual(machine.tick(fgName: name, isUserFocused: false, now: t0), .idle, name)
             machine.noteUserInput(now: t0 + 5)
@@ -141,7 +143,7 @@ final class ActivityOnlyAgentTests: XCTestCase {
     // MARK: - Capabilities
 
     func testRecognizedButNotATypedPromptTarget() {
-        for name in ["gemini", "opencode"] {
+        for name in ["gemini", "opencode", "agy"] {
             XCTAssertTrue(AgentStatusMachine.isRecognizedAgentProcess(name), name)
             XCTAssertTrue(AgentStatusMachine.activityOnlyAgentProcesses.contains(name), name)
         }
