@@ -750,7 +750,7 @@ extension NiruxShellView {
         let from = workspace.focusedIndex
         workspace.moveColumn(dir)
         relayout(animated: true)
-        if agentLightsMayMove, workspace.focusedIndex != from,
+        if agentLightsMayMove || ZZ("liftStill"), workspace.focusedIndex != from,
            let moved = workspace.columns[safe: workspace.focusedIndex], let passed = workspace.columns[safe: from] {
             moved.lift(over: passed)
         }

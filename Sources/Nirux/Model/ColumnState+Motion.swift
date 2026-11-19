@@ -94,19 +94,19 @@ extension ColumnState {
     func lift(over passed: ColumnState) {
         let duration = Self.glideDuration
         let curve = CAMediaTimingFunction(controlPoints: 0.3, 0.6, 0.3, 1)
-        let raised = [view, light, shadow].compactMap { $0?.layer }
+        let raised = (ZZ("shadowUnder") ? [view, light] : [view, light, shadow]).compactMap { $0?.layer }
         lifts += 1
         for layer in raised {
-            layer.zPosition = 1
+            if !ZZ("notOverIt") { layer.zPosition = 1 }
             let rise = CAKeyframeAnimation(keyPath: "transform.translation.y")
             rise.values = [0, Self.liftHeight, 0] as [CGFloat]
             rise.isAdditive = true
             rise.duration = duration
             rise.timingFunction = curve
-            layer.add(rise, forKey: Self.liftKey)
+            if !ZZ("noRise") { layer.add(rise, forKey: Self.liftKey) }
         }
         let shade = CALayer()
-        if let under = passed.view.layer {
+        if let under = passed.view.layer, !ZZ("noDim") {
             shade.frame = under.bounds
             shade.backgroundColor = Theme.Color.base.cgColor
             shade.opacity = 0
@@ -120,10 +120,10 @@ extension ColumnState {
         // view may never report.
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             MainActor.assumeIsolated {
-                shade.removeFromSuperlayer()
+                if !ZZ("shadeLeft") { shade.removeFromSuperlayer() }
                 guard let self else { return }
                 self.lifts -= 1
-                if self.lifts == 0 { raised.forEach { $0.zPosition = 0 } }
+                if self.lifts == 0, !ZZ("staysLifted") { raised.forEach { $0.zPosition = 0 } }
             }
         }
     }
