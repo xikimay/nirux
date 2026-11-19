@@ -1070,16 +1070,20 @@ extension NiruxShellView {
         scheduleCameraRelease()
     }
 
-    /// From any run loop pass, even one a button's or a menu's tracking
-    /// held back: the local monitor never sees the mouse-up they take.
-    private func scheduleCameraRelease() {
+    /// From the mouse-down, as the local monitor never sees a mouse-up a
+    /// button's or a menu's tracking takes; the default run loop mode runs
+    /// it once that tracking is over.
+    private func scheduleCameraRelease(after delay: TimeInterval = NSEvent.doubleClickInterval) {
         NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(releaseHeldCameras), object: nil)
-        perform(#selector(releaseHeldCameras), with: nil, afterDelay: NSEvent.doubleClickInterval)
+        perform(#selector(releaseHeldCameras), with: nil, afterDelay: delay)
     }
 
     @objc private func releaseHeldCameras() {
-        // A drag or a long press goes on.
-        guard NSEvent.pressedMouseButtons & 1 == 0 else { return scheduleCameraRelease() }
+        // A drag or a long press goes on; a double-click's interval counts
+        // from the mouse-up.
+        let wait = NSEvent.pressedMouseButtons & 1 != 0
+            ? NSEvent.doubleClickInterval : NSEvent.doubleClickInterval - sideEffects.secondsSinceMouseUp()
+        guard wait <= 0 else { return scheduleCameraRelease(after: wait) }
         let held = workspaces.filter { $0.heldCamera != nil }
         guard !held.isEmpty else { return }
         for workspace in held { workspace.heldCamera = nil }
