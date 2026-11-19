@@ -18,7 +18,7 @@ final class UnderGlassTests: XCTestCase {
             let container = try XCTUnwrap(workspace.containerView.layer)
             let sidebarAbove = try XCTUnwrap(shell.subviews.firstIndex(of: shell.sidebar))
             XCTAssertGreaterThan(sidebarAbove, try XCTUnwrap(shell.subviews.firstIndex(of: shell.viewport)), "the rail lies over the work")
-            XCTAssertTrue(shell.divider.isHidden, "no line marks a floating rail's edge")
+            XCTAssertEqual(shell.divider.alphaValue, 0, "no line marks a floating rail's edge")
             let viewFrame = shell.viewport.frame
 
             shell.focusColumn(.right)
@@ -68,7 +68,7 @@ final class UnderGlassTests: XCTestCase {
                 test.change()
                 shell.relayout(animated: false)
                 XCTAssertEqual(shell.railFloats, test.floats, test.name)
-                XCTAssertEqual(shell.divider.isHidden, test.floats, "\(test.name): the line")
+                XCTAssertEqual(shell.divider.alphaValue, test.floats ? 0 : 1, "\(test.name): the line")
                 shell.focusColumn(.right)
                 shell.focusColumn(.right)
                 XCTAssertNotNil(try strip(of: workspace).layer?.animation(forKey: "colSlide"), "\(test.name): it travels")
@@ -109,6 +109,83 @@ final class UnderGlassTests: XCTestCase {
             waitUntil("past the first pass's end", timeout: 2) { Date() >= due }
             XCTAssertLessThan(viewport.bounds.minX, 0, "the first's end left the second alone")
             XCTAssertFalse(container.masksToBounds)
+        }
+    }
+
+    /// A switch to another workspace's far column, or a fold, moves the
+    /// camera too: neither is a travel of the cards on screen, so nothing
+    /// passes under the rail (P3's floors play; the sidebar shrinks).
+    func testNeitherAWorkspaceSwitchNorAFoldPasses() throws {
+        try withShell { shell in
+            let first = try floatingRail(in: shell)
+            let viewport = try XCTUnwrap(shell.viewport.layer)
+            @MainActor func atRest(_ name: String) {
+                XCTAssertEqual(viewport.bounds.minX, 0, "\(name): nothing under the rail")
+                XCTAssertTrue(shell.workspaces.allSatisfy { $0.containerView.layer?.masksToBounds == true }, name)
+            }
+
+            shell.addWorkspace(title: "other", cwd: NSTemporaryDirectory())
+            let other = try XCTUnwrap(shell.activeWorkspace)
+            while other.columns.count < 3 { other.addColumn() }
+            for column in other.columns { column.widthFraction = 0.5 }
+            other.focusedIndex = 0
+            let firstIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === first })
+            let otherIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === other })
+            shell.switchToWorkspace(firstIndex)
+            let camera = other.lastCameraX
+            shell.switchToWorkspace(otherIndex, column: 2)
+            XCTAssertNotEqual(other.lastCameraX, camera, "its camera moved")
+            atRest("a switch")
+
+            shell.isSidebarExpanded = true
+            shell.sidebar.isExpanded = true
+            other.focusedIndex = 2
+            shell.relayout(animated: false)
+            let unfolded = other.lastCameraX
+            shell.toggleSidebar()
+            XCTAssertFalse(shell.isSidebarExpanded)
+            XCTAssertNotEqual(other.lastCameraX, unfolded, "the fold moved the camera")
+            atRest("a fold")
+        }
+    }
+
+    /// A pass ends at once where the rail stops floating (Opaque, an
+    /// unfold's fade) or the viewport has no size; the divider follows the
+    /// rail, also when the sidebar unfolds after its layout.
+    func testAPassEndsWhereTheRailStopsFloatingAndTheDividerFollows() throws {
+        try withShell { shell in
+            var workspace = try floatingRail(in: shell)
+            let viewport = try XCTUnwrap(shell.viewport.layer)
+            @MainActor func ended(_ name: String) {
+                XCTAssertEqual(viewport.bounds.minX, 0, "\(name): ended at once")
+                XCTAssertTrue(workspace.containerView.layer?.masksToBounds == true, name)
+                XCTAssertNil(shell.passingUnderRail, name)
+            }
+
+            shell.passUnderRail(workspace, for: 1)
+            shell.interfaceTransparency = .opaque
+            ended("at Opaque")
+            XCTAssertEqual(shell.divider.alphaValue, 1)
+
+            workspace = try floatingRail(in: shell)
+            shell.passUnderRail(workspace, for: 1)
+            shell.sidebar.isRailHidden = true
+            ended("an unfold's fade")
+            XCTAssertEqual(shell.divider.alphaValue, 1, "the line back")
+
+            workspace = try floatingRail(in: shell)
+            XCTAssertEqual(shell.divider.alphaValue, 0)
+            shell.isSidebarExpanded = true
+            shell.sidebar.isExpanded = true
+            XCTAssertEqual(shell.divider.alphaValue, 1, "unfolded after its layout, the line is there")
+
+            workspace = try floatingRail(in: shell)
+            shell.passUnderRail(workspace, for: 1)
+            let size = shell.frame.size
+            shell.setFrameSize(NSSize(width: size.width, height: 0))
+            shell.relayout(animated: false)
+            ended("no viewport")
+            shell.setFrameSize(size)
         }
     }
 

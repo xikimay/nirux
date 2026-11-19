@@ -305,6 +305,7 @@ final class NiruxShellView: NSView {
         addSubview(viewport)
         // Over the work: the cards pass under the rail (NiruxShellView+UnderGlass).
         addSubview(sidebar)
+        sidebar.onRailShownChange = { [weak self] in self?.railMayHaveChanged(animated: true) }
         addSubview(columnIndicator)
         addSubview(edgeGlowLeft)
         addSubview(edgeGlowRight)
@@ -477,7 +478,7 @@ final class NiruxShellView: NSView {
         statusBar.isHidden = !statusBar.hasContent
         let statusH = statusBar.isHidden ? CGFloat(0) : StatusBarView.height
         let viewportH = bounds.height - statusH; let viewportW = bounds.width - sidebarW - 1
-        guard viewportH > 0, viewportW > 0 else { return }
+        guard viewportH > 0, viewportW > 0 else { return endUnderGlass() }
         NiruxDebugLog.log(
             "relayout bounds=\(bounds.width)x\(bounds.height) "
                 + "window=\(window?.frame.width ?? -1)x\(window?.frame.height ?? -1) "
@@ -499,8 +500,10 @@ final class NiruxShellView: NSView {
             indicator: NSRect(x: vpX, y: 4, width: viewportW, height: 16),
             statusBar: NSRect(x: 0, y: 0, width: bounds.width, height: statusH)
         )
+        // A fold moves the camera too, which is no travel of the columns.
+        let sidebarStays = sidebar.frame.width == sidebarW
         applyChromeLayout(frames, animated: animated)
-        showDivider()
+        railMayHaveChanged(animated: animated)
         layoutToast(frames)
         layOutWorkspaceCard(in: frames.viewport)
 
@@ -508,7 +511,8 @@ final class NiruxShellView: NSView {
         // positioned so the active workspace is the one on screen.
         let totalH = viewportH * CGFloat(visibleWorkspaceIndices.count)
         let activePosition = CGFloat(activeVisibleWorkspacePosition ?? 0)
-        let before = activeWorkspace.map { (workspace: $0, camera: $0.lastCameraX) }
+        let shown = workspaceOnScreenBeforeLayout()
+        let camera = activeWorkspace?.lastCameraX
         layoutWorkspaceStrip(StripLayout(
             viewportW: viewportW, totalH: totalH, rowH: viewportH,
             targetY: (activePosition + 1) * viewportH - totalH, animated: animated
@@ -523,8 +527,10 @@ final class NiruxShellView: NSView {
         refreshStaleBranchReviewsOnScreen()
         // A column opened since takes the terminals' opacity.
         applyTerminalOpacity()
-        if animated, let before, before.workspace === activeWorkspace, before.workspace.lastCameraX != before.camera {
-            passUnderRail(before.workspace, for: WorkspaceState.slideDuration)
+        if !sidebarStays {
+            endUnderGlass()
+        } else if animated, let workspace = activeWorkspace, workspace === shown, workspace.lastCameraX != camera {
+            passUnderRail(workspace, for: WorkspaceState.slideDuration)
         } else {
             keepUnderGlass()
         }

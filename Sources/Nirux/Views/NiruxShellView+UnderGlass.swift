@@ -16,9 +16,26 @@ extension NiruxShellView {
         sidebar.showsRail && sideEffects.drawsGlass() && sideEffects.drawnTransparency(interfaceTransparency).usesGlass
     }
 
-    /// No line marks the edge of a rail that floats.
-    func showDivider() {
-        divider.isHidden = railFloats
+    /// Whether the rail floats may have changed: the divider follows, and a
+    /// pass ends where it no longer floats.
+    func railMayHaveChanged(animated: Bool) {
+        showDivider(animated: animated)
+        if !railFloats { endUnderGlass() }
+    }
+
+    /// No line marks the edge of a rail that floats. It fades with the
+    /// sidebar's fold.
+    private func showDivider(animated: Bool) {
+        let opacity: Float = railFloats ? 0 : 1
+        guard divider.layer?.opacity != opacity else { return }
+        let shown = divider.layer?.presentation()?.opacity ?? 1 - opacity
+        divider.alphaValue = CGFloat(opacity)
+        guard animated, agentLightsMayMove, let layer = divider.layer else { return }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = shown
+        fade.toValue = opacity
+        fade.duration = Self.chromeDuration
+        layer.add(fade, forKey: "divider")
     }
 
     /// The columns of `workspace` slide for `duration`: they pass under the
@@ -69,7 +86,7 @@ extension NiruxShellView {
     /// The work's edge sweeps back to the rail's, its content still; then
     /// the workspace clips its cards again.
     private func closeUnderRail(_ generation: Int) {
-        guard let layer = viewport.layer else { return }
+        guard let layer = viewport.layer, railFloats, passingUnderRail === activeWorkspace else { return endUnderGlass() }
         passingUnderRail = nil
         let reached = [("position", NSValue(point: layer.position)), ("bounds", NSValue(rect: layer.bounds))]
         Self.reach(layer, by: layer.bounds.minX)

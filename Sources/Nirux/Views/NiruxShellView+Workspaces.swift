@@ -579,10 +579,13 @@ extension NiruxShellView {
         let indicator, statusBar: NSRect
     }
 
+    /// The sidebar folding or unfolding, its divider fading.
+    static let chromeDuration: CFTimeInterval = 0.2
+
     func applyChromeLayout(_ frames: ChromeFrames, animated: Bool) {
         if animated {
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.2
+                ctx.duration = Self.chromeDuration
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 sidebar.animator().frame = frames.sidebar
                 divider.animator().frame = frames.divider
