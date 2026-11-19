@@ -15,7 +15,7 @@ extension NiruxShellView {
     func afterUnsavedEdits(in columns: [ColumnState], _ proceed: @escaping () -> Void) {
         let editors = Self.unsavedEditors(in: columns)
         guard !editors.isEmpty else { return proceed() }
-        switch askAboutUnsavedEdits(editors.flatMap(\.unsavedPaths)) {
+        switch askAboutUnsavedEdits(Self.unsavedPaths(of: editors)) {
         case .save:
             save(editors[...]) { written in
                 if written { proceed() }
@@ -37,7 +37,7 @@ extension NiruxShellView {
         guard !editors.isEmpty else { return mergeQueueTerminateReply(reply: reply) }
         // Quit from the Dock while Nirux is hidden: the question must show.
         sideEffects.comeToFront()
-        switch askAboutUnsavedEdits(editors.flatMap(\.unsavedPaths)) {
+        switch askAboutUnsavedEdits(Self.unsavedPaths(of: editors)) {
         case .save:
             save(editors[...]) { [weak self] written in
                 // Through the run loop AppKit's wait runs: a save refused at
@@ -71,6 +71,12 @@ extension NiruxShellView {
 
     private static func unsavedEditors(in columns: [ColumnState]) -> [EditorColumn] {
         columns.compactMap(\.editorColumn).filter { !$0.unsavedPaths.isEmpty }
+    }
+
+    /// A file open in two editors is named once.
+    private static func unsavedPaths(of editors: [EditorColumn]) -> [String] {
+        var named = Set<String>()
+        return editors.flatMap(\.unsavedPaths).filter { named.insert($0).inserted }
     }
 
     /// One editor after the other; the first that fails stops the rest and

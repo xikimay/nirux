@@ -1202,7 +1202,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 if path == activePath { onDirtyChanged?() }
             }
             // Its edits undone, a conflict has nothing left to keep.
-            if !dirty, diskModifiedWhileDirty.contains(path) { reloadFromDisk(path: path) }
+            if !dirty, diskModifiedWhileDirty.contains(path) {
+                if isComparingWithDisk(path) { exitDiff() }
+                reloadFromDisk(path: path)
+            }
         case "save":
             handleSave(body: body)
         case "savedAll":

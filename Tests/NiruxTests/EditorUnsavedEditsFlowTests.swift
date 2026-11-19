@@ -72,12 +72,14 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
             pressCommandSRefused(in: webView, harness: harness)
             XCTAssertFalse(banner.isHidden)
             XCTAssertEqual(try read(notes), "agent 3\n", "⌘S wrote over an older-dated change")
-            // Its edits undone, nothing is left to keep: the disk's version
-            // comes in.
+            // Its edits undone in the compare, nothing is left to keep: the
+            // disk's version comes in.
+            try click("Compare", in: banner)
             try setBuffer("agent\nmine\n", in: webView)
             waitForBuffer("agent 3\n", in: webView)
             XCTAssertTrue(banner.isHidden)
             XCTAssertEqual(editor.unsavedPaths, [])
+            XCTAssertNil(editor.diffActivePath, "the compare stayed")
 
             try setBuffer("agent 3\nmine\n", in: webView)
             harness.waitUntil("the edit") { editor.unsavedPaths == [notes] }
