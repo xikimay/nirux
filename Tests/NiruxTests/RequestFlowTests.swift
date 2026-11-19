@@ -161,7 +161,7 @@ final class RequestFlowTests: XCTestCase {
             self.fold(shell)
             shell.updateSidebar()
             let icon = try XCTUnwrap(shell.sidebar.iconRail.itemViews[there.id])
-            XCTAssertNotNil(NiruxShellView.screenRect(of: icon))
+            harness.waitUntil("its icon laid out in the rail") { NiruxShellView.screenRect(of: icon) != nil }
             let list = try XCTUnwrap(icon.superview)
             let out = NSView(frame: NSRect(x: 0, y: list.bounds.maxY + 400, width: 20, height: 20))
             list.addSubview(out)
