@@ -661,22 +661,13 @@ enum AgentHookCLI {
         env["NIRUX_AGENT_UUID"]?.isEmpty == false
     }
 
-    /// Append one JSON line in one `write`. O_APPEND keeps concurrent
-    /// writers (several agents across columns) from interleaving mid-line:
-    /// the file system serializes writes to one file (PIPE_BUF bounds
-    /// pipes, not files). Lines are small: a Stop's final message excerpt
-    /// (`TurnEndText.excerpt`, 3,000 characters) and a question dialog at
-    /// its bounds (`AgentDialog.bounded`, a few thousand) are the largest.
+    /// Append one JSON line (`QueueFile`). Lines are small: a Stop's final
+    /// message excerpt (`TurnEndText.excerpt`, 3,000 characters) and a
+    /// question dialog at its bounds (`AgentDialog.bounded`, a few
+    /// thousand) are the largest.
     private static func append(_ event: AgentHookEvent) {
         guard var line = try? JSONEncoder().encode(event) else { return }
         line.append(0x0A) // \n
-        let url = AgentHookCenter.eventsURL
-        let fd = open(url.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
-        guard fd >= 0 else { return }
-        line.withUnsafeBytes { buf in
-            guard let ptr = buf.baseAddress else { return }
-            _ = write(fd, ptr, buf.count)
-        }
-        close(fd)
+        _ = QueueFile.append(line, to: AgentHookCenter.eventsURL)
     }
 }

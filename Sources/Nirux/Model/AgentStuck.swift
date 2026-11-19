@@ -9,9 +9,6 @@ struct AgentTurnFailure: Equatable, Sendable {
     let detail: String?
     /// Epoch seconds.
     let failedAt: TimeInterval
-    /// When the failed turn's prompt went in (epoch seconds), if seen: text
-    /// typed at the prompt since is a draft.
-    let promptAt: TimeInterval?
     /// The `claude` that reported it: Resume types into that process only.
     let emitter: ProcessInstance?
     /// When Resume last typed `continue` (epoch seconds), and the

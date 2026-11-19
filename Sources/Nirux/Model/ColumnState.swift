@@ -420,6 +420,9 @@ final class ColumnState {
         ptySession.onOsc9Received = { [weak self] in
             self?.onAgentAttention?(nil)
         }
+        ptySession.onApprovalsAbandoned = { [weak self] requests in
+            requests.forEach { AgentHookCenter.shared.release($0, agentUUID: self?.agentUUID) }
+        }
         // Only agy's own: any program can print the sequence.
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
             guard let self, let ptySession, ptySession.isNewProgramStatus(status),

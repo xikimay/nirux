@@ -289,13 +289,15 @@ final class StuckAgentTests: XCTestCase {
         XCTAssertEqual(refusal(), .userTyped)
     }
 
-    /// A draft typed while the turn still ran sits in the prompt too.
+    /// A draft typed while the turn still ran sits in the prompt too, past
+    /// a message Claude took in by itself (a peer's).
     func testResumeRefusedOverADraftTypedBeforeTheFailure() {
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0))
         _ = apply(event(.sessionStart))
         machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 0.5)) // the prompt itself
         _ = apply(event(.userPromptSubmit, at: 1))
-        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 3)) // a draft, no Enter
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 3), keys: Data("x".utf8)) // a draft, no Enter
+        _ = apply(event(.userPromptSubmit, at: 4))
         _ = apply(event(.stopFailure, at: 5, errorKind: "overloaded"))
         XCTAssertEqual(refusal(), .userTyped)
     }

@@ -355,7 +355,9 @@ final class AgentStatusMachineTests: XCTestCase {
         // An interrupt (Esc) during a subagent's dialog fires neither
         // SubagentStop nor Stop: the next prompt typed frees the gate.
         _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "sub", agent: "sub-c"), isUserFocused: false)
-        _ = machine.apply(event(.userPromptSubmit), isUserFocused: false)
+        machine.noteKeystroke(now: t0 + 1, keys: Data([0x1B]))
+        machine.noteKeystroke(now: t0 + 2, keys: Data("go on\r".utf8))
+        _ = machine.apply(event(.userPromptSubmit, at: 3), isUserFocused: false)
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
 
         _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "denied"), isUserFocused: false)

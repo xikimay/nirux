@@ -96,7 +96,7 @@ extension NiruxShellView {
     /// turn, the comments changed), then pasted; once Claude takes the
     /// prompt (the user submitted it), the comments in it are sent.
     private func send(_ session: ReviewSendSession, to id: UUID, panel: ReviewSendPanel) {
-        AgentHookCenter.shared.drain()
+        guard AgentHookCenter.shared.drain() else { return panel.showError(Self.hooksStillComing) }
         let shown = session.send
         guard let content = readReviewSend(session, snapshot: ProcessSnapshot()) else { return panel.dismiss() }
         panel.update(content)

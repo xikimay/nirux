@@ -30,15 +30,16 @@ extension NiruxShellView {
             return .emptyPrompt
         }
         // A PermissionRequest may still wait out the hook queue's drain
-        // debounce: apply it before deciding whether a dialog is open.
-        AgentHookCenter.shared.drain()
+        // debounce: apply it before deciding whether a dialog is open. One
+        // a receiver is still writing may be.
+        let read = AgentHookCenter.shared.drain()
         guard let place = liveColumn(where: { $0.agentUUID == agentUUID }),
               let session = makeTypedPromptTarget(
                   workspace: place.workspace, column: place.column, columnIndex: place.columnIndex, snapshot: ProcessSnapshot()
               ),
               let pty = place.column.pty
         else { return .sessionUnavailable }
-        if session.pendingDialog != nil { return .blockedByDialog(session) }
+        if !read || session.pendingDialog != nil { return .blockedByDialog(session) }
         pty.typePromptFromUser(terminalInput)
         return .sent(session)
     }
