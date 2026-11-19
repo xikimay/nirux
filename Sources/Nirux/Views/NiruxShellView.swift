@@ -27,8 +27,10 @@ final class NiruxShellView: NSView {
     /// its pictures over the viewport (NiruxShellView+SpaceCrossing).
     var spaceCrossingGeneration = 0
     var crossingPictures: [FrozenView] = []
-    /// The space as a plan, while it shows (NiruxShellView+SpacePlan).
+    /// The space as a plan, while it shows (NiruxShellView+SpacePlan), and
+    /// a count so that a motion's end acts only on its own.
     var spacePlan: SpacePlanView?
+    var spacePlanGeneration = 0
     /// How far the fingers moved in this pinch (NiruxShellView+SpacePlan).
     var pinchTotal: CGFloat = 0
     /// The size of the workspace on screen, as `relayout` lays it out.

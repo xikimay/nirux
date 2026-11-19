@@ -32,6 +32,16 @@ final class SpacePlanView: NSView {
     /// The scale every row's picture is drawn at.
     private(set) var scale: CGFloat = 1
     private let ring = CALayer()
+    /// What zooms: the rows' pictures, in a view of their own (its layer's
+    /// `sublayerTransform` moves them; AppKit owns the layers).
+    let world = NSView()
+    /// The names and lines beside the rows, which don't zoom.
+    private var labels: [NSView] = []
+    /// A picture at the size of the viewport over the zoom: what the work
+    /// showed (an opening) or will show (a dive).
+    private var overlay: FrozenView?
+    /// Going to a workspace: it shows already under the plan.
+    var isDiving = false
     /// How far the fingers moved in this pinch.
     private var pinchTotal: CGFloat = 0
     /// Where to go: a workspace and its column; nil goes back.
@@ -44,6 +54,9 @@ final class SpacePlanView: NSView {
         workspaceID = onScreen.id
         super.init(frame: frame)
         wantsLayer = true
+        world.frame = bounds
+        world.wantsLayer = true
+        addSubview(world)
         let laidOut = workspaces.filter { !$0.columns.isEmpty && !$0.stripSize.equalTo(.zero) }
         let room = NSSize(
             width: bounds.width - Self.labelWidth - Self.margin * 3,
@@ -59,7 +72,7 @@ final class SpacePlanView: NSView {
             guard let picture = workspace.frozenColumns(scale: scale) else { continue }
             let height = workspace.stripSize.height * scale
             picture.frame.origin = NSPoint(x: left, y: top - height)
-            addSubview(picture)
+            world.addSubview(picture)
             let cards = workspace.columnFrames.map { frame in
                 NSRect(x: left + frame.minX * scale, y: top - height + frame.minY * scale, width: frame.width * scale, height: frame.height * scale)
             }
@@ -166,6 +179,103 @@ final class SpacePlanView: NSView {
         icon.frame.origin = NSPoint(x: Self.margin, y: midY - icon.frame.height / 2)
         title.frame = NSRect(x: textX, y: midY, width: textWidth, height: title.intrinsicContentSize.height)
         detail.frame = NSRect(x: textX, y: midY - detail.intrinsicContentSize.height, width: textWidth, height: detail.intrinsicContentSize.height)
-        for view in [icon, title, detail] as [NSView] { addSubview(view) }
+        for view in [icon, title, detail] as [NSView] {
+            addSubview(view)
+            labels.append(view)
+        }
+    }
+
+    // MARK: - Motion (depth study P5's transitions)
+
+    static let openingDuration: CFTimeInterval = 0.56
+    static let diveDuration: CFTimeInterval = 0.52
+    private static let curve = CAMediaTimingFunction(controlPoints: 0.3, 0.7, 0.2, 1)
+
+    /// Where a row's workspace shows, its camera at `cameraX` across
+    /// `width`, in the plan.
+    func shownRect(row: Int, cameraX: CGFloat, width: CGFloat) -> NSRect? {
+        guard let picture = rows[safe: row]?.picture.frame else { return nil }
+        return NSRect(x: picture.minX + cameraX * scale, y: picture.minY, width: width * scale, height: picture.height)
+    }
+
+    /// The world zoomed until `rect` fills the plan.
+    func zoom(into rect: NSRect) -> CATransform3D {
+        let factor = bounds.width / rect.width
+        return CATransform3DConcat(CATransform3DMakeScale(factor, factor, 1), CATransform3DMakeTranslation(-rect.minX * factor, -rect.minY * factor, 0))
+    }
+
+    /// The work recedes into the plan: the world comes from `rect` filling
+    /// it to its place, `shown` (the viewport frozen at its size) fading
+    /// into its row's picture; the names come after.
+    func playOpening(from shown: FrozenView, at rect: NSRect) {
+        showOverlay(shown, in: rect, opacities: [1, 1, 0], keyTimes: [0, 0.35, 0.8], duration: Self.openingDuration)
+        zoomWorld(from: zoom(into: rect), to: CATransform3DIdentity, duration: Self.openingDuration)
+        for label in labels { Self.fade(label, to: 1, from: 0, duration: 0.22, delay: 0.32) }
+        ring.isHidden = true
+    }
+
+    /// Into `rect`, where the chosen workspace now shows: the world zooms
+    /// until it fills the plan, `arriving` (that workspace frozen at its
+    /// size) fading in over it; the names go first.
+    func playDive(into rect: NSRect, arriving: FrozenView) {
+        isDiving = true
+        ring.isHidden = true
+        showOverlay(arriving, in: rect, opacities: [0, 0, 1], keyTimes: [0, 0.5, 0.9], duration: Self.diveDuration)
+        zoomWorld(from: CATransform3DIdentity, to: zoom(into: rect), duration: Self.diveDuration)
+        for label in labels { Self.fade(label, to: 0, from: 1, duration: 0.16, delay: 0) }
+    }
+
+    /// An opening at its end, at once: the world in place, the overlay
+    /// gone, the names and the ring shown.
+    func finishOpening() {
+        guard !isDiving else { return }
+        overlay?.removeFromSuperview()
+        overlay = nil
+        world.layer?.removeAnimation(forKey: "planZoom")
+        world.layer?.sublayerTransform = CATransform3DIdentity
+        for label in labels {
+            label.layer?.removeAnimation(forKey: "planFade")
+            label.alphaValue = 1
+        }
+        showChoice()
+    }
+
+    private func showOverlay(_ picture: FrozenView, in rect: NSRect, opacities: [Float], keyTimes: [NSNumber], duration: CFTimeInterval) {
+        overlay?.removeFromSuperview()
+        picture.show(in: rect)
+        world.addSubview(picture)
+        overlay = picture
+        picture.alphaValue = CGFloat(opacities.last ?? 1)
+        let fade = CAKeyframeAnimation(keyPath: "opacity")
+        fade.values = opacities
+        fade.keyTimes = keyTimes
+        fade.duration = duration
+        picture.layer?.add(fade, forKey: "planFade")
+    }
+
+    private func zoomWorld(from start: CATransform3D, to end: CATransform3D, duration: CFTimeInterval) {
+        guard let layer = world.layer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.sublayerTransform = end
+        CATransaction.commit()
+        let zoom = CABasicAnimation(keyPath: "sublayerTransform")
+        zoom.fromValue = NSValue(caTransform3D: start)
+        zoom.duration = duration
+        zoom.timingFunction = Self.curve
+        layer.add(zoom, forKey: "planZoom")
+    }
+
+    private static func fade(_ view: NSView, to end: CGFloat, from start: CGFloat, duration: CFTimeInterval, delay: CFTimeInterval) {
+        view.alphaValue = end
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = start
+        fade.toValue = end
+        fade.duration = duration
+        if delay > 0 {
+            fade.beginTime = CACurrentMediaTime() + delay
+            fade.fillMode = .backwards
+        }
+        view.layer?.add(fade, forKey: "planFade")
     }
 }

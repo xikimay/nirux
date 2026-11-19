@@ -44,6 +44,18 @@ final class FrozenView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    /// Shown in `rect`, its content scaled to fit: a picture frozen at its
+    /// size shown smaller (depth study P5's zoom).
+    func show(in rect: NSRect) {
+        frame = rect
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let scale = rect.width / max(content.bounds.width, 1)
+        content.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        content.transform = CATransform3DMakeScale(scale, scale, 1)
+        CATransaction.commit()
+    }
+
     /// Names a picture's frozen layers.
     static let layerName = "FrozenView"
 

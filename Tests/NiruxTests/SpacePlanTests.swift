@@ -150,7 +150,85 @@ final class SpacePlanTests: XCTestCase {
         }
     }
 
+    /// While the interface may move, the work recedes into the plan: the
+    /// world comes from where the workspace showed, filling the plan, the
+    /// work's picture over it fading into its row; at its end the picture
+    /// goes. Going to a card, the workspace shows under the plan at once and
+    /// the plan dives into it, what it shows fading in; at its end the plan
+    /// goes.
+    func testThePlanRecedesFromTheWorkAndDivesIntoACard() throws {
+        try withWorkspaces { shell, workspaces in
+            Self.letMove(shell)
+            let steps = TimedSteps(on: shell)
+            let onScreen = try XCTUnwrap(shell.activeWorkspace)
+            shell.toggleSpacePlan()
+            let plan = try XCTUnwrap(shell.spacePlan)
+            let row = try XCTUnwrap(plan.rows.firstIndex { $0.workspaceID == onScreen.id })
+            let shown = try XCTUnwrap(plan.shownRect(row: row, cameraX: onScreen.lastCameraX, width: shell.viewport.bounds.width))
+            let zoom = try XCTUnwrap(plan.world.layer?.animation(forKey: "planZoom") as? CABasicAnimation)
+            let from = try XCTUnwrap((zoom.fromValue as? NSValue)?.caTransform3DValue)
+            XCTAssertEqual(from.m11, plan.zoom(into: shown).m11, accuracy: 0.001, "from where the work showed")
+            XCTAssertEqual(from.m41, plan.zoom(into: shown).m41, accuracy: 0.5)
+            XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(plan.world.layer?.sublayerTransform)), "to its place")
+            XCTAssertEqual(plan.world.subviews.count, plan.rows.count + 1, "the work's picture over the rows")
+            XCTAssertEqual(steps.durations, [SpacePlanView.openingDuration])
+            steps.runNext()
+            XCTAssertEqual(plan.world.subviews.count, plan.rows.count, "the picture gone")
+            XCTAssertNil(plan.world.layer?.animation(forKey: "planZoom"))
+
+            plan.keyDown(with: try Self.key(126))
+            let target = workspaces[plan.chosen.row]
+            XCTAssertFalse(target === onScreen)
+            plan.keyDown(with: try Self.key(36))
+            XCTAssertIdentical(shell.spacePlan, plan, "it dives")
+            XCTAssertIdentical(shell.activeWorkspace, target, "the workspace shows under it already")
+            let into = try XCTUnwrap(plan.shownRect(row: plan.chosen.row, cameraX: target.lastCameraX, width: shell.viewport.bounds.width))
+            XCTAssertEqual(try XCTUnwrap(plan.world.layer?.sublayerTransform).m11, plan.zoom(into: into).m11, accuracy: 0.001, "into where it shows")
+            XCTAssertEqual(plan.world.subviews.count, plan.rows.count + 1, "what it shows, fading in")
+            XCTAssertEqual(steps.durations, [SpacePlanView.diveDuration])
+            steps.runNext()
+            XCTAssertNil(shell.spacePlan)
+            XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
+        }
+    }
+
+    /// With Reduce motion the plan shows and goes at once; movement turning
+    /// off ends an opening and lands a dive at once.
+    func testThePlanSnapsWhileNothingMayMove() throws {
+        try withWorkspaces { shell, _ in
+            let steps = TimedSteps(on: shell)
+            shell.toggleSpacePlan()
+            let still = try XCTUnwrap(shell.spacePlan)
+            XCTAssertNil(still.world.layer?.animation(forKey: "planZoom"), "at once")
+            XCTAssertTrue(steps.durations.isEmpty)
+            shell.toggleSpacePlan()
+            XCTAssertNil(shell.spacePlan, "gone at once")
+
+            Self.letMove(shell)
+            shell.toggleSpacePlan()
+            let moving = try XCTUnwrap(shell.spacePlan)
+            shell.sideEffects.reducesMotion = { true }
+            shell.applyAgentLights()
+            XCTAssertNil(moving.world.layer?.animation(forKey: "planZoom"), "the opening ends at once")
+            XCTAssertEqual(moving.world.subviews.count, moving.rows.count)
+
+            shell.sideEffects.reducesMotion = { false }
+            moving.keyDown(with: try Self.key(126))
+            moving.keyDown(with: try Self.key(36))
+            XCTAssertTrue(moving.isDiving)
+            shell.animatesInterface = false
+            XCTAssertNil(shell.spacePlan, "the dive lands at once")
+            XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
+        }
+    }
+
     // MARK: - Helpers
+
+    private static func letMove(_ shell: NiruxShellView) {
+        shell.sideEffects.reducesMotion = { false }
+        shell.agentLights.isDisplayAsleep = false
+        shell.animatesInterface = true
+    }
 
     private static func key(_ code: UInt16) throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(
