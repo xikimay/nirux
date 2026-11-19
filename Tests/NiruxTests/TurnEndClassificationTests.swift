@@ -829,12 +829,23 @@ final class TurnEndClassificationTests: XCTestCase {
 
     /// Nirux types nothing (Mission messages, Lead notices) into a prompt
     /// whose turn end waits for its verdict: it would settle it as unread.
+    /// Nor into a `claude` started since that took no prompt yet, at its
+    /// prompt as it may be.
     func testNiruxWaitsForTheVerdictBeforeTyping() throws {
         let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        let resumed = ForegroundProcess(instance: ProcessInstance(pid: 10, startedAt: t0 + 6), name: "claude", arguments: ["claude"])
         let request = try XCTUnwrap(endTurn().turnEnd)
         XCTAssertFalse(machine.isPromptFree(foreground: claude, runningSince: t0 + 9))
         _ = machine.applyTurnEndVerdict(.done, for: request, isUserFocused: false)
         XCTAssertTrue(machine.isPromptFree(foreground: claude, runningSince: t0 + 9))
+
+        // Resumed since, its hooks reporting: a turn end of its own (a
+        // background agent it resumed) waits for its verdict.
+        _ = machine.apply(event(.sessionStart, at: 7, source: "resume"), isUserFocused: false)
+        let resumedEnd = try XCTUnwrap(machine.apply(event(.stop, at: 8, message: "Shall I merge?"), isUserFocused: false).turnEnd)
+        XCTAssertFalse(machine.isPromptFree(foreground: resumed, runningSince: t0 + 9) { _ in true })
+        _ = machine.applyTurnEndVerdict(.done, for: resumedEnd, isUserFocused: false)
+        XCTAssertTrue(machine.isPromptFree(foreground: resumed, runningSince: t0 + 9) { _ in true })
     }
 
     /// A question stays said (sidebar, header, ⌘J) after Nirux is
