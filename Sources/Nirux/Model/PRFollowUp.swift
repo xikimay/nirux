@@ -97,7 +97,7 @@ enum PRFollowUp {
 
         /// The last round never reached the agent: typing it failed.
         mutating func cancelRound() {
-            guard let last = rounds.last, last.endedAt == nil, last.settledAt == nil else { return }
+            guard let last = rounds.last, last.settledAt == nil else { return }
             rounds.removeLast()
             handedFeedback.removeAll(where: last.items.contains)
         }

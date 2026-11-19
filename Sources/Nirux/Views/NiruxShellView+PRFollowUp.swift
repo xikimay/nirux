@@ -48,15 +48,17 @@ extension NiruxShellView {
 
     /// At each turn end: a round may go now, or one may have ended.
     func followUpPullRequests() {
+        let followed = workspaces.filter { $0.prInfo != nil && isFollowedTask($0) }
+        guard !followed.isEmpty else { return }
         let snapshot = ProcessSnapshot()
-        for workspace in workspaces where workspace.prInfo != nil { followUpPullRequest(of: workspace, snapshot: snapshot) }
+        for workspace in followed { followUpPullRequest(of: workspace, snapshot: snapshot) }
     }
 
     /// After each read of a task's pull request or its feedback, and each
     /// turn end: runs the decision (`PRFollowUp`), and types the round it
     /// gives once the checkout, read now, says go. Without an agent to
     /// type into, the decision still settles rounds and clears stops.
-    func followUpPullRequest(of workspace: WorkspaceState, snapshot: ProcessSnapshot = ProcessSnapshot()) {
+    func followUpPullRequest(of workspace: WorkspaceState, snapshot given: ProcessSnapshot? = nil) {
         guard let pullRequest = workspace.prInfo, !pullRequest.url.isEmpty else { return }
         let center = prFollowUpCenter
         guard pullRequest.state.uppercased() == "OPEN" else {
@@ -68,6 +70,7 @@ extension NiruxShellView {
         }
         guard isFollowedTask(workspace) else { return }
         let now = Date().timeIntervalSince1970
+        let snapshot = given ?? ProcessSnapshot()
         let target = followUpTarget(in: workspace, pullRequest: pullRequest, snapshot: snapshot)
         let facts = followUpFacts(for: workspace, pullRequest: pullRequest, target: target, snapshot: snapshot, now: now)
         let decided = decideFollowUp(of: workspace, pullRequest: pullRequest, target: target, facts: facts, snapshot: snapshot)
@@ -124,6 +127,7 @@ extension NiruxShellView {
             )
             guard let self else { return }
             if typed == .left { self.cancelFollowUpRound(round, of: pullRequest) }
+            // Some or all of it is in the prompt: it counts.
             self.reportUnsent(typed, what: "an automatic follow-up round", for: title, telling: nil)
         }
         scheduleMetadataRefresh()
@@ -132,7 +136,7 @@ extension NiruxShellView {
     private func cancelFollowUpRound(_ round: PRFollowUp.Round, of pullRequest: PRInfo) {
         prFollowUpCenter.file.update { store in
             store.update(pullRequest.url, now: Date().timeIntervalSince1970) { entry in
-                if entry.rounds.last == round { entry.cancelRound() }
+                if entry.rounds.last?.typedAt == round.typedAt { entry.cancelRound() }
             }
         }
         scheduleMetadataRefresh()
@@ -146,14 +150,18 @@ extension NiruxShellView {
     /// The column whose Claude the decision reads: the one the open round
     /// went to while it is there, else the task's Claude in the pull
     /// request's checkout, running with Nirux's hooks. `roundAgentLeft`:
-    /// the open round's agent is gone, so its turn is over.
+    /// the open round's Claude is gone (its column closed, it quit, another
+    /// one started there), so its turn is over.
     private func followUpTarget(
         in workspace: WorkspaceState, pullRequest: PRInfo, snapshot: ProcessSnapshot
     ) -> (column: ColumnState?, index: Int, roundAgentLeft: Bool) {
-        let open = prFollowUpCenter.file.value.pullRequests[pullRequest.url]?.rounds.last.flatMap { $0.endedAt == nil ? $0 : nil }
-        if let agent = open?.agent {
+        let open = prFollowUpCenter.file.value.pullRequests[pullRequest.url]?.rounds.last
+            .flatMap { $0.endedAt == nil && $0.settledAt == nil ? $0 : nil }
+        if let open, let agent = open.agent {
             guard let index = workspace.columns.firstIndex(where: { $0.agentUUID == agent }) else { return (nil, 0, true) }
-            return (workspace.columns[index], index, false)
+            let column = workspace.columns[index]
+            let refusal = column.pty?.missionPromptRefusal(runningSince: open.typedAt, snapshot: snapshot) ?? .noClaude
+            return (column, index, refusal == .noClaude || refusal == .restarted)
         }
         guard let target = pullRequestAgent(in: workspace, snapshot: snapshot), let column = workspace.columns[safe: target.columnIndex],
               let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
@@ -179,13 +187,14 @@ extension NiruxShellView {
                         entry.endRound(at: facts.now)
                     } else if let pty, pty.finishedTurn(afterTypingAt: last.typedAt),
                               pty.missionPromptRefusal(runningSince: facts.now, snapshot: snapshot) != .failedTurn {
-                        entry.endRound(at: pty.agentLastTurnEndedAt)
+                        // A session end sets no turn end of its own.
+                        entry.endRound(at: max(pty.agentLastTurnEndedAt, last.typedAt))
                     }
                 }
                 let before = entry.stop
                 action = PRFollowUp.next(&entry, facts)
                 raised = entry.stop != nil && entry.stop?.at != before?.at
-                if let stop = entry.stop, stop.seenAt == nil, (pty?.agentLastUserPromptAt ?? 0) > stop.at {
+                if let stop = entry.stop, stop.seenAt == nil, Self.lastUserPrompt(in: workspace) > stop.at {
                     entry.stop?.seenAt = facts.now
                 }
             }
@@ -348,14 +357,19 @@ extension NiruxShellView {
               let entry = prFollowUpCenter.file.value.pullRequests[pullRequest.url]
         else { return nil }
         if let stop = entry.stop {
-            let lastUserPrompt = workspace.columns.compactMap { $0.pty?.agentLastUserPromptAt }.max() ?? 0
-            guard stop.head == pullRequest.headRefOid, stop.seenAt == nil, lastUserPrompt <= stop.at else { return nil }
+            guard stop.head == pullRequest.headRefOid, stop.seenAt == nil, Self.lastUserPrompt(in: workspace) <= stop.at else { return nil }
             return .stopped(PRFollowUp.stopText(stop, pullRequest: pullRequest))
         }
         guard let last = entry.rounds.last, last.endedAt == nil, last.settledAt == nil,
               last.typedAt >= prFollowUpCenter.trackedSince
         else { return nil }
         return .round(PRFollowUp.roundText(last.kind, number: entry.rounds.count))
+    }
+
+    /// When a prompt that isn't a poll event last went into one of the
+    /// workspace's agents.
+    private static func lastUserPrompt(in workspace: WorkspaceState) -> TimeInterval {
+        workspace.columns.compactMap { $0.pty?.agentLastUserPromptAt }.max() ?? 0
     }
 
     /// Each change of decision, once: log category `followUp`.

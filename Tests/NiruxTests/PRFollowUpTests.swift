@@ -165,7 +165,9 @@ final class PRFollowUpTests: XCTestCase {
         later.readAt = now + 30
         XCTAssertEqual(PRFollowUp.next(&afterPush, later), .none)
 
-        // Typing failed: as if never typed.
+        // Typing failed: as if never typed, even once a pass ended it (its
+        // column closed meanwhile).
+        entry.endRound(at: now + 1)
         entry.cancelRound()
         XCTAssertEqual(entry, PRFollowUp.Entry(since: now - 3600, handedFeedback: [item("old", age: 9000).url]))
     }
