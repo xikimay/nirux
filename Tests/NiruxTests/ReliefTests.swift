@@ -27,14 +27,18 @@ final class ReliefTests: XCTestCase {
         )!
     }
 
-    /// A window holding `view` in a host, flipped as the rail's list is.
+    /// A window on screen holding `view` in a host, flipped as the rail's
+    /// list is: AppKit assembles the layer tree of a window that shows.
     private func window(holding view: NSView, flipped: Bool) -> NSWindow {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.borderless], backing: .buffered, defer: true)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        let host = flipped ? FlippedView(frame: NSRect(x: 0, y: 0, width: 300, height: 200)) : NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        let host = flipped ? FlippedView(frame: NSRect(x: 0, y: 0, width: 640, height: 200)) : NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 200))
         host.wantsLayer = true
         window.contentView = host
         host.addSubview(view)
+        window.orderFront(nil)
+        host.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
         return window
     }
 

@@ -131,7 +131,11 @@ final class CommandBarView: NSView {
         ]
         for (segment, views) in contents {
             host.addSubview(segment)
-            views.forEach(segment.addSubview)
+            for view in views {
+                // A layer of its own, so that it rises with its segment.
+                view.wantsLayer = true
+                segment.addSubview(view)
+            }
         }
         for _ in 0..<3 {
             let line = NSView()
