@@ -403,6 +403,17 @@ final class ColumnCardsTests: XCTestCase {
             }
             XCTAssertTrue(kept, "the arrival's end left its recede alone")
 
+            // One pass takes a card from another: the first's end never
+            // comes, whenever the two were due.
+            let card = try XCTUnwrap(workspace.columns.first)
+            var ends: [String] = []
+            shell.passCard(card, to: 1, alpha: 1, duration: 0.02, curve: CAMediaTimingFunction(name: .linear)) { ends.append("first") }
+            shell.passCard(card, to: NiruxShellView.closeScale, alpha: 1, duration: 0.3, curve: CAMediaTimingFunction(name: .linear)) { ends.append("second") }
+            waitUntil("the second's end", timeout: 2) { !ends.isEmpty }
+            wait(0.05)
+            XCTAssertEqual(ends, ["second"], "the first's end never came")
+            XCTAssertNil(card.view.layer?.animation(forKey: WorkspaceState.cardPassKey))
+
             shell.addColumn()
             let resized = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
             XCTAssertNotNil(resized.view.layer?.animation(forKey: WorkspaceState.cardPassKey))
