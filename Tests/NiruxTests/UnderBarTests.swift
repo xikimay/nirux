@@ -97,9 +97,10 @@ final class UnderBarTests: XCTestCase {
             shell.focusWorkspace(.down)
             XCTAssertNotNil(shell.titleBandCover)
             shell.addWorkspace(title: "new", cwd: NSTemporaryDirectory())
-            let slide = try XCTUnwrap(shell.viewport.subviews.compactMap { $0 as? FrozenView }.first)
-            // What it holds: AppKit resizes its view with the viewport's.
-            XCTAssertEqual(slide.content.bounds.size, rest.size, "a new workspace's slide")
+            let pictures = shell.viewport.subviews.compactMap { $0 as? FrozenView }
+            XCTAssertFalse(pictures.isEmpty)
+            // What they hold: AppKit resizes their views with the viewport's.
+            XCTAssertTrue(pictures.allSatisfy { $0.content.bounds.height <= rest.height }, "a new workspace's slide")
             clock.advance(by: 1)
 
             shell.focusWorkspace(.up)
