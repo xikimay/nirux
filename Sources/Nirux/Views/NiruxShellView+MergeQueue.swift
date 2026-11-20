@@ -460,10 +460,10 @@ extension NiruxShellView {
     /// window stays, and the quit asks the one question of
     /// `mergeQueueTerminateReply`.
     func mainWindowShouldClose() -> Bool {
-        // Changes typed in Space Settings ask first too: a Cancel must leave
-        // the window there.
+        // Changes typed in Space Settings or an editor ask first too: a
+        // Cancel must leave the window there.
         spaceSettings?.panel?.makeFirstResponder(nil)
-        guard !runningMergeQueues.isEmpty || spaceSettings?.hasUnsavedChanges == true else { return true }
+        guard !runningMergeQueues.isEmpty || spaceSettings?.hasUnsavedChanges == true || hasUnsavedEditors else { return true }
         // From the next turn of the run loop, after the close returns.
         sideEffects.requestQuit()
         return false

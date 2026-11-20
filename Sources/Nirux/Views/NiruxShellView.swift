@@ -129,6 +129,10 @@ final class NiruxShellView: NSView {
     )
     /// Keeps stuck-agent alerts going while the heartbeat is stopped.
     var stuckWatchTimer: Timer?
+    /// Reads of Claude's transcript, half a second apart, before an Esc
+    /// Nirux sent reads as ignored: a tool can be slow to stop (see
+    /// `followInterrupt`).
+    var interruptReads = 60
     /// A working agent that may be going in circles says so on its row
     /// (Settings; see `AgentCirclingHint`). Read with the restored state.
     var circlingHintEnabled = PersistedSettings().agentCirclingHint
@@ -176,6 +180,21 @@ final class NiruxShellView: NSView {
     /// RuleProposalStore once and kept current by the app's own changes
     /// (the sidebar asks several times a second).
     var ruleProposals: [String: RuleProposalStore.Loaded] = [:]
+    /// Each space's daily pass, by space id, read once and kept by the
+    /// app's own changes, for the Lead row's note.
+    var dailyPassStates: [String: DailyPassState] = [:]
+    /// The spaces whose due pass is being read (GitHub), so a minute's
+    /// check doesn't start another.
+    var dailyPassChecks: Set<String> = []
+    /// The spaces whose due pass waits, after GitHub didn't answer or a
+    /// pass couldn't be recorded, until then.
+    var dailyPassRetryAt: [String: TimeInterval] = [:]
+    /// Reads GitHub may answer next time, in a row, by space.
+    var dailyPassRereads: [String: DailyPass.Rereads] = [:]
+    /// When the Mac last woke: the user's absence counts from there.
+    var dailyPassWokeAt: TimeInterval = 0
+    var dailyPassTimer: Timer?
+    var dailyPassWakeObservers: [NSObjectProtocol] = []
     /// The sheet that adds a rule to a space's brief (LearnedRuleSheet).
     var learnedRuleSheet: LearnedRuleSheet?
     /// ⌘P's workspace rows and Next Waiting Agent (⌘J).
@@ -390,8 +409,21 @@ final class NiruxShellView: NSView {
             self?.noteCatchUpTaskAnswered(workspaceIndex: wsIndex)
             self?.interruptSilentAgent(workspaceIndex: wsIndex, columnIndex: colIndex, since: since)
         }
+        sidebar.onMissionTypeNow = { [weak self] wsIndex, colIndex, since in
+            self?.typeWaitingMessagesNow(workspaceIndex: wsIndex, columnIndex: colIndex, since: since)
+        }
         sidebar.onTurnAnswer = { [weak self] question, answer, button in
             self?.answerFromCard(answer, to: question, button: button)
+        }
+        sidebar.onMissionAnswer = { [weak self] click, button in
+            guard let self else { return }
+            if click.accepts {
+                _ = self.acceptMissionRecommendation(click.questionID)
+            } else {
+                self.showMissionReplyPopover(
+                    workspaceIndex: click.workspaceIndex, columnIndex: click.columnIndex, anchor: button, questionID: click.questionID
+                )
+            }
         }
         sidebar.onQuestionDismissed = { [weak self] columnID, askedAt in
             self?.dismissTurnQuestion(columnID: columnID, askedAt: askedAt)
@@ -1090,6 +1122,40 @@ extension NiruxShellView {
         relayout(animated: true)
         updateSidebar()
         focusActiveTerminal(in: window, editorTakesKeyboard: true)
+    }
+
+    /// The pointer went down in the window. The column a click landed on
+    /// (`index`) takes the focus without moving the strip, so that the
+    /// click, a double-click or a drag land on what was under the pointer;
+    /// the strip goes where it wants once the button is up and a
+    /// double-click had its chance.
+    func clickBegan(onColumn index: Int?) {
+        if let index, let workspace = activeWorkspace, workspace.columns.indices.contains(index),
+           workspace.focusedIndex != index {
+            workspace.holdCamera(for: index)
+            focusColumnByIndex(index)
+        }
+        scheduleCameraRelease()
+    }
+
+    /// From the mouse-down, as the local monitor never sees a mouse-up a
+    /// button's or a menu's tracking takes; the default run loop mode runs
+    /// it once that tracking is over.
+    private func scheduleCameraRelease(after delay: TimeInterval = NSEvent.doubleClickInterval) {
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(releaseHeldCameras), object: nil)
+        perform(#selector(releaseHeldCameras), with: nil, afterDelay: delay)
+    }
+
+    @objc private func releaseHeldCameras() {
+        // A drag or a long press goes on; a double-click's interval counts
+        // from the mouse-up.
+        let wait = NSEvent.pressedMouseButtons & 1 != 0
+            ? NSEvent.doubleClickInterval : NSEvent.doubleClickInterval - sideEffects.secondsSinceMouseUp()
+        guard wait <= 0 else { return scheduleCameraRelease(after: wait) }
+        let held = workspaces.filter { $0.heldCamera != nil }
+        guard !held.isEmpty else { return }
+        for workspace in held { workspace.heldCamera = nil }
+        relayout(animated: true)
     }
 
     /// Gives the focus to the column of `header`, for the header's ⋯ items

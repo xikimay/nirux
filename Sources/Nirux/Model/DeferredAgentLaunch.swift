@@ -40,6 +40,7 @@ struct DeferredAgentLaunch: Equatable {
         /// never prompted.
         case claude(resume: NiruxShellView.AgentResumeTarget?, mode: ClaudeLaunchMode)
         case codex(resume: NiruxShellView.AgentResumeTarget, mode: CodexLaunchMode)
+        case agy(resume: NiruxShellView.AgentResumeTarget)
 
         /// The launch, through the picker when another column already runs
         /// its session: `liveText` holds what they run (launch lines, the
@@ -51,6 +52,8 @@ struct DeferredAgentLaunch: Equatable {
                 return .claude(resume: .picker, mode: mode)
             case .codex(.session(let sessionID), let mode) where AgentSessionHolder.mentions(sessionID, in: liveText):
                 return .codex(resume: .picker, mode: mode)
+            case .agy(.session(let sessionID)) where AgentSessionHolder.mentions(sessionID, in: liveText):
+                return .agy(resume: .picker)
             default:
                 return self
             }
@@ -66,6 +69,7 @@ struct DeferredAgentLaunch: Equatable {
         switch agent {
         case .claude: return "claude"
         case .codex: return "codex"
+        case .agy: return AgentProgramStatus.agy
         }
     }
 

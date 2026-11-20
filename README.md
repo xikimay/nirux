@@ -38,7 +38,7 @@ A task's row turns amber when its agent needs you, and the command bar at the to
 
 ## Agent status hooks
 
-To know when an agent starts working, waits for you or stops, Nirux adds entries to two global files at every launch: hooks in `~/.claude/settings.json` and a `notify` command in `~/.codex/config.toml`. The entries do nothing outside a Nirux terminal. Your own hooks are kept, and a `notify` you already set is left alone.
+To know when an agent starts working, waits for you or stops, Nirux adds entries to global files at every launch: hooks in `~/.claude/settings.json`, a `notify` command in `~/.codex/config.toml`, and, for Antigravity's resume, a `nirux` hook in `~/.gemini/config/hooks.json`. The entries do nothing outside a Nirux terminal. Your own hooks are kept, and a `notify` you already set is left alone.
 
 [Agent status](docs/agent-status.md#status-hooks) lists what is written and how to remove it. An optional usage indicator, off by default, adds one more entry there.
 

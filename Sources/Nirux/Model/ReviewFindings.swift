@@ -20,12 +20,16 @@ enum ReviewFindings {
 
     struct Entry: Codable, Equatable, Sendable {
         var time: TimeInterval
-        /// The task's workspace and branch (else its folder or title) tell
-        /// one task from another, whatever pull request it opens: a second
-        /// branch in the same worktree is another task.
+        /// The task's workspace and its branch tell one task from another,
+        /// whatever pull request it opens. While HEAD is detached (a
+        /// rebase) or not read yet, the name its last review had, else its
+        /// Mission's branch.
         var workspace: String
         var task: String
         var pullRequest: Int?
+        /// The folder of the space's repository it works in: its rounds
+        /// count for that repository's pull requests only.
+        var repository: String?
         /// The Nth review recorded for this task.
         var round: Int
         var findings: [Finding]
@@ -35,7 +39,7 @@ enum ReviewFindings {
 
         func isSameTask(as other: Entry) -> Bool { workspace == other.workspace && task == other.task }
 
-        enum CodingKeys: String, CodingKey { case time = "t", workspace, task, pullRequest = "pr", round, findings }
+        enum CodingKeys: String, CodingKey { case time = "t", workspace, task, pullRequest = "pr", repository = "repo", round, findings }
     }
 
     // MARK: - A call's findings
@@ -146,9 +150,14 @@ enum ReviewFindings {
     struct Review: Sendable {
         let findings: [Finding]
         let workspace: String
-        /// Its branch, else its folder or title.
-        let task: String
+        /// Its branch, nil while HEAD is detached or not read yet.
+        let branch: String?
+        /// The branch its Mission started it on, if it has one.
+        let missionBranch: String?
+        /// Its folder or title: a task without a repository.
+        let folderOrTitle: String
         let pullRequest: Int?
+        let repository: String?
     }
 
     /// Records a review on `lines`'s queue, as the next round of its task;
@@ -171,8 +180,10 @@ enum ReviewFindings {
             return .notRecorded("The space’s review log is full: it frees up as reviews pass 30 days.")
         }
         let earlier = lines.load(spaceID: spaceID, stateDirectory: stateDirectory)
+        let task = review.branch ?? earlier.last { $0.workspace == review.workspace }?.task ?? review.missionBranch ?? review.folderOrTitle
         var entry = Entry(
-            time: now, workspace: review.workspace, task: review.task, pullRequest: review.pullRequest, round: 1, findings: review.findings
+            time: now, workspace: review.workspace, task: task, pullRequest: review.pullRequest, repository: review.repository,
+            round: 1, findings: review.findings
         )
         entry.round = earlier.filter { $0.isSameTask(as: entry) }.count + 1
         guard lines.append(entry, spaceID: spaceID, stateDirectory: stateDirectory) else {
