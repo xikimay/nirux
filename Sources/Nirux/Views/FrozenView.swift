@@ -9,6 +9,11 @@ import Metal
 /// copy instead. Drawing the view again (`cacheDisplay`) took about 90 ms
 /// in a large window and left the terminals blank. Takes no click.
 final class FrozenView: NSView {
+    /// The frozen layers, in a layer of their own: AppKit owns the view's.
+    let content = CALayer()
+    private var countsDown = false
+    override var isFlipped: Bool { countsDown }
+
     /// `view` as it shows now, the size of its bounds; nil while it has no
     /// layer or no size.
     static func freeze(_ view: NSView) -> FrozenView? {
@@ -20,21 +25,23 @@ final class FrozenView: NSView {
         for (found, copy) in zip(surfaces, copies) {
             if let copy { images[ObjectIdentifier(found.layer)] = copy }
         }
-        let frozen = CALayer()
-        frozen.name = layerName
-        frozen.bounds = root.bounds
-        frozen.masksToBounds = true
-        frozen.isGeometryFlipped = root.isGeometryFlipped
-        frozen.sublayers = root.sublayers?.compactMap { clone($0, root: root, images: images) }
-        let host = FrozenView(frame: view.bounds)
-        host.layer = frozen
-        host.wantsLayer = true
-        return host
+        // Laid out as the view counts y, so its layers' places hold.
+        let picture = FrozenView(frame: view.bounds)
+        picture.countsDown = view.isFlipped
+        picture.wantsLayer = true
+        let content = picture.content
+        content.name = layerName
+        content.frame = CGRect(origin: .zero, size: view.bounds.size)
+        content.bounds.origin = root.bounds.origin
+        content.masksToBounds = true
+        content.sublayers = root.sublayers?.compactMap { clone($0, root: root, images: images) }
+        picture.layer?.addSublayer(content)
+        return picture
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    /// Names a picture's own layer.
+    /// Names a picture's frozen layers.
     static let layerName = "FrozenView"
 
     /// Out of sight: hidden or clear as it shows, clipping to bounds that
@@ -42,8 +49,8 @@ final class FrozenView: NSView {
     /// earlier picture still sliding away (a picture of it would copy its
     /// copies again, doubling them at each switch).
     private static func isOutOfSight(_ layer: CALayer, root: CALayer) -> Bool {
-        let shown = layer.presentation() ?? layer
-        return layer.name == layerName || shown.isHidden || shown.opacity == 0
+        let shown = shown(layer)
+        return layer.delegate is FrozenView || shown.isHidden || shown.opacity == 0
             || (layer.masksToBounds && !layer.convert(layer.bounds, to: root).intersects(root.bounds))
     }
 
@@ -52,6 +59,13 @@ final class FrozenView: NSView {
             if let surface = surface(of: sublayer) { surfaces.append((sublayer, surface)) }
             collectSurfaces(in: sublayer, root: root, into: &surfaces)
         }
+    }
+
+    /// What `layer` shows: its presentation while an animation runs on it
+    /// (a glide, an arrival), else its model, which holds a change made in
+    /// this turn that the presentation doesn't show yet.
+    private static func shown(_ layer: CALayer) -> CALayer {
+        (layer.animationKeys()?.isEmpty == false ? layer.presentation() : nil) ?? layer
     }
 
     static func surface(of layer: CALayer) -> IOSurfaceRef? {
@@ -73,7 +87,7 @@ final class FrozenView: NSView {
     private static let gradientKeys = ["colors", "locations", "startPoint", "endPoint", "type"]
 
     /// `layer` and what it holds in sight, as they show (mid-way through a
-    /// glide or an arrival), each sharing its contents. A surface's copy in
+    /// glide or an arrival, else as last set), each sharing its contents. A surface's copy in
     /// `images` takes the surface's place, on the canvas where the surface
     /// isn't opaque: a frost under it isn't copied.
     static func clone(_ layer: CALayer, root: CALayer, images: [ObjectIdentifier: IOSurfaceRef]) -> CALayer? {
@@ -84,7 +98,7 @@ final class FrozenView: NSView {
         case is CAGradientLayer: (copy, keys) = (CAGradientLayer(), layerKeys + gradientKeys)
         default: (copy, keys) = (CALayer(), layerKeys)
         }
-        let shown = layer.presentation() ?? layer
+        let shown = shown(layer)
         for key in keys { copy.setValue(shown.value(forKey: key), forKey: key) }
         copy.contents = layer.contents
         if let image = images[ObjectIdentifier(layer)] {

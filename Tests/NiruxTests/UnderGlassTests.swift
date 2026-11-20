@@ -6,44 +6,40 @@ import XCTest
 /// While the columns travel they pass under it; at rest nothing does.
 @MainActor
 final class UnderGlassTests: XCTestCase {
-    /// A slide to a card passes the cards under the rail: the viewport's
-    /// layer reaches the sidebar's edge, what it holds where it lay, its
-    /// view and its frame unmoved, and the workspace leaves its cards
-    /// unclipped. Then the work's edge sweeps back, and the cards are
+    /// A slide to a card passes the cards under the rail: the viewport
+    /// reaches the sidebar's edge, what it holds where it lay, and the
+    /// workspace leaves its cards unclipped. Then the work's edge sweeps back, and the cards are
     /// clipped again.
     func testTheColumnsPassUnderTheRailWhileTheyTravel() throws {
         try withShell { shell in
             let workspace = try floatingRail(in: shell)
-            let viewport = try XCTUnwrap(shell.viewport.layer)
-            let container = try XCTUnwrap(workspace.containerView.layer)
+            let steps = TimedSteps(on: shell)
+            let viewport = shell.viewport
             let sidebarAbove = try XCTUnwrap(shell.subviews.firstIndex(of: shell.sidebar))
             XCTAssertGreaterThan(sidebarAbove, try XCTUnwrap(shell.subviews.firstIndex(of: shell.viewport)), "the rail lies over the work")
             XCTAssertEqual(shell.divider.alphaValue, 0, "no line marks a floating rail's edge")
             let viewFrame = shell.viewport.frame
+            let stripOrigin = shell.verticalStrip.convert(NSPoint.zero, to: shell)
 
             shell.focusColumn(.right)
-            XCTAssertEqual(viewport.bounds.minX, 0, "no travel, nothing under the rail")
+            XCTAssertEqual(viewport.frame, viewFrame, "no travel, nothing under the rail")
             shell.focusColumn(.right)
             XCTAssertNotNil(try strip(of: workspace).layer?.animation(forKey: "colSlide"), "it travels")
-            let reached = try onScreen(viewport, in: shell)
-            XCTAssertEqual(reached.minX, shell.sidebar.frame.minX, accuracy: 0.5, "under the sidebar")
-            XCTAssertEqual(reached.maxX, viewFrame.maxX, accuracy: 0.5)
-            XCTAssertEqual(shell.viewport.frame, viewFrame, "the view stays put")
-            XCTAssertFalse(container.masksToBounds, "the cards unclipped")
-            for column in workspace.columns {
-                let layer = try XCTUnwrap(column.view.layer)
-                XCTAssertEqual(try onScreen(layer, in: shell).minX, column.view.convert(column.view.bounds, to: shell).minX, accuracy: 0.5, "where it lies")
-            }
+            XCTAssertEqual(viewport.frame.minX, shell.sidebar.frame.minX, accuracy: 0.5, "under the sidebar")
+            XCTAssertEqual(viewport.frame.maxX, viewFrame.maxX, accuracy: 0.5)
+            XCTAssertEqual(shell.verticalStrip.convert(NSPoint.zero, to: shell).x, stripOrigin.x, accuracy: 0.5, "what it holds where it lay")
+            XCTAssertFalse(workspace.containerView.clipsToBounds, "the cards unclipped")
+            XCTAssertEqual(shell.viewportRestFrame, viewFrame, "what centres on it stays put")
 
-            var swept = false
-            waitUntil("back at the rail's edge", timeout: 2) {
-                if viewport.bounds.minX == 0, !container.masksToBounds {
-                    swept = swept || viewport.animation(forKey: "underGlass.bounds") != nil
-                }
-                return viewport.bounds.minX == 0 && container.masksToBounds
-            }
-            XCTAssertTrue(swept, "the edge sweeps back while the cards are still unclipped")
-            XCTAssertEqual(try onScreen(viewport, in: shell).minX, viewFrame.minX, accuracy: 0.5)
+            XCTAssertEqual(steps.durations, [WorkspaceState.slideDuration], "it ends with the slide")
+            steps.runNext()
+            XCTAssertEqual(viewport.bounds.minX, 0, "the edge back at the rail's")
+            XCTAssertEqual(viewport.frame, viewFrame)
+            XCTAssertNotNil(viewport.layer?.animation(forKey: "underGlass.bounds"), "it sweeps back")
+            XCTAssertFalse(workspace.containerView.clipsToBounds, "the cards unclipped while it sweeps")
+            XCTAssertEqual(steps.durations, [NiruxShellView.underGlassClose])
+            steps.runNext()
+            XCTAssertTrue(workspace.containerView.clipsToBounds, "then clipped again")
         }
     }
 
@@ -52,8 +48,7 @@ final class UnderGlassTests: XCTestCase {
     func testNothingPassesUnderARailThatDoesNotFloat() throws {
         try withShell { shell in
             let workspace = try floatingRail(in: shell)
-            let viewport = try XCTUnwrap(shell.viewport.layer)
-            let container = try XCTUnwrap(workspace.containerView.layer)
+            let viewport = shell.viewport
             let cases: [(name: String, floats: Bool, change: () -> Void)] = [
                 ("at Opaque", false, { shell.interfaceTransparency = .opaque }),
                 ("without macOS's glass", false, { shell.sideEffects.drawsGlass = { false } }),
@@ -73,7 +68,7 @@ final class UnderGlassTests: XCTestCase {
                 shell.focusColumn(.right)
                 XCTAssertNotNil(try strip(of: workspace).layer?.animation(forKey: "colSlide"), "\(test.name): it travels")
                 XCTAssertEqual(viewport.bounds.minX, 0, "\(test.name): nothing under the rail")
-                XCTAssertTrue(container.masksToBounds, test.name)
+                XCTAssertTrue(workspace.containerView.clipsToBounds, test.name)
             }
         }
     }
@@ -84,31 +79,34 @@ final class UnderGlassTests: XCTestCase {
     func testAPassGoesOnThroughALayoutAndOnlyItsOwnEndClosesIt() throws {
         try withShell { shell in
             let workspace = try floatingRail(in: shell)
-            let viewport = try XCTUnwrap(shell.viewport.layer)
-            let container = try XCTUnwrap(workspace.containerView.layer)
+            let viewport = shell.viewport
 
+            let rest = viewport.frame
             shell.passUnderRail(workspace, for: 1)
-            let reached = try onScreen(viewport, in: shell)
+            let reached = viewport.frame
             XCTAssertEqual(reached.minX, shell.sidebar.frame.minX, accuracy: 0.5)
             shell.relayout(animated: false)
-            XCTAssertEqual(try onScreen(viewport, in: shell), reached, "a layout keeps it")
-            XCTAssertEqual(viewport.bounds.minX, shell.sidebar.frame.minX - shell.viewport.frame.minX, accuracy: 0.5, "what it holds where it lay")
-            XCTAssertFalse(container.masksToBounds)
+            XCTAssertEqual(viewport.frame, reached, "a layout keeps it")
+            XCTAssertEqual(viewport.bounds.minX, shell.sidebar.frame.minX - rest.minX, accuracy: 0.5, "what it holds where it lay")
+            XCTAssertFalse(workspace.containerView.clipsToBounds)
 
             shell.isSidebarExpanded = true
             shell.sidebar.isExpanded = true
             shell.relayout(animated: false)
             XCTAssertEqual(viewport.bounds.minX, 0, "unfolded, it ends at once")
-            XCTAssertEqual(try onScreen(viewport, in: shell).minX, shell.viewport.frame.minX, accuracy: 0.5)
-            XCTAssertTrue(container.masksToBounds)
+            XCTAssertGreaterThan(viewport.frame.minX, shell.sidebar.frame.minX)
+            XCTAssertTrue(workspace.containerView.clipsToBounds)
 
             _ = try floatingRail(in: shell)
+            let steps = TimedSteps(on: shell)
             shell.passUnderRail(workspace, for: 0.05)
             shell.passUnderRail(workspace, for: 1)
-            let due = Date().addingTimeInterval(0.4)
-            waitUntil("past the first pass's end", timeout: 2) { Date() >= due }
+            XCTAssertEqual(steps.durations, [0.05, 1])
+            steps.runNext()
             XCTAssertLessThan(viewport.bounds.minX, 0, "the first's end left the second alone")
-            XCTAssertFalse(container.masksToBounds)
+            XCTAssertFalse(workspace.containerView.clipsToBounds)
+            steps.runNext()
+            XCTAssertEqual(viewport.bounds.minX, 0, "its own end closes it")
         }
     }
 
@@ -118,10 +116,10 @@ final class UnderGlassTests: XCTestCase {
     func testNeitherAWorkspaceSwitchNorAFoldPasses() throws {
         try withShell { shell in
             let first = try floatingRail(in: shell)
-            let viewport = try XCTUnwrap(shell.viewport.layer)
+            let viewport = shell.viewport
             @MainActor func atRest(_ name: String) {
                 XCTAssertEqual(viewport.bounds.minX, 0, "\(name): nothing under the rail")
-                XCTAssertTrue(shell.workspaces.allSatisfy { $0.containerView.layer?.masksToBounds == true }, name)
+                XCTAssertTrue(shell.workspaces.allSatisfy { $0.containerView.clipsToBounds }, name)
             }
 
             shell.addWorkspace(title: "other", cwd: NSTemporaryDirectory())
@@ -155,10 +153,10 @@ final class UnderGlassTests: XCTestCase {
     func testAPassEndsWhereTheRailStopsFloatingAndTheDividerFollows() throws {
         try withShell { shell in
             var workspace = try floatingRail(in: shell)
-            let viewport = try XCTUnwrap(shell.viewport.layer)
+            let viewport = shell.viewport
             @MainActor func ended(_ name: String) {
                 XCTAssertEqual(viewport.bounds.minX, 0, "\(name): ended at once")
-                XCTAssertTrue(workspace.containerView.layer?.masksToBounds == true, name)
+                XCTAssertTrue(workspace.containerView.clipsToBounds, name)
                 XCTAssertNil(shell.passingUnderRail, name)
             }
 
@@ -186,6 +184,29 @@ final class UnderGlassTests: XCTestCase {
             shell.relayout(animated: false)
             ended("no viewport")
             shell.setFrameSize(size)
+        }
+    }
+
+    /// Movement turning off (Reduce motion, the setting) ends a pass at once,
+    /// and its sweep too.
+    func testMovementTurningOffEndsAPassAtOnce() throws {
+        try withShell { shell in
+            let workspace = try floatingRail(in: shell)
+            let steps = TimedSteps(on: shell)
+            shell.passUnderRail(workspace, for: 1)
+            shell.sideEffects.reducesMotion = { true }
+            shell.applyAgentLights()
+            XCTAssertEqual(shell.viewport.bounds.minX, 0, "ended at once")
+            XCTAssertTrue(workspace.containerView.clipsToBounds)
+            XCTAssertNil(shell.passingUnderRail)
+
+            shell.sideEffects.reducesMotion = { false }
+            shell.passUnderRail(workspace, for: 1)
+            while steps.durations.first != NiruxShellView.underGlassClose, steps.runNext() {}
+            XCTAssertFalse(workspace.containerView.clipsToBounds, "it sweeps")
+            shell.animatesInterface = false
+            XCTAssertTrue(workspace.containerView.clipsToBounds, "the sweep ends at once")
+            XCTAssertNil(shell.viewport.layer?.animation(forKey: "underGlass.bounds"))
         }
     }
 
@@ -220,11 +241,6 @@ final class UnderGlassTests: XCTestCase {
 
     private func strip(of workspace: WorkspaceState) throws -> NSView {
         try XCTUnwrap(workspace.columns.first?.view.superview)
-    }
-
-    /// Where a layer shows in the shell, from the layers' own geometry.
-    private func onScreen(_ layer: CALayer, in shell: NiruxShellView) throws -> CGRect {
-        layer.convert(layer.bounds, to: try XCTUnwrap(shell.layer))
     }
 
     private func withShell(_ body: (NiruxShellView) throws -> Void) throws {

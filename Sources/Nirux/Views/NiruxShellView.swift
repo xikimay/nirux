@@ -23,6 +23,12 @@ final class NiruxShellView: NSView {
     var underGlassGeneration = 0
     /// The workspace whose cards pass under the rail, until its edge closes.
     weak var passingUnderRail: WorkspaceState?
+    /// Counts space crossings: a crossing's end acts only on its own, and
+    /// its pictures over the viewport (NiruxShellView+SpaceCrossing).
+    var spaceCrossingGeneration = 0
+    var crossingPictures: [FrozenView] = []
+    /// The workspace a crossing brings on screen.
+    var crossingWorkspaceID: String?
     /// The size of the workspace on screen, as `relayout` lays it out.
     var workspaceViewportSize: NSSize {
         let statusH = statusBar.hasContent ? StatusBarView.height : 0
@@ -315,7 +321,7 @@ final class NiruxShellView: NSView {
         layer?.backgroundColor = Theme.Color.canvas.cgColor
         divider.boxType = .separator
         viewport.wantsLayer = true
-        viewport.layer?.masksToBounds = true
+        viewport.clipsToBounds = true
         verticalStrip.wantsLayer = true
         viewport.addSubview(verticalStrip)
         viewport.addSubview(emptySpaceView)
@@ -402,6 +408,16 @@ final class NiruxShellView: NSView {
         }
         sidebar.onTurnAnswer = { [weak self] question, answer, button in
             self?.answerFromCard(answer, to: question, button: button)
+        }
+        sidebar.onMissionAnswer = { [weak self] click, button in
+            guard let self else { return }
+            if click.accepts {
+                _ = self.acceptMissionRecommendation(click.questionID)
+            } else {
+                self.showMissionReplyPopover(
+                    workspaceIndex: click.workspaceIndex, columnIndex: click.columnIndex, anchor: button, questionID: click.questionID
+                )
+            }
         }
         sidebar.onQuestionDismissed = { [weak self] columnID, askedAt in
             self?.dismissTurnQuestion(columnID: columnID, askedAt: askedAt)
@@ -492,6 +508,7 @@ final class NiruxShellView: NSView {
     // MARK: - Layout
 
     func relayout(animated: Bool) {
+        endSpaceCrossingIfStale(animated: animated)
         // A pass under the rail goes on through a layout; a travel the
         // layout starts begins another.
         restUnderGlass()

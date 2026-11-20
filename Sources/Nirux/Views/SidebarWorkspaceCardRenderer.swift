@@ -709,6 +709,10 @@ final class SidebarWorkspaceCardRenderer {
             add(SidebarTurnQuestionBlockRenderer(
                 question: question, workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
             ).render())
+        case let .missionRecommendation(columnIndex, question):
+            add(SidebarMissionRecommendationBlockRenderer(
+                question: question, workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
+            ).render())
         case let .dialog(columnIndex, dialog):
             add(SidebarDialogBlockRenderer(
                 dialog: dialog, workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
@@ -868,7 +872,8 @@ final class SidebarWorkspaceCardRenderer {
                 + "takes it after one prompt from you."
             label.setAccessibilityLabel("Answer from \(question.parentTitle) waiting: \(question.text)")
         } else {
-            label.toolTip = "\(question.text)\n\n\(question.explanation) Click to answer."
+            label.toolTip = ([question.text] + [question.recommendationLine, "\(question.explanation) Click to answer."].compactMap { $0 })
+                .joined(separator: "\n\n")
             label.setAccessibilityLabel(
                 question.handOff == nil ? "Asking \(question.parentTitle): \(question.text)" : "Needs you, a question: \(question.text)"
             )

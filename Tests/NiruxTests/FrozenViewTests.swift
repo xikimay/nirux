@@ -44,7 +44,7 @@ final class FrozenViewTests: XCTestCase {
         let frozen = try XCTUnwrap(FrozenView.freeze(view))
         XCTAssertEqual(frozen.frame, view.bounds)
         XCTAssertNil(frozen.hitTest(NSPoint(x: 50, y: 50)), "it takes no click")
-        let layers = try XCTUnwrap(frozen.layer?.sublayers)
+        let layers = try XCTUnwrap(frozen.content.sublayers)
         XCTAssertEqual(layers.count, 3, "what clips out of sight stays out")
         let cardCopy = try XCTUnwrap(layers.first)
         XCTAssertFalse(cardCopy === card)
@@ -63,6 +63,29 @@ final class FrozenViewTests: XCTestCase {
         XCTAssertTrue(Self.pixels(of: copy) == Self.pixels(of: surface), "the same pixels")
         Self.fill(surface, with: 0x11)
         XCTAssertTrue(Self.pixels(of: copy).allSatisfy { $0 == 0x5A }, "what draws into the surface after leaves the copy as it was")
+    }
+
+    /// A change made in this turn shows in the picture: a layer at rest is
+    /// read as last set, not as the screen last showed it.
+    func testAPictureShowsAChangeNotYetOnScreen() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        view.wantsLayer = true
+        window.contentView = view
+        window.orderFront(nil)
+        defer { window.close() }
+        // A view laid out anew, as a space is when chosen: AppKit moves its
+        // layer without an animation, so what shows lags until the commit.
+        let card = NSView(frame: NSRect(x: 10, y: 10, width: 50, height: 50))
+        card.wantsLayer = true
+        view.addSubview(card)
+        view.layoutSubtreeIfNeeded()
+        CATransaction.flush()
+        card.frame = NSRect(x: 100, y: 20, width: 80, height: 60)
+        let frozen = try XCTUnwrap(FrozenView.freeze(view))
+        XCTAssertEqual(frozen.content.sublayers?.first?.frame, card.layer?.frame, "as last set")
+        XCTAssertEqual(card.layer?.frame, card.frame)
     }
 
     /// Where the GPU can't copy a surface, the CPU's copy is the same; past
@@ -94,37 +117,34 @@ final class FrozenViewTests: XCTestCase {
         root.sublayers = [terminal, clear]
 
         let first = try XCTUnwrap(FrozenView.freeze(view))
-        XCTAssertEqual(first.layer?.sublayers?.count, 1, "what doesn't show stays out")
-        XCTAssertEqual(first.layer?.sublayers?.first?.backgroundColor, Theme.Color.canvas.cgColor, "on the canvas")
+        XCTAssertEqual(first.content.sublayers?.count, 1, "what doesn't show stays out")
+        XCTAssertEqual(first.content.sublayers?.first?.backgroundColor, Theme.Color.canvas.cgColor, "on the canvas")
         // The picture slides away over what it froze.
         root.addSublayer(try XCTUnwrap(first.layer))
         let second = try XCTUnwrap(FrozenView.freeze(view))
-        XCTAssertEqual(second.layer?.sublayers?.count, 1, "not the first picture")
-        XCTAssertEqual(Self.surfaces(in: second.layer), 1, "one picture's copies")
+        XCTAssertEqual(second.content.sublayers?.count, 1, "not the first picture")
+        XCTAssertEqual(Self.surfaces(in: second.content), 1, "one picture's copies")
 
         terminal.isOpaque = true
         let opaque = try XCTUnwrap(FrozenView.freeze(view))
-        XCTAssertNil(opaque.layer?.sublayers?.first?.backgroundColor, "an opaque surface needs no fill")
+        XCTAssertNil(opaque.content.sublayers?.first?.backgroundColor, "an opaque surface needs no fill")
     }
 
-    /// A new workspace and ⌥⌘→ lay what the viewport showed, frozen, over
-    /// it as it slides away, gone on time; nothing is drawn again.
+    /// A new workspace lays what the viewport showed, frozen, over it as it
+    /// slides away, gone on time; nothing is drawn again. While nothing may
+    /// move, it shows at once. (⌥⌘← ⌥⌘→:
+    /// SpaceCrossingTests.)
     func testASlideLeavesAFrozenPictureGoneOnTime() throws {
         try withShell { shell in
-            let first = shell.activeProfileID
             shell.workspaceStore.createProfile(named: "Second", select: true)
             shell.addWorkspace(title: "second", cwd: NSTemporaryDirectory())
             XCTAssertEqual(Self.frozenViews(in: shell).count, 1, "a new workspace slides over what showed, frozen")
+            XCTAssertFalse(shell.viewport.subviews.contains { $0 is NSImageView }, "nothing drawn again")
             waitUntil("gone on time", timeout: 2) { Self.frozenViews(in: shell).isEmpty }
 
-            shell.selectProfile(first)
-            XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "a pick from the menu doesn't slide")
-            shell.focusSpace(.next)
-            XCTAssertEqual(Self.frozenViews(in: shell).count, 1, "the space left, frozen, over the viewport")
-            XCTAssertFalse(shell.viewport.subviews.contains { $0 is NSImageView }, "nothing drawn again")
-            for _ in 1...3 { shell.focusSpace(.next) }
-            XCTAssertTrue(Self.frozenViews(in: shell).allSatisfy { Self.pictureLayers(in: $0.layer) == 1 }, "no picture holds another")
-            waitUntil("gone on time", timeout: 2) { Self.frozenViews(in: shell).isEmpty }
+            shell.sideEffects.reducesMotion = { true }
+            shell.addWorkspace(title: "still", cwd: NSTemporaryDirectory())
+            XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "while nothing may move, it shows at once")
         }
     }
 
@@ -133,12 +153,6 @@ final class FrozenViewTests: XCTestCase {
     private static func surfaces(in layer: CALayer?) -> Int {
         guard let layer else { return 0 }
         return (FrozenView.surface(of: layer) == nil ? 0 : 1) + (layer.sublayers ?? []).reduce(0) { $0 + surfaces(in: $1) }
-    }
-
-    /// Layers named as a picture's own, `layer` included.
-    private static func pictureLayers(in layer: CALayer?) -> Int {
-        guard let layer else { return 0 }
-        return (layer.name == FrozenView.layerName ? 1 : 0) + (layer.sublayers ?? []).reduce(0) { $0 + pictureLayers(in: $1) }
     }
 
     private static func frozenViews(in shell: NiruxShellView) -> [FrozenView] {
@@ -199,6 +213,9 @@ final class FrozenViewTests: XCTestCase {
             let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
             shell.stopHeartbeat()
             shell.sideEffects.windowShows = { _ in true }
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                 styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false

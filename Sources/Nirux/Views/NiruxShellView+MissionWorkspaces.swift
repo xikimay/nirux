@@ -638,6 +638,7 @@ extension NiruxShellView {
                   let column = workspace.columns.first(where: { $0.agentUUID == notice.agentUUID })
             else { return false }
             guard let pty = column.pty else { return true }
+            guard notice.isFor(claudeStartedAt: pty.foregroundProcess(snapshot: snapshot)?.instance.startedAt) else { return false }
             let refusal = pty.missionPromptRefusal(runningSince: now, snapshot: snapshot, seenByUser: column.id == seenAtPrompt)
             if column.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
             guard refusal == nil, let paste = TypedPromptSanitizer.bracketedPaste(for: notice.text) else { return true }
@@ -758,4 +759,14 @@ struct LeadNotice: Equatable {
     let text: String
     /// Epoch seconds.
     let queuedAt: TimeInterval
+    /// Only a `claude` started by then takes it: the one that saw what it
+    /// answers. Nil: any.
+    var forClaudeStartedBy: TimeInterval?
+
+    /// Whether the `claude` started at `claudeStartedAt` (nil: not known)
+    /// takes it.
+    func isFor(claudeStartedAt: TimeInterval?) -> Bool {
+        guard let forClaudeStartedBy, let claudeStartedAt else { return true }
+        return claudeStartedAt <= forClaudeStartedBy
+    }
 }
