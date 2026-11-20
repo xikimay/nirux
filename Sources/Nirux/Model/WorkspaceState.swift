@@ -202,8 +202,8 @@ final class WorkspaceState {
 
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
-    /// A column's Codex reported its turn over (`ColumnState.onCodexTurnOver`).
-    var onCodexTurnOver: (() -> Void)?
+    /// A column's agent reported its turn over (`ColumnState.onProgramTurnOver`).
+    var onProgramTurnOver: (() -> Void)?
     /// A column's terminal title changed (fires before onMetadataChanged).
     var onColumnTitleChanged: ((ColumnState) -> Void)?
     var onFocusedColumnChanged: (() -> Void)?
@@ -693,7 +693,7 @@ extension WorkspaceState {
     }
 
     private func setupAgentAttentionTracking(for col: ColumnState) {
-        col.onCodexTurnOver = { [weak self] in self?.onCodexTurnOver?() }
+        col.onProgramTurnOver = { [weak self] in self?.onProgramTurnOver?() }
         col.onAgentAttention = { [weak self, weak col] reason in
             guard let self else { return }
             // A Mission child ends its turn after asking (even in prose).
@@ -1178,6 +1178,17 @@ extension WorkspaceState {
     private static let slideKey = "colSlide"
     /// The strip's slide to a card.
     static let slideDuration: CFTimeInterval = 0.3
+
+    /// Every column as it shows, whatever the camera shows, frozen at
+    /// `scale` (depth study P5's plan); nil before a layout.
+    func frozenColumns(scale: CGFloat) -> FrozenView? {
+        FrozenView.freeze(stripView, scale: scale)
+    }
+
+    /// The strip that holds the columns: its size, and each column's frame
+    /// in it.
+    var stripSize: NSSize { stripView.frame.size }
+    var columnFrames: [NSRect] { columns.map(\.view.frame) }
 
     /// What a width fraction of 1 spans, its gap included: the viewport
     /// less the air at its edges, plus one gap. Two halves then fill the

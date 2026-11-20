@@ -556,6 +556,7 @@ What shipped differs from the proposal below in these ways:
 | Claude permission mode | A Claude column launches | `ClaudeLaunchMode.cliArgs` |
 | Codex mode | A Codex column launches | `CodexLaunchMode.cliArgs` |
 | Environment variables | A shell starts in the project | `makeTerminalEnvironment` |
+| Follow up on pull requests (`prFollowUp`: on unless false) | A task's pull request needs a round and its Claude sits idle | `PRFollowUp` ([pr-follow-up.md](pr-follow-up.md)) |
 | Post-worktree setup script | After a worktree workspace is created, before the agent starts | Typed before the agent command (see below) |
 | Pinned URLs | On demand | Project view and command palette; open as web columns |
 

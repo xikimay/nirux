@@ -29,6 +29,9 @@ extension GitHub {
         /// The check run's `detailsUrl`, or the commit status's `targetUrl`.
         /// Set by whoever posted the check: untrusted.
         let url: String?
+        /// A finished check run's conclusion, uppercased (CANCELLED,
+        /// TIMED_OUT…); nil for a commit status.
+        var conclusion: String?
 
         /// `Workflow / job`, as board.json may name it.
         var qualifiedName: String? { GitHub.qualifiedName(name: name, workflow: workflowName) }
@@ -68,7 +71,8 @@ extension GitHub {
             }
         }
         return Check(
-            name: name, workflowName: json["workflowName"] as? String, result: result, startedAt: startedAt, url: url
+            name: name, workflowName: json["workflowName"] as? String, result: result, startedAt: startedAt, url: url,
+            conclusion: result == .pending || conclusion.isEmpty ? nil : conclusion
         )
     }
 

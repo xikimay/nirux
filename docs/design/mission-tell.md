@@ -75,8 +75,8 @@ child's prompt.
   typed; 3 not typed yet, and the same command again resumes the wait instead
   of queuing the text twice (like `ask`, its ID is derived from the text; a
   message typed less than 60 s ago counts as that same one); 4 no Mission on
-  that branch from this terminal, a child that runs neither Claude Code nor
-  Codex, or handoffs off; 2 usage; 1 state.
+  that branch from this terminal, a child Nirux delivers nothing to, or
+  handoffs off; 2 usage; 1 state.
 - **Ledger:** a new event kind `instruction` (parent → child), with
   `childConsumedAt` set once typed. Nirux routes only events that carry the
   recorded parent identity; as for `reply`, any process of the user that can
@@ -178,3 +178,25 @@ nothing into Codex (`CodexQueue`, `queueForCodex`).
   untold to Codex again, its sender told: Codex may hold it.
 - It goes as text: a slash command doesn't run in Codex.
 - A Codex child's `ask` still waits for its answer.
+
+## Antigravity children (2026-11-20)
+
+agy 1.5.12 has no queue of its own, so Nirux types into it, behind the same
+`promptRefusal` as Claude Code: a branch reads agy's OSC 7501 instead of
+hooks. Its prompt is free once the `agy` in front (the one sent to, or one
+resuming its conversation) said `done` and no key reached the terminal since
+its turn began (the Enter that sent its prompt, else its first `working`;
+another `working` after a dialog is the same turn's, a new prompt's Enter
+starts a new one even when the last turn's end was missed, and keys
+answering that dialog don't count, up to the one that answers it). A state
+read on an empty process table goes to the `agy` last seen in front. Seen live: agy says `idle` at
+the first key after `done`, but a key typed while it works stays in its box
+and it still says `done`. Its dialogs say `blocked`, `error` holds the
+message like a failed turn, and before its first turn ends (a resumed agy) it
+may show a screen no state tells of: the message waits for that turn. A paste
+and its Enter in one write go in (probed). A message goes only to the agent
+its Mission names, so one for a Claude Code child is never typed into an agy
+that took its terminal, nor a question into an agy parent, which polls with
+`receive`. A slash command is refused for an agy child: agy runs it itself,
+with no turn to end, and the text Nirux typed would hold every message after
+it as a draft.

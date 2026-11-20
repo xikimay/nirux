@@ -95,8 +95,16 @@ final class FrozenViewTests: XCTestCase {
         let blank = try XCTUnwrap(SurfaceCopies.blank(like: surface))
         let copy = try XCTUnwrap(SurfaceCopies.cpuCopy(surface, into: blank))
         XCTAssertTrue(Self.pixels(of: copy) == Self.pixels(of: surface), "the same pixels")
-        let late = try XCTUnwrap(SurfaceCopies.copies(of: [surface], waitingAtMost: .nanoseconds(0)).first ?? nil)
+        let late = try XCTUnwrap(SurfaceCopies.copies(of: [surface], waitingAtMost: .nanoseconds(0)).first ?? nil).surface
         XCTAssertTrue(Self.pixels(of: late) == Self.pixels(of: surface), "a copy past the wait")
+    }
+
+    /// A smaller copy says its size against the surface's as made, in
+    /// whole pixels (8 at 0.3 makes 2, a quarter).
+    func testACopySaysItsSizeAsMade() throws {
+        let surface = try XCTUnwrap(Self.surface(filledWith: 0x33))
+        let copy = try XCTUnwrap(SurfaceCopies.copies(of: [surface], scale: 0.3).first ?? nil)
+        XCTAssertEqual(copy.scale, CGFloat(IOSurfaceGetWidth(copy.surface)) / CGFloat(IOSurfaceGetWidth(surface)))
     }
 
     /// A picture never holds an earlier one still sliding away, nor what

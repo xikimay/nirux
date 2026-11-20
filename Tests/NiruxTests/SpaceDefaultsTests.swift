@@ -105,6 +105,23 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(leftovers, [SpaceDefaultsStore.fileName], "no temporary file left")
     }
 
+    /// docs/design/pr-follow-up.md: on unless turned off; a value this build
+    /// can't read is off, and never rewritten.
+    func testTheFollowUpIsOnUnlessTurnedOff() throws {
+        let store = try store()
+        XCTAssertTrue(store.load().defaults.followsUpPullRequests)
+        XCTAssertTrue(SpaceDefaults(prFollowUp: nil).followsUpPullRequests)
+        XCTAssertTrue(SpaceDefaults(prFollowUp: true).followsUpPullRequests)
+        let saved = try store.save(SpaceDefaults(prFollowUp: false), replacing: store.load()).get()
+        XCTAssertFalse(saved.defaults.followsUpPullRequests)
+        XCTAssertFalse(store.load().defaults.followsUpPullRequests, "read back: only false turns it off")
+        XCTAssertTrue(try String(contentsOf: store.fileURL, encoding: .utf8).contains("\"prFollowUp\" : false"))
+        try Data(#"{"prFollowUp": "yes"}"#.utf8).write(to: store.fileURL)
+        let unreadable = store.load()
+        XCTAssertFalse(unreadable.defaults.followsUpPullRequests)
+        XCTAssertEqual(unreadable.status, .readOnly(.unknownSettings(["prFollowUp"])))
+    }
+
     /// Another Nirux saved since the window read the file: left alone.
     func testAFileChangedSinceLoadedIsNotOverwritten() throws {
         let store = try store()

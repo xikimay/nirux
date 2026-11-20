@@ -514,6 +514,33 @@ the text stays flat and sharp.
   ends it at once, and so does a move or another workspace on screen (⌘N,
   a close, a ⌘P jump); Reduce motion, or a pick from the menu, shows the
   space at once.
+- **The plan (study P5, first part):** ⌥⌘↑ (Space › Space Overview)
+  shows the space as a plan over the viewport: a row per workspace, in the
+  order they're listed, every column of it frozen at the plan's scale
+  (`FrozenView`, terminals copied that small on the GPU), its state icon,
+  name and status line at their own size beside it. The card on screen
+  wears a ring; the arrows move it, Return or a click goes there at once,
+  Escape or ⌥⌘↑ goes back; it holds the keys, none reaches a terminal.
+  Under it the live views hide and no terminal draws; a change to what it
+  shows (a workspace, its columns, the card in focus), another space or a
+  new size closes it at once, and the keyboard goes back to the column on
+  screen. A new name doesn't. However many workspaces, every row shows: the
+  gaps shrink. A pinch does the same: fingers closing over the work past a
+  quarter of their span, within one pinch, show the plan, and opening them
+  in it goes to the card under them, else to the chosen one; each pinch
+  acts once, whichever view its events reach. A column that zooms itself
+  keeps its own pinch: Branch Review's page does; whether the editor's
+  WebKit, which doesn't zoom, passes it on wasn't checked in the app. While
+  the interface may move, the work recedes into the plan (0.56 s): the
+  rows' world comes from where the workspace showed, filling the plan, the
+  work's picture at its size over it fading into its row, the names after.
+  Going to a card, that workspace shows under the plan at once, its column
+  taking the keyboard, and the plan dives into it (0.52 s), its picture
+  fading in over the zoom; going back dives into the workspace on screen.
+  Diving, the plan leaves keys and clicks to that workspace; ⌥⌘↑ or a pinch
+  meanwhile lands the dive and opens the plan anew. The rows move through their view's
+  `sublayerTransform`; ends come on time, and Reduce motion, Animate the
+  interface off or movement turning off mid-way show the end at once.
 - **Frozen pictures (study P4):** a crossing, or a new workspace's slide,
   moves pictures of what the viewport showed, frozen in
   about 6 ms (`FrozenView`): a clone of its layers, each sharing its

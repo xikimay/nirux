@@ -584,7 +584,7 @@ final class MissionAskTests: XCTestCase {
         XCTAssertTrue(claude.contains(MissionPromptText.prefix))
         XCTAssertTrue(claude.contains("\(MissionEventCLI.maxMessageLength) characters"))
         XCTAssertFalse(claude.contains("seconds"), "nothing to wait for")
-        XCTAssertTrue(skill.contains("A Codex parent waits"), "Nirux types only into Claude Code")
+        XCTAssertTrue(skill.contains("A Codex or Antigravity parent"), "Nirux types questions and results only into Claude Code")
         for text in [skill, codex] {
             XCTAssertFalse(text.contains("--timeout"), "the default wait already fits the shell tool")
             XCTAssertTrue(text.contains("\(Int(MissionEventCLI.defaultWaitTimeout)) seconds"))

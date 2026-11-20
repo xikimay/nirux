@@ -515,6 +515,11 @@ final class PtySession: @unchecked Sendable {
     /// See `AgentStatusMachine.lastTurnEndedAt`.
     var agentLastTurnEndedAt: TimeInterval { state.machine.lastTurnEndedAt }
 
+    /// When the last prompt Claude Code didn't mark as a poll event went into
+    /// its agent: the user's, or a Mission message (2.1.328 sends no mark,
+    /// so every prompt). Nil before one.
+    var agentLastUserPromptAt: TimeInterval? { state.machine.lastUserPromptAt }
+
     /// See `AgentStatusMachine.isCurrentTurnEnd`.
     func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
         state.machine.isCurrentTurnEnd(turnEndedAt)
@@ -1002,13 +1007,13 @@ final class PtySession: @unchecked Sendable {
     /// prompt yet (a check's own reading, between checks).
     func missionPromptRefusal(
         runningSince: TimeInterval, snapshot: ProcessSnapshot, seenByUser: Bool = false,
-        now: TimeInterval = Date().timeIntervalSince1970,
+        agent: String = NiruxApp.WorkspaceAgent.claude.rawValue, now: TimeInterval = Date().timeIntervalSince1970,
         record: (ProcessInstance) -> ClaudeSessionRecord.Reading = { sessionRecord(of: $0) }
     ) -> AgentPromptRefusal? {
         guard !hasExited else { return .noClaude }
         readTranscriptPrompts()
         return state.machine.promptRefusal(
-            foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince, seenByUser: seenByUser
+            foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince, seenByUser: seenByUser, agent: agent
         ) {
             seenByUser ? record($0).allowsTypingOnSight(of: $0, now: now) : record($0).showsIdlePrompt(of: $0, now: now)
         }
@@ -1052,10 +1057,17 @@ final class PtySession: @unchecked Sendable {
         return state.machine.codexQueueRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince)
     }
 
-    /// Whether `process`, the column's `codex`, started a turn after `time`.
-    func codexWorked(since time: TimeInterval, by process: ProcessInstance) -> Bool {
+    /// Whether `process`, the column's `codex` or `agy`, started a turn
+    /// after `time` (what it said through OSC 7501).
+    func startedTurn(since time: TimeInterval, by process: ProcessInstance) -> Bool {
+        if let turn = state.machine.agyTurn, turn.process == process, turn.startedAt > time { return true }
         guard let worked = state.machine.codexWorked, worked.at > time else { return false }
         return worked.process.map { $0 == process } ?? (process.startedAt <= worked.at)
+    }
+
+    /// See `AgentStatusMachine.agyFacts`.
+    func agyFacts(now: TimeInterval) -> String {
+        state.machine.agyFacts(now: now)
     }
 
     /// See `AgentStatusMachine.codexFacts`.

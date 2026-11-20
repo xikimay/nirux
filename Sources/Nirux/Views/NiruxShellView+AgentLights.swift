@@ -99,6 +99,7 @@ extension NiruxShellView {
         if !moves {
             stillUnderGlass()
             stillSpaceCrossing()
+            stillSpacePlan()
         }
         for workspace in workspaces {
             let isOnScreen = workspace === activeWorkspace
@@ -135,6 +136,7 @@ extension NiruxShellView {
     /// of one that asks.
     func turnEndSettled() {
         typeMissionMessages()
+        followUpPullRequests()
         scheduleMetadataRefresh()
     }
 

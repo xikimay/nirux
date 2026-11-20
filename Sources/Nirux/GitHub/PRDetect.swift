@@ -126,7 +126,7 @@ enum PRDetect {
             "number", "state", "headRefOid", "headRepositoryOwner",
             "headRepository", "isDraft", "statusCheckRollup",
             "reviewDecision", "mergeable", "url", "additions",
-            "deletions", "changedFiles"
+            "deletions", "changedFiles", "baseRefName", "autoMergeRequest"
         ].joined(separator: ",")
         let call = GitHub.CLI.Call(
             ["pr", "list", "--head", branch, "--state", state, "--json", fields, "--limit", String(limit)],
@@ -183,7 +183,10 @@ enum PRDetect {
             url: candidate["url"] as? String ?? "",
             additions: candidate["additions"] as? Int,
             deletions: candidate["deletions"] as? Int,
-            changedFiles: candidate["changedFiles"] as? Int
+            changedFiles: candidate["changedFiles"] as? Int,
+            headRefOid: (candidate["headRefOid"] as? String)?.lowercased(),
+            baseRefName: candidate["baseRefName"] as? String,
+            autoMerges: candidate["autoMergeRequest"] is [String: Any]
         )
     }
 

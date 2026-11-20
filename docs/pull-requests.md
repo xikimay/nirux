@@ -43,6 +43,18 @@ For an open pull request, Nirux counts the feedback nobody has dealt with yet: u
 
 The selected row shows the counts, people and bots apart. A click on them lists up to ten items, each opening on GitHub. Below them, **Address** types a prompt into the workspace's Claude Code session that starts with `/receiving-code-review` and names every item.
 
+## Automatic follow-up
+
+**Space Settings › Defaults › Follow up on pull requests** is on by default; only turning it off in a space stops it. From the first launch that follows a pull request, or from switching it on, feedback posted before is left to you; checks still red count. While it's on, Nirux keeps the pull requests of the space's tasks mergeable while their Claude Code sits idle. It types the prompt each one needs, in this order:
+
+- a conflict with the base: merge `<remote>/<base>`, resolve the conflicts, run the checks, push. Never a rebase.
+- a failed check (FAILURE or TIMED_OUT in the pull request's own Actions runs, not a likely flake), 2 minutes after it failed: find why, fix it, push, or say the branch didn't cause it.
+- new review feedback (review threads, and what people write besides an approval), 3 minutes after the last item: the Address prompt for the new items.
+
+It waits while the agent works, asks you something, has text in its prompt, or a Mission message waits for it; while you're on its terminal; while the checkout has uncommitted changes to tracked files (untracked files don't count) or isn't at the pull request's head; and while a merge queue holds the pull request or auto-merge is on. A review thread whose last comment is yours waits on its reviewer. One round runs at a time across tasks; the row reads `Auto follow-up 1/3 · failed checks` meanwhile.
+
+The row reads `Needs you · …` in amber with the reason when a fourth round would be due, when a round pushed nothing while its problem is still there, or when the checkout still isn't at the pull request's head 10 minutes after a round. No round goes until the pull request's head moves or the problem goes away; a prompt into the agent clears the amber line. Your own **Address** or **Ask Agent Why CI Failed** takes that feedback or failure out of its hands. Tasks only: never the main checkout or the Lead. A Claude Code resumed after a relaunch takes no round until it has taken a prompt, as with Mission messages. Its decisions go to the `followUp` log category.
+
 ## Branch Review
 
 `Review Branch`, in the command palette or a workspace's menu, opens a Branch Review column next to the agent: the whole branch on one page. It reads the branch checked out in the workspace's folder, from where it left the base branch to the working tree, uncommitted changes included, and writes nothing to the repository. The page shows:

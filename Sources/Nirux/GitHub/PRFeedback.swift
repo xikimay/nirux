@@ -16,6 +16,13 @@ struct PRFeedback: Hashable, Sendable {
         let excerpt: String
         let url: String
         let createdAt: Date
+        /// A review that approves.
+        var isApproval = false
+        /// A review thread whose last comment is ours: answered, waiting on
+        /// its reviewer.
+        var isAnswered = false
+
+        var isThread: Bool { location != "comment" }
     }
 
     /// Newest first.
@@ -33,6 +40,13 @@ struct PRFeedback: Hashable, Sendable {
     var counts: Counts? {
         items.isEmpty ? nil : Counts(humans: humanCount, bots: botCount)
     }
+
+    /// Names the items given, so the agent addresses those and not
+    /// whatever else the PR holds.
+    static func addressPrompt(for pullRequest: PRInfo, items: [Item]) -> String {
+        "/receiving-code-review Address this feedback on PR #\(pullRequest.number) (\(pullRequest.url)): "
+            + items.map(\.url).joined(separator: " ")
+    }
 }
 
 enum PRFeedbackReader {
@@ -42,7 +56,8 @@ enum PRFeedbackReader {
       author { login }
       commits(last: 1) { nodes { commit { committedDate } } }
       reviewThreads(last: 100) { nodes { isResolved isOutdated path line comments(first: 1) { nodes {
-        author { __typename login } authorAssociation isMinimized body url createdAt } } } }
+        author { __typename login } authorAssociation isMinimized body url createdAt } }
+        latest: comments(last: 1) { nodes { author { login } } } } }
       comments(last: 50) { nodes { author { __typename login } authorAssociation isMinimized body url createdAt } }
       reviews(last: 50) { nodes { state author { __typename login } authorAssociation isMinimized body url createdAt } }
     } } }
@@ -97,11 +112,14 @@ enum PRFeedbackReader {
                   counts(first, ours: ours)
             else { return nil }
             let path = thread["path"] as? String ?? ""
-            return item(
+            var threadItem = item(
                 from: first,
                 location: (thread["line"] as? Int).map { "\(path):\($0)" } ?? path,
                 isOutdated: thread["isOutdated"] as? Bool ?? false
             )
+            let last = (GitHub.dig(thread, "latest", "nodes") as? [[String: Any]])?.last
+            threadItem?.isAnswered = last.flatMap(login(of:)).map(ours.contains) == true
+            return threadItem
         }
         let conversationItems = conversation.compactMap { node -> PRFeedback.Item? in
             guard counts(node, ours: ours),
@@ -130,7 +148,8 @@ enum PRFeedbackReader {
             isOutdated: isOutdated,
             excerpt: String(excerpt(of: node).prefix(80)),
             url: url,
-            createdAt: createdAt
+            createdAt: createdAt,
+            isApproval: node["state"] as? String == "APPROVED"
         )
     }
 

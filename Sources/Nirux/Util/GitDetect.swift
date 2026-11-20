@@ -106,6 +106,31 @@ enum GitDetect {
         return isDirty
     }
 
+    /// Whether the checkout at `path` changes tracked files, read now: a
+    /// workspace's context may be seconds old. Untracked files don't count,
+    /// in a submodule neither, nor Nirux's handover at the top. Nil when git
+    /// can't say.
+    static func hasTrackedChanges(at path: String, gitPath: String = "/usr/bin/git", timeout: TimeInterval = 30) -> Bool? {
+        guard let status = BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: gitPath),
+            arguments: ["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=no", "--ignore-submodules=untracked"],
+            currentDirectoryURL: URL(fileURLWithPath: path),
+            environment: readOnlyEnvironment,
+            timeout: timeout
+        ), status.terminationStatus == 0 else { return nil }
+        return isDirty(status: status.standardOutput)
+    }
+
+    /// The checkout's HEAD commit, lowercased, read now; nil when git can't
+    /// say.
+    static func head(at path: String, gitPath: String = "/usr/bin/git", timeout: TimeInterval = 30) -> String? {
+        guard let result = gitOutput(arguments: ["rev-parse", "--verify", "HEAD"], at: path, gitPath: gitPath, timeout: timeout),
+              result.terminationStatus == 0
+        else { return nil }
+        let head = result.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        return head.isEmpty ? nil : head.lowercased()
+    }
+
     /// `startFolder`: the folder the workspace started in (its `cwd`), the
     /// one Clean Up asks about too, whichever column is focused.
     static func context(at path: String, startFolder: String? = nil) -> GitContext? {
