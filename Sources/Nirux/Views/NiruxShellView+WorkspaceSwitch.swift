@@ -86,6 +86,7 @@ extension NiruxShellView {
               workspaces.contains(where: { $0.id == floors.leaving && !$0.containerView.isHidden })
         else { return endWorkspaceSwitch() }
         placeFloorUnderneath()
+        keepUnderBar()
     }
 
     /// The floors of a switch from `leaving` to `arriving`, both in the
@@ -124,6 +125,7 @@ extension NiruxShellView {
             arrivingLayer.add(Self.floorMove(from: recede, to: 0, curve: rest), forKey: Self.floorsKey)
             shade.add(Self.floorShade(from: Self.floorsShade, to: 0, curve: rest), forKey: Self.floorsKey)
         }
+        passUnderBar([leaving, arriving])
         state.switchGeneration += 1
         let generation = state.switchGeneration
         // Not on the animation's completion, which a window out of view may
@@ -188,6 +190,7 @@ extension NiruxShellView {
 
     /// The floors back in the strip: no move, no offset, no plate, no shade.
     private func removeFloors() {
+        endUnderBar()
         guard let floors = workspaceSwitch.floors else { return }
         workspaceSwitch.floors = nil
         for workspace in workspaces where [floors.leaving, floors.arriving].contains(workspace.id) {

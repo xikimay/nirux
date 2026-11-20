@@ -24,10 +24,12 @@ extension NiruxShellView {
     }
 
     /// Where the viewport lies at rest, even while it reaches under the
-    /// rail: what centres on it (a hint, a toast, a name card) stays put.
+    /// rail or the bar: what centres on it (a hint, a toast, a name card)
+    /// stays put.
     var viewportRestFrame: NSRect {
         let reach = -viewport.bounds.minX
-        return NSRect(x: viewport.frame.minX + reach, y: viewport.frame.minY, width: viewport.frame.width - reach, height: viewport.frame.height)
+        let above = max(0, viewport.frame.maxY - bounds.maxY)
+        return NSRect(x: viewport.frame.minX + reach, y: viewport.frame.minY, width: viewport.frame.width - reach, height: viewport.frame.height - above)
     }
 
     /// No line marks the edge of a rail that floats. It fades with the
@@ -109,9 +111,11 @@ extension NiruxShellView {
         }
     }
 
-    /// Movement turned off: a pass, or its sweep, ends at once.
+    /// Movement turned off: a pass under the rail or the bar, or a sweep,
+    /// ends at once.
     func stillUnderGlass() {
         if passingUnderRail != nil || workspaces.contains(where: { !$0.containerView.clipsToBounds }) { endUnderGlass() }
+        endUnderBar()
     }
 
     /// At rest: the viewport where it lies, every workspace clipping its
