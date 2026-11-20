@@ -12,11 +12,14 @@ struct AgentStandIn {
     /// quarter of a second, as an agent busy drawing. `launchPrompt` (no
     /// single quote in it): its last argument, as an agent launched with a
     /// prompt has.
-    func command(named name: String = "claude", slowly: Bool = false, launchPrompt: String? = nil) -> String {
-        guard slowly || launchPrompt != nil else { return "stty -icanon min 1 time 0; exec -a \(name) /bin/cat > '\(received.path)'" }
+    /// `arguments` (no single quote in them) come before it.
+    func command(named name: String = "claude", slowly: Bool = false, arguments: [String] = [], launchPrompt: String? = nil) -> String {
+        guard slowly || launchPrompt != nil || !arguments.isEmpty else {
+            return "stty -icanon min 1 time 0; exec -a \(name) /bin/cat > '\(received.path)'"
+        }
         let reader = #"open(my $o, ">", $ARGV[0]); $o->autoflush(1); "#
             + #"while (sysread(STDIN, my $b, 128)) { print $o $b;"# + (slowly ? " select(undef, undef, undef, 0.25)" : "") + " }"
-        let prompt = launchPrompt.map { " '\($0)'" } ?? ""
+        let prompt = (arguments + (launchPrompt.map { [$0] } ?? [])).map { " '\($0)'" }.joined()
         return "stty -icanon min 1 time 0; exec -a \(name) /usr/bin/perl -e '\(reader)' '\(received.path)'\(prompt)"
     }
 

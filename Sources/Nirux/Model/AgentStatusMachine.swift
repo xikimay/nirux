@@ -1449,8 +1449,9 @@ struct AgentStatusMachine {
         }
         lastInputAt = time
         if inFront == nil, keys.map(Self.sendsPrompt) ?? true { submitKeys = Array((submitKeys + [time]).suffix(Self.promptMemory)) }
-        // So does Antigravity's, which it reports itself (OSC 7501 blocked).
-        let answersAgy = agyTurn?.answering == true
+        // So does Antigravity's, which it reports itself (OSC 7501 blocked),
+        // while that agy is in front.
+        let answersAgy = lastForegroundName == AgentProgramStatus.agy && agyTurn?.answering == true
         if inFront == nil, !answersAgy, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)

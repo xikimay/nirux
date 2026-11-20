@@ -1219,6 +1219,11 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertTrue(slash.isError && slash.text.contains("slash command"), slash.text)
             let told = try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity task", "message": "Review this."], lead: lead)
             XCTAssertFalse(told.isError, told.text)
+            harness.shell.sweepWaitingInstructions(
+                now: Date().timeIntervalSince1970 + MissionEventCLI.instructionHeldNotice + 1, snapshot: ProcessSnapshot()
+            )
+            XCTAssertTrue(harness.shell.pendingLeadNotices.contains { $0.text.contains("isn't typed yet: its turn isn't over") },
+                          "\(harness.shell.pendingLeadNotices.map(\.text))")
             harness.shell.typeMissionMessages()
             XCTAssertEqual(agy.agent.input, "", "not while it works")
             XCTAssertNil(instruction(of: agy.column)?.childConsumedAt)
@@ -1245,6 +1250,38 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertTrue(MissionStore.shared.missions.contains {
                 $0.oneWay == true && $0.childAgentUUID == byHand.column.agentUUID && $0.childAgentKind == "agy"
             }, "the Lead's one-way Mission")
+            harness.shell.missionWaits.checkedAt = nil
+            harness.shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + NiruxShellView.missionMessageStallAge + 1)
+            let row = try XCTUnwrap(harness.shell.missionWaits.shown[byHand.column.id])
+            XCTAssertTrue(row.line.hasSuffix("· no turn ended since it started"), row.line)
+
+            // An agy resumed on the conversation a tell was for, after it: that tell is its.
+            let resumedID = UUID().uuidString, resumedUUID = UUID().uuidString
+            let resumedMission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: resumedID, childAgentUUID: resumedUUID, childAgentKind: "agy", branch: "feat/resumed", reportsToLead: true
+            ), enabled: true))
+            harness.shell.addWorkspace(
+                title: "Resumed agy", cwd: harness.worktree, profileID: lead.space, workspaceID: resumedID, missionID: resumedMission.id,
+                reportsToLead: true
+            )
+            let resumedWorkspace = try XCTUnwrap(harness.shell.workspaces.first { $0.id == resumedID })
+            let resumedAgent = AgentStandIn()
+            defer { resumedAgent.remove() }
+            resumedWorkspace.addColumn(
+                command: "sleep 2; " + resumedAgent.command(named: "agy", arguments: ["--conversation", "conv-1"]), agentUUID: resumedUUID,
+                cwd: harness.worktree
+            )
+            let resumedColumn = try XCTUnwrap(resumedWorkspace.columns.first { $0.agentUUID == resumedUUID })
+            resumedColumn.onAgentAttention = { _ in }
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Resumed agy", "message": "Resume."], lead: lead).isError)
+            let resumedTell = try XCTUnwrap(instruction(of: resumedColumn))
+            XCTAssertTrue(MissionStore.shared.noteConversation("conv-1", ofInstruction: resumedTell.id))
+            let resumedPty = try XCTUnwrap(resumedColumn.pty)
+            harness.waitUntil("its agy, resumed") { resumedPty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
+            report(.working, in: resumedColumn)
+            report(.done, in: resumedColumn)
+            harness.waitUntil("typed into the agy that resumed its conversation") { resumedAgent.input.hasSuffix("\u{1B}[201~\n") }
         }
     }
 

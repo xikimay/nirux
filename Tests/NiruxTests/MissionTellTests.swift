@@ -448,6 +448,7 @@ final class MissionTellTests: XCTestCase {
     func testAntigravityPromptIsFreeOnceItsTurnIsDoneWithNoKeySince() {
         let agy = ForegroundProcess(instance: claudeProcess, name: "agy", arguments: ["agy", "-i", "Go"])
         var machine = AgentStatusMachine()
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0))
         func refusal(_ foreground: ForegroundProcess? = agy, since: TimeInterval = t0 + 100) -> AgentPromptRefusal? {
             machine.promptRefusal(foreground: foreground, runningSince: since, agent: "agy")
         }
@@ -512,6 +513,17 @@ final class MissionTellTests: XCTestCase {
         report(.done, at: 13, from: ProcessInstance(pid: 9, startedAt: t0))
         XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: t0), name: "agy", arguments: ["agy"])),
                        .noPromptYet, "its own turn, not another agy's")
+
+        // An agy that left with its dialog open: the keys of what runs next are drafts.
+        var after = AgentStatusMachine()
+        _ = after.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0))
+        _ = after.noteProgramStatus(AgentProgramStatus(state: .working, kind: nil, message: nil, process: "agy"), from: claudeProcess,
+                                    isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 1))
+        _ = after.noteProgramStatus(AgentProgramStatus(state: .blocked, kind: "permission", message: nil, process: "agy"), from: claudeProcess,
+                                    isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 2))
+        _ = after.tick(fgName: "claude", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 3))
+        after.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 4), keys: Data("x".utf8))
+        XCTAssertTrue(after.hasDraft, "Claude Code's draft")
     }
 
     func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {
