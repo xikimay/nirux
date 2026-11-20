@@ -91,7 +91,7 @@ extension NiruxShellView {
                 snapshot.animator().alphaValue = 0
                 snapshot.animator().frame.origin.y += self.viewport.bounds.height * 0.5
             }
-            ColumnState.afterCommit(0.3) { snapshot.removeFromSuperview() }
+            sideEffects.afterCommit(0.3) { snapshot.removeFromSuperview() }
         }
     }
 

@@ -123,7 +123,7 @@ final class SpaceCrossingTests: XCTestCase {
     /// crossing; a layout that changes nothing leaves it.
     func testAnotherWorkspaceOrAMoveEndsACrossing() throws {
         try withSpaces { shell, _, _ in
-            _ = TimedSteps(on: shell)
+            let steps = TimedSteps(on: shell)
             shell.focusSpace(.next)
             shell.relayout(animated: false)
             XCTAssertEqual(Self.frozenViews(in: shell).count, 1, "a layout that changes nothing")
@@ -131,7 +131,8 @@ final class SpaceCrossingTests: XCTestCase {
             XCTAssertTrue(shell.crossingPictures.isEmpty, "⌘N")
             XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
 
-            waitUntil("the new workspace's slide gone", timeout: 2) { Self.frozenViews(in: shell).isEmpty }
+            while steps.runNext() {}
+            XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "the new workspace's slide gone")
             shell.focusSpace(.next)
             XCTAssertFalse(shell.crossingPictures.isEmpty)
             shell.focusColumn(.right)
@@ -186,6 +187,7 @@ final class SpaceCrossingTests: XCTestCase {
             window.contentView = shell
             window.orderFront(nil)
             defer { window.close() }
+            let setup = TimedSteps(on: shell)
             let first = shell.activeProfileID
             let second = shell.workspaceStore.createProfile(named: "Second", select: true).id
             shell.addWorkspace(title: "second", cwd: NSTemporaryDirectory())
@@ -194,7 +196,8 @@ final class SpaceCrossingTests: XCTestCase {
             for column in workspace.columns { column.widthFraction = 0.5 }
             shell.relayout(animated: false)
             shell.selectProfile(first)
-            waitUntil("the new workspace's slide gone", timeout: 2) { Self.frozenViews(in: shell).isEmpty }
+            while setup.runNext() {}
+            XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "the new workspace's slide gone")
             try body(shell, first, second)
         }
     }
