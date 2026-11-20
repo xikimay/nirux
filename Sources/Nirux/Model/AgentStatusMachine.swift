@@ -246,9 +246,19 @@ struct AgentStatusMachine {
     private(set) var codexStatus: ReportedStatus?
     /// When Codex last said it works, and which `codex`: a turn started.
     private(set) var codexWorked: (at: TimeInterval, process: ProcessInstance?)?
-    /// When Antigravity last said it works, and which `agy`: its turn began
-    /// then (`promptRefusal`).
-    private(set) var agyWorked: (at: TimeInterval, process: ProcessInstance?)?
+    /// Antigravity's current or last turn (`promptRefusal`).
+    private(set) var agyTurn: AgyTurn?
+
+    /// A turn of the `agy` `process`, from its first `working` (another
+    /// after a dialog, or redrawn, is the same turn's) to `done`, `idle` or
+    /// `error`.
+    struct AgyTurn: Equatable {
+        let startedAt: TimeInterval
+        let process: ProcessInstance?
+        var open = true
+        /// It said `done`: not stopped with Esc, which says `idle`.
+        var done = false
+    }
 
     /// What Antigravity reported, when, from which process, and whether its
     /// wait alerted.
@@ -1436,7 +1446,9 @@ struct AgentStatusMachine {
         }
         lastInputAt = time
         if inFront == nil, keys.map(Self.sendsPrompt) ?? true { submitKeys = Array((submitKeys + [time]).suffix(Self.promptMemory)) }
-        if inFront == nil, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
+        // So does Antigravity's, which it reports itself (OSC 7501 blocked).
+        let answersAgy = programStatus?.status.state == .blocked
+        if inFront == nil, !answersAgy, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)
             if Self.mayLeaveText(keys) { lastTextInputAt = time }
@@ -1592,7 +1604,17 @@ struct AgentStatusMachine {
     ) -> AgentAttentionReason? {
         guard status != programStatus?.status || process != programStatus?.process else { return nil }
         programStatus = ReportedStatus(status: status, at: now.timeIntervalSince1970, process: process)
-        if status.state == .working { agyWorked = (now.timeIntervalSince1970, process) }
+        switch status.state {
+        case .working where agyTurn?.process != process || agyTurn?.open != true:
+            agyTurn = AgyTurn(startedAt: now.timeIntervalSince1970, process: process)
+        case .done where agyTurn?.process == process:
+            agyTurn?.open = false
+            agyTurn?.done = true
+        case .idle where agyTurn?.process == process, .error where agyTurn?.process == process:
+            agyTurn?.open = false
+        default:
+            break
+        }
         _ = reportedState(isUserFocused: isUserFocused, now: now.timeIntervalSince1970)
         guard !isUserFocused, state == .needsAttention, status.state != .working, status.state != .idle,
               status.kind != "auth" else { return nil }
@@ -1769,7 +1791,7 @@ struct AgentStatusMachine {
         programStatus = nil
         codexStatus = nil
         codexWorked = nil
-        agyWorked = nil
+        agyTurn = nil
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false

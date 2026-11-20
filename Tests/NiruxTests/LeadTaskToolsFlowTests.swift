@@ -1089,7 +1089,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             shell.sweepWaitingInstructions(now: Date().timeIntervalSince1970 + MissionEventCLI.instructionHeldNotice + 1, snapshot: ProcessSnapshot())
             XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("isn't typed yet: its conversation isn't known yet") },
                           "\(shell.pendingLeadNotices.map(\.text))")
-            shell.missionWaits.codexStartWait = 0.2
+            shell.missionWaits.startWait = 0.2
 
             thread("main", first: prompt, of: task)
             thread("title-2", first: "Generate a concise title.", of: task)
@@ -1213,6 +1213,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
 
             let agy = try task("Antigravity task", kind: "agy")
             defer { agy.agent.remove() }
+            harness.shell.missionWaits.startWait = 0.2
             report(.working, in: agy.column)
             let told = try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity task", "message": "Review this."], lead: lead)
             XCTAssertFalse(told.isError, told.text)
@@ -1223,6 +1224,9 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             harness.waitUntil("typed, then Enter") { agy.agent.input.hasSuffix("\u{1B}[201~\n") }
             XCTAssertTrue(agy.agent.input.contains("Review this."), agy.agent.input)
             XCTAssertNotNil(instruction(of: agy.column)?.childConsumedAt)
+            harness.waitUntil("its sender told agy didn't start it") {
+                harness.shell.pendingLeadNotices.contains { $0.text.contains("but Antigravity hasn't started it") }
+            }
 
             let claude = try task("Claude task", kind: "claude")
             defer { claude.agent.remove() }

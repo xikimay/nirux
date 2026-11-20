@@ -130,9 +130,10 @@ struct MissionWaitState {
     var recordReadings: [ProcessInstance: ClaudeSessionRecord.Reading] = [:]
     /// A typing pass waits for a queue a writer held (`hooksReadBeforeTyping`).
     var typingPassSoon = false
-    /// How long Codex may take to start a message it queued while idle
-    /// before its sender hears it hasn't (`queueForCodex`).
-    var codexStartWait: TimeInterval = 20
+    /// How long Codex or Antigravity may take to start a message Nirux
+    /// handed it at a free prompt before its sender hears it hasn't
+    /// (`checkStarted`).
+    var startWait: TimeInterval = 20
     /// Columns whose Codex is being handed a message: one at a time, so
     /// that its queue keeps their order.
     var codexQueuing: Set<UUID> = []
@@ -206,7 +207,9 @@ extension NiruxShellView {
             let since = runningSince(of: event, in: column, snapshot: snapshot, now: now)
             let agent = mission.childAgentName
             let refusal = agent == "Codex" ? column.codexMissionRefusal(runningSince: since, snapshot: snapshot)
-                : column.pty?.missionPromptRefusal(runningSince: since, snapshot: snapshot, now: now, record: sessionRecord(of:)) ?? .noClaude
+                : column.pty?.missionPromptRefusal(
+                    runningSince: since, snapshot: snapshot, agent: mission.childAgentKind, now: now, record: sessionRecord(of:)
+                ) ?? .noClaude
             let holder = {
                 agent == nil ? "its agent hasn't collected it"
                     : !mission.isCarried(handoffsEnabled: handoffsEnabled) ? "Mission handoffs are off"
@@ -273,7 +276,7 @@ extension NiruxShellView {
                 ?? Self.currentMissionHandoffsEnabled()
             missionWaits.handoffsEnabled = (deliveryIDs, handoffsEnabled)
             for delivery in deliveries where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
-                // A child other than Claude Code or Codex collects its own.
+                // A child Nirux delivers nothing to collects its own.
                 guard Self.goesToParent(delivery.event) || delivery.mission.childAgentName != nil else { continue }
                 let recipient = missionRecipient(of: delivery)
                 add(recipient, WaitingMessage(
@@ -303,7 +306,9 @@ extension NiruxShellView {
                 // Another agent in front: what holds its own messages, if any, says why.
                 if let name = foreground?.name, name != message.agentKind, AgentStatusMachine.isRecognizedAgentProcess(name) { return nil }
                 let refusal = pty.map {
-                    $0.missionPromptRefusal(runningSince: message.runningSince, snapshot: snapshot, now: now, record: sessionRecord(of:))
+                    $0.missionPromptRefusal(
+                        runningSince: message.runningSince, snapshot: snapshot, agent: message.agentKind, now: now, record: sessionRecord(of:)
+                    )
                 } ?? .noClaude
                 guard refusal != .draft || missionWaits.typedAt[id] == nil else { return nil }
                 return (message, refusal)

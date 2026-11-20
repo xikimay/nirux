@@ -300,14 +300,13 @@ extension NiruxShellView {
                 queueForCodex(delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title, snapshot: snapshot, now: now)
                 continue
             }
-            // Only to the agent its Mission names (`recipientKind`).
             guard let recipient = missionRecipient(of: delivery), let pty = recipient.pty,
-                  !missionWaits.typing.contains(delivery.event.id),
-                  pty.foregroundProcess(snapshot: snapshot)?.name == Self.recipientKind(of: delivery)
+                  !missionWaits.typing.contains(delivery.event.id)
             else { continue }
+            // Only into the agent its Mission names (`recipientKind`).
             let refusal = pty.missionPromptRefusal(
                 runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now), snapshot: snapshot,
-                seenByUser: recipient.id == seenAtPrompt
+                seenByUser: recipient.id == seenAtPrompt, agent: Self.recipientKind(of: delivery)
             )
             if recipient.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
             guard refusal == nil,
@@ -324,9 +323,21 @@ extension NiruxShellView {
                 : nil
             let recipientTitle = MissionPromptText.quoted((toChild ? childWorkspace : parentWorkspace)?.title ?? mission.branch)
             missionWaits.typing.insert(delivery.event.id)
-            typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { [weak self] typed in
-                self?.finishTyping(delivery, typed)
-                self?.reportUnsent(typed, what: byUser ? "your answer" : "a Mission message", for: recipientTitle, telling: sender)
+            let front = pty.foregroundProcess(snapshot: snapshot)?.instance
+            let toAgy = Self.recipientKind(of: delivery) == AgentProgramStatus.agy
+            typeMissionPrompt(paste, into: pty, keepingInFront: front) { [weak self] typed in
+                guard let self else { return }
+                self.finishTyping(delivery, typed)
+                self.reportUnsent(typed, what: byUser ? "your answer" : "a Mission message", for: recipientTitle, telling: sender)
+                // agy says when it takes a prompt (OSC 7501 working).
+                guard typed == .sent, toAgy, let front else { return }
+                self.checkStarted(front, in: pty, since: now) {
+                    if let sender {
+                        self.tellProposer(sender, "Your message to “\(recipientTitle)” was typed into its prompt, but Antigravity hasn't "
+                            + "started it: it may still sit there. Look at “\(recipientTitle)” before sending it again.")
+                    }
+                    self.showToast("Antigravity in “\(recipientTitle)” hasn't started the Mission message typed into it.")
+                }
             }
             missionWaits.noteTyped(into: recipient, at: now)
             if recipient.id == seenAtPrompt { onSight = .typed }
@@ -382,7 +393,7 @@ extension NiruxShellView {
     /// for the thread its `codex` proved it runs (`CodexQueue`), once
     /// Codex reports its turn over: Codex taking it counts as typed. It
     /// starts it at once, that conversation being idle; if it says nothing
-    /// for `MissionWaitState.codexStartWait`, the message's sender and the
+    /// for `MissionWaitState.startWait`, the message's sender and the
     /// user hear so.
     private func queueForCodex(
         _ delivery: MissionStore.AcceptedEvent, childTitle: String?, parentTitle: String?, snapshot: ProcessSnapshot,
@@ -415,8 +426,7 @@ extension NiruxShellView {
             case .queued:
                 self.finishTyping(delivery, .sent)
                 self.updateSidebar()
-                DispatchQueue.main.asyncAfter(deadline: .now() + self.missionWaits.codexStartWait) { [weak self, weak pty] in
-                    guard let self, let pty, !pty.codexWorked(since: sentAt, by: codex.instance) else { return }
+                self.checkStarted(codex.instance, in: pty, since: sentAt) {
                     self.tellProposer(sender, "Your message to “\(recipient)” is in its Codex's queue, but Codex hasn't started it yet: "
                         + "it starts it once that conversation is idle. Don't send it again.")
                     self.showToast("Codex in “\(recipient)” hasn't started the Mission message in its queue yet.")
@@ -436,6 +446,18 @@ extension NiruxShellView {
             }
         }
         missionWaits.noteTyped(into: column, at: now)
+    }
+
+    /// Runs `notice` when `process`, an agent that says its state (Codex,
+    /// Antigravity), started no turn `MissionWaitState.startWait` after
+    /// `sentAt`, when Nirux handed it a message.
+    private func checkStarted(
+        _ process: ProcessInstance, in pty: PtySession, since sentAt: TimeInterval, notice: @escaping @MainActor () -> Void
+    ) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + missionWaits.startWait) { [weak pty] in
+            guard let pty, !pty.startedTurn(since: sentAt, by: process) else { return }
+            notice()
+        }
     }
 
     /// Records what became of a Mission message Nirux typed: typed once its
@@ -590,7 +612,12 @@ extension NiruxShellView {
         default: break
         }
         if let foreground, foreground.name == AgentProgramStatus.codex { return column.provenCodexSessionID(of: foreground) }
-        if let foreground, foreground.name == AgentProgramStatus.agy { return column.boundAgySessionID(of: foreground.instance) }
+        if let foreground, foreground.name == AgentProgramStatus.agy {
+            // One resumed by hand says none in its hooks until a turn ends.
+            let arguments = foreground.arguments
+            return column.boundAgySessionID(of: foreground.instance)
+                ?? arguments.firstIndex(of: "--conversation").flatMap { arguments[safe: $0 + 1] }
+        }
         return column.confirmedClaudeSessionID(foregroundProcess: foreground)
     }
 

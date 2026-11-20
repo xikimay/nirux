@@ -96,12 +96,14 @@ extension AgentStatusMachine {
         promptRefusal(foreground: foreground, runningSince: time, seenByUser: seenByUser, showsIdlePrompt: showsIdlePrompt) == nil
     }
 
-    /// Why `isPromptFree` says no, nil when it says yes.
+    /// Why `isPromptFree` says no, nil when it says yes. `agent`: the kind
+    /// of agent the text is for, Claude Code unless an Antigravity Mission
+    /// child's (`agyPromptRefusal`).
     func promptRefusal(
-        foreground: ForegroundProcess?, runningSince time: TimeInterval,
-        seenByUser: Bool = false, showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
+        foreground: ForegroundProcess?, runningSince time: TimeInterval, seenByUser: Bool = false,
+        agent: String = NiruxApp.WorkspaceAgent.claude.rawValue, showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
     ) -> AgentPromptRefusal? {
-        if let foreground, foreground.name == AgentProgramStatus.agy { return agyPromptRefusal(foreground, runningSince: time) }
+        if agent == AgentProgramStatus.agy { return agyPromptRefusal(foreground, runningSince: time) }
         guard let foreground, AgentHookCenter.isInteractiveClaude(foreground) else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
         let startedAt = foreground.instance.startedAt
@@ -124,24 +126,24 @@ extension AgentStatusMachine {
 
     /// `promptRefusal` for `agy`, the column's interactive Antigravity,
     /// already running at `time`, which says its state itself (OSC 7501):
-    /// its prompt is free once it reported its turn over (`done`) and no key
-    /// reached the terminal since that turn began. It says `idle` at the
-    /// first key after `done`, but a key typed while it worked stays in its
-    /// box. Its dialogs report `blocked`; before its first turn ends it may
-    /// show a screen no state tells of, so one that ended none since it
-    /// started waits for that.
-    private func agyPromptRefusal(_ agy: ForegroundProcess, runningSince time: TimeInterval) -> AgentPromptRefusal? {
-        guard !AgentHookCenter.isHeadlessAgy(agy) else { return .noClaude }
+    /// its prompt is free once its turn ended (`done`, or `idle` after it,
+    /// at a key) and no key that may leave text reached the terminal since
+    /// that turn began (`AgyTurn`): a key typed while it works stays in its
+    /// box (agy 1.5.12), keys that answer its dialogs don't. Stopped with Esc
+    /// (`idle` without `done`), its box may hold its prompt again. Before its
+    /// first turn ends it may show a screen no state tells of: one that ended
+    /// none since it started waits for that.
+    private func agyPromptRefusal(_ agy: ForegroundProcess?, runningSince time: TimeInterval) -> AgentPromptRefusal? {
+        guard let agy, agy.name == AgentProgramStatus.agy, !AgentHookCenter.isHeadlessAgy(agy) else { return .noClaude }
         guard agy.instance.startedAt <= time else { return .restarted }
-        guard let reported = programStatus, reported.process == agy.instance,
-              let workedAt = agyWorked.flatMap({ $0.process == agy.instance ? $0.at : nil })
+        guard let reported = programStatus, reported.process == agy.instance, let turn = agyTurn, turn.process == agy.instance
         else { return .noPromptYet }
         switch reported.status.state {
         case .working: return .working
         case .blocked: return .dialog
         case .error: return .failedTurn
-        case .idle: return .draft
-        case .done: return lastDraftInputAt > workedAt ? .draft : nil
+        case .idle where !turn.done: return .draft
+        case .idle, .done: return lastDraftInputAt > turn.startedAt ? .draft : nil
         }
     }
 

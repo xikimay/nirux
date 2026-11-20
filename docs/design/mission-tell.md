@@ -75,8 +75,8 @@ child's prompt.
   typed; 3 not typed yet, and the same command again resumes the wait instead
   of queuing the text twice (like `ask`, its ID is derived from the text; a
   message typed less than 60 s ago counts as that same one); 4 no Mission on
-  that branch from this terminal, a child that runs neither Claude Code nor
-  Codex, or handoffs off; 2 usage; 1 state.
+  that branch from this terminal, a child Nirux delivers nothing to, or
+  handoffs off; 2 usage; 1 state.
 - **Ledger:** a new event kind `instruction` (parent → child), with
   `childConsumedAt` set once typed. Nirux routes only events that carry the
   recorded parent identity; as for `reply`, any process of the user that can
