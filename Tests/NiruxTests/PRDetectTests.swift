@@ -93,19 +93,25 @@ final class PRDetectTests: XCTestCase {
 
         XCTAssertFalse(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
 
+        XCTAssertEqual(GitDetect.hasTrackedChanges(at: directory.path), false)
+
         let untrackedFile = directory.appendingPathComponent("untracked.txt")
         try "new\n".write(to: untrackedFile, atomically: true, encoding: .utf8)
         XCTAssertTrue(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
+        XCTAssertEqual(GitDetect.hasTrackedChanges(at: directory.path), false)
         try FileManager.default.removeItem(at: untrackedFile)
 
         try "modified\n".write(to: trackedFile, atomically: true, encoding: .utf8)
         XCTAssertTrue(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
+        XCTAssertEqual(GitDetect.hasTrackedChanges(at: directory.path), true)
         try runGit(["restore", "tracked.txt"], at: directory)
         XCTAssertFalse(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
 
         try "staged\n".write(to: trackedFile, atomically: true, encoding: .utf8)
         try runGit(["add", "tracked.txt"], at: directory)
         XCTAssertTrue(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
+        XCTAssertEqual(GitDetect.hasTrackedChanges(at: directory.path), true)
+        XCTAssertNil(GitDetect.hasTrackedChanges(at: directory.appendingPathComponent("missing").path))
     }
 
     func testNiruxHandoversDoNotMakeTheWorktreeDirty() throws {

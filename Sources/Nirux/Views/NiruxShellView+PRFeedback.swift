@@ -49,7 +49,7 @@ extension NiruxShellView {
         }
         for scope in scopes {
             let title = refusal.map { "\(scope.title) (\($0))" } ?? scope.title
-            let prompt = Self.prFeedbackAddressPrompt(for: pullRequest, items: scope.items)
+            let prompt = PRFeedback.addressPrompt(for: pullRequest, items: scope.items)
             menu.addClosureItem(title: title) { [weak self, weak workspace] in
                 guard let self, let workspace else { return }
                 self.addressPRFeedback(in: workspace, prompt: prompt)
@@ -61,13 +61,6 @@ extension NiruxShellView {
     private static func prFeedbackMenuTitle(_ item: PRFeedback.Item) -> String {
         let outdated = item.isOutdated ? " (outdated)" : ""
         return "\(item.isBot ? "🤖" : "💬") \(item.author) · \(item.location)\(outdated) · \(item.excerpt)"
-    }
-
-    /// Names the items the user saw, so the agent addresses those and not
-    /// whatever else the PR holds.
-    static func prFeedbackAddressPrompt(for pullRequest: PRInfo, items: [PRFeedback.Item]) -> String {
-        "/receiving-code-review Address this feedback on PR #\(pullRequest.number) (\(pullRequest.url)): "
-            + items.map(\.url).joined(separator: " ")
     }
 
     /// Why Address can't type into the agent now; nil when it can.

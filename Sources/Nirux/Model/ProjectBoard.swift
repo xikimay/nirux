@@ -43,6 +43,9 @@ extension ProjectBoard {
         /// The check run's `detailsUrl`, or the commit status's `targetUrl`.
         /// Set by whoever posted the check: untrusted.
         let url: String?
+        /// A finished check run's conclusion, uppercased (CANCELLED,
+        /// TIMED_OUT…); nil for a commit status.
+        var conclusion: String?
 
         /// `Workflow / job`, as board.json may name it.
         var qualifiedName: String? {

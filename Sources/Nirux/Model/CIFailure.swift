@@ -25,9 +25,15 @@ enum CIFailure {
     /// The Actions runs of the red checks in the pull request's repository,
     /// each once, in order.
     static func runs(_ pullRequest: PRInfo) -> [Run] {
+        runs(of: redChecks(pullRequest), in: pullRequest)
+    }
+
+    /// The Actions runs of `checks` in the pull request's repository, each
+    /// once, in order.
+    static func runs(of checks: [ProjectBoard.Check], in pullRequest: PRInfo) -> [Run] {
         guard let own = parse(pullRequest.url), own.rest.first == "pull" else { return [] }
         var runs: [Run] = []
-        for run in redChecks(pullRequest).compactMap(run(of:))
+        for run in checks.compactMap(run(of:))
         where run.repository.lowercased() == own.repository.lowercased() && !runs.contains(run) {
             runs.append(run)
         }
@@ -77,8 +83,18 @@ enum CIFailure {
     }
 
     static func whyFailedPrompt(pullRequest: Int, runs: [Run]) -> String {
-        let commands = runs.map { "`gh run view \($0.id) --repo \($0.repository) --log-failed`" }
-        return "CI failed on PR #\(pullRequest). Run \(commands.joined(separator: " and ")), then tell me why it failed."
+        "CI failed on PR #\(pullRequest). Run \(logCommands(runs)), then tell me why it failed."
+    }
+
+    /// Nirux's own round (`PRFollowUp`): the fix too, or nothing pushed
+    /// for a failure the branch didn't cause.
+    static func fixPrompt(pullRequest: Int, runs: [Run]) -> String {
+        "CI failed on PR #\(pullRequest). Run \(logCommands(runs)), find why it failed, fix it, run the checks, "
+            + "commit and push. If this branch didn't cause it, say so and push nothing."
+    }
+
+    private static func logCommands(_ runs: [Run]) -> String {
+        runs.map { "`gh run view \($0.id) --repo \($0.repository) --log-failed`" }.joined(separator: " and ")
     }
 
     static func rerunArguments(_ run: Run) -> [String] {

@@ -16,6 +16,10 @@ struct PRFeedback: Hashable, Sendable {
         let excerpt: String
         let url: String
         let createdAt: Date
+        /// A review that approves.
+        var isApproval = false
+
+        var isThread: Bool { location != "comment" }
     }
 
     /// Newest first.
@@ -27,6 +31,13 @@ struct PRFeedback: Hashable, Sendable {
     /// What the card shows; nil when there's nothing.
     var sidebarCounts: SidebarPRFeedback? {
         items.isEmpty ? nil : SidebarPRFeedback(humans: humanCount, bots: botCount)
+    }
+
+    /// Names the items given, so the agent addresses those and not
+    /// whatever else the PR holds.
+    static func addressPrompt(for pullRequest: PRInfo, items: [Item]) -> String {
+        "/receiving-code-review Address this feedback on PR #\(pullRequest.number) (\(pullRequest.url)): "
+            + items.map(\.url).joined(separator: " ")
     }
 }
 
@@ -127,7 +138,8 @@ enum PRFeedbackReader {
             isOutdated: isOutdated,
             excerpt: String(excerpt(of: node).prefix(80)),
             url: url,
-            createdAt: createdAt
+            createdAt: createdAt,
+            isApproval: node["state"] as? String == "APPROVED"
         )
     }
 
