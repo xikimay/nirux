@@ -67,6 +67,17 @@ final class ClaudeSessionRecordTests: XCTestCase {
         XCTAssertFalse(stale.allowsTypingOnSight(of: process, now: 1_002.9))
     }
 
+    /// Its times come in milliseconds: read back, a status set as its
+    /// process started can land a hair before that start, or after it. It
+    /// still belongs to it, and settles on time.
+    func testARecordReadBackFromMillisecondsBelongsAndSettlesOnTime() {
+        let started = ProcessInstance(pid: 4242, startedAt: 1_795_134_038.032965)
+        let early = started.startedAt.nextDown, late = started.startedAt.nextUp
+        XCTAssertTrue(record("idle", changedAt: early, writtenAt: early).belongs(to: started))
+        XCTAssertTrue(record("idle", changedAt: late, writtenAt: late).showsIdlePrompt(of: started, now: started.startedAt + ClaudeSessionRecord.settleTime))
+        XCTAssertFalse(record("idle", changedAt: started.startedAt - 0.01).belongs(to: started), "an earlier process's")
+    }
+
     /// Found in the config folder Claude Code uses, `.claude` in its home
     /// unless `CLAUDE_CONFIG_DIR` names one, read without waiting and only
     /// up to Claude Code's size; missing and unreadable are told apart for
