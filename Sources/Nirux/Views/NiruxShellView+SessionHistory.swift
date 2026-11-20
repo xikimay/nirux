@@ -12,7 +12,6 @@ extension NiruxShellView {
               let sessionID = event.sessionID, !sessionID.isEmpty else { return }
         let resolution = appliedEvent.resolution
         let workspace = resolution.workspace
-        guard SessionHistory.agents.contains(event.kind) else { return }
         let agentProcess: ForegroundProcess?
         switch event.kind {
         case .claude:
@@ -24,6 +23,7 @@ extension NiruxShellView {
                     ? $0 : nil
             }
         case .agy, .gemini, .opencode:
+            // Not in `SessionHistory.agents`.
             return
         }
         // A permission dialog and its answer only move the status: no disk

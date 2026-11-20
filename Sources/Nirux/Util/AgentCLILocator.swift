@@ -17,9 +17,9 @@ enum AgentCLILocator {
     ) -> AgentCLIAvailability {
         let directories = searchDirectories(path: path, home: home, systemDirectories: systemDirectories)
         return AgentCLIAvailability(
-            claudePath: executable(named: CodingAgent.claude.rawValue, in: directories),
-            codexPath: executable(named: CodingAgent.codex.rawValue, in: directories),
-            agyPath: executable(named: CodingAgent.agy.rawValue, in: directories)
+            claudePath: executable(named: "claude", in: directories),
+            codexPath: executable(named: "codex", in: directories),
+            agyPath: executable(named: "agy", in: directories)
         )
     }
 

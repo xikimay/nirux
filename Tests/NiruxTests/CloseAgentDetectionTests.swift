@@ -168,6 +168,28 @@ final class CloseAgentDetectionTests: XCTestCase {
         }
     }
 
+    /// Nirux types prompts only into an agent its hooks drive: one read from
+    /// its output says nothing of a dialog a prompt would answer.
+    @MainActor
+    func testTypedPromptsReachOnlyAgentsDrivenByHooks() async throws {
+        try await withScratchStateDirectory { cwd in
+            let names = ["claude", "codex", "opencode", "agy"]
+            let agents = names.map { name in
+                let session = PtySession()
+                session.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a \(name) /bin/cat"], cwd: cwd)
+                return session
+            }
+            let shell = PtySession()
+            shell.start(shell: "/bin/zsh", args: ["-f"], cwd: cwd)
+            try await waitUntil("each agent in front", timeout: 5) {
+                agents.map { $0.foregroundProcessName(snapshot: ProcessSnapshot()) } == names
+            }
+            let snapshot = ProcessSnapshot()
+            XCTAssertEqual(agents.map { $0.acceptsTypedPrompts(snapshot: snapshot) }, [true, true, false, false])
+            XCTAssertFalse(shell.acceptsTypedPrompts(snapshot: snapshot))
+        }
+    }
+
     @MainActor
     func testEmptySnapshotFallsBackToTheHeartbeatsView() async throws {
         try await withScratchStateDirectory { cwd in

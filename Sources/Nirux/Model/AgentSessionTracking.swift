@@ -177,8 +177,7 @@ enum CodexLaunch {
 
     /// The thread `codex resume <id>` named.
     static func resumedThread(of process: ForegroundProcess) -> String? {
-        guard let index = CodingAgent.codex.resumeArgument.flatMap(process.arguments.firstIndex(of:)),
-              process.arguments.indices.contains(index + 1),
+        guard let index = process.arguments.firstIndex(of: "resume"), process.arguments.indices.contains(index + 1),
               !process.arguments[index + 1].hasPrefix("-") else { return nil }
         return process.arguments[index + 1]
     }
@@ -189,9 +188,7 @@ enum CodexLaunch {
     /// subcommand (`resume`, `fork`…) comes first.
     static func prompt(of process: ForegroundProcess) -> String? {
         let arguments = process.arguments
-        let program = arguments.firstIndex {
-            (($0 as NSString).lastPathComponent as NSString).deletingPathExtension == CodingAgent.codex.rawValue
-        } ?? 0
+        let program = arguments.firstIndex { (($0 as NSString).lastPathComponent as NSString).deletingPathExtension == "codex" } ?? 0
         guard arguments.count > program + 1, let last = arguments.last, !last.hasPrefix("-"),
               arguments.count - 2 == program || !CodingAgent.codexOptionsWithValue.contains(arguments[arguments.count - 2])
         else { return nil }

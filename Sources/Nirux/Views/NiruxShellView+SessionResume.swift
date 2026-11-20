@@ -98,7 +98,8 @@ extension NiruxShellView {
     /// arguments they run with (the session a launch resumes); the session
     /// a restored column will resume; the one an agent died on mid-turn.
     static func agentSessionHolders(in workspaces: [WorkspaceState], snapshot: ProcessSnapshot) -> [AgentSessionHolder] {
-        let agentNames = Set(CodingAgent.allCases.filter { $0.resumeArgument != nil }.map(\.rawValue))
+        // The agents whose launch line names the session it resumes.
+        let agentNames = Set([CodingAgent.claude, .codex, .agy].map(\.rawValue))
         return workspaces.flatMap { workspace in
             workspace.columns.map { column in
                 var holder = AgentSessionHolder(workspaceID: workspace.id, columnID: column.id)

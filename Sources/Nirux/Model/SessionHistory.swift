@@ -4,8 +4,10 @@ import Foundation
 /// session: ⌘P lists a space's past sessions under "Sessions", and picking
 /// one resumes it (`NiruxShellView.resumeSession`).
 enum SessionHistory {
-    /// The agents whose sessions it lists: those their hooks drive.
-    static let agents = CodingAgent.allCases.filter { $0.statusSource == .hooks }
+    /// The agents whose sessions it lists: their hooks report each
+    /// session's start, turns and end. Antigravity's only name its
+    /// conversation.
+    static let agents: [CodingAgent] = [.claude, .codex]
 
     static let paletteSectionTitle = "Sessions"
     /// ⌘P lists this many past sessions at most, the most recently active.

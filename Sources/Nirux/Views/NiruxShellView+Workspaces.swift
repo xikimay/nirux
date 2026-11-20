@@ -266,6 +266,8 @@ extension NiruxShellView {
     ) {
         guard let col = workspace.columns[safe: workspace.focusedIndex],
               let launch = Self.launch(of: agent, resume: nil, in: workspace) else { return }
+        // A new agy says which conversation it runs through Nirux's hook.
+        if agent == .agy { AgentHookInstaller.installAgyHooksIfInstalling() }
         let cmd = agentCommand(
             launch, in: workspace, launchDirectory: workspace.cwd,
             sessionName: SessionName.make(

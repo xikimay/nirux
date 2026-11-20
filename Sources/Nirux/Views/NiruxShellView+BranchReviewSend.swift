@@ -167,14 +167,7 @@ extension NiruxShellView {
                       MergeQueue.isInside(Self.comparablePath(folder), roots: roots, allWorktrees: others) else { continue }
                 let foreground = pty.foregroundProcess(snapshot: snapshot)
                 let inFront = foreground?.agent != nil
-                let refusal: ReviewSendRefusal? = if inFront {
-                    pty.reviewSendRefusal(snapshot: snapshot)
-                } else if let foreground, Shell.isShell(foreground.name) {
-                    // A shell in front runs the agent stopped or in the background, not as a launcher.
-                    .notInFront
-                } else {
-                    .underLauncher(foreground?.name ?? "another program")
-                }
+                let refusal = inFront ? pty.reviewSendRefusal(snapshot: snapshot) : Self.reviewSendRefusal(behind: foreground)
                 columns.append(ReviewSendColumn(
                     workspaceID: workspace.id, columnID: column.id,
                     label: "\(workspace.title) — \(agent.rawValue), column \(index + 1) · \((folder as NSString).abbreviatingWithTildeInPath)",
@@ -184,6 +177,14 @@ extension NiruxShellView {
             }
         }
         return columns
+    }
+
+    /// Why the comments can't go to an agent that isn't in front of its
+    /// terminal: a shell in front runs it stopped or in the background,
+    /// another program runs it as a launcher.
+    nonisolated static func reviewSendRefusal(behind foreground: ForegroundProcess?) -> ReviewSendRefusal {
+        guard let foreground else { return .underLauncher("another program") }
+        return Shell.isShell(foreground.name) ? .notInFront : .underLauncher(foreground.name)
     }
 
     /// What the sheet says of `send` and the columns it could go to.

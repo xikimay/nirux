@@ -733,9 +733,16 @@ extension NiruxShellView {
 
     // MARK: - Terminal Redraw
 
-    /// Heavy redraw: refresh every terminal surface and additionally send
-    /// Ctrl+L (0x0C) to any foreground process that isn't a plain shell or
-    /// a recognized agent (vim, htop, etc.) so TUI apps repaint their buffer.
+    /// Ctrl+L repaints a TUI in front (vim, htop). Not a shell, nor an
+    /// agent: it redraws from SIGWINCH alone, and Ctrl+L clears its
+    /// session (Claude Code rebinds it to `/clear`, Gemini CLI clears its
+    /// history), so a layout change (⌘E's width cycle) wiped active ones.
+    nonisolated static func repaintsWithCtrlL(_ processName: String) -> Bool {
+        !Shell.isShell(processName) && CodingAgent(rawValue: processName) == nil
+    }
+
+    /// Heavy redraw: refresh every terminal surface, and Ctrl+L to the
+    /// programs that need it to repaint their buffer.
     func redrawAllTerminals() {
         let snap = ProcessSnapshot()
         for workspace in workspaces {
@@ -743,13 +750,7 @@ extension NiruxShellView {
                 col.terminalView?.fitToSize()
                 col.pty?.forceRedraw()
                 col.terminalView?.needsDisplay = true
-                // Ctrl+L to any non-shell TUI (vim, htop, etc.). Agents
-                // redraw from SIGWINCH alone, and Ctrl+L clears theirs:
-                // Claude Code rebinds it to `/clear`, Gemini CLI clears its
-                // history, so a layout change (⌘E's width cycle) wiped
-                // active sessions.
-                if let name = col.pty?.foregroundProcessName(snapshot: snap),
-                   !Shell.isShell(name), CodingAgent(rawValue: name) == nil {
+                if let name = col.pty?.foregroundProcessName(snapshot: snap), Self.repaintsWithCtrlL(name) {
                     col.pty?.sendRaw(Data([0x0C]))
                 }
             }

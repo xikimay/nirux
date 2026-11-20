@@ -51,9 +51,13 @@ enum CodingAgent: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    /// Nirux starts it: it has an `AgentLaunch`.
+    /// Nirux starts it: ⌘N, Space Settings › Defaults, `nirux://…agent=`,
+    /// the Agent menu and the palette (`AgentLaunch`).
     var isLaunchable: Bool {
-        AgentLaunch(self, resume: nil, claudeMode: .default, codexMode: .default) != nil
+        switch self {
+        case .claude, .codex, .agy: true
+        case .gemini, .opencode: false
+        }
     }
 
     var folderTrust: FolderTrust {
@@ -174,7 +178,7 @@ enum CodingAgent: String, CaseIterable, Codable, Sendable {
     /// (`node …/bin/codex`, from npm or bun).
     private static func isCodexExec(_ arguments: [String]) -> Bool {
         guard let codex = arguments.firstIndex(where: {
-            (($0 as NSString).lastPathComponent as NSString).deletingPathExtension == CodingAgent.codex.rawValue
+            (($0 as NSString).lastPathComponent as NSString).deletingPathExtension == "codex"
         }) else { return false }
         var index = codex + 1
         while let argument = arguments[safe: index], argument != "--" {

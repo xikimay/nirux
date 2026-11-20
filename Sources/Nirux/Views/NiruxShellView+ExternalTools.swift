@@ -36,9 +36,9 @@ extension NiruxShellView {
         shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
     ) -> String {
-        var parts = ["command", CodingAgent.claude.rawValue]
-        if let resume, let flag = CodingAgent.claude.resumeArgument {
-            parts.append(flag)
+        var parts = ["command", "claude"]
+        if let resume {
+            parts.append("--resume")
             if case .session(let sessionID) = resume {
                 parts.append(Self.shellQuotedArgument(sessionID))
             }
@@ -95,9 +95,9 @@ extension NiruxShellView {
         shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
     ) -> String {
-        var parts = ["command", CodingAgent.codex.rawValue]
-        if let resume, let subcommand = CodingAgent.codex.resumeArgument {
-            parts.append(subcommand)
+        var parts = ["command", "codex"]
+        if let resume {
+            parts.append("resume")
             if case .session(let sessionID) = resume {
                 parts.append(Self.shellQuotedArgument(sessionID))
             }
@@ -121,9 +121,9 @@ extension NiruxShellView {
     /// `handoverPrompt` is its first prompt (`-i`), as in the worktree
     /// handover flow.
     static func agyCommand(resume: AgentResumeTarget? = nil, handoverPrompt: String? = nil) -> String {
-        var parts = ["command", CodingAgent.agy.rawValue]
-        if case .session(let sessionID)? = resume, let flag = CodingAgent.agy.resumeArgument {
-            parts.append(contentsOf: [flag, Self.shellQuotedArgument(sessionID)])
+        var parts = ["command", "agy"]
+        if case .session(let sessionID)? = resume {
+            parts.append(contentsOf: ["--conversation", Self.shellQuotedArgument(sessionID)])
         }
         if let prompt = handoverPrompt {
             parts.append(contentsOf: ["-i", Self.shellQuotedArgument(prompt)])
@@ -190,8 +190,7 @@ extension NiruxShellView {
     /// The line that runs `launch` in `workspace`, with the space's brief
     /// and Claude settings (`settingsFiles`: prepared for a batch). Codex
     /// takes the brief unless a config from `launchDirectory` up sets its
-    /// own, and `resumeDirectory` resumes its thread there. A new agy gets
-    /// Nirux's hook first: through it, agy says which conversation it runs.
+    /// own, and `resumeDirectory` resumes its thread there.
     func agentCommand(
         _ launch: AgentLaunch, in workspace: WorkspaceState, launchDirectory: String, resumeDirectory: String? = nil,
         sessionName: String? = nil, handoverPrompt: String? = nil, settingsFiles: [String: String]? = nil
@@ -209,7 +208,6 @@ extension NiruxShellView {
                 handoverPrompt: handoverPrompt
             )
         case .agy(let resume):
-            if resume == nil { AgentHookInstaller.installAgyHooksIfInstalling() }
             return Self.agyCommand(resume: resume, handoverPrompt: handoverPrompt)
         }
     }
@@ -217,6 +215,8 @@ extension NiruxShellView {
     /// Starts `agent` in a new terminal column of the active workspace, focused.
     func openAgent(_ agent: CodingAgent) {
         guard let workspace = activeWorkspace, let launch = Self.launch(of: agent, resume: nil, in: workspace) else { return }
+        // A new agy says which conversation it runs through Nirux's hook.
+        if agent == .agy { AgentHookInstaller.installAgyHooksIfInstalling() }
         let command = agentCommand(launch, in: workspace, launchDirectory: workspace.focusedWorkingDirectory)
         workspace.addColumn()
         relayout(animated: false)

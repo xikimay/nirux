@@ -42,7 +42,7 @@ enum CodexQueue {
     nonisolated static func command(executable: String, arguments: [String]) -> [String] {
         func name(_ path: String) -> String { ((path as NSString).lastPathComponent as NSString).deletingPathExtension }
         guard ProcessSnapshot.runtimeBinaries.contains(name(executable)),
-              let script = arguments.dropFirst().first(where: { name($0) == CodingAgent.codex.rawValue }) else { return [executable] }
+              let script = arguments.dropFirst().first(where: { name($0) == "codex" }) else { return [executable] }
         return [executable, script]
     }
 

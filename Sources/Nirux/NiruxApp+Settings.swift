@@ -226,7 +226,7 @@ extension NiruxApp {
 
         return SettingsForm.pane([
             [
-                SettingsForm.header(CodingAgent.claude.productName),
+                SettingsForm.header("Claude Code"),
                 SettingsForm.row("Launch mode", claudeMode),
                 noFlicker,
                 SettingsForm.hint(
@@ -238,7 +238,7 @@ extension NiruxApp {
                 SettingsForm.hint(Self.usageLimitsHint(for: claudeStatusLineStateReader()), under: usageLimits)
             ],
             [
-                SettingsForm.header(CodingAgent.codex.productName),
+                SettingsForm.header("Codex"),
                 SettingsForm.row("Launch mode", codexMode),
                 SettingsForm.hint(
                     "Default = no flags; Codex's own config applies. "

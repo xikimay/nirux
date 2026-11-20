@@ -389,6 +389,7 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         XCTAssertNil(tracker.restore(for: replacement))
     }
 
+    @MainActor
     func testHookEmitterSkipsTheHookShell() throws {
         let me = try XCTUnwrap(ProcessInstance.running(pid: getpid()))
         XCTAssertEqual(ProcessInstance.firstNonShellAncestor(from: getpid()), me)
@@ -418,11 +419,7 @@ final class ClaudeSessionTrackerTests: XCTestCase {
             nu.terminate()
             nu.waitUntilExit()
         }
-        let deadline = Date().addingTimeInterval(5)
-        while ProcessSnapshot.arguments(of: nu.processIdentifier, maxArgs: 1).first != "nu", Date() < deadline {
-            usleep(10_000)
-        }
-        XCTAssertEqual(ProcessSnapshot.arguments(of: nu.processIdentifier, maxArgs: 1).first, "nu")
+        waitUntil("its argv names nu", timeout: 5) { ProcessSnapshot.arguments(of: nu.processIdentifier, maxArgs: 1).first == "nu" }
         XCTAssertEqual(ProcessInstance.firstNonShellAncestor(from: nu.processIdentifier), me)
     }
 
