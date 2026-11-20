@@ -12,6 +12,22 @@ final class SpacePlanView: NSView {
         let cards: [NSRect]
     }
 
+    /// What a row shows: a workspace, its strip's size, its columns' frames
+    /// and the one focused; the plan goes when one changes.
+    struct Listed: Equatable {
+        let id: String
+        let stripSize: NSSize
+        let columnFrames: [NSRect]
+        let focusedIndex: Int
+
+        @MainActor init(_ workspace: WorkspaceState) {
+            id = workspace.id
+            stripSize = workspace.stripSize
+            columnFrames = workspace.columnFrames
+            focusedIndex = workspace.focusedIndex
+        }
+    }
+
     /// What a row says beside its picture.
     struct Label {
         let title: String
@@ -29,6 +45,7 @@ final class SpacePlanView: NSView {
     let spaceID: String
     let workspaceID: String
     private(set) var rows: [Row] = []
+    let listed: [Listed]
     private(set) var chosen = (row: 0, column: 0)
     /// The scale every row's picture is drawn at.
     private(set) var scale: CGFloat = 1
@@ -50,11 +67,12 @@ final class SpacePlanView: NSView {
     /// Where to go: a workspace and its column; nil goes back.
     var onClose: (_ target: (workspaceID: String, column: Int)?) -> Void = { _ in }
 
-    /// `workspaces` in the order they're listed, the one on screen and its
-    /// focused column chosen.
+    /// `workspaces` as `listing` keeps them, in the order they're listed;
+    /// the one on screen and its focused column chosen.
     init(frame: NSRect, spaceID: String, workspaces: [WorkspaceState], labels: [String: Label], onScreen: WorkspaceState) {
         self.spaceID = spaceID
         workspaceID = onScreen.id
+        listed = workspaces.map(Listed.init)
         super.init(frame: frame)
         wantsLayer = true
         for view in [world, names] {
@@ -62,25 +80,27 @@ final class SpacePlanView: NSView {
             view.wantsLayer = true
             addSubview(view)
         }
-        let laidOut = workspaces.filter { !$0.columns.isEmpty && !$0.stripSize.equalTo(.zero) }
-        let rowLabels = laidOut.map { workspace in
+        let rowLabels = workspaces.map { workspace in
             RowLabel(labels[workspace.id] ?? Label(title: workspace.title, icon: StateIcon(.idle), initials: nil, detail: nil))
         }
         // As wide as the longest name or line needs, so that each sits near its row.
         let labelWidth = ZZ("namesFar") ? Self.maxLabelWidth : min(Self.maxLabelWidth, rowLabels.map(\.width).max() ?? 0)
+        // Gaps take a quarter of the height at most, so that every row shows.
+        let gaps = CGFloat(max(0, workspaces.count - 1))
+        let gap = min(Self.rowGap, (bounds.height - Self.margin * 2) / 4 / max(gaps, 1))
         let room = NSSize(
             width: bounds.width - labelWidth - Self.margin * 3,
-            height: bounds.height - Self.margin * 2 - Self.rowGap * CGFloat(max(0, laidOut.count - 1))
+            height: bounds.height - Self.margin * 2 - gap * gaps
         )
-        let widest = laidOut.map(\.stripSize.width).max() ?? 1
-        let tallest = laidOut.reduce(0) { $0 + $1.stripSize.height }
+        let widest = workspaces.map(\.stripSize.width).max() ?? 1
+        let tallest = workspaces.reduce(0) { $0 + $1.stripSize.height }
         scale = max(0.01, min(1, room.width / widest, room.height / max(tallest, 1)))
-        let block = tallest * scale + Self.rowGap * CGFloat(max(0, laidOut.count - 1))
+        let block = tallest * scale + gap * gaps
         var top = (bounds.height + block) / 2
         // The names just before the rows, the whole centred.
         let labelLeft = ((bounds.width - labelWidth - Self.margin - widest * scale) / 2).rounded()
         let left = labelLeft + labelWidth + Self.margin
-        for (workspace, rowLabel) in zip(laidOut, rowLabels) {
+        for (workspace, rowLabel) in zip(workspaces, rowLabels) {
             guard let picture = workspace.frozenColumns(scale: scale) else { continue }
             let height = workspace.stripSize.height * scale
             picture.frame.origin = NSPoint(x: left, y: top - height)
@@ -91,16 +111,22 @@ final class SpacePlanView: NSView {
             rows.append(Row(workspaceID: workspace.id, picture: picture, cards: cards))
             rowLabel.place(left: labelLeft, width: labelWidth, midY: top - height / 2, in: names)
             if workspace === onScreen { chosen = (rows.count - 1, min(onScreen.focusedIndex, cards.count - 1)) }
-            top -= height + Self.rowGap
+            top -= height + gap
         }
         ring.borderColor = Theme.Color.accent.cgColor
         ring.borderWidth = Self.ringWidth
-        ring.cornerRadius = Theme.Radius.column * scale + Self.ringWidth
+        // Its corners follow the card's, two ring widths out.
+        ring.cornerRadius = Theme.Radius.column * scale + Self.ringWidth * 2
         layer?.addSublayer(ring)
         showChoice()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Of `workspaces`, those a row shows: laid out, not closing.
+    static func listing(_ workspaces: [WorkspaceState]) -> [WorkspaceState] {
+        workspaces.filter { !$0.isClosing && !$0.columns.isEmpty && !$0.stripSize.equalTo(.zero) }
+    }
 
     /// Leaves its clicks to the plan.
     private final class Passive: NSView {
