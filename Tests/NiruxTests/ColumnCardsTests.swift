@@ -575,6 +575,32 @@ final class ColumnCardsTests: XCTestCase {
         }
     }
 
+    /// DO NOT MERGE: the wait this test had on main, run only under the
+    /// gate's stall, as the process left unserved as the slide starts.
+    func testZZTheOldWaitUnderAStall() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["NIRUX_ZZ_MUTANT"] == "stall")
+        try withShell { shell in
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            for _ in 0..<3 { workspace.addColumn() }
+            for column in workspace.columns { column.widthFraction = 0.5 }
+            workspace.focusedIndex = 0
+            shell.relayout(animated: false)
+            let strip = try strip(of: workspace), start = strip.frame.minX
+            workspace.focusedIndex = 1
+            shell.relayout(animated: true)
+            let target = strip.frame.minX
+            func shown() -> CGFloat {
+                strip.frame.minX + CGFloat((strip.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber)?.doubleValue ?? 0)
+            }
+            var looks = 0
+            waitUntil("on its way", timeout: 2) {
+                looks += 1
+                if looks == 2 { Thread.sleep(forTimeInterval: 0.5) }
+                return abs(shown() - start) > 20 && abs(shown() - target) > 20
+            }
+        }
+    }
+
     /// A click during a slide stops the strip where it shows, so that what
     /// lies under the pointer stays there.
     func testAClickDuringASlideStopsTheStripWhereItShows() throws {
@@ -586,8 +612,11 @@ final class ColumnCardsTests: XCTestCase {
             shell.relayout(animated: false)
             let strip = try strip(of: workspace), start = strip.frame.minX
             let layer = try XCTUnwrap(strip.layer)
+            // DO NOT MERGE: the gate's stall, as a loaded runner would.
+            let stall = { if ProcessInfo.processInfo.environment["NIRUX_ZZ_MUTANT"] == "stall" { Thread.sleep(forTimeInterval: 0.5) } }
             workspace.focusedIndex = 1
             shell.relayout(animated: true)
+            stall()
             let target = strip.frame.minX
             // Held in flight on purpose: the strip's clock stops a quarter of
             // the way, which a loaded runner could slide past between two
@@ -599,6 +628,7 @@ final class ColumnCardsTests: XCTestCase {
             let slide = try XCTUnwrap(layer.animation(forKey: "colSlide"), "it slides")
             layer.timeOffset = slide.beginTime + slide.duration / 4
             CATransaction.flush()
+            stall()
             let midway = strip.frame.minX + CGFloat((layer.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber)?.doubleValue ?? 0)
             XCTAssertTrue(abs(midway - start) > 20 && abs(midway - target) > 20, "on its way: \(start) → \(midway) → \(target)")
             workspace.holdCamera(for: 1)

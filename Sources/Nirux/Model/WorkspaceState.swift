@@ -1058,8 +1058,10 @@ extension WorkspaceState {
     /// Holds the camera where the strip shows for the column at `index`: a
     /// slide on its way stops there.
     func holdCamera(for index: Int) {
-        stripView.frame.origin.x = shownStripX
-        stripView.layer?.removeAnimation(forKey: Self.slideKey)
+        // DO NOT MERGE: the gate's mutants.
+        let zz = ProcessInfo.processInfo.environment["NIRUX_ZZ_MUTANT"]
+        stripView.frame.origin.x = zz == "holdAtPlace" ? stripView.frame.origin.x : shownStripX
+        if zz != "keepSlide" { stripView.layer?.removeAnimation(forKey: Self.slideKey) }
         lastCameraX = -stripView.frame.origin.x
         heldCamera = columns[safe: index].map { CameraHold(x: lastCameraX, column: $0.id) }
     }
