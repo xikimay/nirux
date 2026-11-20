@@ -43,10 +43,19 @@ final class DropTargetView: NSView {
 final class EditorConflictBanner: NSView {
     static let height: CGFloat = 34
 
-    var onReload: (() -> Void)?
-    var onKeep: (() -> Void)?
+    var onCompare: (() -> Void)?
+    var onTakeDisk: (() -> Void)?
+    var onKeepMine: (() -> Void)?
 
     private let messageLabel = NSTextField(labelWithString: "")
+    /// On while the disk's version shows beside the buffer.
+    private lazy var compareButton = makeButton(title: "Compare", action: #selector(compareClicked))
+    /// Right to left.
+    private lazy var buttons = [
+        makeButton(title: "Keep Mine", action: #selector(keepMineClicked)),
+        makeButton(title: "Take Disk", action: #selector(takeDiskClicked)),
+        compareButton
+    ]
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -61,10 +70,8 @@ final class EditorConflictBanner: NSView {
         messageLabel.lineBreakMode = .byTruncatingMiddle
         addSubview(messageLabel)
 
-        let reload = makeButton(title: "Reload from Disk", action: #selector(reloadClicked))
-        let keep = makeButton(title: "Keep My Changes", action: #selector(keepClicked))
-        addSubview(reload)
-        addSubview(keep)
+        compareButton.setButtonType(.pushOnPushOff)
+        buttons.forEach(addSubview)
     }
 
     @available(*, unavailable)
@@ -78,8 +85,12 @@ final class EditorConflictBanner: NSView {
         return button
     }
 
-    func configure(fileName: String) {
-        messageLabel.stringValue = "\(fileName) changed on disk while you have unsaved edits.".asWarning
+    func configure(fileName: String, isDeleted: Bool, isComparing: Bool) {
+        let change = isDeleted ? "was deleted" : "changed"
+        messageLabel.stringValue = (isComparing
+            ? "\(fileName): on disk on the left, your edits on the right."
+            : "\(fileName) \(change) on disk while you have unsaved edits.").asWarning
+        compareButton.state = isComparing ? .on : .off
         needsLayout = true
     }
 
@@ -87,20 +98,21 @@ final class EditorConflictBanner: NSView {
         super.layout()
         let pad: CGFloat = 10
         let buttonH: CGFloat = 22
-        let buttonW: CGFloat = 118
         let gap: CGFloat = 8
         let y = (bounds.height - buttonH) / 2
         var x = bounds.width - pad
-        for subview in subviews where subview is NSButton {
+        for button in buttons {
+            let buttonW = button.intrinsicContentSize.width
             x -= buttonW
-            subview.frame = NSRect(x: x, y: y, width: buttonW, height: buttonH)
+            button.frame = NSRect(x: x, y: y, width: buttonW, height: buttonH)
             x -= gap
         }
         messageLabel.frame = NSRect(x: pad, y: (bounds.height - 15) / 2, width: max(60, x - pad), height: 15)
     }
 
-    @objc private func reloadClicked() { onReload?() }
-    @objc private func keepClicked() { onKeep?() }
+    @objc private func compareClicked() { onCompare?() }
+    @objc private func takeDiskClicked() { onTakeDisk?() }
+    @objc private func keepMineClicked() { onKeepMine?() }
 }
 
 /// Banner above the editor's "Full Branch Diff" tab: the same branch reads
@@ -332,21 +344,26 @@ final class ShellExitedOverlay: NSView {
 /// bounds), positioned over the inter-column boundary by layoutAndScroll.
 /// The owner turns the pointer's way into a width.
 final class ColumnResizeHandle: NSView {
-    /// What a drag starts from: its column's width, the strip's, and where
-    /// the camera was.
-    typealias Start = (width: CGFloat, strip: CGFloat, camera: CGFloat)
+    /// What a drag starts from: the columns' widths, the strip's, where the
+    /// camera was, the focused column, and whether it lay in the middle.
+    typealias Start = (widths: [CGFloat], strip: CGFloat, camera: CGFloat, focus: Int, centred: Bool)
     /// Drag start → where it starts from; nil: no drag.
     var onDragStart: (() -> Start?)?
     /// Dragging → its start and the pointer's way since, in points
     /// (absolute-set semantics, so a wobbly mouse can't compound errors).
     var onDrag: ((Start, CGFloat) -> Void)?
-    /// The drag is over.
+    /// A drag that moved is over; a click on the edge leaves the strip to
+    /// the double-click that may follow.
     var onDragEnd: (() -> Void)?
     /// Double-click → reset to the default width.
     var onReset: (() -> Void)?
 
+    /// How far the pointer goes before a press on the edge drags it: less is
+    /// a click's jitter, which leaves a double-click its chance.
+    private static let dragThreshold: CGFloat = 3
     private var dragStartX: CGFloat = 0
     private var dragStart: Start?
+    private var moved = false
     private let line = NSView()
 
     override init(frame: NSRect) {
@@ -376,17 +393,20 @@ final class ColumnResizeHandle: NSView {
             return
         }
         dragStartX = event.locationInWindow.x
+        moved = false
         dragStart = onDragStart?()
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let dragStart else { return }
-        onDrag?(dragStart, event.locationInWindow.x - dragStartX)
+        let delta = event.locationInWindow.x - dragStartX
+        guard let dragStart, moved || abs(delta) >= Self.dragThreshold else { return }
+        moved = true
+        onDrag?(dragStart, delta)
     }
 
     override func mouseUp(with event: NSEvent) {
         guard dragStart != nil else { return }
         dragStart = nil
-        onDragEnd?()
+        if moved { onDragEnd?() }
     }
 }

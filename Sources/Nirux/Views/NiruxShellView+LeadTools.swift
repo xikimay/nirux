@@ -343,7 +343,7 @@ extension NiruxShellView {
         if let branch = task.gitBranch { line += " · branch \(MissionPromptText.quoted(branch))" }
         if let folder = task.taskFolder {
             line += " · no repository · folder \(MissionPromptText.quoted(folder))"
-        } else if let repository = leadRepositoryName(of: task, in: space) {
+        } else if let repository = repositoryAnchor(of: task, in: space)?.name {
             line += " · \(repository)"
         }
         if task.isInactive { line += " · inactive" }
@@ -361,6 +361,7 @@ extension NiruxShellView {
         if let question = store.waitingQuestion(childWorkspaceID: task.id, childAgentUUID: mission.childAgentUUID)?.event {
             let holder = question.handedToUserBecause == nil ? "asks you" : "asks the user (you handed it over)"
             return "\n  \(holder), question \(question.id): \(MissionPromptText.quoted(question.message))"
+                + (MissionPromptText.blockLine(of: question, accept: nil).map { "\n  " + $0 } ?? "")
         }
         if mission.status == .completed, let result = mission.events.last(where: { $0.kind == .completed }) {
             return "\n  completed: \(MissionPromptText.quoted(result.message))"
@@ -376,55 +377,84 @@ extension NiruxShellView {
         return "\n  \(source): “\(status)”"
     }
 
-    /// The space's repository a task works in, by name: its folder is the
-    /// main checkout, in it, or one of the worktrees Nirux places beside it
-    /// (`<checkout>.<branch>`, see `GitWorktree.create`). No git: a guess.
-    private func leadRepositoryName(of task: WorkspaceState, in space: WorkspaceProfile) -> String? {
+    /// The space's anchor a task works in: its folder is the main
+    /// checkout, in it, or one of the worktrees Nirux places beside it
+    /// (`<checkout>.<branch>`, see `GitWorktree.create`); the deepest when
+    /// anchors nest. No git: a guess.
+    func repositoryAnchor(of task: WorkspaceState, in space: WorkspaceProfile) -> SpaceAnchor? {
         let folder = URL(fileURLWithPath: task.cwd).standardizedFileURL.path
-        return space.anchors.first { anchor in
-            guard let anchorFolder = anchor.folder.map({ URL(fileURLWithPath: $0).standardizedFileURL.path }) else { return false }
-            return folder == anchorFolder || folder.hasPrefix(anchorFolder + "/") || folder.hasPrefix(anchorFolder + ".")
-        }?.name
+        let matches = space.anchors.compactMap { anchor -> (SpaceAnchor, String)? in
+            guard let anchorFolder = anchor.folder.map({ URL(fileURLWithPath: $0).standardizedFileURL.path }),
+                  folder == anchorFolder || folder.hasPrefix(anchorFolder + "/") || folder.hasPrefix(anchorFolder + ".")
+            else { return nil }
+            return (anchor, anchorFolder)
+        }
+        return matches.max { $0.1.count < $1.1.count }?.0
     }
 
-    /// What its agents do: working, needs the user (and for what), idle.
+    /// What its agents do: needs the user (and for what), stuck as its row
+    /// says in red, working, idle.
     private func leadAgentState(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> String {
         let agents = agentReadings(of: workspace, snapshot: snapshot)
         guard let first = agents.first else { return "no agent running" }
         if let waiting = agents.first(where: \.needsUser) {
             return "\(waiting.name) needs the user" + (waiting.dialog.map { ": \($0)" } ?? "")
         }
+        if let failed = agents.first(where: { $0.failure != nil }), let failure = failed.failure {
+            return "\(failed.name) \(failure)"
+        }
         if let working = agents.first(where: { $0.status == AgentStatus.working }) { return "\(working.name) working" }
         if let quiet = agents.first(where: \.isQuiet) { return "\(quiet.name) is quiet (it may be waiting on you in its terminal)" }
         return "\(first.name) idle"
     }
 
-    /// An agent in front of one of a workspace's columns, as list_tasks
-    /// tells the Lead about it.
+    /// A row drawn red, in the Lead's words: a silent turn without the
+    /// row's advice, an Esc in its terminal, which is the user's.
+    private static func leadFailure(_ stuck: SidebarStuckState) -> String? {
+        guard stuck.isFailure else { return nil }
+        if case .silent = stuck { return stuck.headline }
+        return stuck.headline + (stuck.detail.map { " — \($0)" } ?? "")
+    }
+
+    /// An agent in front of one of a workspace's columns, or the one that
+    /// exited mid-turn there, as list_tasks tells the Lead about it.
     struct AgentReading {
         let name: String
         let status: AgentStatus
         /// What it waits on the user for, in a few words.
         let dialog: String?
+        /// What broke, when its row is red (see `leadFailure`): the turn
+        /// stopped on an API error, went silent, or its agent exited mid-turn.
+        let failure: String?
         /// Stopped without saying why: an agent without hooks may be waiting
         /// on the user in its terminal, or done.
         var isQuiet = false
 
-        var needsUser: Bool { status == .needsAttention || dialog != nil }
+        /// A failure needs the user too, but says what broke instead.
+        var needsUser: Bool { dialog != nil || (status == .needsAttention && failure == nil) }
     }
 
-    /// The agents in front of `workspace`'s columns.
-    func agentReadings(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> [AgentReading] {
+    /// The agents in front of `workspace`'s columns, and those that exited
+    /// mid-turn.
+    func agentReadings(
+        of workspace: WorkspaceState, snapshot: ProcessSnapshot, now: TimeInterval = Date().timeIntervalSince1970
+    ) -> [AgentReading] {
         workspace.columns.compactMap { column in
-            guard let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
-                  AgentStatusMachine.isRecognizedAgentProcess(foreground.name) else { return nil }
+            guard let pty = column.pty else { return nil }
+            let foreground = pty.foregroundProcess(snapshot: snapshot)
+            let stuck = sidebarStuckState(of: column, foregroundProcess: foreground, snapshot: snapshot, now: now)
+            let failure = stuck.flatMap(Self.leadFailure)
+            // The agent that died, not the shell that took its place in front.
+            if let name = stuck?.agentName { return AgentReading(name: name, status: .idle, dialog: nil, failure: failure) }
+            guard let foreground, AgentStatusMachine.isRecognizedAgentProcess(foreground.name) else { return nil }
             // A question its last turn ended on waits on the user too.
             let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
                 ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
-                // What agy reported it waits on (OSC 7501).
-                ?? pty.agentBlockedWait(now: Date().timeIntervalSince1970, waitThreshold: nil, foreground: foreground)?
-                    .reason.shortLabel
+                // What agy reported it waits on (OSC 7501); a failure is
+                // `failure`'s.
+                ?? pty.agentBlockedWait(now: now, waitThreshold: nil, foreground: foreground)
+                    .flatMap { $0.reason.isFailure ? nil : $0.reason.shortLabel }
             // A turn end found done (or still being read), or one an agent
             // without hooks reported, asks nothing. One that stopped without
             // saying why is quiet: maybe waiting in its terminal (the row
@@ -433,7 +463,7 @@ extension NiruxShellView {
                 && pty.cachedAgentState == .needsAttention && pty.agentAttentionReason == nil
             let finished = pty.agentAttentionReason == .turnFinished
             let status = pty.isQuietTurnEnd || quiet || finished ? AgentStatus.idle : pty.cachedAgentState
-            return AgentReading(name: foreground.name, status: status, dialog: dialog, isQuiet: quiet)
+            return AgentReading(name: foreground.name, status: status, dialog: dialog, failure: failure, isQuiet: quiet)
         }
     }
 
@@ -525,9 +555,7 @@ extension NiruxShellView {
         if let refusal = leadRefusal(for: workspace, title: title) { return answer(refusal, true) }
         let handoffsEnabled = Self.currentMissionHandoffsEnabled()
         if let own = ownMission(of: workspace), workspace.columns.contains(where: { $0.agentUUID == own.childAgentUUID }) {
-            guard own.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue else {
-                return answer(Self.typesOnlyIntoClaude(title, runs: own.childAgentKind), true)
-            }
+            guard own.childAgentName != nil else { return answer(Self.deliversOnlyToClaudeOrCodex(title, runs: own.childAgentKind), true) }
             if own.isCarried(handoffsEnabled: handoffsEnabled),
                let parent = requestingTerminal(workspaceID: own.parentWorkspaceID, agentUUID: own.parentAgentUUID)?.workspace {
                 // Typed, it reopens a finished sub-task, which counts against its task's limit again.
@@ -542,9 +570,11 @@ extension NiruxShellView {
         }
         let snapshot = ProcessSnapshot()
         guard !snapshot.isEmpty else { return answer("Nirux couldn't read the running processes: call again in a moment.", true) }
-        guard let agentUUID = workspace.columns.first(where: { $0.agentUUID != nil && $0.runsClaude(snapshot: snapshot) })?.agentUUID
-        else { return answer("Nirux types messages only into Claude Code, and “\(title)” runs none.", true) }
-        guard let mission = oneWayMission(to: workspace, agentUUID: agentUUID, from: lead) else {
+        guard let (agentUUID, kind) = workspace.columns.lazy.compactMap({ column in
+            column.agentUUID.flatMap { uuid in column.missionAgent(snapshot: snapshot).map { (uuid, $0) } }
+        }).first
+        else { return answer("Nirux delivers messages only to Claude Code or Codex, and “\(title)” runs neither.", true) }
+        guard let mission = oneWayMission(to: workspace, agentUUID: agentUUID, kind: kind, from: lead) else {
             return answer("Nirux couldn’t record the message: try again.", true)
         }
         sendInstruction(message, to: workspace, in: mission, handoffsEnabled: handoffsEnabled, answer: answer)
@@ -561,20 +591,22 @@ extension NiruxShellView {
         return nil
     }
 
-    static func typesOnlyIntoClaude(_ title: String, runs kind: String) -> String {
-        "Nirux types messages only into a Claude Code task; “\(title)” runs \(kind)."
+    static func deliversOnlyToClaudeOrCodex(_ title: String, runs kind: String) -> String {
+        "Nirux delivers messages only to a Claude Code or Codex task; “\(title)” runs \(kind)."
     }
 
     /// The Lead's one-way Mission to `workspace`'s agent, made at its first tell.
-    private func oneWayMission(to workspace: WorkspaceState, agentUUID: String, from lead: NewTask.MissionParent) -> Mission? {
+    private func oneWayMission(
+        to workspace: WorkspaceState, agentUUID: String, kind: NiruxApp.WorkspaceAgent, from lead: NewTask.MissionParent
+    ) -> Mission? {
         let store = MissionStore.shared
         if let mission = store.missions.last(where: { mission in
             mission.oneWay == true && mission.parentWorkspaceID == lead.workspaceID && mission.parentAgentUUID == lead.agentUUID
-                && mission.childWorkspaceID == workspace.id && mission.childAgentUUID == agentUUID
+                && mission.childWorkspaceID == workspace.id && mission.childAgentUUID == agentUUID && mission.childAgentKind == kind.rawValue
         }) { return mission }
         return store.create(MissionCreationRequest(
             id: UUID().uuidString, parentWorkspaceID: lead.workspaceID, parentAgentUUID: lead.agentUUID,
-            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: NiruxApp.WorkspaceAgent.claude.rawValue,
+            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: kind.rawValue,
             branch: workspace.gitBranch ?? workspace.title, oneWay: true
         ), enabled: false)
     }
@@ -598,8 +630,12 @@ extension NiruxShellView {
         _ message: String, to workspace: WorkspaceState, in mission: Mission, from lead: NewTask.MissionParent? = nil,
         handoffsEnabled: Bool = NiruxShellView.currentMissionHandoffsEnabled(), answer: @escaping LeadAnswer
     ) {
-        guard mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue else {
-            return answer(Self.typesOnlyIntoClaude(workspace.title, runs: mission.childAgentKind), true)
+        guard let agent = mission.childAgentName else {
+            return answer(Self.deliversOnlyToClaudeOrCodex(workspace.title, runs: mission.childAgentKind), true)
+        }
+        if agent == "Codex", missionEnd(mission, parent: false)?.column?.runsUnprovableCodex(snapshot: ProcessSnapshot()) == true {
+            return answer("“\(workspace.title)”’s Codex was started without a prompt, so Nirux can't tell which of its conversations "
+                + "is the task's: give the message to the user instead.", true)
         }
         let instruction = MissionEvent(
             id: UUID().uuidString, missionID: mission.id,
@@ -617,11 +653,19 @@ extension NiruxShellView {
             ? " It doesn't report to you: Nirux marks the message as yours, and its questions and its result still go to "
                 + "\(answerer(of: workspace, reachedThrough: mission, handoffsEnabled: handoffsEnabled))."
             : ""
-        answer((typed ? "Nirux typed it into “\(workspace.title)”’s prompt."
+        let sent = agent == "Codex"
+            ? (typed ? "Nirux handed it to “\(workspace.title)”’s Codex, which starts it as a prompt."
+                : missionWaits.typing.contains(instruction.id)
+                ? "Nirux is handing it to “\(workspace.title)”’s Codex, which starts it as a prompt; a line tells you if Codex "
+                    + "doesn't start it."
+                : "Nirux hands it to “\(workspace.title)”’s Codex once its turn is over, a day at most; past an hour, "
+                    + "a line tells you what holds it.") + " Codex takes it as text: a slash command doesn't run there."
+            : typed ? "Nirux typed it into “\(workspace.title)”’s prompt."
             : missionWaits.typing.contains(instruction.id)
             ? "Nirux is typing it into “\(workspace.title)”’s prompt as its agent reads it; a line tells you if it doesn't all go in."
             : "Nirux types it into “\(workspace.title)”’s prompt at its next free prompt, a day at most; past an hour, "
-                + "a line tells you what holds it.") + notYours, false)
+                + "a line tells you what holds it."
+        answer(sent + notYours, false)
     }
 
     /// Records the conversation `mission`'s child holds, for its instruction
@@ -635,7 +679,6 @@ extension NiruxShellView {
 
     private func leadReply(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {
         let questionID = LeadTools.string(arguments, "question") ?? ""
-        let message = LeadTools.string(arguments, "message") ?? ""
         let store = MissionStore.shared
         _ = store.ensureLoaded()
         let spaceWorkspaces = Set(workspaces.filter { $0.profileID == space.id }.map(\.id))
@@ -645,22 +688,30 @@ extension NiruxShellView {
         }) else {
             return answer("No question “\(questionID)” from one of your tasks: copy its id from the [Nirux Mission] message or list_tasks.", true)
         }
-        sendReply(message, to: questionID, in: mission, answer: answer)
+        sendReply(arguments, to: questionID, in: mission, answer: answer)
     }
 
     /// Answers `questionID`, a question of `mission`'s child, for its
-    /// parent: a Lead's reply, or a task's.
-    func sendReply(_ message: String, to questionID: String, in mission: Mission, answer: @escaping LeadAnswer) {
+    /// parent: a Lead's reply, or a task's. `arguments` hold the answer, or
+    /// accept the question's recommendation.
+    func sendReply(_ arguments: [String: Any], to questionID: String, in mission: Mission, answer: @escaping LeadAnswer) {
         let store = MissionStore.shared
-        guard store.response(to: questionID) == nil, mission.status == .active else {
+        guard store.response(to: questionID) == nil, mission.status == .active,
+              let question = mission.events.first(where: { $0.id == questionID && $0.kind == .question })
+        else {
             return answer("That question was already answered (perhaps by the user), or its task completed. Don't send it again.", true)
         }
-        let response = MissionEvent(
+        let accepts = LeadTools.accepts(arguments) == true
+        guard let message = accepts ? question.acceptableRecommendation : LeadTools.string(arguments, "message") else {
+            return answer(MissionEventCLI.nothingToAccept(question, field: "message", handOver: "hand it over with ask_user"), true)
+        }
+        var response = MissionEvent(
             id: UUID().uuidString, missionID: mission.id,
             childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
             parentWorkspaceID: mission.parentWorkspaceID, parentAgentUUID: mission.parentAgentUUID,
             kind: .response, message: message, inReplyTo: questionID, timestamp: Date().timeIntervalSince1970
         )
+        response.acceptedRecommendation = accepts ? true : nil
         guard case .accepted(let accepted) = store.process(response, enabled: Self.currentMissionHandoffsEnabled()) else {
             return answer("Nirux couldn’t record the answer: try again.", true)
         }
@@ -670,7 +721,8 @@ extension NiruxShellView {
         typeMissionMessages()
         updateSidebar()
         let title = workspaces.first { $0.id == mission.childWorkspaceID }?.title ?? mission.branch
-        answer("Answer sent: Nirux types it into “\(title)”’s prompt once its turn is over.", false)
+        answer((accepts ? "Its recommendation sent as your answer" : "Answer sent")
+            + ": Nirux types it into “\(title)”’s prompt once its turn is over.", false)
     }
 
     private func leadAskUser(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {
@@ -843,5 +895,14 @@ private extension ColumnState {
     func runsClaude(snapshot: ProcessSnapshot) -> Bool {
         if case .claude? = deferredAgent?.agent { return true }
         return AgentHookCenter.isInteractiveClaude(pty?.foregroundProcess(snapshot: snapshot))
+    }
+
+    /// The agent Nirux delivers Mission messages to that this column runs,
+    /// or will once restored: an interactive Claude Code, or Codex.
+    func missionAgent(snapshot: ProcessSnapshot) -> NiruxApp.WorkspaceAgent? {
+        if runsClaude(snapshot: snapshot) { return .claude }
+        if case .codex? = deferredAgent?.agent { return .codex }
+        let foreground = pty?.foregroundProcess(snapshot: snapshot)
+        return foreground?.name == AgentProgramStatus.codex && !AgentHookCenter.isHeadlessCodex(foreground) ? .codex : nil
     }
 }

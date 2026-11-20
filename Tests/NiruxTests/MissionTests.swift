@@ -598,6 +598,55 @@ extension MissionTests {
         XCTAssertEqual(restoredStore.missions[0].events.map(\.id), [pending.id])
     }
 
+    /// A CLI that opened the queue before a drain moved it aside writes
+    /// once the drain read and deleted it: its event goes to the next queue,
+    /// not into the deleted file. One that locked the queue and checked its
+    /// name is about to write: the drain leaves the queue to it.
+    func testAnEventQueuedDuringADrainIsNeverLost() throws {
+        let directory = try makeDirectory()
+        let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
+        let store = MissionStore(fileURL: directory.appendingPathComponent("missions.json"))
+        XCTAssertNotNil(store.create(request(), enabled: true, now: 10))
+        let center = MissionEventCenter(store: store, eventsURL: eventsURL, isEnabled: { true })
+        XCTAssertTrue(MissionEventCLI.append(event(id: "66666666-6666-4666-8666-666666666666", timestamp: 20), to: eventsURL))
+        for (id, step) in [("77777777-7777-4777-8777-777777777777", QueueFile.Step.opened), ("88888888-8888-4888-8888-888888888888", .checked)] {
+            var line = try JSONEncoder().encode(event(id: id, timestamp: 21))
+            line.append(0x0A)
+            var drained = false
+            XCTAssertNil(QueueFile.append(line, to: eventsURL) { at in
+                guard at == step, !drained else { return }
+                drained = true
+                center.drain()
+            })
+            XCTAssertFalse(store.missions[0].events.contains { $0.id == id }, "\(step)")
+            center.drain()
+            XCTAssertEqual(store.missions[0].events.last?.id, id, "\(step)")
+        }
+    }
+
+    /// A writer stopped while it holds the queue's lock (^Z) holds nobody
+    /// up: the others write unlocked after a moment, and a drain says it
+    /// couldn't read the queue (nothing is typed on it) until it takes it,
+    /// a few seconds of tries later.
+    func testAWriterThatKeepsTheQueueHoldsNobodyUp() throws {
+        let directory = try makeDirectory()
+        let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
+        let store = MissionStore(fileURL: directory.appendingPathComponent("missions.json"))
+        XCTAssertNotNil(store.create(request(), enabled: true, now: 10))
+        let center = MissionEventCenter(store: store, eventsURL: eventsURL, isEnabled: { true })
+        let first = event(id: "66666666-6666-4666-8666-666666666666", timestamp: 20)
+        let second = event(id: "77777777-7777-4777-8777-777777777777", timestamp: 21)
+        XCTAssertTrue(MissionEventCLI.append(first, to: eventsURL))
+        let holder = open(eventsURL.path, O_RDONLY)
+        defer { close(holder) }
+        XCTAssertEqual(flock(holder, LOCK_EX), 0)
+        XCTAssertTrue(MissionEventCLI.append(second, to: eventsURL))
+        for _ in 0..<QueueFile.busyDrainsBeforeTaking { XCTAssertFalse(center.drain()) }
+        XCTAssertTrue(store.missions[0].events.isEmpty)
+        XCTAssertTrue(center.drain())
+        XCTAssertEqual(store.missions[0].events.map(\.id), [first.id, second.id])
+    }
+
     func testPendingEventSurvivesRestartAndDeliversOnce() throws {
         let directory = try makeDirectory()
         let missionsURL = directory.appendingPathComponent("missions.json")

@@ -53,10 +53,26 @@ struct SidebarInterruptClick: Equatable {
     let since: TimeInterval
 }
 
+/// Type it now clicked on a row of waiting Mission messages.
+struct SidebarTypeNowClick: Equatable {
+    let workspaceIndex: Int
+    let columnIndex: Int
+    let since: TimeInterval
+}
+
 /// Yes, No or Reply… clicked under a turn's question.
 struct SidebarTurnAnswerClick: Equatable {
     let question: SidebarTurnQuestion
     let answer: SidebarTurnAnswer
+}
+
+/// Reply… or Accept clicked under a Mission question's recommendation,
+/// where the button was released.
+struct SidebarMissionAnswerClick: Equatable {
+    let workspaceIndex: Int
+    let columnIndex: Int
+    let questionID: String
+    let accepts: Bool
 }
 
 /// Resume clicked on the row of a restored agent that hasn't resumed yet.
@@ -93,10 +109,14 @@ extension SidebarView {
             return SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
         case let .agentInterrupt(workspaceIndex, columnIndex, since):
             return SidebarHoverTarget.interruptButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
+        case let .missionTypeNow(workspaceIndex, columnIndex, since):
+            return SidebarHoverTarget.typeNowButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
         case let .deferredAgentResume(_, _, columnID):
             return SidebarHoverTarget.deferredResumeButtonKey(columnID: columnID)
         case let .turnAnswer(_, _, question, answer):
             return SidebarHoverTarget.turnAnswerButtonKey(question: question, answer: answer)
+        case let .missionAnswer(_, _, questionID, accepts):
+            return SidebarHoverTarget.missionAnswerButtonKey(questionID: questionID, accepts: accepts)
         default:
             return nil
         }
@@ -169,6 +189,22 @@ extension SidebarView {
         return SidebarInterruptClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: releasedSilence)
     }
 
+    /// The Type it now a click makes, if any: the same rules, for the same
+    /// waiting messages.
+    static func typeNowClick(
+        pressed: SidebarHitRegion,
+        released: SidebarHitRegion?,
+        clickCount: Int,
+        armedAtPress: Bool,
+        armedAtRelease: Bool
+    ) -> SidebarTypeNowClick? {
+        guard clickCount == 1, armedAtPress, armedAtRelease,
+              case let .missionTypeNow(_, _, pressedSince) = pressed,
+              case let .missionTypeNow(workspaceIndex, columnIndex, releasedSince)? = released,
+              releasedSince == pressedSince else { return nil }
+        return SidebarTypeNowClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: releasedSince)
+    }
+
     /// The Resume of a not-resumed agent a click makes, if any: the same
     /// rules, for the same column.
     static func deferredResumeClick(
@@ -210,6 +246,24 @@ extension SidebarView {
         return SidebarTurnAnswerClick(question: releasedQuestion, answer: releasedAnswer)
     }
 
+    /// Reply… or Accept, if a click makes one: the same rules, for the same
+    /// question and button (Accept answers for the user).
+    static func missionAnswerClick(
+        pressed: SidebarHitRegion,
+        released: SidebarHitRegion?,
+        clickCount: Int,
+        armedAtPress: Bool,
+        armedAtRelease: Bool
+    ) -> SidebarMissionAnswerClick? {
+        guard clickCount == 1, armedAtPress, armedAtRelease,
+              case let .missionAnswer(_, _, pressedQuestion, pressedAccepts) = pressed,
+              case let .missionAnswer(workspaceIndex, columnIndex, releasedQuestion, releasedAccepts)? = released,
+              releasedQuestion == pressedQuestion, releasedAccepts == pressedAccepts else { return nil }
+        return SidebarMissionAnswerClick(
+            workspaceIndex: workspaceIndex, columnIndex: columnIndex, questionID: releasedQuestion, accepts: releasedAccepts
+        )
+    }
+
     /// The second press of a double-click whose first click made a button
     /// act: the rebuild may have put anything there (a deferred agent's
     /// Resume row goes away, the card below moves up). It does nothing.
@@ -217,9 +271,10 @@ extension SidebarView {
         clickCount > 1 && time - action < NSEvent.doubleClickInterval
     }
 
-    /// A press on Allow / Deny / Resume / Interrupt acts only on its release
-    /// (see `approvalClickDecision`, `resumeClick`, `interruptClick`,
-    /// `deferredResumeClick`), never on the press. The loop also keeps the press from moving the window.
+    /// A press on Allow / Deny / Resume / Interrupt / Type it now acts only on
+    /// its release (see `approvalClickDecision`, `resumeClick`,
+    /// `interruptClick`, `typeNowClick`, `deferredResumeClick`), never on the
+    /// press. The loop also keeps the press from moving the window.
     func trackApprovalClick(_ region: SidebarHitRegion, event: NSEvent) {
         guard let key = Self.armedButtonKey(for: region) else { return }
         let armedAtPress = isApprovalButtonArmed(key)
@@ -256,6 +311,12 @@ extension SidebarView {
             ) {
                 lastButtonActionAt = next.timestamp
                 onAgentInterrupt?(interrupt.workspaceIndex, interrupt.columnIndex, interrupt.since)
+            } else if let typeNow = Self.typeNowClick(
+                pressed: region, released: released, clickCount: event.clickCount,
+                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+            ) {
+                lastButtonActionAt = next.timestamp
+                onMissionTypeNow?(typeNow.workspaceIndex, typeNow.columnIndex, typeNow.since)
             } else if let resume = Self.deferredResumeClick(
                 pressed: region, released: released, clickCount: event.clickCount,
                 armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
@@ -268,6 +329,12 @@ extension SidebarView {
             ) {
                 lastButtonActionAt = next.timestamp
                 onTurnAnswer?(answer.question, answer.answer, approvalButtonViews[key])
+            } else if let answer = Self.missionAnswerClick(
+                pressed: region, released: released, clickCount: event.clickCount,
+                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+            ) {
+                lastButtonActionAt = next.timestamp
+                onMissionAnswer?(answer, approvalButtonViews[key])
             }
             return
         }
