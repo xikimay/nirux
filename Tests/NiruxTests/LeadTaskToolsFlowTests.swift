@@ -615,9 +615,9 @@ final class LeadTaskToolsFlowTests: XCTestCase {
 
             // Its own Mission's agent, whatever runs beside it; that agent gone,
             // the Claude Code running in it now, one-way.
-            _ = try missionTask("Antigravity", parent: follower, kind: "agy")
-            let toAgy = try tell("Antigravity", review)
-            XCTAssertTrue(toAgy.isError && toAgy.text.hasSuffix("runs agy."), toAgy.text)
+            _ = try missionTask("Gemini", parent: follower, kind: "gemini")
+            let toOther = try tell("Gemini", review)
+            XCTAssertTrue(toOther.isError && toOther.text.hasSuffix("runs gemini."), toOther.text)
             let moved = try missionTask("Moved", parent: follower, agentColumn: false)
             let movedAgent = AgentStandIn()
             defer { movedAgent.remove() }
@@ -659,7 +659,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
 
             shell.addWorkspace(title: "Idle", cwd: harness.worktree, profileID: lead.space)
             let idle = try tell("Idle", review)
-            XCTAssertTrue(idle.isError && idle.text.contains("runs neither"), idle.text)
+            XCTAssertTrue(idle.isError && idle.text.contains("runs none"), idle.text)
             shell.addWorkspace(title: "Checkout", cwd: harness.repo, profileID: lead.space)
             shell.addWorkspace(title: "Linked", cwd: harness.worktree, profileID: lead.space, startedOutsideNirux: true)
             for (name, why) in [("Checkout", "isn't a task"), ("Linked", "from outside Nirux")] {
@@ -1173,6 +1173,72 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertNotNil(MissionStore.shared.missions.flatMap(\.events).first { $0.id == fromCLI.event.id }?.expiredAt)
             XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("won't be handed over: its Codex was started without a prompt") },
                           "\(shell.pendingLeadNotices.map(\.text))")
+        }
+    }
+
+    /// A tell to an Antigravity task is typed into its prompt once its `agy`
+    /// says its turn is done, not while it works; one for a Claude Code task
+    /// is never typed into an `agy` that took its terminal.
+    func testATellIsTypedIntoAnAntigravityTaskOnceItsTurnIsDone() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            /// `kind` nil: a task the user started.
+            @MainActor func task(_ title: String, kind: String?) throws -> (column: ColumnState, agent: AgentStandIn) {
+                let workspaceID = UUID().uuidString, agentUUID = UUID().uuidString
+                let mission = try kind.map { kind in try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                    id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                    childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: kind,
+                    branch: "feat/\(workspaceID.prefix(8))", reportsToLead: true
+                ), enabled: true)) }
+                harness.shell.addWorkspace(
+                    title: title, cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID, missionID: mission?.id,
+                    reportsToLead: kind != nil
+                )
+                let workspace = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+                let agent = AgentStandIn()
+                workspace.addColumn(command: agent.command(named: "agy", launchPrompt: "Read .agy-handover.md"), agentUUID: agentUUID, cwd: harness.worktree)
+                let column = try XCTUnwrap(workspace.columns.first { $0.agentUUID == agentUUID })
+                let pty = try XCTUnwrap(column.pty)
+                harness.waitUntil("its agy") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
+                // Its alerts aren't what this tests, and reach no notification center.
+                column.onAgentAttention = { _ in }
+                return (column, agent)
+            }
+            @MainActor func report(_ state: AgentProgramStatus.State, in column: ColumnState) {
+                column.pty?.onProgramStatus?(AgentProgramStatus(state: state, kind: nil, message: nil, process: "agy"))
+            }
+            @MainActor func instruction(of column: ColumnState) -> MissionEvent? {
+                MissionStore.shared.missions.flatMap(\.events).first { $0.kind == .instruction && $0.childAgentUUID == column.agentUUID }
+            }
+
+            let agy = try task("Antigravity task", kind: "agy")
+            defer { agy.agent.remove() }
+            report(.working, in: agy.column)
+            let told = try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity task", "message": "Review this."], lead: lead)
+            XCTAssertFalse(told.isError, told.text)
+            harness.shell.typeMissionMessages()
+            XCTAssertEqual(agy.agent.input, "", "not while it works")
+            XCTAssertNil(instruction(of: agy.column)?.childConsumedAt)
+            report(.done, in: agy.column)
+            harness.waitUntil("typed, then Enter") { agy.agent.input.hasSuffix("\u{1B}[201~\n") }
+            XCTAssertTrue(agy.agent.input.contains("Review this."), agy.agent.input)
+            XCTAssertNotNil(instruction(of: agy.column)?.childConsumedAt)
+
+            let claude = try task("Claude task", kind: "claude")
+            defer { claude.agent.remove() }
+            report(.working, in: claude.column)
+            report(.done, in: claude.column)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Claude task", "message": "Rebase."], lead: lead).isError)
+            harness.shell.typeMissionMessages()
+            XCTAssertEqual(claude.agent.input, "", "only into the agent its Mission names")
+            XCTAssertNil(instruction(of: claude.column)?.childConsumedAt)
+
+            let byHand = try task("Antigravity by hand", kind: nil)
+            defer { byHand.agent.remove() }
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity by hand", "message": "Rebase."], lead: lead).isError)
+            XCTAssertTrue(MissionStore.shared.missions.contains {
+                $0.oneWay == true && $0.childAgentUUID == byHand.column.agentUUID && $0.childAgentKind == "agy"
+            }, "the Lead's one-way Mission")
         }
     }
 

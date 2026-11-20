@@ -112,8 +112,8 @@ enum LeadTools {
                     Type a message into a task's prompt once its agent's turn is over (a follow-up, an answer it \
                     didn't ask for, a slash command). Any task of this space: one that doesn't report to you (a \
                     sub-task, a task the user started) gets it under a line saying it comes from you (so no \
-                    slash command); its questions and result still go to whoever started it. Claude Code and \
-                    Codex tasks only: Codex gets it through its own queue, as text (no slash command).
+                    slash command); its questions and result still go to whoever started it. Claude Code, \
+                    Codex and Antigravity tasks only: Codex gets it through its own queue, as text (no slash command).
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],

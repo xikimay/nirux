@@ -676,11 +676,11 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertTrue(lines.last?.hasPrefix("untyped mission message id=\(second.id.prefix(8)) ") == true
             && lines.last?.contains(" working=1 inFlight=1 turn=180s ") == true, lines.last ?? "")
 
-        // A tell to a child other than Claude Code or Codex waits for nobody here.
+        // A tell to an agent Nirux doesn't know waits for nobody here.
         let codexMission = UUID().uuidString, otherWorkspace = UUID().uuidString, otherAgent = UUID().uuidString
         XCTAssertNotNil(store.create(MissionCreationRequest(
             id: codexMission, parentWorkspaceID: otherWorkspace, parentAgentUUID: otherAgent,
-            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: "agy", branch: "feat/y"
+            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: "gemini", branch: "feat/y"
         ), enabled: true, now: now - 900))
         XCTAssertNotNil(store.accept(MissionEvent(
             id: UUID().uuidString, missionID: codexMission, childWorkspaceID: workspace.id, childAgentUUID: agentUUID,

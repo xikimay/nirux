@@ -36,9 +36,9 @@ final class ColumnState {
     /// permission prompt while the user isn't watching this column).
     /// The agent asks for the user (alert), with why when known.
     var onAgentAttention: ((AgentAttentionReason?) -> Void)?
-    /// Codex in front reported its turn over (OSC 7501 done or idle): a
-    /// Mission message may go into its queue.
-    var onCodexTurnOver: (() -> Void)?
+    /// An agent that says its state (OSC 7501) reported its turn over:
+    /// Codex done or idle, Antigravity done. A Mission message may go to it.
+    var onProgramTurnOver: (() -> Void)?
 
     /// Fires when the user cmd-clicks an http(s) link in the terminal —
     /// the workspace opens it in a browser column.
@@ -438,6 +438,7 @@ final class ColumnState {
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
                 onAgentAttention?(reason)
             }
+            if status.state == .done { onProgramTurnOver?() }
         }
 
         ptySession.onLocalServerURL = { [weak self] url in
@@ -628,7 +629,7 @@ final class ColumnState {
         let front = pty.foregroundProcess(snapshot: snapshot)
         guard snapshot.isEmpty || front?.name == status.process else { return }
         pty.noteCodexStatus(status, from: snapshot.isEmpty ? nil : front?.instance)
-        if [.done, .idle].contains(status.state) { onCodexTurnOver?() }
+        if [.done, .idle].contains(status.state) { onProgramTurnOver?() }
     }
 
     /// Why a Mission message can't go into the queue of this column's Codex

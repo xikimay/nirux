@@ -223,9 +223,12 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(tell("/code-review", in: fixture, agentUUID: otherAgentUUID), 4)
         XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
 
+        let other = try makeFixture(childAgentKind: "gemini")
+        XCTAssertEqual(tell("/code-review", in: other), 4, "Nirux delivers nothing to an agent it doesn't know")
+        XCTAssertTrue(try queuedEvents(in: other).isEmpty)
         let agy = try makeFixture(childAgentKind: "agy")
-        XCTAssertEqual(tell("/code-review", in: agy), 4, "Nirux delivers nothing to agy")
-        XCTAssertTrue(try queuedEvents(in: agy).isEmpty)
+        XCTAssertEqual(tell("/code-review", in: agy), 3, "typed into Antigravity's prompt")
+        XCTAssertEqual(try queuedEvents(in: agy).map(\.kind), [.instruction])
         let codex = try makeFixture(childAgentKind: "codex")
         XCTAssertEqual(tell("/code-review", in: codex), 3, "Codex takes it through its own queue")
         XCTAssertEqual(try queuedEvents(in: codex).map(\.kind), [.instruction])
@@ -435,6 +438,50 @@ final class MissionTellTests: XCTestCase {
         XCTAssertNil(refusal(), "one already running")
         XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 12, startedAt: t0 + 80), name: "codex", arguments: ["codex"])),
                        .noPromptYet, "not one started since")
+    }
+
+    /// An Antigravity child's prompt is free once its `agy` said its turn is
+    /// done (OSC 7501) and no key reached the terminal since that turn began:
+    /// agy 1.5.12 says idle at a key after done, but keeps one typed while it
+    /// worked in its box, and still says done.
+    func testAntigravityPromptIsFreeOnceItsTurnIsDoneWithNoKeySince() {
+        let agy = ForegroundProcess(instance: claudeProcess, name: "agy", arguments: ["agy", "-i", "Go"])
+        var machine = AgentStatusMachine()
+        func refusal(_ foreground: ForegroundProcess? = agy, since: TimeInterval = t0 + 100) -> AgentPromptRefusal? {
+            machine.promptRefusal(foreground: foreground, runningSince: since)
+        }
+        func report(_ state: AgentProgramStatus.State, kind: String? = nil, at offset: TimeInterval, from process: ProcessInstance? = nil) {
+            _ = machine.noteProgramStatus(
+                AgentProgramStatus(state: state, kind: kind, message: nil, process: "agy"), from: process ?? claudeProcess,
+                isUserFocused: true, now: Date(timeIntervalSince1970: t0 + offset)
+            )
+        }
+        XCTAssertEqual(refusal(ForegroundProcess(instance: claudeProcess, name: "agy", arguments: ["agy", "-p", "Go"])), .noClaude,
+                       "a one-shot run")
+        report(.idle, at: 1)
+        XCTAssertEqual(refusal(), .noPromptYet, "ready, but no turn ended since it started")
+        report(.working, at: 2)
+        XCTAssertEqual(refusal(), .working)
+        report(.blocked, kind: "permission", at: 3)
+        XCTAssertEqual(refusal(), .dialog)
+        report(.working, at: 4)
+        report(.done, at: 5)
+        XCTAssertNil(refusal())
+        XCTAssertEqual(refusal(since: claudeProcess.startedAt - 1), .restarted)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 6))
+        report(.idle, at: 6)
+        XCTAssertEqual(refusal(), .draft, "a key after its turn")
+        report(.working, at: 7)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8))
+        report(.done, at: 9)
+        XCTAssertEqual(refusal(), .draft, "a key typed while it worked stays in its box")
+        report(.working, at: 10)
+        report(.done, at: 11)
+        XCTAssertNil(refusal())
+        report(.error, at: 12)
+        XCTAssertEqual(refusal(), .failedTurn)
+        report(.done, at: 13, from: ProcessInstance(pid: 9, startedAt: t0))
+        XCTAssertEqual(refusal(), .noPromptYet, "another agy's word")
     }
 
     func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {

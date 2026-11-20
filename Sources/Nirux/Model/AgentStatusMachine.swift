@@ -246,6 +246,9 @@ struct AgentStatusMachine {
     private(set) var codexStatus: ReportedStatus?
     /// When Codex last said it works, and which `codex`: a turn started.
     private(set) var codexWorked: (at: TimeInterval, process: ProcessInstance?)?
+    /// When Antigravity last said it works, and which `agy`: its turn began
+    /// then (`promptRefusal`).
+    private(set) var agyWorked: (at: TimeInterval, process: ProcessInstance?)?
 
     /// What Antigravity reported, when, from which process, and whether its
     /// wait alerted.
@@ -1589,6 +1592,7 @@ struct AgentStatusMachine {
     ) -> AgentAttentionReason? {
         guard status != programStatus?.status || process != programStatus?.process else { return nil }
         programStatus = ReportedStatus(status: status, at: now.timeIntervalSince1970, process: process)
+        if status.state == .working { agyWorked = (now.timeIntervalSince1970, process) }
         _ = reportedState(isUserFocused: isUserFocused, now: now.timeIntervalSince1970)
         guard !isUserFocused, state == .needsAttention, status.state != .working, status.state != .idle,
               status.kind != "auth" else { return nil }
@@ -1765,6 +1769,7 @@ struct AgentStatusMachine {
         programStatus = nil
         codexStatus = nil
         codexWorked = nil
+        agyWorked = nil
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false

@@ -555,7 +555,7 @@ extension NiruxShellView {
         if let refusal = leadRefusal(for: workspace, title: title) { return answer(refusal, true) }
         let handoffsEnabled = Self.currentMissionHandoffsEnabled()
         if let own = ownMission(of: workspace), workspace.columns.contains(where: { $0.agentUUID == own.childAgentUUID }) {
-            guard own.childAgentName != nil else { return answer(Self.deliversOnlyToClaudeOrCodex(title, runs: own.childAgentKind), true) }
+            guard own.childAgentName != nil else { return answer(Self.deliversOnlyToKnownAgents(title, runs: own.childAgentKind), true) }
             if own.isCarried(handoffsEnabled: handoffsEnabled),
                let parent = requestingTerminal(workspaceID: own.parentWorkspaceID, agentUUID: own.parentAgentUUID)?.workspace {
                 // Typed, it reopens a finished sub-task, which counts against its task's limit again.
@@ -573,7 +573,7 @@ extension NiruxShellView {
         guard let (agentUUID, kind) = workspace.columns.lazy.compactMap({ column in
             column.agentUUID.flatMap { uuid in column.missionAgent(snapshot: snapshot).map { (uuid, $0) } }
         }).first
-        else { return answer("Nirux delivers messages only to Claude Code or Codex, and “\(title)” runs neither.", true) }
+        else { return answer("Nirux delivers messages only to Claude Code, Codex or Antigravity, and “\(title)” runs none.", true) }
         guard let mission = oneWayMission(to: workspace, agentUUID: agentUUID, kind: kind, from: lead) else {
             return answer("Nirux couldn’t record the message: try again.", true)
         }
@@ -591,8 +591,8 @@ extension NiruxShellView {
         return nil
     }
 
-    static func deliversOnlyToClaudeOrCodex(_ title: String, runs kind: String) -> String {
-        "Nirux delivers messages only to a Claude Code or Codex task; “\(title)” runs \(kind)."
+    static func deliversOnlyToKnownAgents(_ title: String, runs kind: String) -> String {
+        "Nirux delivers messages only to a Claude Code, Codex or Antigravity task; “\(title)” runs \(kind)."
     }
 
     /// The Lead's one-way Mission to `workspace`'s agent, made at its first tell.
@@ -631,7 +631,7 @@ extension NiruxShellView {
         handoffsEnabled: Bool = NiruxShellView.currentMissionHandoffsEnabled(), answer: @escaping LeadAnswer
     ) {
         guard let agent = mission.childAgentName else {
-            return answer(Self.deliversOnlyToClaudeOrCodex(workspace.title, runs: mission.childAgentKind), true)
+            return answer(Self.deliversOnlyToKnownAgents(workspace.title, runs: mission.childAgentKind), true)
         }
         if agent == "Codex", missionEnd(mission, parent: false)?.column?.runsUnprovableCodex(snapshot: ProcessSnapshot()) == true {
             return answer("“\(workspace.title)”’s Codex was started without a prompt, so Nirux can't tell which of its conversations "
@@ -898,11 +898,20 @@ private extension ColumnState {
     }
 
     /// The agent Nirux delivers Mission messages to that this column runs,
-    /// or will once restored: an interactive Claude Code, or Codex.
+    /// or will once restored: an interactive Claude Code, Codex or
+    /// Antigravity.
     func missionAgent(snapshot: ProcessSnapshot) -> NiruxApp.WorkspaceAgent? {
         if runsClaude(snapshot: snapshot) { return .claude }
-        if case .codex? = deferredAgent?.agent { return .codex }
+        switch deferredAgent?.agent {
+        case .codex?: return .codex
+        case .agy?: return .agy
+        default: break
+        }
         let foreground = pty?.foregroundProcess(snapshot: snapshot)
-        return foreground?.name == AgentProgramStatus.codex && !AgentHookCenter.isHeadlessCodex(foreground) ? .codex : nil
+        switch foreground?.name {
+        case AgentProgramStatus.codex? where !AgentHookCenter.isHeadlessCodex(foreground): return .codex
+        case AgentProgramStatus.agy? where !AgentHookCenter.isHeadlessAgy(foreground): return .agy
+        default: return nil
+        }
     }
 }

@@ -792,7 +792,7 @@ extension MissionEventCLI {
             return 4
         }
         guard mission.childAgentName != nil else {
-            writeStandardError("Nirux delivers messages only to a Claude Code or Codex child; this one runs \(mission.childAgentKind).")
+            writeStandardError("Nirux delivers messages only to a Claude Code, Codex or Antigravity child; this one runs \(mission.childAgentKind).")
             return 4
         }
         let sentAt = now()

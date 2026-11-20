@@ -300,8 +300,10 @@ extension NiruxShellView {
                 queueForCodex(delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title, snapshot: snapshot, now: now)
                 continue
             }
+            // Only to the agent its Mission names (`recipientKind`).
             guard let recipient = missionRecipient(of: delivery), let pty = recipient.pty,
-                  !missionWaits.typing.contains(delivery.event.id)
+                  !missionWaits.typing.contains(delivery.event.id),
+                  pty.foregroundProcess(snapshot: snapshot)?.name == Self.recipientKind(of: delivery)
             else { continue }
             let refusal = pty.missionPromptRefusal(
                 runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now), snapshot: snapshot,
@@ -361,6 +363,13 @@ extension NiruxShellView {
             self?.missionWaits.typingPassSoon = false
             self?.typeMissionMessages()
         }
+    }
+
+    /// The agent kind, its process's name too, a message goes to: a question
+    /// or a result to a Claude Code parent (another one polls with
+    /// `receive`), the rest to the child's agent.
+    nonisolated static func recipientKind(of delivery: MissionStore.AcceptedEvent) -> String {
+        goesToParent(delivery.event) ? NiruxApp.WorkspaceAgent.claude.rawValue : delivery.mission.childAgentKind
     }
 
     /// A message for a Codex child: nothing is typed into Codex, it goes
@@ -572,14 +581,16 @@ extension NiruxShellView {
     }
 
     /// The conversation `column`'s `claude` (`foreground`) confirmed through
-    /// its own hooks, or its `codex` proved, while it runs; the one it will
-    /// resume, while it waits to.
+    /// its own hooks, its `codex` proved, or its `agy` reported, while it
+    /// runs; the one it will resume, while it waits to.
     func conversation(of column: ColumnState, foreground: ForegroundProcess?) -> String? {
         switch column.deferredAgent?.agent {
-        case .claude(resume: .session(let resumes)?, _)?, .codex(resume: .session(let resumes), _)?: return resumes
+        case .claude(resume: .session(let resumes)?, _)?, .codex(resume: .session(let resumes), _)?, .agy(resume: .session(let resumes))?:
+            return resumes
         default: break
         }
         if let foreground, foreground.name == AgentProgramStatus.codex { return column.provenCodexSessionID(of: foreground) }
+        if let foreground, foreground.name == AgentProgramStatus.agy { return column.boundAgySessionID(of: foreground.instance) }
         return column.confirmedClaudeSessionID(foregroundProcess: foreground)
     }
 

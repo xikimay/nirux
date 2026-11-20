@@ -101,6 +101,7 @@ extension AgentStatusMachine {
         foreground: ForegroundProcess?, runningSince time: TimeInterval,
         seenByUser: Bool = false, showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
     ) -> AgentPromptRefusal? {
+        if let foreground, foreground.name == AgentProgramStatus.agy { return agyPromptRefusal(foreground, runningSince: time) }
         guard let foreground, AgentHookCenter.isInteractiveClaude(foreground) else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
         let startedAt = foreground.instance.startedAt
@@ -119,6 +120,29 @@ extension AgentStatusMachine {
         if hasDraft { return .draft }
         if awaitsAnyVerdict { return .verdict }
         return nil
+    }
+
+    /// `promptRefusal` for `agy`, the column's interactive Antigravity,
+    /// already running at `time`, which says its state itself (OSC 7501):
+    /// its prompt is free once it reported its turn over (`done`) and no key
+    /// reached the terminal since that turn began. It says `idle` at the
+    /// first key after `done`, but a key typed while it worked stays in its
+    /// box. Its dialogs report `blocked`; before its first turn ends it may
+    /// show a screen no state tells of, so one that ended none since it
+    /// started waits for that.
+    private func agyPromptRefusal(_ agy: ForegroundProcess, runningSince time: TimeInterval) -> AgentPromptRefusal? {
+        guard !AgentHookCenter.isHeadlessAgy(agy) else { return .noClaude }
+        guard agy.instance.startedAt <= time else { return .restarted }
+        guard let reported = programStatus, reported.process == agy.instance,
+              let workedAt = agyWorked.flatMap({ $0.process == agy.instance ? $0.at : nil })
+        else { return .noPromptYet }
+        switch reported.status.state {
+        case .working: return .working
+        case .blocked: return .dialog
+        case .error: return .failedTurn
+        case .idle: return .draft
+        case .done: return lastDraftInputAt > workedAt ? .draft : nil
+        }
     }
 
     /// Whether `process`, a `claude` that took no prompt since it started,

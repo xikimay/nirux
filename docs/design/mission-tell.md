@@ -178,3 +178,19 @@ nothing into Codex (`CodexQueue`, `queueForCodex`).
   untold to Codex again, its sender told: Codex may hold it.
 - It goes as text: a slash command doesn't run in Codex.
 - A Codex child's `ask` still waits for its answer.
+
+## Antigravity children (2026-11-20)
+
+agy 1.5.12 has no queue of its own, so Nirux types into it, behind the same
+`promptRefusal` as Claude Code: a branch reads agy's OSC 7501 instead of
+hooks. Its prompt is free once the `agy` in front (the one sent to, or one
+resuming its conversation) said `done` and no key reached the terminal since
+it last said `working`, when its turn began. Seen live: agy says `idle` at
+the first key after `done`, but a key typed while it works stays in its box
+and it still says `done`. Its dialogs say `blocked`, `error` holds the
+message like a failed turn, and before its first turn ends (a resumed agy) it
+may show a screen no state tells of: the message waits for that turn. A paste
+and its Enter in one write go in (probed). A message goes only to the agent
+its Mission names, so one for a Claude Code child is never typed into an agy
+that took its terminal, nor a question into an agy parent, which polls with
+`receive`.
