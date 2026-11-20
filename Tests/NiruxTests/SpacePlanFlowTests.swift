@@ -29,7 +29,7 @@ final class SpacePlanFlowTests: XCTestCase {
                 XCTAssertIdentical(harness.window.firstResponder, shell.spacePlan, "it holds the keyboard")
                 for key in [UIFlowHarness.Key.down, .returnKey, .escape] { harness.press(key, in: harness.window) }
                 shell.toggleSpacePlan()
-                XCTAssertNil(shell.spacePlan)
+                harness.waitUntil("the plan gone") { shell.spacePlan == nil }
                 harness.press("x", keyCode: 0x07, [])
                 harness.waitUntil("the key typed after it") { standIn.input.contains("x") }
                 XCTAssertEqual(standIn.input, "x", "none of the plan's keys")
