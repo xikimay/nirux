@@ -21,6 +21,8 @@ struct ClaudeSessionRecord: Equatable, Sendable {
     static let settleTime: TimeInterval = 3
     /// Claude Code reads no larger one.
     static let maxBytes = 262_144
+    /// Its times come in milliseconds: read back, one can land a hair off.
+    static let precision: TimeInterval = 0.001
 
     enum Reading: Equatable, Sendable {
         case found(ClaudeSessionRecord)
@@ -76,17 +78,17 @@ struct ClaudeSessionRecord: Equatable, Sendable {
         return ClaudeSessionRecord(json: data, writtenAt: writtenAt).map(Reading.found) ?? .unreadable
     }
 
-    /// Written by `process`, whose start is known to the second, not by an
-    /// earlier one under the same pid.
+    /// Written by `process`, whose start is known to the microsecond, not
+    /// by an earlier one under the same pid.
     func belongs(to process: ProcessInstance) -> Bool {
-        statusUpdatedAt.map { $0 >= process.startedAt } ?? false
+        statusUpdatedAt.map { $0 >= process.startedAt - Self.precision } ?? false
     }
 
     /// Whether it shows the REPL of `process` idle at its prompt, nothing
     /// waiting, settled for `settleTime` at `now`.
     func showsIdlePrompt(of process: ProcessInstance, now: TimeInterval) -> Bool {
         guard belongs(to: process), status == "idle", waitingFor == nil, let statusUpdatedAt else { return false }
-        return now - max(statusUpdatedAt, writtenAt) >= Self.settleTime
+        return now - max(statusUpdatedAt, writtenAt) >= Self.settleTime - Self.precision
     }
 
     /// Whether it shows the REPL of `process` waiting on a dialog or screen.
@@ -99,6 +101,18 @@ extension ClaudeSessionRecord.Reading {
     func showsIdlePrompt(of process: ProcessInstance, now: TimeInterval) -> Bool {
         guard case .found(let record) = self else { return false }
         return record.showsIdlePrompt(of: process, now: now)
+    }
+
+    /// Whether the user's word that `process` sits at its prompt may stand:
+    /// in place of a record of its own only where there is none (another
+    /// Claude Code, one without a status, an earlier process's), once it ran
+    /// for `settleTime`; one of its own must show its idle prompt.
+    func allowsTypingOnSight(of process: ProcessInstance, now: TimeInterval) -> Bool {
+        switch self {
+        case .unreadable: return false
+        case .found(let record) where record.belongs(to: process): return record.showsIdlePrompt(of: process, now: now)
+        case .missing, .found: return now - process.startedAt >= ClaudeSessionRecord.settleTime
+        }
     }
 
     func showsWait(of process: ProcessInstance) -> Bool {

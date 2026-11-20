@@ -60,7 +60,13 @@ enum PRFollowUp {
             /// After a round, the checkout isn't at the pull request's head:
             /// commits left unpushed, or a push from elsewhere not pulled.
             case checkoutDiffers
+            /// Another build's stop this one can't read: it holds while the
+            /// pull request's head is the one it was about, until the pull
+            /// request closes when even that can't be read.
+            case unreadable
         }
+
+        static let unreadable = Stop(kind: .ci, cause: .unreadable, head: "", at: 0)
 
         let kind: Kind
         let cause: Cause
@@ -165,7 +171,7 @@ enum PRFollowUp {
         if facts.isInMergeQueue { return .wait("the merge queue holds it") }
         if pullRequest.autoMerges { return .wait("auto-merge is on") }
         if let stop = entry.stop {
-            if stop.head == head, holds(stop, facts) { return .wait("stopped: \(stop.cause.rawValue)") }
+            if stop.head == head || stop.head.isEmpty, holds(stop, facts) { return .wait("stopped: \(stop.cause.rawValue)") }
             entry.stop = nil
         }
         if let wait = settleLastRound(&entry, facts, head: head) { return wait }
@@ -233,8 +239,11 @@ enum PRFollowUp {
 
     /// While unknown, a stop holds.
     private static func holds(_ stop: Stop, _ facts: Facts) -> Bool {
-        guard stop.cause != .checkoutDiffers else { return facts.localHead.map { $0 != stop.head } ?? true }
-        return isPresent(stop.kind, items: stop.items, facts) ?? true
+        switch stop.cause {
+        case .unreadable: return true
+        case .checkoutDiffers: return facts.localHead.map { $0 != stop.head } ?? true
+        case .rounds, .nothingPushed: return isPresent(stop.kind, items: stop.items, facts) ?? true
+        }
     }
 
     /// Whether the pull request still shows that kind of trouble (of
@@ -276,9 +285,11 @@ enum PRFollowUp {
             return .ready(prompt: "PR #\(pullRequest.number) conflicts with \(base). Run `git fetch \(remote) \(base)`, "
                 + "merge \(remote)/\(base) into this branch, resolve the conflicts, run the checks, commit and push.", items: [])
         case .ci:
-            let runs = CIFailure.runs(of: fixableFailures(pullRequest), in: pullRequest)
+            let fixable = fixableFailures(pullRequest)
+            let runs = CIFailure.runs(of: fixable, in: pullRequest)
             guard !runs.isEmpty, !entry.userFailures.contains(failureSignature(pullRequest)) else { return nil }
-            if hasRunGoing(pullRequest) { return .wait("checks still run") }
+            // Another workflow may wait on someone (a deployment's approval).
+            if hasRunGoing(pullRequest, in: Set(fixable.compactMap(\.workflowName))) { return .wait("checks still run") }
             switch facts.triage {
             case .pending: return .wait("the triage reads the failure")
             // Rerunning it stays the user's.
@@ -317,10 +328,13 @@ enum PRFollowUp {
         CITriage.signature(of: fixableFailures(pullRequest))
     }
 
-    /// A run of the pull request's own still going: its failures may come
-    /// back, or go.
-    private static func hasRunGoing(_ pullRequest: PRInfo) -> Bool {
-        CIFailure.ownRunResults(pullRequest).contains { $0.result == .pending }
+    /// A run of the pull request's own still going, of `workflows` (nil:
+    /// any): its failures may come back, or go.
+    private static func hasRunGoing(_ pullRequest: PRInfo, in workflows: Set<String>? = nil) -> Bool {
+        let going = pullRequest.checks.filter { check in
+            check.result == .pending && workflows.map { $0.contains(check.workflowName ?? "") } != false
+        }
+        return !CIFailure.runs(of: going, in: pullRequest).isEmpty
     }
 
     /// A name GitHub or the checkout gave goes into a prompt only when plain.
@@ -352,13 +366,17 @@ extension PRFollowUp.Round {
 }
 
 extension PRFollowUp.Stop {
+    /// A kind or cause this build doesn't know makes it `unreadable`,
+    /// about the head it names.
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = values.lenient(.kind, PRFollowUp.Kind?.none)
+        let cause = values.lenient(.cause, Cause?.none)
         self.init(
-            kind: try values.decode(PRFollowUp.Kind.self, forKey: .kind),
-            cause: try values.decode(Cause.self, forKey: .cause),
-            head: try values.decode(String.self, forKey: .head),
-            at: try values.decode(TimeInterval.self, forKey: .at),
+            kind: kind ?? .ci,
+            cause: kind == nil ? .unreadable : cause ?? .unreadable,
+            head: values.lenient(.head, ""),
+            at: values.lenient(.at, 0),
             items: values.lenient(.items, []),
             seenAt: values.lenient(.seenAt, nil)
         )
@@ -373,7 +391,7 @@ extension PRFollowUp.Entry {
             rounds: values.lenient(.rounds, [LenientValue<PRFollowUp.Round>]()).map { $0.value ?? .unreadable },
             handedFeedback: values.lenient(.handedFeedback, []),
             userFailures: values.lenient(.userFailures, []),
-            stop: values.lenient(.stop, nil),
+            stop: values.lenient(.stop, nil) ?? ((try? values.decodeNil(forKey: .stop)) == false ? .unreadable : nil),
             updatedAt: values.lenient(.updatedAt, 0)
         )
     }

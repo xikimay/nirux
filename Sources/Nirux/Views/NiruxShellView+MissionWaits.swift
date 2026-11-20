@@ -13,35 +13,70 @@ struct SidebarWaitingMessages: Hashable {
     let refusal: AgentPromptRefusal?
     /// The prompt looks free, yet the tries at typing failed.
     var untypable = false
+    /// Held by a `claude` with no prompt since it started that doesn't say
+    /// it sits at its prompt, which would take one on the user's word now:
+    /// the row offers to type it (`NiruxShellView.typeWaitingMessagesNow`).
+    var offersTypeNow = false
+    /// With the offer, that `claude`: the offer is for it, not one started
+    /// since.
+    var heldBy: ProcessInstance?
+    /// The agent they wait for, as the row names it.
+    var agent = "Claude Code"
     /// "2 messages waiting since 22:21 · a dialog may be open", written at
     /// the check: the day shows once it is another.
     let line: String
 
-    init(count: Int, since: TimeInterval, refusal: AgentPromptRefusal?, untypable: Bool = false, now: TimeInterval) {
+    init(
+        count: Int, since: TimeInterval, refusal: AgentPromptRefusal?, untypable: Bool = false, offersTypeNow: Bool = false,
+        heldBy: ProcessInstance? = nil, agent: String = "Claude Code", now: TimeInterval
+    ) {
         self.count = count
         self.since = since
         self.refusal = refusal
         self.untypable = untypable
+        self.offersTypeNow = offersTypeNow
+        self.heldBy = heldBy
+        self.agent = agent
         let time = ProjectBoard.clockTime(Date(timeIntervalSince1970: since), now: Date(timeIntervalSince1970: now))
-        line = "\(count == 1 ? "1 message" : "\(count) messages") waiting since \(time) · \(Self.why(refusal, untypable: untypable).short)"
+        line = "\(count == 1 ? "1 message" : "\(count) messages") waiting since \(time) · "
+            + Self.why(refusal, untypable: untypable, agent: agent).short
     }
 
     var tooltip: String {
-        "Mission messages not typed into this agent's prompt yet: \(Self.why(refusal, untypable: untypable).long)."
+        let why = "Mission messages not typed into this agent's prompt yet: \(Self.why(refusal, untypable: untypable, agent: agent).long)."
+        return offersTypeNow ? why + " " + Self.typeNowAdvice : why
     }
 
-    /// Why they wait: a few words for the row, the whole of it for the tooltip.
-    static func why(_ refusal: AgentPromptRefusal?, untypable: Bool) -> (short: String, long: String) {
-        switch refusal {
-        case .noClaude?: ("no Claude Code there", "its terminal doesn't run Claude Code")
+    static let typeNowAdvice = "If its terminal shows its prompt, empty, Type it now types one of them; the rest follow its turn. "
+        + "Click the line to see its terminal."
+
+    /// Why they wait: a few words for the row, the whole of it for the
+    /// tooltip. `agent`: "Claude Code", or "Codex", whose messages go into
+    /// its own queue.
+    static func why(_ refusal: AgentPromptRefusal?, untypable: Bool, agent: String = "Claude Code") -> (short: String, long: String) {
+        let codex = agent == "Codex"
+        return switch refusal {
+        case .noClaude?: ("no \(agent) there", "its terminal doesn't run \(agent)")
         case .restarted?: (
-            "its Claude Code restarted",
-            "its Claude Code restarted since, and Nirux types a message sent to the one before into no other"
+            "its \(agent) restarted",
+            "its \(agent) restarted since, and Nirux types a message sent to the one before into no other"
+        )
+        case .noPromptYet? where agent == "Antigravity": (
+            "no turn ended since it started",
+            "its Antigravity hasn't ended a turn since it started, where a screen of its own may be up; they go in after its first one"
+        )
+        case .noPromptYet? where codex: (
+            "no state from Codex yet",
+            "its Codex hasn't reported its state since it started (Codex 0.167 or later does); they go in once it reports its turn over"
         )
         case .noPromptYet?: (
             "no prompt since it started",
             "its Claude Code took no prompt since it started and doesn't say it sits at its prompt (a screen of its own may be up); "
                 + "they go in once it does, or after its first prompt"
+        )
+        case .noConversation?: (
+            "its conversation isn't known yet",
+            "Nirux doesn't know yet which conversation its Codex runs; it learns it when the turn its launch prompt started ends"
         )
         case .dialog?: ("a dialog may be open", "a dialog may be open there; they go in once it closes and the turn ends")
         case .failedTurn?: ("its last turn failed", "its last turn failed; they go in after its next turn")
@@ -50,6 +85,10 @@ struct SidebarWaitingMessages: Hashable {
             "keys reached its prompt since its last prompt, so it may hold a draft; they go in after its next prompt"
         )
         case .working?, .verdict?: ("its turn isn't over", "its turn isn't over yet")
+        case nil where untypable && codex: (
+            "Codex didn't take them",
+            "its Codex reports its turn over, but it didn't take them into its queue"
+        )
         case nil where untypable: (
             "typing failed",
             "its prompt looks free, but typing them failed; they go in at its next turn end if they can"
@@ -89,6 +128,15 @@ struct MissionWaitState {
     /// sidebar's refreshes read between checks, a read taking a sysctl and a
     /// file (`NiruxShellView.sessionRecord(of:)`).
     var recordReadings: [ProcessInstance: ClaudeSessionRecord.Reading] = [:]
+    /// A typing pass waits for a queue a writer held (`hooksReadBeforeTyping`).
+    var typingPassSoon = false
+    /// How long Codex or Antigravity may take to start a message Nirux
+    /// handed it at a free prompt before its sender hears it hasn't
+    /// (`checkStarted`).
+    var startWait: TimeInterval = 20
+    /// Columns whose Codex is being handed a message: one at a time, so
+    /// that its queue keeps their order.
+    var codexQueuing: Set<UUID> = []
 
     /// Nirux typed into `column`'s prompt: it says nothing of it until the
     /// next check.
@@ -125,6 +173,12 @@ extension NiruxShellView {
         let kind: String
         let sentAt: TimeInterval
         let runningSince: TimeInterval
+        /// The agent kind it goes to (`recipientKind`): a Codex child's goes
+        /// into Codex's queue (`queueForCodex`).
+        var agentKind = NiruxApp.WorkspaceAgent.claude.rawValue
+
+        var toCodex: Bool { agentKind == NiruxApp.WorkspaceAgent.codex.rawValue }
+        var agentName: String { Mission.agentName(ofKind: agentKind) ?? agentKind }
     }
 
     /// Tells a `tell`'s sender, once, what holds it when it is still
@@ -151,17 +205,25 @@ extension NiruxShellView {
                 continue
             }
             let since = runningSince(of: event, in: column, snapshot: snapshot, now: now)
-            let refusal = column.pty?.missionPromptRefusal(runningSince: since, snapshot: snapshot, now: now, record: sessionRecord(of:))
-                ?? .noClaude
+            let agent = mission.childAgentName
+            let refusal = agent == "Codex" ? column.codexMissionRefusal(runningSince: since, snapshot: snapshot)
+                : column.pty?.missionPromptRefusal(
+                    runningSince: since, snapshot: snapshot, agent: mission.childAgentKind, now: now, record: sessionRecord(of:)
+                ) ?? .noClaude
             let holder = {
-                mission.childAgentKind != NiruxApp.WorkspaceAgent.claude.rawValue ? "its agent hasn't collected it"
+                agent == nil ? "its agent hasn't collected it"
                     : !mission.isCarried(handoffsEnabled: handoffsEnabled) ? "Mission handoffs are off"
-                    : SidebarWaitingMessages.why(refusal, untypable: self.missionWaits.tries[event.id, default: 0] >= Self.missionTypingTries).short
+                    : SidebarWaitingMessages.why(
+                        refusal, untypable: self.missionWaits.tries[event.id, default: 0] >= Self.missionTypingTries, agent: agent ?? ""
+                    ).short
             }
             // Restarted, `runningSince` says, on another conversation once it confirmed one.
             let other = conversation(of: column, foreground: column.pty?.foregroundProcess(snapshot: snapshot)) != nil
-            if refusal == .restarted, other, mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue {
-                givenUp.append((delivery, "\(yours) won't be typed: its Claude Code restarted on another conversation, and Nirux "
+            if agent == "Codex", column.runsUnprovableCodex(snapshot: snapshot) {
+                givenUp.append((delivery, "\(yours) won't be handed over: its Codex was started without a prompt, so Nirux can't "
+                    + "tell which of its conversations is the task's. Give it to the user instead."))
+            } else if refusal == .restarted, other, let agent {
+                givenUp.append((delivery, "\(yours) won't be typed: its \(agent) restarted on another conversation, and Nirux "
                     + "types a message only into the conversation it was sent to. Send it again if it still applies."))
             } else if now >= event.instructionDeadline {
                 // One an older build recorded had an hour.
@@ -214,14 +276,13 @@ extension NiruxShellView {
                 ?? Self.currentMissionHandoffsEnabled()
             missionWaits.handoffsEnabled = (deliveryIDs, handoffsEnabled)
             for delivery in deliveries where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
-                // A child other than Claude Code collects its own.
-                guard Self.goesToParent(delivery.event)
-                    || delivery.mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue
-                else { continue }
+                // A child Nirux delivers nothing to collects its own.
+                guard Self.goesToParent(delivery.event) || delivery.mission.childAgentName != nil else { continue }
                 let recipient = missionRecipient(of: delivery)
                 add(recipient, WaitingMessage(
                     id: delivery.event.id, kind: delivery.event.kind.rawValue, sentAt: delivery.event.timestamp,
-                    runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now)
+                    runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now),
+                    agentKind: Self.recipientKind(of: delivery)
                 ))
             }
         }
@@ -231,16 +292,23 @@ extension NiruxShellView {
         }
         var shown: [UUID: SidebarWaitingMessages] = [:]
         var retries: [String] = []
+        var asksCodex = false
         // Freed by its REPL's word, with no turn end to type them at: at once.
         var firstPrompts: [String] = []
         for (id, entry) in waiting {
             let pty = entry.column.pty
             let foreground = pty?.foregroundProcess(snapshot: snapshot)
-            if let name = foreground?.name, name != "claude", AgentStatusMachine.isRecognizedAgentProcess(name) { continue }
             let atFirstPrompt = foreground.map { pty?.agentTookPrompt(since: $0) == false } ?? false
             let refused = entry.messages.compactMap { message -> (message: WaitingMessage, refusal: AgentPromptRefusal?)? in
+                if message.toCodex {
+                    return (message, entry.column.codexMissionRefusal(runningSince: message.runningSince, snapshot: snapshot))
+                }
+                // Another agent in front: what holds its own messages, if any, says why.
+                if let name = foreground?.name, name != message.agentKind, AgentStatusMachine.isRecognizedAgentProcess(name) { return nil }
                 let refusal = pty.map {
-                    $0.missionPromptRefusal(runningSince: message.runningSince, snapshot: snapshot, now: now, record: sessionRecord(of:))
+                    $0.missionPromptRefusal(
+                        runningSince: message.runningSince, snapshot: snapshot, agent: message.agentKind, now: now, record: sessionRecord(of:)
+                    )
                 } ?? .noClaude
                 guard refusal != .draft || missionWaits.typedAt[id] == nil else { return nil }
                 return (message, refusal)
@@ -252,13 +320,17 @@ extension NiruxShellView {
                 now - message.sentAt >= (refusal == nil || refusal == .draft ? Self.missionWaitLogAge : Self.missionMessageStallAge)
             }
             func free(_ messages: [(message: WaitingMessage, refusal: AgentPromptRefusal?)]) -> [String] {
-                messages.filter { $0.refusal == nil && missionWaits.tries[$0.message.id, default: 0] < Self.missionTypingTries }
-                    .map(\.message.id)
+                messages.filter {
+                    $0.refusal == nil && !missionWaits.typing.contains($0.message.id)
+                        && missionWaits.tries[$0.message.id, default: 0] < Self.missionTypingTries
+                }.map(\.message.id)
             }
-            // Tries are counted at the overdue ones' pace.
-            retries += free(overdue)
+            // Tries are counted at the overdue ones' pace; a Codex message's
+            // only when Codex refuses it (`queueForCodex`): a retry just asks.
+            retries += free(overdue.filter { !$0.message.toCodex })
+            asksCodex = asksCodex || !free(overdue.filter(\.message.toCodex)).isEmpty
             if atFirstPrompt { firstPrompts += free(refused) }
-            if let foreground, refused.contains(where: { $0.refusal == .noPromptYet }) {
+            if let foreground, refused.contains(where: { $0.refusal == .noPromptYet && $0.message.agentKind == "claude" }) {
                 logSessionRecordIssue(of: foreground.instance, agentUUID: entry.column.agentUUID, now: now)
             }
             for (message, refusal) in overdue {
@@ -269,19 +341,27 @@ extension NiruxShellView {
                     "untyped mission message id=\(message.id.prefix(8)) kind=\(message.kind) "
                         + "agent=\(entry.column.agentUUID?.prefix(8) ?? "-") waited=\(waited)s reason=\(reason) messages=\(refused.count) "
                         + "fg=\(foreground.map { "\($0.name)/\(Int(max(now - $0.instance.startedAt, 0)))s" } ?? "-") "
-                        + (pty?.missionPromptFacts(now: now, snapshot: snapshot, record: sessionRecord(of:)) ?? "")
+                        + ((foreground?.name == AgentProgramStatus.codex ? pty?.codexFacts(now: now)
+                            : foreground?.name == AgentProgramStatus.agy ? pty?.agyFacts(now: now)
+                            : pty?.missionPromptFacts(now: now, snapshot: snapshot, record: sessionRecord(of:))) ?? "")
                 )
             }
             let typable = refused.filter {
-                $0.refusal != .working && $0.refusal != .restarted && ($0.refusal != .noPromptYet || pty?.agentHookKind == "claude")
+                $0.refusal != .working && $0.refusal != .restarted
+                    && ($0.refusal != .noPromptYet || pty?.agentHookKind == "claude" || $0.message.agentKind != "claude")
             }
             guard typable.contains(where: { now - $0.message.sentAt >= Self.missionMessageStallAge }),
                   let oldest = typable.min(by: { $0.message.sentAt < $1.message.sentAt })
             else { continue }
+            let offersTypeNow = atFirstPrompt && oldest.refusal != nil
+                && pty?.missionPromptRefusal(
+                    runningSince: oldest.message.runningSince, snapshot: snapshot, seenByUser: true, now: now, record: sessionRecord(of:)
+                ) == nil
             shown[id] = SidebarWaitingMessages(
                 count: typable.count, since: oldest.message.sentAt, refusal: oldest.refusal,
                 untypable: oldest.refusal == nil && missionWaits.tries[oldest.message.id, default: 0] >= Self.missionTypingTries,
-                now: now
+                offersTypeNow: offersTypeNow, heldBy: offersTypeNow ? foreground?.instance : nil,
+                agent: oldest.message.agentName, now: now
             )
         }
         let pending = Set(waiting.values.flatMap { $0.messages.map(\.id) })
@@ -290,7 +370,7 @@ extension NiruxShellView {
         missionWaits.shown = shown
         missionWaits.recordIssuesLogged = missionWaits.recordIssuesLogged.filter(snapshot.contains)
         missionWaits.unreadableRecords = missionWaits.unreadableRecords.filter(snapshot.contains)
-        let retryDue = !retries.isEmpty && now - missionWaits.lastRetryAt >= Self.stuckWatchInterval
+        let retryDue = (!retries.isEmpty || asksCodex) && now - missionWaits.lastRetryAt >= Self.stuckWatchInterval
         if retryDue {
             missionWaits.lastRetryAt = now
             for retry in retries { missionWaits.tries[retry, default: 0] += 1 }
@@ -305,6 +385,49 @@ extension NiruxShellView {
         let reading = PtySession.sessionRecord(of: process)
         missionWaits.recordReadings[process] = reading
         return reading
+    }
+
+    /// "Type it now" clicked on a row whose messages wait for a `claude` with
+    /// no prompt since it started (`SidebarWaitingMessages.offersTypeNow`):
+    /// the user says it sits at its prompt. Its terminal not on screen (another
+    /// workspace, or scrolled out of view), the click shows it first, for
+    /// them to look. Then one message goes in, as
+    /// the row showed (`since`, its oldest's; the same `claude`), and as
+    /// `ClaudeSessionRecord.Reading.allowsTypingOnSight` allows; the rest
+    /// follow its turn.
+    func typeWaitingMessagesNow(workspaceIndex: Int, columnIndex: Int, since: TimeInterval, tries: Int = 2) {
+        // A hook may still wait out the queue's drain debounce.
+        AgentHookCenter.shared.drain()
+        let snapshot = ProcessSnapshot()
+        // An empty process table says nothing of its claude: read it once more.
+        guard !snapshot.isEmpty else {
+            guard tries > 1 else { return showToast("Nirux couldn't read the running processes: try again") }
+            return DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.typeWaitingMessagesNow(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since, tries: tries - 1)
+            }
+        }
+        guard let column = workspaces[safe: workspaceIndex]?.columns[safe: columnIndex], let pty = column.pty,
+              let waiting = missionWaits.shown[column.id], waiting.offersTypeNow, waiting.since == since,
+              waiting.heldBy == pty.foregroundProcess(snapshot: snapshot)?.instance
+        else { return showToast("Those messages changed: see the row again") }
+        guard activeWSIndex == workspaceIndex, workspaces[workspaceIndex].showsColumn(at: columnIndex) else {
+            switchToWorkspace(workspaceIndex, column: columnIndex)
+            return showToast("Check that its prompt is empty, then Type it now again")
+        }
+        let outcome = typeMissionMessages(seenAtPrompt: column.id)
+        updateSidebar(snapshot: snapshot)
+        showToast(Self.typedOnSightText(outcome))
+    }
+
+    /// The toast after Type it now.
+    static func typedOnSightText(_ outcome: TypedOnSight?) -> String {
+        switch outcome {
+        case .typed?: "Typed one; the rest follow its turn"
+        case .refused(.noPromptYet?)?: "Nothing typed: Claude Code shows a screen of its own there, or its last turn isn't over"
+        case .refused(let refusal?)?: "Nothing typed: \(SidebarWaitingMessages.why(refusal, untypable: false).short)"
+        case .refused(nil)?: "Nothing typed: it couldn't be typed"
+        case nil: "Nothing typed: none waits for its prompt now, or one is on its way"
+        }
     }
 
     /// Writes to the log, once per process, that the session record of

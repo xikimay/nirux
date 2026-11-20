@@ -25,6 +25,7 @@ final class MissionEventCenter {
     private var pendingDrain: DispatchWorkItem?
     private var nextRetryDelay: TimeInterval
     private var started = false
+    private var queue = QueueFile.Reader(name: "MissionEvents")
 
     init(
         store: MissionStore,
@@ -113,32 +114,40 @@ final class MissionEventCenter {
         nextRetryDelay = initialRetryDelay
     }
 
-    func drain() {
+    /// False when a writer held the queue: what it holds isn't applied yet,
+    /// and what to type mustn't be decided on it.
+    @discardableResult
+    func drain() -> Bool {
         pendingDrain?.cancel()
         pendingDrain = nil
         guard store.ensureLoaded() else {
             scheduleRetry()
-            return
+            return true
         }
         let aside = eventsURL.deletingPathExtension().appendingPathExtension("processing")
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: aside.path), !process(aside, fileManager: fileManager) {
             scheduleRetry()
-            return
+            return true
         }
-        do {
-            try fileManager.moveItem(at: eventsURL, to: aside)
-        } catch {
+        switch queue.takeAside(eventsURL, to: aside) {
+        case .taken:
+            break
+        case .absent:
             resetRetryDelay()
             deliverPendingEvents()
-            return
+            return true
+        case .busy:
+            scheduleDrain()
+            return false
         }
         guard process(aside, fileManager: fileManager) else {
             scheduleRetry()
-            return
+            return true
         }
         resetRetryDelay()
         deliverPendingEvents()
+        return true
     }
 
     private func process(_ source: URL, fileManager: FileManager) -> Bool {

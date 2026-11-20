@@ -33,7 +33,9 @@ enum NiruxMCPServer {
         results are typed into your prompt as [Nirux Mission] messages, only once your turn is over: after \
         starting sub-tasks, go on with your own work or end your turn; don't poll or sleep. Report your own \
         result only once the sub-tasks you need are done. A sub-task can't start sub-tasks of its own. Where \
-        start_task answers that the workspace isn't a task, use the nirux-worktree skill.
+        start_task answers that the workspace isn't a task, use the nirux-worktree skill. When you ask the agent \
+        that started you with --mission ask, add --kind (decision, access or spec-mismatch) and --recommend: the \
+        answer you'd pick, or for access exactly what is needed and where.
         """
 
     /// For an agent outside a Nirux workspace, which has no task tools.

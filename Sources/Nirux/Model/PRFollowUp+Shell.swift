@@ -51,6 +51,8 @@ extension PRFollowUp {
         let number = "#\(pullRequest.number)"
         let base = pullRequest.baseRefName ?? "its base"
         switch stop.cause {
+        case .unreadable:
+            return "\(number): another Nirux build handed it to you"
         case .checkoutDiffers:
             return "\(number): the checkout isn’t at the pull request’s head after the automatic round"
         case .rounds:

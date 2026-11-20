@@ -63,12 +63,25 @@ struct ShellSideEffects {
         try await CookieImporter.importCookies(from: source, into: WebViewColumn.sharedDataStore)
     }
 
+    /// Seconds since the last left mouse-up, even one a button's or a menu's
+    /// tracking took from the app.
+    var secondsSinceMouseUp: @MainActor () -> TimeInterval = {
+        CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .leftMouseUp)
+    }
+
     /// macOS's "Reduce motion" (System Settings › Accessibility › Display).
     var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
     /// The transparency level drawn: the one picked, made opaque where macOS
     /// asks (Reduce transparency, Increase contrast; CI's runners do).
     var drawnTransparency: @MainActor (InterfaceTransparency) -> InterfaceTransparency = { $0.effectiveNow() }
+
+    /// `step` after a motion's `duration`, on time once the change is
+    /// committed (`ColumnState.afterCommit`). Tests run the steps
+    /// themselves, rather than waiting a time.
+    var afterCommit: @MainActor (_ duration: CFTimeInterval, _ step: @escaping @MainActor () -> Void) -> Void = {
+        ColumnState.afterCommit($0, $1)
+    }
 
     /// macOS draws its glass (26 and later), which refracts what passes
     /// under it. CI's macOS 15 draws none.
@@ -96,6 +109,12 @@ struct ShellSideEffects {
     /// (`waitingMissionMessages`): the app's shell writes it to the system
     /// log, a test's shell writes none.
     var logMissionWait: @MainActor (String) -> Void = { _ in }
+
+    /// Hands a Mission message to a running Codex's own queue
+    /// (`CodexQueue`); `done` comes on the main queue.
+    var queueCodexMessage: @MainActor (
+        _ request: CodexQueue.Request, _ done: @escaping @MainActor @Sendable (CodexQueue.Outcome) -> Void
+    ) -> Void = { CodexQueue.send($0, done: $1) }
 
     /// Calls back at each click or scroll the app receives, until stopped;
     /// the events go on as they were. Keys come through the app's key
@@ -210,6 +229,13 @@ struct ShellSideEffects {
         RunLoop.main.perform(inModes: [.default, .modalPanel]) {
             MainActor.assumeIsolated { NSApp.terminate(nil) }
         }
+    }
+
+    /// Brings Nirux to the front for a question it may ask while hidden.
+    /// Tests leave the app where it is.
+    var comeToFront: @MainActor () -> Void = {
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Asks whether to stop the running merge queues and quit, `confirm`

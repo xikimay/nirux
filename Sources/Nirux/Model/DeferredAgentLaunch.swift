@@ -69,7 +69,7 @@ struct DeferredAgentLaunch: Equatable {
         switch agent {
         case .claude: return "claude"
         case .codex: return "codex"
-        case .agy: return AgentProgramStatus.process
+        case .agy: return AgentProgramStatus.agy
         }
     }
 

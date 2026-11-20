@@ -36,6 +36,24 @@ enum LeadTools {
         + "for a task without a repository), or its title. A name several tasks answer goes to the one of yours, "
         + "if only one is; otherwise it is refused."
 
+    /// What reply's description adds about a question's kind and recommendation.
+    static let replyKindsDescription = "A question may say its kind (decision, access, spec-mismatch) and what the task "
+        + "recommends; for access, what it needs, which only the user can give: hand it over with ask_user unless "
+        + "you can say what to do instead. Accept a recommendation only when the brief, the code or the user's words "
+        + "back it: a spec-mismatch one changes what the user asked for."
+
+    /// reply's arguments, for the Lead's tasks and a task's sub-tasks.
+    static var replyProperties: [String: Any] {
+        [
+        "question": ["type": "string", "description": "The question's id."],
+        "message": ["type": "string", "description": "Your answer, at most \(MissionEventCLI.maxInstructionLength) characters."],
+        "accept": [
+            "type": "boolean",
+            "description": "true, in place of message: send the task's recommended answer as yours (not for an access question)."
+        ]
+        ]
+    }
+
     /// A next step or blocker: one line on the task's row.
     static let maxContextLength = 200
 
@@ -82,8 +100,9 @@ enum LeadTools {
                 listTasks, title: "List the space's tasks",
                 description: """
                     The space's tasks and repositories: each task's title, branch, repository, agent state (working, \
-                    needs the user, asking you, stopped on an API error, silent, exited mid-turn, idle, done), pull request and checks, and the question or result it \
-                    sent you, its next step and blocker. Read it again after a /clear: Nirux keeps the state, your \
+                    needs the user, asking you, stopped on an API error, silent, exited mid-turn, idle, done), pull request and checks, the \
+                    last questions it got answered, and the question or result it sent you, its next step and blocker. Read it again after \
+                    a /clear: Nirux keeps the state, your \
                     conversation doesn't.
                     """,
                 properties: [:], required: [], readOnly: true
@@ -94,8 +113,8 @@ enum LeadTools {
                     Type a message into a task's prompt once its agent's turn is over (a follow-up, an answer it \
                     didn't ask for, a slash command). Any task of this space: one that doesn't report to you (a \
                     sub-task, a task the user started) gets it under a line saying it comes from you (so no \
-                    slash command); its questions and result still go to whoever started it. Claude Code tasks \
-                    only.
+                    slash command); its questions and result still go to whoever started it. Claude Code, \
+                    Codex and Antigravity tasks only; slash commands are Claude Code's (Codex gets the text through its queue).
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],
@@ -105,19 +124,17 @@ enum LeadTools {
             ),
             definition(
                 reply, title: "Answer a task's question",
-                description: "Answer the question a task asked you, by its id (in the [Nirux Mission] message and list_tasks).",
-                properties: [
-                    "question": ["type": "string", "description": "The question's id."],
-                    "message": ["type": "string", "description": "Your answer, at most \(MissionEventCLI.maxInstructionLength) characters."]
-                ],
-                required: ["question", "message"]
+                description: "Answer the question a task asked you, by its id (in the [Nirux Mission] message and list_tasks). "
+                    + replyKindsDescription,
+                properties: replyProperties, required: ["question"]
             ),
             definition(
                 askUser, title: "Hand a task's question to the user",
                 description: """
                     Hand the question a task is waiting on to the user, when neither the brief, the code nor the \
-                    conversation settles it: its row turns amber and shows your reason. Their answer goes to the \
-                    task, and a line comes to you.
+                    conversation settles it: its row turns amber and shows your reason, and the task's \
+                    recommendation, if it gave one, which the user can accept (for access, what it needs, with \
+                    nothing to accept). Their answer goes to the task, and a line comes to you.
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],
@@ -330,6 +347,13 @@ enum LeadTools {
         return .some(AgentText.clean(text, maxLength: maxContextLength * 4) ?? "")
     }
 
+    /// reply's `accept`: false when left out, nil when not a JSON boolean.
+    static func accepts(_ arguments: [String: Any]) -> Bool? {
+        guard let value = arguments["accept"], !(value is NSNull) else { return false }
+        guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else { return nil }
+        return flag.boolValue
+    }
+
     /// Whole positive numbers, as JSON gives them; nil for anything else.
     static func pullRequestNumbers(_ arguments: [String: Any]) -> [Int]? {
         guard let values = arguments["prs"] as? [Any], !values.isEmpty else { return nil }
@@ -365,6 +389,10 @@ enum LeadTools {
         case tell, reply:
             let target = tool == tell ? "task" : "question"
             guard string(arguments, target) != nil else { return "\(target) is missing." }
+            if tool == reply {
+                guard let accepts = accepts(arguments) else { return "accept must be true or false." }
+                if accepts { return string(arguments, "message") == nil ? nil : "Pass message or accept, not both." }
+            }
             guard let message = string(arguments, "message") else { return "message must hold 1 to \(messageLimit) characters." }
             return MissionEventCLI.problem(with: message, limit: messageLimit)
         case askUser:

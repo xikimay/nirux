@@ -380,6 +380,7 @@ final class AgentHookEventTests: XCTestCase {
             "type": "agent-turn-complete",
             "thread-id": "thread-9",
             "cwd": "/tmp/proj",
+            "input-messages": ["Start the task.", "Go on."],
             "last-assistant-message": "Done."
         ]
         let event = AgentHookEvent(
@@ -391,6 +392,11 @@ final class AgentHookEventTests: XCTestCase {
         )
         XCTAssertEqual(event?.name, .turnComplete)
         XCTAssertEqual(event?.sessionID, "thread-9")
+        XCTAssertNil(event?.soleInputDigest, "a later turn or a fork holds more than one message")
+        var first = payload
+        first["input-messages"] = ["Start the task."]
+        XCTAssertEqual(AgentHookEvent(kind: .codex, payload: first, env: env, now: 5)?.soleInputDigest,
+                       CodexLaunch.promptDigest("Start the task."), "its only message, never the text")
         XCTAssertEqual(event?.detail, "Done.")
         XCTAssertEqual(event?.emitterProcess, emitter)
     }
@@ -482,6 +488,32 @@ final class AgentHookEventTests: XCTestCase {
         let decoded = try JSONDecoder().decode(AgentHookEvent.self, from: data)
 
         XCTAssertNil(decoded.emitterProcess)
+    }
+
+    /// A receiver that holds the queue's lock checked its name and is about
+    /// to write: the drain leaves the queue to it, and says so
+    /// (`QueueFile`). One that keeps it (stopped mid-write) loses it a few
+    /// seconds of drains later.
+    @MainActor
+    func testTheDrainLeavesTheQueueToAReceiverHoldingIt() throws {
+        let state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-hook-queue-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
+        let previous = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", state.path, 1)
+        defer {
+            if let previous { setenv("NIRUX_STATE_DIR", previous, 1) } else { unsetenv("NIRUX_STATE_DIR") }
+            try? FileManager.default.removeItem(at: state)
+        }
+        let url = AgentHookCenter.eventsURL
+        XCTAssertNil(QueueFile.append(Data("{}\n".utf8), to: url))
+        let receiver = open(url.path, O_RDONLY)
+        defer { close(receiver) }
+        XCTAssertEqual(flock(receiver, LOCK_EX), 0)
+        let center = AgentHookCenter()
+        for _ in 0..<QueueFile.busyDrainsBeforeTaking { XCTAssertFalse(center.drain()) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertTrue(center.drain())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 
     func testReceiverOnlyAcceptsNiruxTerminals() {

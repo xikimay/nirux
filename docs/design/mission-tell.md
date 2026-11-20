@@ -1,7 +1,7 @@
 # Mission Tell
 
 > **Design record:** shipped. `--mission tell` is in the app.\
-> **Differs today:** the same guarded typing now carries questions and answers too, and a Claude Code child's `ask` returns at once.\
+> **Differs today:** the same guarded typing now carries questions and answers too, and a Claude Code child's `ask` returns at once. A Codex child gets tells through Codex's own queue (2026-11-19, below).\
 > **User guide:** [Mission handoffs](../missions.md).
 
 Status: design validated on 2026-10-03, implemented. Since 2026-11-08 the
@@ -75,8 +75,8 @@ child's prompt.
   typed; 3 not typed yet, and the same command again resumes the wait instead
   of queuing the text twice (like `ask`, its ID is derived from the text; a
   message typed less than 60 s ago counts as that same one); 4 no Mission on
-  that branch from this terminal, a Codex child, or handoffs off; 2 usage; 1
-  state.
+  that branch from this terminal, a child Nirux delivers nothing to, or
+  handoffs off; 2 usage; 1 state.
 - **Ledger:** a new event kind `instruction` (parent → child), with
   `childConsumedAt` set once typed. Nirux routes only events that carry the
   recorded parent identity; as for `reply`, any process of the user that can
@@ -89,8 +89,8 @@ child's prompt.
   the ledger, so the CLI would need a new state file. A `tell` that ends with
   "then report with `completed`" answers "did it run /code-review?" through the
   existing inbox.
-- **Codex children.** Codex reports no dialogs, so Nirux can't prove its
-  prompt is free.
+- **Codex children** (until 2026-11-19, see below). Codex reported no
+  dialogs, so Nirux couldn't prove its prompt was free.
 - **Messages over 500 characters.** Long review output goes in a file; the
   `tell` gives its path.
 
@@ -127,3 +127,76 @@ Review's send).
 - A file the message points to was rejected: one in the task's worktree shows
   in git status and can get committed; one in Nirux's state folder sits
   outside the task's project, so Claude asks the user before reading it.
+
+## Codex children (2026-11-19)
+
+The user asked that any task's agent hear from its parent and the Lead.
+Codex 0.167 has its own way in: `codex queue --thread <id> --message <text>`
+stores the message with the thread, and Codex starts it as a prompt only
+once that conversation is idle, not after an Esc. Probed live, nothing
+reaches the terminal: an idle Codex started it at once, a draft stayed in its
+composer untouched, a busy one finished its turn first. So Nirux types
+nothing into Codex (`CodexQueue`, `queueForCodex`).
+
+- **Which thread.** Codex's notify also reports threads it runs out of
+  sight: one titles each new conversation, seen right after the first turn.
+  `ForegroundSessionTracker` counts a thread as the column's once its only
+  message is the prompt that `codex` was launched with (the notify carries a
+  digest, never the text), or once `codex resume <id>` named it. A fork
+  (`/side`, a forked sub-agent) holds the forked messages too, so it never
+  proves itself, even when its turn ends first. With a launch prompt, no
+  thread binds before the proof; once proven, no other replaces it, which
+  also keeps a relaunch from resuming the title's thread. A `codex`
+  launched without a prompt proves none: a tell to it is refused, or given
+  up at the next check once it turns out to be one (it was restoring, or an
+  editor was in front). One that started another conversation with /new keeps
+  getting messages on the first, and a relaunch resumes the first: the
+  title's thread, which came up after every first turn, made following the
+  last thread worse.
+- **When.** Codex sends OSC 7501 like agy (`app=codex`): Nirux hands a message
+  over only while the `codex` it was sent to (or one resuming its thread)
+  last said `done` or `idle` (`codexQueueRefusal`). Codex says each state
+  once, so its status stays while a Ctrl-G editor or a ^Z shell is in front,
+  and one read on an empty process table is kept for the `codex` in front
+  then; the process is checked where the status is read. After an Esc Codex says
+  `idle` too, and its queue starts nothing until another turn ends: the
+  message waits there, and the notice below says so. Nirux doesn't hold it
+  itself, since a resume replays turns as `working` then `idle` without an
+  Esc. Codex would wait for an idle thread anyway; waiting here keeps the
+  day's lifetime, the held notice and the give-up as they are for Claude
+  Code. One message per Codex is handed at a time, so its queue
+  keeps their order. Codex's status on its row still comes from its notify
+  and its output.
+- **Typed** once `codex queue` exits 0, run with what runs that `codex`
+  (its binary, or npm's `node …/bin/codex`), so the same build takes it.
+  The message goes as `--message=<text>`: one starting with "-" stays a
+  value. If Codex then reports nothing for 20 s, the sender and the user
+  hear that it hasn't started it, and not to send it again. A refusal (an
+  older Codex, a thread it doesn't know) leaves it waiting; after three
+  refusals (the stall watch's retries ask again, but don't count) its row
+  says Codex didn't take it. The text is sanitized as typed text is. No answer within 30 s gives it up
+  untold to Codex again, its sender told: Codex may hold it.
+- It goes as text: a slash command doesn't run in Codex.
+- A Codex child's `ask` still waits for its answer.
+
+## Antigravity children (2026-11-20)
+
+agy 1.5.12 has no queue of its own, so Nirux types into it, behind the same
+`promptRefusal` as Claude Code: a branch reads agy's OSC 7501 instead of
+hooks. Its prompt is free once the `agy` in front (the one sent to, or one
+resuming its conversation) said `done` and no key reached the terminal since
+its turn began (the Enter that sent its prompt, else its first `working`;
+another `working` after a dialog is the same turn's, a new prompt's Enter
+starts a new one even when the last turn's end was missed, and keys
+answering that dialog don't count, up to the one that answers it). A state
+read on an empty process table goes to the `agy` last seen in front. Seen live: agy says `idle` at
+the first key after `done`, but a key typed while it works stays in its box
+and it still says `done`. Its dialogs say `blocked`, `error` holds the
+message like a failed turn, and before its first turn ends (a resumed agy) it
+may show a screen no state tells of: the message waits for that turn. A paste
+and its Enter in one write go in (probed). A message goes only to the agent
+its Mission names, so one for a Claude Code child is never typed into an agy
+that took its terminal, nor a question into an agy parent, which polls with
+`receive`. A slash command is refused for an agy child: agy runs it itself,
+with no turn to end, and the text Nirux typed would hold every message after
+it as a draft.

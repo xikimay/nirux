@@ -1,8 +1,9 @@
 import AppKit
 
-/// The reply popover of a Mission child's question: who asks, the whole
-/// question, why it comes to the user, and a multi-line answer field.
-/// ⌘↩ sends, Esc closes; Return makes a new line.
+/// The reply popover of a Mission child's question: who asks, what blocks
+/// it, the whole question, what it recommends (Accept sends that) or, for
+/// an access question, what it needs, why it comes to the user, and a
+/// multi-line answer field. ⌘↩ sends, Esc closes; Return makes a new line.
 @MainActor
 final class MissionReplyViewController: NSViewController {
     static let width: CGFloat = 340
@@ -11,9 +12,12 @@ final class MissionReplyViewController: NSViewController {
     private let question: SidebarMissionQuestion
     /// True once the answer went out; false keeps the popover open.
     private let onSend: (String) -> Bool
+    /// Sends the recommendation; nil when there is none to accept.
+    private let onAccept: (() -> Bool)?
     private let onOpenTask: () -> Void
     private(set) var replyView: MissionReplyTextView?
     private(set) var sendButton: NSButton?
+    private(set) var acceptButton: NSButton?
     /// The popover showing this controller.
     weak var popover: NSPopover?
 
@@ -21,11 +25,13 @@ final class MissionReplyViewController: NSViewController {
         childTitle: String,
         question: SidebarMissionQuestion,
         onSend: @escaping (String) -> Bool,
+        onAccept: (() -> Bool)? = nil,
         onOpenTask: @escaping () -> Void
     ) {
         self.childTitle = childTitle
         self.question = question
         self.onSend = onSend
+        self.onAccept = onAccept
         self.onOpenTask = onOpenTask
         super.init(nibName: nil, bundle: nil)
     }
@@ -45,10 +51,22 @@ final class MissionReplyViewController: NSViewController {
 
         stack.addArrangedSubview(header())
 
+        if let kind = question.kindTitle {
+            let kindLabel = NSTextField(labelWithString: kind.uppercased())
+            kindLabel.font = Theme.Font.caption
+            kindLabel.textColor = Theme.Color.textTertiary
+            stack.addArrangedSubview(kindLabel)
+            stack.setCustomSpacing(Theme.Space.xs, after: kindLabel)
+        }
+
         let questionLabel = Self.wrappingLabel(question.text, font: Theme.Font.display, color: Theme.Color.textPrimary)
         questionLabel.isSelectable = true
         questionLabel.preferredMaxLayoutWidth = contentWidth
         stack.addArrangedSubview(questionLabel)
+
+        if let recommendation = question.recommendation {
+            stack.addArrangedSubview(recommendationBox(recommendation, width: contentWidth))
+        }
 
         let explanation = Self.wrappingLabel(question.explanation, font: Theme.Font.body, color: Theme.Color.textSecondary)
         explanation.preferredMaxLayoutWidth = contentWidth
@@ -116,8 +134,48 @@ final class MissionReplyViewController: NSViewController {
         return row
     }
 
+    /// The recommendation under its heading, in a box; Accept at its foot
+    /// when the user may send it as the answer.
+    private func recommendationBox(_ text: String, width: CGFloat) -> NSView {
+        let inset = Theme.Space.md
+        let heading = NSTextField(labelWithString: question.recommendationTitle)
+        heading.font = Theme.Font.caption
+        heading.textColor = Theme.Color.textTertiary
+        let body = Self.wrappingLabel(text, font: Theme.Font.body, color: Theme.Color.textPrimary)
+        body.isSelectable = true
+        body.preferredMaxLayoutWidth = width - 2 * inset
+        let box = NSStackView(views: [heading, body])
+        box.orientation = .vertical
+        box.alignment = .leading
+        box.spacing = Theme.Space.xs
+        box.edgeInsets = NSEdgeInsets(top: inset, left: inset, bottom: inset, right: inset)
+        box.wantsLayer = true
+        box.layer?.backgroundColor = Theme.Color.canvas.cgColor
+        box.layer?.borderColor = Theme.Color.line.cgColor
+        box.layer?.borderWidth = 1
+        box.layer?.cornerRadius = Theme.Radius.card
+        box.setAccessibilityElement(true)
+        box.setAccessibilityRole(.group)
+        box.setAccessibilityLabel(question.recommendationTitle)
+        if onAccept != nil {
+            let accept = NSButton(title: "Accept", target: self, action: #selector(acceptAction))
+            accept.bezelStyle = .rounded
+            accept.toolTip = "Send the recommendation as your answer"
+            accept.setAccessibilityLabel("Accept the recommendation: \(text)")
+            acceptButton = accept
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            let row = NSStackView(views: [spacer, accept])
+            row.orientation = .horizontal
+            box.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalToConstant: width - 2 * inset).isActive = true
+        }
+        return box
+    }
+
     private func replyField() -> NSView {
         let field = MissionReplyTextView.field(width: Self.width - 2 * Theme.Space.lg) { [weak self] in self?.send() }
+        field.text.delegate = self
         replyView = field.text
         return field.scroll
     }
@@ -159,11 +217,30 @@ final class MissionReplyViewController: NSViewController {
 
     @objc private func sendAction() { send() }
 
+    /// Once: a second click would find the question answered. Not while the
+    /// field holds an answer, which Accept would throw away.
+    @objc private func acceptAction() {
+        acceptButton?.isEnabled = false
+        if onAccept?() != true { updateAcceptButton() }
+    }
+
+    private func updateAcceptButton() {
+        let drafted = !(replyView?.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        acceptButton?.isEnabled = !drafted
+        acceptButton?.toolTip = drafted ? "Clear your answer to send the recommendation instead" : "Send the recommendation as your answer"
+    }
+
     @objc private func openTaskAction() { onOpenTask() }
 
     func send() {
         guard let replyView else { return }
         _ = onSend(replyView.string)
+    }
+}
+
+extension MissionReplyViewController: NSTextViewDelegate {
+    func textDidChange(_ notification: Notification) {
+        updateAcceptButton()
     }
 }
 

@@ -19,18 +19,34 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
     /// Per-tab dirty state (mirror of what JS reports).
     private var dirtyByPath: [String: Bool] = [:]
-    /// Per-tab on-disk mtime as of the last open / external-modification check.
-    private var mtimeByPath: [String: Date] = [:]
+    /// Per-tab version of the file on disk as last read or written: what a
+    /// save may replace.
+    private var diskVersionByPath: [String: DiskVersion] = [:]
+    private enum DiskVersion: Equatable {
+        case file(modified: Date)
+        case missing
+    }
+    /// Per-tab version of the text Swift last gave the page (open, reload):
+    /// a save carries the one its text grew from, and one from before a
+    /// reload still on its way is refused.
+    private var textVersionByPath: [String: Int] = [:]
+    private var nextTextVersion = 0
     /// Per-tab encoding detected at open — saves round-trip the same
     /// encoding instead of silently transcoding everything to UTF-8.
     private var encodingByPath: [String: String.Encoding] = [:]
-    /// Tabs whose disk version moved while the buffer was dirty — saving would
-    /// clobber the on-disk content.
+    /// Tabs whose file changed on disk under unsaved edits: nothing is
+    /// saved until the user keeps theirs or takes the disk's.
     private var diskModifiedWhileDirty: Set<String> = []
     /// Path currently shown in diff mode, or nil when the
     /// regular editor is active. Resets on tab switch — diff is per-tab.
     private(set) var diffActivePath: String?
-    private(set) var diffActiveMode: EditorDiffMode?
+    /// What the diff on screen compares with.
+    private(set) var diffActiveBase: DiffBase?
+    enum DiffBase: Equatable {
+        case git(EditorDiffMode)
+        /// The file as it is on disk: a conflict's Compare.
+        case disk
+    }
     private var diffModeByPath: [String: EditorDiffMode] = [:]
     private(set) var diffGroupTabs: [String: DiffGroupTab] = [:]
     /// The title of the active tab when it shows several files' diff.
@@ -55,6 +71,18 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     var onPathChanged: (() -> Void)?
     var onDirtyChanged: (() -> Void)?
     var onFilePickerRequest: ((EditorColumn) -> Void)?
+    /// Asked before a tab with unsaved edits closes. Unset, it stays.
+    var askAboutUnsavedEdits: ([String]) -> UnsavedEditsChoice = { _ in .cancel }
+    /// How long a Save All waits for the page to post its saves.
+    var saveTimeout: TimeInterval = 10
+
+    /// A Save All waiting for the page to post its saves.
+    private struct SaveRequest {
+        var allWritten: Bool
+        let completion: (Bool) -> Void
+    }
+    private var saveRequests: [Int: SaveRequest] = [:]
+    private var nextSaveRequestID = 0
 
     /// A Monaco selection as reported over the bridge. Lines are 1-based.
     struct Selection {
@@ -181,6 +209,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             monacoLoadWatchdog?.invalidate()
             monacoLoadWatchdog = nil
             drainSelectionRequests()
+            drainSaveRequests()
             webView.configuration.userContentController
                 .removeScriptMessageHandler(forName: "nirux")
         }
@@ -207,7 +236,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
     private func setupTabBar() {
         tabBar.onSelect = { [weak self] path in self?.switchTo(path: path) }
-        tabBar.onClose = { [weak self] path in self?.close(path: path) }
+        tabBar.onClose = { [weak self] path in self?.closeAskingFirst(path: path) }
         addSubview(tabBar)
         refreshTabBar()
     }
@@ -222,8 +251,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         // Conflict banner floats over the editor surface — added last so it
         // stacks above the webview.
         conflictBanner.isHidden = true
-        conflictBanner.onReload = { [weak self] in self?.resolveConflict(reload: true) }
-        conflictBanner.onKeep = { [weak self] in self?.resolveConflict(reload: false) }
+        conflictBanner.onCompare = { [weak self] in self?.toggleDiskCompare() }
+        conflictBanner.onTakeDisk = { [weak self] in self?.takeDiskVersion() }
+        conflictBanner.onKeepMine = { [weak self] in self?.keepMine() }
         addSubview(conflictBanner)
 
         branchReviewBanner.isHidden = true
@@ -380,12 +410,11 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
 
-        guard let (content, encoding) = readFileContent(at: absolute, interactive: interactive)
-        else { return }
+        guard let file = readFileContent(at: absolute, interactive: interactive) else { return }
 
         openBuffer(
-            path: absolute, content: content, mtime: mtime(of: absolute),
-            line: line, endLine: endLine, takeFocus: takeFocus, encoding: encoding
+            path: absolute, content: file.content, version: file.version,
+            line: line, endLine: endLine, takeFocus: takeFocus, encoding: file.encoding
         )
     }
 
@@ -418,12 +447,17 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         return .unreadable
     }
 
-    /// Reads a text file for editing. Explicit user opens (`interactive`)
-    /// surface failures as alerts; internal reads just log.
-    private func readFileContent(at absolute: String, interactive: Bool) -> (content: String, encoding: String.Encoding)? {
+    /// Reads a text file for editing, with its version read just before: a
+    /// write in between shows as a change at the next check, never as the
+    /// version read. Explicit user opens (`interactive`) surface failures
+    /// as alerts; internal reads just log.
+    private func readFileContent(
+        at absolute: String, interactive: Bool
+    ) -> (content: String, encoding: String.Encoding, version: DiskVersion)? {
+        let version = diskVersion(of: absolute)
         switch Self.readTextFile(at: absolute) {
         case .ok(let content, let encoding):
-            return (content, encoding)
+            return (content, encoding, version)
         case .binary:
             if interactive {
                 showOpenFailureAlert(path: absolute, reason: "Binary files can't be edited.")
@@ -456,13 +490,13 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             }
             return
         }
-        openBuffer(path: absolute, content: "", mtime: nil, line: nil, activate: activate)
+        openBuffer(path: absolute, content: "", version: .missing, line: nil, activate: activate)
     }
 
     private func openBuffer(
         path absolute: String,
         content: String,
-        mtime: Date?,
+        version: DiskVersion,
         line: Int?,
         endLine: Int? = nil,
         takeFocus: Bool = true,
@@ -472,11 +506,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         tabPaths.append(absolute)
         dirtyByPath[absolute] = false
         encodingByPath[absolute] = encoding
-        if let mtime {
-            mtimeByPath[absolute] = mtime
-        } else {
-            mtimeByPath.removeValue(forKey: absolute)
-        }
+        diskVersionByPath[absolute] = version
         diskModifiedWhileDirty.remove(absolute)
 
         if activate {
@@ -494,7 +524,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             "type": "openFile",
             "path": absolute,
             "content": content,
-            "activate": activate
+            "activate": activate,
+            "version": newTextVersion(of: absolute)
         ]
         if let line { payload["line"] = line }
         Self.applyNavFlags(&payload, endLine: endLine, takeFocus: takeFocus)
@@ -516,7 +547,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         // keeps per-tab diff intent and re-enters it after the model swap.
         if diffActivePath != nil {
             diffActivePath = nil
-            diffActiveMode = nil
+            diffActiveBase = nil
             diffLoadGeneration += 1
         }
         activePath = path
@@ -571,17 +602,52 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         sendBridge(["type": "toggleWordWrap"])
     }
 
-    /// Save every dirty buffer. JS iterates its models and posts one save per
-    /// dirty path, so each file goes through the normal Cmd+S write path.
-    /// Buffers whose disk version moved while dirty are skipped — writing
-    /// them would silently clobber the external change; the conflict banner
-    /// resolves those when their tab is activated.
-    func saveAll() {
-        var payload: [String: Any] = ["type": "saveAll"]
-        if !diskModifiedWhileDirty.isEmpty {
-            payload["skipPaths"] = Array(diskModifiedWhileDirty)
+    /// Save every dirty buffer, each through the Cmd+S write path;
+    /// `completion` says whether all were written.
+    func saveAll(then completion: @escaping (Bool) -> Void = { _ in }) {
+        save(paths: nil, then: completion)
+    }
+
+    /// Saves `paths`, or every dirty buffer when nil: the page posts them,
+    /// as it holds the text. A file changed on disk under its edits isn't
+    /// saved: its tab shows, with the conflict banner.
+    private func save(paths: [String]?, then completion: @escaping (Bool) -> Void) {
+        let targets = paths ?? unsavedPaths
+        guard !targets.isEmpty else { return completion(true) }
+        guard monacoReady else {
+            showToast("Not saved: the editor isn’t running", tone: .error)
+            return completion(false)
         }
+        let conflicted = targets.filter(diskModifiedWhileDirty.contains)
+        if let first = conflicted.first {
+            switchTo(path: first)
+            showSaveRefusal(path: first)
+        }
+        nextSaveRequestID += 1
+        let requestID = nextSaveRequestID
+        saveRequests[requestID] = SaveRequest(allWritten: conflicted.isEmpty, completion: completion)
+        var payload: [String: Any] = ["type": "saveAll", "requestID": requestID, "skipPaths": conflicted]
+        if let paths { payload["paths"] = paths }
         sendBridge(payload)
+        // A page that never answers (its script threw) holds no close nor
+        // the quit; in every mode, the quit's wait for an answer included.
+        let timeout = Timer(timeInterval: saveTimeout, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.expireSaveRequest(requestID) }
+        }
+        RunLoop.main.add(timeout, forMode: .common)
+    }
+
+    private func expireSaveRequest(_ requestID: Int) {
+        guard let request = saveRequests.removeValue(forKey: requestID) else { return }
+        showToast("Not saved: the editor didn’t answer", tone: .error)
+        request.completion(false)
+    }
+
+    /// Fails every save request the page can no longer answer.
+    private func drainSaveRequests() {
+        let pending = saveRequests.values
+        saveRequests.removeAll()
+        for request in pending { request.completion(false) }
     }
 
     /// Toggle the minimap in the Monaco surface (and diff surface when active).
@@ -593,7 +659,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         selectedDiffMode = mode
         refreshTabBar()
         guard let path = activePath else { return }
-        if diffActivePath == path, diffActiveMode == mode {
+        if diffActivePath == path, diffActiveBase == .git(mode) {
             diffModeByPath.removeValue(forKey: path)
             exitDiff()
             return
@@ -614,7 +680,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         guard ensureBufferOpen(path: absolute, activate: true) else { return }
         refreshTabBar()
         guard activePath == absolute else { return }
-        guard diffActivePath != absolute || diffActiveMode != mode else { return }
+        guard diffActivePath != absolute || diffActiveBase != .git(mode) else { return }
         enterDiff(for: absolute, mode: mode)
     }
 
@@ -641,7 +707,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
         activePath = groupPath
         diffActivePath = nil
-        diffActiveMode = mode
+        diffActiveBase = .git(mode)
         refreshTabBar()
         onPathChanged?()
         onDirtyChanged?()
@@ -667,7 +733,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 self.refreshTabBar()
                 guard self.activePath == groupPath else { return }
                 self.diffActivePath = nil
-                self.diffActiveMode = mode
+                self.diffActiveBase = .git(mode)
                 self.onPathChanged?()
                 self.onDirtyChanged?()
                 self.sendDiffGroup(group)
@@ -678,7 +744,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private func exitDiff() {
         diffLoadGeneration += 1
         diffActivePath = nil
-        diffActiveMode = nil
+        diffActiveBase = nil
         refreshTabBar()
         sendBridge(["type": "exitDiff"])
     }
@@ -693,9 +759,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
 
         if FileManager.default.fileExists(atPath: absolute) {
-            guard let (content, encoding) = readFileContent(at: absolute, interactive: false)
-            else { return false }
-            openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: nil, activate: activate, encoding: encoding)
+            guard let file = readFileContent(at: absolute, interactive: false) else { return false }
+            openBuffer(path: absolute, content: file.content, version: file.version, line: nil, activate: activate, encoding: file.encoding)
         } else {
             openDeletedBufferForDiff(path: absolute, activate: activate)
         }
@@ -738,7 +803,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                     self.showToast("This file is too large to compare")
                 case .text(let original):
                     self.diffActivePath = path
-                    self.diffActiveMode = mode
+                    self.diffActiveBase = .git(mode)
                     self.refreshTabBar()
                     self.sendBridge(["type": "enterDiff", "path": path, "original": original])
                 }
@@ -749,7 +814,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// A diff that failed isn't asked again each time its tab comes back;
     /// the one still on screen, if any, is.
     private func forgetFailedDiffMode(path: String) {
-        if diffActivePath == path, let shown = diffActiveMode {
+        if diffActivePath == path, case .git(let shown)? = diffActiveBase {
             diffModeByPath[path] = shown
             selectedDiffMode = shown
             refreshTabBar()
@@ -764,6 +829,21 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             : (workspaceCwd as NSString).appendingPathComponent(path)
     }
 
+    /// The tab's × and ⌘W: unsaved edits ask first.
+    func closeAskingFirst(path: String) {
+        guard unsavedPaths.contains(path) else { return close(path: path) }
+        switch askAboutUnsavedEdits([path]) {
+        case .save:
+            save(paths: [path]) { [weak self] written in
+                if written { self?.close(path: path) }
+            }
+        case .discard:
+            close(path: path)
+        case .cancel:
+            break
+        }
+    }
+
     /// Close a tab. Disposes its Monaco model and switches focus to a
     /// neighbor if the closed tab was active.
     func close(path: String) {
@@ -772,7 +852,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         let wasActive = activePath == path
         tabPaths.remove(at: index)
         dirtyByPath.removeValue(forKey: path)
-        mtimeByPath.removeValue(forKey: path)
+        diskVersionByPath.removeValue(forKey: path)
+        textVersionByPath.removeValue(forKey: path)
         encodingByPath.removeValue(forKey: path)
         diskModifiedWhileDirty.remove(path)
         diffModeByPath.removeValue(forKey: path)
@@ -780,7 +861,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         if diffActivePath == path {
             diffLoadGeneration += 1
             diffActivePath = nil
-            diffActiveMode = nil
+            diffActiveBase = nil
             sendBridge(["type": "exitDiff"])
         }
         if !isDiffGroup {
@@ -818,10 +899,13 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
     /// Re-read the active file from disk and push its content to Monaco.
     /// Used when an external change races a clean buffer.
-    private func reloadFromDisk(path: String) {
-        guard case .ok(let content, let encoding) = Self.readTextFile(at: path) else { return }
+    /// `keepingEdits`: the page keeps text typed that Swift hasn't heard
+    /// of yet, and says so (`reloadRefused`).
+    @discardableResult
+    private func reloadFromDisk(path: String, keepingEdits: Bool = true) -> Bool {
+        guard let (content, encoding, version) = readFileContent(at: path, interactive: false) else { return false }
 
-        mtimeByPath[path] = mtime(of: path)
+        diskVersionByPath[path] = version
         encodingByPath[path] = encoding
         diskModifiedWhileDirty.remove(path)
         refreshTabBar()
@@ -833,8 +917,16 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         // it just revealed while the user is typing in a terminal.
         sendBridge([
             "type": "openFile", "path": path, "content": content,
-            "activate": path == activePath, "focus": false
+            "activate": path == activePath, "focus": false, "keepEdits": keepingEdits,
+            "version": newTextVersion(of: path)
         ])
+        return true
+    }
+
+    private func newTextVersion(of path: String) -> Int {
+        nextTextVersion += 1
+        textVersionByPath[path] = nextTextVersion
+        return nextTextVersion
     }
 
     /// Shared tail of every navigation payload — one place to add the next
@@ -873,28 +965,60 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     }
 
     private func checkDisk() {
-        for path in openPaths {
-            guard let last = mtimeByPath[path] else { continue }
-            guard let now = mtime(of: path) else { continue }
-            guard now > last else { continue }
-
-            let isDirtyHere = dirtyByPath[path] ?? false
-            if isDirtyHere {
-                if !diskModifiedWhileDirty.contains(path) {
-                    diskModifiedWhileDirty.insert(path)
-                    mtimeByPath[path] = now
-                    refreshTabBar()
-                    if path == activePath { onDirtyChanged?() }
-                }
-            } else {
-                reloadFromDisk(path: path)
-            }
+        // A conflict keeps the version the user was shown.
+        for path in openPaths where !diskModifiedWhileDirty.contains(path) {
+            guard let version = diskChange(of: path) else { continue }
+            adoptDiskChange(of: path, version: version)
         }
     }
 
+    /// The file changed on disk, or went: unsaved edits wait for the user's
+    /// choice, nothing saved meanwhile; a clean buffer takes the new
+    /// version, and keeps showing a file that went. `version`: the one Keep
+    /// Mine may replace.
+    private func adoptDiskChange(of path: String, version: DiskVersion) {
+        guard dirtyByPath[path] ?? false else {
+            if version != .missing { reloadFromDisk(path: path) }
+            return
+        }
+        raiseConflict(path: path, version: version)
+    }
+
+    private func raiseConflict(path: String, version: DiskVersion) {
+        diskVersionByPath[path] = version
+        diskModifiedWhileDirty.insert(path)
+        refreshTabBar()
+        if path == activePath { onDirtyChanged?() }
+    }
+
+    /// The file's version when it is no longer the one last read or
+    /// written, a file gone included; nil while it is.
+    private func diskChange(of path: String) -> DiskVersion? {
+        let version = diskVersion(of: path)
+        return version == diskVersionByPath[path] ? nil : version
+    }
+
+    private func diskVersion(of path: String) -> DiskVersion {
+        mtime(of: path).map { .file(modified: $0) } ?? .missing
+    }
+
     private func mtime(of path: String) -> Date? {
-        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        let attrs = try? FileManager.default.attributesOfItem(atPath: Self.linkTarget(of: path))
         return attrs?[.modificationDate] as? Date
+    }
+
+    /// Through symlinks, the file a path names, there or not: an agent
+    /// edits AGENTS.md under a CLAUDE.md link, or moves it away.
+    private nonisolated static func linkTarget(of path: String) -> String {
+        var target = path
+        // A loop of links stops somewhere.
+        for _ in 0..<32 {
+            guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: target) else { break }
+            target = (destination as NSString).isAbsolutePath
+                ? destination
+                : ((target as NSString).deletingLastPathComponent as NSString).appendingPathComponent(destination)
+        }
+        return target
     }
 
     // MARK: - JS bridge
@@ -915,13 +1039,52 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
     /// Persist a buffer to disk. Path comes from JS but we only honor saves
     /// for tabs we're actually tracking, so a compromised page can't redirect
-    /// writes outside our open set. Writes use the encoding detected at
-    /// open — a UTF-16 (or Latin-1) file is not silently transcoded to UTF-8.
+    /// writes outside our open set.
     private func handleSave(body: [String: Any]) {
-        guard let path = body["path"] as? String,
-              openPaths.contains(path),
-              let content = body["content"] as? String
-        else { return }
+        let path = body["path"] as? String
+        let written: Bool = {
+            guard let path, openPaths.contains(path), let content = body["content"] as? String else { return false }
+            // Its text grew from one Swift has since replaced: a reload
+            // follows on the page.
+            guard body["version"] as? Int == textVersionByPath[path] else {
+                showSaveRefusal(path: path)
+                return false
+            }
+            return write(content, to: path)
+        }()
+        // The page takes as clean the text of this save only, once written.
+        var reply: [String: Any] = ["type": written ? "markSaved" : "saveRefused"]
+        reply["path"] = path
+        reply["saveID"] = body["saveID"]
+        sendBridge(reply)
+        if written {
+            scheduleGitReload()
+        } else if let requestID = body["requestID"] as? Int {
+            saveRequests[requestID]?.allWritten = false
+        }
+    }
+
+    /// Writes in the encoding detected at open — a UTF-16 (or Latin-1) file
+    /// is not silently transcoded to UTF-8 — and only over the version last
+    /// read or written: a change made on disk since is never overwritten
+    /// unasked. False: nothing written.
+    private func write(_ content: String, to path: String) -> Bool {
+        if diskModifiedWhileDirty.contains(path) {
+            showSaveRefusal(path: path)
+            return false
+        }
+        if let version = diskChange(of: path) {
+            adoptDiskChange(of: path, version: version)
+            // A clean buffer took the new version, or keeps showing a file
+            // gone, which a save doesn't bring back.
+            if diskModifiedWhileDirty.contains(path) || version == .missing { showSaveRefusal(path: path) }
+            return false
+        }
+        // Nor a clean buffer opened for a deleted file's diff.
+        if diskVersionByPath[path] == .missing, !(dirtyByPath[path] ?? false) {
+            showSaveRefusal(path: path)
+            return false
+        }
 
         let encoding = encodingByPath[path] ?? .utf8
         var data = content.data(using: encoding)
@@ -934,25 +1097,55 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
         guard let data else {
             NSLog("[EditorColumn] save failed for \(path): buffer not representable")
-            return
+            showToast("Couldn’t save “\((path as NSString).lastPathComponent)”", tone: .error)
+            return false
         }
 
-        let url = URL(fileURLWithPath: path)
         do {
-            try data.write(to: url, options: .atomic)
+            // Into the file a symlink names: replacing the path would replace
+            // the link.
+            let written = try Self.replaceFile(at: URL(fileURLWithPath: Self.linkTarget(of: path)), with: data)
+            diskVersionByPath[path] = .file(modified: written)
         } catch {
             NSLog("[EditorColumn] save failed for \(path): \(error)")
-            return
+            showToast("Couldn’t save “\((path as NSString).lastPathComponent)”", tone: .error)
+            return false
         }
+        return true
+    }
 
-        // Refresh the watcher's mtime baseline so we don't immediately re-detect
-        // our own atomic-write as an external modification.
-        mtimeByPath[path] = mtime(of: path)
-        diskModifiedWhileDirty.remove(path)
+    /// Writes `data` in a file of its own, then puts it in the place of the
+    /// file at `url`, whose permissions it keeps. Returns the modification
+    /// date of what was written, read before it takes the file's place: a
+    /// write landing after it reads as a change.
+    private nonisolated static func replaceFile(at url: URL, with data: Data) throws -> Date {
+        let manager = FileManager.default
+        let folder = try manager.url(
+            for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: url.deletingLastPathComponent(), create: true
+        )
+        defer { try? manager.removeItem(at: folder) }
+        let written = folder.appendingPathComponent(url.lastPathComponent)
+        try data.write(to: written)
+        let original = try? manager.attributesOfItem(atPath: url.path)
+        if let permissions = original?[.posixPermissions] {
+            try manager.setAttributes([.posixPermissions: permissions], ofItemAtPath: written.path)
+        }
+        // Its group too, where we may give it (a shared repository).
+        if let group = original?[.groupOwnerAccountID] {
+            try? manager.setAttributes([.groupOwnerAccountID: group], ofItemAtPath: written.path)
+        }
+        guard let modified = try manager.attributesOfItem(atPath: written.path)[.modificationDate] as? Date else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        guard rename(written.path, url.path) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        return modified
+    }
 
-        // Tell JS the buffer is now clean for this path.
-        sendBridge(["type": "markSaved", "path": path])
-        scheduleGitReload()
+    private func showSaveRefusal(path: String) {
+        let change = diskVersion(of: path) == .missing ? "was deleted" : "changed"
+        showToast("Not saved: “\((path as NSString).lastPathComponent)” \(change) on disk")
     }
 
     /// Coalesce git-status refreshes: Save All lands one save per dirty file
@@ -989,30 +1182,73 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     }
 
     /// Show the disk-conflict banner when the active tab was modified
-    /// externally while dirty. Choosing "Keep My Changes" is the explicit
-    /// overwrite; "Reload from Disk" discards the buffer.
+    /// externally while dirty.
     private func updateConflictBanner() {
         guard let path = activePath, diskModifiedWhileDirty.contains(path) else {
             conflictBanner.isHidden = true
             return
         }
-        conflictBanner.configure(fileName: (path as NSString).lastPathComponent)
+        conflictBanner.configure(
+            fileName: (path as NSString).lastPathComponent,
+            isDeleted: diskVersionByPath[path] == .missing,
+            isComparing: isComparingWithDisk(path)
+        )
         conflictBanner.isHidden = false
         needsLayout = true
     }
 
-    private func resolveConflict(reload: Bool) {
+    private func isComparingWithDisk(_ path: String) -> Bool {
+        diffActivePath == path && diffActiveBase == .disk
+    }
+
+    /// Compare: the buffer beside the disk's version in Monaco's diff, its
+    /// side still editable; again, back to the buffer alone.
+    private func toggleDiskCompare() {
         guard let path = activePath, diskModifiedWhileDirty.contains(path) else { return }
-        if reload {
-            reloadFromDisk(path: path)
+        if isComparingWithDisk(path) { return exitDiff() }
+        // A file gone compares with nothing.
+        let disk: (content: String, version: DiskVersion)?
+        if diskVersion(of: path) == .missing {
+            disk = ("", .missing)
         } else {
-            // Explicit overwrite: adopt the current disk mtime as the new
-            // baseline so the watcher doesn't re-flag before the next save.
-            mtimeByPath[path] = mtime(of: path)
-            diskModifiedWhileDirty.remove(path)
-            refreshTabBar()
-            onDirtyChanged?()
+            disk = readFileContent(at: path, interactive: false).map { ($0.content, $0.version) }
         }
+        guard let disk else {
+            // The button turned itself on.
+            refreshTabBar()
+            return showDiskReadFailure(path: path)
+        }
+        // Keep Mine replaces the version shown.
+        diskVersionByPath[path] = disk.version
+        diffLoadGeneration += 1
+        diffActivePath = path
+        diffActiveBase = .disk
+        refreshTabBar()
+        sendBridge(["type": "enterDiff", "viewer": "monaco", "path": path, "original": disk.content])
+    }
+
+    /// Take Disk: the buffer becomes the file on disk, its edits gone; a
+    /// file gone takes its tab with it.
+    private func takeDiskVersion() {
+        guard let path = activePath, diskModifiedWhileDirty.contains(path) else { return }
+        if isComparingWithDisk(path) { exitDiff() }
+        guard diskVersion(of: path) != .missing else { return close(path: path) }
+        if !reloadFromDisk(path: path, keepingEdits: false) { showDiskReadFailure(path: path) }
+    }
+
+    private func showDiskReadFailure(path: String) {
+        showToast("Couldn’t read “\((path as NSString).lastPathComponent)” on disk", tone: .error)
+    }
+
+    /// Keep Mine: the buffer replaces the version of the file the user was
+    /// shown; one changed again since asks again.
+    private func keepMine() {
+        guard let path = activePath, diskModifiedWhileDirty.contains(path) else { return }
+        if isComparingWithDisk(path) { exitDiff() }
+        diskModifiedWhileDirty.remove(path)
+        refreshTabBar()
+        onDirtyChanged?()
+        save(paths: [path]) { _ in }
     }
 
     // MARK: - WKNavigationDelegate
@@ -1030,6 +1266,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             monacoReady = false
             pendingOps.removeAll()
             drainSelectionRequests()
+            drainSaveRequests()
             showLoadFailure(message: "The editor process crashed.", showRetry: true)
         }
     }
@@ -1070,8 +1307,27 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 refreshTabBar()
                 if path == activePath { onDirtyChanged?() }
             }
+            // Its edits undone, a conflict has nothing left to keep; a file
+            // gone stays for the user to close.
+            if !dirty, diskModifiedWhileDirty.contains(path), diskVersion(of: path) != .missing {
+                if isComparingWithDisk(path) { exitDiff() }
+                reloadFromDisk(path: path)
+            }
+        case "reloadRefused":
+            // The page holds edits Swift hadn't heard of: the version read
+            // waits beside them, as a conflict.
+            guard let path = body["path"] as? String, let version = diskVersionByPath[path] else { return }
+            // The page's text still grows from the version it holds.
+            textVersionByPath[path] = body["version"] as? Int
+            dirtyByPath[path] = true
+            raiseConflict(path: path, version: version)
         case "save":
             handleSave(body: body)
+        case "savedAll":
+            guard let requestID = body["requestID"] as? Int,
+                  let request = saveRequests.removeValue(forKey: requestID)
+            else { return }
+            request.completion(request.allWritten)
         case "selection":
             guard let requestID = body["requestID"] as? Int,
                   let completion = selectionRequests.removeValue(forKey: requestID)

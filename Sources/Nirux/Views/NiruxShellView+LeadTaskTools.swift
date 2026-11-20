@@ -321,16 +321,50 @@ extension NiruxShellView {
             self?.saveState()
         }
         guard let then else { return }
+        Self.waitForExit(processes, then: then)
+    }
+
+    /// `then` once `processes` have ended, and any process working in
+    /// `folder` (resolved), with the names of those still running
+    /// `exitTimeout` later.
+    static func waitForExit(
+        _ processes: [(process: ProcessInstance, name: String)], workingIn folder: String? = nil,
+        then: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Void
+    ) {
         let (instances, names) = (processes.map(\.process), processes.map(\.name))
-        Self.offMain({
+        offMain({
             let deadline = Date().addingTimeInterval(Self.exitTimeout)
             var running = Array(instances.indices)
             while true {
                 running = running.filter { ProcessInstance.running(pid: instances[$0].pid) == instances[$0] }
-                if running.isEmpty || Date() >= deadline { return Array(Set(running.map { names[$0] })).sorted() }
+                let inside = folder.map { Self.processNames(workingIn: $0) ?? ["(unreadable process list)"] } ?? []
+                if running.isEmpty && inside.isEmpty || Date() >= deadline {
+                    return Array(Set(running.map { names[$0] } + inside)).sorted()
+                }
                 Thread.sleep(forTimeInterval: 0.1)
             }
         }, then: then)
+    }
+
+    /// The processes whose working folder is `folder` (resolved) or inside
+    /// it, Nirux aside; nil when they can't be listed.
+    nonisolated static func processNames(workingIn folder: String) -> [String]? {
+        let estimate = proc_listallpids(nil, 0)
+        guard estimate > 0 else { return nil }
+        var pids = [pid_t](repeating: 0, count: Int(estimate) + 64)
+        let count = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+        guard count > 0 else { return nil }
+        return pids.prefix(Int(count)).compactMap { pid in
+            var info = proc_vnodepathinfo()
+            let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+            guard pid > 0, pid != getpid(), proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+            let cwd = withUnsafePointer(to: &info.pvi_cdir.vip_path) { pointer in
+                pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+            }
+            guard cwd == folder || cwd.hasPrefix(folder + "/") else { return nil }
+            var name = [CChar](repeating: 0, count: 2 * Int(MAXCOMLEN) + 1)
+            return proc_name(pid, &name, UInt32(name.count)) > 0 ? String(cString: name) : "pid \(pid)"
+        }
     }
 
     // MARK: move_task
@@ -513,7 +547,7 @@ extension NiruxShellView {
             return answer("The user has “\(title)” on screen: they can press Esc there, or ask them.", true)
         }
         // A dialog or a prompt may still wait out the hooks' debounce.
-        AgentHookCenter.shared.drain()
+        guard AgentHookCenter.shared.drain() else { return answer("“\(title)”'s hooks are still coming in: call again in a moment.", true) }
         let snapshot = ProcessSnapshot()
         guard !snapshot.isEmpty else { return answer("Nirux couldn't read the running processes: call again in a moment.", true) }
         guard let column = task.columns.first(where: { $0.agentUUID == mission.childAgentUUID }), let pty = column.pty,

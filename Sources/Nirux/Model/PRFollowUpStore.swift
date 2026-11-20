@@ -24,10 +24,10 @@ struct PRFollowUpStore: Codable, Equatable {
         if firstLaunchAt == nil { firstLaunchAt = time }
     }
 
-    /// An entry nothing changed for this long goes at the next change,
-    /// unless it holds a stop: its pull request merged or closed while no
-    /// workspace followed it. One read merged or closed goes at once (the
-    /// shell's part).
+    /// An entry nothing changed for this long goes (`prune`), unless it
+    /// holds a stop or its pull request is open in a workspace: it merged
+    /// or closed while no workspace followed it. One read merged or closed
+    /// goes at once (the shell's part).
     static let lifetime: TimeInterval = 30 * 24 * 60 * 60
 
     /// Changes the entry of `url` (a new one follows from `since`, else
@@ -43,8 +43,16 @@ struct PRFollowUpStore: Codable, Equatable {
         guard entry != before else { return false }
         entry.updatedAt = now
         pullRequests[url] = entry
-        pullRequests = pullRequests.filter { $0.value.stop != nil || now - $0.value.updatedAt < Self.lifetime }
         return true
+    }
+
+    /// Drops the entries quiet for `lifetime`, but those holding a stop and
+    /// those of `open` pull requests: a quiet one still followed keeps its
+    /// rounds and the feedback it handed.
+    mutating func prune(now: TimeInterval, keeping open: Set<String>) {
+        pullRequests = pullRequests.filter { url, entry in
+            entry.stop != nil || open.contains(url) || now - entry.updatedAt < Self.lifetime
+        }
     }
 
     static var url: URL { Persistence.stateDirectory.appendingPathComponent("pr-follow-up.json") }

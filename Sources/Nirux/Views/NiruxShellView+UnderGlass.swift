@@ -23,6 +23,13 @@ extension NiruxShellView {
         if !railFloats { endUnderGlass() }
     }
 
+    /// Where the viewport lies at rest, even while it reaches under the
+    /// rail: what centres on it (a hint, a toast, a name card) stays put.
+    var viewportRestFrame: NSRect {
+        let reach = -viewport.bounds.minX
+        return NSRect(x: viewport.frame.minX + reach, y: viewport.frame.minY, width: viewport.frame.width - reach, height: viewport.frame.height)
+    }
+
     /// No line marks the edge of a rail that floats. It fades with the
     /// sidebar's fold.
     private func showDivider(animated: Bool) {
@@ -46,17 +53,17 @@ extension NiruxShellView {
         let generation = underGlassGeneration
         passingUnderRail = workspace
         reachUnderRail(workspace)
-        ColumnState.afterCommit(duration) { [weak self] in
+        sideEffects.afterCommit(duration) { [weak self] in
             guard let self, underGlassGeneration == generation else { return }
             closeUnderRail(generation)
         }
     }
 
-    /// Before a layout: the viewport's layer where its view lies. A pass
-    /// goes on through it (`keepUnderGlass`); a closing edge ends at once.
+    /// Before a layout: the viewport where it lies at rest. A pass goes on
+    /// through it (`keepUnderGlass`); a closing edge ends at once.
     func restUnderGlass() {
-        guard passingUnderRail != nil, let layer = viewport.layer else { return endUnderGlass() }
-        Self.reach(layer, by: layer.bounds.minX)
+        guard passingUnderRail != nil else { return endUnderGlass() }
+        reachViewport(by: viewport.bounds.minX)
     }
 
     /// After a layout: a pass goes on as long as its workspace stays on
@@ -68,28 +75,26 @@ extension NiruxShellView {
     }
 
     private func mayPassUnderRail(_ workspace: WorkspaceState) -> Bool {
-        railFloats && agentLightsMayMove && viewport.frame.minX > sidebar.frame.minX && viewport.layer != nil
+        // Where the viewport lies at rest, even while it reaches.
+        railFloats && agentLightsMayMove && viewport.frame.minX - viewport.bounds.minX > sidebar.frame.minX
     }
 
-    /// The viewport's layer reaches under the sidebar, what it holds where
-    /// it lay, and the workspace leaves its cards unclipped. Only the
-    /// layer: the view, its frame and its clicks stay put.
+    /// The viewport reaches under the sidebar (its frame, and its bounds'
+    /// origin so that what it holds stays), and the workspace leaves its
+    /// cards unclipped. The sidebar lies over it and keeps its clicks.
     private func reachUnderRail(_ workspace: WorkspaceState) {
-        guard let layer = viewport.layer else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        Self.reach(layer, by: viewport.frame.minX - sidebar.frame.minX + layer.bounds.minX)
-        workspace.containerView.layer?.masksToBounds = false
-        CATransaction.commit()
+        reachViewport(by: viewport.frame.minX - sidebar.frame.minX)
+        workspace.containerView.clipsToBounds = false
     }
 
     /// The work's edge sweeps back to the rail's, its content still; then
     /// the workspace clips its cards again.
     private func closeUnderRail(_ generation: Int) {
-        guard let layer = viewport.layer, railFloats, passingUnderRail === activeWorkspace else { return endUnderGlass() }
+        guard let layer = viewport.layer, railFloats, agentLightsMayMove, passingUnderRail === activeWorkspace else { return endUnderGlass() }
         passingUnderRail = nil
         let reached = [("position", NSValue(point: layer.position)), ("bounds", NSValue(rect: layer.bounds))]
-        Self.reach(layer, by: layer.bounds.minX)
+        reachViewport(by: viewport.bounds.minX)
+        // From where its layer showed: AppKit set where it lies.
         let curve = CAMediaTimingFunction(name: .easeInEaseOut)
         for (key, value) in reached {
             let edge = CABasicAnimation(keyPath: key)
@@ -98,39 +103,35 @@ extension NiruxShellView {
             edge.timingFunction = curve
             layer.add(edge, forKey: "underGlass." + key)
         }
-        ColumnState.afterCommit(Self.underGlassClose) { [weak self] in
+        sideEffects.afterCommit(Self.underGlassClose) { [weak self] in
             guard let self, underGlassGeneration == generation else { return }
             endUnderGlass()
         }
     }
 
-    /// At rest: the viewport's layer where its view lies, every workspace
-    /// clipping its cards, and no pass left to end.
+    /// Movement turned off: a pass, or its sweep, ends at once.
+    func stillUnderGlass() {
+        if passingUnderRail != nil || workspaces.contains(where: { !$0.containerView.clipsToBounds }) { endUnderGlass() }
+    }
+
+    /// At rest: the viewport where it lies, every workspace clipping its
+    /// cards, and no pass left to end.
     func endUnderGlass() {
         underGlassGeneration += 1
         passingUnderRail = nil
-        guard let layer = viewport.layer else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        for key in Self.underGlassKeys { layer.removeAnimation(forKey: key) }
-        Self.reach(layer, by: layer.bounds.minX)
-        for workspace in workspaces where workspace.containerView.layer?.masksToBounds == false {
-            workspace.containerView.layer?.masksToBounds = true
+        for key in Self.underGlassKeys { viewport.layer?.removeAnimation(forKey: key) }
+        reachViewport(by: viewport.bounds.minX)
+        for workspace in workspaces where !workspace.containerView.clipsToBounds {
+            workspace.containerView.clipsToBounds = true
         }
-        CATransaction.commit()
     }
 
-    /// `layer`'s left edge `distance` further left (back when negative),
-    /// what it holds where it was.
-    private static func reach(_ layer: CALayer, by distance: CGFloat) {
+    /// The viewport's left edge `distance` further left (back when
+    /// negative), what it holds where it was.
+    private func reachViewport(by distance: CGFloat) {
         guard distance != 0 else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        var frame = layer.frame
-        frame.origin.x -= distance
-        frame.size.width += distance
-        layer.frame = frame
-        layer.bounds.origin.x -= distance
-        CATransaction.commit()
+        let frame = viewport.frame
+        viewport.frame = NSRect(x: frame.minX - distance, y: frame.minY, width: frame.width + distance, height: frame.height)
+        viewport.setBoundsOrigin(NSPoint(x: viewport.bounds.minX - distance, y: viewport.bounds.minY))
     }
 }
