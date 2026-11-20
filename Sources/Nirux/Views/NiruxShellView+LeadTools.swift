@@ -355,9 +355,24 @@ extension NiruxShellView {
         return line
     }
 
+    /// The questions `mission`'s child got answered, the last
+    /// `listedAnswers`, then what it waits on or sent, each on a line of
+    /// its own.
+    func taskListMissionLine(_ mission: Mission, of task: WorkspaceState, store: MissionStore) -> String {
+        // An access answer may hold what only the user could give: not repeated.
+        let answers = MissionAnswerContext.answered(in: mission).suffix(Self.listedAnswers).map { pair in
+            "\n  answered: “\(MissionAnswerContext.clipped(pair.question.message, Self.listedAnswerLength))” → "
+                + (pair.question.questionKind == .access
+                    ? "(an access answer, not repeated)"
+                    : "“\(MissionAnswerContext.clipped(pair.answer.message, Self.listedAnswerLength))”")
+                + MissionAnswerContext.notes(of: pair.answer, owner: "its")
+        }.joined()
+        return answers + taskListOpenLine(mission, of: task, store: store)
+    }
+
     /// The question `mission`'s child waits on, or the result it sent, on
     /// a line of its own; "" for neither.
-    func taskListMissionLine(_ mission: Mission, of task: WorkspaceState, store: MissionStore) -> String {
+    private func taskListOpenLine(_ mission: Mission, of task: WorkspaceState, store: MissionStore) -> String {
         if let question = store.waitingQuestion(childWorkspaceID: task.id, childAgentUUID: mission.childAgentUUID)?.event {
             let holder = question.handedToUserBecause == nil ? "asks you" : "asks the user (you handed it over)"
             return "\n  \(holder), question \(question.id): \(MissionPromptText.quoted(question.message))"
@@ -368,6 +383,10 @@ extension NiruxShellView {
         }
         return ""
     }
+
+    /// A task's answered questions list_tasks shows, and how long each side.
+    static let listedAnswers = 3
+    static let listedAnswerLength = 120
 
     /// Where a task stands, as its row says it: a model's reading of its
     /// last turn's message, or the user's own summary; "" for neither.
