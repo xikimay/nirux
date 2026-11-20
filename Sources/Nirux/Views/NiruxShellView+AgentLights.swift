@@ -99,6 +99,7 @@ extension NiruxShellView {
         if !moves {
             stillUnderGlass()
             stillSpaceCrossing()
+            stillSpacePlan()
         }
         for workspace in workspaces {
             let isOnScreen = workspace === activeWorkspace

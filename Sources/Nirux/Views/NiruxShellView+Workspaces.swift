@@ -36,7 +36,7 @@ extension NiruxShellView {
         // Its picture slides away while the interface may move only, of what
         // shows: a crossing on its way ends.
         if activate {
-            closeSpacePlan(going: nil)
+            closeSpacePlan(going: nil, animated: false)
             endSpaceCrossing()
         }
         let snapshot = activate && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
@@ -415,7 +415,7 @@ extension NiruxShellView {
         let previousProfileID = activeProfileID
         // The plan goes, a crossing on its way ends, and a pass under the
         // rail: what shows now, at rest, is what leaves.
-        closeSpacePlan(going: nil)
+        closeSpacePlan(going: nil, animated: false)
         endSpaceCrossing()
         endUnderGlass()
         let leaving = crosses && agentLightsMayMove ? FrozenView.freeze(viewport) : nil

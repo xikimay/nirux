@@ -30,8 +30,8 @@ final class NiruxShellView: NSView {
     /// The workspace a crossing brings on screen.
     var crossingWorkspaceID: String?
     /// The space as a plan, while it shows (NiruxShellView+SpacePlan); the
-    /// workspaces drawing once before it shows; a count so that a step acts
-    /// only on its own.
+    /// workspaces drawing once before it shows; a count so that a step or a
+    /// motion's end acts only on its own.
     var spacePlan: SpacePlanView?
     var planDrawing: Set<String> = []
     var spacePlanGeneration = 0
@@ -1193,8 +1193,9 @@ extension NiruxShellView {
 
     var isOverlayActive: Bool {
         if commandPalette?.isVisible == true { return true }
-        // The space's plan takes the keys over hidden terminals.
-        if spacePlan != nil { return true }
+        // The space's plan takes the keys over hidden terminals; diving, it
+        // leaves them to the workspace it goes to, which shows under it.
+        if let spacePlan, !spacePlan.isDiving { return true }
         if NSApp.keyWindow is NSPanel { return true }
         // A popover hanging from the window has the keyboard (the Mission
         // reply's field): AppKit keeps the window key, gives it the
