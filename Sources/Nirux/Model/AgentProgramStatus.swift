@@ -3,8 +3,9 @@ import Foundation
 /// What a terminal agent says of itself through OSC 7501, the Program Status
 /// Protocol: `ESC ] 7501 ; state=…[:kind=…]:app=…[:msg=<base64>]`, ended by
 /// BEL or ST. Nirux reads Antigravity's, asked for with `AGY_CLI_OSC7501=on`
-/// in its terminals. Claude Code speaks it only to a terminal that answers
-/// its query, which Nirux doesn't: its hooks say more.
+/// in its terminals, and Codex's, which it always sends to a terminal.
+/// Claude Code speaks it only to a terminal that answers its query, which
+/// Nirux doesn't: its hooks say more.
 struct AgentProgramStatus: Equatable, Sendable {
     enum State: String, Sendable {
         case working, blocked, done, idle, error
@@ -16,10 +17,13 @@ struct AgentProgramStatus: Equatable, Sendable {
     let kind: String?
     /// What it shows: the pending command or question, the turn's answer.
     let message: String?
+    /// The process it speaks for, which must be in front to be heard.
+    let process: String
 
-    /// The one app Nirux reads, and its process.
-    static let app = "antigravity"
-    static let process = "agy"
+    /// The apps Nirux reads, by name, and their processes.
+    static let processes = ["antigravity": agy, "codex": codex]
+    static let agy = "agy"
+    static let codex = "codex"
     /// Every launch says `blocked:kind=auth` for a moment while it signs in.
     static let signInGrace: TimeInterval = 5
     /// agy's spinner never stops this long while it works: past it, a
@@ -43,22 +47,22 @@ struct AgentProgramStatus: Equatable, Sendable {
         }
     }
 
-    /// `payload`, what follows `ESC ] 7501 ;`: nil for another app's or a
-    /// query.
+    /// `payload`, what follows `ESC ] 7501 ;`: nil for an app Nirux doesn't
+    /// read, or a query.
     static func parse(_ payload: Substring) -> AgentProgramStatus? {
         var fields: [Substring: Substring] = [:]
         for field in payload.split(separator: ":") {
             let pair = field.split(separator: "=", maxSplits: 1)
             if pair.count == 2 { fields[pair[0]] = pair[1] }
         }
-        guard fields["app"] == Substring(app), let state = fields["state"].flatMap({ State(rawValue: String($0)) }) else {
-            return nil
-        }
+        guard let process = fields["app"].flatMap({ processes[String($0)] }),
+              let state = fields["state"].flatMap({ State(rawValue: String($0)) })
+        else { return nil }
         let message = fields["msg"]
             .flatMap { Data(base64Encoded: String($0)) }
             .flatMap { String(data: $0, encoding: .utf8) }
             .flatMap { AgentText.clean($0, maxLength: AgentToolInput.maxSummaryLength) }
-        return AgentProgramStatus(state: state, kind: fields["kind"].map(String.init), message: message)
+        return AgentProgramStatus(state: state, kind: fields["kind"].map(String.init), message: message, process: process)
     }
 
     /// Reads them out of terminal output, which comes in chunks: a sequence

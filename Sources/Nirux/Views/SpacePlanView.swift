@@ -185,7 +185,8 @@ final class SpacePlanView: NSView {
         title.lineBreakMode = .byTruncatingTail
         let detail = NSTextField(labelWithString: label.detail ?? "")
         detail.font = Theme.Font.caption
-        if case .needsYou = label.icon.kind { detail.textColor = Theme.Color.waiting } else { detail.textColor = Theme.Color.textSecondary }
+        // Amber, the state's colour, only while it waits on the user.
+        if case .needsYou = label.icon.kind { detail.textColor = label.icon.color } else { detail.textColor = Theme.Color.textSecondary }
         detail.lineBreakMode = .byTruncatingTail
         let textX = labelLeft + icon.frame.width + Theme.Space.sm
         let textWidth = Self.labelWidth - icon.frame.width - Theme.Space.sm
