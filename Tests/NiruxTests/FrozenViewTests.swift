@@ -99,6 +99,14 @@ final class FrozenViewTests: XCTestCase {
         XCTAssertTrue(Self.pixels(of: late) == Self.pixels(of: surface), "a copy past the wait")
     }
 
+    /// A smaller copy says its size against the surface's as made, in
+    /// whole pixels (8 at 0.3 makes 2, a quarter).
+    func testACopySaysItsSizeAsMade() throws {
+        let surface = try XCTUnwrap(Self.surface(filledWith: 0x33))
+        let copy = try XCTUnwrap(SurfaceCopies.copies(of: [surface], scale: 0.3).first ?? nil)
+        XCTAssertEqual(copy.scale, CGFloat(IOSurfaceGetWidth(copy.surface)) / CGFloat(IOSurfaceGetWidth(surface)))
+    }
+
     /// A picture never holds an earlier one still sliding away, nor what
     /// doesn't show: a burst of slides keeps the copies at one picture's
     /// worth. A surface that isn't opaque lies on the canvas, its frost not

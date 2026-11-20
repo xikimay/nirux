@@ -166,7 +166,8 @@ enum SurfaceCopies {
         buffer.commit()
         guard done.wait(timeout: .now() + wait) == .success, buffer.status == .completed else { return nil }
         return zip(surfaces, zip(blanks, pairs)).map { source, made in
-            if let copy = made.0, made.1 != nil { return (copy, shrinks ? scale : 1) }
+            // Its pixels' ratio to the source's, once rounded to whole pixels.
+            if let copy = made.0, made.1 != nil { return (copy, CGFloat(IOSurfaceGetWidth(copy)) / CGFloat(IOSurfaceGetWidth(source))) }
             return blank(like: source).flatMap { cpuCopy(source, into: $0) }.map { ($0, 1) }
         }
     }

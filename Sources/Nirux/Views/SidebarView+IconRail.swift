@@ -89,28 +89,42 @@ extension SidebarView {
     /// a rebuild runs at every layout pass.
     var railContent: IconRail.Content {
         var content = IconRail.Content(lead: nil, tasks: [], archivedCount: lastInfos.filter(\.isInactive).count)
-        // Over every task, listed or not: a task coming or going renumbers
-        // none ("CR2" stays "CR2").
-        let tasks = displayedWorkspaceInfos.filter { !$0.isLead }
-        let initials = Dictionary(zip(tasks.map(\.id), TaskInitials.initials(for: tasks.map(\.title))), uniquingKeysWith: { first, _ in first })
+        let initials = railInitials
         for info in displayedWorkspaceInfos {
             let state = info.railState
             guard !info.isInactive || info.isActive || info.asksUser || state == .waiting else { continue }
-            let summary = info.rowSummary
-            let rowIcon = info.stateIcon(summary: summary)
-            let icon = WorkspaceInfo.railIcon(rowIcon, state: state)
-            // The row's words, but the branch it prints when nothing goes
-            // on, or a row that says less than the amber icon: then the
-            // icon's state says more.
-            let saysLess = summary.status.tone == .branch || icon != rowIcon
-            let item = IconRail.Item(
-                id: info.id, title: info.title, icon: icon, detail: saysLess ? nil : summary.status.text,
-                label: info.isLead ? nil : initials[info.id]
-            )
+            let item = railItem(info, state: state, initials: initials)
             if info.isLead, content.lead == nil { content.lead = item } else if !info.isLead { content.tasks.append(item) }
             if info.isActive { content.selectedID = info.id }
         }
         return content
+    }
+
+    /// Every workspace as the rail shows one, the archived ones too.
+    var railItems: [IconRail.Item] {
+        let initials = railInitials
+        return displayedWorkspaceInfos.map { railItem($0, state: $0.railState, initials: initials) }
+    }
+
+    /// Over every task, listed or not: a task coming or going renumbers
+    /// none ("CR2" stays "CR2").
+    private var railInitials: [String: String] {
+        let tasks = displayedWorkspaceInfos.filter { !$0.isLead }
+        return Dictionary(zip(tasks.map(\.id), TaskInitials.initials(for: tasks.map(\.title))), uniquingKeysWith: { first, _ in first })
+    }
+
+    private func railItem(_ info: WorkspaceInfo, state: SidebarCardState, initials: [String: String]) -> IconRail.Item {
+        let summary = info.rowSummary
+        let rowIcon = info.stateIcon(summary: summary)
+        let icon = WorkspaceInfo.railIcon(rowIcon, state: state)
+        // The row's words, but the branch it prints when nothing goes on, or
+        // a row that says less than the amber icon: then the icon's state
+        // says more.
+        let saysLess = summary.status.tone == .branch || icon != rowIcon
+        return IconRail.Item(
+            id: info.id, title: info.title, icon: icon, detail: saysLess ? nil : summary.status.text,
+            label: info.isLead ? nil : initials[info.id]
+        )
     }
 }
 
