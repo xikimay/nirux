@@ -231,7 +231,7 @@ final class UnderGlassTests: XCTestCase {
         workspace.focusedIndex = 0
         shell.relayout(animated: false)
         let root = try XCTUnwrap(shell.layer)
-        waitUntil("the columns' layers in the shell's tree") {
+        waitUntil("the columns' layers in the shell's tree", timeout: 5) {
             workspace.columns.allSatisfy { column in
                 sequence(first: column.view.layer, next: { $0?.superlayer }).contains { $0 === root }
             }
