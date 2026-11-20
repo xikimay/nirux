@@ -394,7 +394,7 @@ extension NiruxShellView {
           The kind says what blocks: `decision`, a choice the task leaves open; `access`, something
           only a person can give (a login, a secret, a permission); `spec-mismatch`, the task
           contradicts the code or itself. For a decision or a spec mismatch, always recommend the
-          answer you'd pick: the parent can accept it in one step. For access, say in
+          answer you'd pick: the parent or the user can accept it in one step. For access, say in
           `--recommend` exactly what is needed and where.
         - The child's question reaches your prompt as a `[Nirux Mission] Question from …` message
           that ends with the command to answer it, after a line with its kind and recommendation
