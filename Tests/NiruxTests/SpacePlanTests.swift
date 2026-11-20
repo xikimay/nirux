@@ -111,7 +111,8 @@ final class SpacePlanTests: XCTestCase {
             workspaces[0].title = "renamed"
             shell.relayout(animated: true)
             XCTAssertNotNil(shell.spacePlan, "a new name")
-            shell.focusColumn(.right)
+            let onScreen = try XCTUnwrap(shell.activeWorkspace)
+            shell.focusColumn(onScreen.focusedIndex == 0 ? .right : .left)
             XCTAssertNil(shell.spacePlan, "a move")
             XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
 
@@ -119,8 +120,8 @@ final class SpacePlanTests: XCTestCase {
             shell.setFrameSize(NSSize(width: shell.frame.width - 100, height: shell.frame.height))
             shell.relayout(animated: false)
             XCTAssertNil(shell.spacePlan, "a new size")
-            let onScreen = try XCTUnwrap(shell.activeWorkspace?.columns[safe: shell.activeWorkspace?.focusedIndex ?? 0])
-            XCTAssertTrue((shell.window?.firstResponder as? NSView)?.isDescendant(of: onScreen.view) == true, "the keyboard back")
+            let focused = try XCTUnwrap(onScreen.columns[safe: onScreen.focusedIndex])
+            XCTAssertTrue((shell.window?.firstResponder as? NSView)?.isDescendant(of: focused.view) == true, "the keyboard back")
 
             toggle(shell)
             shell.addWorkspace(title: "background", cwd: NSTemporaryDirectory(), activate: false)
