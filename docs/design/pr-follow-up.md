@@ -46,7 +46,8 @@ After each read of the pull request and each turn end of that agent:
      Without them, nothing goes: no other round's checks would run.
   2. **CI:** a red check of the pull request's own Actions runs that ended on
      FAILURE or TIMED_OUT (a cancelled job, or one that never started, isn't
-     the branch's doing), once its runs are over, the triage has spoken, and
+     the branch's doing), once its workflows' runs are over (another
+     workflow's job waiting on an approval holds nothing), the triage has spoken, and
      the failure is 2 minutes old (the user's own Rerun or Why Failed goes
      first). Only those runs' logs go into the prompt. A likely flake starts
      nothing: its rerun stays the user's. A failure the user's Why Failed
@@ -90,9 +91,11 @@ Each ends on "(Nirux follow-up, round n of 3.)".
 - `pr-follow-up.json` in the state directory (0600) keeps each pull request's
   rounds, handed feedback and stop, by URL: the count survives a relaunch and
   a workspace opened again. An entry goes once its pull request reads merged
-  or closed, or after 30 days with no change unless it holds a stop. What
-  another build wrote differently is read on the side of typing less: an
-  unknown round still counts, an unreadable entry goes alone.
+  or closed, or after 30 days with no change unless it holds a stop or its
+  pull request is open in a workspace. What another build wrote differently
+  is read on the side of typing less: an unknown round still counts, an
+  unreadable stop holds (while the head it names is the pull request's, else
+  until it closes), an unreadable entry goes alone.
 
 ## Wiring rules for PR 2
 

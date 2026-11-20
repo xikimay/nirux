@@ -20,8 +20,10 @@ final class PRFollowUpTests: XCTestCase {
         return PRDetect.pullRequestInfo(from: candidate)
     }
 
-    private func checkRun(_ name: String, conclusion: String = "FAILURE", status: String = "COMPLETED", run: Int = 7) -> [String: Any] {
-        ["__typename": "CheckRun", "name": name, "workflowName": "Tests", "status": status, "conclusion": conclusion,
+    private func checkRun(
+        _ name: String, conclusion: String = "FAILURE", status: String = "COMPLETED", run: Int = 7, workflow: String = "Tests"
+    ) -> [String: Any] {
+        ["__typename": "CheckRun", "name": name, "workflowName": workflow, "status": status, "conclusion": conclusion,
          "startedAt": "2026-11-19T10:00:00Z", "detailsUrl": "https://github.com/acme/widgets/actions/runs/\(run)/job/1"]
     }
 
@@ -90,6 +92,13 @@ final class PRFollowUpTests: XCTestCase {
         var running = failed
         running.pullRequest = pullRequest(rollup: red + [checkRun("lint", conclusion: "", status: "IN_PROGRESS", run: 8)])
         XCTAssertEqual(next(running), .wait("checks still run"))
+        // Another workflow's job waiting on someone (an environment's
+        // approval) holds nothing.
+        var deploying = failed
+        deploying.pullRequest = pullRequest(rollup: red + [
+            checkRun("production", conclusion: "", status: "WAITING", run: 9, workflow: "Deploy")
+        ])
+        XCTAssertEqual(try XCTUnwrap(typed(next(deploying))).round.kind, .ci)
         var reading = failed
         reading.triage = .pending
         XCTAssertEqual(next(reading), .wait("the triage reads the failure"))
@@ -341,14 +350,20 @@ final class PRFollowUpTests: XCTestCase {
         var store = PRFollowUpStore()
         let old = "https://github.com/acme/widgets/pull/1"
         let stopped = "https://github.com/acme/widgets/pull/2"
+        let quiet = "https://github.com/acme/widgets/pull/3"
         let current = "https://github.com/acme/widgets/pull/52"
         let monthAgo = now - PRFollowUpStore.lifetime
         XCTAssertTrue(store.update(old, now: monthAgo) { _ in }, "a new entry is saved: it says since when")
         XCTAssertEqual(store.pullRequests[old]?.since, monthAgo)
         XCTAssertFalse(store.update(old, now: monthAgo) { _ in })
         store.update(stopped, now: monthAgo) { $0.stop = PRFollowUp.Stop(kind: .ci, cause: .rounds, head: self.head, at: monthAgo) }
+        // Open and followed, quiet for a month: it keeps what it handed.
+        store.update(quiet, now: monthAgo) { $0.handedFeedback = ["thread"] }
         XCTAssertTrue(store.update(current, now: now) { $0.rounds = [self.round(.ci, on: self.head)] })
-        XCTAssertEqual(Set(store.pullRequests.keys), [stopped, current])
+        XCTAssertEqual(store.pullRequests.count, 4, "a change prunes nothing")
+        store.prune(now: now, keeping: [quiet, current])
+        XCTAssertEqual(Set(store.pullRequests.keys), [stopped, quiet, current])
+        XCTAssertEqual(store.pullRequests[quiet]?.handedFeedback, ["thread"])
         XCTAssertEqual(store.pullRequests[current]?.updatedAt, now)
 
         store.save(to: url)
@@ -366,12 +381,33 @@ final class PRFollowUpTests: XCTestCase {
           "a": {"updatedAt": 9, "rounds": [{"kind": "ci", "head": "h", "typedAt": 6},
                                             {"kind": "deploy", "head": "h", "typedAt": 7, "items": []}],
                 "stop": {"kind": "ci", "cause": "someday", "head": "h", "at": 8}, "extra": 1},
+          "c": {"updatedAt": 9, "stop": "garbage"},
+          "d": {"updatedAt": 9, "stop": null},
           "b": "garbage"
         }}
         """
         let store = try JSONDecoder().decode(PRFollowUpStore.self, from: Data(json.utf8))
-        XCTAssertEqual(store.pullRequests, ["a": PRFollowUp.Entry(
-            since: 9, rounds: [PRFollowUp.Round(kind: .ci, head: "h", typedAt: 6), .unreadable], updatedAt: 9
-        )])
+        XCTAssertEqual(store.pullRequests, [
+            "a": PRFollowUp.Entry(
+                since: 9, rounds: [PRFollowUp.Round(kind: .ci, head: "h", typedAt: 6), .unreadable],
+                stop: PRFollowUp.Stop(kind: .ci, cause: .unreadable, head: "h", at: 8), updatedAt: 9
+            ),
+            "c": PRFollowUp.Entry(since: 9, stop: .unreadable, updatedAt: 9),
+            "d": PRFollowUp.Entry(since: 9, updatedAt: 9)
+        ])
+    }
+
+    /// A stop this build can't read holds while the head it names is the
+    /// pull request's; one naming none holds until the pull request closes.
+    func testAnUnreadableStopHolds() {
+        let failed = facts(pullRequest(rollup: red))
+        let named = PRFollowUp.Stop(kind: .ci, cause: .unreadable, head: head, at: now - 60)
+        XCTAssertEqual(next(failed, PRFollowUp.Entry(stop: named)), .wait("stopped: unreadable"))
+        XCTAssertEqual(next(failed, PRFollowUp.Entry(stop: .unreadable)), .wait("stopped: unreadable"))
+        var pushed = facts(pullRequest(rollup: red, head: self.pushed))
+        pushed.localHead = self.pushed
+        var moved = PRFollowUp.Entry(stop: named)
+        XCTAssertNotNil(typed(PRFollowUp.next(&moved, pushed)), "its head moved: it no longer holds")
+        XCTAssertEqual(next(pushed, PRFollowUp.Entry(stop: .unreadable)), .wait("stopped: unreadable"))
     }
 }
