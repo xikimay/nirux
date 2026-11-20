@@ -67,7 +67,7 @@ final class SpacePlanView: NSView {
             RowLabel(labels[workspace.id] ?? Label(title: workspace.title, icon: StateIcon(.idle), initials: nil, detail: nil))
         }
         // As wide as the longest name or line needs, so that each sits near its row.
-        let labelWidth = min(Self.maxLabelWidth, rowLabels.map(\.width).max() ?? 0)
+        let labelWidth = ZZ("namesFar") ? Self.maxLabelWidth : min(Self.maxLabelWidth, rowLabels.map(\.width).max() ?? 0)
         let room = NSSize(
             width: bounds.width - labelWidth - Self.margin * 3,
             height: bounds.height - Self.margin * 2 - Self.rowGap * CGFloat(max(0, laidOut.count - 1))
@@ -201,7 +201,7 @@ final class SpacePlanView: NSView {
         /// Its icon and its longer line, whole: a truncating label's intrinsic
         /// width cuts its last letters.
         var width: CGFloat {
-            icon.frame.width + Theme.Space.sm + ceil(max(title.fittingSize.width, detail.fittingSize.width))
+            icon.frame.width + Theme.Space.sm + ceil(ZZ("intrinsicCut") ? max(title.intrinsicContentSize.width, detail.intrinsicContentSize.width) : max(title.fittingSize.width, detail.fittingSize.width))
         }
 
         func place(left: CGFloat, width: CGFloat, midY: CGFloat, in view: NSView) {
