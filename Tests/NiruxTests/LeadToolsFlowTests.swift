@@ -80,7 +80,9 @@ final class LeadToolsFlowTests: XCTestCase {
             // One it settles with the task's recommendation; an access
             // question's can't be accepted.
             let access = try ask("Which Stripe key?", from: mission, kind: .access, recommending: "A test key in .env")
-            XCTAssertTrue(try call(LeadTools.listTasks, lead: lead, in: harness).text.contains("\n  Kind: access. Needed: A test key in .env"))
+            let accessList = try call(LeadTools.listTasks, lead: lead, in: harness).text
+            XCTAssertTrue(accessList.contains("\n  Kind: access. Needed: A test key in .env"), accessList)
+            XCTAssertTrue(accessList.contains("\n  answered: “ISO 8601 or timestamps?” → “ISO 8601”\n  asks you"), "what it got answered first")
             let accessRefused = try call(LeadTools.reply, ["question": access.id, "accept": true], lead: lead, in: harness)
             XCTAssertTrue(accessRefused.isError)
             XCTAssertTrue(accessRefused.text.hasPrefix("An access question has no answer to accept"), accessRefused.text)
@@ -91,6 +93,9 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertFalse(accepted.isError, accepted.text)
             XCTAssertEqual(MissionStore.shared.response(to: decision.id)?.message, "UTC")
             XCTAssertEqual(MissionStore.shared.response(to: decision.id)?.acceptedRecommendation, true)
+            let answeredList = try call(LeadTools.listTasks, lead: lead, in: harness).text
+            XCTAssertTrue(answeredList.contains("\n  answered: “Which Stripe key?” → (an access answer, not repeated)"), answeredList)
+            XCTAssertTrue(answeredList.contains("\n  answered: “UTC or local?” → “UTC” (its recommendation)"), answeredList)
 
             // A question it hands to the user, the task named by its branch:
             // amber at once, with why.
@@ -104,6 +109,9 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(row?.handOff, .handedOver(why: why))
             XCTAssertTrue(shell.answerMissionQuestion(second.id, text: "Yes, until v3"))
             XCTAssertEqual(shell.pendingLeadNotices.map(\.text), ["[Nirux Mission] The user answered “Add a date filter”: Yes, until v3"])
+            let handedAt = MissionStore.shared.missions.flatMap(\.events).first { $0.id == second.id }?.handedToUserAt
+            XCTAssertNotNil(handedAt, "never typed: handed over")
+            XCTAssertEqual(shell.pendingLeadNotices.last?.forClaudeStartedBy, handedAt, "for the claude that handed it over")
 
             // One handed over with a recommendation: the user accepts it in
             // one click. An access question's can't be accepted.
@@ -328,7 +336,7 @@ final class LeadToolsFlowTests: XCTestCase {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             // As its REPL writes it: once it started.
             @MainActor func write(_ status: String, waitingFor: String? = nil) throws {
-                var fields = #""status":"\#(status)","statusUpdatedAt":\#(claude.startedAt * 1000)"#
+                var fields = #""status":"\#(status)","statusUpdatedAt":\#(Self.writtenAfter(claude))"#
                 if let waitingFor { fields += #","waitingFor":"\#(waitingFor)""# }
                 try Data("{\(fields)}".utf8).write(to: url)
                 try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: claude.startedAt)], ofItemAtPath: url.path)
@@ -425,6 +433,13 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// A session record's statusUpdatedAt (ms), a millisecond after `claude`
+    /// started: `startedAt * 1000` read back over 1000 can land below
+    /// `startedAt`, and the record then reads as an earlier process's.
+    private static func writtenAfter(_ claude: ProcessInstance) -> Double {
+        claude.startedAt * 1000 + 1
+    }
+
     private func resumedLead(_ harness: UIFlowHarness, standIn: AgentStandIn) throws -> ResumedLead {
         let lead = try makeLead(harness)
         let agentUUID = UUID().uuidString
@@ -466,7 +481,7 @@ final class LeadToolsFlowTests: XCTestCase {
             // A screen of its own up: no offer, and the row it left types nothing.
             let url = ClaudeSessionRecord.url(pid: lead.claude.pid, environment: ProcessInfo.processInfo.environment)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try Data(#"{"status":"waiting","waitingFor":"dialog open","statusUpdatedAt":\#(lead.claude.startedAt * 1000)}"#.utf8).write(to: url)
+            try Data(#"{"status":"waiting","waitingFor":"dialog open","statusUpdatedAt":\#(Self.writtenAfter(lead.claude))}"#.utf8).write(to: url)
             XCTAssertFalse(try lead.waiting().offersTypeNow)
             lead.shell.missionWaits.shown[lead.column.id] = held
             lead.shell.switchToWorkspace(lead.workspaceIndex)

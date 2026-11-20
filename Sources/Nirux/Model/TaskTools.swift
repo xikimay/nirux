@@ -45,7 +45,8 @@ enum TaskTools {
                 LeadTools.listTasks, title: "List your sub-tasks",
                 description: """
                     Your task's sub-tasks: each one's title, branch or folder, agent state (working, needs the user, \
-                    idle), pull request and checks, and the question or result it sent you. Read it again after a \
+                    idle), pull request and checks, the last questions it got answered, and the question or result \
+                    it sent you. Read it again after a \
                     /clear: Nirux keeps the state, your conversation doesn't.
                     """,
                 properties: [:], required: [], readOnly: true
