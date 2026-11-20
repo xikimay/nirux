@@ -132,6 +132,9 @@ struct WorktreeCleanupCandidate: Equatable {
     /// What the single-worktree confirmation lists: exactly what goes.
     func confirmationLines(for plan: WorktreeCleanup.Plan) -> [String] {
         var lines = ["Pull request #\(plan.pullRequest.number) is merged. This:"]
+        if let workspacePhrase {
+            lines.append("• closes \(workspacePhrase) and waits for \(workspaces.count > 1 ? "their" : "its") programs to end")
+        }
         lines.append("• deletes the folder \(plan.worktree.path.abbreviatedPath(maxComponents: .max))")
         lines.append("• deletes the local branch \(plan.branch)")
         if !plan.worktree.leftovers.isEmpty {
@@ -143,7 +146,6 @@ struct WorktreeCleanupCandidate: Equatable {
         if !plan.worktree.buildOutput.isEmpty {
             lines.append("• deletes its build output: \(plan.worktree.buildOutputSummary.joined(separator: ", "))")
         }
-        if let workspacePhrase { lines.append("• closes \(workspacePhrase)") }
         if !plan.worktree.folderMatchesBranch {
             lines.append(
                 "The folder isn’t named for \(plan.branch): it may be a base reused across branches, "

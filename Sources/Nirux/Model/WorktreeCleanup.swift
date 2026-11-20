@@ -1,7 +1,7 @@
 import Foundation
 
 /// Removes a linked git worktree whose pull request is merged: its folder
-/// and its local branch (Nirux then closes the workspaces open in it). It
+/// and its local branch (Nirux closes the workspaces open in it first). It
 /// never merges, pushes or fetches, and never touches the remote branch.
 /// Every check is required:
 /// - GitHub reports the branch's pull request MERGED. Its state decides,
@@ -443,23 +443,77 @@ enum WorktreeCleanup {
         files.untrackedDisposable.sort()
         files.modifiedDisposable.sort()
         files.deletedDisposable.sort()
-        files.ignoredEntries = ignored.stdout.split(separator: "\0").map(String.init).sorted()
-        let named = files.ignoredEntries.filter(isRegenerable)
+        var ignoredEntries = ignored.stdout.split(separator: "\0").map(String.init)
+        var shown: [String] = []
+        // git doesn't look into an untracked folder holding a file it shows
+        // (local settings, a handover), and lists it as one entry once that
+        // file is gone: below the topmost untracked folder that may hold
+        // one, ignored files are listed as their patterns match them.
+        let roots = Set(([".claude"] + startFolders.flatMap { [$0, $0 + "/.claude"] }).compactMap { folder in
+            untrackedRoot(of: folder, in: path, tools: tools)
+        }).sorted()
+        if !roots.isEmpty {
+            let matching = git(
+                ["--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--"]
+                    + roots.map { $0 + "/" },
+                in: path, tools: tools
+            )
+            guard matching.status == 0 else {
+                return .failure(ReadFailure(message: matching.stderr.firstLine ?? "git couldn't list the files of \(path)."))
+            }
+            let isInside = { (entry: String) in roots.contains { entry.hasPrefix($0 + "/") } }
+            let listed = statusEntries(matching.stdout).filter { isInside($0.path) }
+            ignoredEntries = ignoredEntries.filter { !isInside($0) } + listed.filter { $0.code == "!!" }.map(\.path)
+            shown = listed.filter { $0.code == "??" }.map(\.path)
+        }
+        let named = ignoredEntries.filter(isRegenerable)
         if !named.isEmpty {
-            // Exit 1: none of them is ignored by a pattern of its own. (-z
-            // needs --stdin; a path with a newline just goes to the Trash.)
-            let matched = git(["check-ignore", "--"] + named, in: path, tools: tools)
+            // Exit 1: none of them is ignored by a pattern of its own. On
+            // standard input: there may be more than a command line takes.
+            let matched = git(
+                ["check-ignore", "--stdin", "-z"], in: path, tools: tools, input: Data(named.map { $0 + "\0" }.joined().utf8)
+            )
             guard [0, 1].contains(matched.status) else {
                 return .failure(ReadFailure(message: matched.stderr.firstLine ?? "git check-ignore failed in \(path)."))
             }
-            let patterned = Set(matched.stdout.split(separator: "\n").map(String.init))
-            files.buildOutput = named.filter { patterned.contains($0) }
+            let patterned = Set(matched.stdout.split(separator: "\0").map(String.init))
+            files.buildOutput = named.filter { patterned.contains($0) }.sorted()
         }
+        files.ignoredEntries = folded(ignoredEntries, below: roots, keeping: shown + files.buildOutput).sorted()
         files.hiddenFiles = hiddenEntries(flagged.stdout).filter { relative in
             var info = stat()
             return lstat(path + "/" + relative, &info) == 0
         }
         return .success(files)
+    }
+
+    /// `entries` below `roots` grouped as `git ls-files --directory` would:
+    /// each into the topmost folder that holds none of `kept` (files git
+    /// shows, build output). The other entries as they are.
+    static func folded(_ entries: [String], below roots: [String], keeping kept: [String]) -> [String] {
+        Array(Set(entries.map { entry -> String in
+            guard !kept.contains(entry), let root = roots.first(where: { entry.hasPrefix($0 + "/") }) else { return entry }
+            var folders = [root]
+            for component in entry.dropFirst(root.count + 1).split(separator: "/").dropLast() {
+                folders.append(folders[folders.count - 1] + "/" + component)
+            }
+            let top = folders.first { folder in !kept.contains { $0.hasPrefix(folder + "/") } }
+            return top.map { $0 + "/" } ?? entry
+        }))
+    }
+
+    /// The topmost folder on the way to `folder`, relative to `worktree`,
+    /// that HEAD doesn't hold; nil when HEAD holds them all, or one of them
+    /// isn't a folder.
+    private static func untrackedRoot(of folder: String, in worktree: String, tools: Tools) -> String? {
+        let components = folder.split(separator: "/")
+        for end in components.indices {
+            let prefix = components[...end].joined(separator: "/")
+            let type = (try? FileManager.default.attributesOfItem(atPath: worktree + "/" + prefix))?[.type] as? FileAttributeType
+            guard type == .typeDirectory else { return nil }
+            if git(["cat-file", "-e", "HEAD:" + prefix], in: worktree, tools: tools).status != 0 { return prefix }
+        }
+        return nil
     }
 
     struct StatusEntry: Equatable {
@@ -609,16 +663,17 @@ enum WorktreeCleanup {
     }
 
     static func git(
-        _ arguments: [String], in directory: String, tools: Tools, timeout: TimeInterval? = nil
+        _ arguments: [String], in directory: String, tools: Tools, timeout: TimeInterval? = nil, input: Data? = nil
     ) -> GitResult {
-        run(executable: tools.gitPath, arguments: arguments, in: directory, tools: tools, timeout: timeout)
+        run(executable: tools.gitPath, arguments: arguments, in: directory, tools: tools, timeout: timeout, input: input)
     }
 
     /// Reads never take optional locks (`git status` would rewrite the
     /// index); writes take the locks they need regardless. Output that
     /// isn't UTF-8 fails the run rather than reading as empty.
     static func run(
-        executable: String, arguments: [String], in directory: String, tools: Tools, timeout: TimeInterval? = nil
+        executable: String, arguments: [String], in directory: String, tools: Tools, timeout: TimeInterval? = nil,
+        input: Data? = nil
     ) -> GitResult {
         let name = (executable as NSString).lastPathComponent
         guard let result = BoundedProcess.run(
@@ -626,6 +681,7 @@ enum WorktreeCleanup {
             arguments: arguments,
             currentDirectoryURL: URL(fileURLWithPath: directory),
             environment: GitDetect.readOnlyEnvironment.merging(tools.environment) { _, override in override },
+            standardInput: input,
             timeout: timeout ?? tools.timeout,
             captureStandardError: true
         ) else {

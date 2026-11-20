@@ -220,14 +220,19 @@ extension WorkspaceInfo {
             if case let .silent(_, since, true)? = column.stuck {
                 actions.append(.interrupt(columnIndex: column.index, since: since))
             }
+            // A Mission question and what it recommends come before a
+            // turn's question block, which may ask it again.
+            if let question = column.missionQuestion, column.index != questionShown {
+                actions.append(.missionQuestion(columnIndex: column.index, question))
+            }
+            if let question = column.missionQuestion, question.handOff != nil, !question.isAnswered, question.recommendation != nil {
+                actions.append(.missionRecommendation(columnIndex: column.index, question))
+            }
             if let question = column.turnQuestion {
                 actions.append(.turnQuestion(columnIndex: column.index, question))
             }
             if let dialog = column.dialog {
                 actions.append(.dialog(columnIndex: column.index, dialog))
-            }
-            if let question = column.missionQuestion, column.index != questionShown {
-                actions.append(.missionQuestion(columnIndex: column.index, question))
             }
             if let waiting = column.waitingMessages {
                 actions.append(.waitingMessages(columnIndex: column.index, waiting))
@@ -277,6 +282,9 @@ enum SidebarCardAction: Hashable {
     /// A Mission question the status line doesn't show: a click opens the
     /// reply popover.
     case missionQuestion(columnIndex: Int, SidebarMissionQuestion)
+    /// What a Mission question that waits on the user recommends (or, for
+    /// access, needs), with Reply… and Accept.
+    case missionRecommendation(columnIndex: Int, SidebarMissionQuestion)
     /// The question a Claude turn ended on: the choices it lists, the
     /// question whole, then Yes / No / Reply….
     case turnQuestion(columnIndex: Int, SidebarTurnQuestion)
@@ -298,7 +306,7 @@ enum SidebarCardAction: Hashable {
         switch self {
         case .next, .reviewBadges, .ruleProposals, .dailyPass: return true
         case .missionQuestion(_, let question): return question.handOff == nil
-        case .approval, .resume, .interrupt, .cleanup, .turnQuestion, .dialog, .waitingMessages: return false
+        case .approval, .resume, .interrupt, .cleanup, .turnQuestion, .dialog, .waitingMessages, .missionRecommendation: return false
         }
     }
 }

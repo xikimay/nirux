@@ -236,7 +236,6 @@ extension NiruxShellView {
 
     private func taskReply(_ arguments: [String: Any], for parent: NewTask.MissionParent, answer: @escaping LeadAnswer) {
         let questionID = LeadTools.string(arguments, "question") ?? ""
-        let message = LeadTools.string(arguments, "message") ?? ""
         let store = MissionStore.shared
         _ = store.ensureLoaded()
         // Typed into this agent's prompt: another column's isn't its to answer.
@@ -247,6 +246,6 @@ extension NiruxShellView {
             return answer("No question “\(questionID)” from one of your sub-tasks: copy its id from the [Nirux Mission] message "
                 + "or list_tasks.", true)
         }
-        sendReply(message, to: questionID, in: mission, answer: answer)
+        sendReply(arguments, to: questionID, in: mission, answer: answer)
     }
 }

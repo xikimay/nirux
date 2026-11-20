@@ -693,6 +693,87 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: worktree + "/vendor/clone/notes.txt"))
     }
 
+    /// F1 of the 2026-11-19 evaluation: an agent writes an ignored file
+    /// after the re-read, as the leftovers go to the Trash. git would
+    /// delete it with the folder, even under a name the confirmation listed.
+    func testFilesWrittenDuringTheCleanUpStopIt() throws {
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        try write("*.log\n.env.local\n", to: "info/exclude", in: root + "/widgets/.git")
+        try write("SECRET=1\n", to: ".env.local", in: worktree)
+        let plan = try readyPlan()
+        let (trash, folder) = (tools.trash, worktree!)
+        let executeWriting = { (file: String, text: String) -> WorktreeCleanup.Execution in
+            self.tools.trash = { bundle in
+                try text.write(toFile: folder + "/" + file, atomically: false, encoding: .utf8)
+                return try trash(bundle)
+            }
+            return WorktreeCleanup.execute(plan, tools: self.tools)
+        }
+
+        guard case .failed(let message) = executeWriting("agent.log", "agent output\n") else {
+            return XCTFail("agent.log would have been deleted for good")
+        }
+        XCTAssertTrue(message.contains("agent.log"), message)
+        XCTAssertEqual(try String(contentsOfFile: worktree + "/agent.log", encoding: .utf8), "agent output\n")
+        XCTAssertEqual(try String(contentsOfFile: worktree + "/.env.local", encoding: .utf8), "SECRET=1\n", "back from the Trash")
+        XCTAssertTrue(try isListed(worktree))
+        XCTAssertTrue(branchExists("feat/x"))
+
+        try FileManager.default.removeItem(atPath: worktree + "/agent.log")
+        guard case .failed(let again) = executeWriting(".env.local", "SECRET=2\n") else {
+            return XCTFail("the second .env.local would have been deleted for good")
+        }
+        XCTAssertTrue(again.contains("couldn't be put back"), again)
+        XCTAssertEqual(try String(contentsOfFile: worktree + "/.env.local", encoding: .utf8), "SECRET=2\n")
+        XCTAssertEqual(try String(contentsOfFile: trashed(".env.local"), encoding: .utf8), "SECRET=1\n")
+        XCTAssertTrue(try isListed(worktree))
+    }
+
+    /// git hides the ignored files of an untracked folder holding a file
+    /// it shows: Claude Code's local settings, a handover in a start folder
+    /// (under an untracked one, named as git pathspec magic). They are
+    /// listed, and go to the Trash with it, or with the folder for build
+    /// output.
+    func testIgnoredFilesHiddenInUntrackedFoldersAreListed() throws {
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        try write("*.key\n.DS_Store\n*.log\n", to: "info/exclude", in: root + "/widgets/.git")
+        try write("{}\n", to: ".claude/settings.local.json", in: worktree)
+        try write("key\n", to: ".claude/signing.key", in: worktree)
+        try write("finder\n", to: ".claude/.DS_Store", in: worktree)
+        try write("# handover\n", to: ":scratch/agent/.claude-handover.md", in: worktree)
+        try write("notes\n", to: ":scratch/notes.log", in: worktree)
+        // One entry for a folder of ignored files, as git gives it, unless build output is in it.
+        try write("a\n", to: ":scratch/logs/a.log", in: worktree)
+        try write("b\n", to: ":scratch/logs/b.log", in: worktree)
+        try write("c\n", to: ":scratch/cache/c.log", in: worktree)
+        try write("finder\n", to: ":scratch/cache/.DS_Store", in: worktree)
+        let plan = try readyPlan(agentFolders: [worktree + "/:scratch/agent"])
+        XCTAssertEqual(plan.worktree.leftovers, [
+            ".claude/settings.local.json", ".claude/signing.key", ":scratch/agent/.claude-handover.md",
+            ":scratch/cache/c.log", ":scratch/logs/", ":scratch/notes.log"
+        ])
+        XCTAssertEqual(plan.worktree.buildOutput, [".claude/.DS_Store", ":scratch/cache/.DS_Store"])
+
+        XCTAssertEqual(
+            WorktreeCleanup.execute(plan, tools: tools),
+            .cleaned(forcedBranchDelete: false, trashFolder: "widgets.feat-x leftovers")
+        )
+        XCTAssertEqual(try String(contentsOfFile: trashed(".claude/signing.key"), encoding: .utf8), "key\n")
+        XCTAssertEqual(try String(contentsOfFile: trashed(":scratch/notes.log"), encoding: .utf8), "notes\n")
+        XCTAssertEqual(try String(contentsOfFile: trashed(":scratch/logs/b.log"), encoding: .utf8), "b\n")
+    }
+
+    /// More build output than a command line takes still gets checked.
+    func testThousandsOfBuildOutputEntriesAreChecked() throws {
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        try write(".DS_Store\n", to: "info/exclude", in: root + "/widgets/.git")
+        try write("{}\n", to: ".claude/settings.local.json", in: worktree)
+        for index in 0..<4_100 { try write("", to: ".claude/f\(index)/.DS_Store", in: worktree) }
+        let plan = try readyPlan()
+        XCTAssertEqual(plan.worktree.buildOutput.count, 4_100)
+        XCTAssertEqual(plan.worktree.leftovers, [".claude/settings.local.json"])
+    }
+
     func testFolderOfIgnoredFilesUnderABuildNameGoesToTheTrash() throws {
         try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
         try write("*.secret\nbuild/\n", to: "info/exclude", in: root + "/widgets/.git")
@@ -1025,11 +1106,11 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
             .confirmationLines(for: ready)
         XCTAssertEqual(lines, [
             "Pull request #12 is merged. This:",
+            "• closes the workspaces “x”, “x tests” and waits for their programs to end",
             "• deletes the folder /tmp/widgets.feat-x",
             "• deletes the local branch feat/x",
             "• moves to the Trash, in “widgets.feat-x leftovers”: .claude-handover.md, .env, a/, b/, c/, d/, e/, f/, g/, h/",
             "• deletes its build output: .build/",
-            "• closes the workspaces “x”, “x tests”",
             "Claude is idle — closing the workspaces ends its session.",
             "The remote branch is not touched."
         ])

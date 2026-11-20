@@ -663,22 +663,24 @@ final class StuckAgentSidebarTests: XCTestCase {
         ])
         XCTAssertTrue(waits(at: now + 50, in: codex).isEmpty)
 
-        pty.applyAgentHook(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "s", timestamp: now + 40), isUserFocused: true)
-        XCTAssertTrue(waits(at: now + 41).isEmpty, "its turn runs")
+        pty.sendRaw(Data("\r".utf8))
+        let promptAt = Date().timeIntervalSince1970
+        pty.applyAgentHook(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "s", timestamp: promptAt), isUserFocused: true)
+        XCTAssertTrue(waits(at: promptAt + 1).isEmpty, "its turn runs")
         // A turn at work holding a message says so too, past a stall's length.
         XCTAssertEqual(lines.count, 3)
         XCTAssertTrue(lines.last?.hasPrefix("untyped mission message id=\(first.id.prefix(8)) ") == true
             && lines.last?.contains(" reason=working messages=2 ") == true, lines.last ?? "")
-        _ = waits(at: now + 40 + NiruxShellView.missionMessageStallAge)
+        _ = waits(at: promptAt + NiruxShellView.missionMessageStallAge)
         XCTAssertEqual(lines.count, 4)
         XCTAssertTrue(lines.last?.hasPrefix("untyped mission message id=\(second.id.prefix(8)) ") == true
             && lines.last?.contains(" working=1 inFlight=1 turn=180s ") == true, lines.last ?? "")
 
-        // A tell to a child other than Claude Code waits for nobody here.
+        // A tell to a child other than Claude Code or Codex waits for nobody here.
         let codexMission = UUID().uuidString, otherWorkspace = UUID().uuidString, otherAgent = UUID().uuidString
         XCTAssertNotNil(store.create(MissionCreationRequest(
             id: codexMission, parentWorkspaceID: otherWorkspace, parentAgentUUID: otherAgent,
-            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: "codex", branch: "feat/y"
+            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: "agy", branch: "feat/y"
         ), enabled: true, now: now - 900))
         XCTAssertNotNil(store.accept(MissionEvent(
             id: UUID().uuidString, missionID: codexMission, childWorkspaceID: workspace.id, childAgentUUID: agentUUID,

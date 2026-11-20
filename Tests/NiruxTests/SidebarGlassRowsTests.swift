@@ -338,8 +338,9 @@ final class SidebarGlassRowsTests: XCTestCase {
     }
 
     /// The Board row reads open while the space's Board column shows, and
-    /// follows it as the columns are laid out: an edge dragged pushes the
-    /// Board out of view at once, with no refresh of the whole sidebar.
+    /// follows it as the columns are laid out: an edge dragged brings the
+    /// Board into view, or takes it out, at once, with no refresh of the
+    /// whole sidebar.
     func testTheBoardRowFollowsItsColumn() throws {
         _ = NSApplication.shared
         let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
@@ -352,19 +353,26 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertEqual(shell.sidebar.navigation, SidebarNavigation(boardShown: true, boardAvailable: true), "beside the agent")
         XCTAssertTrue(shell.sidebar.iconRail.boardButton.isSelected)
 
+        // The agent at the whole width: the Board out of view.
+        workspace.columns[agent].widthFraction = 1
+        shell.relayout(animated: false)
+        XCTAssertFalse(shell.sidebar.navigation.boardShown)
+
         shell.isMetadataRefreshScheduled = false
         let agentView = workspace.columns[agent].view
         let handle = try XCTUnwrap(agentView.superview?.subviews.compactMap { $0 as? ColumnResizeHandle }.first {
             $0.frame.minX <= agentView.frame.maxX && agentView.frame.maxX <= $0.frame.maxX
         }, "the handle on the agent's right edge")
         let start = try XCTUnwrap(handle.onDragStart?())
-        handle.onDrag?(start, 10_000)
-        XCTAssertFalse(shell.sidebar.navigation.boardShown, "pushed out of view")
-        XCTAssertFalse(shell.sidebar.iconRail.boardButton.isSelected)
+        handle.onDrag?(start, -400)
+        XCTAssertTrue(shell.sidebar.navigation.boardShown, "brought into view")
+        XCTAssertTrue(shell.sidebar.iconRail.boardButton.isSelected)
         XCTAssertFalse(shell.isMetadataRefreshScheduled, "no process-table scan for one row")
+        handle.onDrag?(start, 0)
+        XCTAssertFalse(shell.sidebar.navigation.boardShown, "out again")
 
         // Closing, it no longer counts.
-        handle.onDrag?(start, 0)
+        handle.onDrag?(start, -400)
         XCTAssertTrue(shell.sidebar.navigation.boardShown)
         let board = try XCTUnwrap(workspace.columns.first { $0.projectBoard != nil })
         board.isClosing = true

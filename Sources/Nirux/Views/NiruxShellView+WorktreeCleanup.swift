@@ -6,7 +6,7 @@ import AppKit
 /// Worktrees…" in the palette. `WorktreeCleanup` runs the checks and the
 /// git commands; this side finds the workspaces open in each worktree and
 /// the agents and editors inside it, confirms, and closes the workspaces
-/// once the folder is gone.
+/// before git runs.
 extension NiruxShellView {
     /// The worktree a workspace's folder belongs to: the nearest folder up
     /// from `cwd` whose `.git` file points into a repository's `worktrees`
@@ -234,7 +234,7 @@ extension NiruxShellView {
                 details: candidate.closeOnlyLines(),
                 confirmTitle: "Close Workspace"
             ) {
-                let kept = closeWorkspacesAfterCleanup(of: candidate)
+                let kept = closeWorkspaces(of: candidate)
                 if !kept.isEmpty { showKeptOpenNotice(kept) }
             }
             completion()
@@ -252,20 +252,71 @@ extension NiruxShellView {
         }
     }
 
-    /// Runs `plan` off the main thread, its worktree's Explain stopped
-    /// meanwhile, then closes the workspaces once the folder is gone (see
-    /// `finishWorktreeCleanup`). `done` comes on the main thread, with nil
-    /// once the shell is gone.
+    /// Runs `plan` off the main thread once nothing runs in the worktree
+    /// (see `closeWorkspacesBeforeCleanup`), its Explain stopped meanwhile.
+    /// A change since the check stops it before any workspace closes.
+    /// `done` comes on the main thread, with nil once the shell is gone.
     func executeWorktreeCleanup(
         _ plan: WorktreeCleanup.Plan, of candidate: WorktreeCleanupCandidate,
         done: @escaping @MainActor @Sendable (CleanupOutcome?) -> Void
     ) {
         let tools = worktreeCleanupTools()
-        Self.stoppingExplains(in: plan.worktree.path) { [weak self] resumeExplains in
-            Self.offMain({ WorktreeCleanup.execute(plan, tools: tools) }) { [weak self] execution in
-                resumeExplains()
-                done(self?.finishWorktreeCleanup(execution, of: candidate, plan: plan))
+        Self.offMain({ WorktreeCleanup.recheck(plan, tools: tools) }) { [weak self] recheck in
+            guard self != nil else { return done(nil) }
+            if case .failure(let changed) = recheck { return done(CleanupOutcome(succeeded: false, message: changed.message, keptOpen: [])) }
+            Self.stoppingExplains(in: plan.worktree.path) { [weak self] resumeExplains in
+                guard let self else { resumeExplains(); return done(nil) }
+                self.closeWorkspacesBeforeCleanup(of: candidate) { [weak self] stop, closedAny in
+                    let closed = closedAny ? "\nIts workspaces were closed." : ""
+                    guard self != nil, stop == nil else {
+                        resumeExplains()
+                        return done(stop.map { CleanupOutcome(succeeded: false, message: $0 + closed, keptOpen: []) })
+                    }
+                    Self.offMain({ WorktreeCleanup.execute(plan, tools: tools) }) { [weak self] execution in
+                        resumeExplains()
+                        done(self?.finishWorktreeCleanup(execution, of: candidate, plan: plan, closed: closed))
+                    }
+                }
             }
+        }
+    }
+
+    /// Closes the worktree's workspaces, as confirmed, before git runs: git
+    /// deletes the ignored files it finds, so nothing may write there any
+    /// more (close_task waits the same way). Then waits for their terminals'
+    /// processes, those of workspaces already closing, and any process
+    /// working in the folder (one that outlived a stopped clean-up, say).
+    /// `then` gets why the clean-up stops, or nil, and whether any
+    /// workspace closed.
+    private func closeWorkspacesBeforeCleanup(
+        of candidate: WorktreeCleanupCandidate, then: @escaping @MainActor @Sendable (_ stop: String?, _ closedAny: Bool) -> Void
+    ) {
+        let open = worktreeWorkspaces(of: candidate)
+        let confirmed = Set(candidate.workspaceIDs)
+        if let opened = open.first(where: { !confirmed.contains($0.id) }) {
+            return then("“\(opened.title)” was opened in the folder since the check. Nothing was deleted.", false)
+        }
+        let unsaved = open.filter { Self.holdsUnsavedEdits($0) }
+        guard unsaved.isEmpty else {
+            let titles = WorktreeCleanupCandidate.quotedList(unsaved.map(\.title))
+            return then("Unsaved editor changes in \(titles). Nothing was deleted.", false)
+        }
+        let snapshot = ProcessSnapshot()
+        // A failed read sees no process at all.
+        guard !snapshot.isEmpty else { return then("Nirux couldn't read the running processes. Nothing was deleted.", false) }
+        let terminals = worktreeWorkspaces(of: candidate, closingToo: true).flatMap(\.columns).compactMap(\.pty)
+        let processes = terminals.compactMap(\.shellPID).flatMap { snapshot.tree(of: $0) }
+        closeWorkspaces(of: candidate)
+        // Now, not when its terminals are freed: the wait needs them gone.
+        terminals.forEach { $0.hangUp() }
+        let closedAny = !open.isEmpty
+        Self.waitForExit(processes, workingIn: Self.comparablePath(candidate.path)) { [weak self] stillRunning in
+            guard stillRunning.isEmpty else {
+                let names = stillRunning.joined(separator: ", ")
+                return then("Still running after \(Int(Self.exitTimeout)) s: \(names). Nothing was deleted.", closedAny)
+            }
+            let opened = self?.worktreeWorkspaces(of: candidate).first
+            then(opened.map { "“\($0.title)” was opened in the folder meanwhile. Nothing was deleted." }, closedAny)
         }
     }
 
@@ -299,24 +350,25 @@ extension NiruxShellView {
         let keptOpen: [String]
     }
 
-    /// Closes the workspaces once the folder is gone, and words the result.
+    /// Closes any workspace opened in the folder since, once it is gone,
+    /// and words the result; `closed` notes a failure's closed workspaces.
     private func finishWorktreeCleanup(
-        _ execution: WorktreeCleanup.Execution, of candidate: WorktreeCleanupCandidate, plan: WorktreeCleanup.Plan
+        _ execution: WorktreeCleanup.Execution, of candidate: WorktreeCleanupCandidate, plan: WorktreeCleanup.Plan, closed: String
     ) -> CleanupOutcome {
         defer { expireProjectBoardWorktrees() }
         switch execution {
         case .cleaned(let forced, let trashFolder):
-            let kept = closeWorkspacesAfterCleanup(of: candidate)
+            let kept = closeWorkspaces(of: candidate)
             var message = "Folder and branch \(plan.branch) deleted"
             if forced { message += " (squash merge: -D)" }
             if let trashFolder { message += ", leftovers in the Trash (“\(trashFolder)”)" }
             return CleanupOutcome(succeeded: true, message: message, keptOpen: kept)
         case .branchKept(let reason, let trashFolder):
-            let kept = closeWorkspacesAfterCleanup(of: candidate)
+            let kept = closeWorkspaces(of: candidate)
             let trashNote = trashFolder.map { "\nIts leftovers are in the Trash (“\($0)”)." } ?? ""
             return CleanupOutcome(succeeded: false, message: reason + trashNote, keptOpen: kept)
         case .failed(let reason):
-            return CleanupOutcome(succeeded: false, message: reason, keptOpen: [])
+            return CleanupOutcome(succeeded: false, message: reason + closed, keptOpen: [])
         }
     }
 
@@ -457,7 +509,7 @@ extension NiruxShellView {
         panel.setResult(.running, for: candidate.path)
         switch candidate.availability {
         case .closeOnly:
-            let kept = closeWorkspacesAfterCleanup(of: candidate)
+            let kept = closeWorkspaces(of: candidate)
             panel.setResult(kept.isEmpty ? .done("Workspace closed") : .skipped(Self.keptOpenText(kept)), for: candidate.path)
             runWorktreeCleanups(rest, in: panel, finished: finished)
         case .ready(let plan, _):
@@ -486,22 +538,22 @@ extension NiruxShellView {
 
     // MARK: Closing
 
-    /// Closes the workspaces open in the cleaned-up folder, without asking
-    /// again: those confirmed, and any opened there since. One with an
+    /// Closes `worktreeWorkspaces`, without asking again. One with an
     /// editor holding unsaved changes stays open, its buffer the only copy
     /// left; their titles are returned. Nirux keeps one workspace open: a
-    /// fresh one in the space's default folder (else the home folder) takes
-    /// over if none would be left.
+    /// fresh one in the space's default folder (the home folder when there
+    /// is none, or it is in the candidate's) takes over if none would be
+    /// left.
     @discardableResult
-    func closeWorkspacesAfterCleanup(of candidate: WorktreeCleanupCandidate) -> [String] {
-        let isInside = Self.containment(in: candidate.path)
-        let ids = Set(candidate.workspaceIDs)
-        let affected = workspaces.filter { !$0.isClosing && (ids.contains($0.id) || isInside($0.cwd)) }
-        let kept = affected.filter { $0.columns.contains { !($0.editorColumn?.unsavedPaths.isEmpty ?? true) } }
+    func closeWorkspaces(of candidate: WorktreeCleanupCandidate) -> [String] {
+        let affected = worktreeWorkspaces(of: candidate)
+        let kept = affected.filter { Self.holdsUnsavedEdits($0) }
         let closing = affected.filter { workspace in !kept.contains { $0 === workspace } }
         guard !closing.isEmpty else { return kept.map(\.title) }
         if workspaceStore.remainingWorkspaceCount <= closing.count {
-            addWorkspace()
+            // Never in the folder going away.
+            let folder = defaultFolder(forSpace: workspaceStore.targetProfileID(for: nil))
+            addWorkspace(cwd: Self.containment(in: candidate.path)(folder) ? sideEffects.homeDirectory() : folder)
         }
         // The selected one last: its successor is then picked among the
         // workspaces left, in one hop.
@@ -516,6 +568,18 @@ extension NiruxShellView {
             self?.saveState()
         }
         return kept.map(\.title)
+    }
+
+    /// The workspaces open in the candidate's folder: those confirmed, and
+    /// any opened there since; `closingToo`, those closing as well.
+    private func worktreeWorkspaces(of candidate: WorktreeCleanupCandidate, closingToo: Bool = false) -> [WorkspaceState] {
+        let isInside = Self.containment(in: candidate.path)
+        let ids = Set(candidate.workspaceIDs)
+        return workspaces.filter { (closingToo || !$0.isClosing) && (ids.contains($0.id) || isInside($0.cwd)) }
+    }
+
+    private static func holdsUnsavedEdits(_ workspace: WorkspaceState) -> Bool {
+        workspace.columns.contains { !($0.editorColumn?.unsavedPaths.isEmpty ?? true) }
     }
 
     static func keptOpenText(_ titles: [String]) -> String {

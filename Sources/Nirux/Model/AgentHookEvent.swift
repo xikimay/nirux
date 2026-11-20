@@ -131,6 +131,11 @@ struct AgentHookEvent: Codable, Equatable {
     /// empty once none is: a review run in the background outlives the turn
     /// that started it. Nil from older receivers and on other events.
     var backgroundAgents: [String]?
+    /// On a Codex turn end whose thread holds one message, its
+    /// `CodexLaunch.promptDigest`, never the text: it proves the thread its
+    /// launch prompt started (a fork holds the forked ones too). Nil from
+    /// older receivers.
+    var soleInputDigest: String?
     /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
     /// the request ID and deadline (epoch seconds) the receiver waits
     /// under; on approvalResolved, the request and what became of it.
@@ -263,6 +268,7 @@ struct AgentHookEvent: Codable, Equatable {
             guard let type = payload["type"] as? String, type == "agent-turn-complete" else { return nil }
             name = .turnComplete
             sessionID = payload["thread-id"] as? String
+            soleInputDigest = (payload["input-messages"] as? [String]).flatMap { $0.count == 1 ? CodexLaunch.promptDigest($0[0]) : nil }
             cwd = payload["cwd"] as? String
             source = nil
             let message = payload["last-assistant-message"] as? String
@@ -666,22 +672,13 @@ enum AgentHookCLI {
         env["NIRUX_AGENT_UUID"]?.isEmpty == false
     }
 
-    /// Append one JSON line in one `write`. O_APPEND keeps concurrent
-    /// writers (several agents across columns) from interleaving mid-line:
-    /// the file system serializes writes to one file (PIPE_BUF bounds
-    /// pipes, not files). Lines are small: a Stop's final message excerpt
-    /// (`TurnEndText.excerpt`, 3,000 characters) and a question dialog at
-    /// its bounds (`AgentDialog.bounded`, a few thousand) are the largest.
+    /// Append one JSON line (`QueueFile`). Lines are small: a Stop's final
+    /// message excerpt (`TurnEndText.excerpt`, 3,000 characters) and a
+    /// question dialog at its bounds (`AgentDialog.bounded`, a few
+    /// thousand) are the largest.
     private static func append(_ event: AgentHookEvent) {
         guard var line = try? JSONEncoder().encode(event) else { return }
         line.append(0x0A) // \n
-        let url = AgentHookCenter.eventsURL
-        let fd = open(url.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
-        guard fd >= 0 else { return }
-        line.withUnsafeBytes { buf in
-            guard let ptr = buf.baseAddress else { return }
-            _ = write(fd, ptr, buf.count)
-        }
-        close(fd)
+        _ = QueueFile.append(line, to: AgentHookCenter.eventsURL)
     }
 }

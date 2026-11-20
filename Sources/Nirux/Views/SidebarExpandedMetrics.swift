@@ -166,6 +166,7 @@ enum SidebarExpandedMetrics {
         case .resume(_, _, _, _, let resume): return resumeBlockHeight(for: resume)
         case .interrupt: return buttonHeight
         case .turnQuestion(_, let question): return turnQuestionBlockHeight(for: question, width: width)
+        case .missionRecommendation(_, let question): return SidebarMissionRecommendationBlockRenderer.height(of: question, width: width)
         case .dialog(_, let dialog): return dialogBlockHeight(for: dialog, width: width)
         case .next(let text):
             return SidebarWrappedText.height(
@@ -177,10 +178,12 @@ enum SidebarExpandedMetrics {
                 maxLines: missionQuestionMaxLines
             )
         case .waitingMessages(_, let waiting):
-            return SidebarWrappedText.height(
+            let line = SidebarWrappedText.height(
                 SidebarWorkspaceCardRenderer.waitingText(waiting), width: textWidth, lineHeight: actionLineHeight,
                 maxLines: waitingMessagesMaxLines
             )
+            // Type it now's row under it.
+            return line + (waiting.offersTypeNow ? buttonHeight : 0)
         case .cleanup, .reviewBadges, .ruleProposals, .dailyPass: return actionLineHeight
         }
     }
