@@ -43,6 +43,17 @@ struct Mission: Codable, Equatable {
     func isCarried(handoffsEnabled: Bool) -> Bool {
         handoffsEnabled || isAlwaysCarried
     }
+
+    /// The agent its child runs, as Nirux's lines name it, when Nirux
+    /// delivers its parent's messages: typed into Claude Code's prompt, or
+    /// handed to Codex's queue. Nil for one that delivers none (agy).
+    var childAgentName: String? {
+        switch childAgentKind {
+        case NiruxApp.WorkspaceAgent.claude.rawValue: "Claude Code"
+        case NiruxApp.WorkspaceAgent.codex.rawValue: "Codex"
+        default: nil
+        }
+    }
 }
 
 /// An explicit mailbox event. `deliveredAt` is set once the app has acted

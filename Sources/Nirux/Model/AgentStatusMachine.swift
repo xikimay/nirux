@@ -240,6 +240,12 @@ struct AgentStatusMachine {
     /// Antigravity's last word on its state (OSC 7501) and when it came,
     /// until another process comes to the front.
     private(set) var programStatus: ReportedStatus?
+    /// Codex's, while the shell runs (`keepProgramStatus`). Its hooks drive
+    /// its status: this one only says when a Mission message may go into its
+    /// queue (`codexQueueRefusal`).
+    private(set) var codexStatus: ReportedStatus?
+    /// When Codex last said it works, and which `codex`: a turn started.
+    private(set) var codexWorked: (at: TimeInterval, process: ProcessInstance?)?
 
     /// What Antigravity reported, when, from which process, and whether its
     /// wait alerted.
@@ -248,6 +254,12 @@ struct AgentStatusMachine {
         let at: TimeInterval
         let process: ProcessInstance?
         var alerted = false
+
+        /// Whether `process` sent it. One read on an empty process table
+        /// came from the agent in front then: one already running.
+        func isFrom(_ process: ProcessInstance) -> Bool {
+            self.process.map { $0 == process } ?? (process.startedAt <= at)
+        }
     }
     /// The agent process died mid-turn (see `noteAgentExited`). Cleared by
     /// a new session, an agent back in the foreground, or the user.
@@ -1565,7 +1577,7 @@ struct AgentStatusMachine {
         if Self.activityOnlyAgentProcesses.contains(fgName) { hookKind = nil }
         // Antigravity's status goes with it; one can come before the
         // heartbeat sees it in front.
-        if fgName != AgentProgramStatus.process { programStatus = nil }
+        if fgName != AgentProgramStatus.agy { programStatus = nil }
     }
 
     /// Takes in what Antigravity's process `process` reported: the reason to
@@ -1584,8 +1596,18 @@ struct AgentStatusMachine {
         return lastAttentionReason
     }
 
+    /// Takes in what Codex's process `process` reported: the same status
+    /// again (a redraw) keeps the time it first came.
+    mutating func noteCodexStatus(_ status: AgentProgramStatus, from process: ProcessInstance?, now: TimeInterval) {
+        guard status != codexStatus?.status || process != codexStatus?.process else { return }
+        codexStatus = ReportedStatus(status: status, at: now, process: process)
+        if status.state == .working { codexWorked = (now, process) }
+    }
+
     /// Antigravity's status belongs to the process that sent it: an agy
-    /// started again begins with none.
+    /// started again begins with none. Codex's stays (it says each state
+    /// once): a Ctrl-G editor or a ^Z shell in front doesn't end it, and
+    /// its process is checked where it is read (`ReportedStatus.isFrom`).
     mutating func keepProgramStatus(of process: ProcessInstance?) {
         if let reported = programStatus, reported.process != process { programStatus = nil }
     }
@@ -1604,7 +1626,7 @@ struct AgentStatusMachine {
     /// What Antigravity in front reported it waits on, or failed on, past
     /// the moment every launch signs in, and until the user answers it.
     func reportedWait(foreground: ForegroundProcess?, now: TimeInterval) -> AgentWait? {
-        guard foreground?.name == AgentProgramStatus.process, let reported = programStatus,
+        guard foreground?.name == AgentProgramStatus.agy, let reported = programStatus,
               [.blocked, .error].contains(reported.status.state), lastInputAt <= reported.at,
               reported.status.kind != "auth" || now - reported.at >= AgentProgramStatus.signInGrace,
               let reason = reported.status.attentionReason
@@ -1741,6 +1763,8 @@ struct AgentStatusMachine {
     mutating func reset() {
         state = .idle
         programStatus = nil
+        codexStatus = nil
+        codexWorked = nil
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false

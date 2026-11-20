@@ -453,7 +453,7 @@ extension NiruxShellView {
             case "codex":
                 kind = .codex; webURL = nil
                 codexMode = detectCodexLaunchMode(process: foregroundProcess)
-            case AgentProgramStatus.process where !AgentHookCenter.isHeadlessAgy(foregroundProcess):
+            case AgentProgramStatus.agy where !AgentHookCenter.isHeadlessAgy(foregroundProcess):
                 kind = .agy; webURL = nil
             default: kind = .terminal; webURL = nil
             }

@@ -103,6 +103,12 @@ struct ShellSideEffects {
     /// log, a test's shell writes none.
     var logMissionWait: @MainActor (String) -> Void = { _ in }
 
+    /// Hands a Mission message to a running Codex's own queue
+    /// (`CodexQueue`); `done` comes on the main queue.
+    var queueCodexMessage: @MainActor (
+        _ request: CodexQueue.Request, _ done: @escaping @MainActor @Sendable (CodexQueue.Outcome) -> Void
+    ) -> Void = { CodexQueue.send($0, done: $1) }
+
     /// Calls back at each click or scroll the app receives, until stopped;
     /// the events go on as they were. Keys come through the app's key
     /// interceptor, which consumes the terminals' own. Tests watch

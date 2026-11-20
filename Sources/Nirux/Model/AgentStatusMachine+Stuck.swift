@@ -161,6 +161,34 @@ extension AgentStatusMachine {
         hookKind == "claude" && lastEventAt >= startedAt
     }
 
+    /// Why a Mission message can't go into Codex's own queue now
+    /// (`CodexQueue`), nil when it can: `foreground`, the column's
+    /// interactive `codex`, already running at `time`, last reported its
+    /// turn over: done, or idle (once ready, after a key, or after an Esc,
+    /// when Codex's queue itself waits for another turn's end). Nothing is
+    /// typed: Codex starts a queued message itself once that conversation is
+    /// idle, so neither a dialog nor a draft can take it. Its turn is waited
+    /// for all the same, so that what holds a message stays Nirux's to tell
+    /// and to give up.
+    func codexQueueRefusal(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> AgentPromptRefusal? {
+        guard let foreground, foreground.name == AgentProgramStatus.codex, !AgentHookCenter.isHeadlessCodex(foreground)
+        else { return .noClaude }
+        guard foreground.instance.startedAt <= time else { return .restarted }
+        guard let reported = codexStatus, reported.isFrom(foreground.instance) else { return .noPromptYet }
+        switch reported.status.state {
+        case .done, .idle: return nil
+        case .working: return .working
+        case .blocked: return .dialog
+        case .error: return .failedTurn
+        }
+    }
+
+    /// What `codexQueueRefusal` reads, for the log.
+    func codexFacts(now: TimeInterval) -> String {
+        guard let reported = codexStatus else { return "codex=-" }
+        return "codex=\(reported.status.state.rawValue)/\(Int(min(max(now - reported.at, 0), 1e7)))s"
+    }
+
     /// What `promptRefusal` reads, for the log: ages in seconds and names,
     /// no text.
     func promptFacts(now: TimeInterval) -> String {
@@ -198,14 +226,19 @@ extension AgentStatusMachine {
 /// Why a Mission message isn't typed into an agent's prompt now (see
 /// `AgentStatusMachine.isPromptFree`).
 enum AgentPromptRefusal: String, Equatable, Sendable {
-    /// The column doesn't run an interactive `claude`.
+    /// The column doesn't run the agent the message is for: an interactive
+    /// `claude`, or `codex`.
     case noClaude
     /// Its `claude` started after the message was sent, which goes only to
     /// the one that ran then.
     case restarted
     /// Its `claude` took no prompt since it started, and doesn't say it
-    /// sits at its prompt (see `AgentStatusMachine.sitsAtFirstPrompt`).
+    /// sits at its prompt (see `AgentStatusMachine.sitsAtFirstPrompt`); its
+    /// `codex` reported no state since it started.
     case noPromptYet
+    /// Nirux doesn't know which conversation its `codex` runs: one its
+    /// launch prompt started, or one it resumed (`ForegroundSessionTracker`).
+    case noConversation
     case dialog
     case working
     case failedTurn

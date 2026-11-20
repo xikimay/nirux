@@ -791,8 +791,8 @@ extension MissionEventCLI {
             writeStandardError("No Mission on branch \(branch) was started from this terminal.")
             return 4
         }
-        guard mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue else {
-            writeStandardError("Nirux types messages only into a Claude Code child; this one runs \(mission.childAgentKind).")
+        guard mission.childAgentName != nil else {
+            writeStandardError("Nirux delivers messages only to a Claude Code or Codex child; this one runs \(mission.childAgentKind).")
             return 4
         }
         let sentAt = now()
@@ -818,8 +818,10 @@ extension MissionEventCLI {
                 event.childConsumedAt != nil ? true : event.expiredAt != nil ? false : nil
             }
         }
+        let codex = mission.childAgentKind == NiruxApp.WorkspaceAgent.codex.rawValue
         if typed == true {
-            writeStandardOutput("Nirux typed the message into the child's prompt.")
+            writeStandardOutput(codex ? "Nirux handed the message to the child's Codex, which starts it as a prompt."
+                : "Nirux typed the message into the child's prompt.")
             return 0
         }
         if typed == false {
@@ -827,8 +829,11 @@ extension MissionEventCLI {
             return 4
         }
         writeStandardError(
-            "Not typed yet: the child is working, a dialog is open, or someone is typing at its prompt. "
-                + "Nirux types it at the child's next free prompt, for a day at most; past an hour, a line tells you "
+            (codex ? "Not handed over yet: the child's Codex is working, waits on a dialog, or hasn't said which conversation it runs. "
+                + "Nirux hands it over at its next turn end"
+                : "Not typed yet: the child is working, a dialog is open, or someone is typing at its prompt. "
+                    + "Nirux types it at the child's next free prompt")
+                + ", for a day at most; past an hour, a line tells you "
                 + "what holds it. Run the "
                 + "exact same command again to keep waiting; it does not send the message twice."
         )

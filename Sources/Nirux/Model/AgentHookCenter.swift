@@ -547,7 +547,7 @@ final class AgentHookCenter {
     /// An `agy` that holds no conversation to resume: a one-shot `-p` run, or
     /// one of its subcommands (agy 1.5's `agy help`).
     nonisolated static func isHeadlessAgy(_ process: ForegroundProcess?) -> Bool {
-        guard let process, process.name == AgentProgramStatus.process else { return false }
+        guard let process, process.name == AgentProgramStatus.agy else { return false }
         let arguments = process.arguments.dropFirst()
         return arguments.contains { ["-p", "--print", "--prompt"].contains($0) }
             || arguments.first.map(agySubcommands.contains) ?? false
@@ -576,7 +576,7 @@ final class AgentHookCenter {
     }
 
     /// Codex's global options whose value is the next argument.
-    private nonisolated static let codexOptionsWithValue: Set<String> = [
+    nonisolated static let codexOptionsWithValue: Set<String> = [
         "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env", "-i", "--image",
         "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox", "-C", "--cd", "--add-dir",
         "-a", "--ask-for-approval"

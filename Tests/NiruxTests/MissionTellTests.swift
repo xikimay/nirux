@@ -223,9 +223,12 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(tell("/code-review", in: fixture, agentUUID: otherAgentUUID), 4)
         XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
 
+        let agy = try makeFixture(childAgentKind: "agy")
+        XCTAssertEqual(tell("/code-review", in: agy), 4, "Nirux delivers nothing to agy")
+        XCTAssertTrue(try queuedEvents(in: agy).isEmpty)
         let codex = try makeFixture(childAgentKind: "codex")
-        XCTAssertEqual(tell("/code-review", in: codex), 4, "Nirux can't prove a Codex prompt is free")
-        XCTAssertTrue(try queuedEvents(in: codex).isEmpty)
+        XCTAssertEqual(tell("/code-review", in: codex), 3, "Codex takes it through its own queue")
+        XCTAssertEqual(try queuedEvents(in: codex).map(\.kind), [.instruction])
 
         for arguments in [["--branch", "feat/mission"], ["--message", "Hi"],
                           ["--branch", "feat/mission", "--message", String(repeating: "x", count: MissionEventCLI.maxInstructionLength + 1)]] {
@@ -388,6 +391,50 @@ final class MissionTellTests: XCTestCase {
         _ = machine.apply(hook(.userPromptSubmit, at: 1), isUserFocused: false)
         _ = machine.apply(hook(.stop, at: 5), isUserFocused: false)
         return machine
+    }
+
+    /// A Codex child's message goes into Codex's own queue once the `codex`
+    /// it was sent to says its turn is over (OSC 7501), keys at its prompt
+    /// or not: nothing is typed.
+    func testCodexTakesAMessageOnceItSaysItsTurnIsOver() {
+        let codex = ForegroundProcess(instance: claudeProcess, name: "codex", arguments: ["codex", "Go"])
+        var machine = AgentStatusMachine()
+        func refusal(_ foreground: ForegroundProcess? = codex, since: TimeInterval = t0 + 100) -> AgentPromptRefusal? {
+            machine.codexQueueRefusal(foreground: foreground, runningSince: since)
+        }
+        func report(_ state: AgentProgramStatus.State, kind: String? = nil, from process: ProcessInstance? = nil) {
+            let status = AgentProgramStatus(state: state, kind: kind, message: nil, process: "codex")
+            machine.noteCodexStatus(status, from: process ?? claudeProcess, now: t0 + 50)
+        }
+        XCTAssertEqual(refusal(nil), .noClaude)
+        XCTAssertEqual(refusal(ForegroundProcess(instance: claudeProcess, name: "codex", arguments: ["codex", "exec", "Go"])), .noClaude,
+                       "a run, not a conversation")
+        XCTAssertEqual(refusal(), .noPromptYet, "no state reported yet")
+        report(.working)
+        XCTAssertEqual(refusal(), .working)
+        report(.blocked, kind: "permission")
+        XCTAssertEqual(refusal(), .dialog)
+        report(.error)
+        XCTAssertEqual(refusal(), .failedTurn)
+        report(.done)
+        XCTAssertNil(refusal())
+        XCTAssertEqual(refusal(since: claudeProcess.startedAt - 1), .restarted, "a codex started after the tell")
+        report(.idle)
+        XCTAssertNil(refusal(), "a key after its turn's end: its queue takes the message all the same")
+        // Codex says each state once: a Ctrl-G editor or a ^Z shell in front keeps it.
+        let editor = ProcessInstance(pid: 11, startedAt: t0 + 60)
+        _ = machine.tick(fgName: "vim", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 60))
+        machine.keepProgramStatus(of: editor)
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 61))
+        machine.keepProgramStatus(of: claudeProcess)
+        XCTAssertNil(refusal(), "its idle stays")
+        report(.done, from: ProcessInstance(pid: 9, startedAt: t0))
+        XCTAssertEqual(refusal(), .noPromptYet, "another codex's word")
+        // Read on an empty process table: the codex in front then's.
+        machine.noteCodexStatus(AgentProgramStatus(state: .done, kind: nil, message: nil, process: "codex"), from: nil, now: t0 + 70)
+        XCTAssertNil(refusal(), "one already running")
+        XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 12, startedAt: t0 + 80), name: "codex", arguments: ["codex"])),
+                       .noPromptYet, "not one started since")
     }
 
     func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {
