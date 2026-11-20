@@ -452,6 +452,7 @@ extension NiruxShellView {
             if event.kind == .codex,
                appliedEvent.resolution.column.captureCodexSession(
                    sessionID: event.sessionID,
+                   soleInputDigest: event.soleInputDigest,
                    emitterProcess: event.emitterProcess,
                    snapshot: snapshot
                ) {
@@ -473,7 +474,8 @@ extension NiruxShellView {
         if changed { saveState(snapshot: snapshot) }
         // After this drain: a turn that ended may have freed a Mission
         // agent's prompt for a message waiting to be typed.
-        if events.contains(where: { $0.event.kind.statusSource == .hooks && [.stop, .stopFailure].contains($0.event.name) }) {
+        // Codex's turn end too: it may prove the thread its OSC `done` came before.
+        if events.contains(where: { $0.event.kind.statusSource == .hooks && [.stop, .stopFailure, .turnComplete].contains($0.event.name) }) {
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
     }
@@ -554,6 +556,9 @@ extension NiruxShellView {
 
     func wireMetadataAndGitRefresh(_ workspace: WorkspaceState) {
         workspace.onMetadataChanged = { [weak self] in self?.scheduleMetadataRefresh() }
+        workspace.onCodexTurnOver = { [weak self] in
+            DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
+        }
         // The header follows its title immediately (no "· path" flicker);
         // the snapshot is only taken for shell titles such as "zsh".
         workspace.onColumnTitleChanged = { $0.updateHeaderTitle(snapshot: ProcessSnapshot()) }

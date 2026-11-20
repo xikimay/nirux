@@ -220,7 +220,8 @@ New flow, built on the guarded typing `tell` already uses
   ("Needs you · " and the question). A popover shows the whole question with a
   multi-line reply field (⌘↩ sends). It replaces the `NSAlert`.
 - **Codex children** keep today's blocking `ask` (Codex reports no dialogs, so
-  Nirux can't tell its prompt is free).
+  Nirux can't tell its prompt is free). Since 2026-11-19 a tell reaches them
+  through Codex's own queue ([mission-tell.md](mission-tell.md)).
 - `receive` keeps working for old skills but leaves the skill text.
 - The Activity section, its store and its reply alert go. Native
   notifications, the Dock badge and ⌘J stay.

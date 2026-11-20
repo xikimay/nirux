@@ -156,4 +156,81 @@ final class AgentSessionResumeTests: XCTestCase {
         )
         XCTAssertEqual(tracker.sessionID(for: codex), "t1")
     }
+
+    /// Codex's notify also reports its hidden threads, such as the one that
+    /// titles a new conversation (codex 0.167): once a thread proved itself
+    /// (its first message is the launch prompt, or `codex resume` named it),
+    /// none replaces it, in either order. A `codex` that proved none binds
+    /// the last, as before.
+    func testCodexHiddenThreadsNeverReplaceTheProvenOne() {
+        let prompt = "Read .codex-handover.md for full context."
+        let launched = ForegroundProcess(
+            instance: ProcessInstance(pid: 10, startedAt: 1), name: "codex", arguments: ["codex", "-a", "never", prompt]
+        )
+        var tracker = ForegroundSessionTracker.codex
+        /// `sole`: the thread holds that message alone (a fork holds the
+        /// forked ones too).
+        func capture(_ thread: String, first: String, sole: Bool = true, by process: ForegroundProcess) -> Bool {
+            tracker.capture(
+                sessionID: thread, soleInputDigest: sole ? CodexLaunch.promptDigest(first) : nil,
+                emitterBelongsToForegroundJob: true, foregroundProcess: process
+            )
+        }
+        let title = "Generate a concise, single-line task title.\n\nUser prompt:\n" + prompt
+        XCTAssertFalse(capture("title", first: title, by: launched), "the title's turn may end first: nothing binds before the proof")
+        XCTAssertFalse(capture("fork", first: prompt, sole: false, by: launched), "a /side fork or a forked sub-agent may too")
+        XCTAssertNil(tracker.provenSessionID(for: launched))
+        XCTAssertNil(tracker.sessionID(for: launched))
+        XCTAssertTrue(capture("main", first: prompt, by: launched))
+        XCTAssertEqual(tracker.provenSessionID(for: launched), "main")
+        XCTAssertFalse(capture("title-2", first: title, by: launched))
+        XCTAssertFalse(capture("side", first: prompt, by: launched), "the first proof stands")
+        XCTAssertEqual(tracker.provenSessionID(for: launched), "main")
+        XCTAssertEqual(tracker.sessionID(for: launched), "main", "what a relaunch resumes")
+
+        let resumed = ForegroundProcess(
+            instance: ProcessInstance(pid: 11, startedAt: 2), name: "codex", arguments: ["codex", "resume", "main", "-C", "/repo"]
+        )
+        XCTAssertEqual(tracker.provenSessionID(for: resumed), "main")
+        XCTAssertFalse(capture("subagent", first: "Explore the code.", by: resumed))
+        XCTAssertFalse(capture("fork", first: prompt, sole: false, by: resumed))
+        XCTAssertTrue(capture("main", first: prompt, by: resumed))
+
+        let bare = ForegroundProcess(instance: ProcessInstance(pid: 12, startedAt: 3), name: "codex", arguments: ["codex"])
+        XCTAssertTrue(capture("a", first: "Hi", by: bare))
+        XCTAssertTrue(capture("b", first: "Hello", by: bare))
+        XCTAssertNil(tracker.provenSessionID(for: bare))
+        XCTAssertEqual(tracker.sessionID(for: bare), "b")
+        XCTAssertFalse(CodexLaunch.canProve(bare))
+        let modeOnly = ForegroundProcess(
+            instance: ProcessInstance(pid: 13, startedAt: 4), name: "codex", arguments: ["codex", "--sandbox", "read-only"]
+        )
+        XCTAssertFalse(CodexLaunch.canProve(modeOnly), "an option's value is no prompt")
+        for arguments in [["codex", "resume"], ["node", "/usr/local/lib/node_modules/@openai/codex/bin/codex"], ["codex", "fork", "t1"]] {
+            let process = ForegroundProcess(instance: ProcessInstance(pid: 14, startedAt: 5), name: "codex", arguments: arguments)
+            XCTAssertFalse(CodexLaunch.canProve(process), "the program is no prompt: \(arguments)")
+        }
+        XCTAssertTrue(CodexLaunch.canProve(launched) && CodexLaunch.canProve(resumed))
+    }
+
+    /// `codex queue` runs with what runs the column's `codex`: its binary,
+    /// or the runtime and script of npm's shim on a Node that can't replace
+    /// itself with the binary.
+    func testCodexQueueRunsWhatRunsTheCodex() {
+        XCTAssertEqual(CodexQueue.command(executable: "/opt/codex/bin/codex", arguments: ["codex", "Go"]), ["/opt/codex/bin/codex"])
+        XCTAssertEqual(
+            CodexQueue.command(executable: "/opt/homebrew/bin/codex-aarch64-apple-darwin", arguments: ["codex", "resume", "t1", "-C", "/repos/codex"]),
+            ["/opt/homebrew/bin/codex-aarch64-apple-darwin"], "only a runtime runs a script"
+        )
+        XCTAssertEqual(
+            CodexQueue.command(executable: "/usr/local/bin/node", arguments: ["node", "/usr/local/lib/node_modules/@openai/codex/bin/codex.js", "Go"]),
+            ["/usr/local/bin/node", "/usr/local/lib/node_modules/@openai/codex/bin/codex.js"]
+        )
+        XCTAssertEqual(
+            CodexQueue.arguments(for: CodexQueue.Request(command: ["/usr/local/bin/node", "/x/codex.js"], thread: "t1", message: "- Fix A")),
+            ["/x/codex.js", "queue", "--thread=t1", "--message=- Fix A"], "a message starting with \"-\" stays a value"
+        )
+        let request = CodexQueue.Request(command: ["/opt/codex"], thread: "t1", message: "Go", codexHome: "/Users/me/work-codex")
+        XCTAssertEqual(CodexQueue.environment(for: request), ["CODEX_HOME": "/Users/me/work-codex"], "its shell's, which Nirux may not have")
+    }
 }

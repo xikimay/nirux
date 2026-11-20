@@ -615,9 +615,9 @@ final class LeadTaskToolsFlowTests: XCTestCase {
 
             // Its own Mission's agent, whatever runs beside it; that agent gone,
             // the Claude Code running in it now, one-way.
-            _ = try missionTask("Codex", parent: follower, kind: "codex")
-            let toCodex = try tell("Codex", review)
-            XCTAssertTrue(toCodex.isError && toCodex.text.hasSuffix("runs codex."), toCodex.text)
+            _ = try missionTask("Antigravity", parent: follower, kind: "agy")
+            let toAgy = try tell("Antigravity", review)
+            XCTAssertTrue(toAgy.isError && toAgy.text.hasSuffix("runs agy."), toAgy.text)
             let moved = try missionTask("Moved", parent: follower, agentColumn: false)
             let movedAgent = AgentStandIn()
             defer { movedAgent.remove() }
@@ -659,7 +659,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
 
             shell.addWorkspace(title: "Idle", cwd: harness.worktree, profileID: lead.space)
             let idle = try tell("Idle", review)
-            XCTAssertTrue(idle.isError && idle.text.contains("runs none"), idle.text)
+            XCTAssertTrue(idle.isError && idle.text.contains("runs neither"), idle.text)
             shell.addWorkspace(title: "Checkout", cwd: harness.repo, profileID: lead.space)
             shell.addWorkspace(title: "Linked", cwd: harness.worktree, profileID: lead.space, startedOutsideNirux: true)
             for (name, why) in [("Checkout", "isn't a task"), ("Linked", "from outside Nirux")] {
@@ -1015,6 +1015,164 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             sweep(60)
             XCTAssertEqual(notices().count, 3)
             XCTAssertTrue(notices().last?.contains("was never typed: its task closed first.") == true, notices().last ?? "")
+        }
+    }
+
+    /// A tell to a Codex task goes into Codex's own queue, nothing typed:
+    /// for the thread its `codex` started with its launch prompt (never one
+    /// it runs out of sight), once it says its turn is over. A refusal leaves
+    /// it waiting, its row and the Lead told why; Codex taking it counts as
+    /// typed, and a Codex that then says nothing has its sender told. A
+    /// Codex task the user started gets the Lead's one-way Mission.
+    func testATellReachesACodexTaskThroughItsQueue() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            final class Queue {
+                var requests: [CodexQueue.Request] = []
+                var outcome = CodexQueue.Outcome.refused("thread not found")
+                /// Holds the answers, as Codex takes seconds, when set.
+                var held: [@MainActor @Sendable (CodexQueue.Outcome) -> Void]?
+            }
+            let queue = Queue()
+            harness.shell.sideEffects.queueCodexMessage = { request, done in
+                queue.requests.append(request)
+                if queue.held != nil { queue.held?.append(done) } else { done(queue.outcome) }
+            }
+            let prompt = "Read .codex-handover.md for full context."
+            @MainActor func codexTask(_ title: String, reports: Bool) throws -> (column: ColumnState, codex: ForegroundProcess, agent: AgentStandIn) {
+                let workspaceID = UUID().uuidString, agentUUID = UUID().uuidString
+                let mission = try reports ? XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                    id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                    childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "codex",
+                    branch: "feat/\(workspaceID.prefix(8))", reportsToLead: true
+                ), enabled: true)) : nil
+                harness.shell.addWorkspace(
+                    title: title, cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID, missionID: mission?.id,
+                    reportsToLead: reports
+                )
+                let task = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+                let agent = AgentStandIn()
+                task.addColumn(command: agent.command(named: "codex", launchPrompt: prompt), agentUUID: agentUUID, cwd: harness.worktree)
+                let column = try XCTUnwrap(task.columns.first { $0.agentUUID == agentUUID })
+                let pty = try XCTUnwrap(column.pty)
+                harness.waitUntil("its codex") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "codex" }
+                return (column, try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())), agent)
+            }
+            @MainActor func report(_ state: AgentProgramStatus.State, in column: ColumnState) {
+                column.pty?.onProgramStatus?(AgentProgramStatus(state: state, kind: nil, message: nil, agent: .codex))
+            }
+            @MainActor func thread(_ id: String, first: String, of task: (column: ColumnState, codex: ForegroundProcess, agent: AgentStandIn)) {
+                _ = task.column.captureCodexSession(
+                    sessionID: id, soleInputDigest: CodexLaunch.promptDigest(first), emitterProcess: task.codex.instance,
+                    snapshot: ProcessSnapshot()
+                )
+            }
+
+            let task = try codexTask("Codex task", reports: true)
+            let bare = AgentStandIn()
+            defer { bare.remove() }
+            defer { task.agent.remove() }
+            let told = try harness.callLeadTool(LeadTools.tell, ["task": "Codex task", "message": "Review this.\u{1B}[31m"], lead: lead)
+            XCTAssertFalse(told.isError, told.text)
+            XCTAssertTrue(told.text.contains("once its turn is over") && told.text.contains("a slash command doesn't run there"), told.text)
+            let instruction = { MissionStore.shared.missions.flatMap(\.events).first { $0.kind == .instruction && $0.childAgentUUID == task.column.agentUUID } }
+            report(.done, in: task.column)
+            thread("title", first: "Generate a concise title.\n\nUser prompt:\n" + prompt, of: task)
+            harness.shell.typeMissionMessages()
+            XCTAssertTrue(queue.requests.isEmpty, "no thread proven yet")
+            let shell = harness.shell
+            shell.missionWaits.checkedAt = nil
+            shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + NiruxShellView.missionMessageStallAge + 1)
+            let row = try XCTUnwrap(shell.missionWaits.shown[task.column.id])
+            XCTAssertEqual(row.refusal, .noConversation)
+            XCTAssertTrue(row.line.hasSuffix("· its conversation isn't known yet"), row.line)
+            shell.sweepWaitingInstructions(now: Date().timeIntervalSince1970 + MissionEventCLI.instructionHeldNotice + 1, snapshot: ProcessSnapshot())
+            XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("isn't typed yet: its conversation isn't known yet") },
+                          "\(shell.pendingLeadNotices.map(\.text))")
+            shell.missionWaits.codexStartWait = 0.2
+
+            thread("main", first: prompt, of: task)
+            thread("title-2", first: "Generate a concise title.", of: task)
+            report(.working, in: task.column)
+            report(.done, in: task.column)
+            harness.waitUntil("handed to Codex") { !queue.requests.isEmpty }
+            XCTAssertNil(try XCTUnwrap(instruction()).childConsumedAt, "refused: it waits")
+            let refusals = try shell.missionWaits.tries[XCTUnwrap(instruction()).id]
+            shell.missionWaits.checkedAt = nil
+            shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + NiruxShellView.missionMessageStallAge + 1)
+            XCTAssertEqual(try shell.missionWaits.tries[XCTUnwrap(instruction()).id], refusals, "only Codex's refusals count")
+            queue.outcome = .queued
+            report(.idle, in: task.column)
+            harness.waitUntil("Codex took it") { instruction()?.childConsumedAt != nil }
+            let request = try XCTUnwrap(queue.requests.last)
+            XCTAssertEqual(request.thread, "main")
+            XCTAssertEqual(request.command, CodexQueue.command(of: task.codex))
+            XCTAssertTrue(request.message.contains("Review this.") && !request.message.contains("\u{1B}"), request.message)
+            report(.done, in: task.column)
+            harness.waitUntil("its sender told Codex hasn't started it, a state that isn't work notwithstanding") {
+                shell.pendingLeadNotices.contains { $0.text.contains("Codex hasn't started it") }
+            }
+            XCTAssertEqual(task.agent.input, "", "nothing typed")
+
+            // Two at once go one after the other, in their order.
+            report(.working, in: task.column)
+            for message in ["First.", "Second."] {
+                XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Codex task", "message": message], lead: lead).isError)
+            }
+            queue.held = []
+            let handed = queue.requests.count
+            report(.done, in: task.column)
+            harness.waitUntil("one handed") { queue.requests.count == handed + 1 }
+            harness.shell.typeMissionMessages()
+            XCTAssertEqual(queue.requests.count, handed + 1, "the next waits for the first's answer")
+            queue.held?.removeFirst()(.queued)
+            report(.idle, in: task.column)
+            harness.waitUntil("the next handed") { queue.requests.count == handed + 2 }
+            XCTAssertEqual(queue.requests.suffix(2).map(\.message), ["First.", "Second."])
+            queue.held?.removeFirst()(.queued)
+            queue.held = nil
+
+            // No answer in time: Codex may hold it, so it is never handed again.
+            queue.outcome = .unconfirmed
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Codex task", "message": "Third."], lead: lead).isError)
+            report(.done, in: task.column)
+            harness.waitUntil("given up") {
+                MissionStore.shared.missions.flatMap(\.events).contains { $0.message == "Third." && $0.expiredAt != nil }
+            }
+            XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("“Codex task” may be in its Codex's queue") },
+                          "\(shell.pendingLeadNotices.map(\.text))")
+
+            let byHand = try codexTask("Codex by hand", reports: false)
+            defer { byHand.agent.remove() }
+            let oneWay = try harness.callLeadTool(LeadTools.tell, ["task": "Codex by hand", "message": "Rebase."], lead: lead)
+            XCTAssertFalse(oneWay.isError, oneWay.text)
+            XCTAssertTrue(MissionStore.shared.missions.contains {
+                $0.oneWay == true && $0.childAgentUUID == byHand.column.agentUUID && $0.childAgentKind == "codex"
+            })
+
+            // A Codex started without a prompt never proves its conversation.
+            let workspaceID = UUID().uuidString, bareUUID = UUID().uuidString
+            harness.shell.addWorkspace(title: "Bare Codex", cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID)
+            let bareTask = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+            bareTask.addColumn(command: bare.command(named: "codex"), agentUUID: bareUUID, cwd: harness.worktree)
+            let barePty = try XCTUnwrap(bareTask.columns.first { $0.agentUUID == bareUUID }?.pty)
+            harness.waitUntil("its codex") { barePty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "codex" }
+            let refused = try harness.callLeadTool(LeadTools.tell, ["task": "Bare Codex", "message": "Rebase."], lead: lead)
+            XCTAssertTrue(refused.isError && refused.text.contains("started without a prompt"), refused.text)
+            // One from the CLI is given up as Nirux takes it, its sender told.
+            let bareMission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: workspaceID, childAgentUUID: bareUUID, childAgentKind: "codex", branch: "feat/bare", reportsToLead: true
+            ), enabled: true))
+            guard case .accepted(let fromCLI?) = MissionStore.shared.process(MissionEvent(
+                id: UUID().uuidString, missionID: bareMission.id, childWorkspaceID: workspaceID, childAgentUUID: bareUUID,
+                parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID, kind: .instruction, message: "Rebase now.",
+                timestamp: Date().timeIntervalSince1970
+            ), enabled: true) else { return XCTFail("the CLI's tell is recorded") }
+            shell.sweepWaitingInstructions(now: Date().timeIntervalSince1970, snapshot: ProcessSnapshot())
+            XCTAssertNotNil(MissionStore.shared.missions.flatMap(\.events).first { $0.id == fromCLI.event.id }?.expiredAt)
+            XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("won't be handed over: its Codex was started without a prompt") },
+                          "\(shell.pendingLeadNotices.map(\.text))")
         }
     }
 

@@ -555,9 +555,7 @@ extension NiruxShellView {
         if let refusal = leadRefusal(for: workspace, title: title) { return answer(refusal, true) }
         let handoffsEnabled = Self.currentMissionHandoffsEnabled()
         if let own = ownMission(of: workspace), workspace.columns.contains(where: { $0.agentUUID == own.childAgentUUID }) {
-            guard own.childAgent == .claude else {
-                return answer(Self.typesOnlyIntoClaude(title, runs: own.childAgentKind), true)
-            }
+            guard own.deliveryAgent != nil else { return answer(Self.deliversOnlyToClaudeOrCodex(title, runs: own.childAgentKind), true) }
             if own.isCarried(handoffsEnabled: handoffsEnabled),
                let parent = requestingTerminal(workspaceID: own.parentWorkspaceID, agentUUID: own.parentAgentUUID)?.workspace {
                 // Typed, it reopens a finished sub-task, which counts against its task's limit again.
@@ -572,9 +570,11 @@ extension NiruxShellView {
         }
         let snapshot = ProcessSnapshot()
         guard !snapshot.isEmpty else { return answer("Nirux couldn't read the running processes: call again in a moment.", true) }
-        guard let agentUUID = workspace.columns.first(where: { $0.agentUUID != nil && $0.runsClaude(snapshot: snapshot) })?.agentUUID
-        else { return answer("Nirux types messages only into Claude Code, and “\(title)” runs none.", true) }
-        guard let mission = oneWayMission(to: workspace, agentUUID: agentUUID, from: lead) else {
+        guard let (agentUUID, kind) = workspace.columns.lazy.compactMap({ column in
+            column.agentUUID.flatMap { uuid in column.missionAgent(snapshot: snapshot).map { (uuid, $0) } }
+        }).first
+        else { return answer("Nirux delivers messages only to Claude Code or Codex, and “\(title)” runs neither.", true) }
+        guard let mission = oneWayMission(to: workspace, agentUUID: agentUUID, kind: kind, from: lead) else {
             return answer("Nirux couldn’t record the message: try again.", true)
         }
         sendInstruction(message, to: workspace, in: mission, handoffsEnabled: handoffsEnabled, answer: answer)
@@ -591,20 +591,22 @@ extension NiruxShellView {
         return nil
     }
 
-    static func typesOnlyIntoClaude(_ title: String, runs kind: String) -> String {
-        "Nirux types messages only into a Claude Code task; “\(title)” runs \(kind)."
+    static func deliversOnlyToClaudeOrCodex(_ title: String, runs kind: String) -> String {
+        "Nirux delivers messages only to a Claude Code or Codex task; “\(title)” runs \(kind)."
     }
 
     /// The Lead's one-way Mission to `workspace`'s agent, made at its first tell.
-    private func oneWayMission(to workspace: WorkspaceState, agentUUID: String, from lead: NewTask.MissionParent) -> Mission? {
+    private func oneWayMission(
+        to workspace: WorkspaceState, agentUUID: String, kind: CodingAgent, from lead: NewTask.MissionParent
+    ) -> Mission? {
         let store = MissionStore.shared
         if let mission = store.missions.last(where: { mission in
             mission.oneWay == true && mission.parentWorkspaceID == lead.workspaceID && mission.parentAgentUUID == lead.agentUUID
-                && mission.childWorkspaceID == workspace.id && mission.childAgentUUID == agentUUID
+                && mission.childWorkspaceID == workspace.id && mission.childAgentUUID == agentUUID && mission.childAgentKind == kind.rawValue
         }) { return mission }
         return store.create(MissionCreationRequest(
             id: UUID().uuidString, parentWorkspaceID: lead.workspaceID, parentAgentUUID: lead.agentUUID,
-            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: CodingAgent.claude.rawValue,
+            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: kind.rawValue,
             branch: workspace.gitBranch ?? workspace.title, oneWay: true
         ), enabled: false)
     }
@@ -628,8 +630,12 @@ extension NiruxShellView {
         _ message: String, to workspace: WorkspaceState, in mission: Mission, from lead: NewTask.MissionParent? = nil,
         handoffsEnabled: Bool = NiruxShellView.currentMissionHandoffsEnabled(), answer: @escaping LeadAnswer
     ) {
-        guard mission.childAgent == .claude else {
-            return answer(Self.typesOnlyIntoClaude(workspace.title, runs: mission.childAgentKind), true)
+        guard let agent = mission.deliveryAgent else {
+            return answer(Self.deliversOnlyToClaudeOrCodex(workspace.title, runs: mission.childAgentKind), true)
+        }
+        if agent == .codex, missionEnd(mission, parent: false)?.column?.runsUnprovableCodex(snapshot: ProcessSnapshot()) == true {
+            return answer("“\(workspace.title)”’s Codex was started without a prompt, so Nirux can't tell which of its conversations "
+                + "is the task's: give the message to the user instead.", true)
         }
         let instruction = MissionEvent(
             id: UUID().uuidString, missionID: mission.id,
@@ -647,11 +653,19 @@ extension NiruxShellView {
             ? " It doesn't report to you: Nirux marks the message as yours, and its questions and its result still go to "
                 + "\(answerer(of: workspace, reachedThrough: mission, handoffsEnabled: handoffsEnabled))."
             : ""
-        answer((typed ? "Nirux typed it into “\(workspace.title)”’s prompt."
+        let sent = agent == .codex
+            ? (typed ? "Nirux handed it to “\(workspace.title)”’s Codex, which starts it as a prompt."
+                : missionWaits.typing.contains(instruction.id)
+                ? "Nirux is handing it to “\(workspace.title)”’s Codex, which starts it as a prompt; a line tells you if Codex "
+                    + "doesn't start it."
+                : "Nirux hands it to “\(workspace.title)”’s Codex once its turn is over, a day at most; past an hour, "
+                    + "a line tells you what holds it.") + " Codex takes it as text: a slash command doesn't run there."
+            : typed ? "Nirux typed it into “\(workspace.title)”’s prompt."
             : missionWaits.typing.contains(instruction.id)
             ? "Nirux is typing it into “\(workspace.title)”’s prompt as its agent reads it; a line tells you if it doesn't all go in."
             : "Nirux types it into “\(workspace.title)”’s prompt at its next free prompt, a day at most; past an hour, "
-                + "a line tells you what holds it.") + notYours, false)
+                + "a line tells you what holds it."
+        answer(sent + notYours, false)
     }
 
     /// Records the conversation `mission`'s child holds, for its instruction
@@ -874,4 +888,14 @@ struct LeadProposal: Equatable {
     /// A task's agent proposed it, a sub-task of this task (its
     /// workspace's id); nil for a Lead's proposal.
     var subtaskOf: String?
+}
+
+private extension ColumnState {
+    /// The agent Nirux delivers Mission messages to that this column runs,
+    /// or will once restored: an interactive Claude Code, or Codex.
+    func missionAgent(snapshot: ProcessSnapshot) -> CodingAgent? {
+        if runsClaude(snapshot: snapshot) { return .claude }
+        if deferredAgent?.launch.agent == .codex { return .codex }
+        return pty?.foregroundProcess(snapshot: snapshot)?.interactiveAgent == .codex ? .codex : nil
+    }
 }

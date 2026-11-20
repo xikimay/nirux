@@ -243,7 +243,7 @@ final class ProcessSnapshot {
         return processGroupMap[processGroupID]?.contains(process.pid) == true
     }
 
-    private static let runtimeBinaries: Set<String> = [
+    static let runtimeBinaries: Set<String> = [
         "node", "python", "python3", "ruby", "perl", "java", "deno", "bun"
     ]
 
@@ -365,8 +365,9 @@ final class PtySession: @unchecked Sendable {
         set { state.onOsc9Received = newValue }
     }
 
-    /// What Antigravity reported of itself (OSC 7501), on the main queue:
-    /// give it to `applyProgramStatus` once it is known to come from agy.
+    /// What Antigravity or Codex reported of itself (OSC 7501), on the main
+    /// queue: give it to `applyProgramStatus` or `noteCodexStatus` once it
+    /// is known to come from the agent in front.
     var onProgramStatus: ((AgentProgramStatus) -> Void)? {
         get { state.onProgramStatus }
         set { state.onProgramStatus = newValue }
@@ -384,6 +385,11 @@ final class PtySession: @unchecked Sendable {
     /// `AgentStatusMachine.takeLateSignInAlert`).
     func takeLateSignInAlert(isUserFocused: Bool) -> AgentAttentionReason? {
         state.machine.takeLateSignInAlert(isUserFocused: isUserFocused, now: Date().timeIntervalSince1970)
+    }
+
+    /// Takes in Codex's status (see `AgentStatusMachine.codexQueueRefusal`).
+    func noteCodexStatus(_ status: AgentProgramStatus, from process: ProcessInstance?) {
+        state.machine.noteCodexStatus(status, from: process, now: Date().timeIntervalSince1970)
     }
 
     /// Whether `status` says something new: the same again (a redraw) needs
@@ -1038,6 +1044,23 @@ final class PtySession: @unchecked Sendable {
             cwd(ofExecedProcess: process.pid)
         }
         return ClaudeSessionRecord.read(at: url)
+    }
+
+    /// See `AgentStatusMachine.codexQueueRefusal`.
+    func codexQueueRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> AgentPromptRefusal? {
+        guard !hasExited else { return .noClaude }
+        return state.machine.codexQueueRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince)
+    }
+
+    /// Whether `process`, the column's `codex`, started a turn after `time`.
+    func codexWorked(since time: TimeInterval, by process: ProcessInstance) -> Bool {
+        guard let worked = state.machine.codexWorked, worked.at > time else { return false }
+        return worked.process.map { $0 == process } ?? (process.startedAt <= worked.at)
+    }
+
+    /// See `AgentStatusMachine.codexFacts`.
+    func codexFacts(now: TimeInterval) -> String {
+        state.machine.codexFacts(now: now)
     }
 
     /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.

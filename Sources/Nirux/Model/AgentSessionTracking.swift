@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Binds an agent conversation ID to the exact process instance running it,
@@ -91,22 +92,36 @@ struct ForegroundSessionTracker {
     /// with nothing to tell them apart), and it stays while another process
     /// holds the terminal (Ctrl-Z).
     private let keepsProcessSession: Bool
+    /// Codex: its notify also reports the threads it runs out of sight, such
+    /// as the one that titles a new conversation (seen on codex 0.167). A
+    /// thread is proven once its only message is the prompt that `codex`
+    /// was launched with (a fork, `/side` or a forked sub-agent, holds the
+    /// forked ones too), or once `codex resume <id>` named it: the first
+    /// proof stands, no other thread replaces it, and with a launch prompt
+    /// none binds before it.
+    private let provesThread: Bool
+    /// The thread its launch prompt started, and that `codex`.
+    private var launched: (sessionID: String, process: ProcessInstance)?
 
-    static var codex: Self { Self(agent: .codex) }
+    static var codex: Self { Self(agent: .codex, provesThread: true) }
     static var agy: Self { Self(agent: .agy, keepsProcessSession: true) }
 
-    init(agent: CodingAgent, keepsProcessSession: Bool = false) {
+    init(agent: CodingAgent, keepsProcessSession: Bool = false, provesThread: Bool = false) {
         session = AgentSessionBinding(agent: agent)
         self.keepsProcessSession = keepsProcessSession
+        self.provesThread = provesThread
     }
 
     mutating func prepareResume(sessionID: String) {
         session.prepareResume(sessionID: sessionID)
     }
 
+    /// `soleInputDigest`: `CodexLaunch.promptDigest` of the thread's message,
+    /// when it holds one.
     @discardableResult
     mutating func capture(
         sessionID: String?,
+        soleInputDigest: String? = nil,
         emitterBelongsToForegroundJob: Bool,
         foregroundProcess: ForegroundProcess?
     ) -> Bool {
@@ -115,10 +130,24 @@ struct ForegroundSessionTracker {
               emitterBelongsToForegroundJob else {
             return false
         }
+        if provesThread {
+            let prompt = CodexLaunch.prompt(of: foregroundProcess)
+            if launched?.process != foregroundProcess.instance, let soleInputDigest, soleInputDigest == prompt.map(CodexLaunch.promptDigest) {
+                launched = (sessionID, foregroundProcess.instance)
+            }
+            // The title's thread may end its turn first.
+            guard provenSessionID(for: foregroundProcess).map({ $0 == sessionID }) ?? (prompt == nil) else { return false }
+        }
         guard keepsProcessSession else { return session.bind(sessionID: sessionID, process: foregroundProcess.instance) }
         guard session.sessionID(boundTo: foregroundProcess.instance) == nil else { return false }
         let launched = session.launchedSessionID(foregroundProcess.arguments)
         return session.bind(sessionID: launched ?? sessionID, process: foregroundProcess.instance)
+    }
+
+    /// The thread `process`, a `codex`, proved it runs, if it did.
+    func provenSessionID(for process: ForegroundProcess) -> String? {
+        if let launched, launched.process == process.instance { return launched.sessionID }
+        return CodexLaunch.resumedThread(of: process)
     }
 
     mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {
@@ -135,6 +164,54 @@ struct ForegroundSessionTracker {
     mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
         if keepsProcessSession, foregroundProcess?.agent != session.agent { return false }
         return session.invalidateBinding(ifProcessChangedTo: foregroundProcess)
+    }
+}
+
+/// What a `codex` process's arguments say of the thread it runs.
+enum CodexLaunch {
+    /// Whether `process` can prove a thread: it was launched with a prompt,
+    /// or resumed one. A `codex` started without either never does.
+    static func canProve(_ process: ForegroundProcess) -> Bool {
+        prompt(of: process) != nil || resumedThread(of: process) != nil
+    }
+
+    /// The thread `codex resume <id>` named.
+    static func resumedThread(of process: ForegroundProcess) -> String? {
+        guard let index = CodingAgent.codex.resumeArgument.flatMap(process.arguments.firstIndex(of:)),
+              process.arguments.indices.contains(index + 1),
+              !process.arguments[index + 1].hasPrefix("-") else { return nil }
+        return process.arguments[index + 1]
+    }
+
+    /// The prompt `process` was launched with: its last argument, as
+    /// Nirux's launch line ends, when it follows the program (`codex`, or a
+    /// runtime's script), is no option nor an option's value, and no
+    /// subcommand (`resume`, `fork`…) comes first.
+    static func prompt(of process: ForegroundProcess) -> String? {
+        let arguments = process.arguments
+        let program = arguments.firstIndex {
+            (($0 as NSString).lastPathComponent as NSString).deletingPathExtension == CodingAgent.codex.rawValue
+        } ?? 0
+        guard arguments.count > program + 1, let last = arguments.last, !last.hasPrefix("-"),
+              arguments.count - 2 == program || !CodingAgent.codexOptionsWithValue.contains(arguments[arguments.count - 2])
+        else { return nil }
+        var index = program + 1
+        while index < arguments.count - 1, arguments[index].hasPrefix("-") {
+            index += CodingAgent.codexOptionsWithValue.contains(arguments[index]) ? 2 : 1
+        }
+        return subcommands.contains(arguments[index]) ? nil : last
+    }
+
+    /// Codex 0.167's subcommands (`codex --help`).
+    private static let subcommands: Set<String> = [
+        "agents", "exec", "e", "review", "login", "logout", "mcp", "plugin", "app-server", "remote-control", "app", "completion",
+        "update", "doctor", "sandbox", "debug", "apply", "a", "resume", "queue", "archive", "delete", "migrate-rollouts",
+        "migrate-nfs-db", "unarchive", "fork", "cloud", "exec-server", "features", "help"
+    ]
+
+    /// SHA-256 of `prompt`, in hex: what an event keeps of a prompt.
+    static func promptDigest(_ prompt: String) -> String {
+        SHA256.hash(data: Data(prompt.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }
 

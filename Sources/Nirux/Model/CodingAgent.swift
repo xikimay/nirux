@@ -107,6 +107,15 @@ enum CodingAgent: String, CaseIterable, Codable, Sendable {
         }
     }
 
+    /// The `app` it names itself in OSC 7501 (`AgentProgramStatus`).
+    var programStatusApp: String? {
+        switch self {
+        case .agy: "antigravity"
+        case .codex: "codex"
+        case .claude, .gemini, .opencode: nil
+        }
+    }
+
     /// Its desktop app, whose icon stands for it when installed.
     var appBundleID: String? {
         switch self {
@@ -176,7 +185,7 @@ enum CodingAgent: String, CaseIterable, Codable, Sendable {
     }
 
     /// Codex's global options whose value is the next argument.
-    private static let codexOptionsWithValue: Set<String> = [
+    static let codexOptionsWithValue: Set<String> = [
         "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env", "-i", "--image",
         "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox", "-C", "--cd", "--add-dir",
         "-a", "--ask-for-approval"
