@@ -41,6 +41,11 @@ if [[ "${1:-}" == --class ]]; then
     exit 0
 fi
 
+if [[ -n "${NIRUX_TESTS_BUDGET:-}" && ! $NIRUX_TESTS_BUDGET =~ ^[0-9]+$ ]]; then
+    echo "::error::NIRUX_TESTS_BUDGET is a number of seconds, not '$NIRUX_TESTS_BUDGET'"
+    exit 1
+fi
+
 cpus=$(sysctl -n hw.activecpu)
 workers="${1:-$((cpus * 2 < 6 ? cpus * 2 : 6))}"
 script="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")"
@@ -69,7 +74,7 @@ echo "$expected tests in $(wc -l < "$work/classes" | tr -d ' ') classes, $worker
 # The longest classes first (scripts/test-class-times.sh), so the last to
 # start are short and no worker is left running a long one alone. A class
 # with no time yet may be long: it starts with them.
-awk 'NR == FNR { seconds[$2] = $1; next } { print ($1 in seconds ? seconds[$1] : 999999), $1 }' \
+awk 'FILENAME == ARGV[1] { seconds[$2] = $1; next } { print ($1 in seconds ? seconds[$1] : 999999), $1 }' \
     scripts/test-class-times.txt "$work/classes" | sort -k1,1nr -k2,2 | cut -d' ' -f2 > "$work/order"
 
 # What `swift test` sets for xctest on macOS.
