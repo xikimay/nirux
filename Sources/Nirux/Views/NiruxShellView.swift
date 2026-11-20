@@ -166,6 +166,10 @@ final class NiruxShellView: NSView {
     var pendingLeadNotices: [LeadNotice] = []
     /// Mission messages that wait too long for a prompt (`waitingMissionMessages`).
     var missionWaits = MissionWaitState()
+    /// What merge waits looked up (NiruxShellView+MergeWaits).
+    var mergeWaitTracking = MergeWaitTracking()
+    /// How a merge wait asks GitHub; tests answer for it.
+    var mergeWaitLookUp: @Sendable (MergeWait.LookUpTarget) -> Result<MergeWait.LookedUp?, MergeWait.LookUpFailure> = MergeWait.lookUp
     /// A Lead's tasks waiting to be proposed in the New sheet, one sheet at
     /// a time, and the timer that shows the next once no sheet is up.
     var pendingLeadProposals: [LeadProposal] = []

@@ -662,6 +662,9 @@ struct PersistedWorkspace: Codable {
     /// See `WorkspaceState.taskFolder`. A build before it restores the
     /// task as a plain workspace.
     var taskFolder: String?
+    /// See `WorkspaceState.mergeWaits`. One this build can't read is
+    /// dropped, never the workspace.
+    var mergeWaits: [MergeWait]?
 
     init(
         id: String? = nil,
@@ -691,7 +694,8 @@ struct PersistedWorkspace: Codable {
         isLead: Bool = false,
         reportsToLead: Bool = false,
         reportsToTask: Bool = false,
-        taskFolder: String? = nil
+        taskFolder: String? = nil,
+        mergeWaits: [MergeWait]? = nil
     ) {
         self.id = id
         self.title = title
@@ -721,6 +725,7 @@ struct PersistedWorkspace: Codable {
         self.reportsToLead = reportsToLead
         self.reportsToTask = reportsToTask
         self.taskFolder = taskFolder
+        self.mergeWaits = mergeWaits
     }
 
     enum CodingKeys: String, CodingKey {
@@ -728,7 +733,7 @@ struct PersistedWorkspace: Codable {
         case purpose, phase, lastSummary, lastSummaryIsManual, lastSummaryIsStatus, lastActivityAt
         case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
         case reportsToLead, reportsToTask
-        case taskFolder
+        case taskFolder, mergeWaits
     }
 
     init(from decoder: Decoder) throws {
@@ -768,6 +773,8 @@ struct PersistedWorkspace: Codable {
         taskFolder = (try? container.decodeIfPresent(String.self, forKey: .taskFolder)).flatMap { $0 }.flatMap {
             $0.hasPrefix("/") ? $0 : nil
         }
+        let waits = Lossy<MergeWait>.array(container, .mergeWaits)
+        mergeWaits = waits.isEmpty ? nil : waits
     }
 
     func encode(to encoder: Encoder) throws {
@@ -802,6 +809,7 @@ struct PersistedWorkspace: Codable {
         if reportsToLead { try container.encode(true, forKey: .reportsToLead) }
         if reportsToTask { try container.encode(true, forKey: .reportsToTask) }
         try container.encodeIfPresent(taskFolder, forKey: .taskFolder)
+        try container.encodeIfPresent(mergeWaits, forKey: .mergeWaits)
     }
 }
 

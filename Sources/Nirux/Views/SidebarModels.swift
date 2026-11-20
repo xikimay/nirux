@@ -437,6 +437,8 @@ struct WorkspaceInfo: Hashable {
     var dailyPassNote: String?
     /// Its pull request's automatic follow-up, when the row says it.
     var followUp: SidebarFollowUp?
+    /// The Lead's messages it holds until other tasks' pull requests merge.
+    var heldMessages: SidebarHeldMessages?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }

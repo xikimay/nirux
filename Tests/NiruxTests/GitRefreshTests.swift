@@ -358,6 +358,30 @@ final class GitRefreshTests: XCTestCase {
         XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers).map(\.title), ["focused", "background"])
     }
 
+    /// A merge wait follows its task's pull request at the hot cadence,
+    /// archived or not.
+    func testAwaitedPullRequestsAreReadClosely() {
+        let harness = CoordinatorHarness()
+        let background = WorkspaceState(title: "background", cwd: NSTemporaryDirectory())
+        let archived = WorkspaceState(title: "archived", cwd: NSTemporaryDirectory())
+        archived.isInactive = true
+        for workspace in [background, archived] {
+            workspace.updateGitContext(GitContext(
+                branch: "feature/\(workspace.title)",
+                identity: GitIdentity(repositoryRoot: "/repo/\(workspace.title)", head: "abc")
+            ))
+        }
+        let tiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] = [(background, .background), (archived, .archived)]
+        let awaited: Set<String> = [background.id, archived.id]
+        XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers).map(\.title), ["background"])
+        XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers, awaited: awaited).map(\.title), ["background", "archived"])
+        harness.coordinator.notePullRequestRefresh(background)
+        harness.coordinator.notePullRequestRefresh(archived)
+        harness.advance(120)
+        XCTAssertTrue(harness.coordinator.pullRequestsDue(tiers).isEmpty)
+        XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers, awaited: awaited).map(\.title), ["background", "archived"])
+    }
+
     func testPushFollowsThePullRequestClosely() {
         let harness = CoordinatorHarness()
         let focused = makeWorkspace("focused")

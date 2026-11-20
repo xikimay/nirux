@@ -1462,4 +1462,147 @@ final class LeadToolsFlowTests: XCTestCase {
                 + "nothing was started."])
         }
     }
+
+    /// GitHub's answers to merge waits' look-ups, by pull request or
+    /// branch: none found unless set.
+    private final class LookUps: @unchecked Sendable {
+        private let lock = NSLock()
+        private var answers: [String: MergeWait.LookedUp] = [:]
+        private var askedFor: [String] = []
+
+        func set(_ target: String, _ answer: MergeWait.LookedUp) { lock.withLock { answers[target] = answer } }
+        var asked: [String] { lock.withLock { askedFor } }
+
+        func answer(_ target: MergeWait.LookUpTarget) -> Result<MergeWait.LookedUp?, MergeWait.LookUpFailure> {
+            lock.withLock {
+                askedFor.append(target.pullRequest)
+                return .success(answers[target.pullRequest])
+            }
+        }
+    }
+
+    /// tell's after: the message waits on its task until the other task's
+    /// pull request merges, then goes as the Lead's tell, and the Lead hears
+    /// it. A pull request closed unmerged, the other task closing first, or
+    /// the task itself closing drops it with a line to the Lead.
+    func testATellWaitsForAnotherTasksMerge() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let github = LookUps()
+            shell.mergeWaitLookUp = { github.answer($0) }
+            let (login, _) = try startTask("Fix login", lead: lead, in: harness)
+            let (filter, _) = try startTask("Add a date filter", lead: lead, in: harness)
+            let (docs, _) = try startTask("Write the docs", lead: lead, in: harness)
+            let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childWorkspaceID == filter.id })
+            let instructions = {
+                MissionStore.shared.missions.first { $0.id == mission.id }?.events.filter { $0.kind == .instruction }.map(\.message)
+            }
+            let notice = { shell.pendingLeadNotices.last?.text }
+            func pullRequest(_ number: Int, _ state: String) -> PRInfo {
+                PRInfo(
+                    number: number, state: state, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil,
+                    url: "https://github.com/o/r/pull/\(number)", additions: nil, deletions: nil, changedFiles: nil
+                )
+            }
+            @MainActor func tell(_ message: String, to task: String = "Add a date filter", after: Any) throws -> (text: String, isError: Bool) {
+                try call(LeadTools.tell, ["task": task, "message": message, "after": after], lead: lead, in: harness)
+            }
+
+            XCTAssertTrue(try tell("hi", after: "nope").isError)
+            XCTAssertTrue(try tell("hi", after: 3).isError)
+            let own = try tell("hi", after: "Add a date filter")
+            XCTAssertTrue(own.isError && own.text.contains("can't wait for its own pull request"), own.text)
+
+            // Held until #41 merges: on the row, in list_tasks, saved. Once
+            // its branch is read: a new context clears the pull request.
+            shell.refreshGitContextNow(for: login)
+            harness.waitUntil("the branch of “Fix login”") { login.gitBranch != nil }
+            login.prInfo = pullRequest(41, "OPEN")
+            let held = try tell("merge origin/main", after: "Fix login")
+            XCTAssertFalse(held.isError, held.text)
+            XCTAssertTrue(
+                held.text.hasPrefix("Held: Nirux types it into “Add a date filter”’s prompt as your tell once #41 (“Fix login”) merges."),
+                held.text
+            )
+            XCTAssertEqual(instructions(), [])
+            XCTAssertEqual(shell.persistedState().workspaces.first { $0.id == filter.id }?.mergeWaits, filter.mergeWaits)
+            XCTAssertEqual(filter.mergeWaits.count, 1)
+            let list = try call(LeadTools.listTasks, lead: lead, in: harness).text
+            XCTAssertTrue(list.contains("\n  held until #41 (“Fix login”) merges: your message “merge origin/main”"), list)
+            let line = try XCTUnwrap(SidebarHeldMessages(filter.mergeWaits))
+            XCTAssertEqual(line.line, "After #41 merges · a message from the Lead")
+            harness.waitUntil("the row's line") {
+                shell.sidebar.lastInfos.first { $0.id == filter.id }?.cardActions.contains(.heldMessages(line)) == true
+            }
+
+            // A read that loses the pull request asks GitHub, once per reading.
+            github.set("https://github.com/o/r/pull/41", MergeWait.LookedUp(number: 41, state: "OPEN", url: "https://github.com/o/r/pull/41"))
+            shell.followMergeWaits(awaiting: login, read: nil, now: 1_000)
+            harness.waitUntil("GitHub's answer") { github.asked.count == 1 && shell.mergeWaitTracking.lookingUp.isEmpty }
+            shell.followMergeWaits(awaiting: login, read: nil, now: 1_001)
+            harness.waitUntil("no look-up in flight") { shell.mergeWaitTracking.lookingUp.isEmpty }
+            XCTAssertEqual(github.asked, ["https://github.com/o/r/pull/41"])
+            XCTAssertEqual(filter.mergeWaits.count, 1, "still open")
+            // Reads that keep saying the same ask again past the interval.
+            shell.followMergeWaits(awaiting: login, read: nil, now: 1_000 + MergeWait.lookUpInterval)
+            harness.waitUntil("GitHub asked again") { github.asked.count == 2 && shell.mergeWaitTracking.lookingUp.isEmpty }
+            XCTAssertEqual(filter.mergeWaits.count, 1)
+
+            // Merged: typed as the Lead's tell, and the Lead hears how.
+            shell.followMergeWaits(awaiting: login, read: pullRequest(41, "MERGED"), now: 1_002)
+            XCTAssertTrue(filter.mergeWaits.isEmpty)
+            XCTAssertEqual(instructions(), ["merge origin/main"])
+            XCTAssertEqual(notice()?.hasPrefix("[Nirux Mission] #41 (“Fix login”) merged: Nirux "), true, notice() ?? "")
+
+            // Closed without merging: dropped, and the Lead hears what it said.
+            login.prInfo = pullRequest(42, "OPEN")
+            XCTAssertFalse(try tell("rebase on #42", after: "Fix login").isError)
+            shell.followMergeWaits(awaiting: login, read: pullRequest(42, "CLOSED"), now: 1_003)
+            XCTAssertTrue(filter.mergeWaits.isEmpty)
+            XCTAssertEqual(notice(), "[Nirux Mission] #42 (“Fix login”) closed without merging: your message for “Add a date filter” "
+                + "wasn't typed. It said: “rebase on #42”")
+            XCTAssertEqual(instructions(), ["merge origin/main"])
+
+            // Merged already: typed at once.
+            login.prInfo = pullRequest(42, "MERGED")
+            let late = try tell("go on", after: "Fix login")
+            XCTAssertTrue(late.text.hasPrefix("#42 (“Fix login”) is merged already: Nirux "), late.text)
+            XCTAssertEqual(instructions(), ["merge origin/main", "go on"])
+            XCTAssertTrue(filter.mergeWaits.isEmpty)
+
+            // The task holding it closes: the Lead hears it wasn't typed.
+            XCTAssertFalse(try tell("link the login page", to: "Write the docs", after: "Add a date filter").isError)
+            XCTAssertEqual(docs.mergeWaits.count, 1)
+            shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === docs }), refocusing: false)
+            XCTAssertEqual(notice(), "[Nirux Mission] “Write the docs” closed: your message held until “Add a date filter” merges "
+                + "wasn't typed. It said: “link the login page”")
+
+            // The task it waits for closes first: GitHub says whether it merged.
+            login.prInfo = pullRequest(43, "OPEN")
+            XCTAssertFalse(try tell("after 43", after: "Fix login").isError)
+            github.set("https://github.com/o/r/pull/43", MergeWait.LookedUp(number: 43, state: "OPEN", url: "https://github.com/o/r/pull/43"))
+            shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === login }), refocusing: false)
+            harness.waitUntil("the wait to settle") { filter.mergeWaits.isEmpty }
+            XCTAssertEqual(notice(), "[Nirux Mission] “Fix login” closed while #43 was still open: your message for “Add a date filter” "
+                + "wasn't typed. It said: “after 43”")
+            XCTAssertEqual(instructions(), ["merge origin/main", "go on"])
+
+            // Kept across a relaunch; one whose task didn't come back asks
+            // GitHub then.
+            let (ship, _) = try startTask("Ship it", lead: lead, in: harness)
+            shell.refreshGitContextNow(for: ship)
+            harness.waitUntil("the branch of “Ship it”") { ship.gitBranch != nil }
+            ship.prInfo = pullRequest(44, "OPEN")
+            XCTAssertFalse(try tell("ship it too", after: "Ship it").isError)
+            github.set("https://github.com/o/r/pull/44", MergeWait.LookedUp(number: 44, state: "MERGED", url: "https://github.com/o/r/pull/44"))
+            shell.saveState()
+            var state = try XCTUnwrap(Persistence.load())
+            state.workspaces.removeAll { $0.id == ship.id }
+            XCTAssertTrue(Persistence.save(state))
+            shell.restoreState()
+            harness.waitUntil("the restored wait to settle") { shell.workspaces.first { $0.id == filter.id }?.mergeWaits.isEmpty == true }
+            XCTAssertEqual(instructions(), ["merge origin/main", "go on", "ship it too"])
+        }
+    }
 }

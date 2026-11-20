@@ -189,6 +189,9 @@ final class WorkspaceState {
     /// Apart from `reviewRuns`, whose run needs a HEAD git may not find.
     /// Not kept across launches: no turn outlives one.
     var reviewsRunning: [RunningPass] = []
+    /// What waits on another task's pull request to merge before it acts
+    /// here (docs/design/task-dependencies.md). Kept across launches.
+    var mergeWaits: [MergeWait] = []
 
     var effectivePhase: WorkspacePhase {
         if let phase { return phase }

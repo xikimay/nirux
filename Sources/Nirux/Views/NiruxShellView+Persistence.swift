@@ -91,6 +91,7 @@ extension NiruxShellView {
             for (rawValue, run) in persistedWS.reviewRuns ?? [:] {
                 if let pass = ReviewPass(rawValue: rawValue) { workspace.reviewRuns[pass] = run }
             }
+            workspace.mergeWaits = persistedWS.mergeWaits ?? []
             // Remove the default column created by WorkspaceState.init
             if let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
             for persistedColumn in persistedWS.columns {
@@ -124,6 +125,7 @@ extension NiruxShellView {
             resumeAllDeferredAgents()
         }
         updateSidebar()
+        settleOrphanedMergeWaits()
     }
 
     private func restoreSidebarState(_ settings: PersistedSettings?) {
@@ -380,7 +382,8 @@ extension NiruxShellView {
                     isLead: workspace.isLead && !workspace.isClosing,
                     reportsToLead: workspace.reportsToLead,
                     reportsToTask: workspace.reportsToTask,
-                    taskFolder: workspace.taskFolder)
+                    taskFolder: workspace.taskFolder,
+                    mergeWaits: workspace.mergeWaits.isEmpty ? nil : workspace.mergeWaits)
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,

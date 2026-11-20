@@ -244,6 +244,9 @@ extension WorkspaceInfo {
                 actions.append(.waitingMessages(columnIndex: column.index, waiting))
             }
         }
+        if let heldMessages {
+            actions.append(.heldMessages(heldMessages))
+        }
         // The blocker is the status line's, or waits behind what comes
         // first (the tooltip has it). The selected row adds the next step
         // when its status line says something else; the Lead's row has no
@@ -305,12 +308,14 @@ enum SidebarCardAction: Hashable {
     /// Mission messages that wait too long for an agent's prompt: a click
     /// shows its column.
     case waitingMessages(columnIndex: Int, SidebarWaitingMessages)
+    /// The Lead's messages held until other tasks' pull requests merge.
+    case heldMessages(SidebarHeldMessages)
 
     /// Information rather than something to do: no separator above. A
     /// proposed rule waits on nothing: it stays as quiet.
     var isQuiet: Bool {
         switch self {
-        case .next, .reviewBadges, .ruleProposals, .dailyPass: return true
+        case .next, .reviewBadges, .ruleProposals, .dailyPass, .heldMessages: return true
         case .missionQuestion(_, let question): return question.handOff == nil
         case .approval, .resume, .interrupt, .cleanup, .turnQuestion, .dialog, .waitingMessages, .missionRecommendation: return false
         }
