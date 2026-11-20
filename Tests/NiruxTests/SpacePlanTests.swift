@@ -207,6 +207,7 @@ final class SpacePlanTests: XCTestCase {
             plan.keyDown(with: try Self.key(36))
             XCTAssertIdentical(shell.spacePlan, plan, "it dives")
             XCTAssertIdentical(shell.activeWorkspace, target, "the workspace shows under it already")
+            XCTAssertFalse(shell.isOverlayActive, "diving, it leaves the keys to the workspace it goes to")
             let into = try XCTUnwrap(plan.shownRect(row: plan.chosen.row, cameraX: target.lastCameraX, width: shell.viewport.bounds.width))
             XCTAssertEqual(try XCTUnwrap(plan.world.layer?.sublayerTransform).m11, plan.zoom(into: into).m11, accuracy: 0.001, "into where it shows")
             XCTAssertEqual(plan.world.subviews.count, plan.rows.count + 1, "what it shows, fading in")
@@ -246,6 +247,15 @@ final class SpacePlanTests: XCTestCase {
             shell.animatesInterface = false
             XCTAssertNil(shell.spacePlan, "the dive lands at once")
             XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
+
+            Self.letMove(shell)
+            toggle(shell)
+            let diving = try XCTUnwrap(shell.spacePlan)
+            diving.keyDown(with: try Self.key(126))
+            diving.keyDown(with: try Self.key(36))
+            XCTAssertTrue(diving.isDiving)
+            shell.addWorkspace(title: "new", cwd: NSTemporaryDirectory())
+            XCTAssertNil(shell.spacePlan, "a new workspace lands it at once")
         }
     }
 
