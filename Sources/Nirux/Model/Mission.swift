@@ -605,7 +605,8 @@ final class MissionStore {
             .first
     }
 
-    private static func isPendingDelivery(_ event: MissionEvent, in mission: Mission, now: TimeInterval) -> Bool {
+    /// Whether Nirux will type `event` into its recipient's prompt.
+    nonisolated static func isPendingDelivery(_ event: MissionEvent, in mission: Mission, now: TimeInterval) -> Bool {
         switch event.kind {
         case .instruction:
             return event.childConsumedAt == nil && event.expiredAt == nil && now < event.instructionDeadline
