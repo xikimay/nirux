@@ -134,7 +134,7 @@ final class SpacePlanView: NSView {
 
     /// Fingers opening go to the card under them, else to the chosen one.
     func pinched(by magnification: CGFloat, phase: NSEvent.Phase, at point: NSPoint) {
-        guard superview != nil, pinch.moved(by: magnification, phase: phase, past: NiruxShellView.pinchThreshold) else { return }
+        guard pinch.moved(by: magnification, phase: phase, past: NiruxShellView.pinchThreshold) else { return }
         if let card = card(at: point) { chosen = card }
         goToChoice()
     }

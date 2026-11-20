@@ -71,7 +71,6 @@ extension NiruxShellView {
     /// keyboard it held goes back to the column on screen.
     func closeSpacePlan(going target: (workspaceID: String, column: Int)?) {
         guard let plan = spacePlan else { return }
-        pinch.end()
         let heldKeyboard = window?.firstResponder === plan
         spacePlan = nil
         plan.removeFromSuperview()

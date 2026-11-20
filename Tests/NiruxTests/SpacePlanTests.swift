@@ -205,6 +205,9 @@ final class SpacePlanTests: XCTestCase {
             XCTAssertTrue(shell.planDrawing.isEmpty)
             shell.pinched(by: -0.3, phase: .began, at: work)
             XCTAssertFalse(shell.planDrawing.isEmpty, "a new pinch over the work")
+            shell.pinched(by: 0, phase: .ended, at: work)
+            shell.pinched(by: -0.3, phase: .began, at: work)
+            XCTAssertFalse(shell.planDrawing.isEmpty, "another while it draws doesn't cancel it")
         }
     }
 
