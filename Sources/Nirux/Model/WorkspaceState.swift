@@ -262,7 +262,7 @@ final class WorkspaceState {
 
         containerView = NSView()
         containerView.wantsLayer = true
-        containerView.layer?.masksToBounds = true
+        containerView.clipsToBounds = true
 
         stripView = NSView()
         stripView.wantsLayer = true

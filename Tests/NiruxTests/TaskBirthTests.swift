@@ -394,12 +394,7 @@ final class TaskBirthTests: UIFlowTestCase {
             let added = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(added.title, "as before")
             XCTAssertEqual(added.columns.first?.isArriving, false, "no column coming in")
-            let strip = try XCTUnwrap(shell.viewport.subviews.firstIndex(of: shell.verticalStrip))
-            XCTAssertEqual(self.pictures(in: shell).count, 1, "the old fade")
-            XCTAssertTrue(
-                self.pictures(in: shell).allSatisfy { (shell.viewport.subviews.firstIndex(of: $0) ?? 0) > strip },
-                "over the workspace"
-            )
+            XCTAssertTrue(self.pictures(in: shell).isEmpty, "nor a picture sliding away")
         }
     }
 }
