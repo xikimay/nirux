@@ -7,12 +7,15 @@ extension NiruxShellView {
     /// card): a quarter of their span.
     static let pinchThreshold: CGFloat = 0.25
 
-    /// Fingers closing on the work show the plan.
-    func pinched(by magnification: CGFloat, began: Bool) {
-        if began { pinchTotal = 0 }
-        pinchTotal += magnification
-        guard spacePlan == nil, planDrawing.isEmpty, pinchTotal <= -Self.pinchThreshold else { return }
-        toggleSpacePlan()
+    /// Fingers closing over the work show the plan, once a pinch; false
+    /// elsewhere (the sidebar, the status bar), which the pinch doesn't reach.
+    @discardableResult
+    func pinched(by magnification: CGFloat, phase: NSEvent.Phase, at point: NSPoint) -> Bool {
+        guard viewport.frame.contains(point) else { return false }
+        if pinch.moved(by: magnification, phase: phase, past: -Self.pinchThreshold), spacePlan == nil, planDrawing.isEmpty {
+            toggleSpacePlan()
+        }
+        return true
     }
 
     /// The plan shows once every listed workspace drew (their terminals rest
@@ -20,6 +23,8 @@ extension NiruxShellView {
     /// while the interface may move. Asked again meanwhile, it doesn't;
     /// showing, it goes back.
     func toggleSpacePlan() {
+        // A pinch under way is done: the plan came or went.
+        pinch.end()
         if spacePlan != nil { return closeSpacePlan(going: nil) }
         if !planDrawing.isEmpty { return endPlanDrawing() }
         guard activeWorkspace != nil else { return }
@@ -53,7 +58,11 @@ extension NiruxShellView {
             labels: planLabels(), onScreen: onScreen
         )
         guard !plan.rows.isEmpty else { return }
-        plan.onClose = { [weak self] target in self?.closeSpacePlan(going: target) }
+        // A plan already gone closes no other.
+        plan.onClose = { [weak self, weak plan] target in
+            guard let self, let plan, spacePlan === plan else { return }
+            closeSpacePlan(going: target)
+        }
         viewport.addSubview(plan)
         spacePlan = plan
         verticalStrip.alphaValue = 0

@@ -525,16 +525,18 @@ the text stays flat and sharp.
   shows (a workspace, its columns, the card in focus), another space or a
   new size closes it at once, and the keyboard goes back to the column on
   screen. A new name doesn't. However many workspaces, every row shows: the
-  gaps shrink. A pinch does the same: fingers closing on the work past a
+  gaps shrink. A pinch does the same: fingers closing over the work past a
   quarter of their span, within one pinch, show the plan, and opening them
-  in it goes to the card under them, else to the chosen one; a column that
-  zooms itself (a page) keeps its own pinch. While the interface may move,
-  the work recedes into the plan (0.56 s): the rows' world comes from where
-  the workspace showed, filling the plan, the work's picture at its size
-  over it fading into its row, the names after. Going to a card, that
-  workspace shows under the plan at once and the plan dives into it
-  (0.52 s), its picture fading in over the zoom; going back dives into the
-  workspace on screen. The rows move through their view's
+  in it goes to the card under them, else to the chosen one; each pinch
+  acts once, whichever view its events reach. A column that zooms itself
+  keeps its own pinch: Branch Review's page does; whether the editor's
+  WebKit, which doesn't zoom, passes it on wasn't checked in the app. While
+  the interface may move, the work recedes into the plan (0.56 s): the
+  rows' world comes from where the workspace showed, filling the plan, the
+  work's picture at its size over it fading into its row, the names after.
+  Going to a card, that workspace shows under the plan at once and the plan
+  dives into it (0.52 s), its picture fading in over the zoom; going back
+  dives into the workspace on screen. The rows move through their view's
   `sublayerTransform`; ends come on time, and Reduce motion, Animate the
   interface off or movement turning off mid-way show the end at once.
 - **Frozen pictures (study P4):** a crossing, or a new workspace's slide,
