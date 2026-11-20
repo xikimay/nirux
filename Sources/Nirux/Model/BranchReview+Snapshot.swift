@@ -6,9 +6,9 @@ import Foundation
 extension BranchReview {
     struct Options: Sendable {
         var gitPath = "/usr/bin/git"
-        /// Nil when gh isn't installed: the page works without the pull
-        /// request, and says so.
-        var gitHub: GitHubCLI? = .installed()
+        /// Nil runs no gh: the page works without the pull request, and
+        /// says so, as without gh installed.
+        var gitHub: GitHub.CLI.Runner? = GitHub.CLI.installed
         /// Refresh fetches the pull request's base branch; opening the page
         /// doesn't.
         var fetchBase = false

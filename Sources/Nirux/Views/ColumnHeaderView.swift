@@ -806,7 +806,7 @@ extension ColumnHeaderView.Status {
         guard run.isCompleted else {
             return ColumnHeaderView.Status(text(nil), tone: .neutral, symbol: Theme.Symbol.checksRunning, toolTip: summary)
         }
-        if run.conclusion == "success" {
+        if GitHub.isSucceededRun(run.conclusion) {
             return ColumnHeaderView.Status(
                 text(nil), tone: .neutral, symbol: Theme.Symbol.checksPassed, symbolTone: .success, toolTip: summary
             )

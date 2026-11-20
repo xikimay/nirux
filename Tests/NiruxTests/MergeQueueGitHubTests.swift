@@ -225,6 +225,8 @@ final class MergeQueueGitHubTests: XCTestCase {
                        .noAnswer("HTTP 502: Bad Gateway (https://api.github.com/graphql)"))
         XCTAssertEqual(GitHub.CLI.Failure.unreadable(output: Data((String(repeating: "x", count: 100) + "\nmore").utf8)),
                        .unreadable(String(repeating: "x", count: 80) + "…"), "a one-line JSON answer is cut")
+        XCTAssertEqual(GitHub.CLI.Failure.unreadable(output: Data("{\n  \"message\": \"Moved\"\n}\n".utf8)), .unreadable(#"{ "message": "Moved" }"#),
+                       "gh api's JSON over several lines reads on one")
         guard case .refused(nil, _) = GitHub.CLI.classify(output(
             1, stderr: "X Pull request acme/widgets#52 is not mergeable: the merge commit cannot be cleanly created.\n"
         )) else { return XCTFail("a merge gh refused") }
@@ -324,7 +326,7 @@ final class MergeQueueGitHubTests: XCTestCase {
                   status: 1, stdout: Self.notFound, stderr: "gh: Not Found (HTTP 404)\n")
         gh.answer(prefix: ["auth", "status"], status: 1, stderr: "You are not logged into any GitHub hosts. To log in, run: gh auth login\n")
         gh.answer(prefix: ["run", "list"], stdout: Self.runs)
-        let client = GitHubCLIQueueClient(run: gh.run)
+        let client = GitHubCLIQueueClient(gh: gh.run)
 
         let pullRequest = try client.read(.pullRequest(60), settings: settings).get()
         guard case .pullRequest(let snapshot) = pullRequest else { return XCTFail("\(pullRequest)") }
@@ -347,7 +349,7 @@ final class MergeQueueGitHubTests: XCTestCase {
                   stderr: "gh: API rate limit already exceeded for user ID 1.\n")
         gh.answer(prefix: ["api", "--hostname", "github.com", "rate_limit"],
                   stdout: Self.rateLimit.replacingOccurrences(of: #""remaining":4997"#, with: #""remaining":0"#))
-        let client = GitHubCLIQueueClient(run: gh.run)
+        let client = GitHubCLIQueueClient(gh: gh.run)
         guard case .failure(.rateLimited(let reset)) = client.read(.pullRequest(52), settings: settings) else {
             return XCTFail("rate limited")
         }
@@ -360,7 +362,7 @@ final class MergeQueueGitHubTests: XCTestCase {
         gh.answer(prefix: ["api", "--hostname", "github.com", "--method", "PUT"], status: 1,
                   stdout: #"{"message":"merge conflict between base and head","status":"422"}"#,
                   stderr: "gh: merge conflict between base and head (HTTP 422)\n")
-        let client = GitHubCLIQueueClient(run: gh.run)
+        let client = GitHubCLIQueueClient(gh: gh.run)
         XCTAssertEqual(client.mutate(.merge(number: 52, head: MQ.sha("a"), method: .merge), settings: settings), .sent)
         XCTAssertEqual(client.mutate(.updateBranch(number: 52, expectedHead: MQ.sha("a")), settings: settings),
                        .refused(status: 422, message: "merge conflict between base and head"))
@@ -371,7 +373,7 @@ final class MergeQueueGitHubTests: XCTestCase {
     // MARK: Dry run
 
     func testDevBuildsGetTheDryRunClient() {
-        let live = GitHubCLIQueueClient { _, _ in XCTFail("no gh in tests"); return .failure(.ghMissing) }
+        let live = GitHubCLIQueueClient { _ in XCTFail("no gh in tests"); return .failure(.ghMissing) }
         // Refused by the requirement, not by the check itself: an API misuse
         // (errSecCSInvalidFlags) read as "not the release" once, and kept
         // the nightly from shipping; a requirement typo would too
@@ -487,8 +489,8 @@ final class ScriptedGH: @unchecked Sendable {
                        at: 0)
     }
 
-    var run: @Sendable ([String], TimeInterval) -> Result<GitHub.CLI.Output, GitHub.CLI.Failure> {
-        { [self] arguments, _ in self.respond(arguments) }
+    var run: GitHub.CLI.Runner {
+        { [self] call in self.respond(call.arguments) }
     }
 
     private func respond(_ arguments: [String]) -> Result<GitHub.CLI.Output, GitHub.CLI.Failure> {

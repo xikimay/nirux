@@ -167,6 +167,9 @@ final class ProjectBoardGitHubTests: XCTestCase {
     func testNotAListReadsAsNothing() {
         XCTAssertNil(ProjectBoard.parsePullRequests(Data("{\"message\": \"Bad credentials\"}".utf8), repository: widgets))
         XCTAssertNil(GitHub.parseWorkflowRuns(Data("not json".utf8)))
+        let locked = #"[{"number": 1, "state": "LOCKED", "headRefName": "a", "headRefOid": "9b57f5ab537bf3b5c0b22ea831b8d8c647ee2984", "url": "u"}]"#
+        XCTAssertEqual(ProjectBoard.parsePullRequests(Data(locked.utf8), repository: widgets), [], "a state GitHub never sends")
+        XCTAssertEqual(ProjectBoard.parsePullRequests(Data(locked.replacingOccurrences(of: "LOCKED", with: "open").utf8), repository: widgets)?.count, 1)
         XCTAssertNil(GitHub.parseWorkflowRuns(Data(Self.postMergeRuns.replacingOccurrences(of: #""databaseId":5,"#, with: "").utf8)),
                      "a run that can't be read fails the list: it might be the failed one")
         XCTAssertEqual(ProjectBoard.parsePullRequests(Data("[]".utf8), repository: widgets), [])
@@ -329,7 +332,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
         try Data(script.utf8).write(to: URL(fileURLWithPath: path))
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
         let calls = { (try? String(contentsOfFile: "\(path).calls", encoding: .utf8))?.split(separator: "\n").map(String.init) ?? [] }
-        return (GitHubCLIBoardClient(findGH: { path }), calls)
+        return (GitHubCLIBoardClient(gh: { GitHub.CLI.run($0, gh: path) }), calls)
     }
 
     /// gh signed out (its status 4), or with a token GitHub refuses, is
@@ -410,7 +413,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
     }
 
     func testWithoutGhNothingRuns() {
-        let client = GitHubCLIBoardClient(findGH: { nil })
+        let client = GitHubCLIBoardClient(gh: { GitHub.CLI.run($0, gh: nil) })
         XCTAssertEqual(client.pullRequests(repository: "acme/widgets", state: .open), .failure(.ghMissing))
         XCTAssertEqual(client.postMergeRuns(repository: "acme/widgets", workflow: "n.yml", branch: "main"), .failure(.ghMissing))
     }

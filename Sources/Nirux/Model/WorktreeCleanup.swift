@@ -33,7 +33,7 @@ enum WorktreeCleanup {
         var gitPath = "/usr/bin/git"
         /// Nil when the GitHub CLI isn't installed.
         var ghPath: String?
-        /// Added to the environment of every git run.
+        /// Added to the environment of every git and gh run.
         var environment: [String: String] = [:]
         /// For reads and gh: past it, the check fails.
         var timeout: TimeInterval = 60
@@ -56,6 +56,12 @@ enum WorktreeCleanup {
                 ghPath: GitHub.CLI.installedPath(),
                 reviewStateDirectory: Persistence.stateDirectory
             )
+        }
+
+        /// Reads never take optional locks (`git status` would rewrite the
+        /// index, and gh runs git to find the repository).
+        var runEnvironment: [String: String] {
+            GitDetect.readOnlyEnvironment.merging(environment) { _, override in override }
         }
     }
 
@@ -680,7 +686,7 @@ enum WorktreeCleanup {
             executableURL: URL(fileURLWithPath: executable),
             arguments: arguments,
             currentDirectoryURL: URL(fileURLWithPath: directory),
-            environment: GitDetect.readOnlyEnvironment.merging(tools.environment) { _, override in override },
+            environment: tools.runEnvironment,
             standardInput: input,
             timeout: timeout ?? tools.timeout,
             captureStandardError: true

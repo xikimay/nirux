@@ -128,16 +128,11 @@ enum PRDetect {
             "reviewDecision", "mergeable", "url", "additions",
             "deletions", "changedFiles"
         ].joined(separator: ",")
-        // From the checkout: gh finds the base repository through its remotes.
-        let output = try? GitHub.CLI.run(
-            ["pr", "list", "--head", branch,
-             "--state", state,
-             "--json", fields,
-             "--limit", String(limit)],
-            gh: cliContext.executablePath,
-            in: URL(fileURLWithPath: cliContext.repositoryRoot),
-            timeout: cliContext.timeout
-        ).flatMap(\.result).get()
+        let call = GitHub.CLI.Call(
+            ["pr", "list", "--head", branch, "--state", state, "--json", fields, "--limit", String(limit)],
+            in: URL(fileURLWithPath: cliContext.repositoryRoot), timeout: cliContext.timeout
+        )
+        let output = try? GitHub.CLI.run(call, gh: cliContext.executablePath).flatMap(\.result).get()
         return output.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] }
     }
 

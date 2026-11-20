@@ -61,10 +61,9 @@ extension ProjectBoard {
     }
 }
 
-/// The real client: the GitHub CLI as `GitHub.CLI` finds and runs it.
+/// The real client: gh, as `gh` runs it.
 struct GitHubCLIBoardClient: ProjectBoardGitHub {
-    /// Where gh is; nil when it isn't installed.
-    var findGH: @Sendable () -> String? = { GitHub.CLI.installedPath() }
+    var gh: GitHub.CLI.Runner = GitHub.CLI.installed
     var timeout: TimeInterval = 30
 
     static var installed: GitHubCLIBoardClient { GitHubCLIBoardClient() }
@@ -136,7 +135,7 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
     }
 
     func retarget(repository: String, number: Int, base: String) -> Result<Data, GitHub.CLI.Failure> {
-        run(Self.retargetArguments(repository: repository, number: number, base: base))
+        read(Self.retargetArguments(repository: repository, number: number, base: base))
     }
 
     /// The merged read is never less than the list opened last: when
@@ -146,21 +145,21 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
     /// pull requests' does. Not for a gh that is missing or signed out,
     /// which fails every call.
     func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, GitHub.CLI.Failure> {
-        let read = run(Self.pullRequestArguments(repository: repository, state: state))
-        guard state == .merged else { return read }
-        let both = read.flatMap { data in Self.mergedList(data).map(Result.success) ?? .failure(.unreadable(output: data)) }
+        let answer = read(Self.pullRequestArguments(repository: repository, state: state))
+        guard state == .merged else { return answer }
+        let both = answer.flatMap { data in Self.mergedList(data).map(Result.success) ?? .failure(.unreadable(output: data)) }
         switch both {
         case .success, .failure(.ghMissing), .failure(.notSignedIn): return both
-        case .failure: return run(Self.openedLastArguments(repository: repository))
+        case .failure: return read(Self.openedLastArguments(repository: repository))
         }
     }
 
     func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, GitHub.CLI.Failure> {
-        run(Self.runArguments(repository: repository, workflow: workflow, branch: branch))
+        read(Self.runArguments(repository: repository, workflow: workflow, branch: branch))
     }
 
-    private func run(_ arguments: [String]) -> Result<Data, GitHub.CLI.Failure> {
-        GitHub.CLI.run(arguments, gh: findGH(), timeout: timeout).flatMap(\.result)
+    private func read(_ arguments: [String]) -> Result<Data, GitHub.CLI.Failure> {
+        gh(.init(arguments, timeout: timeout)).flatMap(\.result)
     }
 }
 

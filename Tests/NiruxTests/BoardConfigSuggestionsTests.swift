@@ -223,10 +223,11 @@ final class BoardConfigSuggestionsTests: XCTestCase {
     /// as an option.
     func testAnSSHAliasOfGitHubReadsAsGitHub() throws {
         let config = root + "/ssh_config"
-        try Data("Host github-work\n  HostName github.com\nHost lab-work\n  HostName gitlab.com\n".utf8)
+        try Data("Host github-work\n  HostName github.com\nHost github-dot\n  HostName github.com.\nHost lab-work\n  HostName gitlab.com\n".utf8)
             .write(to: URL(fileURLWithPath: config))
         // ssh, with the test's own config, given time on a busy runner.
         XCTAssertEqual(SSHHostAlias.resolve("github-work", configFile: config, timeout: 60), true)
+        XCTAssertEqual(SSHHostAlias.resolve("github-dot", configFile: config, timeout: 60), true, "github.com. is github.com")
         XCTAssertEqual(SSHHostAlias.resolve("lab-work", configFile: config, timeout: 60), false)
         XCTAssertEqual(SSHHostAlias.resolve("-oProxyCommand=touch", configFile: config, timeout: 60), false)
         XCTAssertTrue(GitHubRepository.isSSH("git@github-work:acme/app.git"))

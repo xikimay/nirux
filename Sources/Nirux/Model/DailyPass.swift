@@ -74,12 +74,6 @@ enum DailyPass {
         var readsAgain = false
     }
 
-    typealias GitHubRead = @Sendable (_ arguments: [String]) -> Result<Data, GitHub.CLI.Failure>
-
-    static let installedGitHub: GitHubRead = { arguments in
-        GitHub.CLI.run(arguments, timeout: 30, maxStandardOutputBytes: 8_000_000).flatMap(\.result)
-    }
-
     /// Past 49, gh's query (each commit's authors) passes GitHub's 500,000
     /// nodes and is refused.
     static let mergedLimit = 40
@@ -161,19 +155,20 @@ enum DailyPass {
     /// Each repository's pull requests merged and runs rerun in the
     /// window, the repositories read at once: the call's wait doesn't grow
     /// with their number. Never on the main thread.
-    static func readGitHub(_ repositories: [String], window: Window, read: GitHubRead) -> [RepositoryReport] {
+    static func readGitHub(_ repositories: [String], window: Window, gh: GitHub.CLI.Runner) -> [RepositoryReport] {
         let reports = OSAllocatedUnfairLock(initialState: [Int: RepositoryReport]())
         DispatchQueue.concurrentPerform(iterations: repositories.count) { index in
-            let report = readGitHub(repositories[index], window: window, read: read)
+            let report = readGitHub(repositories[index], window: window, gh: gh)
             reports.withLock { $0[index] = report }
         }
         return reports.withLock { found in repositories.indices.compactMap { found[$0] } }
     }
 
-    private static func readGitHub(_ name: String, window: Window, read: GitHubRead) -> RepositoryReport {
+    private static func readGitHub(_ name: String, window: Window, gh: GitHub.CLI.Runner) -> RepositoryReport {
         var report = RepositoryReport(name: name)
         func parsed<Value>(_ what: String, _ arguments: [String], _ parse: (Data) -> Value?) -> Value? {
-            switch read(arguments).flatMap({ data in parse(data).map(Result.success) ?? .failure(.unreadable(output: data)) }) {
+            let answer = gh(.init(arguments, maxStandardOutputBytes: 8_000_000)).flatMap(\.result)
+            switch answer.flatMap({ data in parse(data).map(Result.success) ?? .failure(.unreadable(output: data)) }) {
             case .success(let value):
                 return value
             case .failure(let failure):

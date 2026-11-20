@@ -87,15 +87,11 @@ enum CIFailure {
 
     /// `gh run rerun --failed`: nil once GitHub accepted it, else why not.
     /// Runs gh: off the main thread.
-    static func rerun(_ run: Run, gh: String? = GitHub.CLI.installedPath()) -> String? {
-        switch GitHub.CLI.run(rerunArguments(run), gh: gh, timeout: 30) {
-        case .failure(.ghMissing):
-            return "\(GitHub.CLI.missing): run \(run.id) can’t be rerun."
-        case .failure(let failure):
-            return "Run \(run.id): \(failure.message)."
-        case .success(let output):
-            guard output.status != 0 else { return nil }
-            return "Run \(run.id): " + (String(decoding: output.standardError, as: UTF8.self).firstLine ?? "exit status \(output.status)")
+    static func rerun(_ run: Run, gh: GitHub.CLI.Runner = GitHub.CLI.installed) -> String? {
+        switch gh(.init(rerunArguments(run))).flatMap(\.result) {
+        case .success: return nil
+        case .failure(.ghMissing): return "\(GitHub.CLI.missing): run \(run.id) can’t be rerun."
+        case .failure(let failure): return "Run \(run.id): \(failure.message)"
         }
     }
 

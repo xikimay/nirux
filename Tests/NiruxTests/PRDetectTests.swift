@@ -590,6 +590,26 @@ final class PRDetectTests: XCTestCase {
         }
         XCTAssertNil(pullRequest)
     }
+
+    /// gh runs with Nirux's environment for it: no colour or TTY forced.
+    func testGhRunsWithoutForcedColour() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let gh = directory.appendingPathComponent("gh")
+        let environment = directory.appendingPathComponent("environment")
+        try "#!/bin/sh\nprintf '%s\\n' \"NO_COLOR=$NO_COLOR CLICOLOR_FORCE=$CLICOLOR_FORCE\" > '\(environment.path)'\necho '[]'\n"
+            .write(to: gh, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gh.path)
+        _ = PRDetect.fetch(
+            branch: "feature/task", ghPath: gh.path,
+            context: GitContext(
+                branch: "feature/task", identity: GitIdentity(repositoryRoot: directory.path, head: "head", isDirty: false),
+                upstreamRepository: GitHubRepository(host: "example.test", owner: "xikimay", name: "nirux")
+            )
+        )
+        XCTAssertEqual(try String(contentsOf: environment, encoding: .utf8), "NO_COLOR=1 CLICOLOR_FORCE=0\n")
+    }
 }
 
 private extension PRDetectTests {

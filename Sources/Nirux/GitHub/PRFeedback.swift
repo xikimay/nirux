@@ -30,7 +30,6 @@ struct PRFeedback: Hashable, Sendable {
         let bots: Int
     }
 
-    /// Nil when there's nothing.
     var counts: Counts? {
         items.isEmpty ? nil : Counts(humans: humanCount, bots: botCount)
     }
@@ -66,7 +65,7 @@ enum PRFeedbackReader {
         completion: @escaping @MainActor @Sendable (PRFeedback?) -> Void
     ) {
         DispatchQueue.global(qos: .utility).async {
-            let output = try? GitHub.CLI.run(arguments(pullRequestURL: pullRequestURL), timeout: 30).flatMap(\.result).get()
+            let output = try? GitHub.CLI.run(.init(arguments(pullRequestURL: pullRequestURL))).flatMap(\.result).get()
             let read = output.flatMap(feedback(from:))
             DispatchQueue.main.async { completion(read) }
         }

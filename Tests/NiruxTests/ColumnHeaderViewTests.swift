@@ -532,6 +532,7 @@ final class ProjectBoardHeaderTests: XCTestCase {
         XCTAssertEqual(passed.symbol, Theme.Symbol.checksPassed)
         XCTAssertEqual(passed.symbolTone, .success)
         XCTAssertEqual(passed.toolTip, "nightly: success 08:00, 43a9503")
+        XCTAssertEqual(status(run("completed", "SUCCESS")).symbol, Theme.Symbol.checksPassed, "any case, as red is")
 
         let failed = status(run("completed", "failure"))
         XCTAssertEqual(failed.tone, .error)

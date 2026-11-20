@@ -13,30 +13,47 @@ extension GitHub {
         static let missing = "The GitHub CLI (gh) isn’t installed"
         static let signedOut = "gh isn’t signed in to github.com"
 
-        /// Where gh is; nil when it isn't there. Looked up at each call, so a
-        /// gh installed since launch is found.
-        static func installedPath() -> String? {
-            ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"].first { FileManager.default.isExecutableFile(atPath: $0) }
+        /// The first executable gh among `candidates`. Looked up at each call,
+        /// so a gh installed since launch is found.
+        static func installedPath(among candidates: [String] = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]) -> String? {
+            candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
         }
 
-        /// gh at `path` with the neutral environment, from `folder`: by
-        /// default one outside every checkout, so only the arguments name the
-        /// repository. Its output whatever its exit status; a failure when
-        /// there is no gh, or it didn't start or timed out.
-        static func run(
-            _ arguments: [String], gh path: String? = installedPath(), in folder: URL = FileManager.default.temporaryDirectory,
-            timeout: TimeInterval, maxStandardOutputBytes: Int? = nil
-        ) -> Result<Output, Failure> {
+        struct Call: Sendable {
+            let arguments: [String]
+            /// A checkout lets gh find the repository from its remotes. Nil runs
+            /// it outside every checkout: only the arguments name the repository.
+            var folder: URL?
+            var timeout: TimeInterval
+            var maxStandardOutputBytes: Int?
+
+            init(_ arguments: [String], in folder: URL? = nil, timeout: TimeInterval = 30, maxStandardOutputBytes: Int? = nil) {
+                self.arguments = arguments
+                self.folder = folder
+                self.timeout = timeout
+                self.maxStandardOutputBytes = maxStandardOutputBytes
+            }
+        }
+
+        /// What every feature runs gh with: `installed`, or a test's stand-in.
+        typealias Runner = @Sendable (Call) -> Result<Output, Failure>
+
+        static let installed: Runner = { run($0) }
+
+        /// gh's output whatever its exit status; a failure when there is no gh,
+        /// or it didn't start or timed out. The neutral environment is set
+        /// over `environment`.
+        static func run(_ call: Call, gh path: String? = installedPath(), environment extra: [String: String] = [:]) -> Result<Output, Failure> {
             guard let path else { return .failure(.ghMissing) }
             guard let result = BoundedProcess.run(
                 executableURL: URL(fileURLWithPath: path),
-                arguments: arguments,
-                currentDirectoryURL: folder,
-                environment: environment,
-                timeout: timeout,
+                arguments: call.arguments,
+                currentDirectoryURL: call.folder ?? FileManager.default.temporaryDirectory,
+                environment: extra.merging(environment) { _, neutral in neutral },
+                timeout: call.timeout,
                 captureStandardError: true,
-                maxStandardOutputBytes: maxStandardOutputBytes
-            ) else { return .failure(.noAnswer("gh couldn’t start, or took longer than \(Int(timeout)) s")) }
+                maxStandardOutputBytes: call.maxStandardOutputBytes
+            ) else { return .failure(.noAnswer("gh couldn’t start, or took longer than \(Int(call.timeout)) s")) }
             return .success(Output(status: result.terminationStatus, standardOutput: result.standardOutput,
                                    standardError: result.standardError))
         }
@@ -49,7 +66,6 @@ extension GitHub {
                 + integers.flatMap { ["-F", "\($0.0)=\($0.1)"] }
         }
 
-        /// The `owner` and `name` GraphQL variables of `owner/name`.
         static func repositoryVariables(_ repository: String) -> [(String, String)] {
             let parts = repository.split(separator: "/", maxSplits: 1).map(String.init)
             return [("owner", parts.first ?? ""), ("name", parts.count > 1 ? parts[1] : "")]
@@ -85,10 +101,11 @@ extension GitHub {
             /// gh exited 0 with output Nirux can't read: the start of it.
             case unreadable(String)
 
-            /// gh prints its JSON on one line: the excerpt is cut, not the line.
+            /// The start of what gh printed, on one line: `gh api` spreads its
+            /// JSON over several, the other commands print it on one.
             static func unreadable(output: Data) -> Failure {
-                let line = String(decoding: output.prefix(512), as: UTF8.self).firstLine ?? ""
-                return .unreadable(line.count > 80 ? line.prefix(80) + "…" : line)
+                let text = String(decoding: output.prefix(512), as: UTF8.self).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+                return .unreadable(text.count > 80 ? text.prefix(80) + "…" : text)
             }
 
             var message: String {

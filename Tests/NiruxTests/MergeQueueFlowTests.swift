@@ -61,8 +61,9 @@ final class MergeQueueFlowTests: XCTestCase {
         var allCalls: [[String]] { lock.withLock { calls } }
         var answeredOffMain: Bool { lock.withLock { !threads.contains("main") && !threads.isEmpty } }
 
-        var run: @Sendable ([String], TimeInterval) -> Result<GitHub.CLI.Output, GitHub.CLI.Failure> {
-            { [self] arguments, _ in
+        var run: GitHub.CLI.Runner {
+            { [self] call in
+                let arguments = call.arguments
                 // Answered on another queue, as a slow gh would.
                 let answered = DispatchSemaphore(value: 0)
                 var result: Result<GitHub.CLI.Output, GitHub.CLI.Failure> = .failure(.noAnswer("unanswered"))
@@ -213,7 +214,7 @@ final class MergeQueueFlowTests: XCTestCase {
         let b = MQ.sha("b")
         let world = GitHubWorld(pullRequests: [52: a, 53: b])
         let clock = VirtualClock()
-        let queue = controller(GitHubCLIQueueClient(run: world.run), clock: clock)
+        let queue = controller(GitHubCLIQueueClient(gh: world.run), clock: clock)
         var began = 0
         var ended = 0
         queue.beginActivity = {
@@ -262,7 +263,7 @@ final class MergeQueueFlowTests: XCTestCase {
     func testStopEndsAWaitingQueueAndReleasesItsLock() throws {
         let a = MQ.sha("a")
         let world = GitHubWorld(pullRequests: [52: a], testConclusion: nil)
-        let queue = controller(GitHubCLIQueueClient(run: world.run), clock: VirtualClock())
+        let queue = controller(GitHubCLIQueueClient(gh: world.run), clock: VirtualClock())
         var ended = 0
         queue.beginActivity = { NSObject() }
         queue.endActivity = { _ in ended += 1 }
@@ -324,7 +325,7 @@ final class MergeQueueFlowTests: XCTestCase {
         let world = GitHubWorld(pullRequests: [52: a])
         let dryRun = MergeQueue.client(environment: [:], bundleURL: URL(fileURLWithPath: "/Applications/Nirux.app"),
                                        signature: .notRelease(errSecCSReqFailed),
-                                       live: GitHubCLIQueueClient(run: world.run))
+                                       live: GitHubCLIQueueClient(gh: world.run))
         let queue = controller(dryRun, clock: VirtualClock())
         queue.beginActivity = { NSObject() }
         queue.endActivity = { _ in }

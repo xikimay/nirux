@@ -268,7 +268,7 @@ extension NiruxShellView {
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
             let remotes = DailyPass.repositories(from: folders.map { ($0, GitHubBaseRemote.read(at: $0)) })
-            var reports = DailyPass.readGitHub(remotes.gitHub.map(\.name), window: window, read: DailyPass.installedGitHub)
+            var reports = DailyPass.readGitHub(remotes.gitHub.map(\.name), window: window, gh: GitHub.CLI.installed)
             for index in reports.indices { reports[index].folders = remotes.gitHub[index].folders }
             reports += remotes.unread
             let findings = ReviewFindings.lines.queue.sync {

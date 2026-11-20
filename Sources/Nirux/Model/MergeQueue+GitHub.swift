@@ -231,17 +231,14 @@ struct DryRunQueueClient: MergeQueueGitHub {
 /// (`--repo github.com/…`, `--hostname github.com`): a terminal's
 /// `GH_HOST` would otherwise send it to another server.
 struct GitHubCLIQueueClient: MergeQueueGitHub {
-    /// Runs gh with these arguments. Tests record the arguments instead.
-    let run: @Sendable (_ arguments: [String], _ timeout: TimeInterval) -> Result<GitHub.CLI.Output, GitHub.CLI.Failure>
+    let gh: GitHub.CLI.Runner
 
     var isDryRun: Bool { false }
 
     static let readTimeout: TimeInterval = 60
     static let mutationTimeout: TimeInterval = 120
 
-    static var installed: GitHubCLIQueueClient {
-        GitHubCLIQueueClient { arguments, timeout in GitHub.CLI.run(arguments, timeout: timeout) }
-    }
+    static var installed: GitHubCLIQueueClient { GitHubCLIQueueClient(gh: GitHub.CLI.installed) }
 
     // MARK: Reads
 
@@ -306,7 +303,7 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
     // MARK: Mutations
 
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
-        switch run(Self.mutationArguments(mutation, repository: settings.repository), Self.mutationTimeout).flatMap(\.result) {
+        switch gh(.init(Self.mutationArguments(mutation, repository: settings.repository), timeout: Self.mutationTimeout)).flatMap(\.result) {
         case .success: return .sent
         case .failure(let error): return Self.mutationResult(error)
         }
@@ -333,9 +330,9 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
     /// gh's standard output when it exited 0, else its error. A primary
     /// rate limit asks `rate_limit` (free) when the limit resets.
     private func call(_ arguments: [String]) -> Result<Data, GitHub.CLI.Failure> {
-        let read = run(arguments, Self.readTimeout).flatMap(\.result)
+        let read = gh(.init(arguments, timeout: Self.readTimeout)).flatMap(\.result)
         guard case .failure(.rateLimited) = read else { return read }
-        let limit = try? run(Self.rateLimitArguments, Self.readTimeout).flatMap(\.result).get()
+        let limit = try? gh(.init(Self.rateLimitArguments, timeout: Self.readTimeout)).flatMap(\.result).get()
         return .failure(.rateLimited(resetAt: limit.flatMap(MergeQueue.parseRateLimit).flatMap(Self.resetOfExhaustedPool)))
     }
 

@@ -26,17 +26,17 @@ extension WorktreeCleanup {
         case .failure(let failure): return (nil, [failure.message], nil)
         }
         let fields = "number,state,headRefOid,headRepositoryOwner,headRepository,url"
-        let output: GitHub.CLI.Output
-        switch GitHub.CLI.run(
+        let call = GitHub.CLI.Call(
             ["pr", "list", "--head=\(branch)", "--state", "all", "--json", fields, "--limit", "1000"],
-            gh: ghPath, in: URL(fileURLWithPath: worktree.path), timeout: tools.timeout
-        ) {
-        case .success(let ran): output = ran
-        case .failure(let failure): return (nil, ["gh couldn't list the pull requests of \(branch): \(failure.message)"], nil)
+            in: URL(fileURLWithPath: worktree.path), timeout: tools.timeout
+        )
+        let listed = GitHub.CLI.run(call, gh: ghPath, environment: tools.runEnvironment).flatMap(\.result).flatMap { data in
+            ((try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]).map(Result.success) ?? .failure(.unreadable(output: data))
         }
-        guard output.status == 0, let json = try? JSONSerialization.jsonObject(with: output.standardOutput) as? [[String: Any]] else {
-            let reason = String(decoding: output.standardError, as: UTF8.self).firstLine.map { ": \($0)" } ?? ""
-            return (nil, ["gh couldn't list the pull requests of \(branch)\(reason)"], nil)
+        let json: [[String: Any]]
+        switch listed {
+        case .success(let list): json = list
+        case .failure(let failure): return (nil, ["gh couldn't list the pull requests of \(branch): \(failure.message)"], nil)
         }
         let candidates = json.compactMap { pullRequest(from: $0, headRepository: repository) }
         if candidates.isEmpty, let problem = mergedElsewhere(json, branch: branch, tip: tip, repository: repository, worktree: worktree, tools: tools) {

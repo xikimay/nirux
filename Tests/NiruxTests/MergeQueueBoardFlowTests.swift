@@ -270,7 +270,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         shell.projectBoardClient = boardClient ?? ProjectBoardFlowTests.FakeGitHub(
             openPullRequests: Self.boardPullRequests, runs: ProjectBoardGitHubTests.postMergeRuns
         )
-        let queueClient = GitHubCLIQueueClient(run: world.run)
+        let queueClient = GitHubCLIQueueClient(gh: world.run)
         shell.mergeQueueClient = isDryRun ? DryRunQueueClient(wrapped: queueClient, reason: "NIRUX_STATE_DIR is set") : queueClient
         shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
         let window = NSWindow(

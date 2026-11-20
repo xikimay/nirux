@@ -41,7 +41,7 @@ final class WorktreeCleanupTests: XCTestCase {
         #!/bin/sh
         dir="$(dirname "$0")"
         printf '%s\\n' "$*" >> "$dir/gh-args"
-        printf '%s\\n' "NO_COLOR=$NO_COLOR CLICOLOR_FORCE=$CLICOLOR_FORCE" >> "$dir/gh-env"
+        printf '%s\\n' "NO_COLOR=$NO_COLOR CLICOLOR_FORCE=$CLICOLOR_FORCE GIT_OPTIONAL_LOCKS=$GIT_OPTIONAL_LOCKS HOME=$HOME" >> "$dir/gh-env"
         pwd -P >> "$dir/gh-folder"
         if [ -f "$dir/gh-error" ]; then cat "$dir/gh-error" >&2; exit 1; fi
         cat "$dir/gh-prs.json"
@@ -187,7 +187,10 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertEqual(plan.worktree.buildOutput, ["build/"])
         XCTAssertTrue(plan.worktree.folderMatchesBranch)
         XCTAssertTrue(try String(contentsOfFile: root + "/gh-args", encoding: .utf8).contains("--head=feat/x"))
-        XCTAssertTrue(try String(contentsOfFile: root + "/gh-env", encoding: .utf8).contains("NO_COLOR=1 CLICOLOR_FORCE=0"), "no colour forced")
+        XCTAssertEqual(
+            try String(contentsOfFile: root + "/gh-env", encoding: .utf8),
+            "NO_COLOR=1 CLICOLOR_FORCE=0 GIT_OPTIONAL_LOCKS=0 HOME=\(root!)/home\n", "no colour forced; git's read-only and the tools' environment"
+        )
         XCTAssertEqual(try String(contentsOfFile: root + "/gh-folder", encoding: .utf8), worktree + "\n", "gh finds the repository from the worktree")
 
         // The squash left feat/x unmerged as far as git knows: -D after -d.
@@ -481,7 +484,7 @@ final class WorktreeCleanupTests: XCTestCase {
             .write(toFile: root + "/gh-error", atomically: true, encoding: .utf8)
         XCTAssertEqual(
             try report().problems,
-            ["gh couldn't list the pull requests of feat/x: gh: To get started with GitHub CLI, please run: gh auth login"]
+            ["gh couldn't list the pull requests of feat/x: gh isn’t signed in to github.com"]
         )
 
         tools.ghPath = root + "/no-gh"

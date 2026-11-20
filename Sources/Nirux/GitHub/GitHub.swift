@@ -44,9 +44,13 @@ enum GitHub {
         ["FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"].contains(conclusion?.uppercased() ?? "")
     }
 
-    /// "nightly" for `nightly.yml`.
-    static func workflowLabel(_ workflow: String) -> String {
-        (workflow as NSString).deletingPathExtension
+    static func isSucceededRun(_ conclusion: String?) -> Bool {
+        conclusion?.uppercased() == "SUCCESS"
+    }
+
+    /// "nightly" for `nightly.yml`; "post-merge workflow" when none is set.
+    static func workflowLabel(_ workflow: String?) -> String {
+        workflow.map { ($0 as NSString).deletingPathExtension } ?? "post-merge workflow"
     }
 
     /// A start time as gh gives it; nil for none, or for gh's zero time
@@ -56,7 +60,6 @@ enum GitHub {
         return value
     }
 
-    /// The value at `path` in gh's JSON output.
     static func dig(_ json: Any?, _ path: String...) -> Any? {
         path.reduce(json) { value, key in (value as? [String: Any])?[key] }
     }

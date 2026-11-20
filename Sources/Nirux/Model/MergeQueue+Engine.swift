@@ -107,7 +107,7 @@ extension MergeQueue {
             case .running, .paused, .stopping:
                 var text = current.map { current in
                     let step = isWaitingOnBaseRun
-                        ? "#\(entries[current].number) waiting for the \(MergeQueue.workflowLabel(settings.postMergeWorkflow)) "
+                        ? "#\(entries[current].number) waiting for the \(GitHub.workflowLabel(settings.postMergeWorkflow)) "
                             + "on \(settings.baseBranch) before merging"
                         : entries[current].stepDescription(workflow: settings.postMergeWorkflow)
                     return "\(step), \(current + 1) of \(entries.count)"
@@ -789,7 +789,7 @@ extension MergeQueue {
         /// stops the queue and anything else checks step 4 again. Returns
         /// whether the merge waits.
         private mutating func waitForBaseRuns(_ runs: [GitHub.WorkflowRun], head: String, index: Int, now: TimeInterval) -> Bool {
-            let label = MergeQueue.workflowLabel(settings.postMergeWorkflow)
+            let label = GitHub.workflowLabel(settings.postMergeWorkflow)
             // One that failed between two looks is caught too.
             if let failed = runs.first(where: {
                 GitHub.isFailedRun($0.conclusion)
@@ -903,7 +903,7 @@ extension MergeQueue {
         }
 
         private mutating func postMergeRead(_ runs: [GitHub.WorkflowRun], commit: String, index: Int, now: TimeInterval) {
-            let label = MergeQueue.workflowLabel(settings.postMergeWorkflow)
+            let label = GitHub.workflowLabel(settings.postMergeWorkflow)
             let number = entries[index].number
             let again = { (engine: inout Engine) in
                 engine.read([.pushRuns(commit: commit)], after: Limits.runPollInterval, for: .postMerge(commit: commit))
@@ -922,7 +922,7 @@ extension MergeQueue {
                 }
                 return again(&self)
             }
-            if run.conclusion?.lowercased() == "success" {
+            if GitHub.isSucceededRun(run.conclusion) {
                 note("The \(label) of #\(number) succeeded")
                 return finishEntry(index)
             }
@@ -936,7 +936,7 @@ extension MergeQueue {
         private mutating func postMergeFailed(
             _ run: GitHub.WorkflowRun, commit: String, baseRuns: [GitHub.WorkflowRun], comparison: Comparison?, index: Int
         ) {
-            let label = MergeQueue.workflowLabel(settings.postMergeWorkflow)
+            let label = GitHub.workflowLabel(settings.postMergeWorkflow)
             let number = entries[index].number
             let base = settings.baseBranch
             // GitHub not knowing the merge commit on the base any more: moved too.

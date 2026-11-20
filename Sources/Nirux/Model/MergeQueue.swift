@@ -81,16 +81,11 @@ extension MergeQueue {
             case .rerunning: return "rerunning the failed checks of \(pr)"
             case .merging: return "merging \(pr)"
             case .waitingForPostMerge:
-                return "waiting for the \(MergeQueue.workflowLabel(workflow)) of \(pr)"
+                return "waiting for the \(GitHub.workflowLabel(workflow)) of \(pr)"
             case .done: return "\(pr) merged"
             case .stopped(let reason): return "\(pr) stopped: \(reason.message)"
             }
         }
-    }
-
-    /// "nightly" for `nightly.yml`.
-    static func workflowLabel(_ workflow: String?) -> String {
-        workflow.map(GitHub.workflowLabel) ?? "post-merge workflow"
     }
 }
 

@@ -48,6 +48,16 @@ final class SessionHistoryTests: XCTestCase {
         XCTAssertEqual(SessionHistory.subtitle(of: record(name: "x", branch: "HEAD"), now: 1000) { $0 }, "just now · /repos/app.feat-x")
     }
 
+    /// The merged pull request's label is drawn as done, whatever case the
+    /// record spells its state in.
+    func testAMergedPullRequestReadsAsDoneInAnyCase() {
+        let pullRequest = { AgentSessionRecord.PullRequest(number: 112, url: "https://github.com/o/r/pull/112", state: $0) }
+        XCTAssertEqual(SessionHistory.mergedPullRequestLabel(of: record(pullRequest: pullRequest("MERGED"))), "#112 merged")
+        XCTAssertEqual(SessionHistory.mergedPullRequestLabel(of: record(pullRequest: pullRequest("merged"))), "#112 merged")
+        XCTAssertNil(SessionHistory.mergedPullRequestLabel(of: record(pullRequest: pullRequest("OPEN"))))
+        XCTAssertNil(SessionHistory.mergedPullRequestLabel(of: record()))
+    }
+
     func testAgo() {
         XCTAssertEqual(SessionHistory.ago(-5), "just now")
         XCTAssertEqual(SessionHistory.ago(59), "just now")

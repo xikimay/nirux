@@ -72,14 +72,16 @@ final class DailyPassTests: XCTestCase {
         let many = Data(("[" + (1...DailyPass.mergedLimit).map { "{\"number\": \($0), \"title\": \"t\", \"mergedAt\": \"2027-01-15T07:00:00Z\"}" }
             .joined(separator: ",") + "]").utf8)
         let repositories = ["acme/one", "acme/two", "acme/three", "acme/busy", "acme/limited", "acme/odd", "acme/wordy"]
-        let reports = DailyPass.readGitHub(repositories, window: window) { arguments in
+        let answer: @Sendable (Data) -> Result<GitHub.CLI.Output, GitHub.CLI.Failure> = { .success(.init(status: 0, standardOutput: $0, standardError: Data())) }
+        let reports = DailyPass.readGitHub(repositories, window: window) { call in
+            let arguments = call.arguments
             if arguments.contains("github.com/acme/two") { return .failure(.noAnswer("gh didn’t answer")) }
             if arguments.contains("github.com/acme/three") { return .failure(.notSignedIn("not signed in")) }
-            if arguments.contains("github.com/acme/busy") { return .success(arguments.first == "pr" ? many : Data("[]".utf8)) }
+            if arguments.contains("github.com/acme/busy") { return answer(arguments.first == "pr" ? many : Data("[]".utf8)) }
             if arguments.contains("github.com/acme/limited") { return .failure(.rateLimited(resetAt: nil)) }
-            if arguments.contains("github.com/acme/odd") { return .success(Data("<html>".utf8)) }
+            if arguments.contains("github.com/acme/odd") { return answer(Data("<html>".utf8)) }
             if arguments.contains("github.com/acme/wordy") { return .failure(.refused(status: nil, message: "Bad\n" + String(repeating: "word ", count: 100))) }
-            return .success(arguments.first == "pr" ? pulls : runs)
+            return answer(arguments.first == "pr" ? pulls : runs)
         }
         XCTAssertEqual(reports.map(\.name), repositories)
         XCTAssertEqual(reports[0].merged.map(\.number), [2])

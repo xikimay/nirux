@@ -286,8 +286,9 @@ final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
 
         var calls: [[String]] { lock.withLock { recorded } }
 
-        var cli: BranchReview.GitHubCLI {
-            BranchReview.GitHubCLI { arguments, _ in
+        var cli: GitHub.CLI.Runner {
+            { call in
+                let arguments = call.arguments
                 self.lock.withLock { self.recorded.append(arguments) }
                 if arguments.starts(with: ["pr", "list"]) {
                     self.onList()
@@ -299,8 +300,8 @@ final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
         }
     }
 
-    private func failingGitHub(status: Int32, error: String) -> BranchReview.GitHubCLI {
-        BranchReview.GitHubCLI { _, _ in .success(.init(status: status, standardOutput: Data(), standardError: Data(error.utf8))) }
+    private func failingGitHub(status: Int32, error: String) -> GitHub.CLI.Runner {
+        { _ in .success(.init(status: status, standardOutput: Data(), standardError: Data(error.utf8))) }
     }
 
     func testOpenPullRequestPicksAndFetchesItsBaseBranch() throws {
@@ -442,7 +443,7 @@ final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
         ))
         XCTAssertEqual(
             loggedOut.pullRequest,
-            .unavailable("gh couldn't list the pull requests: To get started with GitHub CLI, please run:  gh auth login")
+            .unavailable("gh couldn't list the pull requests: gh isn’t signed in to github.com")
         )
         XCTAssertEqual(loggedOut.files.map(\.path), ["Sources/App.swift"])
     }
@@ -569,7 +570,7 @@ final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
         try commit("work")
         try pushAndPointAtGitHub()
         let calledOnMain = LockedFlag()
-        let gitHub = BranchReview.GitHubCLI { _, _ in
+        let gitHub: GitHub.CLI.Runner = { _ in
             calledOnMain.set(Thread.isMainThread)
             return .success(.init(status: 0, standardOutput: Data("[]".utf8), standardError: Data()))
         }

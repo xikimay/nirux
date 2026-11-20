@@ -94,7 +94,7 @@ extension MergeQueue {
         var plan: [String] {
             let base = settings.baseBranch
             let workflow = settings.postMergeWorkflow
-            let label = MergeQueue.workflowLabel(workflow)
+            let label = GitHub.workflowLabel(workflow)
             let count = items.count
             let method = settings.mergeMethod == .squash ? "Squash and merge it" : "Merge it with a merge commit"
             var lines = [
@@ -187,7 +187,7 @@ extension MergeQueue {
     /// broken. One still running: the first merge waits for it.
     private static func baseWarnings(_ runs: [GitHub.WorkflowRun]?, settings: BoardConfig.QueueSettings) -> [String] {
         guard let workflow = settings.postMergeWorkflow, let runs else { return [] }
-        let label = MergeQueue.workflowLabel(workflow)
+        let label = GitHub.workflowLabel(workflow)
         var warnings: [String] = []
         if let last = runs.first(where: \.isCompleted), GitHub.isFailedRun(last.conclusion) {
             warnings.append("The last \(label) on \(settings.baseBranch) failed (\(Engine.short(last.headSha))"

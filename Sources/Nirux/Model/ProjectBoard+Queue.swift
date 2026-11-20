@@ -76,7 +76,7 @@ extension ProjectBoard {
         case .waitingForChecks: return "waiting for checks"
         case .rerunning: return "rerunning checks"
         case .merging: return "merging"
-        case .waitingForPostMerge: return "waiting for \(MergeQueue.workflowLabel(workflow))"
+        case .waitingForPostMerge: return "waiting for \(GitHub.workflowLabel(workflow))"
         case .done: return "merged ✓"
         case .stopped(let reason): return "stopped: \(queueStopLabel(reason, workflow: workflow))"
         }
@@ -97,7 +97,7 @@ extension ProjectBoard {
         case .update: return "update failed"
         case .checks: return "checks"
         case .merge: return "merge failed"
-        case .postMerge: return "\(MergeQueue.workflowLabel(workflow)) failed"
+        case .postMerge: return "\(GitHub.workflowLabel(workflow)) failed"
         }
     }
 }
