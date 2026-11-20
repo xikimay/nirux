@@ -246,6 +246,26 @@ struct AgentStatusMachine {
     private(set) var codexStatus: ReportedStatus?
     /// When Codex last said it works, and which `codex`: a turn started.
     private(set) var codexWorked: (at: TimeInterval, process: ProcessInstance?)?
+    /// Antigravity's current or last turn (`promptRefusal`).
+    private(set) var agyTurn: AgyTurn?
+
+    /// A turn of the `agy` `process`, from its first `working` (another
+    /// after a dialog, or redrawn, is the same turn's) to `done`, `idle` or
+    /// `error`.
+    struct AgyTurn: Equatable {
+        /// The Enter that sent its prompt, else its first `working`.
+        let startedAt: TimeInterval
+        let process: ProcessInstance?
+        /// When it last said its state.
+        var saidAt: TimeInterval
+        /// How it ended, nil while it runs: `done`, or `idle` when stopped
+        /// with Esc, or `error`. A later state (`idle` at a key) keeps it.
+        var ended: AgentProgramStatus.State?
+        /// A dialog of it waits: keys answer it until one that answers
+        /// (Enter, a number, Esc, Ctrl-C), the heartbeat dropping a
+        /// `blocked` status at the first.
+        var answering = false
+    }
 
     /// What Antigravity reported, when, from which process, and whether its
     /// wait alerted.
@@ -1432,8 +1452,14 @@ struct AgentStatusMachine {
             }
         }
         lastInputAt = time
-        if inFront == nil, keys.map(Self.sendsPrompt) ?? true { submitKeys = Array((submitKeys + [time]).suffix(Self.promptMemory)) }
-        if inFront == nil, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
+        // So does Antigravity's, which it reports itself (OSC 7501 blocked),
+        // while that agy is in front, until a key answers it.
+        let answersAgy = lastForegroundName == AgentProgramStatus.agy && agyTurn?.answering == true
+        if answersAgy, keys.map(Self.answersApproval) ?? true { agyTurn?.answering = false }
+        if inFront == nil, !answersAgy, keys.map(Self.sendsPrompt) ?? true {
+            submitKeys = Array((submitKeys + [time]).suffix(Self.promptMemory))
+        }
+        if inFront == nil, !answersAgy, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)
             if Self.mayLeaveText(keys) { lastTextInputAt = time }
@@ -1589,6 +1615,19 @@ struct AgentStatusMachine {
     ) -> AgentAttentionReason? {
         guard status != programStatus?.status || process != programStatus?.process else { return nil }
         programStatus = ReportedStatus(status: status, at: now.timeIntervalSince1970, process: process)
+        let time = now.timeIntervalSince1970
+        // A prompt sent since its turn last said something starts a new one,
+        // its end missed or not; dated by its Enter, as the keys after it are
+        // a draft agy keeps in its box.
+        let turn = agyTurn?.process == process ? agyTurn : nil
+        let enter = submitKeys.last { $0 > (turn?.saidAt ?? process?.startedAt ?? 0) && $0 <= time }
+        if status.state == .working, turn?.ended != nil || turn == nil || enter != nil {
+            agyTurn = AgyTurn(startedAt: enter ?? time, process: process, saidAt: time)
+        } else if turn != nil, turn?.ended == nil {
+            agyTurn?.saidAt = time
+            agyTurn?.answering = status.state == .blocked
+            if [.done, .idle, .error].contains(status.state) { agyTurn?.ended = status.state }
+        }
         _ = reportedState(isUserFocused: isUserFocused, now: now.timeIntervalSince1970)
         guard !isUserFocused, state == .needsAttention, status.state != .working, status.state != .idle,
               status.kind != "auth" else { return nil }
@@ -1765,6 +1804,7 @@ struct AgentStatusMachine {
         programStatus = nil
         codexStatus = nil
         codexWorked = nil
+        agyTurn = nil
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false

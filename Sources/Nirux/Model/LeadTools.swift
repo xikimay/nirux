@@ -100,8 +100,9 @@ enum LeadTools {
                 listTasks, title: "List the space's tasks",
                 description: """
                     The space's tasks and repositories: each task's title, branch, repository, agent state (working, \
-                    needs the user, asking you, stopped on an API error, silent, exited mid-turn, idle, done), pull request and checks, and the question or result it \
-                    sent you, its next step and blocker. Read it again after a /clear: Nirux keeps the state, your \
+                    needs the user, asking you, stopped on an API error, silent, exited mid-turn, idle, done), pull request and checks, the \
+                    last questions it got answered, and the question or result it sent you, its next step and blocker. Read it again after \
+                    a /clear: Nirux keeps the state, your \
                     conversation doesn't.
                     """,
                 properties: [:], required: [], readOnly: true
@@ -112,8 +113,8 @@ enum LeadTools {
                     Type a message into a task's prompt once its agent's turn is over (a follow-up, an answer it \
                     didn't ask for, a slash command). Any task of this space: one that doesn't report to you (a \
                     sub-task, a task the user started) gets it under a line saying it comes from you (so no \
-                    slash command); its questions and result still go to whoever started it. Claude Code and \
-                    Codex tasks only: Codex gets it through its own queue, as text (no slash command).
+                    slash command); its questions and result still go to whoever started it. Claude Code, \
+                    Codex and Antigravity tasks only; slash commands are Claude Code's (Codex gets the text through its queue).
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],
