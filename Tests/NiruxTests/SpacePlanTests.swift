@@ -103,14 +103,19 @@ final class SpacePlanTests: XCTestCase {
         }
     }
 
-    /// A user's move or a new size closes the plan, which would show what no
-    /// longer is; a layout that changes nothing leaves it. An empty space
+    /// A change to what the plan shows closes it, which would show what no
+    /// longer is: a move, a new size, a workspace it doesn't list. A layout
+    /// that changes nothing, or a new name, leaves it. Closed by a layout,
+    /// it gives the keyboard back to the column on screen. An empty space
     /// has no plan.
-    func testAMoveOrANewSizeClosesThePlan() throws {
-        try withWorkspaces { shell, _ in
+    func testAChangeToWhatItShowsClosesThePlan() throws {
+        try withWorkspaces { shell, workspaces in
             toggle(shell)
             shell.relayout(animated: false)
             XCTAssertNotNil(shell.spacePlan, "a layout that changes nothing")
+            workspaces[0].title = "renamed"
+            shell.relayout(animated: true)
+            XCTAssertNotNil(shell.spacePlan, "a new name")
             shell.focusColumn(.right)
             XCTAssertNil(shell.spacePlan, "a move")
             XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
@@ -119,6 +124,13 @@ final class SpacePlanTests: XCTestCase {
             shell.setFrameSize(NSSize(width: shell.frame.width - 100, height: shell.frame.height))
             shell.relayout(animated: false)
             XCTAssertNil(shell.spacePlan, "a new size")
+            let onScreen = try XCTUnwrap(shell.activeWorkspace?.columns[safe: shell.activeWorkspace?.focusedIndex ?? 0])
+            XCTAssertTrue((shell.window?.firstResponder as? NSView)?.isDescendant(of: onScreen.view) == true, "the keyboard back")
+
+            toggle(shell)
+            shell.addWorkspace(title: "background", cwd: NSTemporaryDirectory(), activate: false)
+            shell.relayout(animated: false)
+            XCTAssertNil(shell.spacePlan, "a workspace it doesn't list")
 
             shell.workspaceStore.createProfile(named: "Empty", select: true)
             shell.relayout(animated: false)
@@ -236,6 +248,59 @@ final class SpacePlanTests: XCTestCase {
         }
     }
 
+    /// However many workspaces, every row shows whole; one closing has none.
+    /// An archived one reads as the rail would show it.
+    func testEveryRowShowsHoweverManyWorkspaces() throws {
+        try withWorkspaces { shell, workspaces in
+            shell.window?.setContentSize(NSSize(width: 1200, height: 320))
+            for index in 0..<7 { shell.addWorkspace(title: "more \(index)", cwd: NSTemporaryDirectory(), activate: false) }
+            let closing = try XCTUnwrap(shell.workspaces.last)
+            closing.isClosing = true
+            workspaces[2].isInactive = true
+            shell.relayout(animated: false)
+            shell.updateSidebar(snapshot: ProcessSnapshot())
+            toggle(shell)
+            let plan = try XCTUnwrap(shell.spacePlan)
+            let listed = shell.visibleWorkspaceIndices.map { shell.workspaces[$0] }.filter { !$0.isClosing }
+            XCTAssertEqual(plan.rows.map(\.workspaceID), listed.map(\.id), "every one but the one closing")
+            XCTAssertGreaterThan(listed.count, 8)
+            XCTAssertTrue(plan.rows.allSatisfy { plan.bounds.contains($0.picture.frame) }, "each whole")
+            let icons = plan.names.subviews.compactMap { $0 as? StateIconView }
+            XCTAssertEqual(icons.filter { $0.label != nil }.count, plan.rows.count, "each with its initials, as the rail names it")
+        }
+    }
+
+    /// ⌥⌘→ or a new workspace closes the plan before freezing what shows:
+    /// the work leaves, not the plan over it.
+    func testASpaceSwitchOrANewWorkspaceLeavesThePlanOutOfItsPicture() throws {
+        try withWorkspaces { shell, _ in
+            let first = shell.activeProfileID
+            shell.workspaceStore.createProfile(named: "Second", select: true)
+            shell.addWorkspace(title: "second space", cwd: NSTemporaryDirectory())
+            shell.selectProfile(first)
+            shell.relayout(animated: false)
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+
+            toggle(shell)
+            var ring = Theme.Radius.column * (try XCTUnwrap(shell.spacePlan)).scale + 4
+            shell.focusSpace(.next)
+            XCTAssertNil(shell.spacePlan)
+            let leaving = try XCTUnwrap(shell.crossingPictures.first)
+            XCTAssertFalse(Self.holdsRing(leaving.content, radius: ring), "the work leaves, not the plan")
+
+            shell.selectProfile(first)
+            shell.relayout(animated: false)
+            toggle(shell)
+            ring = Theme.Radius.column * (try XCTUnwrap(shell.spacePlan)).scale + 4
+            shell.addWorkspace(title: "new", cwd: NSTemporaryDirectory())
+            XCTAssertNil(shell.spacePlan)
+            let slide = try XCTUnwrap(shell.viewport.subviews.compactMap { $0 as? FrozenView }.first)
+            XCTAssertFalse(Self.holdsRing(slide.content, radius: ring), "nor under a new workspace")
+        }
+    }
+
     /// Every workspace the plan lists draws once before it shows: their
     /// terminals rested off screen. Asked again meanwhile, or with a
     /// workspace that didn't draw, it doesn't show.
@@ -269,6 +334,11 @@ final class SpacePlanTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// Whether `layer` or one under it is the plan's ring, by its width and radius.
+    private static func holdsRing(_ layer: CALayer, radius: CGFloat) -> Bool {
+        (layer.borderWidth == 2 && abs(layer.cornerRadius - radius) < 0.01) || (layer.sublayers ?? []).contains { holdsRing($0, radius: radius) }
+    }
+
     /// The shell's timed steps, held (see `TimedSteps`).
     private var steps: TimedSteps?
 
@@ -278,9 +348,9 @@ final class SpacePlanTests: XCTestCase {
         settle(shell)
     }
 
-    /// The step after which the plan shows, once its workspaces drew.
+    /// The steps held until the plan shows, once its workspaces drew.
     private func settle(_ shell: NiruxShellView) {
-        if !shell.planDrawing.isEmpty { steps?.runNext() }
+        while !shell.planDrawing.isEmpty, steps?.runNext() == true {}
     }
 
     private static func letMove(_ shell: NiruxShellView) {
