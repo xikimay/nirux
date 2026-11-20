@@ -3,10 +3,27 @@ import AppKit
 /// Depth study P5: ⌥⌘↑ shows the space as a plan (`SpacePlanView`) over the
 /// viewport, the live views hidden and their terminals resting under it.
 extension NiruxShellView {
+    /// How far fingers close (or open) before the plan shows (or goes to a
+    /// card): a quarter of their span.
+    static let pinchThreshold: CGFloat = 0.25
+
+    /// Fingers closing over the work show the plan, once a pinch; false
+    /// elsewhere (the sidebar, the status bar), which the pinch doesn't reach.
+    @discardableResult
+    func pinched(by magnification: CGFloat, phase: NSEvent.Phase, at point: NSPoint) -> Bool {
+        guard viewport.frame.contains(point) else { return false }
+        if pinch.moved(by: magnification, phase: phase, past: -Self.pinchThreshold), spacePlan == nil, planDrawing.isEmpty {
+            toggleSpacePlan()
+        }
+        return true
+    }
+
     /// The plan shows once every listed workspace drew: their terminals rest
     /// while off screen, or never drew since launch. Asked again meanwhile,
     /// it doesn't.
     func toggleSpacePlan() {
+        // A pinch under way is done: the plan came or went.
+        pinch.end()
         if spacePlan != nil { return closeSpacePlan(going: nil) }
         if !planDrawing.isEmpty { return endPlanDrawing() }
         guard activeWorkspace != nil else { return }
@@ -38,7 +55,11 @@ extension NiruxShellView {
             labels: planLabels(), onScreen: onScreen
         )
         guard !plan.rows.isEmpty else { return }
-        plan.onClose = { [weak self] target in self?.closeSpacePlan(going: target) }
+        // A plan already gone closes no other.
+        plan.onClose = { [weak self, weak plan] target in
+            guard let self, let plan, spacePlan === plan else { return }
+            closeSpacePlan(going: target)
+        }
         viewport.addSubview(plan)
         spacePlan = plan
         verticalStrip.alphaValue = 0

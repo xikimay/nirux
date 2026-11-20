@@ -525,7 +525,13 @@ the text stays flat and sharp.
   shows (a workspace, its columns, the card in focus), another space or a
   new size closes it, and the keyboard goes back to the column on screen. A
   new name doesn't. However many workspaces, every row shows: the gaps
-  shrink. The pinch and the transitions come next.
+  shrink. A pinch does the same: fingers closing over the work past a
+  quarter of their span, within one pinch, show the plan, and opening them
+  in it goes to the card under them, else to the chosen one; each pinch
+  acts once, whichever view its events reach. A column that zooms itself
+  keeps its own pinch: Branch Review's page does; whether the editor's
+  WebKit, which doesn't zoom, passes it on wasn't checked in the app. The
+  transitions come next.
 - **Frozen pictures (study P4):** a crossing, or a new workspace's slide,
   moves pictures of what the viewport showed, frozen in
   about 6 ms (`FrozenView`): a clone of its layers, each sharing its

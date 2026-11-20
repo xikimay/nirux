@@ -35,6 +35,8 @@ final class NiruxShellView: NSView {
     var spacePlan: SpacePlanView?
     var planDrawing: Set<String> = []
     var spacePlanGeneration = 0
+    /// The pinch on the work under way (NiruxShellView+SpacePlan).
+    var pinch = PinchGesture()
     /// The size of the workspace on screen, as `relayout` lays it out.
     var workspaceViewportSize: NSSize {
         let statusH = statusBar.hasContent ? StatusBarView.height : 0
@@ -658,6 +660,11 @@ final class NiruxShellView: NSView {
                 self.redrawAllTerminals()
             }
         }
+    }
+
+    /// A pinch the views under the fingers leave (a terminal does).
+    override func magnify(with event: NSEvent) {
+        if !pinched(by: event.magnification, phase: event.phase, at: convert(event.locationInWindow, from: nil)) { super.magnify(with: event) }
     }
 
     override func viewDidMoveToWindow() {

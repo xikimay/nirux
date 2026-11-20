@@ -135,6 +135,82 @@ final class SpacePlanTests: XCTestCase {
         }
     }
 
+    /// Fingers closing on the work past a quarter of their span, within one
+    /// pinch, show the plan, closing on while its workspaces draw; opening
+    /// them in it goes to the card under them, else to the chosen one.
+    func testAPinchShowsThePlanAndAnotherGoesToTheCardUnderIt() throws {
+        try withWorkspaces { shell, workspaces in
+            let work = NSPoint(x: shell.viewport.frame.midX, y: shell.viewport.frame.midY)
+            shell.pinched(by: -0.2, phase: .began, at: work)
+            shell.pinched(by: 0, phase: .ended, at: work)
+            shell.pinched(by: -0.1, phase: .began, at: work)
+            XCTAssertTrue(shell.planDrawing.isEmpty, "not that far within one pinch")
+            shell.pinched(by: -0.2, phase: .changed, at: work)
+            shell.pinched(by: -0.1, phase: .changed, at: work)
+            settle(shell)
+            let plan = try XCTUnwrap(shell.spacePlan, "past a quarter, closing on")
+            shell.pinched(by: -0.1, phase: .changed, at: work)
+            XCTAssertIdentical(shell.spacePlan, plan, "once a pinch")
+            shell.pinched(by: 0, phase: .ended, at: work)
+
+            plan.pinched(by: 0.1, phase: .began, at: .zero)
+            XCTAssertNotNil(shell.spacePlan, "not that far")
+            let card = try XCTUnwrap(plan.rows.last?.cards.first)
+            plan.pinched(by: 0.2, phase: .changed, at: NSPoint(x: card.midX, y: card.midY))
+            XCTAssertNil(shell.spacePlan)
+            XCTAssertIdentical(shell.activeWorkspace, workspaces.last, "the card under the fingers")
+
+            shell.pinched(by: -0.3, phase: .began, at: work)
+            settle(shell)
+            let again = try XCTUnwrap(shell.spacePlan)
+            again.keyDown(with: try Self.key(126))
+            let chosen = again.rows[again.chosen.row].workspaceID
+            XCTAssertNotEqual(chosen, workspaces.last?.id)
+            again.pinched(by: 0.3, phase: .began, at: .zero)
+            XCTAssertEqual(shell.activeWorkspace?.id, chosen, "away from any card, the chosen one")
+        }
+    }
+
+    /// Each pinch acts once, whichever view its events reach: the rest of
+    /// one that went to a card, or met Escape, opens nothing; a plan gone
+    /// closes no other; over the sidebar a pinch is AppKit's.
+    func testOnePinchActsOnce() throws {
+        try withWorkspaces { shell, _ in
+            let work = NSPoint(x: shell.viewport.frame.midX, y: shell.viewport.frame.midY)
+            shell.pinched(by: -0.3, phase: .began, at: work)
+            settle(shell)
+            let plan = try XCTUnwrap(shell.spacePlan)
+            // The fingers open on a card: the plan takes those events, then
+            // the shell the rest of them, the plan gone.
+            let card = try XCTUnwrap(plan.rows.first?.cards.first)
+            plan.pinched(by: 0.3, phase: .began, at: NSPoint(x: card.midX, y: card.midY))
+            XCTAssertNil(shell.spacePlan)
+            shell.pinched(by: -0.02, phase: .changed, at: work)
+            shell.pinched(by: -0.3, phase: .changed, at: work)
+            XCTAssertTrue(shell.planDrawing.isEmpty && shell.spacePlan == nil, "the rest of that pinch opens nothing")
+            shell.pinched(by: 0, phase: .ended, at: work)
+
+            shell.pinched(by: -0.3, phase: .began, at: work)
+            settle(shell)
+            let second = try XCTUnwrap(shell.spacePlan)
+            plan.pinched(by: 0.3, phase: .began, at: .zero)
+            XCTAssertIdentical(shell.spacePlan, second, "a plan gone closes no other")
+            second.keyDown(with: try Self.key(53))
+            XCTAssertNil(shell.spacePlan)
+            shell.pinched(by: -0.3, phase: .changed, at: work)
+            XCTAssertTrue(shell.planDrawing.isEmpty, "Escape mid-pinch: the rest of it opens nothing")
+            shell.pinched(by: 0, phase: .ended, at: work)
+
+            XCTAssertFalse(shell.pinched(by: -0.3, phase: .began, at: NSPoint(x: shell.sidebar.frame.midX, y: shell.sidebar.frame.midY)), "over the sidebar")
+            XCTAssertTrue(shell.planDrawing.isEmpty)
+            shell.pinched(by: -0.3, phase: .began, at: work)
+            XCTAssertFalse(shell.planDrawing.isEmpty, "a new pinch over the work")
+            shell.pinched(by: 0, phase: .ended, at: work)
+            shell.pinched(by: -0.3, phase: .began, at: work)
+            XCTAssertFalse(shell.planDrawing.isEmpty, "another while it draws doesn't cancel it")
+        }
+    }
+
     /// However many workspaces, every row shows whole; one closing has none.
     /// An archived one reads as the rail would show it.
     func testEveryRowShowsHoweverManyWorkspaces() throws {
