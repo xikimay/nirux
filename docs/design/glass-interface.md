@@ -520,11 +520,14 @@ the text stays flat and sharp.
   (`FrozenView`, terminals copied that small on the GPU), its state icon,
   name and status line at their own size beside it. The card on screen
   wears a ring; the arrows move it, Return or a click goes there at once,
-  Escape or ⌥⌘↑ goes back. Under it the live views hide and no terminal
-  draws; a user's move, another space or workspace, or a new size closes
-  it. A pinch does the same: fingers closing on the work past a quarter of
-  their span, within one pinch, show the plan, and opening them in it goes
-  to the card under them, else to the chosen one; a column that zooms
+  Escape or ⌥⌘↑ goes back; it holds the keys, none reaches a terminal.
+  Under it the live views hide and no terminal draws; a change to what it
+  shows (a workspace, its columns, the card in focus), another space or a
+  new size closes it, and the keyboard goes back to the column on screen. A
+  new name doesn't. However many workspaces, every row shows: the gaps
+  shrink. A pinch does the same: fingers closing on the work past a quarter
+  of their span, within one pinch, show the plan, and opening them in it
+  goes to the card under them, else to the chosen one; a column that zooms
   itself (a page) keeps its own pinch. The transitions come next.
 - **Frozen pictures (study P4):** a crossing, or a new workspace's slide,
   moves pictures of what the viewport showed, frozen in

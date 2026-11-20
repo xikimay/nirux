@@ -46,7 +46,7 @@ extension NiruxShellView {
     private func showSpacePlan() {
         guard let onScreen = activeWorkspace else { return }
         let plan = SpacePlanView(
-            frame: viewport.bounds, spaceID: activeProfileID, workspaces: visibleWorkspaceIndices.map { workspaces[$0] },
+            frame: viewport.bounds, spaceID: activeProfileID, workspaces: SpacePlanView.listing(planWorkspaces),
             labels: planLabels(), onScreen: onScreen
         )
         guard !plan.rows.isEmpty else { return }
@@ -58,11 +58,11 @@ extension NiruxShellView {
         window?.makeFirstResponder(plan)
     }
 
-    /// The plan goes; to `target` at once, else back to what showed.
-    /// `focusing`: false for a layout's close, whose caller keeps the
-    /// keyboard where it was.
-    func closeSpacePlan(going target: (workspaceID: String, column: Int)?, focusing: Bool = true) {
+    /// The plan goes; to `target` at once, else back to what showed. The
+    /// keyboard it held goes back to the column on screen.
+    func closeSpacePlan(going target: (workspaceID: String, column: Int)?) {
         guard let plan = spacePlan else { return }
+        let heldKeyboard = window?.firstResponder === plan
         spacePlan = nil
         plan.removeFromSuperview()
         verticalStrip.alphaValue = 1
@@ -72,24 +72,28 @@ extension NiruxShellView {
             return refreshAfterWorkspaceSelection(animated: false)
         }
         syncTerminalOcclusion()
-        if focusing { focusActiveTerminal(in: window) }
+        if heldKeyboard { focusActiveTerminal(in: window) }
     }
 
-    /// A layout that moves something (a user's action), or changes the
-    /// space, the workspace on screen or the viewport's size, closes the
-    /// plan: it would show what no longer is.
-    func closeSpacePlanIfStale(animated: Bool, viewport size: NSSize) {
+    /// A change to what the plan lists (a workspace, its columns, their
+    /// sizes or order), to the space, the workspace on screen or the
+    /// viewport's size closes it: it would show what no longer is. A name
+    /// changing doesn't.
+    func closeSpacePlanIfStale(viewport size: NSSize) {
         guard let plan = spacePlan else { return }
-        if animated || plan.frame.size != size || plan.spaceID != activeProfileID || plan.workspaceID != activeWorkspace?.id {
-            closeSpacePlan(going: nil, focusing: false)
+        if plan.frame.size != size || plan.spaceID != activeProfileID || plan.workspaceID != activeWorkspace?.id
+            || plan.listed != SpacePlanView.listing(planWorkspaces).map(SpacePlanView.Listed.init) {
+            closeSpacePlan(going: nil)
         }
     }
 
-    /// Each row's icon, name and status line, as the rail shows them.
+    /// The space's workspaces, in the order they're listed.
+    private var planWorkspaces: [WorkspaceState] { visibleWorkspaceIndices.map { workspaces[$0] } }
+
+    /// Each row's icon, name and status line, as the rail shows them; the
+    /// archived ones too, which the folded rail leaves out.
     private func planLabels() -> [String: SpacePlanView.Label] {
-        let content = sidebar.railContent
-        let items = (content.lead.map { [$0] } ?? []) + content.tasks
-        return Dictionary(items.map { item in
+        Dictionary(sidebar.railItems.map { item in
             (item.id, SpacePlanView.Label(title: item.title, icon: item.icon, initials: item.label, detail: item.detail))
         }) { first, _ in first }
     }
