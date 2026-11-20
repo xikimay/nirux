@@ -1215,6 +1215,8 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             defer { agy.agent.remove() }
             harness.shell.missionWaits.startWait = 0.2
             report(.working, in: agy.column)
+            let slash = try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity task", "message": "/clear"], lead: lead)
+            XCTAssertTrue(slash.isError && slash.text.contains("slash command"), slash.text)
             let told = try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity task", "message": "Review this."], lead: lead)
             XCTAssertFalse(told.isError, told.text)
             harness.shell.typeMissionMessages()

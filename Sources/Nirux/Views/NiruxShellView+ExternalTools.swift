@@ -416,10 +416,10 @@ extension NiruxShellView {
           "$NIRUX_CLI_PATH" --mission receive
           ```
 
-        To give a Claude Code, Codex or Antigravity child more work (a follow-up, `/code-review`),
-        even after it completed, name it by branch. Nirux types the message and Enter into a Claude
-        Code or Antigravity child's prompt, or hands it to a Codex child's own queue, and the
-        Mission is active again:
+        To give a Claude Code, Codex or Antigravity child more work (a follow-up, or for Claude Code
+        a slash command such as `/code-review`), even after it completed, name it by branch. Nirux
+        types the message and Enter into a Claude Code or Antigravity child's prompt, or hands it to a
+        Codex child's own queue, and the Mission is active again:
 
         ```bash
         "$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "<instruction or /command>"

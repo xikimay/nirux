@@ -255,9 +255,12 @@ struct AgentStatusMachine {
     struct AgyTurn: Equatable {
         let startedAt: TimeInterval
         let process: ProcessInstance?
-        var open = true
-        /// It said `done`: not stopped with Esc, which says `idle`.
-        var done = false
+        /// How it ended, nil while it runs: `done`, or `idle` when stopped
+        /// with Esc, or `error`. A later state (`idle` at a key) keeps it.
+        var ended: AgentProgramStatus.State?
+        /// A dialog of it waits: keys answer it, the second and later too
+        /// (the heartbeat drops a `blocked` status at the first).
+        var answering = false
     }
 
     /// What Antigravity reported, when, from which process, and whether its
@@ -1447,7 +1450,7 @@ struct AgentStatusMachine {
         lastInputAt = time
         if inFront == nil, keys.map(Self.sendsPrompt) ?? true { submitKeys = Array((submitKeys + [time]).suffix(Self.promptMemory)) }
         // So does Antigravity's, which it reports itself (OSC 7501 blocked).
-        let answersAgy = programStatus?.status.state == .blocked
+        let answersAgy = agyTurn?.answering == true
         if inFront == nil, !answersAgy, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)
@@ -1604,16 +1607,11 @@ struct AgentStatusMachine {
     ) -> AgentAttentionReason? {
         guard status != programStatus?.status || process != programStatus?.process else { return nil }
         programStatus = ReportedStatus(status: status, at: now.timeIntervalSince1970, process: process)
-        switch status.state {
-        case .working where agyTurn?.process != process || agyTurn?.open != true:
-            agyTurn = AgyTurn(startedAt: now.timeIntervalSince1970, process: process)
-        case .done where agyTurn?.process == process:
-            agyTurn?.open = false
-            agyTurn?.done = true
-        case .idle where agyTurn?.process == process, .error where agyTurn?.process == process:
-            agyTurn?.open = false
-        default:
-            break
+        if agyTurn?.process != process || agyTurn?.ended != nil {
+            if status.state == .working { agyTurn = AgyTurn(startedAt: now.timeIntervalSince1970, process: process) }
+        } else {
+            agyTurn?.answering = status.state == .blocked
+            if [.done, .idle, .error].contains(status.state) { agyTurn?.ended = status.state }
         }
         _ = reportedState(isUserFocused: isUserFocused, now: now.timeIntervalSince1970)
         guard !isUserFocused, state == .needsAttention, status.state != .working, status.state != .idle,

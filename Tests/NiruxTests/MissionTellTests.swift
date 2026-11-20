@@ -227,7 +227,8 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(tell("/code-review", in: other), 4, "Nirux delivers nothing to an agent it doesn't know")
         XCTAssertTrue(try queuedEvents(in: other).isEmpty)
         let agy = try makeFixture(childAgentKind: "agy")
-        XCTAssertEqual(tell("/code-review", in: agy), 3, "typed into Antigravity's prompt")
+        XCTAssertEqual(tell("/code-review", in: agy), 2, "agy runs a slash command itself, with no turn to end")
+        XCTAssertEqual(tell("Review the diff.", in: agy), 3, "typed into Antigravity's prompt")
         XCTAssertEqual(try queuedEvents(in: agy).map(\.kind), [.instruction])
         let codex = try makeFixture(childAgentKind: "codex")
         XCTAssertEqual(tell("/code-review", in: codex), 3, "Codex takes it through its own queue")
@@ -493,10 +494,24 @@ final class MissionTellTests: XCTestCase {
         report(.working, at: 11.6)
         report(.done, at: 11.7)
         XCTAssertNil(refusal())
+        // A dialog answered with several keys: the heartbeat drops its status at the first.
+        report(.working, at: 11.8)
+        report(.blocked, kind: "question", at: 11.85)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 11.86), keys: Data("\u{1B}[B".utf8))
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 11.87))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 11.88), keys: Data("\r".utf8))
+        report(.working, at: 11.9)
+        report(.done, at: 11.95)
+        XCTAssertNil(refusal(), "every key that answered its dialog")
+        // ^Z then fg drops its status, not its turn.
+        _ = machine.tick(fgName: "zsh", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 11.96))
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 11.97))
+        XCTAssertNil(refusal(), "its turn ended done")
         report(.error, at: 12)
         XCTAssertEqual(refusal(), .failedTurn)
         report(.done, at: 13, from: ProcessInstance(pid: 9, startedAt: t0))
-        XCTAssertEqual(refusal(), .noPromptYet, "another agy's word")
+        XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: t0), name: "agy", arguments: ["agy"])),
+                       .noPromptYet, "its own turn, not another agy's")
     }
 
     func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {

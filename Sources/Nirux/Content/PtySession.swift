@@ -1060,6 +1060,11 @@ final class PtySession: @unchecked Sendable {
         return worked.process.map { $0 == process } ?? (process.startedAt <= worked.at)
     }
 
+    /// See `AgentStatusMachine.agyFacts`.
+    func agyFacts(now: TimeInterval) -> String {
+        state.machine.agyFacts(now: now)
+    }
+
     /// See `AgentStatusMachine.codexFacts`.
     func codexFacts(now: TimeInterval) -> String {
         state.machine.codexFacts(now: now)

@@ -136,14 +136,15 @@ extension AgentStatusMachine {
     private func agyPromptRefusal(_ agy: ForegroundProcess?, runningSince time: TimeInterval) -> AgentPromptRefusal? {
         guard let agy, agy.name == AgentProgramStatus.agy, !AgentHookCenter.isHeadlessAgy(agy) else { return .noClaude }
         guard agy.instance.startedAt <= time else { return .restarted }
-        guard let reported = programStatus, reported.process == agy.instance, let turn = agyTurn, turn.process == agy.instance
-        else { return .noPromptYet }
-        switch reported.status.state {
-        case .working: return .working
-        case .blocked: return .dialog
-        case .error: return .failedTurn
-        case .idle where !turn.done: return .draft
-        case .idle, .done: return lastDraftInputAt > turn.startedAt ? .draft : nil
+        guard let turn = agyTurn, turn.process == agy.instance else { return .noPromptYet }
+        // Its last word, else how its turn ended (another process in front, or
+        // a silence, drops the status, not the turn).
+        switch programStatus.flatMap({ $0.process == agy.instance ? $0.status.state : nil }) ?? turn.ended {
+        case .working?, nil: return .working
+        case .blocked?: return .dialog
+        case .error?: return .failedTurn
+        case .idle? where turn.ended != .done: return .draft
+        case .idle?, .done?: return lastDraftInputAt > turn.startedAt ? .draft : nil
         }
     }
 
@@ -207,6 +208,14 @@ extension AgentStatusMachine {
         case .blocked: return .dialog
         case .error: return .failedTurn
         }
+    }
+
+    /// What `promptRefusal` reads for an `agy`, for the log.
+    func agyFacts(now: TimeInterval) -> String {
+        func age(_ time: TimeInterval?) -> String { time.map { String(Int(min(max(now - $0, 0), 1e7))) + "s" } ?? "-" }
+        let draft = lastDraftInputAt > (agyTurn?.startedAt ?? 0) ? age(lastDraftInputAt) : "-"
+        return "agy=\(programStatus?.status.state.rawValue ?? "-")/\(age(programStatus?.at)) "
+            + "turn=\(age(agyTurn?.startedAt))/\(agyTurn?.ended?.rawValue ?? "open") draft=\(draft)"
     }
 
     /// What `codexQueueRefusal` reads, for the log.

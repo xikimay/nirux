@@ -113,7 +113,7 @@ enum LeadTools {
                     didn't ask for, a slash command). Any task of this space: one that doesn't report to you (a \
                     sub-task, a task the user started) gets it under a line saying it comes from you (so no \
                     slash command); its questions and result still go to whoever started it. Claude Code, \
-                    Codex and Antigravity tasks only: Codex gets it through its own queue, as text (no slash command).
+                    Codex and Antigravity tasks only; slash commands are Claude Code's (Codex gets the text through its queue).
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],

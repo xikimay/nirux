@@ -633,6 +633,10 @@ extension NiruxShellView {
         guard let agent = mission.childAgentName else {
             return answer(Self.deliversOnlyToKnownAgents(workspace.title, runs: mission.childAgentKind), true)
         }
+        if agent == "Antigravity", message.hasPrefix("/") {
+            return answer("Antigravity runs a slash command itself, with no turn to end, which would hold the messages after it: "
+                + "ask “\(workspace.title)” in words instead.", true)
+        }
         if agent == "Codex", missionEnd(mission, parent: false)?.column?.runsUnprovableCodex(snapshot: ProcessSnapshot()) == true {
             return answer("“\(workspace.title)”’s Codex was started without a prompt, so Nirux can't tell which of its conversations "
                 + "is the task's: give the message to the user instead.", true)

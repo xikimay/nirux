@@ -55,7 +55,7 @@ enum TaskTools {
                 description: """
                     Type a message into one of your sub-tasks' prompt once its agent's turn is over (more work, an \
                     answer it didn't ask for, a slash command such as /code-review). Claude Code, Codex and \
-                    Antigravity sub-tasks only: Codex gets it through its own queue, as text (no slash command).
+                    Antigravity sub-tasks only; slash commands are Claude Code's (Codex gets the text through its queue).
                     """,
                 properties: [
                     "task": ["type": "string", "description": subtaskDescription],
