@@ -10,7 +10,7 @@ extension NiruxShellView {
     /// In macOS's own glass (26 and later, which refracts what passes under
     /// it), above Opaque.
     var barFloats: Bool {
-        sideEffects.drawsGlass() && sideEffects.drawnTransparency(interfaceTransparency).usesGlass
+        sideEffects.drawsGlass() && (ZZ("opaquePasses") || sideEffects.drawnTransparency(interfaceTransparency).usesGlass)
     }
 
     /// The title band over the shell and the bar in it, in the shell's
@@ -35,8 +35,8 @@ extension NiruxShellView {
         guard barFloats, agentLightsMayMove, let place = titleBand else { return }
         let cover = TitleBandCover(frame: place.band, level: sideEffects.drawnTransparency(interfaceTransparency))
         titleBandCover = cover
-        addSubview(cover)
-        for workspace in workspaces where !floors.contains(where: { $0 === workspace }) { workspace.containerView.alphaValue = 0 }
+        if !ZZ("noCover") { addSubview(cover) }
+        for workspace in workspaces where !ZZ("rowsShown") && !floors.contains(where: { $0 === workspace }) { workspace.containerView.alphaValue = 0 }
         reachUnderBar(place)
     }
 
@@ -44,7 +44,7 @@ extension NiruxShellView {
     /// floats and the interface may move.
     func keepUnderBar() {
         guard titleBandCover != nil else { return }
-        guard barFloats, agentLightsMayMove, let place = titleBand else { return endUnderBar() }
+        guard !ZZ("layoutEnds"), barFloats, agentLightsMayMove, let place = titleBand else { return endUnderBar() }
         reachUnderBar(place)
     }
 
@@ -53,9 +53,9 @@ extension NiruxShellView {
     /// where the bar lies.
     private func reachUnderBar(_ place: (band: NSRect, bar: NSRect)) {
         titleBandCover?.frame = place.band
-        titleBandCover?.open(NSRect(origin: NSPoint(x: place.bar.minX - place.band.minX, y: place.bar.minY - place.band.minY), size: place.bar.size))
+        if !ZZ("noOpening") { titleBandCover?.open(NSRect(origin: NSPoint(x: place.bar.minX - place.band.minX, y: place.bar.minY - place.band.minY), size: place.bar.size)) }
         let reach = place.band.maxY - viewport.frame.maxY
-        if reach > 0 { viewport.frame.size.height += reach }
+        if reach > 0, !ZZ("noReach") { viewport.frame.size.height += reach }
     }
 
     /// At rest: the viewport's top at the shell's, no cover, every row

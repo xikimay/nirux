@@ -38,7 +38,7 @@ extension NiruxShellView {
         if activate {
             closeSpacePlan(going: nil, animated: false)
             endSpaceCrossing()
-            endUnderBar()
+            if !ZZ("slideTall") { endUnderBar() }
         }
         let snapshot = activate && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
 
@@ -419,7 +419,7 @@ extension NiruxShellView {
         closeSpacePlan(going: nil, animated: false)
         endSpaceCrossing()
         endUnderGlass()
-        endUnderBar()
+        if !ZZ("crossingTall") { endUnderBar() }
         let leaving = crosses && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }

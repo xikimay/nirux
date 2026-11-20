@@ -28,7 +28,7 @@ extension NiruxShellView {
     /// stays put.
     var viewportRestFrame: NSRect {
         let reach = -viewport.bounds.minX
-        let above = max(0, viewport.frame.maxY - bounds.maxY)
+        let above = ZZ("restGrows") ? 0 : max(0, viewport.frame.maxY - bounds.maxY)
         return NSRect(x: viewport.frame.minX + reach, y: viewport.frame.minY, width: viewport.frame.width - reach, height: viewport.frame.height - above)
     }
 
@@ -115,7 +115,7 @@ extension NiruxShellView {
     /// ends at once.
     func stillUnderGlass() {
         if passingUnderRail != nil || workspaces.contains(where: { !$0.containerView.clipsToBounds }) { endUnderGlass() }
-        endUnderBar()
+        if !ZZ("stillIgnored") { endUnderBar() }
     }
 
     /// At rest: the viewport where it lies, every workspace clipping its

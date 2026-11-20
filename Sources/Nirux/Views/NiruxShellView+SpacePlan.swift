@@ -57,7 +57,7 @@ extension NiruxShellView {
         guard let onScreen = activeWorkspace else { return }
         // What the work shows, at rest and at its size: the opening starts
         // sharp.
-        endUnderBar()
+        if !ZZ("planTall") { endUnderBar() }
         let shown = agentLightsMayMove ? FrozenView.freeze(viewport) : nil
         let plan = SpacePlanView(
             frame: viewport.bounds, spaceID: activeProfileID, workspaces: SpacePlanView.listing(planWorkspaces),

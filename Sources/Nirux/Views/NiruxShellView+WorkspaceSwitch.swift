@@ -190,7 +190,7 @@ extension NiruxShellView {
 
     /// The floors back in the strip: no move, no offset, no plate, no shade.
     private func removeFloors() {
-        endUnderBar()
+        if !ZZ("notEnded") { endUnderBar() }
         guard let floors = workspaceSwitch.floors else { return }
         workspaceSwitch.floors = nil
         for workspace in workspaces where [floors.leaving, floors.arriving].contains(workspace.id) {

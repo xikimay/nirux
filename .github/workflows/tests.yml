@@ -54,5 +54,11 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: P6 PR 2's gate: its tests' mutants, then ten runs of
+      # the new class and its neighbours.
+      - name: Flake gate
+        run: |
+          status=0
+          scripts/mutants-class.sh NiruxTests.UnderBarTests noReach noCover noOpening rowsShown notEnded layoutEnds opaquePasses stillIgnored restGrows slideTall planTall crossingTall || status=1
+          scripts/repeat-class.sh NiruxTests.UnderBarTests 10 3 NiruxTests.WorkspaceSwitchTests NiruxTests.UnderGlassTests || status=1
+          exit $status
