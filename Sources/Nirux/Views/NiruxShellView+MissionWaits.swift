@@ -61,6 +61,10 @@ struct SidebarWaitingMessages: Hashable {
             "its \(agent) restarted",
             "its \(agent) restarted since, and Nirux types a message sent to the one before into no other"
         )
+        case .noPromptYet? where agent == "Antigravity": (
+            "no turn ended since it started",
+            "its Antigravity hasn't ended a turn since it started, where a screen of its own may be up; they go in after its first one"
+        )
         case .noPromptYet? where codex: (
             "no state from Codex yet",
             "its Codex hasn't reported its state since it started (Codex 0.167 or later does); they go in once it reports its turn over"
@@ -126,9 +130,10 @@ struct MissionWaitState {
     var recordReadings: [ProcessInstance: ClaudeSessionRecord.Reading] = [:]
     /// A typing pass waits for a queue a writer held (`hooksReadBeforeTyping`).
     var typingPassSoon = false
-    /// How long Codex may take to start a message it queued while idle
-    /// before its sender hears it hasn't (`queueForCodex`).
-    var codexStartWait: TimeInterval = 20
+    /// How long Codex or Antigravity may take to start a message Nirux
+    /// handed it at a free prompt before its sender hears it hasn't
+    /// (`checkStarted`).
+    var startWait: TimeInterval = 20
     /// Columns whose Codex is being handed a message: one at a time, so
     /// that its queue keeps their order.
     var codexQueuing: Set<UUID> = []
@@ -168,8 +173,12 @@ extension NiruxShellView {
         let kind: String
         let sentAt: TimeInterval
         let runningSince: TimeInterval
-        /// For a Codex child: it goes into Codex's queue (`queueForCodex`).
-        var toCodex = false
+        /// The agent kind it goes to (`recipientKind`): a Codex child's goes
+        /// into Codex's queue (`queueForCodex`).
+        var agentKind = NiruxApp.WorkspaceAgent.claude.rawValue
+
+        var toCodex: Bool { agentKind == NiruxApp.WorkspaceAgent.codex.rawValue }
+        var agentName: String { Mission.agentName(ofKind: agentKind) ?? agentKind }
     }
 
     /// Tells a `tell`'s sender, once, what holds it when it is still
@@ -198,7 +207,9 @@ extension NiruxShellView {
             let since = runningSince(of: event, in: column, snapshot: snapshot, now: now)
             let agent = mission.childAgentName
             let refusal = agent == "Codex" ? column.codexMissionRefusal(runningSince: since, snapshot: snapshot)
-                : column.pty?.missionPromptRefusal(runningSince: since, snapshot: snapshot, now: now, record: sessionRecord(of:)) ?? .noClaude
+                : column.pty?.missionPromptRefusal(
+                    runningSince: since, snapshot: snapshot, agent: mission.childAgentKind, now: now, record: sessionRecord(of:)
+                ) ?? .noClaude
             let holder = {
                 agent == nil ? "its agent hasn't collected it"
                     : !mission.isCarried(handoffsEnabled: handoffsEnabled) ? "Mission handoffs are off"
@@ -265,13 +276,13 @@ extension NiruxShellView {
                 ?? Self.currentMissionHandoffsEnabled()
             missionWaits.handoffsEnabled = (deliveryIDs, handoffsEnabled)
             for delivery in deliveries where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
-                // A child other than Claude Code or Codex collects its own.
+                // A child Nirux delivers nothing to collects its own.
                 guard Self.goesToParent(delivery.event) || delivery.mission.childAgentName != nil else { continue }
                 let recipient = missionRecipient(of: delivery)
                 add(recipient, WaitingMessage(
                     id: delivery.event.id, kind: delivery.event.kind.rawValue, sentAt: delivery.event.timestamp,
                     runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now),
-                    toCodex: Self.goesToCodex(delivery)
+                    agentKind: Self.recipientKind(of: delivery)
                 ))
             }
         }
@@ -287,15 +298,17 @@ extension NiruxShellView {
         for (id, entry) in waiting {
             let pty = entry.column.pty
             let foreground = pty?.foregroundProcess(snapshot: snapshot)
-            let otherAgent = foreground.map { $0.name != "claude" && AgentStatusMachine.isRecognizedAgentProcess($0.name) } ?? false
             let atFirstPrompt = foreground.map { pty?.agentTookPrompt(since: $0) == false } ?? false
             let refused = entry.messages.compactMap { message -> (message: WaitingMessage, refusal: AgentPromptRefusal?)? in
                 if message.toCodex {
                     return (message, entry.column.codexMissionRefusal(runningSince: message.runningSince, snapshot: snapshot))
                 }
-                guard !otherAgent else { return nil }
+                // Another agent in front: what holds its own messages, if any, says why.
+                if let name = foreground?.name, name != message.agentKind, AgentStatusMachine.isRecognizedAgentProcess(name) { return nil }
                 let refusal = pty.map {
-                    $0.missionPromptRefusal(runningSince: message.runningSince, snapshot: snapshot, now: now, record: sessionRecord(of:))
+                    $0.missionPromptRefusal(
+                        runningSince: message.runningSince, snapshot: snapshot, agent: message.agentKind, now: now, record: sessionRecord(of:)
+                    )
                 } ?? .noClaude
                 guard refusal != .draft || missionWaits.typedAt[id] == nil else { return nil }
                 return (message, refusal)
@@ -317,7 +330,7 @@ extension NiruxShellView {
             retries += free(overdue.filter { !$0.message.toCodex })
             asksCodex = asksCodex || !free(overdue.filter(\.message.toCodex)).isEmpty
             if atFirstPrompt { firstPrompts += free(refused) }
-            if let foreground, refused.contains(where: { $0.refusal == .noPromptYet && !$0.message.toCodex }) {
+            if let foreground, refused.contains(where: { $0.refusal == .noPromptYet && $0.message.agentKind == "claude" }) {
                 logSessionRecordIssue(of: foreground.instance, agentUUID: entry.column.agentUUID, now: now)
             }
             for (message, refusal) in overdue {
@@ -329,12 +342,13 @@ extension NiruxShellView {
                         + "agent=\(entry.column.agentUUID?.prefix(8) ?? "-") waited=\(waited)s reason=\(reason) messages=\(refused.count) "
                         + "fg=\(foreground.map { "\($0.name)/\(Int(max(now - $0.instance.startedAt, 0)))s" } ?? "-") "
                         + ((foreground?.name == AgentProgramStatus.codex ? pty?.codexFacts(now: now)
+                            : foreground?.name == AgentProgramStatus.agy ? pty?.agyFacts(now: now)
                             : pty?.missionPromptFacts(now: now, snapshot: snapshot, record: sessionRecord(of:))) ?? "")
                 )
             }
             let typable = refused.filter {
                 $0.refusal != .working && $0.refusal != .restarted
-                    && ($0.refusal != .noPromptYet || pty?.agentHookKind == "claude" || $0.message.toCodex)
+                    && ($0.refusal != .noPromptYet || pty?.agentHookKind == "claude" || $0.message.agentKind != "claude")
             }
             guard typable.contains(where: { now - $0.message.sentAt >= Self.missionMessageStallAge }),
                   let oldest = typable.min(by: { $0.message.sentAt < $1.message.sentAt })
@@ -347,7 +361,7 @@ extension NiruxShellView {
                 count: typable.count, since: oldest.message.sentAt, refusal: oldest.refusal,
                 untypable: oldest.refusal == nil && missionWaits.tries[oldest.message.id, default: 0] >= Self.missionTypingTries,
                 offersTypeNow: offersTypeNow, heldBy: offersTypeNow ? foreground?.instance : nil,
-                agent: oldest.message.toCodex ? "Codex" : "Claude Code", now: now
+                agent: oldest.message.agentName, now: now
             )
         }
         let pending = Set(waiting.values.flatMap { $0.messages.map(\.id) })

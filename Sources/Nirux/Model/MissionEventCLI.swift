@@ -792,8 +792,13 @@ extension MissionEventCLI {
             return 4
         }
         guard mission.childAgentName != nil else {
-            writeStandardError("Nirux delivers messages only to a Claude Code or Codex child; this one runs \(mission.childAgentKind).")
+            writeStandardError("Nirux delivers messages only to a Claude Code, Codex or Antigravity child; this one runs \(mission.childAgentKind).")
             return 4
+        }
+        if mission.childAgentKind == NiruxApp.WorkspaceAgent.agy.rawValue, MissionPromptText.startsWithSlashCommand(message) {
+            writeStandardError("Antigravity runs a slash command itself, with no turn to end, which would hold the messages after it: "
+                + "send the request in words.")
+            return 2
         }
         let sentAt = now()
         let instructionID = instructionID(for: message, in: mission, now: sentAt)
