@@ -40,6 +40,9 @@ enum PRFollowUp {
         let typedAt: TimeInterval
         /// The feedback it handed, by URL.
         var items: [String] = []
+        /// The agent it was typed into (`ColumnState.agentUUID`): its turn
+        /// is the round's.
+        var agent: String?
         /// When the turn that took it ended (`Entry.endRound`).
         var endedAt: TimeInterval?
         /// When a read after it told whether it moved the pull request.
@@ -71,6 +74,9 @@ enum PRFollowUp {
         let at: TimeInterval
         /// Of feedback, the items it is about.
         var items: [String] = []
+        /// When the user took it: a prompt of theirs went into its agent.
+        /// It still holds; the row stops asking.
+        var seenAt: TimeInterval?
     }
 
     /// One pull request's follow-up.
@@ -97,7 +103,7 @@ enum PRFollowUp {
 
         /// The last round never reached the agent: typing it failed.
         mutating func cancelRound() {
-            guard let last = rounds.last, last.endedAt == nil, last.settledAt == nil else { return }
+            guard let last = rounds.last, last.settledAt == nil else { return }
             rounds.removeLast()
             handedFeedback.removeAll(where: last.items.contains)
         }
@@ -108,6 +114,9 @@ enum PRFollowUp {
         var pullRequest: PRInfo
         /// Nil until read.
         var feedback: PRFeedback?
+        /// When the space's follow-up was last turned on: feedback from
+        /// before is the user's.
+        var followedSince: TimeInterval?
         /// When the read that gave `feedback` started.
         var feedbackReadAt: TimeInterval?
         var triage: Triage
@@ -122,6 +131,8 @@ enum PRFollowUp {
         var isInMergeQueue = false
         /// When the read that gave `pullRequest` started.
         var readAt: TimeInterval?
+        /// The agent a round goes to (`ColumnState.agentUUID`).
+        var agent: String?
         /// Why the agent's prompt takes no round now; nil when it does.
         var agentRefusal: String?
         /// Its turn goes on, or the user's may: a dialog, a question, a
@@ -177,13 +188,14 @@ enum PRFollowUp {
             case .ready(let prompt, let items)?:
                 // Else the read may be older than a push.
                 guard facts.localHead == head else { return .wait("the checkout's HEAD isn't the pull request's") }
+                // A busy agent may be fixing it with the user.
+                if let refusal = facts.agentRefusal { return .wait(refusal) }
                 guard entry.rounds.count < maxRounds else {
                     entry.stop = Stop(kind: kind, cause: .rounds, head: head, at: facts.now, items: items)
                     return .wait("stopped: rounds")
                 }
                 guard facts.hasTrackedChanges == false else { return .wait("tracked files changed, or unknown") }
-                if let refusal = facts.agentRefusal { return .wait(refusal) }
-                let round = Round(kind: kind, head: head, typedAt: facts.now, items: items)
+                let round = Round(kind: kind, head: head, typedAt: facts.now, items: items, agent: facts.agent)
                 entry.rounds.append(round)
                 entry.handedFeedback += items
                 return .type(round, prompt: prompt + " (Nirux follow-up, round \(entry.rounds.count) of \(maxRounds).)")
@@ -235,9 +247,9 @@ enum PRFollowUp {
     }
 
     /// Whether the pull request still shows that kind of trouble (of
-    /// feedback, one of `items`); nil while that isn't known: GitHub
-    /// computing `mergeable`, a run of the pull request's going, feedback
-    /// not read.
+    /// feedback, one of `items` nobody answered since); nil while that
+    /// isn't known: GitHub computing `mergeable`, a run of the pull
+    /// request's going, feedback not read.
     private static func isPresent(_ kind: Kind, items: [String], _ facts: Facts) -> Bool? {
         let pullRequest = facts.pullRequest
         switch kind {
@@ -248,7 +260,7 @@ enum PRFollowUp {
             if !fixableFailures(pullRequest).isEmpty { return true }
             return hasRunGoing(pullRequest) ? nil : false
         case .feedback:
-            return facts.feedback.map { $0.items.contains { items.contains($0.url) } }
+            return facts.feedback.map { $0.items.contains { items.contains($0.url) && !$0.isAnswered } }
         }
     }
 
@@ -287,8 +299,9 @@ enum PRFollowUp {
             guard let redSince = facts.redSince, facts.now - redSince >= ciGrace else { return .wait("the failure is new") }
             return .ready(prompt: CIFailure.fixPrompt(pullRequest: pullRequest.number, runs: runs), items: [])
         case .feedback:
+            let since = max(entry.since, facts.followedSince ?? 0)
             let items = (facts.feedback?.items ?? []).filter {
-                takesRound($0) && $0.createdAt.timeIntervalSince1970 >= entry.since && !entry.handedFeedback.contains($0.url)
+                takesRound($0) && $0.createdAt.timeIntervalSince1970 >= since && !entry.handedFeedback.contains($0.url)
             }
             guard let newest = items.map(\.createdAt).max() else { return nil }
             guard facts.now - newest.timeIntervalSince1970 >= feedbackQuiet else { return .wait("feedback may still come") }
@@ -297,10 +310,11 @@ enum PRFollowUp {
         }
     }
 
-    /// Review threads, and what people (not bots) write besides an
-    /// approval: a bot's or an approval's summary asks for nothing.
+    /// Review threads nobody answered since, and what people (not bots)
+    /// write besides an approval: a bot's or an approval's summary asks
+    /// for nothing.
     private static func takesRound(_ item: PRFeedback.Item) -> Bool {
-        !item.isOutdated && (item.isThread || (!item.isBot && !item.isApproval))
+        !item.isOutdated && !item.isAnswered && (item.isThread || (!item.isBot && !item.isApproval))
     }
 
     /// The red checks a commit can fix.
@@ -344,6 +358,7 @@ extension PRFollowUp.Round {
             head: try values.decode(String.self, forKey: .head),
             typedAt: try values.decode(TimeInterval.self, forKey: .typedAt),
             items: values.lenient(.items, []),
+            agent: values.lenient(.agent, nil),
             endedAt: values.lenient(.endedAt, nil),
             settledAt: values.lenient(.settledAt, nil)
         )
@@ -362,7 +377,8 @@ extension PRFollowUp.Stop {
             cause: kind == nil ? .unreadable : cause ?? .unreadable,
             head: values.lenient(.head, ""),
             at: values.lenient(.at, 0),
-            items: values.lenient(.items, [])
+            items: values.lenient(.items, []),
+            seenAt: values.lenient(.seenAt, nil)
         )
     }
 }

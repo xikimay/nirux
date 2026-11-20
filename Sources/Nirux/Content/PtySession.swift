@@ -515,6 +515,11 @@ final class PtySession: @unchecked Sendable {
     /// See `AgentStatusMachine.lastTurnEndedAt`.
     var agentLastTurnEndedAt: TimeInterval { state.machine.lastTurnEndedAt }
 
+    /// When the last prompt Claude Code didn't mark as a poll event went into
+    /// its agent: the user's, or a Mission message (2.1.328 sends no mark,
+    /// so every prompt). Nil before one.
+    var agentLastUserPromptAt: TimeInterval? { state.machine.lastUserPromptAt }
+
     /// See `AgentStatusMachine.isCurrentTurnEnd`.
     func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
         state.machine.isCurrentTurnEnd(turnEndedAt)

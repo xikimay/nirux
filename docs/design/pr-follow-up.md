@@ -1,8 +1,8 @@
 # PR Auto Follow-up
 
-> **Design record:** in progress. PR 1 (the decision, not wired) and PR 2 (the setting, the wiring, the row).\
-> **Differs today:** nothing types yet: PR 2 wires it.\
-> **User guide:** to come with PR 2.
+> **Design record:** shipped in two parts: the decision (#651), then the setting, the wiring and the row.\
+> **Differs today:** nothing known.\
+> **User guide:** [Pull requests](../pull-requests.md#automatic-follow-up).
 
 Status: approved by the user on 2026-11-19, from the review of "A look inside
 the factory" (a local daemon owns each pull request until it merges). Lane 2:
@@ -17,8 +17,15 @@ hands the pull request to the user.
 
 ## Setting
 
-Space Settings › Defaults, "Follow up on pull requests", per space, off by
-default: it types into terminals and spends usage on its own.
+Space Settings › Defaults, "Follow up on pull requests", per space, **on by
+default** (the user's call, 2026-11-19): `prFollowUp` nil is on, only an
+explicit false turns it off (the switch writes false, and nothing for on).
+A value this build can't read counts as off, like the Lead's switches. A
+space that never set it counts as turned on at the first launch that
+follows a pull request (`firstLaunchAt`, kept in `pr-follow-up.json`), as
+switching it on would: feedback from before is cut, so an upgrade doesn't sweep in old
+feedback across every task; failed checks still red stay eligible, one round
+at a time across tasks.
 
 ## Which agent
 
@@ -27,7 +34,11 @@ request's checkout, running with Nirux's hooks. Its prompt must take a Mission
 message (`isPromptFree`: not working, no dialog, no draft, no failed turn, no
 turn end being read, a prompt taken since it started), its turn must not have
 ended on a question to the user, no Mission question or message of the task
-waits, and its last turn ended 30 s ago or more.
+waits, its last turn ended 30 s ago or more, and the user isn't on its
+terminal (its column in front, Nirux active). A round is judged on the
+agent it was typed into; when that agent is gone, the round is over. A
+Claude resumed after a relaunch takes no round until it has taken a prompt,
+as with Mission messages.
 
 ## When a round goes
 
@@ -52,10 +63,11 @@ After each read of the pull request and each turn end of that agent:
      first). Only those runs' logs go into the prompt. A likely flake starts
      nothing: its rerun stays the user's. A failure the user's Why Failed
      took is theirs.
-  3. **Feedback:** review threads, and what people (not bots) write besides an
-     approval, posted since Nirux started following the pull request, never
-     handed before, outdated threads left out, the newest 3 minutes old (bots
-     post over a minute or two).
+  3. **Feedback:** review threads whose last comment isn't ours, and what
+     people (not bots) write besides an approval, posted since Nirux started
+     following the pull request (or since the setting was last turned on),
+     never handed before, outdated threads left out, the newest 3 minutes old
+     (bots post over a minute or two).
 
 ## Prompts
 
@@ -83,7 +95,7 @@ Each ends on "(Nirux follow-up, round n of 3.)".
 - **Stops**, each a "Needs you" with its reason:
   - another round was due after three;
   - a round pushed nothing and its signal is still there (still conflicting,
-    still a fixable failure, one of its items still listed);
+    still a fixable failure, one of its items still listed and unanswered);
   - 10 minutes after a round, the checkout still isn't at the pull request's
     head (commits not pushed, or a push from elsewhere not pulled).
 - A stop holds until the pull request's head moves or what stopped it goes
@@ -97,7 +109,24 @@ Each ends on "(Nirux follow-up, round n of 3.)".
   unreadable stop holds (while the head it names is the pull request's, else
   until it closes), an unreadable entry goes alone.
 
-## Wiring rules for PR 2
+## Wiring
+
+Each read of the pull request or of its feedback, and each turn end, runs
+the decision. When everything but the checkout says go, Nirux reads the
+checkout's HEAD and tracked changes off the main thread, decides again with
+them, and types through the Mission typing path (Enter only when nothing was
+typed meanwhile).
+
+- The row: `Auto follow-up 1/3 · failed checks` while a round's turn runs;
+  `Needs you · #52 still fails its checks: the automatic round pushed
+  nothing` (and the task's attention mark) once stopped, until a prompt goes
+  into one of its agents (the user's, or a Mission message), kept in the
+  entry across relaunches.
+- Without an agent to type into, the decision still runs: it settles rounds
+  and clears stops.
+- The decisions go to the log category `followUp`, once per change.
+
+Rules:
 
 - End a round only on `finishedTurn(afterTypingAt:)` with no failed turn.
 - Read the tracked changes (`GitDetect.hasTrackedChanges(at:)`) off the main
@@ -105,8 +134,14 @@ Each ends on "(Nirux follow-up, round n of 3.)".
   `feedbackReadAt` from when each read started.
 - Why Failed records `PRFollowUp.failureSignature` in `userFailures`, Address
   its items in `handedFeedback`.
-- When the setting turns on, the space's entries follow from then (`since`):
-  feedback that came while it was off is the user's.
+- When the setting turns on, the space's entries follow from then (`since`),
+  and so does a pull request first seen later (`spacesOnSince`): feedback
+  that came while it was off is the user's.
 - A merge queue holds a pull request while any of its entries isn't done or
   stopped.
-- At most one automatic round in flight across all tasks.
+- At most one automatic round in flight across all tasks: a round counts
+  while its pull request is a followed task's.
+- A round left in the prompt unsent, or cut, counts and the user hears of
+  it, but no turn of the agent is its: it holds no other task and is never
+  judged. One none of which went in is dropped.
+- Entries of pull requests open in any workspace outlive a quiet month.

@@ -47,6 +47,7 @@ extension NiruxShellView {
                 agentUUID: session.id,
                 prompt: CIFailure.whyFailedPrompt(pullRequest: pullRequest.number, runs: runs)
             )
+            if case .sent = result { noteFollowUpTakenByUser(in: workspace, failure: true) }
             switch result {
             case .sent(let session), .blockedByDialog(let session):
                 focusWorkspace(id: workspace.id, column: session.columnIndex)

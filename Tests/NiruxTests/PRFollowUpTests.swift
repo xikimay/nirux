@@ -30,10 +30,10 @@ final class PRFollowUpTests: XCTestCase {
     private var red: [[String: Any]] { [checkRun("test")] }
 
     private func item(_ name: String, age: TimeInterval, outdated: Bool = false, location: String = "Sources/A.swift:3",
-                      bot: Bool = false, approval: Bool = false) -> PRFeedback.Item {
+                      bot: Bool = false, approval: Bool = false, answered: Bool = false) -> PRFeedback.Item {
         PRFeedback.Item(author: "reviewer", isBot: bot, location: location, isOutdated: outdated, excerpt: "Fix",
                         url: "https://github.com/acme/widgets/pull/52#\(name)", createdAt: Date(timeIntervalSince1970: now - age),
-                        isApproval: approval)
+                        isApproval: approval, isAnswered: answered)
     }
 
     /// A task ready for a round, its failure read and old enough.
@@ -41,7 +41,7 @@ final class PRFollowUpTests: XCTestCase {
         PRFollowUp.Facts(
             pullRequest: pullRequest, feedback: PRFeedback(items: feedback), feedbackReadAt: now, triage: .done(.real),
             redSince: now - 600, localHead: head, baseRemote: "upstream", hasTrackedChanges: false, readAt: now,
-            trackedSince: now - 3600, now: now
+            agent: "agent-1", trackedSince: now - 3600, now: now
         )
     }
 
@@ -69,7 +69,7 @@ final class PRFollowUpTests: XCTestCase {
     func testTheConflictComesFirstAndMergesTheBase() throws {
         let conflicting = facts(pullRequest(mergeable: "CONFLICTING", rollup: red), feedback: [item("c1", age: 600)])
         let conflict = try XCTUnwrap(typed(next(conflicting)))
-        XCTAssertEqual(conflict.round, PRFollowUp.Round(kind: .conflict, head: head, typedAt: now))
+        XCTAssertEqual(conflict.round, PRFollowUp.Round(kind: .conflict, head: head, typedAt: now, agent: "agent-1"))
         XCTAssertEqual(conflict.prompt, "PR #52 conflicts with main. Run `git fetch upstream main`, merge upstream/main into "
             + "this branch, resolve the conflicts, run the checks, commit and push. (Nirux follow-up, round 1 of 3.)")
 
@@ -145,11 +145,16 @@ final class PRFollowUpTests: XCTestCase {
         let items = [
             fresh, item("outdated", age: 900, outdated: true), item("old", age: 9000),
             item("before", age: 4000), item("lgtm", age: 900, location: "comment", approval: true),
-            item("overview", age: 900, location: "comment", bot: true), item("bot-thread", age: 400, bot: true)
+            item("overview", age: 900, location: "comment", bot: true), item("bot-thread", age: 400, bot: true),
+            item("replied", age: 500, answered: true)
         ]
         var entry = PRFollowUp.Entry(since: now - 3600, handedFeedback: [item("old", age: 9000).url])
         XCTAssertEqual(PRFollowUp.next(&entry, facts(pullRequest(), feedback: [item("burst", age: 60)] + items)),
                        .wait("feedback may still come"))
+        // Turned off and on again since the entry began: what came between is the user's.
+        var turnedOn = facts(pullRequest(), feedback: items)
+        turnedOn.followedSince = now - 300
+        XCTAssertEqual(typed(next(turnedOn, entry))?.round.items, [fresh.url], "only what came since it was turned on")
         let action = PRFollowUp.next(&entry, facts(pullRequest(), feedback: items + [item("ask", age: 300, location: "comment")]))
         let round = try XCTUnwrap(typed(action))
         let handed = [fresh.url, item("bot-thread", age: 400).url, item("ask", age: 300).url]
@@ -169,7 +174,9 @@ final class PRFollowUpTests: XCTestCase {
         later.readAt = now + 30
         XCTAssertEqual(PRFollowUp.next(&afterPush, later), .none)
 
-        // Typing failed: as if never typed.
+        // Typing failed: as if never typed, even once a pass ended it (its
+        // column closed meanwhile).
+        entry.endRound(at: now + 1)
         entry.cancelRound()
         XCTAssertEqual(entry, PRFollowUp.Entry(since: now - 3600, handedFeedback: [item("old", age: 9000).url]))
     }
@@ -305,6 +312,10 @@ final class PRFollowUpTests: XCTestCase {
             round(.ci, on: "1", settled: true), round(.conflict, on: "2", settled: true), round(.ci, on: "3", settled: true)
         ])
         let failed = facts(pullRequest(rollup: red))
+        var busy = failed
+        busy.agentRefusal = "working"
+        XCTAssertEqual(PRFollowUp.next(&entry, busy), .wait("working"), "it may be fixing it with the user")
+        XCTAssertNil(entry.stop)
         XCTAssertEqual(PRFollowUp.next(&entry, failed), .wait("stopped: rounds"))
         XCTAssertEqual(entry.stop, PRFollowUp.Stop(kind: .ci, cause: .rounds, head: head, at: now))
         XCTAssertEqual(PRFollowUp.next(&entry, failed), .wait("stopped: rounds"))
@@ -339,6 +350,10 @@ final class PRFollowUpTests: XCTestCase {
         var resolved = PRFollowUp.Entry(since: now - 1800, handedFeedback: [c1.url], stop: feedbackStop)
         XCTAssertEqual(PRFollowUp.next(&resolved, facts(pullRequest(), feedback: [item("older", age: 3000)])), .none)
         XCTAssertNil(resolved.stop)
+        // Answered, its reviewer's turn: neither.
+        var answered = PRFollowUp.Entry(since: now - 1800, handedFeedback: [c1.url], stop: feedbackStop)
+        XCTAssertEqual(PRFollowUp.next(&answered, facts(pullRequest(), feedback: [item("c1", age: 900, answered: true)])), .none)
+        XCTAssertNil(answered.stop)
     }
 
     // MARK: - Store
@@ -359,7 +374,9 @@ final class PRFollowUpTests: XCTestCase {
         store.update(stopped, now: monthAgo) { $0.stop = PRFollowUp.Stop(kind: .ci, cause: .rounds, head: self.head, at: monthAgo) }
         // Open and followed, quiet for a month: it keeps what it handed.
         store.update(quiet, now: monthAgo) { $0.handedFeedback = ["thread"] }
-        XCTAssertTrue(store.update(current, now: now) { $0.rounds = [self.round(.ci, on: self.head)] })
+        XCTAssertTrue(store.update(current, now: now, since: now - 600) { $0.rounds = [self.round(.ci, on: self.head)] })
+        XCTAssertEqual(store.pullRequests[current]?.since, now - 600, "from when its space's follow-up turned on")
+        store.spacesOnSince["space"] = now - 600
         XCTAssertEqual(store.pullRequests.count, 4, "a change prunes nothing")
         store.prune(now: now, keeping: [quiet, current])
         XCTAssertEqual(Set(store.pullRequests.keys), [stopped, quiet, current])
@@ -371,6 +388,46 @@ final class PRFollowUpTests: XCTestCase {
         let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
         XCTAssertEqual(permissions, 0o600)
         XCTAssertEqual(PRFollowUpStore.load(from: folder.appendingPathComponent("missing.json")), PRFollowUpStore())
+    }
+
+    /// A space that never set the option counts as turned on at the first
+    /// launch of the follow-up: an upgrade cuts old feedback, not the checks
+    /// still red.
+    func testTheFirstLaunchTurnsOnASpaceThatNeverSetIt() throws {
+        var store = PRFollowUpStore()
+        store.noteLaunch(at: now - 600)
+        store.noteLaunch(at: now)
+        XCTAssertEqual(store.firstLaunchAt, now - 600, "the first launch only")
+        XCTAssertEqual(store.followedSince(space: "never-set"), now - 600)
+        store.spacesOnSince["switched-on"] = now - 60
+        XCTAssertEqual(store.followedSince(space: "switched-on"), now - 60)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        store.save(to: folder.appendingPathComponent("pr-follow-up.json"))
+        XCTAssertEqual(PRFollowUpStore.load(from: folder.appendingPathComponent("pr-follow-up.json")).firstLaunchAt, now - 600)
+
+        let before = item("before", age: 900)
+        let after = item("after", age: 400)
+        var upgraded = facts(pullRequest(), feedback: [before, after])
+        upgraded.followedSince = store.followedSince(space: "never-set")
+        XCTAssertEqual(try XCTUnwrap(typed(next(upgraded))).round.items, [after.url])
+        var red = facts(pullRequest(rollup: self.red), feedback: [before])
+        red.followedSince = store.followedSince(space: "never-set")
+        XCTAssertEqual(try XCTUnwrap(typed(next(red))).round.kind, .ci, "a check still red stays eligible")
+    }
+
+    /// The first launch that follows a pull request is kept; a later one,
+    /// another Nirux's on the same state directory, keeps it too.
+    @MainActor
+    func testTheFirstLaunchThatFollowsIsKept() {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let first = PRFollowUpCenter(trackedSince: now - 600)
+        first.file.url = folder.appendingPathComponent("pr-follow-up.json")
+        XCTAssertEqual(first.followedSince(space: "never-set"), now - 600)
+        let later = PRFollowUpCenter(trackedSince: now)
+        later.file.url = first.file.url
+        XCTAssertEqual(later.followedSince(space: "never-set"), now - 600)
     }
 
     /// Another build's file is read on the side of typing less: an
@@ -409,5 +466,118 @@ final class PRFollowUpTests: XCTestCase {
         var moved = PRFollowUp.Entry(stop: named)
         XCTAssertNotNil(typed(PRFollowUp.next(&moved, pushed)), "its head moved: it no longer holds")
         XCTAssertEqual(next(pushed, PRFollowUp.Entry(stop: .unreadable)), .wait("stopped: unreadable"))
+    }
+
+    // MARK: - What the shell reads
+
+    func testTheAgentGateWaitsForAFreePromptAndSaysWhenItsTurnMayGoOn() {
+        let free = PRFollowUp.AgentState(lastTurnEndedAt: now - 60)
+        func gate(_ change: (inout PRFollowUp.AgentState) -> Void) -> [String] {
+            var agent = free
+            change(&agent)
+            let gate = PRFollowUp.gate(agent, now: now)
+            return [gate.refusal ?? "free", gate.isBusy ? "busy" : "idle"]
+        }
+        XCTAssertEqual(gate { _ in }, ["free", "idle"])
+        XCTAssertEqual(gate { $0.refusal = .working }, ["working", "busy"])
+        XCTAssertEqual(gate { $0.refusal = .failedTurn }, ["failedTurn", "busy"], "a usage limit: what the round did is unknown")
+        XCTAssertEqual(gate { $0.refusal = .noPromptYet }, ["noPromptYet", "idle"], "resumed: it takes nothing until the user types")
+        XCTAssertEqual(gate { $0.waitsOnUser = true }, ["it waits on the user", "busy"])
+        XCTAssertEqual(gate { $0.missionWaits = true }, ["a Mission message waits", "busy"])
+        XCTAssertEqual(gate { $0.lastTurnEndedAt = now - 10 }, ["its turn just ended", "idle"])
+        XCTAssertEqual(gate { $0.isWatched = true }, ["the user is on its terminal", "idle"])
+    }
+
+    func testTheRowSaysTheRoundAndWhyThePullRequestIsTheUsers() {
+        XCTAssertEqual(PRFollowUp.roundText(.ci, number: 2), "Auto follow-up 2/3 · failed checks")
+        let pullRequest = pullRequest(base: "develop")
+        let cases: [(PRFollowUp.Kind, PRFollowUp.Stop.Cause, String)] = [
+            (.conflict, .rounds, "#52 conflicts with develop after 3 automatic rounds"),
+            (.ci, .nothingPushed, "#52 still fails its checks: the automatic round pushed nothing"),
+            (.feedback, .nothingPushed, "#52 still has review feedback open: the automatic round pushed nothing"),
+            (.feedback, .checkoutDiffers, "#52: the checkout isn’t at the pull request’s head after the automatic round"),
+            (.ci, .unreadable, "#52: another Nirux build handed it to you")
+        ]
+        for (kind, cause, text) in cases {
+            XCTAssertEqual(PRFollowUp.stopText(PRFollowUp.Stop(kind: kind, cause: cause, head: head, at: now), pullRequest: pullRequest), text)
+        }
+        XCTAssertEqual(NiruxShellView.pullRequestRepository("https://github.com/Acme/Widgets/pull/52"),
+                       GitHubRepository(owner: "acme", name: "widgets"))
+        XCTAssertNil(NiruxShellView.pullRequestRepository("https://github.com/acme/widgets/issues/52"))
+    }
+
+    /// Another Nirux on the same state directory writes the file too.
+    @MainActor
+    func testAFileWrittenElsewhereIsReadAgain() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("pr-follow-up.json")
+        let file = FileBackedValue(url: url, read: { PRFollowUpStore.load(from: $0) }, write: { $0.save(to: $1) })
+        XCTAssertEqual(file.value, PRFollowUpStore())
+        file.update { $0.update("a", now: self.now) { _ in } }
+        // Two writes within the date's precision: the file is another one.
+        let sameDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try FileManager.default.setAttributes([.modificationDate: sameDate], ofItemAtPath: url.path)
+        XCTAssertEqual(Set(file.value.pullRequests.keys), ["a"])
+        var other = PRFollowUpStore.load(from: url)
+        other.update("b", now: now) { _ in }
+        other.save(to: url)
+        try FileManager.default.setAttributes([.modificationDate: sameDate], ofItemAtPath: url.path)
+        XCTAssertEqual(Set(file.value.pullRequests.keys), ["a", "b"], "written right after, read again")
+    }
+
+    /// The Lead's round 1: a quiet month drops no entry a workspace still
+    /// has open, else its old threads would be typed again, with three more
+    /// rounds.
+    @MainActor
+    func testAnEntryStillOpenSomewhereOutlivesAQuietMonth() {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let center = PRFollowUpCenter(trackedSince: now)
+        center.file.url = folder.appendingPathComponent("pr-follow-up.json")
+        let quiet = "https://github.com/acme/widgets/pull/3"
+        let other = "https://github.com/acme/widgets/pull/52"
+        center.file.update { $0.update(quiet, now: self.now - PRFollowUpStore.lifetime) { $0.handedFeedback = ["thread"] } }
+        center.updateEntry(other, space: "space", now: now, open: [quiet]) { $0.userFailures = ["a"] }
+        XCTAssertEqual(center.file.value.pullRequests[quiet]?.handedFeedback, ["thread"])
+        center.updateEntry(other, space: "space", now: now, open: []) { $0.userFailures = ["b"] }
+        XCTAssertNil(center.file.value.pullRequests[quiet], "open nowhere: it goes")
+        XCTAssertEqual(center.file.value.pullRequests[other]?.userFailures, ["b"], "the one changed stays")
+    }
+
+    /// The Lead's round 1: a round that didn't go in whole counts, but holds
+    /// no other task and no later turn judges it.
+    @MainActor
+    func testARoundThatDidNotGoInWholeHoldsNothingAndIsNotJudged() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let center = PRFollowUpCenter(trackedSince: now - 3600)
+        center.file.url = folder.appendingPathComponent("pr-follow-up.json")
+        let url = "https://github.com/acme/widgets/pull/52"
+        let round = PRFollowUp.Round(kind: .ci, head: head, typedAt: now - 60, items: ["c1"], agent: "agent-1")
+        @MainActor func typedRound() { center.file.update { $0.pullRequests[url] = PRFollowUp.Entry(rounds: [round], handedFeedback: ["c1"]) } }
+        let failed = facts(pullRequest(rollup: red))
+
+        typedRound()
+        center.noteTyped(.sent, round: round, url: url, now: now)
+        XCTAssertNil(center.file.value.pullRequests[url]?.rounds.last?.endedAt, "typed whole: its turn is the round's")
+
+        for outcome: NiruxShellView.TypedMessage in [.inPrompt(why: "someone typed meanwhile"), .cut] {
+            typedRound()
+            center.noteTyped(outcome, round: round, url: url, now: now)
+            var entry = try XCTUnwrap(center.file.value.pullRequests[url])
+            XCTAssertEqual(entry.rounds.count, 1, "it counts: \(outcome)")
+            XCTAssertEqual(entry.handedFeedback, ["c1"], "its items stay handed: \(outcome)")
+            XCTAssertNotNil(entry.rounds[0].endedAt, "it holds no other task: \(outcome)")
+            // The failure still there, a later turn ended: the next round goes,
+            // no "pushed nothing" for a round Claude never got.
+            XCTAssertEqual(typed(PRFollowUp.next(&entry, failed))?.prompt.hasSuffix("round 2 of 3.)"), true, "\(outcome)")
+            XCTAssertNil(entry.stop, "\(outcome)")
+        }
+
+        typedRound()
+        center.noteTyped(.left, round: round, url: url, now: now)
+        XCTAssertEqual(center.file.value.pullRequests[url]?.rounds, [], "none of it went in: it never was")
+        XCTAssertEqual(center.file.value.pullRequests[url]?.handedFeedback, [])
     }
 }
