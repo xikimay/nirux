@@ -135,7 +135,13 @@ final class SpacePlanView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    /// Diving, its clicks go to the workspace beneath.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        isDiving && !ZZ("diveClicks") ? nil : super.hitTest(point)
+    }
+
     override func keyDown(with event: NSEvent) {
+        finishOpening()
         switch event.keyCode {
         case 123: move(columns: -1)
         case 124: move(columns: 1)
@@ -148,6 +154,7 @@ final class SpacePlanView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        finishOpening()
         guard let card = card(at: convert(event.locationInWindow, from: nil)) else { return }
         chosen = card
         goToChoice()
@@ -160,6 +167,7 @@ final class SpacePlanView: NSView {
     /// Fingers opening go to the card under them, else to the chosen one.
     func pinched(by magnification: CGFloat, phase: NSEvent.Phase, at point: NSPoint) {
         guard pinch.moved(by: magnification, phase: phase, past: NiruxShellView.pinchThreshold) else { return }
+        finishOpening()
         if let card = card(at: point) { chosen = card }
         goToChoice()
     }
@@ -261,9 +269,9 @@ final class SpacePlanView: NSView {
     /// it to its place, `shown` (the viewport frozen at its size) fading
     /// into its row's picture; the names come after.
     func playOpening(from shown: FrozenView, at rect: NSRect) {
-        if !ZZ("noOverlay") { showOverlay(shown, in: rect, opacities: [1, 1, 0], keyTimes: [0, 0.35, 0.8], duration: Self.openingDuration) }
+        if !ZZ("noOverlay") { showOverlay(shown, in: rect, opacities: [1, 1, 0, 0], keyTimes: [0, 0.35, 0.8, 1], duration: Self.openingDuration) }
         zoomWorld(from: ZZ("notFromWork") ? CATransform3DIdentity : zoom(into: rect), to: CATransform3DIdentity, duration: Self.openingDuration)
-        if !ZZ("namesUnfaded") { Self.fade(names, [0, 0, 1], keyTimes: [0, 0.55, 0.95], duration: Self.openingDuration) }
+        if !ZZ("namesUnfaded") { Self.fade(names, [0, 0, 1, 1], keyTimes: [0, 0.55, 0.95, 1], duration: Self.openingDuration) }
         ring.isHidden = true
     }
 
@@ -273,9 +281,9 @@ final class SpacePlanView: NSView {
     func playDive(into rect: NSRect, arriving: FrozenView) {
         isDiving = true
         ring.isHidden = true
-        showOverlay(arriving, in: rect, opacities: [0, 0, 1], keyTimes: [0, 0.5, 0.9], duration: Self.diveDuration)
+        showOverlay(arriving, in: rect, opacities: [0, 0, 1, 1], keyTimes: [0, 0.5, 0.9, 1], duration: Self.diveDuration)
         zoomWorld(from: CATransform3DIdentity, to: zoom(into: rect), duration: Self.diveDuration)
-        Self.fade(names, [1, 0], keyTimes: [0, 0.3], duration: Self.diveDuration)
+        Self.fade(names, [1, 0, 0], keyTimes: [0, 0.3, 1], duration: Self.diveDuration)
     }
 
     /// An opening at its end, at once: the world in place, the overlay

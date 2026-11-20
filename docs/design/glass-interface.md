@@ -534,9 +534,11 @@ the text stays flat and sharp.
   the interface may move, the work recedes into the plan (0.56 s): the
   rows' world comes from where the workspace showed, filling the plan, the
   work's picture at its size over it fading into its row, the names after.
-  Going to a card, that workspace shows under the plan at once and the plan
-  dives into it (0.52 s), its picture fading in over the zoom; going back
-  dives into the workspace on screen. The rows move through their view's
+  Going to a card, that workspace shows under the plan at once, its column
+  taking the keyboard, and the plan dives into it (0.52 s), its picture
+  fading in over the zoom; going back dives into the workspace on screen.
+  Diving, the plan leaves keys and clicks to that workspace; ⌥⌘↑ or a pinch
+  meanwhile lands the dive and opens the plan anew. The rows move through their view's
   `sublayerTransform`; ends come on time, and Reduce motion, Animate the
   interface off or movement turning off mid-way show the end at once.
 - **Frozen pictures (study P4):** a crossing, or a new workspace's slide,
