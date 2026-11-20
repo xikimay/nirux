@@ -198,6 +198,15 @@ final class SpaceCrossingTests: XCTestCase {
             shell.selectProfile(first)
             while setup.runNext() {}
             XCTAssertTrue(Self.frozenViews(in: shell).isEmpty, "the new workspace's slide gone")
+            // AppKit hangs the columns' layers in a later pass; a picture holds
+            // only what hangs in its workspace's tree.
+            waitUntil("every column's layer in its workspace's tree", timeout: 5) {
+                shell.workspaces.allSatisfy { workspace in
+                    workspace.columns.allSatisfy { column in
+                        sequence(first: column.view.layer, next: { $0?.superlayer }).contains { $0 === workspace.containerView.layer }
+                    }
+                }
+            }
             try body(shell, first, second)
         }
     }
