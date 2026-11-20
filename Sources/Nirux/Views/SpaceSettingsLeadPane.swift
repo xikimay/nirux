@@ -16,8 +16,14 @@ final class SpaceSettingsLeadPane: NSObject {
         var place: Place
         /// "Starts tasks without asking" (`SpaceDefaults.leadStartsTasks`).
         var startsTasks = true
+        /// "Daily pass" (`SpaceDefaults.leadDailyPass`) and the hour it is
+        /// due after.
+        var dailyPass = true
+        var dailyPassHour = DailyPass.defaultHour
+        /// "Last pass: …", nil before the first.
+        var lastPass: String?
         /// False while the space's defaults.json can't be written.
-        var canChangeStartsTasks = true
+        var canChangeDefaults = true
     }
 
     /// Where a Lead works: it starts tasks only from a repository's
@@ -39,6 +45,8 @@ final class SpaceSettingsLeadPane: NSObject {
     struct Actions {
         var setLead: @MainActor (Bool) -> Void = { _ in }
         var setStartsTasks: @MainActor (Bool) -> Void = { _ in }
+        var setDailyPass: @MainActor (Bool) -> Void = { _ in }
+        var setDailyPassHour: @MainActor (Int) -> Void = { _ in }
     }
 
     static let width: CGFloat = 680
@@ -57,6 +65,10 @@ final class SpaceSettingsLeadPane: NSObject {
     let descriptionLabel = NSTextField(wrappingLabelWithString: "")
     let startsTasksSwitch = NSSwitch()
     private let startsTasksRow = NSStackView()
+    let dailyPassSwitch = NSSwitch()
+    let dailyPassHourPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    let lastPassLabel = NSTextField(labelWithString: "")
+    private let dailyPassRow = NSStackView()
     private let alwaysSection = NSStackView()
 
     private(set) var model: Model
@@ -77,8 +89,14 @@ final class SpaceSettingsLeadPane: NSObject {
             : Self.description(place: model.place, spaceName: model.spaceName)
         leadSwitch.setAccessibilityHelp(descriptionLabel.stringValue)
         startsTasksSwitch.state = model.startsTasks ? .on : .off
-        startsTasksSwitch.isEnabled = model.canChangeStartsTasks
+        startsTasksSwitch.isEnabled = model.canChangeDefaults
         startsTasksRow.isHidden = model.isGeneral
+        dailyPassSwitch.state = model.dailyPass ? .on : .off
+        dailyPassSwitch.isEnabled = model.canChangeDefaults
+        dailyPassHourPopup.selectItem(at: model.dailyPassHour)
+        dailyPassHourPopup.isEnabled = model.canChangeDefaults && model.dailyPass
+        lastPassLabel.stringValue = model.lastPass ?? "No pass yet."
+        dailyPassRow.isHidden = model.isGeneral
         alwaysSection.isHidden = model.isGeneral
     }
 
@@ -118,8 +136,23 @@ final class SpaceSettingsLeadPane: NSObject {
         let wanted = sender.state == .on
         // What the file holds comes back with `update`.
         sender.state = model.startsTasks ? .on : .off
-        guard wanted != model.startsTasks, model.canChangeStartsTasks else { return }
+        guard wanted != model.startsTasks, model.canChangeDefaults else { return }
         actions.setStartsTasks(wanted)
+    }
+
+    @objc func dailyPassChanged(_ sender: NSSwitch) {
+        let wanted = sender.state == .on
+        // What the file holds comes back with `update`.
+        sender.state = model.dailyPass ? .on : .off
+        guard wanted != model.dailyPass, model.canChangeDefaults else { return }
+        actions.setDailyPass(wanted)
+    }
+
+    @objc func dailyPassHourChanged(_ sender: NSPopUpButton) {
+        let hour = sender.indexOfSelectedItem
+        sender.selectItem(at: model.dailyPassHour)
+        guard (0...23).contains(hour), hour != model.dailyPassHour, model.canChangeDefaults else { return }
+        actions.setDailyPassHour(hour)
     }
 
     @objc func switchChanged(_ sender: NSSwitch) {
@@ -177,7 +210,8 @@ final class SpaceSettingsLeadPane: NSObject {
         startsTasksRow.orientation = .horizontal
         startsTasksRow.alignment = .top
         startsTasksRow.spacing = 12
-        let switches = NSStackView(views: [switchRow, startsTasksRow])
+        buildDailyPassRow()
+        let switches = NSStackView(views: [switchRow, startsTasksRow, dailyPassRow])
         switches.orientation = .vertical
         switches.alignment = .leading
         switches.spacing = 16
@@ -214,6 +248,49 @@ final class SpaceSettingsLeadPane: NSObject {
             view.widthAnchor.constraint(equalToConstant: Self.width),
             descriptionLabel.widthAnchor.constraint(equalToConstant: textWidth)
         ])
+    }
+
+    /// "Daily pass", its hour, and when the last one ran.
+    private func buildDailyPassRow() {
+        dailyPassSwitch.target = self
+        dailyPassSwitch.action = #selector(dailyPassChanged(_:))
+        dailyPassSwitch.setAccessibilityLabel("Daily pass")
+        let title = NSTextField(labelWithString: "Daily pass")
+        title.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        title.setAccessibilityElement(false)
+        let hint = NSTextField(wrappingLabelWithString: "Once a day, once the Lead and you are idle, it reads the space’s day "
+            + "and proposes the rules that would have spared its friction. Nothing reaches the brief without you.")
+        hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        hint.textColor = .secondaryLabelColor
+        hint.isSelectable = false
+        hint.preferredMaxLayoutWidth = Self.contentWidth - 60
+        hint.setAccessibilityElement(false)
+        dailyPassSwitch.setAccessibilityHelp(hint.stringValue)
+        dailyPassHourPopup.addItems(withTitles: (0...23).map { String(format: "%02d:00", $0) })
+        dailyPassHourPopup.controlSize = .small
+        dailyPassHourPopup.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        dailyPassHourPopup.target = self
+        dailyPassHourPopup.action = #selector(dailyPassHourChanged(_:))
+        dailyPassHourPopup.setAccessibilityLabel("Daily pass after")
+        let after = NSTextField(labelWithString: "After")
+        after.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        after.textColor = .secondaryLabelColor
+        after.setAccessibilityElement(false)
+        lastPassLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        lastPassLabel.textColor = .secondaryLabelColor
+        lastPassLabel.lineBreakMode = .byTruncatingTail
+        let hour = NSStackView(views: [after, dailyPassHourPopup, lastPassLabel])
+        hour.orientation = .horizontal
+        hour.alignment = .firstBaseline
+        hour.spacing = 6
+        let texts = NSStackView(views: [title, hint, hour])
+        texts.orientation = .vertical
+        texts.alignment = .leading
+        texts.spacing = 3
+        dailyPassRow.setViews([dailyPassSwitch, texts], in: .leading)
+        dailyPassRow.orientation = .horizontal
+        dailyPassRow.alignment = .top
+        dailyPassRow.spacing = 12
     }
 
     /// A lock, what the Lead never does, then how it comes to the user.

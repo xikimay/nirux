@@ -55,7 +55,8 @@ extension EditorColumn {
         }
         header.titleToolTip = Self.isDiffGroupPath(activePath) ? nil : activePath
         diffButton.isEnabled = !Self.isDiffGroupPath(activePath)
-        diffButton.isOn = diffActivePath == activePath
+        // Compare's diff is the conflict banner's, not the git diff's.
+        diffButton.isOn = diffActivePath == activePath && diffActiveBase != .disk
     }
 
     /// The file's directory relative to the workspace ("Sources/Nirux"),

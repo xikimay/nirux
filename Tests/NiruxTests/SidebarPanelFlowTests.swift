@@ -830,15 +830,28 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let editor = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
             XCTAssertEqual(editor.workspaceCwd, harness.repo)
 
+            // The panel is shared: shown just before for a larger folder,
+            // whose files match the query too, its scan lands last.
+            let other = harness.root + "/other"
+            try FileManager.default.createDirectory(atPath: other, withIntermediateDirectories: true)
+            for index in 0..<2_000 { FileManager.default.createFile(atPath: other + "/search-target-\(index).txt", contents: nil) }
+            let picker = FilePickerPanel()
+            shell.filePickerPanel = picker
+            picker.show(relativeTo: harness.window, workspaceCwd: other) { _ in }
+
             // What Monaco's ⌘P sends over the bridge. The folder is scanned
-            // off the main thread.
+            // off the main thread: typed meanwhile, a query filters its list.
             editor.onFilePickerRequest?(editor)
-            let field = try XCTUnwrap(harness.waitForField(placeholder: "Find file in workspace…"))
+            let field = try XCTUnwrap(shell.filePickerPanel?.searchField)
+            harness.type("search-target", into: field)
             let table = try XCTUnwrap(field.window?.contentView.flatMap {
                 UIFlowHarness.descendant(of: $0, as: NSTableView.self)
             })
-            harness.waitUntil("the file list") { table.numberOfRows >= 2 }
-            harness.type("search-target", into: field)
+            harness.waitUntil("the file list") { table.numberOfRows > 0 }
+            // The other folder's scan, done again here, ends after the one
+            // started for it: its result is in by now.
+            _ = WorkspaceFileScanner.scan(cwd: other)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
             XCTAssertEqual(table.numberOfRows, 1)
             harness.press(.returnKey, in: field.window)
             let target = harness.repo + "/" + UIFlowHarness.searchTarget

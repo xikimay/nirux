@@ -11,8 +11,7 @@ extension NiruxShellView {
     func answerTurnQuestion(agentUUID: String, turnEndedAt: TimeInterval, answer: String) -> Bool {
         guard let terminalInput = TypedPromptSanitizer.terminalInput(for: answer) else { return false }
         // A hook still in the queue may say the agent moved on.
-        AgentHookCenter.shared.drain()
-        guard let place = liveColumn(where: { $0.agentUUID == agentUUID }), let pty = place.column.pty,
+        guard AgentHookCenter.shared.drain(), let place = liveColumn(where: { $0.agentUUID == agentUUID }), let pty = place.column.pty,
               pty.typeQuickAnswer(terminalInput, to: turnEndedAt, foreground: pty.foregroundProcess(snapshot: ProcessSnapshot()))
         else { return false }
         if let index = workspaces.firstIndex(where: { $0 === place.workspace }) { noteCatchUpTaskAnswered(workspaceIndex: index) }

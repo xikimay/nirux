@@ -54,6 +54,17 @@ final class ClaudeSessionRecordTests: XCTestCase {
         XCTAssertFalse(record("idle").showsWait(of: process))
         XCTAssertFalse(record("waiting", changedAt: 999).showsWait(of: process), "an earlier process's")
         XCTAssertNil(ClaudeSessionRecord(json: Data(#"{"status":3}"#.utf8), writtenAt: 0), "a field of another kind")
+
+        // The user's word stands in for a record only where there is none.
+        XCTAssertTrue(ClaudeSessionRecord.Reading.missing.allowsTypingOnSight(of: process, now: 1_003))
+        XCTAssertFalse(ClaudeSessionRecord.Reading.missing.allowsTypingOnSight(of: process, now: 1_002.9), "its REPL may not be up")
+        XCTAssertFalse(ClaudeSessionRecord.Reading.unreadable.allowsTypingOnSight(of: process, now: 2_000))
+        XCTAssertTrue(ClaudeSessionRecord.Reading.found(record("idle")).allowsTypingOnSight(of: process, now: 2_000))
+        XCTAssertTrue(ClaudeSessionRecord.Reading.found(record(nil, changedAt: nil)).allowsTypingOnSight(of: process, now: 1_003),
+                      "one without a status counts as none")
+        let stale = ClaudeSessionRecord.Reading.found(record("waiting", waitingFor: "dialog open", changedAt: 990))
+        XCTAssertTrue(stale.allowsTypingOnSight(of: process, now: 1_003), "an earlier process's counts as none")
+        XCTAssertFalse(stale.allowsTypingOnSight(of: process, now: 1_002.9))
     }
 
     /// Found in the config folder Claude Code uses, `.claude` in its home
@@ -137,16 +148,25 @@ final class ClaudeSessionRecordTests: XCTestCase {
         func refusal(at now: TimeInterval = Date().timeIntervalSince1970) -> AgentPromptRefusal? {
             pty.missionPromptRefusal(runningSince: now, snapshot: ProcessSnapshot(), now: now)
         }
+        func seen(at now: TimeInterval) -> AgentPromptRefusal? {
+            pty.missionPromptRefusal(runningSince: now, snapshot: ProcessSnapshot(), seenByUser: true, now: now)
+        }
         XCTAssertEqual(refusal(), .noPromptYet, "no record")
         // As its REPL writes it: once it started.
+        let record = config.appendingPathComponent("sessions/\(claude.pid).json")
         try writeRecord(pid: claude.pid, in: config, "idle", changedAt: claude.startedAt)
         let settled = claude.startedAt + ClaudeSessionRecord.settleTime
         XCTAssertEqual(refusal(at: settled), .noPromptYet, "without Nirux's hooks from it")
         _ = pty.applyAgentHook(AgentHookEvent(
             kind: .claude, name: .sessionStart, sessionID: "s", emitterProcess: claude, source: "resume", timestamp: claude.startedAt
         ), isUserFocused: false)
+        // The user's word stands in for a missing record, once it ran a while.
+        try FileManager.default.removeItem(at: record)
+        XCTAssertEqual(seen(at: claude.startedAt + 1), .noPromptYet, "its REPL may not be up yet")
+        XCTAssertNil(seen(at: settled), "the user saw its prompt")
         try writeRecord(pid: claude.pid, in: config, "waiting", waitingFor: "dialog open", changedAt: claude.startedAt)
         XCTAssertEqual(refusal(at: settled), .noPromptYet, "a resume's dialog")
+        XCTAssertEqual(seen(at: settled), .noPromptYet, "its record says a screen of its own is up, whatever the user saw")
         try writeRecord(pid: claude.pid, in: config, "idle", changedAt: claude.startedAt)
         XCTAssertEqual(refusal(at: settled - 0.1), .noPromptYet, "not settled at that time")
         XCTAssertNil(refusal(at: settled))

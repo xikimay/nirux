@@ -110,6 +110,7 @@ final class SilentTurnTests: XCTestCase {
         apply(.permissionRequest, at: 3, id: "ask")
         // Esc at its dialog: no hook, no Stop. The user types on at once.
         pressEsc(at: 5)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 19), keys: Data("go on\r".utf8))
         apply(.userPromptSubmit, at: 20)
         XCTAssertTrue(isSilent())
     }
@@ -174,6 +175,9 @@ final class SilentTurnTests: XCTestCase {
             isUserFocused: false
         )
         XCTAssertEqual(machine.silentInterruptRefusal(foreground: claude), .typed)
+        // Nor from the Lead's Esc, once Claude went on.
+        apply(.preToolUse, at: 6, id: "cat")
+        XCTAssertEqual(machine.interruptRefusal(foreground: claude), .typed)
     }
 
     func testAPromptWhileACallRunsLeavesItRunning() {
@@ -539,6 +543,7 @@ final class SilentTurnTests: XCTestCase {
         // no prompt of the user's to give back. The turn ends only once
         // Claude writes its interrupt.
         clock.now = 2_000
+        pty.sendRaw("\r") // the user sends the prompt given back
         hook(.userPromptSubmit, at: Date().timeIntervalSince1970)
         hook(.preToolUse, at: Date().timeIntervalSince1970, call: "ls")
         hook(.postToolUse, at: Date().timeIntervalSince1970, call: "ls")
@@ -553,7 +558,7 @@ final class SilentTurnTests: XCTestCase {
         pty.noteAgentTranscript(path: transcript.path, size: Int64(line.count + tail.count), now: Date().timeIntervalSince1970)
         clock.now = 3_200
         XCTAssertEqual(interrupt(since: 2_000), .stopping(promptAt: peerAt))
-        try await waitUntil("the second Esc", timeout: 3) { agent.input.count == 2 }
+        try await waitUntil("the second Esc", timeout: 3) { agent.input.count == 3 }
         XCTAssertEqual(
             pty.missionPromptRefusal(runningSince: front.instance.startedAt, snapshot: ProcessSnapshot()), .working,
             "no draft given back, and no message until Claude shows it stopped"
@@ -585,7 +590,7 @@ final class SilentTurnTests: XCTestCase {
         clock.now = 6_400
         XCTAssertEqual(interrupt(since: 5_200), .refused(.notWorking))
         try await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(agent.input, "\u{1B}\u{1B}x", "an Esc per interrupt, never Enter")
+        XCTAssertEqual(agent.input, "\u{1B}\n\u{1B}x", "an Esc per interrupt, never Enter but the user's")
     }
 
     /// Keys typed before Claude answered: the Esc could close a screen they

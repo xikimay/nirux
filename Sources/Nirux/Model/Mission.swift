@@ -43,6 +43,17 @@ struct Mission: Codable, Equatable {
     func isCarried(handoffsEnabled: Bool) -> Bool {
         handoffsEnabled || isAlwaysCarried
     }
+
+    /// The agent its child runs, as Nirux's lines name it, when Nirux
+    /// delivers its parent's messages: typed into Claude Code's prompt, or
+    /// handed to Codex's queue. Nil for one that delivers none (agy).
+    var childAgentName: String? {
+        switch childAgentKind {
+        case NiruxApp.WorkspaceAgent.claude.rawValue: "Claude Code"
+        case NiruxApp.WorkspaceAgent.codex.rawValue: "Codex"
+        default: nil
+        }
+    }
 }
 
 /// An explicit mailbox event. `deliveredAt` is set once the app has acted
@@ -93,9 +104,18 @@ struct MissionEvent: Codable, Equatable {
     var expectsTypedAnswer: Bool?
     /// On a response: the user wrote it in Nirux, not the parent agent.
     var answeredByUser: Bool?
+    /// On a question: what blocks the child (`ask --kind`). Nil: it didn't say.
+    var questionKind: QuestionKind?
+    /// On a question: the answer the child would pick (`ask --recommend`),
+    /// one line; for an `access` question, what is needed and where.
+    var recommendation: String?
+    /// On a response: it is the question's recommendation, accepted.
+    var acceptedRecommendation: Bool?
     /// On a question: the parent (a space's Lead, `ask_user`) handed it to
     /// the user, for this reason. Its row turns amber at once.
     var handedToUserBecause: String?
+    /// When, epoch seconds; nil on one an older build handed over.
+    var handedToUserAt: TimeInterval?
     /// On an instruction: Nirux types it at the child's next free prompt
     /// until then (`MissionEventCLI.instructionLifetime` after it was sent).
     /// Nil on one an older build recorded, which had an hour.
@@ -114,6 +134,48 @@ struct MissionEvent: Codable, Equatable {
     /// whose parent is another agent. Its held and given-up lines go to
     /// the Lead, and Nirux types it under a line saying it's the Lead's.
     var leadSender: NewTask.MissionParent?
+
+    /// What blocks a child that asks, so the parent or the user settles it
+    /// in one step. Open: a kind a later build adds decodes here too, as its
+    /// raw value, instead of making the whole ledger unreadable.
+    struct QuestionKind: RawRepresentable, Codable, Hashable {
+        let rawValue: String
+
+        /// A choice the task leaves open.
+        static let decision = QuestionKind(rawValue: "decision")
+        /// Something only a person can give: a login, a secret, a permission.
+        static let access = QuestionKind(rawValue: "access")
+        /// The task contradicts the code or itself.
+        static let specMismatch = QuestionKind(rawValue: "spec-mismatch")
+        /// The kinds `ask --kind` takes.
+        static let known = [decision, access, specMismatch]
+
+        init(rawValue: String) {
+            self.rawValue = rawValue
+        }
+
+        init(from decoder: Decoder) throws {
+            rawValue = try decoder.singleValueContainer().decode(String.self)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(rawValue)
+        }
+    }
+
+    /// The recommendation a reply may send as the answer.
+    var acceptableRecommendation: String? {
+        Self.acceptable(recommendation, of: questionKind)
+    }
+
+    /// `recommendation` if a reply may send it as the answer: an access
+    /// question's says what is needed, which accepting doesn't give, and a
+    /// kind this build doesn't know may be like it.
+    static func acceptable(_ recommendation: String?, of kind: QuestionKind?) -> String? {
+        guard let kind else { return recommendation }
+        return [.decision, .specMismatch].contains(kind) ? recommendation : nil
+    }
 
     /// Until when Nirux may type this instruction.
     var instructionDeadline: TimeInterval {
@@ -317,6 +379,9 @@ final class MissionStore {
         guard MissionEventCLI.fits(message, limit: MissionEventCLI.maxLength(of: incoming.kind)) else {
             return .rejected
         }
+        // A recommendation this build can't carry (a later CLI's) stays out;
+        // the question goes through.
+        let recommendation = incoming.kind == .question ? incoming.recommendation.flatMap(MissionEventCLI.recommendation) : nil
 
         var updated = missions
         let fromParent = incoming.parentWorkspaceID == missions[index].parentWorkspaceID
@@ -340,7 +405,9 @@ final class MissionStore {
                   }),
                   !missions[index].events.contains(where: {
                       $0.kind == .response && $0.inReplyTo == questionID
-                  })
+                  }),
+                  incoming.acceptedRecommendation != true
+                      || missions[index].events[questionIndex].acceptableRecommendation == message
             else { return .rejected }
             updated[index].events[questionIndex].parentConsumedAt = incoming.timestamp
 
@@ -375,6 +442,16 @@ final class MissionStore {
         if event.kind == .instruction {
             event.typableUntil = event.timestamp + MissionEventCLI.instructionLifetime
             event.leadSender = lead
+        }
+        if event.kind == .question {
+            // A kind this build doesn't know (a later CLI's) may not be an
+            // answer: it stays out with its recommendation.
+            let known = incoming.questionKind.map(MissionEvent.QuestionKind.known.contains) ?? true
+            event.questionKind = known ? incoming.questionKind : nil
+            event.recommendation = known ? recommendation : nil
+        }
+        if event.kind == .response, incoming.acceptedRecommendation == true {
+            event.acceptedRecommendation = true
         }
         updated[index].events.append(event)
         updated[index].updatedAt = event.timestamp
@@ -422,16 +499,19 @@ final class MissionStore {
     /// Trusted UI response path: the user answers instead of the parent. It
     /// uses the same validation and persistence as a parent-agent CLI
     /// response, then returns the accepted event for the caller to act on.
+    /// `acceptingRecommendation`: `message` is the question's recommendation,
+    /// accepted (Accept).
     func respond(
         to questionID: String,
         message: String,
+        acceptingRecommendation: Bool = false,
         enabled: Bool,
         now: TimeInterval = Date().timeIntervalSince1970
     ) -> AcceptedEvent? {
         guard let mission = missions.first(where: { candidate in
             candidate.events.contains(where: { $0.id == questionID && $0.kind == .question })
         }) else { return nil }
-        let response = MissionEvent(
+        var response = MissionEvent(
             id: UUID().uuidString,
             missionID: mission.id,
             childWorkspaceID: mission.childWorkspaceID,
@@ -443,6 +523,7 @@ final class MissionStore {
             inReplyTo: questionID,
             timestamp: now
         )
+        response.acceptedRecommendation = acceptingRecommendation ? true : nil
         guard case let .accepted(accepted) = process(response, enabled: enabled, fromUser: true) else { return nil }
         return accepted
     }
@@ -459,6 +540,7 @@ final class MissionStore {
         else { return nil }
         var updated = missions
         updated[missionIndex].events[eventIndex].handedToUserBecause = why
+        updated[missionIndex].events[eventIndex].handedToUserAt = now
         updated[missionIndex].updatedAt = now
         return commit(updated) ? updated[missionIndex] : nil
     }
@@ -536,7 +618,9 @@ final class MissionStore {
             else { return false }
             return !mission.events.contains { $0.kind == .completed && $0.timestamp > question.timestamp }
         case .question:
+            // Not once its parent handed it to the user (`ask_user`).
             return mission.status == .active && event.parentTypedAt == nil && event.parentConsumedAt == nil
+                && event.handedToUserBecause == nil
                 && now - event.timestamp < MissionEventCLI.parentMessageLifetime
                 && !mission.events.contains { $0.kind == .response && $0.inReplyTo == event.id }
         case .completed:
