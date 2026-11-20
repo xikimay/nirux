@@ -382,8 +382,9 @@ extension NiruxShellView {
         on, tell the user that the new task may not report back to you.
 
         With a Mission, Nirux starts the child with Mission instructions. Nirux types the
-        messages between the two agents into their Claude Code prompts, once the agent's turn is
-        over and nobody is typing there:
+        messages between the two agents into their prompts, once the agent's turn is over and
+        nobody is typing there: Claude Code's, and an Antigravity child's for more work; a Codex
+        child's go into Codex's own queue:
 
         - The child asks with the command below and ends its turn; Nirux types the answer into
           its prompt. A Codex child's `ask` waits for the answer instead.

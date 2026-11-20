@@ -185,8 +185,11 @@ agy 1.5.12 has no queue of its own, so Nirux types into it, behind the same
 `promptRefusal` as Claude Code: a branch reads agy's OSC 7501 instead of
 hooks. Its prompt is free once the `agy` in front (the one sent to, or one
 resuming its conversation) said `done` and no key reached the terminal since
-its turn began (its first `working`; another after a dialog is the same
-turn's, and keys answering that dialog don't count). Seen live: agy says `idle` at
+its turn began (the Enter that sent its prompt, else its first `working`;
+another `working` after a dialog is the same turn's, a new prompt's Enter
+starts a new one even when the last turn's end was missed, and keys
+answering that dialog don't count, up to the one that answers it). A state
+read on an empty process table goes to the `agy` last seen in front. Seen live: agy says `idle` at
 the first key after `done`, but a key typed while it works stays in its box
 and it still says `done`. Its dialogs say `blocked`, `error` holds the
 message like a failed turn, and before its first turn ends (a resumed agy) it

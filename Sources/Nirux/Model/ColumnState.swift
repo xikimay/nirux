@@ -125,6 +125,9 @@ final class ColumnState {
     /// The agent last seen in the foreground, and when: gone from the
     /// process table once it leaves, it exited rather than being suspended.
     var lastForegroundAgent: ForegroundProcess?
+    /// Reads the process table where a terminal's own report needs it
+    /// (tests give an empty one, as an ENOMEM read gives).
+    var readsProcesses: () -> ProcessSnapshot = { ProcessSnapshot() }
     var lastForegroundAgentSeenAt: TimeInterval = 0
     /// The user asked to resume the agent that died mid-turn.
     var onResumeExitedAgent: (() -> Void)?
@@ -431,8 +434,11 @@ final class ColumnState {
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
             guard let self, let ptySession else { return }
             guard status.process != AgentProgramStatus.codex else { return noteCodexStatus(status, in: ptySession) }
+            // One read on an empty process table goes to the agy last seen in front.
+            let snapshot = readsProcesses()
             guard ptySession.isNewProgramStatus(status),
-                  let agy = ptySession.foregroundProcess(snapshot: ProcessSnapshot()), agy.name == status.process
+                  let agy = snapshot.isEmpty ? lastForegroundAgent : ptySession.foregroundProcess(snapshot: snapshot),
+                  agy.name == status.process
             else { return }
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {

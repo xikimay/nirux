@@ -1235,6 +1235,17 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 harness.shell.pendingLeadNotices.contains { $0.text.contains("but Antigravity hasn't started it") }
             }
 
+            // A turn end read on an empty process table (an ENOMEM read) goes to the agy last seen in front.
+            let pty = try XCTUnwrap(agy.column.pty)
+            let live = ProcessSnapshot()
+            agy.column.trackForegroundAgent(pty.foregroundProcess(snapshot: live), snapshot: live, now: Date().timeIntervalSince1970)
+            report(.working, in: agy.column)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity task", "message": "Then this."], lead: lead).isError)
+            agy.column.readsProcesses = { ProcessSnapshot(entries: []) }
+            report(.done, in: agy.column)
+            agy.column.readsProcesses = { ProcessSnapshot() }
+            harness.waitUntil("typed after a turn end read on an empty table") { agy.agent.input.contains("Then this.") }
+
             let claude = try task("Claude task", kind: "claude")
             defer { claude.agent.remove() }
             report(.working, in: claude.column)
@@ -1246,7 +1257,8 @@ final class LeadTaskToolsFlowTests: XCTestCase {
 
             let byHand = try task("Antigravity by hand", kind: nil)
             defer { byHand.agent.remove() }
-            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity by hand", "message": "Rebase."], lead: lead).isError)
+            let headed = try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity by hand", "message": "/rebase on main"], lead: lead)
+            XCTAssertFalse(headed.isError, "a Lead's line heads it: typed as text \(headed.text)")
             XCTAssertTrue(MissionStore.shared.missions.contains {
                 $0.oneWay == true && $0.childAgentUUID == byHand.column.agentUUID && $0.childAgentKind == "agy"
             }, "the Lead's one-way Mission")

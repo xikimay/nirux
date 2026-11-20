@@ -143,6 +143,7 @@ extension AgentStatusMachine {
         case .working?, nil: return .working
         case .blocked?: return .dialog
         case .error?: return .failedTurn
+        case .idle? where turn.ended == .error: return .failedTurn
         case .idle? where turn.ended != .done: return .draft
         case .idle?, .done?: return lastDraftInputAt > turn.startedAt ? .draft : nil
         }

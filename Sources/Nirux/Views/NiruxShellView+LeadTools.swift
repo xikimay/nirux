@@ -652,7 +652,8 @@ extension NiruxShellView {
         guard let agent = mission.childAgentName else {
             return answer(Self.deliversOnlyToKnownAgents(workspace.title, runs: mission.childAgentKind), true)
         }
-        if agent == "Antigravity", message.hasPrefix("/") {
+        // Typed as it is: a Lead's line heads one to a task that isn't its.
+        if agent == "Antigravity", mission.oneWay != true, lead == nil, MissionPromptText.startsWithSlashCommand(message) {
             return answer("Antigravity runs a slash command itself, with no turn to end, which would hold the messages after it: "
                 + "ask “\(workspace.title)” in words instead.", true)
         }

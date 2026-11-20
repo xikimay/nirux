@@ -614,11 +614,15 @@ extension NiruxShellView {
         if let foreground, foreground.name == AgentProgramStatus.codex { return column.provenCodexSessionID(of: foreground) }
         if let foreground, foreground.name == AgentProgramStatus.agy {
             // One resumed by hand says none in its hooks until a turn ends.
-            let arguments = foreground.arguments
-            return column.boundAgySessionID(of: foreground.instance)
-                ?? arguments.firstIndex(of: "--conversation").flatMap { arguments[safe: $0 + 1] }
+            return column.boundAgySessionID(of: foreground.instance) ?? Self.resumedConversation(ofAgy: foreground.arguments)
         }
         return column.confirmedClaudeSessionID(foregroundProcess: foreground)
+    }
+
+    /// The conversation `agy --conversation <id>` (or `=<id>`) resumes.
+    nonisolated static func resumedConversation(ofAgy arguments: [String]) -> String? {
+        arguments.firstIndex(of: "--conversation").flatMap { arguments[safe: $0 + 1] }
+            ?? arguments.lazy.compactMap { $0.hasPrefix("--conversation=") ? String($0.dropFirst("--conversation=".count)) : nil }.first
     }
 
     /// Types each Lead notice whose Lead's prompt is free; the others wait

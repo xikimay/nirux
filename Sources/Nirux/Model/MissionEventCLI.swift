@@ -795,7 +795,7 @@ extension MissionEventCLI {
             writeStandardError("Nirux delivers messages only to a Claude Code, Codex or Antigravity child; this one runs \(mission.childAgentKind).")
             return 4
         }
-        if mission.childAgentKind == NiruxApp.WorkspaceAgent.agy.rawValue, message.hasPrefix("/") {
+        if mission.childAgentKind == NiruxApp.WorkspaceAgent.agy.rawValue, MissionPromptText.startsWithSlashCommand(message) {
             writeStandardError("Antigravity runs a slash command itself, with no turn to end, which would hold the messages after it: "
                 + "send the request in words.")
             return 2

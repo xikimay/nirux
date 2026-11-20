@@ -229,7 +229,11 @@ final class MissionTellTests: XCTestCase {
         let agy = try makeFixture(childAgentKind: "agy")
         XCTAssertEqual(tell("/code-review", in: agy), 2, "agy runs a slash command itself, with no turn to end")
         XCTAssertEqual(tell("Review the diff.", in: agy), 3, "typed into Antigravity's prompt")
-        XCTAssertEqual(try queuedEvents(in: agy).map(\.kind), [.instruction])
+        XCTAssertEqual(tell("/Users/me/review.md: apply it.", in: agy), 3, "a path is no slash command")
+        XCTAssertEqual(try queuedEvents(in: agy).map(\.kind), [.instruction, .instruction])
+        XCTAssertEqual(NiruxShellView.resumedConversation(ofAgy: ["agy", "--conversation", "c1"]), "c1")
+        XCTAssertEqual(NiruxShellView.resumedConversation(ofAgy: ["agy", "--conversation=c2"]), "c2")
+        XCTAssertNil(NiruxShellView.resumedConversation(ofAgy: ["agy", "-i", "Go"]))
         let codex = try makeFixture(childAgentKind: "codex")
         XCTAssertEqual(tell("/code-review", in: codex), 3, "Codex takes it through its own queue")
         XCTAssertEqual(try queuedEvents(in: codex).map(\.kind), [.instruction])
@@ -513,6 +517,36 @@ final class MissionTellTests: XCTestCase {
         report(.done, at: 13, from: ProcessInstance(pid: 9, startedAt: t0))
         XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: t0), name: "agy", arguments: ["agy"])),
                        .noPromptYet, "its own turn, not another agy's")
+
+        func at(_ offset: TimeInterval) -> Date { Date(timeIntervalSince1970: t0 + offset) }
+        // Keys typed after the Enter that sent its prompt, before its working is read, stay in its box.
+        machine.noteKeystroke(now: at(20), keys: Data("go".utf8))
+        machine.noteKeystroke(now: at(20.1), keys: Data("\r".utf8))
+        machine.noteKeystroke(now: at(20.12), keys: Data("x".utf8))
+        report(.working, at: 20.2)
+        report(.done, at: 21)
+        XCTAssertEqual(refusal(), .draft, "a key after the Enter that sent its prompt")
+        // Its dialog answered, text typed before it says it works again.
+        report(.working, at: 22)
+        report(.blocked, kind: "permission", at: 22.1)
+        machine.noteKeystroke(now: at(22.2), keys: Data("\r".utf8))
+        machine.noteKeystroke(now: at(22.3), keys: Data("y".utf8))
+        report(.working, at: 22.4)
+        report(.done, at: 23)
+        XCTAssertEqual(refusal(), .draft, "text typed once its dialog was answered")
+        // A turn whose end was missed (a silence dropped its status): the next prompt starts a new one.
+        report(.working, at: 24)
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: at(24 + AgentProgramStatus.workingSilence + 1))
+        machine.noteKeystroke(now: at(86), keys: Data("next".utf8))
+        machine.noteKeystroke(now: at(86.1), keys: Data("\r".utf8))
+        report(.working, at: 86.2)
+        report(.done, at: 87)
+        XCTAssertNil(refusal(), "its prompt's own keys aren't a draft")
+        report(.working, at: 88)
+        report(.error, at: 89)
+        machine.noteKeystroke(now: at(89.5), keys: Data("z".utf8))
+        report(.idle, at: 89.6)
+        XCTAssertEqual(refusal(), .failedTurn, "a failed turn says so, a key after it notwithstanding")
 
         // An agy that left with its dialog open: the keys of what runs next are drafts.
         var after = AgentStatusMachine()
