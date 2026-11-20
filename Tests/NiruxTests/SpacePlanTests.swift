@@ -122,9 +122,9 @@ final class SpacePlanTests: XCTestCase {
             XCTAssertEqual(shell.verticalStrip.alphaValue, 1)
 
             toggle(shell)
-            shell.setFrameSize(NSSize(width: shell.frame.width - 100, height: shell.frame.height))
-            shell.relayout(animated: false)
-            XCTAssertNil(shell.spacePlan, "a new size")
+            let viewport = shell.viewport.bounds.size
+            shell.closeSpacePlanIfStale(viewport: NSSize(width: viewport.width - 100, height: viewport.height))
+            XCTAssertNil(shell.spacePlan, "a new size, before its rows are laid out again")
             let focused = try XCTUnwrap(onScreen.columns[safe: onScreen.focusedIndex])
             XCTAssertTrue((shell.window?.firstResponder as? NSView)?.isDescendant(of: focused.view) == true, "the keyboard back")
 
@@ -253,8 +253,8 @@ final class SpacePlanTests: XCTestCase {
     /// An archived one reads as the rail would show it.
     func testEveryRowShowsHoweverManyWorkspaces() throws {
         try withWorkspaces { shell, workspaces in
-            shell.window?.setContentSize(NSSize(width: 1200, height: 320))
-            for index in 0..<7 { shell.addWorkspace(title: "more \(index)", cwd: NSTemporaryDirectory(), activate: false) }
+            shell.window?.setContentSize(NSSize(width: 1200, height: 300))
+            for index in 0..<12 { shell.addWorkspace(title: "more \(index)", cwd: NSTemporaryDirectory(), activate: false) }
             let closing = try XCTUnwrap(shell.workspaces.last)
             closing.isClosing = true
             workspaces[2].isInactive = true
@@ -264,7 +264,7 @@ final class SpacePlanTests: XCTestCase {
             let plan = try XCTUnwrap(shell.spacePlan)
             let listed = shell.visibleWorkspaceIndices.map { shell.workspaces[$0] }.filter { !$0.isClosing }
             XCTAssertEqual(plan.rows.map(\.workspaceID), listed.map(\.id), "every one but the one closing")
-            XCTAssertGreaterThan(listed.count, 8)
+            XCTAssertGreaterThan(SpacePlanView.rowGap * CGFloat(listed.count - 1), plan.bounds.height - SpacePlanView.margin * 2, "more rows than full gaps leave room for")
             XCTAssertTrue(plan.rows.allSatisfy { plan.bounds.contains($0.picture.frame) }, "each whole")
             let icons = plan.names.subviews.compactMap { $0 as? StateIconView }
             XCTAssertEqual(icons.filter { $0.label != nil }.count, plan.rows.count, "each with its initials, as the rail names it")
@@ -286,6 +286,7 @@ final class SpacePlanTests: XCTestCase {
 
             toggle(shell)
             var ring = Theme.Radius.column * (try XCTUnwrap(shell.spacePlan)).scale + 4
+            Self.waitForTheLayers(of: shell)
             shell.focusSpace(.next)
             XCTAssertNil(shell.spacePlan)
             let leaving = try XCTUnwrap(shell.crossingPictures.first)
@@ -295,6 +296,7 @@ final class SpacePlanTests: XCTestCase {
             shell.relayout(animated: false)
             toggle(shell)
             ring = Theme.Radius.column * (try XCTUnwrap(shell.spacePlan)).scale + 4
+            Self.waitForTheLayers(of: shell)
             shell.addWorkspace(title: "new", cwd: NSTemporaryDirectory())
             XCTAssertNil(shell.spacePlan)
             let slide = try XCTUnwrap(shell.viewport.subviews.compactMap { $0 as? FrozenView }.first)
@@ -334,6 +336,12 @@ final class SpacePlanTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// AppKit hangs a new view's layer in its parent's in a later pass: a
+    /// picture holds only what hangs there.
+    private static func waitForTheLayers(of shell: NiruxShellView) {
+        waitUntil("the plan's layer in the viewport's", timeout: 5) { shell.spacePlan?.layer?.superlayer === shell.viewport.layer }
+    }
 
     /// Whether `layer` or one under it is the plan's ring, by its width and radius.
     private static func holdsRing(_ layer: CALayer, radius: CGFloat) -> Bool {
