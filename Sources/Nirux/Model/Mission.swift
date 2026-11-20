@@ -45,12 +45,17 @@ struct Mission: Codable, Equatable {
     }
 
     /// The agent its child runs, as Nirux's lines name it, when Nirux
-    /// delivers its parent's messages: typed into Claude Code's prompt, or
-    /// handed to Codex's queue. Nil for one that delivers none (agy).
-    var childAgentName: String? {
-        switch childAgentKind {
+    /// delivers its parent's messages to it (`agentName(ofKind:)`).
+    var childAgentName: String? { Self.agentName(ofKind: childAgentKind) }
+
+    /// An agent kind (its process's name too), as Nirux's lines name it,
+    /// when Nirux delivers messages to it: typed into Claude Code's or
+    /// Antigravity's prompt, or handed to Codex's queue.
+    static func agentName(ofKind kind: String) -> String? {
+        switch kind {
         case NiruxApp.WorkspaceAgent.claude.rawValue: "Claude Code"
         case NiruxApp.WorkspaceAgent.codex.rawValue: "Codex"
+        case NiruxApp.WorkspaceAgent.agy.rawValue: "Antigravity"
         default: nil
         }
     }
@@ -605,7 +610,8 @@ final class MissionStore {
             .first
     }
 
-    private static func isPendingDelivery(_ event: MissionEvent, in mission: Mission, now: TimeInterval) -> Bool {
+    /// Whether Nirux will type `event` into its recipient's prompt.
+    nonisolated static func isPendingDelivery(_ event: MissionEvent, in mission: Mission, now: TimeInterval) -> Bool {
         switch event.kind {
         case .instruction:
             return event.childConsumedAt == nil && event.expiredAt == nil && now < event.instructionDeadline

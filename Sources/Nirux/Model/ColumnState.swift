@@ -36,9 +36,9 @@ final class ColumnState {
     /// permission prompt while the user isn't watching this column).
     /// The agent asks for the user (alert), with why when known.
     var onAgentAttention: ((AgentAttentionReason?) -> Void)?
-    /// Codex in front reported its turn over (OSC 7501 done or idle): a
-    /// Mission message may go into its queue.
-    var onCodexTurnOver: (() -> Void)?
+    /// An agent that says its state (OSC 7501) reported its turn over:
+    /// Codex done or idle, Antigravity done. A Mission message may go to it.
+    var onProgramTurnOver: (() -> Void)?
 
     /// Fires when the user cmd-clicks an http(s) link in the terminal —
     /// the workspace opens it in a browser column.
@@ -125,6 +125,9 @@ final class ColumnState {
     /// The agent last seen in the foreground, and when: gone from the
     /// process table once it leaves, it exited rather than being suspended.
     var lastForegroundAgent: ForegroundProcess?
+    /// Reads the process table where a terminal's own report needs it
+    /// (tests give an empty one, as an ENOMEM read gives).
+    var readsProcesses: () -> ProcessSnapshot = { ProcessSnapshot() }
     var lastForegroundAgentSeenAt: TimeInterval = 0
     /// The user asked to resume the agent that died mid-turn.
     var onResumeExitedAgent: (() -> Void)?
@@ -431,13 +434,17 @@ final class ColumnState {
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
             guard let self, let ptySession else { return }
             guard status.process != AgentProgramStatus.codex else { return noteCodexStatus(status, in: ptySession) }
+            // One read on an empty process table goes to the agy last seen in front.
+            let snapshot = readsProcesses()
             guard ptySession.isNewProgramStatus(status),
-                  let agy = ptySession.foregroundProcess(snapshot: ProcessSnapshot()), agy.name == status.process
+                  let agy = snapshot.isEmpty ? lastForegroundAgent : ptySession.foregroundProcess(snapshot: snapshot),
+                  agy.name == status.process
             else { return }
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
                 onAgentAttention?(reason)
             }
+            if status.state == .done { onProgramTurnOver?() }
         }
 
         ptySession.onLocalServerURL = { [weak self] url in
@@ -628,7 +635,7 @@ final class ColumnState {
         let front = pty.foregroundProcess(snapshot: snapshot)
         guard snapshot.isEmpty || front?.name == status.process else { return }
         pty.noteCodexStatus(status, from: snapshot.isEmpty ? nil : front?.instance)
-        if [.done, .idle].contains(status.state) { onCodexTurnOver?() }
+        if [.done, .idle].contains(status.state) { onProgramTurnOver?() }
     }
 
     /// Why a Mission message can't go into the queue of this column's Codex
