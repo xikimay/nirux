@@ -173,10 +173,12 @@ final class UnderBarTests: XCTestCase {
             shell.endWorkspaceSwitch()
             shell.workspaceNameCard.hide(animated: false)
             clock.advance(by: 5)
-            waitUntil("the bar over the title band", timeout: 5) {
+            // At rest: the bar laid out over the band, the new workspaces'
+            // slides gone.
+            waitUntil("the bar over the title band, nothing sliding", timeout: 5) {
                 window.contentView?.superview?.layoutSubtreeIfNeeded()
                 shell.relayout(animated: false)
-                return shell.titleBand != nil
+                return shell.titleBand != nil && !shell.viewport.subviews.contains { $0 is FrozenView }
             }
             try body(shell, clock)
         }
