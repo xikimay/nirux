@@ -12,7 +12,7 @@ extension NiruxShellView {
     @discardableResult
     func pinched(by magnification: CGFloat, phase: NSEvent.Phase, at point: NSPoint) -> Bool {
         guard viewport.frame.contains(point) else { return false }
-        if pinch.moved(by: magnification, phase: phase, past: -Self.pinchThreshold), spacePlan == nil, planDrawing.isEmpty {
+        if pinch.moved(by: magnification, phase: phase, past: -Self.pinchThreshold), spacePlan?.isDiving ?? true, planDrawing.isEmpty {
             toggleSpacePlan()
         }
         return true
@@ -25,7 +25,11 @@ extension NiruxShellView {
     func toggleSpacePlan() {
         // A pinch under way is done: the plan came or went.
         pinch.end()
-        if spacePlan != nil { return closeSpacePlan(going: nil) }
+        if let plan = spacePlan {
+            guard plan.isDiving else { return closeSpacePlan(going: nil) }
+            // Asked again while it dives: it lands, and opens anew.
+            removeSpacePlan()
+        }
         if !planDrawing.isEmpty { return endPlanDrawing() }
         guard activeWorkspace != nil else { return }
         endSpaceCrossing()
@@ -80,17 +84,17 @@ extension NiruxShellView {
     }
 
     /// The plan goes, to `target` or back to what showed. That workspace
-    /// shows under it at once; the plan dives into it while the interface
-    /// may move and `animated`, else goes at once, a dive on its way too.
-    /// The keyboard it held goes to the column on screen.
+    /// shows under it at once, its column taking the keyboard (a card
+    /// chosen, whatever held it; going back, if the plan held it), and the
+    /// plan dives into it while the interface may move and `animated`, else
+    /// goes at once, a dive on its way too.
     func closeSpacePlan(going target: (workspaceID: String, column: Int)?, animated: Bool = true) {
         guard let plan = spacePlan else { return }
         guard !plan.isDiving else { return animated ? () : removeSpacePlan() }
         plan.finishOpening()
-        let focusing = window?.firstResponder === plan
+        let focusing = target != nil || window?.firstResponder === plan
         let destination = target ?? (plan.workspaceID, activeWorkspace?.focusedIndex ?? 0)
-        if destination.workspaceID != activeWorkspace?.id || destination.column != activeWorkspace?.focusedIndex,
-           let index = workspaces.firstIndex(where: { $0.id == destination.workspaceID }), workspaceStore.selectWorkspace(at: index),
+        if let index = workspaces.firstIndex(where: { $0.id == destination.workspaceID }), workspaceStore.selectWorkspace(at: index),
            let workspace = activeWorkspace {
             workspace.focusedIndex = max(0, min(destination.column, workspace.columns.count - 1))
             // Kept through the layout: it dives into what it lays out.

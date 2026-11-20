@@ -36,4 +36,40 @@ final class SpacePlanFlowTests: XCTestCase {
             }
         }
     }
+
+    /// As a dive starts, the column it goes to holds the keyboard, and a
+    /// key typed during the dive reaches its terminal through the monitor.
+    func testADivesKeysGoToTheColumnItGoesTo() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            workspace.addColumn(command: standIn.command(), agentUUID: UUID().uuidString, cwd: harness.repo)
+            let column = try XCTUnwrap(workspace.columns.last)
+            let pty = try XCTUnwrap(column.pty)
+            harness.waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            shell.addWorkspace(title: "other", cwd: harness.repo)
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }), column: workspace.columns.count - 1)
+            shell.sideEffects.reducesMotion = { false }
+            shell.sideEffects.windowShows = { _ in true }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+
+            try harness.withApp {
+                shell.toggleSpacePlan()
+                harness.waitUntil("the plan") { shell.spacePlan != nil }
+                let plan = try XCTUnwrap(shell.spacePlan)
+                plan.keyDown(with: try XCTUnwrap(NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: harness.window.windowNumber,
+                    context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 0x24
+                )))
+                XCTAssertTrue(plan.isDiving, "it dives into the card on screen")
+                XCTAssertTrue((harness.window.firstResponder as? NSView)?.isDescendant(of: column.view) == true, "its column holds the keyboard")
+                harness.press("x", keyCode: 0x07, [])
+                harness.waitUntil("the key typed during the dive") { standIn.input.contains("x") }
+                harness.waitUntil("the plan gone") { shell.spacePlan == nil }
+            }
+        }
+    }
 }

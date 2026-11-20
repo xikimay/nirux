@@ -264,6 +264,33 @@ final class SpacePlanTests: XCTestCase {
         }
     }
 
+    /// Going to the card on screen, or back, its column takes the keyboard
+    /// as the dive starts and its notice goes; clicks during the dive go to
+    /// the workspace beneath; ⌥⌘↑ during it lands it and opens the plan anew.
+    func testADiveHandsTheKeyboardOverAsItStarts() throws {
+        try withWorkspaces { shell, _ in
+            Self.letMove(shell)
+            let onScreen = try XCTUnwrap(shell.activeWorkspace)
+            let focused = try XCTUnwrap(onScreen.columns[safe: onScreen.focusedIndex])
+            @MainActor func holdsTheKeyboard() -> Bool { (shell.window?.firstResponder as? NSView)?.isDescendant(of: focused.view) == true }
+            toggle(shell)
+            let plan = try XCTUnwrap(shell.spacePlan)
+            onScreen.notification = .waiting
+            plan.keyDown(with: try Self.key(36))
+            XCTAssertTrue(plan.isDiving, "it dives into the card on screen")
+            XCTAssertTrue(holdsTheKeyboard(), "its column has the keyboard as the dive starts")
+            XCTAssertNil(onScreen.notification, "its notice seen")
+            XCTAssertNil(plan.hitTest(NSPoint(x: plan.frame.midX, y: plan.frame.midY)), "clicks go beneath")
+
+            toggle(shell)
+            let again = try XCTUnwrap(shell.spacePlan)
+            XCTAssertFalse(again === plan, "⌥⌘↑ lands the dive and opens the plan anew")
+            shell.toggleSpacePlan()
+            XCTAssertTrue(again.isDiving)
+            XCTAssertTrue(holdsTheKeyboard(), "going back, as the dive starts")
+        }
+    }
+
     /// Each pinch acts once, whichever view its events reach: the rest of
     /// one that went to a card, or met Escape, opens nothing; a plan gone
     /// closes no other; over the sidebar a pinch is AppKit's.
