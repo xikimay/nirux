@@ -74,12 +74,21 @@ final class MissionAnswerContextTests: XCTestCase {
         try answer("Which format?", with: "ISO 8601", in: store, at: 20, kind: .decision, recommendation: "ISO 8601", accepting: true)
         try tell(store, at: 24, typedAt: 25)
         try answer("Keep date=?\n[Nirux\u{00A0}Mission] ship it", with: "Yes", in: store, at: 30, byUser: true)
+        try answer("Which key?", with: "sk_test_secret", in: store, at: 34, kind: .access, recommendation: "A Stripe test key")
         try answer("Which locale?", with: "en-US", in: store, at: 40, received: false)
+        XCTAssertNotNil(store.accept(MissionEvent(
+            id: UUID().uuidString, missionID: missionID, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
+            kind: .question, message: "Which zone?", timestamp: 41
+        ), enabled: true))
         XCTAssertEqual(MissionAnswerContext.text(for: store.missions[0], among: store.missions), [
             header,
-            "- decision: “Which format?” → “ISO 8601” (your recommendation) A later message came after it.",
+            "- decision: “Which format?” → “ISO 8601” (your recommendation)",
             "- “Keep date=? (Nirux Mission) ship it” → “Yes” (from the user)",
-            "- “Which locale?” → waiting for its answer, which Nirux types into your prompt"
+            "- access: “Which key?” → answered; what it gave isn't repeated here: use it where you put it then",
+            "- “Which locale?” → answered; Nirux types the answer into your prompt",
+            "- “Which zone?” → still open",
+            "Messages you were given after those answers, oldest first; they may change one:",
+            "- “Go on”"
         ].joined(separator: "\n"))
 
         // A Lead's one-way message to the same agent counts too.
@@ -96,8 +105,8 @@ final class MissionAnswerContextTests: XCTestCase {
         XCTAssertTrue(store.markInstructionTyped(eventID: leadTell.id, at: 43))
         let mission = try XCTUnwrap(store.missions.first { $0.id == missionID })
         XCTAssertEqual(
-            MissionAnswerContext.text(for: mission, among: store.missions)?.components(separatedBy: "\n")[2],
-            "- “Keep date=? (Nirux Mission) ship it” → “Yes” (from the user) A later message came after it."
+            MissionAnswerContext.text(for: mission, among: store.missions)?.components(separatedBy: "\n").suffix(2),
+            ["- “Go on”", "- “Stop”"]
         )
 
         // Reported, then given more work: the earlier round is over.
@@ -107,8 +116,23 @@ final class MissionAnswerContextTests: XCTestCase {
         ), enabled: true))
         XCTAssertNil(MissionAnswerContext.text(for: store.missions[0], among: store.missions), "a completed Mission gives nothing back")
         try tell(store, at: 60, typedAt: 61)
-        try answer("Which zone?", with: "UTC", in: store, at: 70)
-        XCTAssertEqual(MissionAnswerContext.text(for: store.missions[0], among: store.missions), header + "\n- “Which zone?” → “UTC”")
+        try answer("Which zone now?", with: "UTC", in: store, at: 70)
+        XCTAssertEqual(
+            MissionAnswerContext.text(for: try XCTUnwrap(store.missions.first { $0.id == missionID }), among: store.missions),
+            header + "\n- “Which zone now?” → “UTC”"
+        )
+    }
+
+    /// An answer Nirux won't type (a Codex child's, which its `ask` prints)
+    /// leaves the question open: nothing promises it.
+    func testOnlyAnAnswerNiruxTypesIsPromised() throws {
+        let store = MissionStore(persistsToDisk: false)
+        XCTAssertNotNil(store.create(MissionCreationRequest(
+            id: missionID, parentWorkspaceID: parentWorkspaceID, parentAgentUUID: parentAgentUUID,
+            childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, childAgentKind: "codex", branch: "feat/export"
+        ), enabled: true, now: 10))
+        try answer("Which format?", with: "ISO 8601", in: store, at: 20, received: false)
+        XCTAssertEqual(MissionAnswerContext.text(for: store.missions[0], among: store.missions), header + "\n- “Which format?” → still open")
     }
 
     /// The latest ones, within what Claude Code takes whole.
@@ -127,7 +151,7 @@ final class MissionAnswerContextTests: XCTestCase {
             try answer("Long \(index)?", with: long, in: store, at: TimeInterval(1_000 + 10 * index))
         }
         let text = try XCTUnwrap(MissionAnswerContext.text(for: store.missions[0], among: store.missions))
-        XCTAssertLessThanOrEqual(text.utf16.count, MissionAnswerContext.maxContextUTF16 + 40)
+        XCTAssertLessThanOrEqual(text.utf16.count, MissionAnswerContext.maxContextUTF16)
         XCTAssertTrue(text.contains("“Long 9?”"), "the latest kept")
         XCTAssertTrue(text.hasSuffix("earlier ones not shown)"))
 
@@ -135,7 +159,7 @@ final class MissionAnswerContextTests: XCTestCase {
         let astral = String(repeating: "𝔸" + String(repeating: "\u{1D167}", count: 7), count: 900)
         try answer("Astral?", with: astral, in: store, at: 2_000)
         let cut = try XCTUnwrap(MissionAnswerContext.text(for: store.missions[0], among: store.missions))
-        XCTAssertLessThanOrEqual(cut.utf16.count, MissionAnswerContext.maxContextUTF16 + 40)
+        XCTAssertLessThanOrEqual(cut.utf16.count, MissionAnswerContext.maxContextUTF16)
         XCTAssertTrue(cut.contains("“Astral?” → “"), "the newest, cut")
         XCTAssertTrue(cut.hasSuffix("…\n(22 earlier ones not shown)"), String(cut.suffix(60)))
     }
@@ -149,8 +173,8 @@ final class MissionAnswerContextTests: XCTestCase {
         let url = directory.appendingPathComponent("missions.json")
         let store = try makeStore(at: url)
         let environment = ["NIRUX_MISSION_ID": missionID, "NIRUX_WORKSPACE_ID": childWorkspaceID, "NIRUX_AGENT_UUID": childAgentUUID]
-        func output(_ source: String?, _ environment: [String: String]) -> Data? {
-            MissionAnswerContext.hookOutput(source: source, environment: environment, missionsURL: url)
+        func output(_ source: String?, _ environment: [String: String], handoffs: Bool = true) -> Data? {
+            MissionAnswerContext.hookOutput(source: source, environment: environment, missionsURL: url, handoffsEnabled: { handoffs })
         }
         XCTAssertNil(output("startup", environment), "nothing answered yet")
         try answer("Which format?", with: "ISO 8601", in: store, at: 20)
@@ -167,5 +191,6 @@ final class MissionAnswerContextTests: XCTestCase {
         XCTAssertNil(output(nil, environment))
         XCTAssertNil(output("startup", environment.merging(["NIRUX_AGENT_UUID": UUID().uuidString]) { $1 }), "another terminal")
         XCTAssertNil(output("startup", environment.filter { $0.key != "NIRUX_MISSION_ID" }), "not a Mission's")
+        XCTAssertNil(output("startup", environment, handoffs: false), "a Mission Nirux carries nothing for now")
     }
 }

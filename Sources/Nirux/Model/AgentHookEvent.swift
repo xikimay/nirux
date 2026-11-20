@@ -555,14 +555,6 @@ enum AgentHookCLI {
         ) else { return 0 }
         event.applyAccount(environment: env)
 
-        // A Mission child's claude whose conversation lacks the answers its
-        // questions got: they come back as context. Not to a `claude -p` its
-        // agent runs, which inherits the terminal's variables.
-        if event.name == .sessionStart, event.agentID == nil, !TurnEndText.isHeadless(env),
-           let context = MissionAnswerContext.hookOutput(source: event.source, environment: env) {
-            try? FileHandle.standardOutput.write(contentsOf: context)
-        }
-
         let channel = PermissionApprovalChannel.standard
         // The watch comes before the request shows in the queue: from then
         // on the app holds it, and Claude giving up on the hook must still
@@ -574,6 +566,15 @@ enum AgentHookCLI {
               let termination = TerminationWatch()
         else {
             append(event)
+            // Queued first, so the app hears of the session before the ledger
+            // is read: a Mission child's claude whose conversation lacks the
+            // answers its questions got gets them back as context. Not a
+            // `claude -p` its agent runs, which inherits the terminal's
+            // variables.
+            if event.name == .sessionStart, event.agentID == nil, !TurnEndText.isHeadless(env),
+               let context = MissionAnswerContext.hookOutput(source: event.source, environment: env) {
+                try? FileHandle.standardOutput.write(contentsOf: context)
+            }
             return 0
         }
         defer { termination.stop() }
