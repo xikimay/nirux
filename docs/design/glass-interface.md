@@ -514,6 +514,18 @@ the text stays flat and sharp.
   ends it at once, and so does a move or another workspace on screen (⌘N,
   a close, a ⌘P jump); Reduce motion, or a pick from the menu, shows the
   space at once.
+- **The plan (study P5, first part):** ⌥⌘↑ (Space › Space Overview)
+  shows the space as a plan over the viewport: a row per workspace, in the
+  order they're listed, every column of it frozen at the plan's scale
+  (`FrozenView`, terminals copied that small on the GPU), its state icon,
+  name and status line at their own size beside it. The card on screen
+  wears a ring; the arrows move it, Return or a click goes there at once,
+  Escape or ⌥⌘↑ goes back; it holds the keys, none reaches a terminal.
+  Under it the live views hide and no terminal draws; a change to what it
+  shows (a workspace, its columns, the card in focus), another space or a
+  new size closes it, and the keyboard goes back to the column on screen. A
+  new name doesn't. However many workspaces, every row shows: the gaps
+  shrink. The pinch and the transitions come next.
 - **Frozen pictures (study P4):** a crossing, or a new workspace's slide,
   moves pictures of what the viewport showed, frozen in
   about 6 ms (`FrozenView`): a clone of its layers, each sharing its

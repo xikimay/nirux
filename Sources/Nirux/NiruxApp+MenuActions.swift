@@ -64,6 +64,11 @@ extension NiruxApp {
         shell?.focusSpace(.next)
     }
 
+    /// ⌥⌘↑: the space as a plan, or back from it.
+    @objc func showSpaceOverview(_ sender: Any?) {
+        shell?.toggleSpacePlan()
+    }
+
     @objc func moveColumnLeft(_ sender: Any?) {
         shell?.moveColumn(.left)
     }

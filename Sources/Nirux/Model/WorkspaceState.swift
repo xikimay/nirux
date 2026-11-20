@@ -1179,6 +1179,17 @@ extension WorkspaceState {
     /// The strip's slide to a card.
     static let slideDuration: CFTimeInterval = 0.3
 
+    /// Every column as it shows, whatever the camera shows, frozen at
+    /// `scale` (depth study P5's plan); nil before a layout.
+    func frozenColumns(scale: CGFloat) -> FrozenView? {
+        FrozenView.freeze(stripView, scale: scale)
+    }
+
+    /// The strip that holds the columns: its size, and each column's frame
+    /// in it.
+    var stripSize: NSSize { stripView.frame.size }
+    var columnFrames: [NSRect] { columns.map(\.view.frame) }
+
     /// What a width fraction of 1 spans, its gap included: the viewport
     /// less the air at its edges, plus one gap. Two halves then fill the
     /// viewport exactly, whatever the number of columns.

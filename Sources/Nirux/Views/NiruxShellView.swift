@@ -29,6 +29,12 @@ final class NiruxShellView: NSView {
     var crossingPictures: [FrozenView] = []
     /// The workspace a crossing brings on screen.
     var crossingWorkspaceID: String?
+    /// The space as a plan, while it shows (NiruxShellView+SpacePlan); the
+    /// workspaces drawing once before it shows; a count so that a step acts
+    /// only on its own.
+    var spacePlan: SpacePlanView?
+    var planDrawing: Set<String> = []
+    var spacePlanGeneration = 0
     /// The size of the workspace on screen, as `relayout` lays it out.
     var workspaceViewportSize: NSSize {
         let statusH = statusBar.hasContent ? StatusBarView.height : 0
@@ -539,6 +545,7 @@ final class NiruxShellView: NSView {
             indicator: NSRect(x: vpX, y: 4, width: viewportW, height: 16),
             statusBar: NSRect(x: 0, y: 0, width: bounds.width, height: statusH)
         )
+        closeSpacePlanIfStale(viewport: frames.viewport.size)
         // A fold moves the camera too, which is no travel of the columns.
         let sidebarStays = sidebar.frame.width == sidebarW
         applyChromeLayout(frames, animated: animated)
@@ -1179,6 +1186,8 @@ extension NiruxShellView {
 
     var isOverlayActive: Bool {
         if commandPalette?.isVisible == true { return true }
+        // The space's plan takes the keys over hidden terminals.
+        if spacePlan != nil { return true }
         if NSApp.keyWindow is NSPanel { return true }
         // A popover hanging from the window has the keyboard (the Mission
         // reply's field): AppKit keeps the window key, gives it the
