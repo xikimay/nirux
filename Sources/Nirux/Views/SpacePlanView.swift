@@ -22,7 +22,8 @@ final class SpacePlanView: NSView {
 
     static let margin = Theme.Space.xl
     static let rowGap = Theme.Space.xl
-    static let labelWidth: CGFloat = 200
+    /// The names' column, at most.
+    static let maxLabelWidth: CGFloat = 200
     private static let ringWidth: CGFloat = 2
 
     let spaceID: String
@@ -44,8 +45,6 @@ final class SpacePlanView: NSView {
     private var overlay: FrozenView?
     /// Going to a workspace: it shows already under the plan.
     var isDiving = false
-    /// Where the names start.
-    private var labelLeft = SpacePlanView.margin
     /// How far the fingers moved in this pinch.
     private var pinchTotal: CGFloat = 0
     /// Where to go: a workspace and its column; nil goes back.
@@ -64,8 +63,13 @@ final class SpacePlanView: NSView {
             addSubview(view)
         }
         let laidOut = workspaces.filter { !$0.columns.isEmpty && !$0.stripSize.equalTo(.zero) }
+        let rowLabels = laidOut.map { workspace in
+            RowLabel(labels[workspace.id] ?? Label(title: workspace.title, icon: StateIcon(.idle), initials: nil, detail: nil))
+        }
+        // As wide as the longest name or line needs, so that each sits near its row.
+        let labelWidth = min(Self.maxLabelWidth, rowLabels.map(\.width).max() ?? 0)
         let room = NSSize(
-            width: bounds.width - Self.labelWidth - Self.margin * 3,
+            width: bounds.width - labelWidth - Self.margin * 3,
             height: bounds.height - Self.margin * 2 - Self.rowGap * CGFloat(max(0, laidOut.count - 1))
         )
         let widest = laidOut.map(\.stripSize.width).max() ?? 1
@@ -74,9 +78,9 @@ final class SpacePlanView: NSView {
         let block = tallest * scale + Self.rowGap * CGFloat(max(0, laidOut.count - 1))
         var top = (bounds.height + block) / 2
         // The names just before the rows, the whole centred.
-        labelLeft = (bounds.width - Self.labelWidth - Self.margin - widest * scale) / 2
-        let left = labelLeft + Self.labelWidth + Self.margin
-        for workspace in laidOut {
+        let labelLeft = ((bounds.width - labelWidth - Self.margin - widest * scale) / 2).rounded()
+        let left = labelLeft + labelWidth + Self.margin
+        for (workspace, rowLabel) in zip(laidOut, rowLabels) {
             guard let picture = workspace.frozenColumns(scale: scale) else { continue }
             let height = workspace.stripSize.height * scale
             picture.frame.origin = NSPoint(x: left, y: top - height)
@@ -85,8 +89,7 @@ final class SpacePlanView: NSView {
                 NSRect(x: left + frame.minX * scale, y: top - height + frame.minY * scale, width: frame.width * scale, height: frame.height * scale)
             }
             rows.append(Row(workspaceID: workspace.id, picture: picture, cards: cards))
-            let label = labels[workspace.id] ?? Label(title: workspace.title, icon: StateIcon(.idle), initials: nil, detail: nil)
-            addLabel(label, besideRowAt: top - height / 2)
+            rowLabel.place(left: labelLeft, width: labelWidth, midY: top - height / 2, in: names)
             if workspace === onScreen { chosen = (rows.count - 1, min(onScreen.focusedIndex, cards.count - 1)) }
             top -= height + Self.rowGap
         }
@@ -175,25 +178,40 @@ final class SpacePlanView: NSView {
         CATransaction.commit()
     }
 
-    /// The row's state icon, name and status line, at their own size.
-    private func addLabel(_ label: Label, besideRowAt midY: CGFloat) {
-        let icon = StateIconView(label.icon, size: IconRail.iconSize)
-        icon.label = label.initials
-        let title = NSTextField(labelWithString: label.title)
-        title.font = Theme.Font.listTitle
-        title.textColor = Theme.Color.textPrimary
-        title.lineBreakMode = .byTruncatingTail
-        let detail = NSTextField(labelWithString: label.detail ?? "")
-        detail.font = Theme.Font.caption
-        // Amber, the state's colour, only while it waits on the user.
-        if case .needsYou = label.icon.kind { detail.textColor = label.icon.color } else { detail.textColor = Theme.Color.textSecondary }
-        detail.lineBreakMode = .byTruncatingTail
-        let textX = labelLeft + icon.frame.width + Theme.Space.sm
-        let textWidth = Self.labelWidth - icon.frame.width - Theme.Space.sm
-        icon.frame.origin = NSPoint(x: labelLeft, y: midY - icon.frame.height / 2)
-        title.frame = NSRect(x: textX, y: midY, width: textWidth, height: title.intrinsicContentSize.height)
-        detail.frame = NSRect(x: textX, y: midY - detail.intrinsicContentSize.height, width: textWidth, height: detail.intrinsicContentSize.height)
-        for view in [icon, title, detail] as [NSView] { names.addSubview(view) }
+    /// A row's state icon, name and status line, at their own size.
+    @MainActor private struct RowLabel {
+        let icon: StateIconView
+        let title: NSTextField
+        let detail: NSTextField
+
+        init(_ label: Label) {
+            icon = StateIconView(label.icon, size: IconRail.iconSize)
+            icon.label = label.initials
+            title = NSTextField(labelWithString: label.title)
+            title.font = Theme.Font.listTitle
+            title.textColor = Theme.Color.textPrimary
+            title.lineBreakMode = .byTruncatingTail
+            detail = NSTextField(labelWithString: label.detail ?? "")
+            detail.font = Theme.Font.caption
+            // Amber, the state's colour, only while it waits on the user.
+            if case .needsYou = label.icon.kind { detail.textColor = label.icon.color } else { detail.textColor = Theme.Color.textSecondary }
+            detail.lineBreakMode = .byTruncatingTail
+        }
+
+        /// Its icon and its longer line, whole: a truncating label's intrinsic
+        /// width cuts its last letters.
+        var width: CGFloat {
+            icon.frame.width + Theme.Space.sm + ceil(max(title.fittingSize.width, detail.fittingSize.width))
+        }
+
+        func place(left: CGFloat, width: CGFloat, midY: CGFloat, in view: NSView) {
+            let textX = left + icon.frame.width + Theme.Space.sm
+            let textWidth = width - icon.frame.width - Theme.Space.sm
+            icon.frame.origin = NSPoint(x: left, y: midY - icon.frame.height / 2)
+            title.frame = NSRect(x: textX, y: midY, width: textWidth, height: title.intrinsicContentSize.height)
+            detail.frame = NSRect(x: textX, y: midY - detail.intrinsicContentSize.height, width: textWidth, height: detail.intrinsicContentSize.height)
+            for subview in [icon, title, detail] as [NSView] { view.addSubview(subview) }
+        }
     }
 
     // MARK: - Motion (depth study P5's transitions)

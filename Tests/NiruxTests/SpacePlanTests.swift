@@ -25,6 +25,11 @@ final class SpacePlanTests: XCTestCase {
                 XCTAssertTrue(plan.names.subviews.contains { ($0 as? NSTextField)?.stringValue == workspace.title }, "its name beside it")
             }
             XCTAssertGreaterThan(plan.rows[0].picture.frame.minY, plan.rows[1].picture.frame.maxY, "the first listed highest")
+            let texts = plan.names.subviews.compactMap { $0 as? NSTextField }
+            let columnEnd = try XCTUnwrap(texts.map(\.frame.maxX).max())
+            XCTAssertEqual(plan.rows[0].picture.frame.minX - columnEnd, SpacePlanView.margin, accuracy: 0.5, "the names just before the rows")
+            XCTAssertEqual(columnEnd, texts.map { $0.frame.minX + $0.fittingSize.width }.max() ?? 0, accuracy: 1, "as wide as the longest needs")
+            XCTAssertTrue(texts.allSatisfy { $0.cell?.expansionFrame(withFrame: $0.bounds, in: $0) == .zero }, "each whole")
             XCTAssertEqual(plan.rows[plan.chosen.row].workspaceID, onScreen.id)
             XCTAssertEqual(plan.chosen.column, onScreen.focusedIndex)
             XCTAssertEqual(shell.verticalStrip.alphaValue, 0, "the live views hidden")
