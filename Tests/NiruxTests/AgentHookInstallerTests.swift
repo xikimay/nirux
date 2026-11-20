@@ -357,6 +357,49 @@ final class AgentHookInstallerTests: XCTestCase {
         )
     }
 
+    func testAgyHookRunsReceiverOnlyInNiruxTerminals() throws {
+        let receiver = try makeFakeReceiver()
+        let argv = ["/bin/sh", "-c", AgentHookInstaller.agyHookCommand(executablePath: receiver)]
+        XCTAssertEqual(try runHook(argv, env: [:]), 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: receiverOutput.path), "outside Nirux the binary must not even launch")
+        XCTAssertEqual(try runHook(argv, env: niruxEnv), 0)
+        let lines = try String(contentsOf: receiverOutput, encoding: .utf8).components(separatedBy: "\n")
+        XCTAssertEqual(Array(lines.prefix(3)), ["--hook", "claude", "--agy"])
+        XCTAssertEqual(lines.dropFirst(3).first, "ppid=\(ProcessInfo.processInfo.processIdentifier)", "exec: agy is the receiver's parent")
+    }
+
+    /// Its own named hook, beside the user's, only where agy lives; a file
+    /// Nirux can't read stays as it is.
+    func testAgyHookJoinsItsHooksFileBesideTheUsers() throws {
+        let path = "/Applications/Nirux.app/Contents/MacOS/Nirux"
+        AgentHookInstaller.installAgyHooks(executablePath: path, home: home)
+        write("{}", ".gemini/settings.json")
+        AgentHookInstaller.installAgyHooks(executablePath: path, home: home)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent(".gemini/config").path), "Gemini CLI's, not agy's")
+        write(#"{"lint": {"Stop": [{"command": "./lint.sh"}]}, "nirux": {"enabled": false}}"#, ".gemini/config/hooks.json")
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".gemini/antigravity-cli"), withIntermediateDirectories: true)
+        AgentHookInstaller.installAgyHooks(executablePath: path, home: home)
+        let text = read(".gemini/config/hooks.json")
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        XCTAssertNotNil(root["lint"])
+        let nirux = try XCTUnwrap(root["nirux"] as? [String: Any])
+        XCTAssertEqual(Set(nirux.keys), ["SessionStart", "enabled"], "never PreToolUse, which must decide")
+        XCTAssertEqual(nirux["enabled"] as? Bool, false, "agy's own off switch stays")
+        XCTAssertTrue(text.contains(#"exec '/Applications/Nirux.app/Contents/MacOS/Nirux' --hook claude --agy"#), text)
+        write("{ not json", ".gemini/config/hooks.json")
+        AgentHookInstaller.installAgyHooks(executablePath: path, home: home)
+        XCTAssertEqual(read(".gemini/config/hooks.json"), "{ not json")
+        write(#"{"lint": {}}"#, ".gemini/config/hooks.json")
+        let hooksPath = home.appendingPathComponent(".gemini/config/hooks.json").path
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: hooksPath)
+        AgentHookInstaller.installAgyHooks(executablePath: path, home: home)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: hooksPath)
+        XCTAssertEqual(read(".gemini/config/hooks.json"), #"{"lint": {}}"#, "unreadable: left as it is")
+        write("", ".gemini/config/hooks.json")
+        AgentHookInstaller.installAgyHooks(executablePath: path, home: home)
+        XCTAssertTrue(read(".gemini/config/hooks.json").contains("--hook claude --agy"), "an empty file is an empty list")
+    }
+
     func testCodexNotifyIsSilentNoOpWhenBinaryMissing() throws {
         let argv = [
             "/bin/sh", "-c", AgentHookInstaller.codexNotifyScript,

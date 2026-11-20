@@ -31,7 +31,7 @@ extension AgentStatusMachine {
         // One answered at the terminal stays listed until its tool ends.
         guard !pendingDialogs.contains(where: waitsForKeys) else { return .dialog }
         guard lastMainToolAt >= lastPromptAt else { return .notAnswered }
-        guard lastDraftInputAt <= lastPromptAt else { return .typed }
+        guard !hasDraft else { return .typed }
         return nil
     }
 }

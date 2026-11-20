@@ -57,8 +57,10 @@ Validated by the user on 2026-10-02, each the recommended option:
 a tool that reads state across the workspace is a column, next to the agent
 that does the work.
 
-- It opens at two-thirds of the width, so the agent's terminal stays in view:
-  the user sends comments and watches the agent answer them. Its width then
+- It opens at two-thirds of the width, so the agent's terminal stays in view
+  beside it (cut at its edge when the review lands in the middle of the
+  strip, the focused card being centred): the user sends comments and
+  watches the agent answer them. Its width then
   cycles through the presets like any column's.
 - It reviews one branch: the branch checked out in the workspace's folder when
   it opened. It stores the worktree path, the branch name and the project

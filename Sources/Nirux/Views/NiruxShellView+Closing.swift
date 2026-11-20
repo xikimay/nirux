@@ -24,6 +24,13 @@ extension NiruxShellView {
         // Last column closes the workspace — same confirmation as the sidebar.
         guard workspace.openColumns.count > 1 else { return requestCloseWorkspace(at: activeWSIndex) }
         guard confirmCloseColumn(closingColumn, in: workspace) else { return }
+        afterUnsavedEdits(in: [closingColumn]) { [weak self] in
+            guard let self, self.canStillClose(closingColumn, in: workspace) else { return }
+            self.animateColumnClose(closingColumn, in: workspace)
+        }
+    }
+
+    private func animateColumnClose(_ closingColumn: ColumnState, in workspace: WorkspaceState) {
         closingColumn.isClosing = true
         // It takes a card still arriving: behind its neighbours again.
         closingColumn.isArriving = false
@@ -94,17 +101,22 @@ extension NiruxShellView {
         case .blocked:
             return
         case .close:
-            close(index)
+            break
         case .confirm(let details):
             guard confirmDestructiveClose(
                 message: "Close workspace “\(workspace.title)”?",
                 details: details,
                 confirmTitle: "Close Workspace"
             ) else { return }
-            // Main-queue work can mutate `workspaces` while the modal runs
-            // (worktree creation finishing, a prior close's deferred removal) —
-            // re-resolve the index by identity before closing.
-            guard let currentIndex = workspaces.firstIndex(where: { $0 === workspace }), !workspace.isClosing else { return }
+        }
+        afterUnsavedEdits(in: workspace.openColumns) { [weak self] in
+            // Main-queue work can mutate `workspaces` while a modal runs or
+            // a save lands (worktree creation finishing, a prior close's
+            // deferred removal) — re-resolve the index by identity before
+            // closing.
+            guard let self, let currentIndex = self.workspaces.firstIndex(where: { $0 === workspace }),
+                  !workspace.isClosing
+            else { return }
             close(currentIndex)
         }
     }
@@ -121,7 +133,13 @@ extension NiruxShellView {
             details: details,
             confirmTitle: "Close Column"
         ) else { return false }
-        return workspaces.contains { $0 === workspace } && !workspace.isClosing
+        return canStillClose(column, in: workspace)
+    }
+
+    /// The column is still there to close after a question, which main-queue
+    /// work kept running under, or a save.
+    private func canStillClose(_ column: ColumnState, in workspace: WorkspaceState) -> Bool {
+        workspaces.contains { $0 === workspace } && !workspace.isClosing
             && workspace.openColumns.count > 1 && workspace.openColumns.contains { $0 === column }
     }
 
@@ -132,15 +150,19 @@ extension NiruxShellView {
         guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing,
               workspace.openColumns.count > 1,
               let column = workspace.columns[safe: columnIndex], !column.isClosing,
-              confirmCloseColumn(column, in: workspace),
-              let currentIndex = workspace.columns.firstIndex(where: { $0 === column })
+              confirmCloseColumn(column, in: workspace)
         else { return }
-        workspace.closeColumn(at: currentIndex)
-        // The others glide into place, a lone one back to the middle.
-        relayout(animated: true)
-        updateSidebar()
-        focusActiveTerminal(in: window)
-        saveState()
+        afterUnsavedEdits(in: [column]) { [weak self] in
+            guard let self, self.canStillClose(column, in: workspace),
+                  let currentIndex = workspace.columns.firstIndex(where: { $0 === column })
+            else { return }
+            workspace.closeColumn(at: currentIndex)
+            // The others glide into place, a lone one back to the middle.
+            self.relayout(animated: true)
+            self.updateSidebar()
+            self.focusActiveTerminal(in: self.window)
+            self.saveState()
+        }
     }
 
     /// `refocusing`: false for a close the user didn't make (a Lead's
