@@ -51,8 +51,8 @@ final class SpacePlanView: NSView {
     private let ring = CALayer()
     /// Where the names start.
     private var labelLeft = SpacePlanView.margin
-    /// How far the fingers moved in this pinch.
-    private var pinchTotal: CGFloat = 0
+    /// The pinch on the plan under way.
+    private var pinch = PinchGesture()
     /// Where to go: a workspace and its column; nil goes back.
     var onClose: (_ target: (workspaceID: String, column: Int)?) -> Void = { _ in }
 
@@ -129,14 +129,12 @@ final class SpacePlanView: NSView {
     }
 
     override func magnify(with event: NSEvent) {
-        pinched(by: event.magnification, began: event.phase.contains(.began), at: convert(event.locationInWindow, from: nil))
+        pinched(by: event.magnification, phase: event.phase, at: convert(event.locationInWindow, from: nil))
     }
 
     /// Fingers opening go to the card under them, else to the chosen one.
-    func pinched(by magnification: CGFloat, began: Bool, at point: NSPoint) {
-        if began { pinchTotal = 0 }
-        pinchTotal += magnification
-        guard ZZ("planPinchEager") || pinchTotal >= NiruxShellView.pinchThreshold else { return }
+    func pinched(by magnification: CGFloat, phase: NSEvent.Phase, at point: NSPoint) {
+        guard ZZ("planPinchEager") || pinch.moved(by: magnification, phase: phase, past: NiruxShellView.pinchThreshold) else { return }
         if !ZZ("cardIgnored"), let card = card(at: point) { chosen = card }
         goToChoice()
     }
@@ -198,5 +196,29 @@ final class SpacePlanView: NSView {
         title.frame = NSRect(x: textX, y: midY, width: textWidth, height: title.intrinsicContentSize.height)
         detail.frame = NSRect(x: textX, y: midY - detail.intrinsicContentSize.height, width: textWidth, height: detail.intrinsicContentSize.height)
         for view in [icon, title, detail] as [NSView] { addSubview(view) }
+    }
+}
+
+/// One pinch, `.began` to `.ended`: how far its fingers moved, and
+/// whether it acted, which it does once.
+struct PinchGesture {
+    private(set) var total: CGFloat = 0
+    private(set) var acted = false
+
+    /// True once a gesture, when its total passes `threshold`: below it
+    /// when negative (fingers closing), above it otherwise.
+    mutating func moved(by magnification: CGFloat, phase: NSEvent.Phase, past threshold: CGFloat) -> Bool {
+        if phase.contains(.began), !ZZ("noBeganReset") { self = PinchGesture() }
+        defer { if phase.contains(.ended) || phase.contains(.cancelled) { end() } }
+        guard !acted || ZZ("actsTwice") else { return false }
+        total += magnification
+        guard threshold < 0 ? total <= threshold : total >= threshold else { return false }
+        acted = true
+        return true
+    }
+
+    /// Nothing more for the gesture under way.
+    mutating func end() {
+        self = PinchGesture(total: 0, acted: true)
     }
 }
