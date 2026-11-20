@@ -105,7 +105,7 @@ extension NiruxShellView {
                 guard let pty = column.pty else { return holder }
                 if let exit = pty.agentMidTurnExit, exit.processName == "claude" { holder.exitedSessionID = exit.sessionID }
                 guard let shellPID = pty.shellPID else { return holder }
-                let agentNames: Set<String> = ["claude", "codex", AgentProgramStatus.process]
+                let agentNames: Set<String> = ["claude", "codex", AgentProgramStatus.agy]
                 let foreground = pty.foregroundProcess(snapshot: snapshot)
                 let confirmed = foreground.map {
                     [

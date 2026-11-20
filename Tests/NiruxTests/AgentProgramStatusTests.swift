@@ -1,24 +1,29 @@
 import XCTest
 @testable import Nirux
 
-/// Antigravity's status through OSC 7501, as agy 1.5.12 sent it when probed.
+/// Antigravity's and Codex's status through OSC 7501, as agy 1.5.12 and
+/// codex 0.167 sent it when probed.
 final class AgentProgramStatusTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_000)
 
-    private func status(_ state: AgentProgramStatus.State, kind: String? = nil, _ message: String? = nil) -> AgentProgramStatus {
-        AgentProgramStatus(state: state, kind: kind, message: message)
+    private func status(
+        _ state: AgentProgramStatus.State, kind: String? = nil, _ message: String? = nil, process: String = "agy"
+    ) -> AgentProgramStatus {
+        AgentProgramStatus(state: state, kind: kind, message: message, process: process)
     }
 
     // MARK: - Reading
 
-    func testSequencesAreReadForAntigravityOnly() {
+    func testSequencesAreReadForAntigravityAndCodexOnly() {
         var scanner = AgentProgramStatus.Scanner()
         let output = "text\u{1b}]7501;state=blocked:kind=permission:app=antigravity:msg=QXBwcm92ZSBCYXNoOiBlY2hvIG5pcnV4LXByb2Jl\u{07}more"
             + "\u{1b}]7501;state=done:app=antigravity:msg=b2s=\u{1b}\\"
             + "\u{1b}]7501;state=working:app=claude-code\u{07}\u{1b}]7501;?\u{07}\u{1b}]7501;state=thinking:app=antigravity\u{07}"
+            + "\u{1b}]7501;state=done:app=codex\u{1b}\\"
         XCTAssertEqual(scanner.statuses(in: output), [
             status(.blocked, kind: "permission", "Approve Bash: echo nirux-probe"),
-            status(.done, "ok")
+            status(.done, "ok"),
+            status(.done, process: "codex")
         ])
         XCTAssertFalse(scanner.isWaiting)
     }

@@ -113,8 +113,8 @@ enum LeadTools {
                     Type a message into a task's prompt once its agent's turn is over (a follow-up, an answer it \
                     didn't ask for, a slash command). Any task of this space: one that doesn't report to you (a \
                     sub-task, a task the user started) gets it under a line saying it comes from you (so no \
-                    slash command); its questions and result still go to whoever started it. Claude Code tasks \
-                    only.
+                    slash command); its questions and result still go to whoever started it. Claude Code and \
+                    Codex tasks only: Codex gets it through its own queue, as text (no slash command).
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],
@@ -132,8 +132,9 @@ enum LeadTools {
                 askUser, title: "Hand a task's question to the user",
                 description: """
                     Hand the question a task is waiting on to the user, when neither the brief, the code nor the \
-                    conversation settles it: its row turns amber and shows your reason. Their answer goes to the \
-                    task, and a line comes to you.
+                    conversation settles it: its row turns amber and shows your reason, and the task's \
+                    recommendation, if it gave one, which the user can accept (for access, what it needs, with \
+                    nothing to accept). Their answer goes to the task, and a line comes to you.
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],

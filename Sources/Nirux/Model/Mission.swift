@@ -43,6 +43,17 @@ struct Mission: Codable, Equatable {
     func isCarried(handoffsEnabled: Bool) -> Bool {
         handoffsEnabled || isAlwaysCarried
     }
+
+    /// The agent its child runs, as Nirux's lines name it, when Nirux
+    /// delivers its parent's messages: typed into Claude Code's prompt, or
+    /// handed to Codex's queue. Nil for one that delivers none (agy).
+    var childAgentName: String? {
+        switch childAgentKind {
+        case NiruxApp.WorkspaceAgent.claude.rawValue: "Claude Code"
+        case NiruxApp.WorkspaceAgent.codex.rawValue: "Codex"
+        default: nil
+        }
+    }
 }
 
 /// An explicit mailbox event. `deliveredAt` is set once the app has acted
@@ -153,11 +164,16 @@ struct MissionEvent: Codable, Equatable {
         }
     }
 
-    /// The recommendation a reply may send as the answer: an access
+    /// The recommendation a reply may send as the answer.
+    var acceptableRecommendation: String? {
+        Self.acceptable(recommendation, of: questionKind)
+    }
+
+    /// `recommendation` if a reply may send it as the answer: an access
     /// question's says what is needed, which accepting doesn't give, and a
     /// kind this build doesn't know may be like it.
-    var acceptableRecommendation: String? {
-        guard let kind = questionKind else { return recommendation }
+    static func acceptable(_ recommendation: String?, of kind: QuestionKind?) -> String? {
+        guard let kind else { return recommendation }
         return [.decision, .specMismatch].contains(kind) ? recommendation : nil
     }
 
@@ -483,16 +499,19 @@ final class MissionStore {
     /// Trusted UI response path: the user answers instead of the parent. It
     /// uses the same validation and persistence as a parent-agent CLI
     /// response, then returns the accepted event for the caller to act on.
+    /// `acceptingRecommendation`: `message` is the question's recommendation,
+    /// accepted (Accept).
     func respond(
         to questionID: String,
         message: String,
+        acceptingRecommendation: Bool = false,
         enabled: Bool,
         now: TimeInterval = Date().timeIntervalSince1970
     ) -> AcceptedEvent? {
         guard let mission = missions.first(where: { candidate in
             candidate.events.contains(where: { $0.id == questionID && $0.kind == .question })
         }) else { return nil }
-        let response = MissionEvent(
+        var response = MissionEvent(
             id: UUID().uuidString,
             missionID: mission.id,
             childWorkspaceID: mission.childWorkspaceID,
@@ -504,6 +523,7 @@ final class MissionStore {
             inReplyTo: questionID,
             timestamp: now
         )
+        response.acceptedRecommendation = acceptingRecommendation ? true : nil
         guard case let .accepted(accepted) = process(response, enabled: enabled, fromUser: true) else { return nil }
         return accepted
     }
@@ -598,7 +618,9 @@ final class MissionStore {
             else { return false }
             return !mission.events.contains { $0.kind == .completed && $0.timestamp > question.timestamp }
         case .question:
+            // Not once its parent handed it to the user (`ask_user`).
             return mission.status == .active && event.parentTypedAt == nil && event.parentConsumedAt == nil
+                && event.handedToUserBecause == nil
                 && now - event.timestamp < MissionEventCLI.parentMessageLifetime
                 && !mission.events.contains { $0.kind == .response && $0.inReplyTo == event.id }
         case .completed:

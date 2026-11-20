@@ -357,6 +357,16 @@ final class MissionDeliveryTests: XCTestCase {
 
     // MARK: - Hand-off to the user
 
+    /// A question its parent handed to the user before Nirux typed it (a
+    /// Lead read it in its task list) is the user's: not typed into the
+    /// parent's prompt as well.
+    func testAQuestionHandedToTheUserIsNotTypedToTheParent() throws {
+        let store = makeStore()
+        let question = try XCTUnwrap(store.accept(childEvent(.question, "Keep date=?", at: 20), enabled: true))
+        XCTAssertNotNil(store.handToUser(questionID: question.event.id, because: "a product call", now: 21))
+        XCTAssertEqual(pending(store, at: 30), [])
+    }
+
     func testAQuestionComesToTheUserWhenItsParentCantTakeIt() {
         typealias Question = SidebarMissionQuestion
         XCTAssertEqual(Question.handOff(parent: .closed, askedAt: 100, threshold: 600, now: 101), .parentClosed)
@@ -612,6 +622,51 @@ final class MissionDeliveryTests: XCTestCase {
     }
 
     // MARK: - Popover
+
+    /// The popover says what blocks the child and what it recommends, and
+    /// Accept sends it; an access question's box says what it needs, with no
+    /// Accept.
+    func testThePopoverOffersTheRecommendation() throws {
+        func texts(_ view: NSView) -> [String] {
+            ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(texts)
+        }
+        var decision = question(.handedOver(why: "Yours."))
+        decision.kind = .decision
+        decision.recommendation = "ISO 8601"
+        var accepted = 0
+        let controller = MissionReplyViewController(
+            childTitle: "Date filter API", question: decision, onSend: { _ in true }, onAccept: { accepted += 1; return true }, onOpenTask: {}
+        )
+        XCTAssertTrue(Set(texts(controller.view)).isSuperset(of: ["DECISION", "Recommended", "ISO 8601"]), "\(texts(controller.view))")
+        let accept = try XCTUnwrap(controller.acceptButton)
+        controller.replyView?.string = "Not quite: ISO 8601 with milliseconds"
+        controller.textDidChange(Notification(name: NSText.didChangeNotification))
+        XCTAssertFalse(accept.isEnabled, "Accept would throw the typed answer away")
+        controller.replyView?.string = " "
+        controller.textDidChange(Notification(name: NSText.didChangeNotification))
+        accept.performClick(nil)
+        XCTAssertEqual(accepted, 1)
+        XCTAssertFalse(accept.isEnabled, "once")
+
+        var access = decision
+        access.kind = .access
+        let needs = MissionReplyViewController(
+            childTitle: "Date filter API", question: access, onSend: { _ in true }, onAccept: nil, onOpenTask: {}
+        )
+        XCTAssertTrue(Set(texts(needs.view)).isSuperset(of: ["ACCESS", "Needed", "ISO 8601"]), "\(texts(needs.view))")
+        XCTAssertNil(needs.acceptButton)
+    }
+
+    /// A user's answer goes to the parent's `claude` that saw the question,
+    /// never to one started since, which knows nothing of it.
+    func testANoticeGoesOnlyToTheClaudeThatSawItsQuestion() {
+        let notice = LeadNotice(workspaceID: "w", agentUUID: "a", text: "t", queuedAt: 100, forClaudeStartedBy: 50)
+        XCTAssertTrue(notice.isFor(claudeStartedAt: 40))
+        XCTAssertTrue(notice.isFor(claudeStartedAt: 50))
+        XCTAssertFalse(notice.isFor(claudeStartedAt: 60), "started since: it never saw the question")
+        XCTAssertTrue(notice.isFor(claudeStartedAt: nil), "not known: the prompt's own checks decide")
+        XCTAssertTrue(LeadNotice(workspaceID: "w", agentUUID: "a", text: "t", queuedAt: 100).isFor(claudeStartedAt: 60))
+    }
 
     /// ⌘↩ in the answer field sends what it holds; Return makes a new line.
     func testCommandReturnSendsTheAnswer() throws {

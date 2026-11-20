@@ -48,9 +48,7 @@ extension AgentStatusMachine {
     func silentInterruptRefusal(foreground: ForegroundProcess?) -> AgentInterruptRefusal? {
         let refusal = interruptRefusal(foreground: foreground)
         guard refusal == nil || refusal == .notAnswered else { return refusal }
-        // Since the prompt typed at the box: a peer's message Claude polled
-        // in since hides no keys.
-        return lastDraftInputAt > (lastUserPromptAt ?? lastPromptAt ?? 0) ? .typed : nil
+        return hasDraft ? .typed : nil
     }
 
     /// Whether Resume may type `continue`: a failed turn with nothing
@@ -73,11 +71,11 @@ extension AgentStatusMachine {
         guard pendingDialogs.isEmpty, !hookWorking, turnStartedAt == nil else { return .notAtPrompt }
         // (A clock set back since reads as the delay over.)
         if let sent = turnFailure.resumeSentAt, (0..<Self.resumeRetryDelay).contains(now - sent) { return .alreadySent }
-        // Text typed at the prompt since the failed turn's own prompt went
-        // in — during the turn or after — is a draft: `continue` would join
-        // it, and Enter would send it. Keys that answered a dialog aren't.
-        let promptWentIn = max(turnFailure.promptAt ?? 0, turnFailure.resumeKeystrokeAt ?? 0)
-        guard lastDraftInputAt <= promptWentIn else { return .userTyped }
+        // Text typed at the prompt since it last emptied — during the turn
+        // or after — is a draft: `continue` would join it, and Enter would
+        // send it. Keys that answered a dialog aren't.
+        let emptiedAt = max(boxEmptiedAt ?? 0, turnFailure.resumeKeystrokeAt ?? 0)
+        guard lastDraftInputAt <= emptiedAt else { return .userTyped }
         return nil
     }
 
@@ -85,12 +83,12 @@ extension AgentStatusMachine {
     /// `foreground`: the column's interactive `claude`, already running at
     /// `time`, whose turn is over and didn't fail (a usage limit would fail
     /// every message typed, one after the other), with no dialog listed and
-    /// nothing typed since its last prompt went in (a draft, or text typed
-    /// by Nirux that Claude has not submitted yet), and no turn end waiting
-    /// for its verdict (`awaitsAnyVerdict`). One that took no prompt since
-    /// it started also needs its REPL to say it sits idle at its prompt
-    /// (`showsIdlePrompt`, see `sitsAtFirstPrompt`), or the user who saw it
-    /// to say so (`seenByUser`).
+    /// no draft (`hasDraft`: text typed by Nirux that Claude has not
+    /// submitted yet too), and no turn end waiting for its verdict
+    /// (`awaitsAnyVerdict`). One that took no prompt since it started also
+    /// needs its REPL to say it sits idle at its prompt (`showsIdlePrompt`,
+    /// see `sitsAtFirstPrompt`), or the user who saw it to say so
+    /// (`seenByUser`).
     func isPromptFree(
         foreground: ForegroundProcess?, runningSince time: TimeInterval,
         seenByUser: Bool = false, showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
@@ -106,7 +104,7 @@ extension AgentStatusMachine {
         guard let foreground, AgentHookCenter.isInteractiveClaude(foreground) else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
         let startedAt = foreground.instance.startedAt
-        guard let lastPromptAt = prompt(since: startedAt) else {
+        guard prompt(since: startedAt) != nil else {
             if sitsAtFirstPrompt(foreground.instance, seenByUser: seenByUser, showsIdlePrompt: showsIdlePrompt) { return nil }
             // Typed since it started, when its hooks would have said a prompt
             // went in: not a screen of its own, unless the user's word passed
@@ -118,7 +116,7 @@ extension AgentStatusMachine {
         if hookWorking || turnStartedAt != nil { return .working }
         if !pendingDialogs.isEmpty { return .dialog }
         if turnFailure != nil { return .failedTurn }
-        if lastDraftInputAt > lastPromptAt { return .draft }
+        if hasDraft { return .draft }
         if awaitsAnyVerdict { return .verdict }
         return nil
     }
@@ -163,6 +161,34 @@ extension AgentStatusMachine {
         hookKind == "claude" && lastEventAt >= startedAt
     }
 
+    /// Why a Mission message can't go into Codex's own queue now
+    /// (`CodexQueue`), nil when it can: `foreground`, the column's
+    /// interactive `codex`, already running at `time`, last reported its
+    /// turn over: done, or idle (once ready, after a key, or after an Esc,
+    /// when Codex's queue itself waits for another turn's end). Nothing is
+    /// typed: Codex starts a queued message itself once that conversation is
+    /// idle, so neither a dialog nor a draft can take it. Its turn is waited
+    /// for all the same, so that what holds a message stays Nirux's to tell
+    /// and to give up.
+    func codexQueueRefusal(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> AgentPromptRefusal? {
+        guard let foreground, foreground.name == AgentProgramStatus.codex, !AgentHookCenter.isHeadlessCodex(foreground)
+        else { return .noClaude }
+        guard foreground.instance.startedAt <= time else { return .restarted }
+        guard let reported = codexStatus, reported.isFrom(foreground.instance) else { return .noPromptYet }
+        switch reported.status.state {
+        case .done, .idle: return nil
+        case .working: return .working
+        case .blocked: return .dialog
+        case .error: return .failedTurn
+        }
+    }
+
+    /// What `codexQueueRefusal` reads, for the log.
+    func codexFacts(now: TimeInterval) -> String {
+        guard let reported = codexStatus else { return "codex=-" }
+        return "codex=\(reported.status.state.rawValue)/\(Int(min(max(now - reported.at, 0), 1e7)))s"
+    }
+
     /// What `promptRefusal` reads, for the log: ages in seconds and names,
     /// no text.
     func promptFacts(now: TimeInterval) -> String {
@@ -174,7 +200,7 @@ extension AgentStatusMachine {
         case nil: "none"
         }
         let dialogs = pendingDialogs.map { "\($0.toolName ?? "?")/\($0.agentID == nil ? "main" : "sub")/\(age($0.requestedAt))" }
-        let draft = lastDraftInputAt > (lastPromptAt ?? 0) ? "\(lastDraftKind ?? "?")/\(age(lastDraftInputAt))" : "-"
+        let draft = hasDraft ? "\(lastDraftKind ?? "?")/\(age(lastDraftInputAt))" : "-"
         return "working=\(hookWorking ? 1 : 0) inFlight=\(hookTurnInFlight ? 1 : 0) turn=\(age(turnStartedAt)) "
             + "dialogs=[\(dialogs.joined(separator: ","))] prompt=\(age(lastPromptAt)) draft=\(draft) "
             + "input=\(age(lastInputAt > 0 ? lastInputAt : nil)) verdict=\(verdict) "
@@ -189,9 +215,10 @@ extension AgentStatusMachine {
     }
 
     /// Whether a message typed at `typedAt` went in and the turn that took
-    /// it is over: nothing works, no dialog waits.
+    /// it is over: nothing works, no dialog waits. A message Claude took in
+    /// by itself since is not that one.
     func finishedTurn(afterTypingAt typedAt: TimeInterval) -> Bool {
-        guard let lastPromptAt, lastPromptAt >= typedAt else { return false }
+        guard let lastUserPromptAt, lastUserPromptAt >= typedAt else { return false }
         return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil
     }
 }
@@ -199,14 +226,19 @@ extension AgentStatusMachine {
 /// Why a Mission message isn't typed into an agent's prompt now (see
 /// `AgentStatusMachine.isPromptFree`).
 enum AgentPromptRefusal: String, Equatable, Sendable {
-    /// The column doesn't run an interactive `claude`.
+    /// The column doesn't run the agent the message is for: an interactive
+    /// `claude`, or `codex`.
     case noClaude
     /// Its `claude` started after the message was sent, which goes only to
     /// the one that ran then.
     case restarted
     /// Its `claude` took no prompt since it started, and doesn't say it
-    /// sits at its prompt (see `AgentStatusMachine.sitsAtFirstPrompt`).
+    /// sits at its prompt (see `AgentStatusMachine.sitsAtFirstPrompt`); its
+    /// `codex` reported no state since it started.
     case noPromptYet
+    /// Nirux doesn't know which conversation its `codex` runs: one its
+    /// launch prompt started, or one it resumed (`ForegroundSessionTracker`).
+    case noConversation
     case dialog
     case working
     case failedTurn

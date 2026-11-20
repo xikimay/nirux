@@ -394,7 +394,7 @@ extension NiruxShellView {
           The kind says what blocks: `decision`, a choice the task leaves open; `access`, something
           only a person can give (a login, a secret, a permission); `spec-mismatch`, the task
           contradicts the code or itself. For a decision or a spec mismatch, always recommend the
-          answer you'd pick: the parent can accept it in one step. For access, say in
+          answer you'd pick: the parent or the user can accept it in one step. For access, say in
           `--recommend` exactly what is needed and where.
         - The child's question reaches your prompt as a `[Nirux Mission] Question from …` message
           that ends with the command to answer it, after a line with its kind and recommendation
@@ -415,9 +415,9 @@ extension NiruxShellView {
           "$NIRUX_CLI_PATH" --mission receive
           ```
 
-        To give a Claude Code child more work (a follow-up, `/code-review`), even after it
-        completed, name it by branch. Nirux types the message and Enter into the child's prompt,
-        and the Mission is active again:
+        To give a Claude Code or Codex child more work (a follow-up, `/code-review`), even after
+        it completed, name it by branch. Nirux types the message and Enter into a Claude Code
+        child's prompt, or hands it to a Codex child's own queue, and the Mission is active again:
 
         ```bash
         "$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "<instruction or /command>"
@@ -444,7 +444,7 @@ extension NiruxShellView {
           terminal is not part of it, (for `reply`) the question no longer waits for an answer,
           for example because the user answered it in Nirux, (for `reply --accept`) it has no
           recommendation to accept, or (for `tell`) no Mission on that branch came from this
-          terminal, or its child runs Codex.
+          terminal, or its child runs neither Claude Code nor Codex.
         - 2: invalid usage, or not a Mission terminal; the error message says which.
         - 1: Nirux's state could not be read or written. If a sandbox blocks it, run the command
           outside the sandbox.
