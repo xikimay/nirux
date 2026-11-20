@@ -655,6 +655,10 @@ final class StuckAgentSidebarTests: XCTestCase {
         shell.missionWaits.noteTyped(into: column, at: now + 31)
         XCTAssertTrue(waits(at: now + 32).isEmpty)
         let pastGrace = now + 31 + NiruxShellView.typedTextGrace
+        // DO NOT MERGE: the gate checks that midnight passed in between.
+        for (name, time) in [("at the start", now), ("past the grace", pastGrace)] {
+            print("ZZ \(name): \(SidebarWaitingMessages(count: 2, since: first.timestamp, refusal: .draft, now: time).line)")
+        }
         XCTAssertEqual(waits(at: pastGrace)[column.id], waiting(at: pastGrace))
         // Codex in front collects its own messages.
         let codex = ProcessSnapshot(entries: [

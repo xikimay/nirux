@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # DO NOT MERGE. Runs one test with the local clock pinned so that midnight
 # falls about 20 s after its launch (TZ=GMT±hhmm puts it on the next UTC
-# minute): once with NIRUX_ZZ_MUTANT=<control>, which must fail, then
-# <runs> times as is, 3 at a time, which must pass.
+# minute): once with NIRUX_ZZ_MUTANT=<control>, which must fail on a line
+# that names the day, then <runs> times as is, 3 at a time, which must pass
+# with midnight between the test's start and its check past the grace.
 #
 # Usage, after `swift build --build-tests`:
 #   scripts/midnight-test.sh <Module.Class/test> <runs> <control mutant>
@@ -30,12 +31,15 @@ run() { # <name> <zone> <mutant>
     TZ="$2" NIRUX_ZZ_MUTANT="$3" "$xctest" -XCTest "$test" "$bundle" > "$work/$1.log" 2>&1
 }
 
+dated=' since [0-9]+ [A-Z][a-z]{2} [0-9]{2}:[0-9]{2} '
 bad=0
 tz=$(zone)
 if run control "$tz" "$control"; then
     echo "control $control (TZ=$tz): SURVIVED"; bad=1
-else
+elif grep -m1 ': error: ' "$work/control.log" | grep -qE "$dated"; then
     echo "control $control (TZ=$tz): caught · $(grep -m1 ': error: ' "$work/control.log" | sed -E 's/^.*error: //' | cut -c1-400)"
+else
+    echo "control $control (TZ=$tz): failed elsewhere"; cat "$work/control.log"; bad=1
 fi
 done_runs=0
 while (( done_runs < runs )); do
@@ -47,10 +51,13 @@ while (( done_runs < runs )); do
         pids+=($!); names+=("run$done_runs")
     done
     for j in "${!pids[@]}"; do
-        if wait "${pids[$j]}"; then
-            echo "${names[$j]} (TZ=$tz): passed · $(grep -E 'Executed [0-9]+ tests?, with' "$work/${names[$j]}.log" | tail -1 | sed -E 's/^[[:space:]]*//')"
-        else
+        if ! wait "${pids[$j]}"; then
             echo "${names[$j]} (TZ=$tz): FAILED"; cat "$work/${names[$j]}.log"; bad=1
+        elif grep -qE "^ZZ at the start:.*$dated" "$work/${names[$j]}.log" \
+            || ! grep -qE "^ZZ past the grace:.*$dated" "$work/${names[$j]}.log"; then
+            echo "${names[$j]} (TZ=$tz): passed without midnight in between"; cat "$work/${names[$j]}.log"; bad=1
+        else
+            echo "${names[$j]} (TZ=$tz): passed · $(grep -E 'Executed [0-9]+ tests?, with' "$work/${names[$j]}.log" | tail -1 | sed -E 's/^[[:space:]]*//')"
         fi
     done
 done
