@@ -21,12 +21,13 @@
   var wordWrap = false;
   var minimapEnabled = false;
   var editorFontSize = 13;
-  // path -> { content, count } for saves posted to Swift but not yet
-  // acknowledged via markSaved. markSaved must adopt the content that was
-  // actually written, not whatever the buffer holds when the ack arrives —
-  // keystrokes typed during the round-trip would otherwise be blessed as
-  // clean without ever reaching disk.
+  // saveID -> { path, content } for saves posted to Swift and not yet
+  // answered (markSaved or saveRefused). markSaved adopts the content of
+  // the save it acknowledges — not whatever the buffer holds when the ack
+  // arrives, nor a later save Swift refused — or keystrokes would be
+  // blessed as clean without ever reaching disk.
   var pendingSaves = {};
+  var nextSaveID = 0;
 
   function postToSwift(message) {
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nirux) {
@@ -126,12 +127,21 @@
 
     if (models[path]) {
       // Reload existing model — Swift detected an external change while the
-      // buffer was clean. Adopt the new content as the new clean baseline.
+      // buffer was clean. Edits it hasn't heard of yet stay: it hears they
+      // exist, and asks.
+      if (payload.keepEdits && models[path].model.getValue() !== models[path].cleanValue) {
+        postToSwift({ type: "reloadRefused", path: path, version: models[path].version });
+        reportDirtyFor(path);
+        return;
+      }
+      // Adopt the new content as the new clean baseline, first: the change
+      // then reports the buffer clean.
+      models[path].cleanValue = content;
+      models[path].version = payload.version;
       models[path].model.setValue(content);
       monaco.editor.setModelLanguage(models[path].model, lang);
-      models[path].cleanValue = content;
     } else {
-      ensureModel(path, content, lang);
+      ensureModel(path, content, lang).version = payload.version;
     }
     if (payload.activate === false) return;
     switchToPath(path, payload.focus);
@@ -355,21 +365,18 @@
     entry.model.dispose();
     delete models[path];
     delete viewStates[path];
-    delete pendingSaves[path];
+    Object.keys(pendingSaves).forEach(function (saveID) {
+      if (pendingSaves[saveID].path === path) delete pendingSaves[saveID];
+    });
     if (currentPath === path) currentPath = null;
   }
 
-  function markSaved(path) {
+  function markSaved(path, saveID) {
+    var pending = pendingSaves[saveID];
+    delete pendingSaves[saveID];
     var entry = models[path];
-    if (!entry) return;
-    var pending = pendingSaves[path];
-    if (pending) {
-      entry.cleanValue = pending.content;
-      pending.count--;
-      if (pending.count === 0) delete pendingSaves[path];
-    } else {
-      entry.cleanValue = entry.model.getValue();
-    }
+    if (!entry || !pending) return;
+    entry.cleanValue = pending.content;
     reportDirtyFor(path);
   }
 
@@ -777,16 +784,11 @@
     if (action) action.run();
   }
 
-  function postSave(path, entry) {
+  function postSave(path, entry, requestID) {
     var content = entry.model.getValue();
-    var pending = pendingSaves[path];
-    if (pending) {
-      pending.content = content;
-      pending.count++;
-    } else {
-      pendingSaves[path] = { content: content, count: 1 };
-    }
-    postToSwift({ type: "save", path: path, content: content });
+    nextSaveID++;
+    pendingSaves[nextSaveID] = { path: path, content: content };
+    postToSwift({ type: "save", path: path, content: content, version: entry.version, saveID: nextSaveID, requestID: requestID });
   }
 
   function requestSave() {
@@ -796,19 +798,21 @@
     postSave(currentPath, entry);
   }
 
-  // Save every dirty buffer, not just the active tab. Each save goes through
-  // the same Swift round-trip as Cmd+S (write + markSaved per path).
+  // Save msg.paths, or every dirty buffer when it has none. Each save goes
+  // through the same Swift round-trip as Cmd+S (write + markSaved per path).
   // skipPaths carries buffers Swift knows changed on disk while dirty —
-  // writing those would clobber the external change.
-  function saveAllDirty(skipPaths) {
+  // writing those would clobber the external change. Then Swift hears that
+  // every save of msg.requestID is posted.
+  function saveBuffers(msg) {
     var skip = {};
-    (skipPaths || []).forEach(function (path) { skip[path] = true; });
-    Object.keys(models).forEach(function (path) {
-      if (skip[path]) return;
+    (msg.skipPaths || []).forEach(function (path) { skip[path] = true; });
+    (msg.paths || Object.keys(models)).forEach(function (path) {
       var entry = models[path];
-      if (entry.model.getValue() === entry.cleanValue) return;
-      postSave(path, entry);
+      if (!entry || skip[path]) return;
+      if (!msg.paths && entry.model.getValue() === entry.cleanValue) return;
+      postSave(path, entry, msg.requestID);
     });
+    if (msg.requestID !== undefined) postToSwift({ type: "savedAll", requestID: msg.requestID });
   }
 
   function applyFontSize() {
@@ -877,7 +881,8 @@
       case "openFile": applyOpen(msg); break;
       case "switchTab": switchToPath(msg.path, msg.focus); break;
       case "closeTab": closeTab(msg.path); break;
-      case "markSaved": markSaved(msg.path); break;
+      case "markSaved": markSaved(msg.path, msg.saveID); break;
+      case "saveRefused": delete pendingSaves[msg.saveID]; break;
       case "goToLine":
         if (msg.path && currentPath !== msg.path) switchToPath(msg.path, msg.focus);
         // If the model is unknown (Swift/JS state diverged, e.g. after a
@@ -898,7 +903,7 @@
       case "enterDiffGroup": enterPierreDiffGroup(msg); break;
       case "exitDiff": exitDiff(); break;
       case "toggleWordWrap": toggleWordWrap(); break;
-      case "saveAll": saveAllDirty(msg.skipPaths); break;
+      case "saveAll": saveBuffers(msg); break;
       case "toggleMinimap": toggleMinimap(); break;
       case "getSelection": reportSelection(msg.requestID); break;
       case "moveCaretToTextEdge": moveCaretToTextEdge(msg.edge); break;

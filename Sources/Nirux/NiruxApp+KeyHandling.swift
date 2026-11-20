@@ -7,29 +7,23 @@ extension NiruxApp {
     /// Click on a column to focus it without changing layout.
     func setupClickToFocus() {
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            guard let shell = self?.shell else { return event }
             // Before the click is handled, so a toast it shows stays.
             if event.window === self?.mainWindow {
-                self?.shell?.dismissToastOnInput()
-                self?.shell?.dismissSpaceArrivalOnClick(event)
+                shell.dismissToastOnInput()
+                shell.dismissSpaceArrivalOnClick(event)
             }
-            guard let shell = self?.shell,
-                  let workspace = shell.activeWorkspaceForKeyIntercept,
-                  let contentView = event.window?.contentView
-            else { return event }
-
-            // Use hitTest to find the deepest view under the click
-            let location = contentView.convert(event.locationInWindow, from: nil)
-            guard let hitView = contentView.hitTest(location) else { return event }
-
-            // Walk up from the hit view to find which column it belongs to
-            for (index, col) in workspace.columns.enumerated() {
-                if hitView === col.view || hitView.isDescendant(of: col.view) {
-                    shell.focusColumnByIndex(index)
-                    break
-                }
-            }
+            shell.clickBegan(onColumn: Self.column(under: event, in: shell.activeWorkspaceForKeyIntercept))
             return event // pass through so ghostty still handles selection etc.
         }
+    }
+
+    /// The index of the column of `workspace` the click `event` landed on.
+    private static func column(under event: NSEvent, in workspace: WorkspaceState?) -> Int? {
+        guard let workspace, let contentView = event.window?.contentView,
+              let hitView = contentView.hitTest(contentView.convert(event.locationInWindow, from: nil))
+        else { return nil }
+        return workspace.columns.firstIndex { hitView === $0.view || hitView.isDescendant(of: $0.view) }
     }
 
     /// Also consume flagsChanged to prevent ghostty from sending modifier
@@ -184,7 +178,7 @@ extension NiruxApp {
                keyCode: event.keyCode
            ),
            let editor = col.editorColumn, let active = editor.activePath {
-            editor.close(path: active)
+            editor.closeAskingFirst(path: active)
             return nil
         }
         // Let the menu bar handle this key equivalent directly,

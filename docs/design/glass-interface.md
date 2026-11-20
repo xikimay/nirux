@@ -438,8 +438,7 @@ the text stays flat and sharp.
 - **Air:** `Theme.Space.sm` between the columns and around them
   (`WorkspaceState.columnGap`, `columnInset`). At Opaque the air is the
   canvas; from Tinted up, the desktop's frost shows through it. The resize
-  handles straddle the air, and the camera brings the focused card in with
-  its air.
+  handles straddle the air.
 - **Corners:** `Theme.Radius.column`, 10 pt circular: their clip stays
   within the terminals' 10 pt padding (#598), so it cuts no cell. Each
   column clips its content to them; a terminal's header, the terminal's
@@ -457,6 +456,33 @@ the text stays flat and sharp.
   sides; past filling the viewport, or on a strip that started wider, the
   camera holds where the drag found it and goes where the strip wants it
   once let go. With Reduce motion the card is simply there.
+- **The active card in the middle** (window layout study, 2026-11-19): once
+  the cards overflow the viewport, the camera brings the focused one to its
+  middle, its neighbours cut alike on both sides; it stops at the strip's
+  ends, where the first or last card keeps its air against the edge. A
+  card wider than the viewport shows from its left edge. While the pointer
+  works on a card the camera holds (`WorkspaceState.heldCamera`), so
+  that what lies under it stays there. A click focuses the card where
+  the strip shows (a slide on its way stops there), and the card glides
+  to the middle once the button is up and a double-click's interval has
+  passed since the mouse-up, read from the event source: a button's or a
+  menu's tracking takes the mouse-up from the app's monitor. That hold
+  lasts only while its card has the focus, so a key that moves the focus
+  is followed at once, and stays within the strip. A press on an edge
+  drags it only past 3 points; a dragged edge holds the camera until let
+  go, through a focus moved meanwhile.
+- **Resizing from the centre** (same study, R3): only the focused card's
+  two edges show a handle (its left one is its neighbour's). Centred
+  between two neighbours (the camera centres it, or it is the middle of
+  cards that fit), the card grows on both sides from either edge, the
+  edge under the pointer, up to the viewport's width; they pay alike, so
+  nothing glides once let go, and one that runs out leaves the other to
+  pay. Otherwise the neighbour across the edge pays; the strip's last edge
+  grows the card alone, as before. A double-click sets the card back to
+  half by the same share. Within 10 pt of a third, a half or two thirds of
+  the viewport, the card lands there with a tick of the trackpad. Only
+  the columns whose width changes take a new fraction, and a focus moved
+  during a drag ends it.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within
