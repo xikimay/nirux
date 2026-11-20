@@ -34,10 +34,11 @@ extension NiruxShellView {
         // In the background (a task its Lead started): no selection, no
         // focus, no slide; the user stays where they type.
         // Its picture slides away while the interface may move only, of what
-        // shows: a crossing on its way ends.
+        // shows at rest: a crossing on its way ends, and a pass under the bar.
         if activate {
             closeSpacePlan(going: nil, animated: false)
             endSpaceCrossing()
+            endUnderBar()
         }
         let snapshot = activate && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
 
@@ -414,10 +415,11 @@ extension NiruxShellView {
     private func activateProfile(_ profileID: String, crosses: Bool, profileAlreadySelected: Bool = false) {
         let previousProfileID = activeProfileID
         // The plan goes, a crossing on its way ends, and a pass under the
-        // rail: what shows now, at rest, is what leaves.
+        // rail or the bar: what shows now, at rest, is what leaves.
         closeSpacePlan(going: nil, animated: false)
         endSpaceCrossing()
         endUnderGlass()
+        endUnderBar()
         let leaving = crosses && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }

@@ -89,6 +89,40 @@ final class UnderBarTests: XCTestCase {
         }
     }
 
+    /// A picture of the work taken during a pass (a new workspace's slide,
+    /// a crossing to another space, the plan) is of the viewport at rest.
+    func testAPictureDuringAPassIsOfTheWorkAtRest() throws {
+        try withShell { shell, clock in
+            let rest = shell.viewport.frame
+            shell.focusWorkspace(.down)
+            XCTAssertNotNil(shell.titleBandCover)
+            shell.addWorkspace(title: "new", cwd: NSTemporaryDirectory())
+            let slide = try XCTUnwrap(shell.viewport.subviews.compactMap { $0 as? FrozenView }.first)
+            XCTAssertEqual(slide.frame.size, rest.size, "a new workspace's slide")
+            clock.advance(by: 1)
+
+            shell.focusWorkspace(.up)
+            XCTAssertNotNil(shell.titleBandCover)
+            shell.toggleSpacePlan()
+            waitUntil("the plan", timeout: 5) { shell.spacePlan != nil }
+            XCTAssertEqual(shell.spacePlan?.frame.size, rest.size, "the plan")
+            shell.toggleSpacePlan()
+            waitUntil("the plan gone", timeout: 5) { shell.spacePlan == nil }
+            clock.advance(by: 1)
+
+            let first = shell.activeProfileID
+            shell.workspaceStore.createProfile(named: "Second", select: true)
+            shell.addWorkspace(title: "second space", cwd: NSTemporaryDirectory())
+            shell.selectProfile(first)
+            clock.advance(by: 1)
+            shell.focusWorkspace(.down)
+            XCTAssertNotNil(shell.titleBandCover)
+            shell.focusSpace(.next)
+            let leaving = try XCTUnwrap(shell.crossingPictures.first)
+            XCTAssertEqual(leaving.frame.size, rest.size, "a crossing's")
+        }
+    }
+
     // MARK: - Helpers
 
     /// The main window as Nirux builds it, its toolbar's bar over the title
