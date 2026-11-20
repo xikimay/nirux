@@ -631,8 +631,10 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertTrue(line.contains(" draft=text/") && line.contains(" verdict=none ") && line.contains(" last=stop/"), line)
         let second = try XCTUnwrap(ask(at: now - 10))
         // Its line is written at the check: past midnight, it names the day.
+        // DO NOT MERGE: the gate's control writes it at the test's start, as before.
+        let lineAtStart = ProcessInfo.processInfo.environment["NIRUX_ZZ_MUTANT"] == "lineAtStart"
         @MainActor func waiting(at time: TimeInterval) -> SidebarWaitingMessages {
-            SidebarWaitingMessages(count: 2, since: first.timestamp, refusal: .draft, now: time)
+            SidebarWaitingMessages(count: 2, since: first.timestamp, refusal: .draft, now: lineAtStart ? now : time)
         }
         XCTAssertEqual(waits(at: now)[column.id], waiting(at: now))
         XCTAssertEqual(lines.count, 1, "once per message and reason")
