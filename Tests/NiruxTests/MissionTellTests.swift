@@ -223,9 +223,20 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(tell("/code-review", in: fixture, agentUUID: otherAgentUUID), 4)
         XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
 
+        let other = try makeFixture(childAgentKind: "gemini")
+        XCTAssertEqual(tell("/code-review", in: other), 4, "Nirux delivers nothing to an agent it doesn't know")
+        XCTAssertTrue(try queuedEvents(in: other).isEmpty)
+        let agy = try makeFixture(childAgentKind: "agy")
+        XCTAssertEqual(tell("/code-review", in: agy), 2, "agy runs a slash command itself, with no turn to end")
+        XCTAssertEqual(tell("Review the diff.", in: agy), 3, "typed into Antigravity's prompt")
+        XCTAssertEqual(tell("/Users/me/review.md: apply it.", in: agy), 3, "a path is no slash command")
+        XCTAssertEqual(try queuedEvents(in: agy).map(\.kind), [.instruction, .instruction])
+        XCTAssertEqual(NiruxShellView.resumedConversation(ofAgy: ["agy", "--conversation", "c1"]), "c1")
+        XCTAssertEqual(NiruxShellView.resumedConversation(ofAgy: ["agy", "--conversation=c2"]), "c2")
+        XCTAssertNil(NiruxShellView.resumedConversation(ofAgy: ["agy", "-i", "Go"]))
         let codex = try makeFixture(childAgentKind: "codex")
-        XCTAssertEqual(tell("/code-review", in: codex), 4, "Nirux can't prove a Codex prompt is free")
-        XCTAssertTrue(try queuedEvents(in: codex).isEmpty)
+        XCTAssertEqual(tell("/code-review", in: codex), 3, "Codex takes it through its own queue")
+        XCTAssertEqual(try queuedEvents(in: codex).map(\.kind), [.instruction])
 
         for arguments in [["--branch", "feat/mission"], ["--message", "Hi"],
                           ["--branch", "feat/mission", "--message", String(repeating: "x", count: MissionEventCLI.maxInstructionLength + 1)]] {
@@ -364,6 +375,21 @@ final class MissionTellTests: XCTestCase {
         machine.promptRefusal(foreground: claude(), runningSince: t0 + 100)
     }
 
+    private func press(_ keys: String, at offset: TimeInterval, into machine: inout AgentStatusMachine) {
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + offset), keys: Data(keys.utf8))
+    }
+
+    private func prompt(_ id: String, at offset: TimeInterval, transcript: String? = nil) -> AgentHookEvent {
+        AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "lead", promptID: id, transcriptPath: transcript, timestamp: t0 + offset)
+    }
+
+    private func subagentDialog(at offset: TimeInterval, agent: String = "sub") -> AgentHookEvent {
+        AgentHookEvent(
+            kind: .claude, name: .permissionRequest, sessionID: "lead", toolName: "Bash", toolKey: agent, agentID: agent,
+            timestamp: t0 + offset
+        )
+    }
+
     /// A Claude session that took its first prompt and finished the turn.
     private func idleMachine() -> AgentStatusMachine {
         var machine = AgentStatusMachine()
@@ -373,6 +399,165 @@ final class MissionTellTests: XCTestCase {
         _ = machine.apply(hook(.userPromptSubmit, at: 1), isUserFocused: false)
         _ = machine.apply(hook(.stop, at: 5), isUserFocused: false)
         return machine
+    }
+
+    /// A Codex child's message goes into Codex's own queue once the `codex`
+    /// it was sent to says its turn is over (OSC 7501), keys at its prompt
+    /// or not: nothing is typed.
+    func testCodexTakesAMessageOnceItSaysItsTurnIsOver() {
+        let codex = ForegroundProcess(instance: claudeProcess, name: "codex", arguments: ["codex", "Go"])
+        var machine = AgentStatusMachine()
+        func refusal(_ foreground: ForegroundProcess? = codex, since: TimeInterval = t0 + 100) -> AgentPromptRefusal? {
+            machine.codexQueueRefusal(foreground: foreground, runningSince: since)
+        }
+        func report(_ state: AgentProgramStatus.State, kind: String? = nil, from process: ProcessInstance? = nil) {
+            let status = AgentProgramStatus(state: state, kind: kind, message: nil, process: "codex")
+            machine.noteCodexStatus(status, from: process ?? claudeProcess, now: t0 + 50)
+        }
+        XCTAssertEqual(refusal(nil), .noClaude)
+        XCTAssertEqual(refusal(ForegroundProcess(instance: claudeProcess, name: "codex", arguments: ["codex", "exec", "Go"])), .noClaude,
+                       "a run, not a conversation")
+        XCTAssertEqual(refusal(), .noPromptYet, "no state reported yet")
+        report(.working)
+        XCTAssertEqual(refusal(), .working)
+        report(.blocked, kind: "permission")
+        XCTAssertEqual(refusal(), .dialog)
+        report(.error)
+        XCTAssertEqual(refusal(), .failedTurn)
+        report(.done)
+        XCTAssertNil(refusal())
+        XCTAssertEqual(refusal(since: claudeProcess.startedAt - 1), .restarted, "a codex started after the tell")
+        report(.idle)
+        XCTAssertNil(refusal(), "a key after its turn's end: its queue takes the message all the same")
+        // Codex says each state once: a Ctrl-G editor or a ^Z shell in front keeps it.
+        let editor = ProcessInstance(pid: 11, startedAt: t0 + 60)
+        _ = machine.tick(fgName: "vim", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 60))
+        machine.keepProgramStatus(of: editor)
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 61))
+        machine.keepProgramStatus(of: claudeProcess)
+        XCTAssertNil(refusal(), "its idle stays")
+        report(.done, from: ProcessInstance(pid: 9, startedAt: t0))
+        XCTAssertEqual(refusal(), .noPromptYet, "another codex's word")
+        // Read on an empty process table: the codex in front then's.
+        machine.noteCodexStatus(AgentProgramStatus(state: .done, kind: nil, message: nil, process: "codex"), from: nil, now: t0 + 70)
+        XCTAssertNil(refusal(), "one already running")
+        XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 12, startedAt: t0 + 80), name: "codex", arguments: ["codex"])),
+                       .noPromptYet, "not one started since")
+    }
+
+    /// An Antigravity child's prompt is free once its `agy` said its turn is
+    /// done (OSC 7501) and no key reached the terminal since that turn began:
+    /// agy 1.5.12 says idle at a key after done, but keeps one typed while it
+    /// worked in its box, and still says done.
+    func testAntigravityPromptIsFreeOnceItsTurnIsDoneWithNoKeySince() {
+        let agy = ForegroundProcess(instance: claudeProcess, name: "agy", arguments: ["agy", "-i", "Go"])
+        var machine = AgentStatusMachine()
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0))
+        func refusal(_ foreground: ForegroundProcess? = agy, since: TimeInterval = t0 + 100) -> AgentPromptRefusal? {
+            machine.promptRefusal(foreground: foreground, runningSince: since, agent: "agy")
+        }
+        func report(_ state: AgentProgramStatus.State, kind: String? = nil, at offset: TimeInterval, from process: ProcessInstance? = nil) {
+            _ = machine.noteProgramStatus(
+                AgentProgramStatus(state: state, kind: kind, message: nil, process: "agy"), from: process ?? claudeProcess,
+                isUserFocused: true, now: Date(timeIntervalSince1970: t0 + offset)
+            )
+        }
+        XCTAssertEqual(refusal(ForegroundProcess(instance: claudeProcess, name: "agy", arguments: ["agy", "-p", "Go"])), .noClaude,
+                       "a one-shot run")
+        report(.idle, at: 1)
+        XCTAssertEqual(refusal(), .noPromptYet, "ready, but no turn ended since it started")
+        report(.working, at: 2)
+        XCTAssertEqual(refusal(), .working)
+        report(.blocked, kind: "permission", at: 3)
+        XCTAssertEqual(refusal(), .dialog)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 3.5), keys: Data("1".utf8))
+        report(.working, at: 4)
+        report(.done, at: 5)
+        XCTAssertNil(refusal(), "the key that answered its dialog is no draft")
+        XCTAssertEqual(refusal(since: claudeProcess.startedAt - 1), .restarted)
+        XCTAssertEqual(machine.promptRefusal(foreground: agy, runningSince: t0 + 100), .noClaude, "text for Claude Code never goes into agy")
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 5.5), keys: Data("\u{1B}[5~".utf8))
+        report(.idle, at: 5.5)
+        XCTAssertNil(refusal(), "a key after its turn that leaves no text (Page Up)")
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 6))
+        report(.idle, at: 6)
+        XCTAssertEqual(refusal(), .draft, "a key after its turn")
+        report(.working, at: 7)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8))
+        report(.done, at: 9)
+        XCTAssertEqual(refusal(), .draft, "a key typed while it worked stays in its box")
+        report(.working, at: 10)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 10.5))
+        report(.blocked, kind: "permission", at: 10.6)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 10.7), keys: Data("1".utf8))
+        report(.working, at: 10.8)
+        report(.done, at: 10.9)
+        XCTAssertEqual(refusal(), .draft, "a key typed before a dialog stays: its turn began before it")
+        report(.working, at: 11)
+        report(.idle, at: 11.5)
+        XCTAssertEqual(refusal(), .draft, "stopped with Esc: its box may hold its prompt again")
+        report(.working, at: 11.6)
+        report(.done, at: 11.7)
+        XCTAssertNil(refusal())
+        // A dialog answered with several keys: the heartbeat drops its status at the first.
+        report(.working, at: 11.8)
+        report(.blocked, kind: "question", at: 11.85)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 11.86), keys: Data("\u{1B}[B".utf8))
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 11.87))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 11.88), keys: Data("\r".utf8))
+        report(.working, at: 11.9)
+        report(.done, at: 11.95)
+        XCTAssertNil(refusal(), "every key that answered its dialog")
+        // ^Z then fg drops its status, not its turn.
+        _ = machine.tick(fgName: "zsh", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 11.96))
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 11.97))
+        XCTAssertNil(refusal(), "its turn ended done")
+        report(.error, at: 12)
+        XCTAssertEqual(refusal(), .failedTurn)
+        report(.done, at: 13, from: ProcessInstance(pid: 9, startedAt: t0))
+        XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: t0), name: "agy", arguments: ["agy"])),
+                       .noPromptYet, "its own turn, not another agy's")
+
+        func at(_ offset: TimeInterval) -> Date { Date(timeIntervalSince1970: t0 + offset) }
+        // Keys typed after the Enter that sent its prompt, before its working is read, stay in its box.
+        machine.noteKeystroke(now: at(20), keys: Data("go".utf8))
+        machine.noteKeystroke(now: at(20.1), keys: Data("\r".utf8))
+        machine.noteKeystroke(now: at(20.12), keys: Data("x".utf8))
+        report(.working, at: 20.2)
+        report(.done, at: 21)
+        XCTAssertEqual(refusal(), .draft, "a key after the Enter that sent its prompt")
+        // Its dialog answered, text typed before it says it works again.
+        report(.working, at: 22)
+        report(.blocked, kind: "permission", at: 22.1)
+        machine.noteKeystroke(now: at(22.2), keys: Data("\r".utf8))
+        machine.noteKeystroke(now: at(22.3), keys: Data("y".utf8))
+        report(.working, at: 22.4)
+        report(.done, at: 23)
+        XCTAssertEqual(refusal(), .draft, "text typed once its dialog was answered")
+        // A turn whose end was missed (a silence dropped its status): the next prompt starts a new one.
+        report(.working, at: 24)
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: at(24 + AgentProgramStatus.workingSilence + 1))
+        machine.noteKeystroke(now: at(86), keys: Data("next".utf8))
+        machine.noteKeystroke(now: at(86.1), keys: Data("\r".utf8))
+        report(.working, at: 86.2)
+        report(.done, at: 87)
+        XCTAssertNil(refusal(), "its prompt's own keys aren't a draft")
+        report(.working, at: 88)
+        report(.error, at: 89)
+        machine.noteKeystroke(now: at(89.5), keys: Data("z".utf8))
+        report(.idle, at: 89.6)
+        XCTAssertEqual(refusal(), .failedTurn, "a failed turn says so, a key after it notwithstanding")
+
+        // An agy that left with its dialog open: the keys of what runs next are drafts.
+        var after = AgentStatusMachine()
+        _ = after.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0))
+        _ = after.noteProgramStatus(AgentProgramStatus(state: .working, kind: nil, message: nil, process: "agy"), from: claudeProcess,
+                                    isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 1))
+        _ = after.noteProgramStatus(AgentProgramStatus(state: .blocked, kind: "permission", message: nil, process: "agy"), from: claudeProcess,
+                                    isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 2))
+        _ = after.tick(fgName: "claude", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 3))
+        after.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 4), keys: Data("x".utf8))
+        XCTAssertTrue(after.hasDraft, "Claude Code's draft")
     }
 
     func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {
@@ -400,6 +585,282 @@ final class MissionTellTests: XCTestCase {
         ), isUserFocused: false)
         _ = machine.apply(hook(.stop, at: 12), isUserFocused: false)
         XCTAssertEqual(refusal(machine), .dialog)
+    }
+
+    /// A message Claude takes in by itself (a peer's, a task notification)
+    /// follows no key: a subagent's dialog stays listed through it, and no
+    /// message is typed into that dialog once the turn ends. A prompt typed
+    /// at the box closes the dialogs listed at its Enter (one denied with
+    /// Esc fires no hook), not one raised since.
+    func testOnlyAPromptTypedAtTheBoxClosesDialogs() {
+        var machine = idleMachine()
+        press("\r", at: 9.5, into: &machine)
+        _ = machine.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+        _ = machine.apply(subagentDialog(at: 11), isUserFocused: false)
+        _ = machine.apply(hook(.userPromptSubmit, at: 12), isUserFocused: false)
+        _ = machine.apply(hook(.stop, at: 13), isUserFocused: false)
+        XCTAssertEqual(refusal(machine), .dialog)
+
+        press("\u{1B}", at: 20, into: &machine)
+        press("go on\r", at: 21, into: &machine)
+        _ = machine.apply(subagentDialog(at: 21.5, agent: "other"), isUserFocused: false)
+        _ = machine.apply(hook(.userPromptSubmit, at: 22), isUserFocused: false)
+        XCTAssertEqual(machine.pendingDialogs.map(\.agentID), ["other"])
+    }
+
+    /// Keys typed during a turn stay in the box when Claude takes in a
+    /// message by itself: a draft no message joins, until the Enter of a
+    /// prompt typed there.
+    func testAMessageClaudeTakesInLeavesTheDraft() {
+        var machine = idleMachine()
+        press("\r", at: 9.5, into: &machine)
+        _ = machine.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+        press("x", at: 11, into: &machine)
+        press("\u{1B}\r", at: 11.5, into: &machine) // Option-Enter adds a line
+        _ = machine.apply(hook(.userPromptSubmit, at: 12), isUserFocused: false)
+        _ = machine.apply(hook(.stop, at: 13), isUserFocused: false)
+        XCTAssertEqual(refusal(machine), .draft)
+        press("\r", at: 20, into: &machine)
+        _ = machine.apply(hook(.userPromptSubmit, at: 20.1), isUserFocused: false)
+        _ = machine.apply(hook(.stop, at: 21), isUserFocused: false)
+        XCTAssertNil(refusal(machine))
+    }
+
+    /// Read through its transcript (`readsTranscript`), a prompt was typed
+    /// at the box only when its line says so. A peer's message never was,
+    /// even right after a line added with backslash-Enter, and closes no
+    /// dialog. A typed one was sent by the last Enter before its hook,
+    /// however late that hook (Claude held the prompt) and whatever Enter
+    /// came before it was applied, and closes the dialogs listed then. A
+    /// prompt queued mid-turn records no `prompt_id`: its line goes with the
+    /// oldest hook before it.
+    func testTheTranscriptSaysWhichPromptWasTyped() {
+        func readMachine() -> AgentStatusMachine {
+            var machine = idleMachine()
+            machine.readsTranscript = true
+            return machine
+        }
+        func read(_ id: String?, at offset: TimeInterval, typed: Bool, into machine: inout AgentStatusMachine) {
+            _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: id, at: t0 + offset, typed: typed))
+        }
+        var machine = readMachine()
+        press("fix it \\", at: 10, into: &machine)
+        press("\r", at: 10.5, into: &machine)
+        _ = machine.apply(prompt("peer", at: 11), isUserFocused: false)
+        read("peer", at: 11.2, typed: false, into: &machine)
+        _ = machine.apply(hook(.stop, at: 13), isUserFocused: false)
+        XCTAssertEqual(refusal(machine), .draft)
+        press("\r", at: 20, into: &machine)
+        _ = machine.apply(prompt("held", at: 20 + AgentStatusMachine.promptHookDelay + 1), isUserFocused: false)
+        read("held", at: 27, typed: true, into: &machine)
+        _ = machine.apply(hook(.stop, at: 30), isUserFocused: false)
+        XCTAssertNil(refusal(machine))
+
+        // Its line read before its hook, a line added before that hook was applied.
+        var early = readMachine()
+        press("\r", at: 40, into: &early)
+        press("more \\", at: 40.3, into: &early)
+        press("\r", at: 40.4, into: &early)
+        read("early", at: 40.2, typed: true, into: &early)
+        _ = early.apply(prompt("early", at: 40.1), isUserFocused: false)
+        _ = early.apply(hook(.stop, at: 41), isUserFocused: false)
+        XCTAssertEqual(early.boxEmptiedAt, t0 + 40)
+        XCTAssertEqual(refusal(early), .draft)
+
+        var queued = readMachine()
+        press("\r", at: 50, into: &queued)
+        _ = queued.apply(prompt("queued", at: 50.1), isUserFocused: false)
+        read(nil, at: 55, typed: true, into: &queued)
+        XCTAssertEqual(queued.boxEmptiedAt, t0 + 50)
+
+        var dialogs = readMachine()
+        _ = dialogs.apply(subagentDialog(at: 60), isUserFocused: false)
+        _ = dialogs.apply(prompt("peer", at: 61), isUserFocused: false)
+        read("peer", at: 61.1, typed: false, into: &dialogs)
+        press("\u{1B}", at: 62, into: &dialogs)
+        press("go on\r", at: 63, into: &dialogs)
+        _ = dialogs.apply(prompt("typed", at: 63.1), isUserFocused: false)
+        XCTAssertEqual(dialogs.pendingDialogs.count, 1, "until its line says it was typed")
+        read("typed", at: 63.2, typed: true, into: &dialogs)
+        XCTAssertEqual(dialogs.pendingDialogs.count, 0)
+    }
+
+    /// A column follows the transcript its own `claude` names in its hooks,
+    /// and reads it before saying whether keys wait in the prompt.
+    func testTheColumnReadsWhoSentEachPromptInItsTranscript() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-prompts-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("lead.jsonl")
+        try Data().write(to: transcript)
+        let pty = PtySession()
+        func record(_ id: String, origin: String) throws {
+            let time = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+            let handle = try FileHandle(forWritingTo: transcript)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((#"{"type":"user","origin":{"kind":""# + origin + #""},"promptId":""# + id
+                + #"","timestamp":""# + time + #"","message":{"role":"user","content":"…"}}"# + "\n").utf8))
+        }
+        func submit(_ id: String) {
+            pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .userPromptSubmit, sessionID: "lead", promptID: id, transcriptPath: transcript.path,
+                timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+        }
+        pty.sendRaw("fix it \\")
+        pty.sendRaw("\r")
+        submit("peer")
+        try record("peer", origin: "peer")
+        XCTAssertTrue(pty.reviewSendHasDraft)
+        pty.sendRaw("\r")
+        submit("typed")
+        try record("typed", origin: "human")
+        XCTAssertFalse(pty.reviewSendHasDraft)
+    }
+
+    /// Without a transcript, an Enter stands for the prompt whose hook
+    /// follows it within moments: Claude runs the hook as the box sends. An
+    /// older one sent nothing (a line added after a backslash), one that
+    /// reached a dialog whose hook came after it answered that dialog, and a
+    /// prompt Claude Code says came from elsewhere took none.
+    func testAnEnterSendsOnlyThePromptItsHookFollows() {
+        func afterAnEnter(source: String? = nil, hookAfter delay: TimeInterval) -> AgentStatusMachine {
+            var machine = idleMachine()
+            press("fix it", at: 10, into: &machine)
+            press("\r", at: 10.5, into: &machine)
+            _ = machine.apply(hook(.userPromptSubmit, at: 10.5 + delay, source: source), isUserFocused: false)
+            _ = machine.apply(hook(.stop, at: 20), isUserFocused: false)
+            return machine
+        }
+        XCTAssertNil(refusal(afterAnEnter(hookAfter: 0.5)))
+        XCTAssertEqual(refusal(afterAnEnter(hookAfter: AgentStatusMachine.promptHookDelay)), .draft)
+        XCTAssertEqual(refusal(afterAnEnter(source: "system", hookAfter: 0.5)), .draft)
+
+        var answered = idleMachine()
+        press("\r", at: 30.2, into: &answered)
+        _ = answered.apply(subagentDialog(at: 30), isUserFocused: false)
+        _ = answered.apply(hook(.userPromptSubmit, at: 31), isUserFocused: false)
+        _ = answered.apply(hook(.stop, at: 32), isUserFocused: false)
+        XCTAssertEqual(refusal(answered), .dialog)
+    }
+
+    /// A claude launched at the shell took no key since it started: what the
+    /// shell got is no draft, its prompt given as an argument went in with
+    /// no key, and what was typed into it since is a draft. Resumed in a new
+    /// process too, but not by a `/resume` inside it, which may show a
+    /// screen no hook reports (an offer to resume from a summary).
+    func testAClaudeStartsWithAnEmptyBox() {
+        func launched(_ command: String, source: String, by process: ProcessInstance?) -> AgentStatusMachine {
+            var machine = AgentStatusMachine()
+            press(command, at: 0, into: &machine)
+            _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 0.5))
+            _ = machine.apply(AgentHookEvent(
+                kind: .claude, name: .sessionStart, sessionID: "lead", emitterProcess: process, source: source, timestamp: t0 + 1
+            ), isUserFocused: false)
+            _ = machine.apply(hook(.userPromptSubmit, at: 2), isUserFocused: false)
+            _ = machine.apply(hook(.stop, at: 5), isUserFocused: false)
+            return machine
+        }
+        XCTAssertEqual(refusal(launched("claude\n", source: "startup", by: nil)), .draft, "nothing names its process")
+        var started = launched("claude \"Read .claude-handover.md\"\n", source: "startup", by: ProcessInstance(pid: 7, startedAt: t0 + 0.01))
+        XCTAssertNil(refusal(started))
+        press("y", at: 6, into: &started)
+        _ = started.apply(hook(.userPromptSubmit, at: 7), isUserFocused: false)
+        _ = started.apply(hook(.stop, at: 8), isUserFocused: false)
+        XCTAssertEqual(refusal(started), .draft)
+        XCTAssertNil(refusal(launched("claude --resume 1234\n", source: "resume", by: ProcessInstance(pid: 7, startedAt: t0 + 0.01))))
+
+        var resumed = idleMachine()
+        press("/resume\r", at: 10, into: &resumed)
+        press("\r", at: 11, into: &resumed)
+        _ = resumed.apply(AgentHookEvent(
+            kind: .claude, name: .sessionStart, sessionID: "lead", emitterProcess: claudeProcess, source: "resume", timestamp: t0 + 12
+        ), isUserFocused: false)
+        XCTAssertEqual(refusal(resumed), .draft)
+    }
+
+    /// A `claude` that took no prompt since it started, as one Nirux resumed
+    /// at a relaunch, is free once its REPL says it sits idle at its prompt,
+    /// while nothing works or waits there and no key reached its terminal;
+    /// without that word, never.
+    func testAClaudeThatTookNoPromptIsFreeOnlyOnItsREPLsWord() {
+        let resumed = ProcessInstance(pid: 7, startedAt: t0 + 6)
+        func refusal(_ machine: AgentStatusMachine, idle: Bool = true) -> AgentPromptRefusal? {
+            machine.promptRefusal(foreground: claude(resumed), runningSince: t0 + 100) { $0 == resumed && idle }
+        }
+        // Without Nirux's hooks from it, nothing would say a message went in:
+        // never, and keys say nothing of a draft.
+        var hookless = AgentStatusMachine()
+        XCTAssertEqual(refusal(hookless), .noPromptYet)
+        hookless.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("x".utf8))
+        XCTAssertEqual(refusal(hookless), .noPromptYet, "not held by a draft")
+        var earlier = AgentStatusMachine()
+        _ = earlier.apply(hook(.sessionStart, at: 5), isUserFocused: false)
+        XCTAssertEqual(refusal(earlier), .noPromptYet, "an earlier claude's hooks")
+
+        var machine = AgentStatusMachine()
+        _ = machine.apply(hook(.sessionStart, at: 7, source: "resume"), isUserFocused: false)
+        XCTAssertEqual(refusal(machine, idle: false), .noPromptYet)
+        XCTAssertNil(refusal(machine))
+
+        var typed = machine
+        typed.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("x".utf8))
+        XCTAssertEqual(refusal(typed), .draft, "typed since it started")
+        var early = machine
+        early.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 5), keys: Data("x".utf8))
+        XCTAssertEqual(refusal(early), .noPromptYet, "typed while its shell loaded: seeded into its prompt")
+        var scrolled = machine
+        scrolled.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("\u{1B}[6~".utf8))
+        XCTAssertEqual(refusal(scrolled), .noPromptYet, "a key that leaves no draft, as one that answers a screen")
+        var recalled = machine
+        recalled.notePromptRecall(now: Date(timeIntervalSince1970: t0 + 8))
+        XCTAssertEqual(refusal(recalled), .draft, "an old prompt a wheel scroll recalled")
+        // A background agent it resumed works, then asks past the turn.
+        var working = machine
+        _ = working.apply(hook(.preToolUse, at: 8, tool: "Bash"), isUserFocused: false)
+        XCTAssertEqual(refusal(working), .noPromptYet)
+        var asking = machine
+        _ = asking.apply(AgentHookEvent(
+            kind: .claude, name: .permissionRequest, sessionID: "lead", toolName: "Bash", toolKey: "s", agentID: "sub",
+            timestamp: t0 + 8
+        ), isUserFocused: false)
+        _ = asking.apply(hook(.stop, at: 9), isUserFocused: false)
+        XCTAssertEqual(refusal(asking), .noPromptYet, "its dialog outlives the turn")
+        var failed = machine
+        _ = failed.apply(AgentHookEvent(
+            kind: .claude, name: .stopFailure, sessionID: "lead", errorKind: "rate_limit", timestamp: t0 + 8
+        ), isUserFocused: false)
+        XCTAssertEqual(refusal(failed), .noPromptYet, "a usage limit would fail what it is sent")
+
+        // The user, who saw its screen, says it sits at its prompt: keys that
+        // leave no text don't hold it, nor an Enter that answered a screen;
+        // text that may sit in its prompt and the rest still do.
+        func seen(_ machine: AgentStatusMachine, idle: Bool = true) -> AgentPromptRefusal? {
+            machine.promptRefusal(foreground: claude(resumed), runningSince: t0 + 100, seenByUser: true) { $0 == resumed && idle }
+        }
+        var answered = machine
+        answered.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("\u{1B}[B".utf8))
+        answered.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 9), keys: Data("\r".utf8))
+        XCTAssertEqual(refusal(answered), .draft)
+        XCTAssertNil(seen(answered))
+        XCTAssertNil(seen(scrolled))
+        var completed = machine
+        completed.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("@".utf8))
+        completed.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 9), keys: Data("\r".utf8))
+        XCTAssertEqual(seen(completed), .draft, "an Enter that took an @file completion: its text stays")
+        var suggested = machine
+        suggested.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("\u{1B}[C".utf8))
+        XCTAssertEqual(seen(suggested), .draft, "Right takes in a suggested prompt")
+        var givenBack = machine
+        givenBack.notePromptGivenBack(now: t0 + 8)
+        XCTAssertEqual(seen(givenBack), .draft, "a prompt Esc gave back to its box")
+        XCTAssertEqual(seen(typed), .draft, "text in its prompt")
+        XCTAssertNil(seen(early), "keys before it started, Nirux's launch line too: what they left, the user sees")
+        XCTAssertEqual(seen(recalled), .draft, "an old prompt in its box")
+        XCTAssertEqual(seen(answered, idle: false), .noPromptYet, "its record says a screen of its own is up")
+        XCTAssertEqual(seen(asking), .noPromptYet)
+        XCTAssertEqual(seen(working), .noPromptYet)
     }
 
     /// A dialog takes the keys while it waits for one, a paste too: none is a
@@ -550,13 +1011,22 @@ final class MissionTellTests: XCTestCase {
     /// parent didn't answer. Not while the turn runs, nor before it went in.
     func testATurnThatTookAMessageAndEndedIsSeen() {
         var machine = idleMachine()
-        let typedAt = t0 + 6
+        // Recorded once its Enter went out.
+        let typedAt = t0 + 6.01
         XCTAssertFalse(machine.finishedTurn(afterTypingAt: typedAt), "not typed in yet")
-        machine.noteKeystroke(now: Date(timeIntervalSince1970: typedAt))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 6))
         _ = machine.apply(hook(.userPromptSubmit, at: 6.5), isUserFocused: false)
         XCTAssertFalse(machine.finishedTurn(afterTypingAt: typedAt), "working on it")
         _ = machine.apply(hook(.stop, at: 9), isUserFocused: false)
         XCTAssertTrue(machine.finishedTurn(afterTypingAt: typedAt))
+
+        // Left in the prompt, its Enter refused: a message Claude took in by
+        // itself since is not that one.
+        var left = idleMachine()
+        press("\u{1B}[200~Keep date=?\u{1B}[201~", at: 6, into: &left)
+        _ = left.apply(hook(.userPromptSubmit, at: 6.5), isUserFocused: false)
+        _ = left.apply(hook(.stop, at: 9), isUserFocused: false)
+        XCTAssertFalse(left.finishedTurn(afterTypingAt: typedAt))
     }
 
     /// Claude Code shows some dialogs (trust, MCP servers) before any hook

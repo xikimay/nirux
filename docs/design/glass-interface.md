@@ -438,8 +438,7 @@ the text stays flat and sharp.
 - **Air:** `Theme.Space.sm` between the columns and around them
   (`WorkspaceState.columnGap`, `columnInset`). At Opaque the air is the
   canvas; from Tinted up, the desktop's frost shows through it. The resize
-  handles straddle the air, and the camera brings the focused card in with
-  its air.
+  handles straddle the air.
 - **Corners:** `Theme.Radius.column`, 10 pt circular: their clip stays
   within the terminals' 10 pt padding (#598), so it cuts no cell. Each
   column clips its content to them; a terminal's header, the terminal's
@@ -457,6 +456,33 @@ the text stays flat and sharp.
   sides; past filling the viewport, or on a strip that started wider, the
   camera holds where the drag found it and goes where the strip wants it
   once let go. With Reduce motion the card is simply there.
+- **The active card in the middle** (window layout study, 2026-11-19): once
+  the cards overflow the viewport, the camera brings the focused one to its
+  middle, its neighbours cut alike on both sides; it stops at the strip's
+  ends, where the first or last card keeps its air against the edge. A
+  card wider than the viewport shows from its left edge. While the pointer
+  works on a card the camera holds (`WorkspaceState.heldCamera`), so
+  that what lies under it stays there. A click focuses the card where
+  the strip shows (a slide on its way stops there), and the card glides
+  to the middle once the button is up and a double-click's interval has
+  passed since the mouse-up, read from the event source: a button's or a
+  menu's tracking takes the mouse-up from the app's monitor. That hold
+  lasts only while its card has the focus, so a key that moves the focus
+  is followed at once, and stays within the strip. A press on an edge
+  drags it only past 3 points; a dragged edge holds the camera until let
+  go, through a focus moved meanwhile.
+- **Resizing from the centre** (same study, R3): only the focused card's
+  two edges show a handle (its left one is its neighbour's). Centred
+  between two neighbours (the camera centres it, or it is the middle of
+  cards that fit), the card grows on both sides from either edge, the
+  edge under the pointer, up to the viewport's width; they pay alike, so
+  nothing glides once let go, and one that runs out leaves the other to
+  pay. Otherwise the neighbour across the edge pays; the strip's last edge
+  grows the card alone, as before. A double-click sets the card back to
+  half by the same share. Within 10 pt of a third, a half or two thirds of
+  the viewport, the card lands there with a tick of the trackpad. Only
+  the columns whose width changes take a new fraction, and a focus moved
+  during a drag ends it.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within
@@ -480,6 +506,49 @@ the text stays flat and sharp.
   shade. 0.44 s, translations only, so no text scales; N1's name card
   stays. A switch while one plays ends it at once; Reduce motion, another
   space, or a workspace on screen that left the list show it at once.
+- **The crossing (study P4):** ⌥⌘← ⌥⌘→ pass through depth. The space left
+  recedes to 92 % as it fades; the one chosen comes from 106 % and lands,
+  0.56 s, both frozen pictures, every live view hidden under them until it
+  lands, so no live terminal scales. The space chosen is frozen 0.05 s in,
+  once its terminals (resting while hidden) drew. A switch while one plays
+  ends it at once, and so does a move or another workspace on screen (⌘N,
+  a close, a ⌘P jump); Reduce motion, or a pick from the menu, shows the
+  space at once.
+- **The plan (study P5, first part):** ⌥⌘↑ (Space › Space Overview)
+  shows the space as a plan over the viewport: a row per workspace, in the
+  order they're listed, every column of it frozen at the plan's scale
+  (`FrozenView`, terminals copied that small on the GPU), its state icon,
+  name and status line at their own size beside it. The card on screen
+  wears a ring; the arrows move it, Return or a click goes there at once,
+  Escape or ⌥⌘↑ goes back; it holds the keys, none reaches a terminal.
+  Under it the live views hide and no terminal draws; a change to what it
+  shows (a workspace, its columns, the card in focus), another space or a
+  new size closes it at once, and the keyboard goes back to the column on
+  screen. A new name doesn't. However many workspaces, every row shows: the
+  gaps shrink. A pinch does the same: fingers closing over the work past a
+  quarter of their span, within one pinch, show the plan, and opening them
+  in it goes to the card under them, else to the chosen one; each pinch
+  acts once, whichever view its events reach. A column that zooms itself
+  keeps its own pinch: Branch Review's page does; whether the editor's
+  WebKit, which doesn't zoom, passes it on wasn't checked in the app. While
+  the interface may move, the work recedes into the plan (0.56 s): the
+  rows' world comes from where the workspace showed, filling the plan, the
+  work's picture at its size over it fading into its row, the names after.
+  Going to a card, that workspace shows under the plan at once, its column
+  taking the keyboard, and the plan dives into it (0.52 s), its picture
+  fading in over the zoom; going back dives into the workspace on screen.
+  Diving, the plan leaves keys and clicks to that workspace; ⌥⌘↑ or a pinch
+  meanwhile lands the dive and opens the plan anew. The rows move through their view's
+  `sublayerTransform`; ends come on time, and Reduce motion, Animate the
+  interface off or movement turning off mid-way show the end at once.
+- **Frozen pictures (study P4):** a crossing, or a new workspace's slide,
+  moves pictures of what the viewport showed, frozen in
+  about 6 ms (`FrozenView`): a clone of its layers, each sharing its
+  contents, without what is hidden or clipped out of sight, each
+  terminal's last image copied on the GPU (Ghostty draws over the one it
+  shows). Drawing the viewport again took about 90 ms in a large window
+  and left the terminals blank. A column drawn in another process (an
+  editor, a browser) shows its card, empty. The pictures go on time.
 - **From the source (study P7):** the inbox comes out of the bar's badge
   and goes back into it, a request's callout out of its rail icon: from
   60 % of their size about the point of their edge nearest it, 0.32 s in
@@ -513,15 +582,17 @@ the text stays flat and sharp.
 - **Under the glass (study P6):** folded, the rail is an island of glass
   over the work. While the columns travel to a card (the strip's 0.3 s
   slide, the workspace on screen the same, the sidebar's width too: not a
-  switch, a fold or an unfold) they pass under it: the viewport's layer reaches under the
-  sidebar, what it holds where it lay, and the workspace on screen leaves
-  its cards unclipped; then the work's edge sweeps back to the rail's over
+  switch, a fold or an unfold) they pass under it: the viewport reaches
+  under the sidebar (its frame, and its bounds' origin so that what it
+  holds stays) and the workspace on screen stops clipping its cards
+  (`clipsToBounds`); then the work's edge sweeps back to the rail's over
   0.22 s. A pass goes on through a layout while the rail floats. At rest
   nothing lies under the glass, and no line marks the rail's edge (the
-  divider fades with the fold); a pass ends where the rail stops floating. Only the
-  layer reaches: the view, its frame and its clicks stay. Only in macOS's own glass (26 and
-  later, which refracts what passes under it; the rim of 14 and 15 would
-  show the cards plainly), above Opaque, while the interface may move.
+  divider fades with the fold); a pass ends where the rail stops floating.
+  The sidebar lies over the viewport and keeps its clicks. Only in macOS's
+  own glass (26 and later, which refracts what passes under it; the rim of
+  14 and 15 would show the cards plainly), above Opaque, while the
+  interface may move.
 
 ## Plan
 

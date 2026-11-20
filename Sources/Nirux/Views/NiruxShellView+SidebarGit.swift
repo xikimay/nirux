@@ -44,6 +44,9 @@ extension NiruxShellView {
                     processTableRead: processTableRead,
                     claudeFiredHooks: foregroundProcess.map { col.claudeHooksFired(by: $0.instance) } ?? false
                 ) ?? .idle
+                if let reason = col.pty?.takeLateSignInAlert(isUserFocused: isUserFocused && appIsActive) {
+                    col.notifyAgentAttention(reason: reason)
+                }
                 return sidebarColumnInfo(
                     col, at: colIndex, isUserFocused: isUserFocused, agentStatus: agentStatus, foregroundProcess: foregroundProcess,
                     approvalHold: approvalHolds[ObjectIdentifier(col)], missionQuestion: missionQuestions[ObjectIdentifier(col)],
@@ -207,7 +210,8 @@ extension NiruxShellView {
                       parentTitle: parentTitle,
                       statusLine: turnStatusEnabled ? workspace.statusLine : nil,
                       turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil,
-                      ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0)
+                      ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0,
+                      dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil)
     }
 
     /// Every column's foreground process, shown or not, and what follows
@@ -231,8 +235,11 @@ extension NiruxShellView {
                 ) {
                     invalidatedSessionBinding = true
                 }
-                // A task's new folder is where an agent asks for trust.
-                if workspace.isFolderTask { watchTrustPrompt(of: column, foreground: foregroundProcess, now: now) }
+                // A task's new folder is where an agent asks for trust; agy
+                // trusts exact paths, so a new worktree asks again.
+                if workspace.isFolderTask || foregroundProcess?.name == "agy" {
+                    watchTrustPrompt(of: column, foreground: foregroundProcess, now: now)
+                }
                 refreshStuckAgent(
                     column, in: workspace,
                     foregroundProcess: foregroundProcess, snapshot: snapshot, now: now
@@ -434,9 +441,18 @@ extension NiruxShellView {
         for appliedEvent in events {
             let event = appliedEvent.event
             if appliedEvent.claudeRestoreChanged { changed = true }
+            if event.kind == .agy {
+                if appliedEvent.resolution.column.captureAgySession(
+                    sessionID: event.sessionID, emitterProcess: event.emitterProcess, snapshot: snapshot
+                ) {
+                    changed = true
+                }
+                continue
+            }
             if event.kind == .codex,
                appliedEvent.resolution.column.captureCodexSession(
                    sessionID: event.sessionID,
+                   soleInputDigest: event.soleInputDigest,
                    emitterProcess: event.emitterProcess,
                    snapshot: snapshot
                ) {
@@ -458,7 +474,8 @@ extension NiruxShellView {
         if changed { saveState(snapshot: snapshot) }
         // After this drain: a turn that ended may have freed a Mission
         // agent's prompt for a message waiting to be typed.
-        if events.contains(where: { [.stop, .stopFailure].contains($0.event.name) }) {
+        // Codex's turn end too: it may prove the thread its OSC `done` came before.
+        if events.contains(where: { $0.event.kind != .agy && [.stop, .stopFailure, .turnComplete].contains($0.event.name) }) {
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
     }
@@ -539,6 +556,9 @@ extension NiruxShellView {
 
     func wireMetadataAndGitRefresh(_ workspace: WorkspaceState) {
         workspace.onMetadataChanged = { [weak self] in self?.scheduleMetadataRefresh() }
+        workspace.onProgramTurnOver = { [weak self] in
+            DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
+        }
         // The header follows its title immediately (no "· path" flicker);
         // the snapshot is only taken for shell titles such as "zsh".
         workspace.onColumnTitleChanged = { $0.updateHeaderTitle(snapshot: ProcessSnapshot()) }
@@ -546,10 +566,6 @@ extension NiruxShellView {
             guard let self, let workspace else { return }
             self.quickSwitch.focusMoved()
             self.refreshGitContextNow(for: workspace)
-        }
-        workspace.onColumnFocusRequested = { [weak self, weak workspace] index in
-            guard let self, workspace === self.activeWorkspace else { return }
-            self.focusColumnByIndex(index)
         }
         workspace.onColumnsLaidOut = { [weak self, weak workspace] in
             guard let self, let workspace, workspace === self.activeWorkspace else { return }

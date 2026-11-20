@@ -218,6 +218,7 @@ final class UIFlowHarness {
             )
         }
         shell.sideEffects.openURL = { [weak self] url in self?.openedURLs.append(url) }
+        shell.sideEffects.comeToFront = {}
         shell.sideEffects.rerunFailedJobs = { run in "Run \(run.id) of \(run.repository): refused by the flow test" }
         shell.sideEffects.checkExplain = { .unavailable("Explain doesn’t run in flow tests.") }
         shell.sideEffects.cookieBrowsers = { [weak self] in
@@ -533,6 +534,52 @@ final class UIFlowHarness {
         _ condition: () -> Bool
     ) -> Bool {
         NiruxTests.waitUntil(description(), timeout: timeout, file: file, line: line, condition)
+    }
+
+    // MARK: - Clean-up
+
+    /// A stub gh answering each branch's pull requests from
+    /// `<root>/prs/<branch, "/" as "-">.json`, and a Trash of the test's
+    /// own, returned.
+    func stubCleanupTools() throws -> String {
+        let gh = root + "/gh"
+        try """
+        #!/bin/sh
+        for arg in "$@"; do case "$arg" in --head=*) branch="${arg#--head=}";; esac; done
+        file="$(dirname "$0")/prs/$(printf '%s' "$branch" | tr '/' '-').json"
+        if [ -f "$file" ]; then cat "$file"; else echo '[]'; fi
+        """.write(toFile: gh, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gh)
+        try FileManager.default.createDirectory(atPath: root + "/prs", withIntermediateDirectories: true)
+        var tools = WorktreeCleanup.Tools(ghPath: gh, timeout: 30)
+        let trash = root + "/Trash"
+        tools.trash = { url in
+            try FileManager.default.createDirectory(atPath: trash, withIntermediateDirectories: true)
+            let target = URL(fileURLWithPath: trash).appendingPathComponent(url.lastPathComponent)
+            try FileManager.default.moveItem(at: url, to: target)
+            return target
+        }
+        let stubbed = tools
+        shell.worktreeCleanupTools = { stubbed }
+        return trash
+    }
+
+    /// Pushed to GitHub as gh sees it: a worktree of the harness's
+    /// repository on `branch` in `folder`, one commit ahead, with a merged
+    /// pull request holding its tip.
+    func mergedWorktree(_ branch: String, in folder: String, number: Int) throws {
+        try UIFlowHarness.git(["worktree", "add", "-q", "-b", branch, folder], at: repo)
+        try UIFlowHarness.git(
+            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "work"], at: folder
+        )
+        try UIFlowHarness.git(["config", "branch.\(branch).pushRemote", "acme"], at: repo)
+        let tip = try UIFlowHarness.git(["rev-parse", "HEAD"], at: folder).trimmingCharacters(in: .whitespacesAndNewlines)
+        let pullRequest: [String: Any] = [
+            "number": number, "state": "MERGED", "headRefOid": tip, "url": "https://github.com/acme/widgets/pull/\(number)",
+            "headRepositoryOwner": ["login": "acme"], "headRepository": ["name": "widgets"]
+        ]
+        try JSONSerialization.data(withJSONObject: [pullRequest])
+            .write(to: URL(fileURLWithPath: root + "/prs/" + branch.replacingOccurrences(of: "/", with: "-") + ".json"))
     }
 
     // MARK: - Repository

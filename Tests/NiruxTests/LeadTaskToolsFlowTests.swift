@@ -8,32 +8,6 @@ import XCTest
 /// checks; move_task moves one among its siblings.
 @MainActor
 final class LeadTaskToolsFlowTests: XCTestCase {
-    /// A stub gh answering each branch's pull requests from
-    /// `<root>/prs/<branch, "/" as "-">.json`, and a Trash of the test's
-    /// own, returned.
-    private func stubCleanupTools(_ harness: UIFlowHarness) throws -> String {
-        let gh = harness.root + "/gh"
-        try """
-        #!/bin/sh
-        for arg in "$@"; do case "$arg" in --head=*) branch="${arg#--head=}";; esac; done
-        file="$(dirname "$0")/prs/$(printf '%s' "$branch" | tr '/' '-').json"
-        if [ -f "$file" ]; then cat "$file"; else echo '[]'; fi
-        """.write(toFile: gh, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gh)
-        try FileManager.default.createDirectory(atPath: harness.root + "/prs", withIntermediateDirectories: true)
-        var tools = WorktreeCleanup.Tools(ghPath: gh, timeout: 30)
-        let trash = harness.root + "/Trash"
-        tools.trash = { url in
-            try FileManager.default.createDirectory(atPath: trash, withIntermediateDirectories: true)
-            let target = URL(fileURLWithPath: trash).appendingPathComponent(url.lastPathComponent)
-            try FileManager.default.moveItem(at: url, to: target)
-            return target
-        }
-        let stubbed = tools
-        harness.shell.worktreeCleanupTools = { stubbed }
-        return trash
-    }
-
     /// A `claude` stand-in that `command` starts in a new column of
     /// `workspace`, its session begun: its terminal, and its hooks.
     private func startAgent(
@@ -51,24 +25,6 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
         hook(.sessionStart)
         return (pty, hook)
-    }
-
-    /// Pushed to GitHub as gh sees it: a worktree of the harness's
-    /// repository on `branch` in `folder`, one commit ahead, with a merged
-    /// pull request holding its tip.
-    private func mergedWorktree(_ branch: String, in folder: String, number: Int, harness: UIFlowHarness) throws {
-        try UIFlowHarness.git(["worktree", "add", "-q", "-b", branch, folder], at: harness.repo)
-        try UIFlowHarness.git(
-            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "work"], at: folder
-        )
-        try UIFlowHarness.git(["config", "branch.\(branch).pushRemote", "acme"], at: harness.repo)
-        let tip = try UIFlowHarness.git(["rev-parse", "HEAD"], at: folder).trimmingCharacters(in: .whitespacesAndNewlines)
-        let pullRequest: [String: Any] = [
-            "number": number, "state": "MERGED", "headRefOid": tip, "url": "https://github.com/acme/widgets/pull/\(number)",
-            "headRepositoryOwner": ["login": "acme"], "headRepository": ["name": "widgets"]
-        ]
-        try JSONSerialization.data(withJSONObject: [pullRequest])
-            .write(to: URL(fileURLWithPath: harness.root + "/prs/" + branch.replacingOccurrences(of: "/", with: "-") + ".json"))
     }
 
     /// close_task never closes the Lead, another space's workspace, a main
@@ -173,12 +129,12 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try harness.makeLead()
-            _ = try stubCleanupTools(harness)
+            _ = try harness.stubCleanupTools()
             try UIFlowHarness.git(["remote", "add", "acme", "https://github.com/acme/widgets.git"], at: harness.repo)
             let merged = harness.root + "/repo.feat-merged"
             let base = harness.root + "/repo-base"
-            try mergedWorktree("feat/merged", in: merged, number: 7, harness: harness)
-            try mergedWorktree("feat/base", in: base, number: 8, harness: harness)
+            try harness.mergedWorktree("feat/merged", in: merged, number: 7)
+            try harness.mergedWorktree("feat/base", in: base, number: 8)
             for (title, cwd) in [("Merged work", merged), ("Base work", base), ("Flow work", harness.worktree)] {
                 shell.addWorkspace(title: title, cwd: cwd, profileID: lead.space)
             }
@@ -219,7 +175,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try harness.makeLead()
-            let trash = try stubCleanupTools(harness)
+            let trash = try harness.stubCleanupTools()
             for description in ["Compare two parsers", "Draft the notes", "Keep it busy", "Start a repo"] {
                 let started = try harness.callLeadTool(LeadTools.startTask, ["description": description, "repo": "none"], lead: lead)
                 XCTAssertFalse(started.isError, started.text)
@@ -659,9 +615,9 @@ final class LeadTaskToolsFlowTests: XCTestCase {
 
             // Its own Mission's agent, whatever runs beside it; that agent gone,
             // the Claude Code running in it now, one-way.
-            _ = try missionTask("Codex", parent: follower, kind: "codex")
-            let toCodex = try tell("Codex", review)
-            XCTAssertTrue(toCodex.isError && toCodex.text.hasSuffix("runs codex."), toCodex.text)
+            _ = try missionTask("Gemini", parent: follower, kind: "gemini")
+            let toOther = try tell("Gemini", review)
+            XCTAssertTrue(toOther.isError && toOther.text.hasSuffix("runs gemini."), toOther.text)
             let moved = try missionTask("Moved", parent: follower, agentColumn: false)
             let movedAgent = AgentStandIn()
             defer { movedAgent.remove() }
@@ -758,6 +714,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             ), isUserFocused: false)
             harness.waitUntil("the second, then Enter") { task.agent.input.components(separatedBy: "\u{1B}[201~\n").count == 3 }
 
+
             // A key of the user's while it goes in: Enter would send it too.
             task.hook(.userPromptSubmit)
             task.hook(.stop)
@@ -765,6 +722,63 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             task.column.pty?.sendRaw("z")
             harness.waitUntil("its sender told") { harness.shell.pendingLeadNotices.contains { $0.text.contains("wasn't sent") } }
             XCTAssertEqual(task.agent.input.components(separatedBy: "\u{1B}[201~\n").count, 3, "the third went in without Enter")
+        }
+    }
+
+    /// A receiver still writing the hook queue may be writing a dialog that
+    /// just opened: nothing is typed until that queue is read.
+    func testATellWaitsForTheHookQueueToBeRead() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Reader", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            let queue = AgentHookCenter.eventsURL
+            XCTAssertNil(QueueFile.append(Data(), to: queue))
+            let receiver = open(queue.path, O_RDONLY)
+            defer { close(receiver) }
+            XCTAssertEqual(flock(receiver, LOCK_EX), 0)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": "Go on."], lead: lead).isError)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            XCTAssertFalse(task.agent.input.contains("Go on."))
+            flock(receiver, LOCK_UN)
+            harness.waitUntil("typed once the queue is read") { task.agent.input.contains("Go on.") }
+        }
+    }
+
+    /// Claude Code's session record still shows a dialog when a long tell
+    /// is all in (it writes the record after the change, so it may lag the
+    /// hooks): it is read again, and Enter follows once it doesn't; a wait
+    /// that stays leaves the tell unsent.
+    func testEnterAfterALongTellWaitsOutARecordThatLags() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Reader", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            let message = (1...70).map { "Line \($0): read the file and add up the totals." }.joined(separator: "\n")
+            let url = ClaudeSessionRecord.url(pid: task.claude.pid, environment: ProcessInfo.processInfo.environment)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let changed = Date().timeIntervalSince1970 * 1000
+            @MainActor func write(_ status: String) throws {
+                try Data(#"{"status":"\#(status)","waitingFor":"permission prompt","statusUpdatedAt":\#(changed)}"#.utf8).write(to: url)
+            }
+            try write("waiting")
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            harness.waitUntil("all of it") { task.agent.input.contains("\u{1B}[201~") }
+            // Past Enter's first look, within its rereads.
+            RunLoop.main.run(until: Date().addingTimeInterval(NiruxShellView.recordRereadDelay + 0.1))
+            try Data(#"{"status":"idle","statusUpdatedAt":\#(changed)}"#.utf8).write(to: url)
+            harness.waitUntil("then its Enter") { task.agent.input.hasSuffix("\u{1B}[201~\n") }
+
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            try write("waiting")
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            harness.waitUntil("its sender told") { harness.shell.pendingLeadNotices.contains { $0.text.contains("wasn't sent") } }
+            XCTAssertEqual(task.agent.input.components(separatedBy: "\u{1B}[201~\n").count, 2, "the second went in without Enter")
         }
     }
 
@@ -890,11 +904,79 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             task.hook(.preToolUse)
             task.column.pty?.sendRaw("y")
             XCTAssertTrue(try interrupt().text.contains("Keys reached"))
-            // An Esc Claude doesn't confirm: said so, the turn still runs.
+            task.hook(.stop)
+            // An Esc Claude doesn't confirm, past a tool's result: said so,
+            // the turn still runs. Past its reads, the turn waits on the model
+            // again: its silence can show.
+            harness.shell.interruptReads = NiruxShellView.interruptReadsBeforeAnswer + 1
+            task.column.pty?.sendRaw("\r")
             task.hook(.userPromptSubmit)
             task.hook(.preToolUse)
+            task.hook(.postToolUse)
             XCTAssertTrue(try interrupt().text.contains("shows no interrupt"))
             XCTAssertTrue(try interrupt().text.contains("Esc already went into this turn"), "a second Esc would open the rewind")
+            harness.waitUntil("the Esc read as ignored") { pty.agentAwaitsModel(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot())) }
+            // Its transcript ends on the tool's result: past the threshold,
+            // list_tasks says the turn went silent, without the row's advice
+            // to press Esc, which is the user's.
+            let handle = try XCTUnwrap(FileHandle(forWritingAtPath: transcript))
+            handle.seekToEndOfFile()
+            handle.write(Data((#"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"ok"}]}}"# + "\n").utf8))
+            try handle.close()
+            // The system notification needs an app bundle, which xctest isn't.
+            task.column.onAgentAttention = { _ in }
+            task.column.noteTranscriptGrowth(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot()), now: Date().timeIntervalSince1970)
+            let later = pty.awakeClock() + AgentSilence.threshold(waitThreshold: harness.shell.stuckAgentWaitThreshold) + 60
+            pty.awakeClock = { later }
+            let list = try harness.callLeadTool(LeadTools.listTasks, lead: lead).text
+            let line = list.split(separator: "\n").first { $0.hasPrefix("- “Builder”") }.map(String.init) ?? ""
+            XCTAssertTrue(line.contains(" · claude silent for ") && !line.contains(" — "), list)
+        }
+    }
+
+    /// A turn stopped on an API error, or whose agent exited, reads so in
+    /// list_tasks, as on its row: neither idle, as once the user saw it, nor
+    /// needing the user for nothing said, nor no agent running.
+    func testListTasksSaysWhatStoppedATurn() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Builder", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            let pty = try XCTUnwrap(task.column.pty)
+            let line = {
+                try harness.callLeadTool(LeadTools.listTasks, lead: lead).text.split(separator: "\n")
+                    .first { $0.hasPrefix("- “Builder”") }.map(String.init) ?? ""
+            }
+            for isUserFocused in [true, false] {
+                task.hook(.userPromptSubmit)
+                _ = pty.applyAgentHook(AgentHookEvent(
+                    kind: .claude, name: .stopFailure, agentUUID: task.column.agentUUID, sessionID: "task", emitterProcess: task.claude,
+                    errorKind: "overloaded", timestamp: Date().timeIntervalSince1970
+                ), isUserFocused: isUserFocused)
+                let failed = try line()
+                XCTAssertTrue(failed.hasSuffix(" · claude stopped on an API error — overloaded"), "focused: \(isUserFocused), \(failed)")
+            }
+
+            // Mid-turn, its claude leaves the process table and the shell
+            // comes back in front, as the process table would show it.
+            task.hook(.userPromptSubmit)
+            let shellPID = try XCTUnwrap(pty.shellPID)
+            let now = Date().timeIntervalSince1970
+            let claude = ForegroundProcess(instance: ProcessInstance(pid: 99_997, startedAt: now - 60), name: "claude", arguments: ["claude"])
+            let shellEntry = ProcessSnapshot.Entry(
+                pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: shellPID,
+                name: "zsh", startedAt: now - 600, arguments: ["zsh"]
+            )
+            let claudeEntry = ProcessSnapshot.Entry(
+                pid: 99_997, parentPID: shellPID, processGroupID: 99_997, terminalForegroundProcessGroupID: shellPID,
+                name: "claude", startedAt: now - 60, arguments: ["claude"]
+            )
+            let gone = ProcessSnapshot(entries: [shellEntry])
+            task.column.trackForegroundAgent(claude, snapshot: ProcessSnapshot(entries: [shellEntry, claudeEntry]), now: now)
+            task.column.trackForegroundAgent(pty.foregroundProcess(snapshot: gone), snapshot: gone, now: now)
+            let readings = harness.shell.agentReadings(of: task.workspace, snapshot: gone, now: now + AgentStatusMachine.exitConfirmationDelay)
+            XCTAssertEqual(readings.map(\.name), ["claude"])
+            XCTAssertEqual(readings.first?.failure, "exited mid-turn")
         }
     }
 
@@ -933,6 +1015,285 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             sweep(60)
             XCTAssertEqual(notices().count, 3)
             XCTAssertTrue(notices().last?.contains("was never typed: its task closed first.") == true, notices().last ?? "")
+        }
+    }
+
+    /// A tell to a Codex task goes into Codex's own queue, nothing typed:
+    /// for the thread its `codex` started with its launch prompt (never one
+    /// it runs out of sight), once it says its turn is over. A refusal leaves
+    /// it waiting, its row and the Lead told why; Codex taking it counts as
+    /// typed, and a Codex that then says nothing has its sender told. A
+    /// Codex task the user started gets the Lead's one-way Mission.
+    func testATellReachesACodexTaskThroughItsQueue() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            final class Queue {
+                var requests: [CodexQueue.Request] = []
+                var outcome = CodexQueue.Outcome.refused("thread not found")
+                /// Holds the answers, as Codex takes seconds, when set.
+                var held: [@MainActor @Sendable (CodexQueue.Outcome) -> Void]?
+            }
+            let queue = Queue()
+            harness.shell.sideEffects.queueCodexMessage = { request, done in
+                queue.requests.append(request)
+                if queue.held != nil { queue.held?.append(done) } else { done(queue.outcome) }
+            }
+            let prompt = "Read .codex-handover.md for full context."
+            @MainActor func codexTask(_ title: String, reports: Bool) throws -> (column: ColumnState, codex: ForegroundProcess, agent: AgentStandIn) {
+                let workspaceID = UUID().uuidString, agentUUID = UUID().uuidString
+                let mission = try reports ? XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                    id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                    childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "codex",
+                    branch: "feat/\(workspaceID.prefix(8))", reportsToLead: true
+                ), enabled: true)) : nil
+                harness.shell.addWorkspace(
+                    title: title, cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID, missionID: mission?.id,
+                    reportsToLead: reports
+                )
+                let task = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+                let agent = AgentStandIn()
+                task.addColumn(command: agent.command(named: "codex", launchPrompt: prompt), agentUUID: agentUUID, cwd: harness.worktree)
+                let column = try XCTUnwrap(task.columns.first { $0.agentUUID == agentUUID })
+                let pty = try XCTUnwrap(column.pty)
+                harness.waitUntil("its codex") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "codex" }
+                return (column, try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())), agent)
+            }
+            @MainActor func report(_ state: AgentProgramStatus.State, in column: ColumnState) {
+                column.pty?.onProgramStatus?(AgentProgramStatus(state: state, kind: nil, message: nil, process: "codex"))
+            }
+            @MainActor func thread(_ id: String, first: String, of task: (column: ColumnState, codex: ForegroundProcess, agent: AgentStandIn)) {
+                _ = task.column.captureCodexSession(
+                    sessionID: id, soleInputDigest: CodexLaunch.promptDigest(first), emitterProcess: task.codex.instance,
+                    snapshot: ProcessSnapshot()
+                )
+            }
+
+            let task = try codexTask("Codex task", reports: true)
+            let bare = AgentStandIn()
+            defer { bare.remove() }
+            defer { task.agent.remove() }
+            let told = try harness.callLeadTool(LeadTools.tell, ["task": "Codex task", "message": "Review this.\u{1B}[31m"], lead: lead)
+            XCTAssertFalse(told.isError, told.text)
+            XCTAssertTrue(told.text.contains("once its turn is over") && told.text.contains("a slash command doesn't run there"), told.text)
+            let instruction = { MissionStore.shared.missions.flatMap(\.events).first { $0.kind == .instruction && $0.childAgentUUID == task.column.agentUUID } }
+            report(.done, in: task.column)
+            thread("title", first: "Generate a concise title.\n\nUser prompt:\n" + prompt, of: task)
+            harness.shell.typeMissionMessages()
+            XCTAssertTrue(queue.requests.isEmpty, "no thread proven yet")
+            let shell = harness.shell
+            shell.missionWaits.checkedAt = nil
+            shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + NiruxShellView.missionMessageStallAge + 1)
+            let row = try XCTUnwrap(shell.missionWaits.shown[task.column.id])
+            XCTAssertEqual(row.refusal, .noConversation)
+            XCTAssertTrue(row.line.hasSuffix("· its conversation isn't known yet"), row.line)
+            shell.sweepWaitingInstructions(now: Date().timeIntervalSince1970 + MissionEventCLI.instructionHeldNotice + 1, snapshot: ProcessSnapshot())
+            XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("isn't typed yet: its conversation isn't known yet") },
+                          "\(shell.pendingLeadNotices.map(\.text))")
+            shell.missionWaits.startWait = 0.2
+
+            thread("main", first: prompt, of: task)
+            thread("title-2", first: "Generate a concise title.", of: task)
+            report(.working, in: task.column)
+            report(.done, in: task.column)
+            harness.waitUntil("handed to Codex") { !queue.requests.isEmpty }
+            XCTAssertNil(try XCTUnwrap(instruction()).childConsumedAt, "refused: it waits")
+            let refusals = try shell.missionWaits.tries[XCTUnwrap(instruction()).id]
+            shell.missionWaits.checkedAt = nil
+            shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + NiruxShellView.missionMessageStallAge + 1)
+            XCTAssertEqual(try shell.missionWaits.tries[XCTUnwrap(instruction()).id], refusals, "only Codex's refusals count")
+            queue.outcome = .queued
+            report(.idle, in: task.column)
+            harness.waitUntil("Codex took it") { instruction()?.childConsumedAt != nil }
+            let request = try XCTUnwrap(queue.requests.last)
+            XCTAssertEqual(request.thread, "main")
+            XCTAssertEqual(request.command, CodexQueue.command(of: task.codex))
+            XCTAssertTrue(request.message.contains("Review this.") && !request.message.contains("\u{1B}"), request.message)
+            report(.done, in: task.column)
+            harness.waitUntil("its sender told Codex hasn't started it, a state that isn't work notwithstanding") {
+                shell.pendingLeadNotices.contains { $0.text.contains("Codex hasn't started it") }
+            }
+            XCTAssertEqual(task.agent.input, "", "nothing typed")
+
+            // Two at once go one after the other, in their order.
+            report(.working, in: task.column)
+            for message in ["First.", "Second."] {
+                XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Codex task", "message": message], lead: lead).isError)
+            }
+            queue.held = []
+            let handed = queue.requests.count
+            report(.done, in: task.column)
+            harness.waitUntil("one handed") { queue.requests.count == handed + 1 }
+            harness.shell.typeMissionMessages()
+            XCTAssertEqual(queue.requests.count, handed + 1, "the next waits for the first's answer")
+            queue.held?.removeFirst()(.queued)
+            report(.idle, in: task.column)
+            harness.waitUntil("the next handed") { queue.requests.count == handed + 2 }
+            XCTAssertEqual(queue.requests.suffix(2).map(\.message), ["First.", "Second."])
+            queue.held?.removeFirst()(.queued)
+            queue.held = nil
+
+            // No answer in time: Codex may hold it, so it is never handed again.
+            queue.outcome = .unconfirmed
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Codex task", "message": "Third."], lead: lead).isError)
+            report(.done, in: task.column)
+            harness.waitUntil("given up") {
+                MissionStore.shared.missions.flatMap(\.events).contains { $0.message == "Third." && $0.expiredAt != nil }
+            }
+            XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("“Codex task” may be in its Codex's queue") },
+                          "\(shell.pendingLeadNotices.map(\.text))")
+
+            let byHand = try codexTask("Codex by hand", reports: false)
+            defer { byHand.agent.remove() }
+            let oneWay = try harness.callLeadTool(LeadTools.tell, ["task": "Codex by hand", "message": "Rebase."], lead: lead)
+            XCTAssertFalse(oneWay.isError, oneWay.text)
+            XCTAssertTrue(MissionStore.shared.missions.contains {
+                $0.oneWay == true && $0.childAgentUUID == byHand.column.agentUUID && $0.childAgentKind == "codex"
+            })
+
+            // A Codex started without a prompt never proves its conversation.
+            let workspaceID = UUID().uuidString, bareUUID = UUID().uuidString
+            harness.shell.addWorkspace(title: "Bare Codex", cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID)
+            let bareTask = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+            bareTask.addColumn(command: bare.command(named: "codex"), agentUUID: bareUUID, cwd: harness.worktree)
+            let barePty = try XCTUnwrap(bareTask.columns.first { $0.agentUUID == bareUUID }?.pty)
+            harness.waitUntil("its codex") { barePty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "codex" }
+            let refused = try harness.callLeadTool(LeadTools.tell, ["task": "Bare Codex", "message": "Rebase."], lead: lead)
+            XCTAssertTrue(refused.isError && refused.text.contains("started without a prompt"), refused.text)
+            // One from the CLI is given up as Nirux takes it, its sender told.
+            let bareMission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: workspaceID, childAgentUUID: bareUUID, childAgentKind: "codex", branch: "feat/bare", reportsToLead: true
+            ), enabled: true))
+            guard case .accepted(let fromCLI?) = MissionStore.shared.process(MissionEvent(
+                id: UUID().uuidString, missionID: bareMission.id, childWorkspaceID: workspaceID, childAgentUUID: bareUUID,
+                parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID, kind: .instruction, message: "Rebase now.",
+                timestamp: Date().timeIntervalSince1970
+            ), enabled: true) else { return XCTFail("the CLI's tell is recorded") }
+            shell.sweepWaitingInstructions(now: Date().timeIntervalSince1970, snapshot: ProcessSnapshot())
+            XCTAssertNotNil(MissionStore.shared.missions.flatMap(\.events).first { $0.id == fromCLI.event.id }?.expiredAt)
+            XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("won't be handed over: its Codex was started without a prompt") },
+                          "\(shell.pendingLeadNotices.map(\.text))")
+        }
+    }
+
+    /// A tell to an Antigravity task is typed into its prompt once its `agy`
+    /// says its turn is done, not while it works; one for a Claude Code task
+    /// is never typed into an `agy` that took its terminal.
+    func testATellIsTypedIntoAnAntigravityTaskOnceItsTurnIsDone() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            /// `kind` nil: a task the user started.
+            @MainActor func task(_ title: String, kind: String?) throws -> (column: ColumnState, agent: AgentStandIn) {
+                let workspaceID = UUID().uuidString, agentUUID = UUID().uuidString
+                let mission = try kind.map { kind in try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                    id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                    childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: kind,
+                    branch: "feat/\(workspaceID.prefix(8))", reportsToLead: true
+                ), enabled: true)) }
+                harness.shell.addWorkspace(
+                    title: title, cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID, missionID: mission?.id,
+                    reportsToLead: kind != nil
+                )
+                let workspace = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+                let agent = AgentStandIn()
+                workspace.addColumn(command: agent.command(named: "agy", launchPrompt: "Read .agy-handover.md"), agentUUID: agentUUID, cwd: harness.worktree)
+                let column = try XCTUnwrap(workspace.columns.first { $0.agentUUID == agentUUID })
+                let pty = try XCTUnwrap(column.pty)
+                harness.waitUntil("its agy") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
+                // Its alerts aren't what this tests, and reach no notification center.
+                column.onAgentAttention = { _ in }
+                return (column, agent)
+            }
+            @MainActor func report(_ state: AgentProgramStatus.State, in column: ColumnState) {
+                column.pty?.onProgramStatus?(AgentProgramStatus(state: state, kind: nil, message: nil, process: "agy"))
+            }
+            @MainActor func instruction(of column: ColumnState) -> MissionEvent? {
+                MissionStore.shared.missions.flatMap(\.events).first { $0.kind == .instruction && $0.childAgentUUID == column.agentUUID }
+            }
+
+            let agy = try task("Antigravity task", kind: "agy")
+            defer { agy.agent.remove() }
+            harness.shell.missionWaits.startWait = 0.2
+            report(.working, in: agy.column)
+            let slash = try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity task", "message": "/clear"], lead: lead)
+            XCTAssertTrue(slash.isError && slash.text.contains("slash command"), slash.text)
+            let told = try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity task", "message": "Review this."], lead: lead)
+            XCTAssertFalse(told.isError, told.text)
+            harness.shell.sweepWaitingInstructions(
+                now: Date().timeIntervalSince1970 + MissionEventCLI.instructionHeldNotice + 1, snapshot: ProcessSnapshot()
+            )
+            XCTAssertTrue(harness.shell.pendingLeadNotices.contains { $0.text.contains("isn't typed yet: its turn isn't over") },
+                          "\(harness.shell.pendingLeadNotices.map(\.text))")
+            harness.shell.typeMissionMessages()
+            XCTAssertEqual(agy.agent.input, "", "not while it works")
+            XCTAssertNil(instruction(of: agy.column)?.childConsumedAt)
+            report(.done, in: agy.column)
+            harness.waitUntil("typed, then Enter") { agy.agent.input.hasSuffix("\u{1B}[201~\n") }
+            XCTAssertTrue(agy.agent.input.contains("Review this."), agy.agent.input)
+            XCTAssertNotNil(instruction(of: agy.column)?.childConsumedAt)
+            harness.waitUntil("its sender told agy didn't start it") {
+                harness.shell.pendingLeadNotices.contains { $0.text.contains("but Antigravity hasn't started it") }
+            }
+
+            // A turn end read on an empty process table (an ENOMEM read) goes to the agy last seen in front.
+            let pty = try XCTUnwrap(agy.column.pty)
+            let live = ProcessSnapshot()
+            agy.column.trackForegroundAgent(pty.foregroundProcess(snapshot: live), snapshot: live, now: Date().timeIntervalSince1970)
+            report(.working, in: agy.column)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity task", "message": "Then this."], lead: lead).isError)
+            agy.column.readsProcesses = { ProcessSnapshot(entries: []) }
+            report(.done, in: agy.column)
+            agy.column.readsProcesses = { ProcessSnapshot() }
+            harness.waitUntil("typed after a turn end read on an empty table") { agy.agent.input.contains("Then this.") }
+
+            let claude = try task("Claude task", kind: "claude")
+            defer { claude.agent.remove() }
+            report(.working, in: claude.column)
+            report(.done, in: claude.column)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Claude task", "message": "Rebase."], lead: lead).isError)
+            harness.shell.typeMissionMessages()
+            XCTAssertEqual(claude.agent.input, "", "only into the agent its Mission names")
+            XCTAssertNil(instruction(of: claude.column)?.childConsumedAt)
+
+            let byHand = try task("Antigravity by hand", kind: nil)
+            defer { byHand.agent.remove() }
+            let headed = try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity by hand", "message": "/rebase on main"], lead: lead)
+            XCTAssertFalse(headed.isError, "a Lead's line heads it: typed as text \(headed.text)")
+            XCTAssertTrue(MissionStore.shared.missions.contains {
+                $0.oneWay == true && $0.childAgentUUID == byHand.column.agentUUID && $0.childAgentKind == "agy"
+            }, "the Lead's one-way Mission")
+            harness.shell.missionWaits.checkedAt = nil
+            harness.shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + NiruxShellView.missionMessageStallAge + 1)
+            let row = try XCTUnwrap(harness.shell.missionWaits.shown[byHand.column.id])
+            XCTAssertTrue(row.line.hasSuffix("· no turn ended since it started"), row.line)
+
+            // An agy resumed on the conversation a tell was for, after it: that tell is its.
+            let resumedID = UUID().uuidString, resumedUUID = UUID().uuidString
+            let resumedMission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: resumedID, childAgentUUID: resumedUUID, childAgentKind: "agy", branch: "feat/resumed", reportsToLead: true
+            ), enabled: true))
+            harness.shell.addWorkspace(
+                title: "Resumed agy", cwd: harness.worktree, profileID: lead.space, workspaceID: resumedID, missionID: resumedMission.id,
+                reportsToLead: true
+            )
+            let resumedWorkspace = try XCTUnwrap(harness.shell.workspaces.first { $0.id == resumedID })
+            let resumedAgent = AgentStandIn()
+            defer { resumedAgent.remove() }
+            resumedWorkspace.addColumn(
+                command: "sleep 2; " + resumedAgent.command(named: "agy", arguments: ["--conversation", "conv-1"]), agentUUID: resumedUUID,
+                cwd: harness.worktree
+            )
+            let resumedColumn = try XCTUnwrap(resumedWorkspace.columns.first { $0.agentUUID == resumedUUID })
+            resumedColumn.onAgentAttention = { _ in }
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Resumed agy", "message": "Resume."], lead: lead).isError)
+            let resumedTell = try XCTUnwrap(instruction(of: resumedColumn))
+            XCTAssertTrue(MissionStore.shared.noteConversation("conv-1", ofInstruction: resumedTell.id))
+            let resumedPty = try XCTUnwrap(resumedColumn.pty)
+            harness.waitUntil("its agy, resumed") { resumedPty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
+            report(.working, in: resumedColumn)
+            report(.done, in: resumedColumn)
+            harness.waitUntil("typed into the agy that resumed its conversation") { resumedAgent.input.hasSuffix("\u{1B}[201~\n") }
         }
     }
 

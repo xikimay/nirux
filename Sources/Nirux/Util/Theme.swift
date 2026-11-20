@@ -234,6 +234,8 @@ enum Theme {
         static let agentError = "exclamationmark.triangle.fill"
         static let resume = "play.fill"
         static let interrupt = "stop.fill"
+        /// Types waiting Mission messages on the user's word.
+        static let typeNow = "keyboard"
         static let sessionHistory = "clock.arrow.circlepath"
         static let projectMemory = "brain"
         static let notice = "info.circle"

@@ -1,6 +1,6 @@
 # Nirux
 
-Nirux is a macOS app for running coding agents, Claude Code and Codex, on several tasks at once.
+Nirux is a macOS app for running coding agents such as Claude Code, Codex and Antigravity on several tasks at once.
 
 ![Nirux with demo data at the Glass level: the command bar at the top, the sidebar on glass with each task's state icon, an agent's terminal, and the diff of the file it changed](docs/images/nirux.png)
 
@@ -26,7 +26,7 @@ Nirux needs macOS 14 or later.
 
 Builds are signed and notarized, and they update themselves (**Nirux › Install Updates Automatically** turns that off). Nirux opens your workspaces only from `/Applications`, or from `~/Applications` when `/Applications` holds no copy. A copy started from anywhere else says why and quits.
 
-To start agents, Nirux needs `claude` or `codex` installed. Pull request and CI status need the GitHub CLI, `gh`, installed with Homebrew and signed in.
+To start agents, Nirux needs `claude`, `codex` or `agy` installed. Pull request and CI status need the GitHub CLI, `gh`, installed with Homebrew and signed in.
 
 ## Quick start
 
@@ -38,7 +38,7 @@ A task's row turns amber when its agent needs you, and the command bar at the to
 
 ## Agent status hooks
 
-To know when an agent starts working, waits for you or stops, Nirux adds entries to two global files at every launch: hooks in `~/.claude/settings.json` and a `notify` command in `~/.codex/config.toml`. The entries do nothing outside a Nirux terminal. Your own hooks are kept, and a `notify` you already set is left alone.
+To know when an agent starts working, waits for you or stops, Nirux adds entries to global files at every launch: hooks in `~/.claude/settings.json`, a `notify` command in `~/.codex/config.toml`, and, for Antigravity's resume, a `nirux` hook in `~/.gemini/config/hooks.json`. The entries do nothing outside a Nirux terminal. Your own hooks are kept, and a `notify` you already set is left alone.
 
 [Agent status](docs/agent-status.md#status-hooks) lists what is written and how to remove it. An optional usage indicator, off by default, adds one more entry there.
 

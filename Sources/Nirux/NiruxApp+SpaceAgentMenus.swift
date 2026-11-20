@@ -82,6 +82,10 @@ extension NiruxApp {
         shell?.openCodex()
     }
 
+    @objc func newAgy(_ sender: Any?) {
+        shell?.openAgy()
+    }
+
     @objc func reviewBranch(_ sender: Any?) {
         shell?.openBranchReview(in: shell?.activeWorkspace)
     }
@@ -124,6 +128,8 @@ extension NiruxApp {
         previousSpaceItem.keyEquivalentModifierMask = [.command, .option]
         let nextSpaceItem = menu.addItem(withTitle: "Next Space", action: #selector(nextSpace(_:)), keyEquivalent: "\u{F703}")
         nextSpaceItem.keyEquivalentModifierMask = [.command, .option]
+        let overviewItem = menu.addItem(withTitle: "Space Overview", action: #selector(showSpaceOverview(_:)), keyEquivalent: "\u{F700}")
+        overviewItem.keyEquivalentModifierMask = [.command, .option]
         menu.addItem(.separator())
         menu.addSpaceItems()
         menu.addItem(.separator())
@@ -160,6 +166,7 @@ extension NiruxApp {
         let menu = NSMenu(title: "Agent")
         menu.addItem(withTitle: "New Claude Code", action: #selector(newClaudeCode(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "New Codex", action: #selector(newCodex(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "New Antigravity", action: #selector(newAgy(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Next Waiting Agent", action: #selector(jumpToNextWaitingAgent(_:)), shortcut: .nextWaitingAgent)
         menu.addItem(withTitle: "Resume All Agents", action: #selector(resumeAllAgents(_:)), keyEquivalent: "")

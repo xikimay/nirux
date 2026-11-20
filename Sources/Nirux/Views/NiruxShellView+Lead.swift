@@ -97,7 +97,10 @@ extension NiruxShellView {
             hasLead: lead != nil,
             place: leadPlace(in: space, leadFolder: lead?.cwd),
             startsTasks: leadStartsTasksWithoutAsking(spaceID: space.id),
-            canChangeStartsTasks: defaults?.isWritable ?? false
+            dailyPass: defaults?.defaults.dailyPassIsOn ?? false,
+            dailyPassHour: defaults?.defaults.dailyPassHour ?? DailyPass.defaultHour,
+            lastPass: lastDailyPassText(inSpace: space.id),
+            canChangeDefaults: defaults?.isWritable ?? false
         )
     }
 

@@ -227,7 +227,7 @@ final class TaskBirthTests: UIFlowTestCase {
         shell.applyAgentLights()
         // Whatever earlier workspaces left over the viewport: a fade never
         // ends in a window that isn't on screen.
-        shell.viewport.subviews.filter { $0 is NSImageView }.forEach { $0.removeFromSuperview() }
+        shell.viewport.subviews.filter { $0 is FrozenView }.forEach { $0.removeFromSuperview() }
     }
 
     private func picture(at frame: NSRect) throws -> TaskSheetPicture {
@@ -251,7 +251,7 @@ final class TaskBirthTests: UIFlowTestCase {
     }
 
     private func pictures(in shell: NiruxShellView) -> [NSView] {
-        shell.viewport.subviews.filter { $0 is NSImageView }
+        shell.viewport.subviews.filter { $0 is FrozenView }
     }
 
     /// The sheet's picture folds from where the sheet was toward the
@@ -394,12 +394,7 @@ final class TaskBirthTests: UIFlowTestCase {
             let added = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(added.title, "as before")
             XCTAssertEqual(added.columns.first?.isArriving, false, "no column coming in")
-            let strip = try XCTUnwrap(shell.viewport.subviews.firstIndex(of: shell.verticalStrip))
-            XCTAssertEqual(self.pictures(in: shell).count, 1, "the old fade")
-            XCTAssertTrue(
-                self.pictures(in: shell).allSatisfy { (shell.viewport.subviews.firstIndex(of: $0) ?? 0) > strip },
-                "over the workspace"
-            )
+            XCTAssertTrue(self.pictures(in: shell).isEmpty, "nor a picture sliding away")
         }
     }
 }

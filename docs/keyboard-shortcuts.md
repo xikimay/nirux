@@ -83,7 +83,7 @@ A full-screen program (vim, less) keeps no scrollback, so Search Everywhere sear
 
 Open the palette with `Cmd+P` and type a few letters of an action:
 
-- **Agents:** Open Claude Code, Open Codex, Next Waiting Agent, Resume All Agents, Install Agent Skills
+- **Agents:** Open Claude Code, Open Codex, Open Antigravity, Next Waiting Agent, Resume All Agents, Install Agent Skills
 - **Tasks and workspaces:** New…, Open Worktree, Clean Up Merged Worktrees…, Rename Workspace, Session History…, Space Memory…
 - **Columns:** New Terminal, Open Editor, Open Browser, Open Board, Review Branch, Resize Column (Cycle Width)
 - **Search:** Search Workspace, Search Everywhere

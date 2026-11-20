@@ -135,10 +135,36 @@ struct AgentStatusMachine {
     /// The main thread's last prompt or tool event in the turn in flight;
     /// nil between turns.
     private var mainTurnMovedAt: TimeInterval?
-    /// The last prompt typed at the box, not polled in (a peer's message,
-    /// which Claude submits as a prompt mid-turn): what keys typed since
-    /// would sit after.
+    /// When the prompt box last emptied: at the Enter that sent the last
+    /// prompt typed there, a `/clear`, or the start of a process that took
+    /// no key since. A message Claude takes in by itself (a peer's, a task
+    /// notification, a wakeup) leaves it as it was: keys typed since are a
+    /// draft.
+    private(set) var boxEmptiedAt: TimeInterval?
+    /// When the last prompt typed at the box went in (its UserPromptSubmit).
     private(set) var lastUserPromptAt: TimeInterval?
+    /// Enters that reached the prompt box, no dialog waiting for keys in
+    /// front, newest last (a few): one of them sent each prompt typed there.
+    private var submitKeys: [TimeInterval] = []
+    /// The column reads the transcript of the `claude` in front
+    /// (`PtySession`): the line of each prompt says who sent it
+    /// (`noteTranscriptPrompt`). Without one, an Enter shortly before a
+    /// prompt's hook stands for it, a line added after a backslash too.
+    var readsTranscript = false
+    /// The main thread's prompts whose transcript line hasn't said yet who
+    /// sent them, oldest first (a few).
+    private var unreadPrompts: [PromptHook] = []
+    /// Who sent the prompts whose line came before their hook was applied,
+    /// by `prompt_id` (a few).
+    private var readPrompts: [(id: String, typed: Bool)] = []
+
+    private struct PromptHook {
+        let at: TimeInterval
+        let promptID: String?
+        let sessionID: String?
+    }
+
+    private static let promptMemory = 8
     /// The last interrupt of a turn: an Esc or Ctrl-C (Claude fires no hook
     /// for it, and its idle reminder may never come), or a main-thread call
     /// that ended interrupted (a stop Nirux didn't type). Unlike
@@ -176,6 +202,10 @@ struct AgentStatusMachine {
     /// The same, typed while no dialog was believed open: text that may sit
     /// in the agent's prompt as a draft.
     private(set) var lastDraftInputAt: TimeInterval = 0
+    /// The last of those that may have left text (`mayLeaveText`): an Enter
+    /// or a move after it takes nothing away (one may accept an `@file`
+    /// completion and send nothing).
+    private(set) var lastTextInputAt: TimeInterval = 0
     /// What the last draft was, for the log (`keyKind`), and the last hook
     /// event's name.
     private(set) var lastDraftKind: String?
@@ -207,6 +237,50 @@ struct AgentStatusMachine {
     /// attention it raised, it lasts until the agent moves again: a new
     /// prompt or tool call, another turn's end, the session's end.
     private(set) var turnFailure: AgentTurnFailure?
+    /// Antigravity's last word on its state (OSC 7501) and when it came,
+    /// until another process comes to the front.
+    private(set) var programStatus: ReportedStatus?
+    /// Codex's, while the shell runs (`keepProgramStatus`). Its hooks drive
+    /// its status: this one only says when a Mission message may go into its
+    /// queue (`codexQueueRefusal`).
+    private(set) var codexStatus: ReportedStatus?
+    /// When Codex last said it works, and which `codex`: a turn started.
+    private(set) var codexWorked: (at: TimeInterval, process: ProcessInstance?)?
+    /// Antigravity's current or last turn (`promptRefusal`).
+    private(set) var agyTurn: AgyTurn?
+
+    /// A turn of the `agy` `process`, from its first `working` (another
+    /// after a dialog, or redrawn, is the same turn's) to `done`, `idle` or
+    /// `error`.
+    struct AgyTurn: Equatable {
+        /// The Enter that sent its prompt, else its first `working`.
+        let startedAt: TimeInterval
+        let process: ProcessInstance?
+        /// When it last said its state.
+        var saidAt: TimeInterval
+        /// How it ended, nil while it runs: `done`, or `idle` when stopped
+        /// with Esc, or `error`. A later state (`idle` at a key) keeps it.
+        var ended: AgentProgramStatus.State?
+        /// A dialog of it waits: keys answer it until one that answers
+        /// (Enter, a number, Esc, Ctrl-C), the heartbeat dropping a
+        /// `blocked` status at the first.
+        var answering = false
+    }
+
+    /// What Antigravity reported, when, from which process, and whether its
+    /// wait alerted.
+    struct ReportedStatus: Equatable {
+        let status: AgentProgramStatus
+        let at: TimeInterval
+        let process: ProcessInstance?
+        var alerted = false
+
+        /// Whether `process` sent it. One read on an empty process table
+        /// came from the agent in front then: one already running.
+        func isFrom(_ process: ProcessInstance) -> Bool {
+            self.process.map { $0 == process } ?? (process.startedAt <= at)
+        }
+    }
     /// The agent process died mid-turn (see `noteAgentExited`). Cleared by
     /// a new session, an agent back in the foreground, or the user.
     private(set) var midTurnExit: AgentMidTurnExit?
@@ -251,11 +325,12 @@ struct AgentStatusMachine {
     static let integratedAgentProcesses: Set<String> = ["claude", "codex"]
 
     /// Agents recognized by foreground process name alone — no hooks, no
-    /// launcher, no restore. Their status comes from the output-activity
-    /// fallback in `tick`; closing their column asks first like any agent's.
-    /// Names are `ProcessSnapshot.execName` results: Gemini CLI runs as
-    /// `node [flags] …/gemini`, opencode as a native `opencode` binary.
-    static let activityOnlyAgentProcesses: Set<String> = ["gemini", "opencode"]
+    /// restore, a launcher for `agy` only. Their status comes from the
+    /// output-activity fallback in `tick`; closing their column asks first
+    /// like any agent's. Names are `ProcessSnapshot.execName` results:
+    /// Gemini CLI runs as `node [flags] …/gemini`, opencode and Antigravity
+    /// CLI as native `opencode` and `agy` binaries.
+    static let activityOnlyAgentProcesses: Set<String> = ["gemini", "opencode", "agy"]
 
     /// Central gate for local agent status, nested-hook attribution and
     /// close confirmation.
@@ -332,7 +407,7 @@ struct AgentStatusMachine {
         let now = event.timestamp
         lastEventAt = now
         lastEventName = event.name.rawValue + (event.agentID == nil ? "" : "(sub)")
-        let waitingBefore = pendingDialogs.filter { $0.approval.map { $0.sent == nil } ?? false }
+        let waitingBefore = heldApprovals
         var outcome = AgentHookOutcome()
         applyEvent(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         // A receiver still waiting on a dialog that just closed otherwise
@@ -406,6 +481,9 @@ struct AgentStatusMachine {
                 requestedAt: now
             )
             request.dialog = event.dialog
+            // An Enter since it opened went to it, not to the box: its hook
+            // reached Nirux after the key.
+            submitKeys.removeAll { $0 >= now }
             if let requestID = event.approvalRequestID, let deadline = event.approvalDeadline,
                let text = event.approvalText {
                 request.approval = PermissionApprovalTicket(
@@ -458,12 +536,6 @@ struct AgentStatusMachine {
         outcome: inout AgentHookOutcome
     ) {
         hookKind = event.kind.rawValue
-        // A prompt was typed at the session's input, which no dialog of
-        // it covered: they are all closed. This also frees the subagent
-        // dialogs an interrupt (Esc) left behind with no hook. (Missed
-        // race: a message queued earlier and sent while a background
-        // subagent's dialog is up.)
-        closeDialogs { $0.sessionID == event.sessionID }
         turnStartedAt = now
         hookTurnInFlight = true
         turnFailure = nil
@@ -472,7 +544,7 @@ struct AgentStatusMachine {
             askedQuestion = nil
             circling.reset()
             lastPromptAt = now
-            if event.source != "poll_event" { lastUserPromptAt = now }
+            notePromptHook(PromptHook(at: now, promptID: event.promptID, sessionID: event.sessionID), source: event.source)
             // An Esc at a dialog since the main thread last moved ended its
             // call with no hook. (A prompt alone doesn't: Claude submits peer
             // messages and poll results as prompts while a call runs.)
@@ -482,6 +554,73 @@ struct AgentStatusMachine {
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
         }
         resumeUnlessBlocked()
+    }
+
+    /// A main-thread prompt went in, typed at the box or taken in by Claude
+    /// by itself (a peer's message, a task notification, a wakeup), which
+    /// follows no key: its transcript line says which (`readsTranscript`).
+    /// Without one, an Enter at most `promptHookDelay` before its hook, and
+    /// a `source` that doesn't say otherwise where Claude Code sends one.
+    private mutating func notePromptHook(_ hook: PromptHook, source: String?) {
+        guard readsTranscript else {
+            guard source == nil || source == "user", let enter = submitKeys.last(where: { $0 <= hook.at }),
+                  hook.at - enter < Self.promptHookDelay
+            else { return }
+            return noteTypedPrompt(hook)
+        }
+        if let id = hook.promptID, let index = readPrompts.firstIndex(where: { $0.id == id }) {
+            if readPrompts.remove(at: index).typed { noteTypedPrompt(hook) }
+        } else {
+            unreadPrompts = Array((unreadPrompts + [hook]).suffix(Self.promptMemory))
+        }
+    }
+
+    static let promptHookDelay: TimeInterval = 5
+
+    /// The transcript of the `claude` in front recorded `prompt`: matched
+    /// to its hook by `prompt_id`, or, queued mid-turn, to the oldest hook
+    /// before it. The requests whose dialogs a typed one closed, for their
+    /// receivers to be released.
+    mutating func noteTranscriptPrompt(_ prompt: TranscriptPrompt) -> [AgentPermissionRequest] {
+        let index = if let id = prompt.promptID {
+            unreadPrompts.firstIndex { $0.promptID == id }
+        } else {
+            unreadPrompts.firstIndex { $0.at <= prompt.at }
+        }
+        guard let index else {
+            if let id = prompt.promptID { readPrompts = Array((readPrompts + [(id, prompt.typed)]).suffix(Self.promptMemory)) }
+            return []
+        }
+        let hook = unreadPrompts.remove(at: index)
+        guard prompt.typed else { return [] }
+        let held = heldApprovals
+        noteTypedPrompt(hook)
+        return held.filter { request in !pendingDialogs.contains { $0.approval?.requestID == request.approval?.requestID } }
+    }
+
+    /// The prompt of `hook` was typed at the box: the last Enter before its
+    /// hook sent it. The box emptied then, and no dialog of its session
+    /// covered the box: those listed then are closed, a subagent's an Esc
+    /// left behind with no hook too. Typed elsewhere (Remote Control), or
+    /// with an Enter Nirux didn't see, it leaves the box as it was.
+    private mutating func noteTypedPrompt(_ hook: PromptHook) {
+        guard let enter = submitKeys.last(where: { $0 <= hook.at }), enter > (boxEmptiedAt ?? 0) else { return }
+        boxEmptiedAt = enter
+        lastUserPromptAt = hook.at
+        submitKeys.removeAll { $0 <= enter }
+        closeDialogs { $0.sessionID == hook.sessionID && $0.requestedAt <= enter }
+    }
+
+    /// Requests whose receiver waits for the sidebar's decision.
+    private var heldApprovals: [AgentPermissionRequest] {
+        pendingDialogs.filter { $0.approval.map { $0.sent == nil } ?? false }
+    }
+
+    /// The process that started this conversation took no key since it
+    /// started: what was typed went to the shell that launched it. Without
+    /// its process (an older receiver), nothing says so.
+    private func startedEmpty(_ event: AgentHookEvent) -> Bool {
+        event.emitterProcess.map { lastInputAt < $0.startedAt } ?? false
     }
 
     private mutating func startConversation(
@@ -494,7 +633,9 @@ struct AgentStatusMachine {
         guard event.source != "compact" else { return }
         // A new conversation in this process (startup, /clear, /resume):
         // whatever dialogs the old one showed are gone. `/clear` took what
-        // was typed at the prompt, but fires no UserPromptSubmit.
+        // was typed at the prompt, but fires no UserPromptSubmit. A `/resume`
+        // inside it leaves its keys a draft: it may show a screen no hook
+        // reports (an offer to resume from a summary).
         endTurn()
         settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
         askedQuestion = nil
@@ -502,6 +643,7 @@ struct AgentStatusMachine {
         stopHooksKeepGoing = false
         conversationChangedAt = event.timestamp
         if event.source == "clear" { lastPromptAt = event.timestamp }
+        if event.source == "clear" || startedEmpty(event) { boxEmptiedAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
         turnFailure = nil
@@ -547,8 +689,7 @@ struct AgentStatusMachine {
         mainTurnEndAsks = event.finalMessage.map(TurnEndText.endsOnQuestion) ?? false
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
-                kind: event.errorKind, detail: event.detail, failedAt: now,
-                promptAt: lastPromptAt, emitter: event.emitterProcess
+                kind: event.errorKind, detail: event.detail, failedAt: now, emitter: event.emitterProcess
             )
             : nil
         let reason = turnFailure?.reason ?? .turnFinished
@@ -1048,6 +1189,7 @@ struct AgentStatusMachine {
     /// draft until the next prompt goes in, which no message joins.
     mutating func notePromptGivenBack(now: TimeInterval) {
         lastDraftInputAt = now
+        lastTextInputAt = now
         lastDraftKind = "given back"
     }
 
@@ -1156,6 +1298,7 @@ struct AgentStatusMachine {
         // Over a dialog that waits for keys, they move among its options.
         guard !openDialogs.contains(where: waitsForKeys) else { return }
         lastDraftInputAt = now.timeIntervalSince1970
+        lastTextInputAt = now.timeIntervalSince1970
         lastDraftKind = "wheel"
     }
 
@@ -1205,6 +1348,13 @@ struct AgentStatusMachine {
         }
     }
 
+    /// Whether `keys` end on Enter, which sends what the prompt holds, with
+    /// text typed or pasted before it in the same write. Not Option-Enter
+    /// (ESC CR), which adds a line.
+    static func sendsPrompt(_ keys: Data) -> Bool {
+        keys.last == 0x0D && keys.dropLast().last != 0x1B
+    }
+
     /// Whether `keys`, reaching Claude's prompt with no dialog waiting for
     /// them, may leave text there or open a screen no hook tells of (Esc Esc's
     /// rewind picker, Ctrl-O's transcript, a slash command's). Not those that
@@ -1239,6 +1389,20 @@ struct AgentStatusMachine {
         guard bytes.count <= 32, bytes.count >= 3, bytes[1] == 0x5B, let final = bytes.last, (0x40...0x7E).contains(final)
         else { return false }
         return bytes.dropFirst(2).dropLast().allSatisfy { (0x20...0x3F).contains($0) }
+    }
+
+    /// Whether a key may leave text in the prompt: any but Enter, Esc or
+    /// Ctrl-C, Down, Left, Backspace and the keys that only move the view or
+    /// the cursor. Up recalls an old prompt, Right and Tab take in a
+    /// suggested one; an unknown write counts.
+    static func mayLeaveText(_ keys: Data?) -> Bool {
+        guard let keys else { return true }
+        if keys == enterKey || isCancelKey(keys) || keys == Data([0x7F]) || keys == Data([0x08]) || keyKind(keys) == "nav" {
+            return false
+        }
+        guard keys.first == 0x1B, isOneKey(keys), let last = keys.last else { return true }
+        // Down and Left, plain or in application mode.
+        return !(keys.count == 3 && (last == 0x42 || last == 0x44))
     }
 
     /// What kind of key a write was, for the log: never its characters.
@@ -1288,9 +1452,17 @@ struct AgentStatusMachine {
             }
         }
         lastInputAt = time
-        if inFront == nil, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
+        // So does Antigravity's, which it reports itself (OSC 7501 blocked),
+        // while that agy is in front, until a key answers it.
+        let answersAgy = lastForegroundName == AgentProgramStatus.agy && agyTurn?.answering == true
+        if answersAgy, keys.map(Self.answersApproval) ?? true { agyTurn?.answering = false }
+        if inFront == nil, !answersAgy, keys.map(Self.sendsPrompt) ?? true {
+            submitKeys = Array((submitKeys + [time]).suffix(Self.promptMemory))
+        }
+        if inFront == nil, !answersAgy, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)
+            if Self.mayLeaveText(keys) { lastTextInputAt = time }
         }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
@@ -1347,6 +1519,11 @@ struct AgentStatusMachine {
                 if !hookTurnInFlight { turnStartedAt = nil }
             }
             return state
+        }
+
+        // Antigravity says what it does, and why it waits.
+        if let reported = reportedState(isUserFocused: isUserFocused, now: now.timeIntervalSince1970) {
+            return reported
         }
 
         // Fallback: recent output = working; silence ends the turn.
@@ -1424,6 +1601,116 @@ struct AgentStatusMachine {
         // under it is a nested run's); a claude's leftover kind would mute
         // its OSC 9 notifications.
         if Self.activityOnlyAgentProcesses.contains(fgName) { hookKind = nil }
+        // Antigravity's status goes with it; one can come before the
+        // heartbeat sees it in front.
+        if fgName != AgentProgramStatus.agy { programStatus = nil }
+    }
+
+    /// Takes in what Antigravity's process `process` reported: the reason to
+    /// alert with when it starts waiting on the user, or its turn ends or
+    /// fails, out of the user's sight. The same status again (a redraw)
+    /// changes nothing.
+    mutating func noteProgramStatus(
+        _ status: AgentProgramStatus, from process: ProcessInstance? = nil, isUserFocused: Bool, now: Date
+    ) -> AgentAttentionReason? {
+        guard status != programStatus?.status || process != programStatus?.process else { return nil }
+        programStatus = ReportedStatus(status: status, at: now.timeIntervalSince1970, process: process)
+        let time = now.timeIntervalSince1970
+        // A prompt sent since its turn last said something starts a new one,
+        // its end missed or not; dated by its Enter, as the keys after it are
+        // a draft agy keeps in its box.
+        let turn = agyTurn?.process == process ? agyTurn : nil
+        let enter = submitKeys.last { $0 > (turn?.saidAt ?? process?.startedAt ?? 0) && $0 <= time }
+        if status.state == .working, turn?.ended != nil || turn == nil || enter != nil {
+            agyTurn = AgyTurn(startedAt: enter ?? time, process: process, saidAt: time)
+        } else if turn != nil, turn?.ended == nil {
+            agyTurn?.saidAt = time
+            agyTurn?.answering = status.state == .blocked
+            if [.done, .idle, .error].contains(status.state) { agyTurn?.ended = status.state }
+        }
+        _ = reportedState(isUserFocused: isUserFocused, now: now.timeIntervalSince1970)
+        guard !isUserFocused, state == .needsAttention, status.state != .working, status.state != .idle,
+              status.kind != "auth" else { return nil }
+        programStatus?.alerted = true
+        return lastAttentionReason
+    }
+
+    /// Takes in what Codex's process `process` reported: the same status
+    /// again (a redraw) keeps the time it first came.
+    mutating func noteCodexStatus(_ status: AgentProgramStatus, from process: ProcessInstance?, now: TimeInterval) {
+        guard status != codexStatus?.status || process != codexStatus?.process else { return }
+        codexStatus = ReportedStatus(status: status, at: now, process: process)
+        if status.state == .working { codexWorked = (now, process) }
+    }
+
+    /// Antigravity's status belongs to the process that sent it: an agy
+    /// started again begins with none. Codex's stays (it says each state
+    /// once): a Ctrl-G editor or a ^Z shell in front doesn't end it, and
+    /// its process is checked where it is read (`ReportedStatus.isFrom`).
+    mutating func keepProgramStatus(of process: ProcessInstance?) {
+        if let reported = programStatus, reported.process != process { programStatus = nil }
+    }
+
+    /// A sign-in wait that outlasted every launch's moment of it, said once
+    /// out of the user's sight: `noteProgramStatus` held its alert back.
+    mutating func takeLateSignInAlert(isUserFocused: Bool, now: TimeInterval) -> AgentAttentionReason? {
+        guard let reported = programStatus, !reported.alerted, reported.status.state == .blocked,
+              reported.status.kind == "auth", now - reported.at >= AgentProgramStatus.signInGrace,
+              lastInputAt <= reported.at
+        else { return nil }
+        programStatus?.alerted = true
+        return isUserFocused ? nil : reported.status.attentionReason
+    }
+
+    /// What Antigravity in front reported it waits on, or failed on, past
+    /// the moment every launch signs in, and until the user answers it.
+    func reportedWait(foreground: ForegroundProcess?, now: TimeInterval) -> AgentWait? {
+        guard foreground?.name == AgentProgramStatus.agy, let reported = programStatus,
+              [.blocked, .error].contains(reported.status.state), lastInputAt <= reported.at,
+              reported.status.kind != "auth" || now - reported.at >= AgentProgramStatus.signInGrace,
+              let reason = reported.status.attentionReason
+        else { return nil }
+        return AgentWait(reason: reason, since: reported.at)
+    }
+
+    /// The state Antigravity reported since it came to the front: it says
+    /// when it waits on the user, which its output can't.
+    private mutating func reportedState(isUserFocused: Bool, now: TimeInterval) -> AgentStatus? {
+        guard let reported = programStatus else { return nil }
+        let (status, at) = (reported.status, reported.at)
+        switch status.state {
+        case .working where now - max(at, lastReadAt) > AgentProgramStatus.workingSilence:
+            // Its next `working` is a new turn's.
+            programStatus = nil
+            return nil
+        case .working:
+            if turnStartedAt == nil { turnStartedAt = at }
+            state = .working
+            lastAttentionReason = nil
+        case .blocked where lastInputAt > at:
+            // Answered in its terminal: what it does next comes as a new
+            // status, or shows in its output.
+            programStatus = nil
+            return nil
+        case .blocked where status.kind == "auth" && now - at < AgentProgramStatus.signInGrace:
+            break
+        case .blocked:
+            state = .needsAttention
+            lastAttentionReason = status.attentionReason
+        case .done, .error:
+            if turnEndedAt < at {
+                turnEndedAt = at
+                turnStartedAt = nil
+                state = .needsAttention
+                lastAttentionReason = status.attentionReason
+            }
+            if isUserFocused { state = .idle }
+        case .idle:
+            state = .idle
+            lastAttentionReason = nil
+            turnStartedAt = nil
+        }
+        return state
     }
 
     private mutating func startFallbackTurn(now: Date) {
@@ -1514,6 +1801,10 @@ struct AgentStatusMachine {
     /// New shell in the same terminal (start/restart) — everything resets.
     mutating func reset() {
         state = .idle
+        programStatus = nil
+        codexStatus = nil
+        codexWorked = nil
+        agyTurn = nil
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false
@@ -1546,7 +1837,12 @@ struct AgentStatusMachine {
         silenceAlertedSince = nil
         mainCallsRunning = []
         mainTurnMovedAt = nil
+        boxEmptiedAt = nil
         lastUserPromptAt = nil
+        submitKeys = []
+        readsTranscript = false
+        unreadPrompts = []
+        readPrompts = []
         turnInterruptedAt = 0
         dialogCancelledAt = 0
         turnStoppedAt = 0
@@ -1556,6 +1852,7 @@ struct AgentStatusMachine {
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
+        lastTextInputAt = 0
         lastDraftKind = nil
         lastEventName = nil
         circling.reset()

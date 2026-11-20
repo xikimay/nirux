@@ -20,7 +20,7 @@ A space's settings are in the Settings window (`Cmd+,`), under Nirux's own: the 
 | Defaults | the agent new tasks preselect, the Claude Code and Codex modes, environment variables for new shells |
 | Safety | what the space's Claude Code sessions are refused or trusted with ([below](#safety)) |
 | Lead | the space's [Lead](#the-lead) |
-| Brief | rules given to every agent the space starts |
+| Brief | rules given to every Claude Code and Codex session the space starts |
 | Memory | what agents know about the repository ([Space memory](#space-memory)) |
 | Board | per repository, the base branch and the checks the [Board](pull-requests.md#the-board) uses |
 | Templates | the task templates of the New sheet |
@@ -43,7 +43,7 @@ Each Claude Code session the space starts gets a settings file with `--settings`
 
 Below the switches, **Where you're still in the loop** counts the permission prompts and questions of the space's Claude sessions over the last 7 or 30 days, by tool and by what each prompt was about: the program a shell command runs (`swift build`), a fetch's domain, an MCP tool, a file inside or outside the folder. Nirux keeps these in the space's `loop.jsonl` for 30 days, without any command text, file contents or question; at 4 MB it stops counting until older lines go, and says so. A line is offered only for a command Nirux knows reads, builds or tests (`git status`, `git diff`, `git log`, `swift build`, `swift test`, `npm test`, `npm run <script>`, `gh pr view`, `gh pr checks`, `xcrun simctl list`…) or for a domain, after 3 prompts it would cover exactly: the command typed as that program alone, its options after the subcommand, so `git -C app status` or `rm x && swift build` count without offering anything. **Add** puts the line into the space's settings file: an allow rule (`Bash(swift build:*)`, `WebFetch(domain:…)`), or, for a domain only auto mode asked about, an `autoMode.environment` line. Nothing is added on its own; everything else, MCP tools included, shows "Nothing proposed: Nirux can't tell it's safe". **Lines you added** lists them, each with Remove.
 
-A change reaches sessions as they start: a running session keeps the file it read. With every switch off and no line added, new sessions get no file, and the one earlier sessions name holds `{}`, so that restarting their column still works. A workspace opened from outside Nirux (a `nirux://` request) gets none of it, like the space's other defaults. When `defaults.json` can't be read, each switch takes its safe side (no trust, deny rules and sandbox on), and the tab says why. Codex, Gemini CLI and OpenCode don't read this file.
+A change reaches sessions as they start: a running session keeps the file it read. With every switch off and no line added, new sessions get no file, and the one earlier sessions name holds `{}`, so that restarting their column still works. A workspace opened from outside Nirux (a `nirux://` request) gets none of it, like the space's other defaults. When `defaults.json` can't be read, each switch takes its safe side (no trust, deny rules and sandbox on), and the tab says why. Codex, Antigravity, Gemini CLI and OpenCode don't read this file.
 
 ## Starting a task
 
@@ -55,7 +55,7 @@ Describe the task, then pick the repository (in every space but General), the ag
 
 1. It fetches the branch the task starts from: the base branch set for that repository in Space Settings › Board, else origin's default branch, else its `main` or `master`. When `origin` has none of these, the task starts from the main checkout's HEAD, and the sheet says so.
 2. It creates a worktree next to the repository's main checkout, on a new branch. The folder is named `<main folder>.<branch>`, with `/` replaced by `-`.
-3. It writes a handover file in the worktree (`.claude-handover.md` or `.codex-handover.md`) with your description and the template's text, and keeps that file out of git.
+3. It writes a handover file in the worktree (`.claude-handover.md`, `.codex-handover.md` or `.agy-handover.md`) with your description and the template's text, and keeps that file out of git.
 4. It opens a workspace named after the task and launches the agent, told to read the handover file.
 
 If the fetch fails, the sheet says why, and a second **Start** uses the branch as last fetched. A branch name that already exists, locally or on a remote, is refused, and the sheet stays open with the error.
@@ -84,7 +84,7 @@ Research, writing or a one-off script need no repository. Pick **No Repository**
 
 Nirux then makes a new folder named after the task in `~/Nirux Tasks` (Settings › General picks another place) and starts the agent in it, with no git, no branch and no pull request. A name already taken gets ` 2`, ` 3` and so on. Nirux never deletes these folders.
 
-Claude Code and Codex ask whether to trust each new folder, and the row reads `Needs you · Trust this folder?` until you answer in its terminal. Trusting `~/Nirux Tasks` once in Claude Code covers every folder in it.
+Claude Code, Codex and Antigravity ask whether to trust each new folder, and the row reads `Needs you · Trust this folder?` until you answer in its terminal. Trusting `~/Nirux Tasks` once in Claude Code covers every folder in it. Antigravity trusts exact folders, so it also asks in each new worktree.
 
 ### Templates
 
@@ -92,7 +92,7 @@ A template is text added to the handover file. Each space has its own templates,
 
 ## Cleaning up merged worktrees
 
-When a task's pull request is merged, its row reads `Merged · Clean up`. The click removes the worktree folder and its local branch, then closes the workspaces open in it. The same action is **Clean Up Worktree…** in a workspace's `⋯` menu.
+When a task's pull request is merged, its row reads `Merged · Clean up`. The click closes the workspaces open in it and waits for their programs, and any other program working in the folder, to end. Then it removes the worktree folder and its local branch. The same action is **Clean Up Worktree…** in a workspace's `⋯` menu.
 
 **Clean Up Merged Worktrees…** in the command palette does it in bulk. It lists every worktree a workspace is open in, plus the other worktrees of the same repositories, and inspects them all. Worktrees that are ready, open in a workspace, with idle agents and in the folder made for their branch come selected, and the selected ones are cleaned up one at a time. A worktree whose pull request isn't merged reads `Not merged yet` in grey, and a real blocker reads as a warning, after ⚠︎.
 
@@ -112,7 +112,7 @@ When a check fails, the refusal names the files that block.
 
 Git would delete ignored files with the folder, so Nirux moves them to the Trash first, in one "\<folder\> leftovers" folder per worktree. Build output such as `.build/`, `node_modules/` or `DerivedData/` is deleted instead. The confirmation lists these files and the agent sessions that closing the workspaces would end. Return cancels it.
 
-Nirux never forces the worktree's removal. If git refuses, the cleanup stops, shows git's message and puts the leftovers back. If only the branch deletion fails, the folder is gone, the branch is kept and the leftovers stay in the Trash.
+Just before git deletes the folder, Nirux reads it once more: a file written since the confirmation, even under a listed name, stops the cleanup and everything goes back. A listed file written again keeps its confirmed copy in the Trash. Nirux never forces the worktree's removal. If git refuses, the cleanup stops, shows git's message and puts the leftovers back. If only the branch deletion fails, the folder is gone, the branch is kept and the leftovers stay in the Trash.
 
 ## Space memory
 
@@ -129,3 +129,17 @@ You can search the list, filter it by scope and follow `[[links]]`. Return opens
 A space can have a Lead: a Claude Code session, pinned at the top of the sidebar, that starts tasks for you and follows them. Turn it on with **Start a Lead**, in New Space… or the Space menu, or with the **Lead workspace** switch in Space Settings › Lead. `Ctrl+Cmd+L` goes to the Lead, or starts one when the space has none. General can't have a Lead.
 
 The Lead can start tasks, send messages to any task of the space (yours and sub-tasks too: those that don't report to it get them marked as the Lead's, and keep asking whoever started them), answer its tasks' questions or hand one to you, propose a merge queue, and note each task's next step and blocker. It also tidies the space's list: it moves tasks up or down, renames them, puts one under another or takes it out, reads a task's last message, interrupts a task's turn (as Esc), and closes finished ones, yours too. A closed task's worktree and branch go only when its pull request is merged, after the checks of Clean Up Worktree…; a task without a repository has its folder moved to the Trash. It never closes a task you have on screen, whose agent is working or waiting on you, or that has unsaved editor changes or a program running. It cannot merge or reach another space. Its rules are written down in the design record [Spaces, anchors and the Lead](design/spaces.md#the-lead).
+
+### The daily pass
+
+Once a day, after 06:00, Nirux asks the Lead to look back at the space's day. The Lead reads:
+
+- what its reviews found, by kind (it records each review it sends);
+- the pull requests merged and their review rounds;
+- CI failures and reruns;
+- Mission messages held, given up or crossed;
+- your answers.
+
+It then proposes the rules that would have spared that friction, through **Rule proposed · Review** on its row. Nothing reaches the brief without you.
+
+Nirux asks only when something happened, and only once the Lead has been idle for 30 minutes and you have been away from Nirux for 10. For a day after, the Lead's row shows what the pass read ("Daily pass · 6 PRs, 1 flaky test, 2 rules proposed"), and its reply in its terminal says why. Turn it off or change its hour with **Daily pass** in Space Settings › Lead. You can also ask the Lead for a pass at any time.

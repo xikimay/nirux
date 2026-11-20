@@ -299,7 +299,6 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
         shell.addWorkspace(title: "login", cwd: login, profileID: space.id)
         shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "widgets" }))
-        shell.viewport.subviews.filter { $0 is NSImageView }.forEach { $0.removeFromSuperview() }
         shell.openProjectBoard()
         let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
         waitUntil("the lines") {

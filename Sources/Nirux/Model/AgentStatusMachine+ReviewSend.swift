@@ -8,7 +8,8 @@ enum ReviewSendRefusal: Equatable, Sendable {
     case noAgent
     /// An agent that doesn't say when it waits at its prompt (Codex's
     /// notify hook reports turn ends only; Gemini CLI and OpenCode report
-    /// nothing): an open question would take the comments as its answer.
+    /// nothing; Antigravity reports its state, which Nirux doesn't trust for
+    /// typing yet): an open question would take the comments as its answer.
     case notClaude(String)
     /// A Claude that took no prompt since it started, or hasn't reported
     /// since it came back from Ctrl-Z: a dialog it shows before any hook
@@ -62,7 +63,7 @@ enum ReviewSendRefusal: Equatable, Sendable {
 
 extension AgentStatusMachine {
     /// Names, by process, of the agents Nirux knows that aren't Claude Code.
-    static let otherAgents = ["codex": "Codex", "gemini": "Gemini CLI", "opencode": "OpenCode"]
+    static let otherAgents = ["codex": "Codex", "gemini": "Gemini CLI", "opencode": "OpenCode", "agy": "Antigravity"]
 
     /// Why a review's comments may not be typed into `foreground`'s prompt
     /// now; nil when they may: an interactive `claude` driven by Nirux's
@@ -96,12 +97,14 @@ extension AgentStatusMachine {
         return nil
     }
 
-    /// Keys reached the column since its last prompt went in: a draft at
-    /// the prompt, typed during the turn or after, or a menu or picker no
-    /// hook tells of (`/resume`, `/model`, a search, Esc Esc's rewind,
-    /// Ctrl-O's transcript). Review comments would join them (the sheet
-    /// says so); a quick answer would too (`acceptsQuickAnswer` refuses).
+    /// Keys reached the column since its prompt box last emptied
+    /// (`boxEmptiedAt`): a draft at the prompt, typed during the turn or
+    /// after, or a menu or picker no hook tells of (`/resume`, `/model`, a
+    /// search, Esc Esc's rewind, Ctrl-O's transcript). Review comments would
+    /// join them (the sheet says so); a quick answer would too
+    /// (`acceptsQuickAnswer` refuses), a Mission message or Resume's
+    /// `continue` too.
     var hasDraft: Bool {
-        lastDraftInputAt > (lastPromptAt ?? 0)
+        lastDraftInputAt > (boxEmptiedAt ?? 0)
     }
 }

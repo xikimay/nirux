@@ -45,7 +45,8 @@ enum TaskTools {
                 LeadTools.listTasks, title: "List your sub-tasks",
                 description: """
                     Your task's sub-tasks: each one's title, branch or folder, agent state (working, needs the user, \
-                    idle), pull request and checks, and the question or result it sent you. Read it again after a \
+                    idle), pull request and checks, the last questions it got answered, and the question or result \
+                    it sent you. Read it again after a \
                     /clear: Nirux keeps the state, your conversation doesn't.
                     """,
                 properties: [:], required: [], readOnly: true
@@ -54,7 +55,8 @@ enum TaskTools {
                 LeadTools.tell, title: "Tell a sub-task",
                 description: """
                     Type a message into one of your sub-tasks' prompt once its agent's turn is over (more work, an \
-                    answer it didn't ask for, a slash command such as /code-review). Claude Code sub-tasks only.
+                    answer it didn't ask for, a slash command such as /code-review). Claude Code, Codex and \
+                    Antigravity sub-tasks only; slash commands are Claude Code's (Codex gets the text through its queue).
                     """,
                 properties: [
                     "task": ["type": "string", "description": subtaskDescription],
@@ -64,19 +66,17 @@ enum TaskTools {
             ),
             LeadTools.definition(
                 LeadTools.reply, title: "Answer a sub-task's question",
-                description: "Answer the question one of your sub-tasks asked you, by its id (in the [Nirux Mission] message and list_tasks).",
-                properties: [
-                    "question": ["type": "string", "description": "The question's id."],
-                    "message": ["type": "string", "description": "Your answer, at most \(MissionEventCLI.maxInstructionLength) characters."]
-                ],
-                required: ["question", "message"]
+                description: "Answer the question one of your sub-tasks asked you, by its id (in the [Nirux Mission] message and "
+                    + "list_tasks). " + LeadTools.replyKindsDescription,
+                properties: LeadTools.replyProperties, required: ["question"]
             ),
             LeadTools.definition(
                 LeadTools.askUser, title: "Hand a sub-task's question to the user",
                 description: """
                     Hand the question one of your sub-tasks waits on to the user, when neither the code nor the \
-                    user's words settle it: its row turns amber and shows your reason. Their answer goes to the \
-                    sub-task, and a line comes to you.
+                    user's words settle it: its row turns amber and shows your reason, and the sub-task's \
+                    recommendation, if it gave one, which the user can accept (for access, what it needs, with \
+                    nothing to accept). Their answer goes to the sub-task, and a line comes to you.
                     """,
                 properties: [
                     "task": ["type": "string", "description": subtaskDescription],

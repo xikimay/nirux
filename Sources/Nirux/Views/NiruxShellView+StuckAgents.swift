@@ -131,7 +131,7 @@ extension NiruxShellView {
     func resumeFailedAgent(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval) {
         // A prompt or a dialog may still wait out the hook queue's drain
         // debounce: apply it before deciding.
-        AgentHookCenter.shared.drain()
+        guard AgentHookCenter.shared.drain() else { return showToast(Self.hooksStillComing) }
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
         guard let (_, pty) = stuckAgentTerminal(workspaceIndex: workspaceIndex, columnIndex: columnIndex) else { return }
@@ -141,6 +141,8 @@ extension NiruxShellView {
         if let refusal { showToast(Self.resumeRefusalText(refusal)) }
     }
 
+    static let hooksStillComing = "Its agent's hooks are still coming in: click again in a moment."
+
     /// Interrupt clicked under a turn gone silent: Esc goes to its `claude`
     /// only while that silence lasts (see `interruptSilentTurn`). Never
     /// Enter: the user sends their message again. Once the turn is over,
@@ -148,7 +150,7 @@ extension NiruxShellView {
     func interruptSilentAgent(workspaceIndex: Int, columnIndex: Int, since: TimeInterval) {
         // A hook may still wait out the queue's drain debounce: the agent
         // may have moved on.
-        AgentHookCenter.shared.drain()
+        guard AgentHookCenter.shared.drain() else { return showToast(Self.hooksStillComing) }
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
         guard let (column, pty) = stuckAgentTerminal(workspaceIndex: workspaceIndex, columnIndex: columnIndex) else { return }
@@ -163,46 +165,77 @@ extension NiruxShellView {
             typeMissionMessages()
         case .stopping(let promptAt):
             guard let transcript else { return }
-            followInterrupt(transcript: transcript, offset: offset, sentAt: sentAt) { [weak self, weak column, weak pty] shown, read in
-                guard let self, let column, let pty, column.pty === pty else { return false }
-                guard shown else {
-                    if read == Self.interruptReadsBeforeAnswer { self.showToast("Esc went in, but Claude shows no interrupt yet: see its terminal") }
-                    guard read < Self.interruptReads else {
-                        pty.noteInterruptIgnored(promptAt: promptAt)
-                        self.updateSidebar()
-                        return false
-                    }
-                    return true
-                }
-                // What its hooks said meanwhile.
-                AgentHookCenter.shared.drain()
-                guard pty.noteInterrupted(promptAt: promptAt) else { return false }
-                self.typeMissionMessages()
-                self.updateSidebar()
-                return false
+            let esc = SentInterrupt(column: column, pty: pty, transcript: transcript, offset: offset, sentAt: sentAt, promptAt: promptAt)
+            followInterrupt(esc) { [weak self] progress, _ in
+                if progress == .notShownYet { self?.showToast("Esc went in, but Claude shows no interrupt yet: see its terminal") }
             }
         case .notSilent, .noProcesses, .refused:
             break
         }
     }
 
-    /// Reads of the transcript, half a second apart, for an Esc Nirux sent:
-    /// before saying it didn't take, and in all (a tool slow to stop).
+    /// Reads of the transcript, half a second apart, before saying an Esc
+    /// Nirux sent didn't take.
     static let interruptReadsBeforeAnswer = 8
-    static let interruptReads = 60
 
-    /// Reads Claude's transcript for the interrupt an Esc Nirux sent at
-    /// `sentAt` caused (Claude fires no Stop for it), every half second off
-    /// the main thread: `onRead` gets each answer and its count on the main
-    /// thread, and says whether to read again.
+    /// An Esc Nirux pressed in a turn (the Interrupt button, the Lead's
+    /// interrupt_task), until Claude's transcript shows it.
+    struct SentInterrupt {
+        weak var column: ColumnState?
+        /// The terminal the Esc went into: the column may restart its own.
+        weak var pty: PtySession?
+        let transcript: String
+        /// Its size when the Esc went.
+        let offset: UInt64
+        let sentAt: Date
+        /// The prompt whose turn it stops.
+        let promptAt: TimeInterval
+    }
+
+    /// Where a `SentInterrupt` stands, as `followInterrupt` reports it.
+    enum InterruptProgress: Equatable {
+        /// No interrupt shown `interruptReadsBeforeAnswer` reads in: the reads go on.
+        case notShownYet
+        /// None in `interruptReads`: Claude may hang on, and its silence shows again.
+        case ignored
+        case columnClosed
+        case terminalRestarted
+        /// Claude stopped the turn, but a newer prompt went in since.
+        case superseded
+        /// Claude stopped the turn: the messages waiting for it go in next.
+        case interrupted
+    }
+
+    /// Reads Claude's transcript for the interrupt `esc` caused (Claude
+    /// fires no Stop for it), every half second off the main thread, and
+    /// moves the turn on from what it shows. `onProgress` hears, on the main
+    /// thread, `.notShownYet` at most once, then the outcome that ends the
+    /// reads, each with its read.
     func followInterrupt(
-        transcript: String, offset: UInt64, sentAt: Date, read: Int = 1,
-        onRead: @escaping @MainActor @Sendable (_ shown: Bool, _ read: Int) -> Bool
+        _ esc: SentInterrupt, read: Int = 1,
+        onProgress: @escaping @MainActor @Sendable (_ progress: InterruptProgress, _ read: Int) -> Void
     ) {
+        let (transcript, sentAt, offset) = (esc.transcript, esc.sentAt, esc.offset)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             Self.offMain({ TranscriptLastMessage.showsInterrupt(path: transcript, since: sentAt, after: offset) }) { shown in
-                guard onRead(shown, read) else { return }
-                self?.followInterrupt(transcript: transcript, offset: offset, sentAt: sentAt, read: read + 1, onRead: onRead)
+                guard let self else { return }
+                guard let column = esc.column else { return onProgress(.columnClosed, read) }
+                guard let pty = esc.pty, column.pty === pty else { return onProgress(.terminalRestarted, read) }
+                guard shown else {
+                    guard read >= self.interruptReads else {
+                        if read == Self.interruptReadsBeforeAnswer { onProgress(.notShownYet, read) }
+                        return self.followInterrupt(esc, read: read + 1, onProgress: onProgress)
+                    }
+                    pty.noteInterruptIgnored(promptAt: esc.promptAt)
+                    self.updateSidebar()
+                    return onProgress(.ignored, read)
+                }
+                // What its hooks said meanwhile: a dialog the Esc closed.
+                AgentHookCenter.shared.drain()
+                guard pty.noteInterrupted(promptAt: esc.promptAt) else { return onProgress(.superseded, read) }
+                onProgress(.interrupted, read)
+                self.typeMissionMessages()
+                self.updateSidebar()
             }
         }
     }

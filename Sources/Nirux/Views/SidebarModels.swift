@@ -129,7 +129,8 @@ struct SidebarMissionQuestion: Hashable {
     enum HandOff: Hashable {
         case parentClosed
         case parentNotClaude
-        /// The parent's `claude` took no prompt since it started.
+        /// The parent's `claude` took no prompt since it started, and doesn't
+        /// say it sits at its prompt.
         case parentNotAtPrompt
         /// The parent's `claude` restarted after it took the question.
         case parentRestarted
@@ -150,8 +151,9 @@ struct SidebarMissionQuestion: Hashable {
         /// (a restored agent that hasn't resumed).
         case notClaude
         /// Its `claude`, whose hooks report, took no prompt since it started
-        /// (resumed at a relaunch, say), so Nirux types nothing into it: a
-        /// screen no hook reports may be up (see `isPromptFree`).
+        /// (resumed at a relaunch, say) and doesn't say it sits at its
+        /// prompt, so Nirux types nothing into it: a screen no hook reports
+        /// may be up (see `AgentStatusMachine.sitsAtFirstPrompt`).
         case notAtPrompt
         /// Its `claude` started after the question was typed into it: the
         /// one that took it is gone, and a question is typed once.
@@ -167,12 +169,41 @@ struct SidebarMissionQuestion: Hashable {
     let text: String
     let handOff: HandOff?
     /// Answered, the answer not typed into the child's prompt yet: a
-    /// `claude` restarted since takes it only after one prompt.
+    /// `claude` restarted since takes it once it took a prompt or says it
+    /// sits at its first one.
     /// `parentTitle` then names who answered ("you" for the user).
     var isAnswered = false
     /// When the child asked (epoch seconds): its place in ⌘J's queue and
     /// the inbox once handed to the user.
     var askedAt: TimeInterval = 0
+    /// What blocks the child, and the answer it recommends (what it needs,
+    /// for an access question): see `MissionEvent`.
+    var kind: MissionEvent.QuestionKind?
+    var recommendation: String?
+
+    /// What Accept sends as the user's answer; nil: no Accept.
+    var acceptableRecommendation: String? { MissionEvent.acceptable(recommendation, of: kind) }
+
+    /// "Recommended" or, for an access question, "Needed": the
+    /// recommendation's heading.
+    var recommendationTitle: String { kind == .access ? "Needed" : "Recommended" }
+
+    /// The recommendation on one line under its heading, for a notification
+    /// or a tooltip; nil without one.
+    var recommendationLine: String? {
+        recommendation.map { "\(recommendationTitle): \($0)" }
+    }
+
+    /// The kind's name over the question in the popover; nil for none, or
+    /// one this build doesn't know.
+    var kindTitle: String? {
+        switch kind {
+        case .decision?: "Decision"
+        case .access?: "Access"
+        case .specMismatch?: "Spec mismatch"
+        default: nil
+        }
+    }
 
     /// Whether a question asked at `askedAt` now waits on the user: at once
     /// when its parent can't take it, else once nobody answered within
@@ -205,8 +236,9 @@ struct SidebarMissionQuestion: Hashable {
         case .parentClosed: return "“\(parentTitle)” was closed, so the question comes to you."
         case .parentNotClaude: return "“\(parentTitle)” isn’t running Claude Code, so the question comes to you."
         case .parentNotAtPrompt:
-            return "“\(parentTitle)” hasn’t taken a prompt since it started, so the question comes to you. "
-                + "If you don’t answer, it gets the question once it has taken one."
+            return "“\(parentTitle)” hasn’t taken a prompt since it started and may show a screen of its own, so the question "
+                + "comes to you. If you don’t answer, it gets the question once Claude Code says it’s at its prompt, or after its "
+                + "first prompt."
         case .parentRestarted:
             return "“\(parentTitle)” restarted after it got the question, so the question comes to you."
         case .parentDidNotAnswer: return "“\(parentTitle)” ended its turn without answering, so the question comes to you."
@@ -401,6 +433,8 @@ struct WorkspaceInfo: Hashable {
     var turnStatusLine: String?
     /// The Lead's row: how many rules it proposed wait for the user.
     var ruleProposalCount = 0
+    /// The Lead's row: its space's last daily pass, for a day after it.
+    var dailyPassNote: String?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
@@ -480,10 +514,15 @@ enum SidebarHitRegion {
     case agentResume(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval)
     /// Interrupt under a column whose turn went silent.
     case agentInterrupt(workspaceIndex: Int, columnIndex: Int, since: TimeInterval)
+    /// Type it now on the row of Mission messages waiting for a `claude`
+    /// with no prompt yet, since the oldest was sent.
+    case missionTypeNow(workspaceIndex: Int, columnIndex: Int, since: TimeInterval)
     /// Resume on the row of a restored agent that hasn't resumed yet.
     case deferredAgentResume(workspaceIndex: Int, columnIndex: Int, columnID: UUID)
     /// Yes, No or Reply… under the question a Claude turn ended on.
     case turnAnswer(workspaceIndex: Int, columnIndex: Int, question: SidebarTurnQuestion, answer: SidebarTurnAnswer)
+    /// Reply… or Accept under a Mission question's recommendation.
+    case missionAnswer(workspaceIndex: Int, columnIndex: Int, questionID: String, accepts: Bool)
     /// The rest of an Allow / Deny or Resume block: clicks there do nothing
     /// (a press meant for a button that just moved must not reach the card
     /// below).
@@ -560,11 +599,23 @@ enum SidebarHoverTarget: Hashable {
         "interrupt|\(workspaceIndex)|\(columnIndex)|\(since)"
     }
 
+    /// Key of a Type it now button's view, as Interrupt's: other messages at
+    /// the same place arm again.
+    static func typeNowButtonKey(workspaceIndex: Int, columnIndex: Int, since: TimeInterval) -> String {
+        "type-now|\(workspaceIndex)|\(columnIndex)|\(since)"
+    }
+
     /// Key of a Yes / No / Reply… button, among the approval buttons: its
     /// column and question, wherever the card moves; a later question arms
     /// again.
     static func turnAnswerButtonKey(question: SidebarTurnQuestion, answer: SidebarTurnAnswer) -> String {
         "turn-answer|\(question.columnID.uuidString)|\(question.turnEndedAt)|\(answer.rawValue)"
+    }
+
+    /// Key of a Mission question's Reply… or Accept button: its question,
+    /// wherever the card moves.
+    static func missionAnswerButtonKey(questionID: String, accepts: Bool) -> String {
+        "mission-answer|\(questionID)|\(accepts ? "accept" : "reply")"
     }
 
     /// Key of a not-resumed agent's Resume button: its column, wherever

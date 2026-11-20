@@ -13,9 +13,21 @@ import Foundation
 /// Exit statuses, as the installed skill and the child's startup prompt
 /// explain them to agents: 0 done, 1 Nirux state could not be read or
 /// written, 2 invalid usage, 3 nothing yet (run the same command again),
-/// 4 stop (handoffs off, Mission over, or not this terminal's to answer).
+/// 4 stop (handoffs off, Mission over, not this terminal's to answer, or
+/// nothing to accept).
 enum MissionEventCLI {
     static let maxMessageLength = 500
+    /// A question's `--recommend`, on one line, in characters and in
+    /// scalars: the question's id typed after it must fit what Nirux types.
+    static let maxRecommendationLength = 300
+    static let maxRecommendationScalars = 600
+
+    /// How a child asks, as its instructions show it.
+    static let askCommand = "\"$NIRUX_CLI_PATH\" --mission ask --kind \"<kind>\" --message \"...\" --recommend \"...\""
+    /// What the kinds mean and what to recommend, as a child's instructions say it.
+    static let askGuide = "Kinds: decision (a choice the task leaves open), access (something only a person can give: "
+        + "a login, a secret, a permission), spec-mismatch (the task contradicts the code or itself). For a decision or a "
+        + "spec mismatch, recommend the answer you'd pick; for access, say exactly what is needed and where."
     /// A parent's message to its child (`tell`, `reply`): typed into the
     /// child's prompt as the agent reads it, so it may be longer.
     static let maxInstructionLength = 4_000
@@ -44,6 +56,31 @@ enum MissionEventCLI {
 
     static func fits(_ message: String, limit: Int) -> Bool {
         problem(with: message, limit: limit) == nil
+    }
+
+    /// `--recommend` on one line, whitespace folded, then quoted as the
+    /// parent reads it (`MissionPromptText.quoted`), so what it accepts is
+    /// what it saw; nil when it doesn't fit. A huge one is cut past twice the
+    /// limit, so a cut one is still refused.
+    static func recommendation(_ raw: String) -> String? {
+        AgentText.clean(raw, maxLength: maxRecommendationLength * 2).map(MissionPromptText.quoted).flatMap {
+            fits($0, limit: maxRecommendationLength) && $0.unicodeScalars.count <= maxRecommendationScalars ? $0 : nil
+        }
+    }
+
+    /// Why a reply can't accept `question`'s recommendation; `field` names
+    /// what to write the answer with instead, `handOver` how to leave an
+    /// access question to the user.
+    static func nothingToAccept(_ question: MissionEvent, field: String, handOver: String) -> String {
+        if question.questionKind == .access {
+            return "An access question has no answer to accept: only the user can give what it needs, so \(handOver), "
+                + "unless you can say what to do instead with \(field)."
+        }
+        if let kind = question.questionKind, question.recommendation != nil {
+            return "This build of Nirux can't accept the recommendation of a “\(MissionPromptText.quoted(kind.rawValue))” "
+                + "question: write your answer with \(field)."
+        }
+        return "That question has no recommended answer: write yours with \(field)."
     }
     /// Agent shell tools stop foreground commands after a few minutes (two
     /// by default in Claude Code), so a wait never lasts longer than this and
@@ -87,6 +124,10 @@ enum MissionEventCLI {
         let kind: String
         let branch: String
         let message: String
+        let questionKind: String?
+        let recommendation: String?
+        /// True when `reply --accept` may send the recommendation.
+        let acceptsRecommendation: Bool?
     }
 
     /// Entry point for `Nirux --mission <command> [options]`.
@@ -182,15 +223,22 @@ enum MissionEventCLI {
         pollInterval: TimeInterval = 0.2,
         confirmationTimeout: TimeInterval = 5,
         workspaceTitle: (String) -> String? = savedWorkspaceTitle,
-        output: (String) -> Void = writeStandardOutput
+        output: (String) -> Void = writeStandardOutput,
+        notice: (String) -> Void = writeStandardError
     ) -> Int32 {
         guard let context = childContext(environment) else { return notAMissionTerminal(child: true) }
-        let options = parseOptions(arguments, allowed: ["--message", "--timeout"])
+        let options = parseOptions(arguments, allowed: ["--message", "--kind", "--recommend", "--timeout"])
         guard let options,
               let message = validMessage(options["--message"]),
+              let kind = optional(options["--kind"], { raw in MissionEvent.QuestionKind.known.first { $0.rawValue == raw } }),
+              let recommendation = optional(options["--recommend"], recommendation),
               let timeout = validTimeout(options["--timeout"])
         else {
-            return usage("ask \(messageUsage(options?["--message"])) [--timeout <seconds>]")
+            let kinds = MissionEvent.QuestionKind.known.map(\.rawValue).joined(separator: "|")
+            return usage(
+                "ask \(messageUsage(options?["--message"])) [--kind \(kinds)] "
+                    + "[--recommend <1-\(maxRecommendationLength) characters, one line>] [--timeout <seconds>]"
+            )
         }
 
         var ledger = MissionLedgerReader(url: missionsURL)
@@ -205,8 +253,13 @@ enum MissionEventCLI {
         }
         let questionID = questionID(for: message, context: context, in: mission, now: now())
         let typesAnswer = mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue
+        if let recorded = mission.events.first(where: { $0.id == questionID }), kind != nil || recommendation != nil,
+           recorded.questionKind != kind || recorded.recommendation != recommendation {
+            notice("This question was recorded earlier with another kind or recommendation, which stand: "
+                + "ask in other words to change them.")
+        }
         if !mission.events.contains(where: { $0.id == questionID }) {
-            let question = MissionEvent(
+            var question = MissionEvent(
                 id: questionID,
                 missionID: context.missionID,
                 childWorkspaceID: context.workspaceID,
@@ -215,6 +268,8 @@ enum MissionEventCLI {
                 message: message,
                 timestamp: now()
             )
+            question.questionKind = kind
+            question.recommendation = recommendation
             guard append(question, to: eventsURL) else { return 1 }
         }
 
@@ -237,7 +292,7 @@ enum MissionEventCLI {
         }
         switch outcome {
         case let .answered(response):
-            output(response.message)
+            output(response.message + (response.acceptedRecommendation == true ? "\n" + MissionPromptText.acceptedNote : ""))
             // The answer is printed either way; a lost receipt only means a
             // later identical `ask` prints it once more and queues another.
             _ = append(receipt(for: response, at: now()), to: eventsURL)
@@ -302,7 +357,9 @@ enum MissionEventCLI {
 
     /// Identical questions share a derived ID, so a retry after a shell-tool
     /// timeout never queues a duplicate. An answer the child received more
-    /// than `answerReplayWindow` ago moves the same text to a new ID.
+    /// than `answerReplayWindow` ago moves the same text to a new ID. The
+    /// message alone names it: a retry that rewords its kind or
+    /// recommendation is still the question first recorded.
     private static func questionID(
         for message: String, context: ChildContext, in mission: Mission, now: TimeInterval
     ) -> String {
@@ -375,7 +432,8 @@ enum MissionEventCLI {
         now: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 },
         eventsURL: URL = MissionEventCenter.defaultEventsURL,
         missionsURL: URL = MissionStore.defaultFileURL,
-        pollInterval: TimeInterval = 0.2
+        pollInterval: TimeInterval = 0.2,
+        output: (String) -> Void = writeStandardOutput
     ) -> Int32 {
         guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
         guard let options = parseOptions(arguments, allowed: ["--timeout"]),
@@ -409,17 +467,20 @@ enum MissionEventCLI {
             writeStandardError("No Mission event yet. Run the same command again to keep waiting.")
             return 3
         }
-        let output = InboxMessage(
+        let message = InboxMessage(
             eventID: event.id,
             missionID: mission.id,
             kind: event.kind.rawValue,
             branch: mission.branch,
-            message: event.message
+            message: event.message,
+            questionKind: event.questionKind?.rawValue,
+            recommendation: event.recommendation,
+            acceptsRecommendation: event.acceptableRecommendation == nil ? nil : true
         )
-        guard let data = try? JSONEncoder().encode(output),
+        guard let data = try? JSONEncoder().encode(message),
               let line = String(data: data, encoding: .utf8)
         else { return 1 }
-        writeStandardOutput(line)
+        output(line)
 
         if event.kind == .completed {
             let acknowledgement = MissionEvent(
@@ -451,13 +512,17 @@ enum MissionEventCLI {
         pollInterval: TimeInterval = 0.05
     ) -> Int32 {
         guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
-        let options = parseOptions(arguments, allowed: ["--event", "--message"])
+        let options = parseOptions(arguments, allowed: ["--event", "--message"], flags: ["--accept"])
+        let accepts = options?["--accept"] != nil
+        let written = options.flatMap { validMessage($0["--message"], limit: maxInstructionLength) }
         guard let options,
               let eventID = options["--event"],
               UUID(uuidString: eventID) != nil,
-              let message = validMessage(options["--message"], limit: maxInstructionLength)
+              accepts ? options["--message"] == nil : written != nil
         else {
-            return usage("reply --event <question-event-id> \(messageUsage(options?["--message"], limit: maxInstructionLength))")
+            return usage(
+                "reply --event <question-event-id> (\(messageUsage(options?["--message"], limit: maxInstructionLength)) | --accept)"
+            )
         }
         var ledger = MissionLedgerReader(url: missionsURL)
         guard loadLedger(&ledger) else { return unreadableLedger(missionsURL) }
@@ -479,9 +544,14 @@ enum MissionEventCLI {
             )
             return 4
         }
+        let question = mission.events.first { $0.id == eventID && $0.kind == .question }
+        guard let message = written ?? question?.acceptableRecommendation else {
+            if let question { writeStandardError(nothingToAccept(question, field: "--message", handOver: "ask the user")) }
+            return 4
+        }
 
         let responseID = UUID().uuidString
-        let response = MissionEvent(
+        var response = MissionEvent(
             id: responseID,
             missionID: mission.id,
             childWorkspaceID: mission.childWorkspaceID,
@@ -493,6 +563,7 @@ enum MissionEventCLI {
             inReplyTo: eventID,
             timestamp: now
         )
+        response.acceptedRecommendation = accepts ? true : nil
         guard append(response, to: eventsURL) else { return 1 }
         guard confirmationTimeout > 0 else { return 0 }
 
@@ -558,19 +629,32 @@ enum MissionEventCLI {
         return ParentContext(workspaceID: workspaceID, agentUUID: agentUUID)
     }
 
+    /// `allowed` options take a value; `flags` take none and read as "".
     private static func parseOptions(
-        _ arguments: [String], allowed: Set<String>
+        _ arguments: [String], allowed: Set<String>, flags: Set<String> = []
     ) -> [String: String]? {
-        guard arguments.count.isMultiple(of: 2) else { return nil }
         var result: [String: String] = [:]
         var index = 0
         while index < arguments.count {
             let key = arguments[index]
-            guard allowed.contains(key), result[key] == nil else { return nil }
+            guard result[key] == nil else { return nil }
+            if flags.contains(key) {
+                result[key] = ""
+                index += 1
+                continue
+            }
+            guard allowed.contains(key), index + 1 < arguments.count else { return nil }
             result[key] = arguments[index + 1]
             index += 2
         }
         return result
+    }
+
+    /// An option that may be left out: `.some(nil)` then, nil when `parse`
+    /// refuses it.
+    private static func optional<Value>(_ raw: String?, _ parse: (String) -> Value?) -> Value?? {
+        guard let raw else { return .some(nil) }
+        return parse(raw).map { .some($0) }
     }
 
     /// A usage line's `--message`, saying why `raw` failed when its scalars did.
@@ -616,19 +700,8 @@ enum MissionEventCLI {
     static func append(_ event: MissionEvent, to url: URL) -> Bool {
         guard var line = try? JSONEncoder().encode(event) else { return false }
         line.append(0x0A)
-        let fd = open(url.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
-        guard fd >= 0 else {
-            reportQueueFailure(url, code: errno)
-            return false
-        }
-        let written = line.withUnsafeBytes { buffer -> Int in
-            guard let pointer = buffer.baseAddress else { return 0 }
-            return write(fd, pointer, buffer.count)
-        }
-        let writeError = errno
-        close(fd)
-        guard written == line.count else {
-            reportQueueFailure(url, code: written < 0 ? writeError : EIO)
+        if let error = QueueFile.append(line, to: url) {
+            reportQueueFailure(url, code: error)
             return false
         }
         return true
@@ -718,9 +791,14 @@ extension MissionEventCLI {
             writeStandardError("No Mission on branch \(branch) was started from this terminal.")
             return 4
         }
-        guard mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue else {
-            writeStandardError("Nirux types messages only into a Claude Code child; this one runs \(mission.childAgentKind).")
+        guard mission.childAgentName != nil else {
+            writeStandardError("Nirux delivers messages only to a Claude Code, Codex or Antigravity child; this one runs \(mission.childAgentKind).")
             return 4
+        }
+        if mission.childAgentKind == NiruxApp.WorkspaceAgent.agy.rawValue, MissionPromptText.startsWithSlashCommand(message) {
+            writeStandardError("Antigravity runs a slash command itself, with no turn to end, which would hold the messages after it: "
+                + "send the request in words.")
+            return 2
         }
         let sentAt = now()
         let instructionID = instructionID(for: message, in: mission, now: sentAt)
@@ -745,8 +823,10 @@ extension MissionEventCLI {
                 event.childConsumedAt != nil ? true : event.expiredAt != nil ? false : nil
             }
         }
+        let codex = mission.childAgentKind == NiruxApp.WorkspaceAgent.codex.rawValue
         if typed == true {
-            writeStandardOutput("Nirux typed the message into the child's prompt.")
+            writeStandardOutput(codex ? "Nirux handed the message to the child's Codex, which starts it as a prompt."
+                : "Nirux typed the message into the child's prompt.")
             return 0
         }
         if typed == false {
@@ -754,8 +834,11 @@ extension MissionEventCLI {
             return 4
         }
         writeStandardError(
-            "Not typed yet: the child is working, a dialog is open, or someone is typing at its prompt. "
-                + "Nirux types it at the child's next free prompt, for a day at most; past an hour, a line tells you "
+            (codex ? "Not handed over yet: the child's Codex is working, waits on a dialog, or hasn't said which conversation it runs. "
+                + "Nirux hands it over at its next turn end"
+                : "Not typed yet: the child is working, a dialog is open, or someone is typing at its prompt. "
+                    + "Nirux types it at the child's next free prompt")
+                + ", for a day at most; past an hour, a line tells you "
                 + "what holds it. Run the "
                 + "exact same command again to keep waiting; it does not send the message twice."
         )
