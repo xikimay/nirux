@@ -76,7 +76,7 @@ extension NiruxShellView {
     /// The keyboard it held goes to the column on screen.
     func closeSpacePlan(going target: (workspaceID: String, column: Int)?, animated: Bool = true) {
         guard let plan = spacePlan else { return }
-        guard !plan.isDiving else { return animated ? () : removeSpacePlan() }
+        guard !plan.isDiving else { return animated || ZZ("diveKept") ? () : removeSpacePlan() }
         plan.finishOpening()
         let focusing = window?.firstResponder === plan
         let destination = target ?? (plan.workspaceID, activeWorkspace?.focusedIndex ?? 0)

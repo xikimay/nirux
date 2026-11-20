@@ -1195,7 +1195,7 @@ extension NiruxShellView {
         if commandPalette?.isVisible == true { return true }
         // The space's plan takes the keys over hidden terminals; diving, it
         // leaves them to the workspace it goes to, which shows under it.
-        if let spacePlan, !spacePlan.isDiving { return true }
+        if let spacePlan, ZZ("diveTakesKeys") || !spacePlan.isDiving { return true }
         if NSApp.keyWindow is NSPanel { return true }
         // A popover hanging from the window has the keyboard (the Mission
         // reply's field): AppKit keeps the window key, gives it the
