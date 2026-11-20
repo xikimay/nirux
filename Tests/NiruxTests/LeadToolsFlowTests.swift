@@ -193,7 +193,7 @@ final class LeadToolsFlowTests: XCTestCase {
                 XCTAssertEqual(pty.lastKeystrokeAt, untyped, "the terminal got none of it")
                 harness.press("\r", keyCode: 0x24, [.command])
                 XCTAssertEqual(MissionStore.shared.response(to: handed.id)?.message, "ok")
-                harness.waitUntil("the popover to close", timeout: 5) { !reply.popover.isShown }
+                harness.waitUntil("the popover to close") { !reply.popover.isShown }
                 let afterSend = pty.lastKeystrokeAt
                 harness.press("y", keyCode: 0x10, [])
                 XCTAssertGreaterThan(pty.lastKeystrokeAt, afterSend, "sent, it gives the terminal its keys back")
@@ -209,7 +209,7 @@ final class LeadToolsFlowTests: XCTestCase {
                 pty = try terminal()
                 reply = try openReply(to: task, in: harness)
                 harness.press("\u{1b}", keyCode: 0x35, [])
-                harness.waitUntil("Esc to close the popover", timeout: 5) { !reply.popover.isShown }
+                harness.waitUntil("Esc to close the popover") { !reply.popover.isShown }
                 let beforeClosed = pty.lastKeystrokeAt
                 harness.press("x", keyCode: 0x07, [])
                 XCTAssertEqual(reply.controller.replyView?.string, "", "closed, it takes no key")

@@ -282,7 +282,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         let agent = AgentStandIn()
         defer { agent.remove() }
         pty.start(shell: "/bin/zsh", args: ["-f", "-c", agent.command()], cwd: directory.path)
-        try await waitUntil("claude in front", timeout: 3) { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+        try await waitUntil("claude in front") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
         let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
         let now = Date().timeIntervalSince1970
         func hook(_ name: AgentHookEvent.Name, agent: String? = nil, tool: String? = nil) -> AgentHookEvent {
@@ -307,7 +307,7 @@ final class StuckAgentSidebarTests: XCTestCase {
 
         pty.applyAgentHook(hook(.subagentStop, agent: "sub"), isUserFocused: false)
         XCTAssertNil(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now + 1))
-        try await waitUntil("continue typed", timeout: 3) { agent.input.contains("continue") }
+        try await waitUntil("continue typed") { agent.input.contains("continue") }
         XCTAssertEqual(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now + 2), .alreadySent, "one click, one continue")
         XCTAssertNil(
             pty.agentResumeRefusal(
@@ -344,7 +344,7 @@ final class StuckAgentSidebarTests: XCTestCase {
 
         let column = try XCTUnwrap(shell.workspaces.first?.columns.first)
         let pty = try XCTUnwrap(column.pty)
-        try await waitUntil("the column's shell", timeout: 10) { pty.shellPID != nil }
+        try await waitUntil("the column's shell") { pty.shellPID != nil }
         let shellPID = try XCTUnwrap(pty.shellPID)
 
         // A claude in front of the column's shell, as the process table
@@ -416,7 +416,7 @@ final class StuckAgentSidebarTests: XCTestCase {
 
         let column = try XCTUnwrap(shell.workspaces.first?.columns.first)
         let pty = try XCTUnwrap(column.pty)
-        try await waitUntil("the column's shell", timeout: 10) { pty.shellPID != nil }
+        try await waitUntil("the column's shell") { pty.shellPID != nil }
         let shellPID = try XCTUnwrap(pty.shellPID)
         let now = Date().timeIntervalSince1970
         let snapshot = ProcessSnapshot(entries: [
@@ -498,7 +498,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         column.onAgentAttention = { _ in }
         let columnIndex = try XCTUnwrap(workspace.columns.firstIndex { $0 === column })
         let pty = try XCTUnwrap(column.pty)
-        try await waitUntil("its claude", timeout: 5) { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+        try await waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
         let front = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
         let clock = AwakeClock()
         clock.now = 100
@@ -533,7 +533,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         ), enabled: true))
 
         shell.interruptSilentAgent(workspaceIndex: 0, columnIndex: columnIndex, since: silence.since)
-        try await waitUntil("Esc", timeout: 3) { !agent.input.isEmpty }
+        try await waitUntil("Esc") { !agent.input.isEmpty }
         XCTAssertFalse(agent.input.contains("Go on with the parser"), "not typed into a turn still running")
         XCTAssertEqual(turn(), .working, "not over before Claude says so")
         let stamp = ISO8601DateFormatter.string(
@@ -544,7 +544,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         try handle.write(contentsOf: Data((#"{"type":"user","timestamp":""# + stamp
             + #"","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"# + "\n").utf8))
         try handle.close()
-        try await waitUntil("the message waiting, typed once the turn is over", timeout: 5) {
+        try await waitUntil("the message waiting, typed once the turn is over") {
             agent.input.contains("Go on with the parser")
         }
         XCTAssertTrue(agent.input.hasPrefix("\u{1B}"), "Esc first")
@@ -578,7 +578,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         let column = try XCTUnwrap(workspace.columns.first)
         let agentUUID = try XCTUnwrap(column.agentUUID)
         let pty = try XCTUnwrap(column.pty)
-        try await waitUntil("the column's shell", timeout: 10) { pty.shellPID != nil }
+        try await waitUntil("the column's shell") { pty.shellPID != nil }
         let shellPID = try XCTUnwrap(pty.shellPID)
         let now = Date().timeIntervalSince1970
         let claudePID: pid_t = 99_997
@@ -630,8 +630,11 @@ final class StuckAgentSidebarTests: XCTestCase {
             + "waited=175s reason=draft messages=1 fg=claude/690s working=0 inFlight=0 turn=- dialogs=[] prompt="), line)
         XCTAssertTrue(line.contains(" draft=text/") && line.contains(" verdict=none ") && line.contains(" last=stop/"), line)
         let second = try XCTUnwrap(ask(at: now - 10))
-        let waiting = SidebarWaitingMessages(count: 2, since: first.timestamp, refusal: .draft, now: now)
-        XCTAssertEqual(waits(at: now)[column.id], waiting)
+        // Its line is written at the check: past midnight, it names the day.
+        @MainActor func waiting(at time: TimeInterval) -> SidebarWaitingMessages {
+            SidebarWaitingMessages(count: 2, since: first.timestamp, refusal: .draft, now: time)
+        }
+        XCTAssertEqual(waits(at: now)[column.id], waiting(at: now))
         XCTAssertEqual(lines.count, 1, "once per message and reason")
 
         // The row says so: the refresh takes a check made just before.
@@ -641,7 +644,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         shell.missionWaits.checkedAt = nil
         shell.updateSidebar(snapshot: snapshot)
         XCTAssertTrue(shell.sidebar.expandedViews.contains {
-            ($0 as? NSTextField)?.stringValue == waiting.line
+            ($0 as? NSTextField)?.stringValue == waiting(at: now).line
         }, "what the check kept, not a check of its own")
         _ = waits(at: now + 30)
         XCTAssertEqual(lines.count, 2, "each message once per reason")
@@ -649,7 +652,8 @@ final class StuckAgentSidebarTests: XCTestCase {
         // What Nirux just typed reads as a draft until it goes in.
         shell.missionWaits.noteTyped(into: column, at: now + 31)
         XCTAssertTrue(waits(at: now + 32).isEmpty)
-        XCTAssertEqual(waits(at: now + 31 + NiruxShellView.typedTextGrace)[column.id], waiting)
+        let pastGrace = now + 31 + NiruxShellView.typedTextGrace
+        XCTAssertEqual(waits(at: pastGrace)[column.id], waiting(at: pastGrace))
         // Codex in front collects its own messages.
         let codex = ProcessSnapshot(entries: [
             ProcessSnapshot.Entry(
@@ -727,7 +731,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertTrue(shell.circlingHintEnabled, "on by default")
 
         let pty = try XCTUnwrap(shell.workspaces.first?.columns.first?.pty)
-        try await waitUntil("the column's shell", timeout: 10) { pty.shellPID != nil }
+        try await waitUntil("the column's shell") { pty.shellPID != nil }
         let shellPID = try XCTUnwrap(pty.shellPID)
         // A claude in front of the column's shell, as the process table
         // would show it.
