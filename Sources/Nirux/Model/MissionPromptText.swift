@@ -20,6 +20,12 @@ enum MissionPromptText {
         "\(prefix) Answer from \"\": ".unicodeScalars.count + maxNameScalars, oneWayHeader.unicodeScalars.count + 1
     )
 
+    /// Whether `message`, typed as it is, starts with a slash command
+    /// (`/clear`), not a path (`/Users/…`).
+    static func startsWithSlashCommand(_ message: String) -> Bool {
+        message.range(of: #"^/[A-Za-z][A-Za-z0-9_:-]*(\s|$)"#, options: .regularExpression) != nil
+    }
+
     /// `childTitle` and `parentTitle` are the workspaces' titles now; nil
     /// when the workspace is gone.
     static func text(

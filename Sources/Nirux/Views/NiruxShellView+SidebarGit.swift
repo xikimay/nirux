@@ -556,7 +556,7 @@ extension NiruxShellView {
 
     func wireMetadataAndGitRefresh(_ workspace: WorkspaceState) {
         workspace.onMetadataChanged = { [weak self] in self?.scheduleMetadataRefresh() }
-        workspace.onCodexTurnOver = { [weak self] in
+        workspace.onProgramTurnOver = { [weak self] in
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
         // The header follows its title immediately (no "· path" flicker);

@@ -566,6 +566,15 @@ enum AgentHookCLI {
               let termination = TerminationWatch()
         else {
             append(event)
+            // Queued first, so the app hears of the session before the ledger
+            // is read: a Mission child's claude whose conversation lacks the
+            // answers its questions got gets them back as context. Not a
+            // `claude -p` its agent runs, which inherits the terminal's
+            // variables.
+            if event.name == .sessionStart, event.agentID == nil, !TurnEndText.isHeadless(env),
+               let context = MissionAnswerContext.hookOutput(source: event.source, environment: env) {
+                try? FileHandle.standardOutput.write(contentsOf: context)
+            }
             return 0
         }
         defer { termination.stop() }

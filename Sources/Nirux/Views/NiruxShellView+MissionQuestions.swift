@@ -322,18 +322,19 @@ extension NiruxShellView {
             updateSidebar()
             return false
         }
-        // The parent that handed it over or has it in its prompt, a Lead or a
-        // task's agent, hears the answer too: the `claude` that saw it, not
-        // one started since.
+        // The parent that saw the question, a Lead or a task's agent, hears
+        // the answer too: the `claude` that last took it into its prompt or
+        // handed it over, not one started since. One that never saw it hears
+        // nothing.
         if let question = response.mission.events.first(where: { $0.id == questionID }),
-           question.handedToUserBecause != nil || question.parentTypedAt != nil {
+           let seenAt = [question.parentTypedAt, question.handedToUserAt].compactMap({ $0 }).max() {
             let childTitle = workspaces.first { $0.id == response.mission.childWorkspaceID }?.title ?? response.mission.branch
             pendingLeadNotices.append(LeadNotice(
                 workspaceID: response.mission.parentWorkspaceID, agentUUID: response.mission.parentAgentUUID,
                 text: "\(MissionPromptText.prefix) The user answered “\(childTitle)”: \(reply)"
                     + (accepted ? " (its recommendation)" : ""),
                 queuedAt: Date().timeIntervalSince1970,
-                forClaudeStartedBy: question.parentTypedAt ?? Date().timeIntervalSince1970
+                forClaudeStartedBy: seenAt
             ))
         }
         // Before the sidebar refresh, which would read it as answered by
