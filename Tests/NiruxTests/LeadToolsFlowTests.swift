@@ -328,7 +328,7 @@ final class LeadToolsFlowTests: XCTestCase {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             // As its REPL writes it: once it started.
             @MainActor func write(_ status: String, waitingFor: String? = nil) throws {
-                var fields = #""status":"\#(status)","statusUpdatedAt":\#(claude.startedAt * 1000)"#
+                var fields = #""status":"\#(status)","statusUpdatedAt":\#(Self.writtenAfter(claude))"#
                 if let waitingFor { fields += #","waitingFor":"\#(waitingFor)""# }
                 try Data("{\(fields)}".utf8).write(to: url)
                 try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: claude.startedAt)], ofItemAtPath: url.path)
@@ -425,6 +425,13 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// A session record's statusUpdatedAt (ms), a millisecond after `claude`
+    /// started: `startedAt * 1000` read back over 1000 can land below
+    /// `startedAt`, and the record then reads as an earlier process's.
+    private static func writtenAfter(_ claude: ProcessInstance) -> Double {
+        claude.startedAt * 1000 + 1
+    }
+
     private func resumedLead(_ harness: UIFlowHarness, standIn: AgentStandIn) throws -> ResumedLead {
         let lead = try makeLead(harness)
         let agentUUID = UUID().uuidString
@@ -466,7 +473,7 @@ final class LeadToolsFlowTests: XCTestCase {
             // A screen of its own up: no offer, and the row it left types nothing.
             let url = ClaudeSessionRecord.url(pid: lead.claude.pid, environment: ProcessInfo.processInfo.environment)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try Data(#"{"status":"waiting","waitingFor":"dialog open","statusUpdatedAt":\#(lead.claude.startedAt * 1000)}"#.utf8).write(to: url)
+            try Data(#"{"status":"waiting","waitingFor":"dialog open","statusUpdatedAt":\#(Self.writtenAfter(lead.claude))}"#.utf8).write(to: url)
             XCTAssertFalse(try lead.waiting().offersTypeNow)
             lead.shell.missionWaits.shown[lead.column.id] = held
             lead.shell.switchToWorkspace(lead.workspaceIndex)
