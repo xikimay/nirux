@@ -730,8 +730,11 @@ final class LeadToolsFlowTests: XCTestCase {
 
     /// record_review keeps each review of any task of the space (one the
     /// user started too) as its next round, and refuses a workspace that
-    /// isn't a task; daily_pass then lists the findings by kind, and the
-    /// window it read is where the next pass starts.
+    /// isn't a task; daily_pass then lists the findings by kind and the
+    /// tasks it may have forgotten (a merged pull request's, a result's
+    /// with nothing after it, each dated by its last turn or commit; never
+    /// a plain checkout's or an archived task's), and the window it read is
+    /// where the next pass starts.
     func testTheLeadRecordsReviewsAndReadsItsDay() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -769,9 +772,43 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(plain.isError)
             XCTAssertTrue(plain.text.contains("isn't a task"), plain.text)
 
+            let merged = PRInfo(
+                number: 7, state: "MERGED", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil,
+                url: "https://github.com/acme/app/pull/7", additions: nil, deletions: nil, changedFiles: nil
+            )
+            usersFix.prInfo = merged
+            usersFix.lastActivityAt = Date().timeIntervalSince1970
+            try XCTUnwrap(shell.workspaces.first { $0.title == "A shell" }).prInfo = merged
+            shell.addWorkspace(title: "Archived fix", cwd: harness.worktree, profileID: lead.space)
+            let archived = try XCTUnwrap(shell.workspaces.first { $0.title == "Archived fix" })
+            archived.prInfo = merged
+            archived.isInactive = true
+            // The Lead's task sent its result, then committed once, three
+            // days ago: closable.
+            let threeDaysAgo = Date().timeIntervalSince1970 - 3 * 86_400
+            try UIFlowHarness.git(
+                ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "old"],
+                at: harness.repo, environment: ["GIT_COMMITTER_DATE": "@\(Int(threeDaysAgo))"]
+            )
+            let result = MissionEvent(
+                id: UUID().uuidString, missionID: mission.id, childWorkspaceID: workspaceID, childAgentUUID: agentUUID,
+                kind: .completed, message: "Export done", timestamp: threeDaysAgo - 600
+            )
+            guard case .accepted = MissionStore.shared.process(result, enabled: true) else { return XCTFail("its result is carried") }
+            export.lastActivityAt = threeDaysAgo - 86_400
+
             let day = try call(LeadTools.dailyPass, lead: lead, in: harness)
             XCTAssertFalse(day.isError, day.text)
             XCTAssertTrue(day.text.contains("- test-waits-on-sleep · 2 tasks: "), day.text)
+            let fix = "- “The user's fix” · branch \(harness.worktreeBranch) · not yours (started by the user) · PR #7 merged · "
+                + "last activity "
+            let line = try XCTUnwrap(day.text.components(separatedBy: "\n").first { $0.hasPrefix(fix) }, day.text)
+            XCTAssertTrue(line.contains(" (a turn), ") && line.hasSuffix(" → close_task"), line)
+            let exportLine = try XCTUnwrap(day.text.components(separatedBy: "\n").first { $0.hasPrefix("- “Export CSV” ·") }, day.text)
+            let finished = "result sent \(DailyPass.clock(threeDaysAgo - 600)), nothing since, no pull request · "
+                + "last activity \(DailyPass.clock(threeDaysAgo)) (a commit), "
+            XCTAssertTrue(exportLine.contains(finished) && exportLine.hasSuffix(" → close_task"), exportLine)
+            for title in ["A shell", "Archived fix"] { XCTAssertFalse(day.text.contains("- “\(title)” ·"), day.text) }
             let read = try XCTUnwrap(DailyPassState.load(spaceID: lead.space).end)
             XCTAssertEqual(read, Date().timeIntervalSince1970, accuracy: 60)
         }

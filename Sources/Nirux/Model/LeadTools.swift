@@ -235,9 +235,9 @@ enum LeadTools {
                 description: """
                     What happened in this space since the last daily pass (the last day, for the first): your recorded \
                     findings by kind, the pull requests merged with their review rounds, CI failures, flaky tests and \
-                    reruns, Mission messages held, given up or crossed, the questions the user answered, and the rules \
-                    decided, waiting or in the brief. Nirux asks for it once a day; the user may ask too. Its text says \
-                    what to propose.
+                    reruns, Mission messages held, given up or crossed, the questions the user answered, the rules \
+                    decided, waiting or in the brief, and the tasks you may have forgotten. Nirux asks for it once a \
+                    day; the user may ask too. Its text says what to propose.
                     """,
                 properties: [:], required: []
             ),

@@ -311,7 +311,7 @@ extension NiruxShellView {
             // isn't its to answer, and its tells don't make a task its own.
             let missions = store.missions.filter { $0.childWorkspaceID == task.id && $0.parentWorkspaceID == leadID && $0.oneWay != true }
             if missions.isEmpty {
-                line += task.startedByAgent ? " · not yours (another agent started it)" : " · not yours (started by the user)"
+                line += " · " + Self.notYours(startedByAgent: task.startedByAgent)
             } else if let mission = missions.max(by: { $0.createdAt < $1.createdAt }) {
                 line += taskListMissionLine(mission, of: task, store: store)
             }
@@ -333,6 +333,11 @@ extension NiruxShellView {
             ? "No repository: each task starts in \(folderLine)."
             : "Repositories: \(repositories.joined(separator: ", ")); \"\(LeadTools.noRepository)\" starts a task in \(folderLine)."
         return ([header] + lines + [repositoryLine]).joined(separator: "\n")
+    }
+
+    /// list_tasks' words for a task that isn't the Lead's.
+    static func notYours(startedByAgent: Bool) -> String {
+        startedByAgent ? "not yours (another agent started it)" : "not yours (started by the user)"
     }
 
     /// A task's line in list_tasks, up to its pull request: what it is,

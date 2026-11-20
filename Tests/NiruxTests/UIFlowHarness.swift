@@ -598,11 +598,12 @@ final class UIFlowHarness {
     }
 
     /// Runs git in `directory`, never in a repository a GIT_* variable
-    /// points at (`swift test` run from a git hook exports GIT_DIR).
+    /// points at (`swift test` run from a git hook exports GIT_DIR) other
+    /// than `environment`'s.
     @discardableResult
-    static func git(_ arguments: [String], at directory: String) throws -> String {
+    static func git(_ arguments: [String], at directory: String, environment: [String: String] = [:]) throws -> String {
         let process = Process()
-        process.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("GIT_") }
+        process.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("GIT_") }.merging(environment) { $1 }
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false"] + arguments
         process.currentDirectoryURL = URL(fileURLWithPath: directory)

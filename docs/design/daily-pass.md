@@ -86,6 +86,94 @@ What happened since the last pass, at most 40,000 characters (Claude Code saves 
 - **Per run:** 3–8k tokens of facts, plus the Lead's compacted context (30–60k tokens) written to the cache once and read by about 5 requests, plus 3–5k tokens of output.
 - **API-equivalent:** about $0.45–0.60 per run, up to about $1.50 for a 150k-token context. A day with nothing to read costs nothing.
 
+## Forgotten tasks
+
+The digest also lists the tasks the Lead forgot. It only reports: it never
+closes or tells anything.
+
+**Which tasks.** list_tasks' tasks: the space's open workspaces, without the
+Lead, archived or closing ones.
+
+**Activity.** A task's last activity is the latest of these three. Each
+comes from a source Nirux already has:
+- a turn: `WorkspaceState.lastActivityAt`, the time of its last agent hook
+  event. It is saved with the workspace, and it is the age the sidebar row
+  shows;
+- a commit: the committer date of the task folder's HEAD (`git log -1
+  --format=%ct`). It is read off the main thread beside the pass's GitHub
+  reads, as a read-only git call. A failed read counts as no commit;
+- a push: the newest `startedAt` among the checks of its pull request
+  (`PRInfo.checks`, the sidebar's state). A push starts them.
+
+**Kinds**, checked in this order:
+- **closable**: the pull request is MERGED or CLOSED (`PRInfo.state`), or the
+  work is finished. Finished means the newest event of the task's own Mission
+  (not the Lead's one-way Missions) is its `completed` result, with no
+  question or tell after it. `Mission.status` is not used: a held tell typed
+  after the result turns it back to active. A finished task also needs no
+  open pull request and a day without activity since the result. A merged or
+  closed pull request needs no delay;
+- **waiting**: an open pull request that is green (ciStatus SUCCESS) and
+  MERGEABLE, not a draft, and on its repository's base branch as the Board
+  reads it (a stacked one waits for its parent), with a day without
+  activity;
+- **quiet**: three days without activity, with an open pull request that
+  isn't waiting, or with no pull request.
+
+**Thresholds.** `DailyPass.unattendedAfter` = 1 day (waiting, finished).
+`DailyPass.quietAfter` = 3 days.
+
+**Moves.**
+- closable: close_task;
+- waiting: ask the user to merge it (merging stays the user's call);
+- quiet, when its agent waits on the user: ask the user;
+- quiet, when the task isn't the Lead's: ask the user;
+- quiet, when the task is the Lead's: tell it what comes next, or close_task
+  if it was dropped.
+
+**News.** A task counts as news once, in the window where it became
+forgotten: last activity + 1 or 3 days. A merged pull request is already news
+in the window GitHub lists it in. A task reported once is not news again, so
+a forgotten task that stays forgotten doesn't bring a daily line every day.
+Every digest still lists all forgotten tasks, the "Nothing happened" one too.
+The section is a snapshot of now, not a fact of the window. It stays outside
+the cut and `readUntil`, and it lists `maxItems` tasks at most.
+
+**Wording** (after the rules sections):
+
+    ## Tasks you may have forgotten
+    Nirux only lists them: nothing was closed or told. Make each move, or tell the user why not.
+    - “Glass sidebar” · branch feat/glass-sidebar · PR #600 merged · last activity 11-18 22:40 (a turn) → close_task
+    - “Slider test” · result sent 11-19 09:12, nothing since, no pull request · last activity 11-19 09:15 (a turn) → close_task
+    - “Depth P5” · PR #640 green and mergeable, unmerged · last activity 11-19 10:20 (a push), 1 d 20 h ago → ask the user to merge it
+    - “Haiku H6” · PR #602 open, checks failing · quiet: last activity 11-17 18:02 (a commit), 3 d 12 h ago → tell it what comes next, or close_task if it was dropped
+    - “Stale rows” · not yours (started by the user) · no pull request · quiet: last activity 11-16 08:40 (a turn), 4 d 21 h ago → ask the user
+
+**Lead instructions.** They don't change (2,030/2,048). The `daily_pass`
+description gains "the tasks you may have forgotten".
+
+**Lane 2.** It changes when the daily line is typed into the Lead's terminal,
+and it adds git reads to the pass.
+
+**Tests.** Each fails when its behaviour is reverted:
+- DailyPassTests, on pure functions:
+  - merged or closed is closable;
+  - a finished task (result, then nothing) is closable after a day, and a
+    tell or question after the result undoes it;
+  - each source (turn, commit, push) alone keeps a task off the list, and the
+    line names the latest one;
+  - waiting needs green, MERGEABLE, not a draft and the base branch; else
+    the task is quiet after 3 days;
+  - the moves follow ownership and a wait on the user;
+  - a task is news in the window where it crossed, and listed without news
+    after;
+  - the quiet digest lists the section;
+  - the section leaves `readUntil` alone.
+- LeadToolsFlowTests (an existing class, so no flake gate): `daily_pass`
+  lists a task whose PR merged, with close_task, and leaves out the Lead and
+  archived tasks.
+- Runs NiruxMCPServerTests and LeadChannelTests.
+
 ## Later
 
 - **Tasks recording their own reviews.** Their adversarial reviews, `/code-review` and premortems find most defects. Today only their round commits reach the digest.

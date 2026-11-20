@@ -458,6 +458,8 @@ enum DailyPass {
         var proposals: [RuleProposal]
         /// The brief's "Rules learned", as sessions read them now.
         var briefRules: [String]
+        /// The space's open tasks, as they stand at the window's end.
+        var tasks: [TaskActivity] = []
 
         /// Anything for the pass to read. What GitHub didn't say isn't: a
         /// signed-out gh would make every day one.
@@ -466,6 +468,7 @@ enum DailyPass {
                 || repositories.contains { !$0.merged.isEmpty || !$0.reruns.isEmpty }
                 || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }
+                || forgottenTasks(tasks, now: window.end).contains { window.contains($0.since) }
         }
 
         /// GitHub may answer next time: the window isn't marked read.
@@ -515,7 +518,8 @@ enum DailyPass {
             let merged = facts.repositories.contains { !$0.problems.isEmpty } ? "" : "no pull request merged, "
             let quiet = header + "\n\nNothing happened since \(since): no review recorded, \(merged)no CI failure, "
                 + "no Mission message held, no rule decided. Nothing to propose: say so in one line."
-            return Digest(text: ([quiet] + [gitHubSection(facts)].compactMap { $0 }).joined(separator: "\n\n"), readUntil: window.end)
+            let sections = [gitHubSection(facts), forgottenSection(facts, limits[0], timeZone: timeZone)].compactMap { $0 }
+            return Digest(text: ([quiet] + sections).joined(separator: "\n\n"), readUntil: window.end)
         }
         // The rules before the facts; each section lists its facts in time
         // order, so what it leaves out comes after what it shows.
@@ -523,8 +527,8 @@ enum DailyPass {
         for limit in limits {
             parts = [
                 Part(text: instructions(facts)), Part(text: gitHubSection(facts)), rulesSection(facts, limit),
-                findingsSection(facts, limit), pullRequestsSection(facts, limit), ciSection(facts, limit, timeZone: timeZone),
-                missionsSection(facts, limit, timeZone: timeZone)
+                Part(text: forgottenSection(facts, limit, timeZone: timeZone)), findingsSection(facts, limit),
+                pullRequestsSection(facts, limit), ciSection(facts, limit, timeZone: timeZone), missionsSection(facts, limit, timeZone: timeZone)
             ]
             if joined(header, parts).count <= maxCharacters { break }
         }
@@ -576,6 +580,15 @@ enum DailyPass {
             ? "The next pass reads this window again. Read what you need with gh meanwhile."
             : "Read what you need with gh."
         return section("What GitHub didn’t say", lines + [after], total: lines.count + 1)
+    }
+
+    /// The tasks forgotten at the window's end: a snapshot of now, not a
+    /// fact of the window, outside the cut.
+    private static func forgottenSection(_ facts: Facts, _ limit: Limits, timeZone: TimeZone) -> String? {
+        let forgotten = forgottenTasks(facts.tasks, now: facts.window.end, timeZone: timeZone)
+        guard !forgotten.isEmpty else { return nil }
+        let lead = "Nirux only lists them: nothing was closed or told. Make each move, or tell the user why not."
+        return section("Tasks you may have forgotten", [lead] + forgotten.prefix(limit.items).map(\.line), total: forgotten.count + 1)
     }
 
     /// The kinds seen in the window, with where else they showed up in
