@@ -141,5 +141,7 @@ Rules:
   stopped.
 - At most one automatic round in flight across all tasks: a round counts
   while its pull request is a followed task's.
-- A round left in the prompt unsent counts, and the user hears of it; one
-  none of which went in is dropped.
+- A round left in the prompt unsent, or cut, counts and the user hears of
+  it, but no turn of the agent is its: it holds no other task and is never
+  judged. One none of which went in is dropped.
+- Entries of pull requests open in any workspace outlive a quiet month.

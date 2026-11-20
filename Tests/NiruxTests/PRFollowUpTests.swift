@@ -495,7 +495,8 @@ final class PRFollowUpTests: XCTestCase {
             (.conflict, .rounds, "#52 conflicts with develop after 3 automatic rounds"),
             (.ci, .nothingPushed, "#52 still fails its checks: the automatic round pushed nothing"),
             (.feedback, .nothingPushed, "#52 still has review feedback open: the automatic round pushed nothing"),
-            (.feedback, .checkoutDiffers, "#52: the checkout isn’t at the pull request’s head after the automatic round")
+            (.feedback, .checkoutDiffers, "#52: the checkout isn’t at the pull request’s head after the automatic round"),
+            (.ci, .unreadable, "#52: another Nirux build handed it to you")
         ]
         for (kind, cause, text) in cases {
             XCTAssertEqual(PRFollowUp.stopText(PRFollowUp.Stop(kind: kind, cause: cause, head: head, at: now), pullRequest: pullRequest), text)
@@ -523,5 +524,60 @@ final class PRFollowUpTests: XCTestCase {
         other.save(to: url)
         try FileManager.default.setAttributes([.modificationDate: sameDate], ofItemAtPath: url.path)
         XCTAssertEqual(Set(file.value.pullRequests.keys), ["a", "b"], "written right after, read again")
+    }
+
+    /// The Lead's round 1: a quiet month drops no entry a workspace still
+    /// has open, else its old threads would be typed again, with three more
+    /// rounds.
+    @MainActor
+    func testAnEntryStillOpenSomewhereOutlivesAQuietMonth() {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let center = PRFollowUpCenter(trackedSince: now)
+        center.file.url = folder.appendingPathComponent("pr-follow-up.json")
+        let quiet = "https://github.com/acme/widgets/pull/3"
+        let other = "https://github.com/acme/widgets/pull/52"
+        center.file.update { $0.update(quiet, now: self.now - PRFollowUpStore.lifetime) { $0.handedFeedback = ["thread"] } }
+        center.updateEntry(other, space: "space", now: now, open: [quiet]) { $0.userFailures = ["a"] }
+        XCTAssertEqual(center.file.value.pullRequests[quiet]?.handedFeedback, ["thread"])
+        center.updateEntry(other, space: "space", now: now, open: []) { $0.userFailures = ["b"] }
+        XCTAssertNil(center.file.value.pullRequests[quiet], "open nowhere: it goes")
+        XCTAssertEqual(center.file.value.pullRequests[other]?.userFailures, ["b"], "the one changed stays")
+    }
+
+    /// The Lead's round 1: a round that didn't go in whole counts, but holds
+    /// no other task and no later turn judges it.
+    @MainActor
+    func testARoundThatDidNotGoInWholeHoldsNothingAndIsNotJudged() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let center = PRFollowUpCenter(trackedSince: now - 3600)
+        center.file.url = folder.appendingPathComponent("pr-follow-up.json")
+        let url = "https://github.com/acme/widgets/pull/52"
+        let round = PRFollowUp.Round(kind: .ci, head: head, typedAt: now - 60, items: ["c1"], agent: "agent-1")
+        @MainActor func typedRound() { center.file.update { $0.pullRequests[url] = PRFollowUp.Entry(rounds: [round], handedFeedback: ["c1"]) } }
+        let failed = facts(pullRequest(rollup: red))
+
+        typedRound()
+        center.noteTyped(.sent, round: round, url: url, now: now)
+        XCTAssertNil(center.file.value.pullRequests[url]?.rounds.last?.endedAt, "typed whole: its turn is the round's")
+
+        for outcome: NiruxShellView.TypedMessage in [.inPrompt(why: "someone typed meanwhile"), .cut] {
+            typedRound()
+            center.noteTyped(outcome, round: round, url: url, now: now)
+            var entry = try XCTUnwrap(center.file.value.pullRequests[url])
+            XCTAssertEqual(entry.rounds.count, 1, "it counts: \(outcome)")
+            XCTAssertEqual(entry.handedFeedback, ["c1"], "its items stay handed: \(outcome)")
+            XCTAssertNotNil(entry.rounds[0].endedAt, "it holds no other task: \(outcome)")
+            // The failure still there, a later turn ended: the next round goes,
+            // no "pushed nothing" for a round Claude never got.
+            XCTAssertEqual(typed(PRFollowUp.next(&entry, failed))?.prompt.hasSuffix("round 2 of 3.)"), true, "\(outcome)")
+            XCTAssertNil(entry.stop, "\(outcome)")
+        }
+
+        typedRound()
+        center.noteTyped(.left, round: round, url: url, now: now)
+        XCTAssertEqual(center.file.value.pullRequests[url]?.rounds, [], "none of it went in: it never was")
+        XCTAssertEqual(center.file.value.pullRequests[url]?.handedFeedback, [])
     }
 }

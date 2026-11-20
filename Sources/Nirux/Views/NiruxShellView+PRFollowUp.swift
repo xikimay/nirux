@@ -37,6 +37,37 @@ final class PRFollowUpCenter {
         self.trackedSince = trackedSince
     }
 
+    /// Changes the entry of `url` (a new one follows from where its space's
+    /// follow-up starts) and drops the quiet entries of pull requests not
+    /// `open` (`PRFollowUpStore.prune`); returns the entry.
+    @discardableResult
+    func updateEntry(
+        _ url: String, space: String, now: TimeInterval, open: Set<String>, _ change: (inout PRFollowUp.Entry) -> Void
+    ) -> PRFollowUp.Entry {
+        file.update { store in
+            store.noteLaunch(at: trackedSince)
+            store.update(url, now: now, since: store.followedSince(space: space), change)
+            store.prune(now: now, keeping: open.union([url]))
+            return store.pullRequests[url] ?? PRFollowUp.Entry()
+        }
+    }
+
+    /// What became of the round of `url` Nirux typed. None of it went in:
+    /// it never was. Some or all of it stayed in the prompt unsent: it
+    /// counts (Claude gets it if someone presses Enter), but no turn of the
+    /// agent is its, so it neither holds other tasks nor is judged.
+    func noteTyped(_ typed: NiruxShellView.TypedMessage, round: PRFollowUp.Round, url: String, now: TimeInterval) {
+        guard typed != .sent else { return }
+        file.update { store in
+            store.update(url, now: now) { entry in
+                guard let last = entry.rounds.indices.last, entry.rounds[last].typedAt == round.typedAt else { return }
+                guard typed != .left else { return entry.cancelRound() }
+                entry.rounds[last].endedAt = entry.rounds[last].endedAt ?? now
+                entry.rounds[last].settledAt = entry.rounds[last].settledAt ?? now
+            }
+        }
+    }
+
     /// Where a space's follow-up starts (`PRFollowUpStore.followedSince`),
     /// this launch kept as the first one of the follow-up if none was.
     func followedSince(space: String) -> TimeInterval? {
@@ -131,7 +162,8 @@ extension NiruxShellView {
         )
         guard case .type(let round, let prompt) = decided.action else { return }
         guard let pty = column.pty, let paste = TypedPromptSanitizer.bracketedPaste(for: prompt) else {
-            return cancelFollowUpRound(round, of: pullRequest)
+            prFollowUpCenter.noteTyped(.left, round: round, url: pullRequest.url, now: now)
+            return scheduleMetadataRefresh()
         }
         let title = MissionPromptText.quoted(workspace.title)
         typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { [weak self] typed in
@@ -139,20 +171,17 @@ extension NiruxShellView {
                 "#\(pullRequest.number, privacy: .public) round \(round.kind.rawValue, privacy: .public): \(String(describing: typed), privacy: .public)"
             )
             guard let self else { return }
-            if typed == .left { self.cancelFollowUpRound(round, of: pullRequest) }
-            // Some or all of it is in the prompt: it counts.
+            self.prFollowUpCenter.noteTyped(typed, round: round, url: pullRequest.url, now: Date().timeIntervalSince1970)
             self.reportUnsent(typed, what: "an automatic follow-up round", for: title, telling: nil)
+            self.scheduleMetadataRefresh()
         }
         scheduleMetadataRefresh()
     }
 
-    private func cancelFollowUpRound(_ round: PRFollowUp.Round, of pullRequest: PRInfo) {
-        prFollowUpCenter.file.update { store in
-            store.update(pullRequest.url, now: Date().timeIntervalSince1970) { entry in
-                if entry.rounds.last?.typedAt == round.typedAt { entry.cancelRound() }
-            }
-        }
-        scheduleMetadataRefresh()
+    /// The pull requests open in a workspace, followed or not: their entries
+    /// outlive a quiet month.
+    private var openPullRequests: Set<String> {
+        Set(workspaces.compactMap { $0.isClosing || $0.prInfo?.state.uppercased() != "OPEN" ? nil : $0.prInfo?.url })
     }
 
     /// A task of a space that follows its pull requests.
@@ -191,27 +220,26 @@ extension NiruxShellView {
         facts: PRFollowUp.Facts, snapshot: ProcessSnapshot, note: String? = nil
     ) -> (action: PRFollowUp.Action, entry: PRFollowUp.Entry) {
         let pty = target.column?.pty
-        let (action, entry, raised) = prFollowUpCenter.file.update { store in
-            var action = PRFollowUp.Action.none
-            var raised = false
-            store.update(pullRequest.url, now: facts.now, since: store.followedSince(space: workspace.profileID)) { entry in
-                if let last = entry.rounds.last, last.endedAt == nil {
-                    if target.roundAgentLeft {
-                        entry.endRound(at: facts.now)
-                    } else if let pty, pty.finishedTurn(afterTypingAt: last.typedAt),
-                              pty.missionPromptRefusal(runningSince: facts.now, snapshot: snapshot) != .failedTurn {
-                        // A session end sets no turn end of its own.
-                        entry.endRound(at: max(pty.agentLastTurnEndedAt, last.typedAt))
-                    }
-                }
-                let before = entry.stop
-                action = PRFollowUp.next(&entry, facts)
-                raised = entry.stop != nil && entry.stop?.at != before?.at
-                if let stop = entry.stop, stop.seenAt == nil, Self.lastUserPrompt(in: workspace) > stop.at {
-                    entry.stop?.seenAt = facts.now
+        var action = PRFollowUp.Action.none
+        var raised = false
+        let entry = prFollowUpCenter.updateEntry(
+            pullRequest.url, space: workspace.profileID, now: facts.now, open: openPullRequests
+        ) { entry in
+            if let last = entry.rounds.last, last.endedAt == nil {
+                if target.roundAgentLeft {
+                    entry.endRound(at: facts.now)
+                } else if let pty, pty.finishedTurn(afterTypingAt: last.typedAt),
+                          pty.missionPromptRefusal(runningSince: facts.now, snapshot: snapshot) != .failedTurn {
+                    // A session end sets no turn end of its own.
+                    entry.endRound(at: max(pty.agentLastTurnEndedAt, last.typedAt))
                 }
             }
-            return (action, store.pullRequests[pullRequest.url] ?? PRFollowUp.Entry(), raised)
+            let before = entry.stop
+            action = PRFollowUp.next(&entry, facts)
+            raised = entry.stop != nil && entry.stop?.at != before?.at
+            if let stop = entry.stop, stop.seenAt == nil, Self.lastUserPrompt(in: workspace) > stop.at {
+                entry.stop?.seenAt = facts.now
+            }
         }
         logFollowUp(action, of: workspace, pullRequest: pullRequest, note: note)
         if raised {
@@ -345,11 +373,11 @@ extension NiruxShellView {
     func noteFollowUpTakenByUser(in workspace: WorkspaceState, feedback: [String] = [], failure: Bool = false) {
         guard let pullRequest = workspace.prInfo, pullRequest.state.uppercased() == "OPEN" else { return }
         let signature = PRFollowUp.failureSignature(pullRequest)
-        prFollowUpCenter.file.update { store in
-            store.update(pullRequest.url, now: Date().timeIntervalSince1970, since: store.followedSince(space: workspace.profileID)) { entry in
-                entry.handedFeedback += feedback.filter { !entry.handedFeedback.contains($0) }
-                if failure, !signature.isEmpty, !entry.userFailures.contains(signature) { entry.userFailures.append(signature) }
-            }
+        prFollowUpCenter.updateEntry(
+            pullRequest.url, space: workspace.profileID, now: Date().timeIntervalSince1970, open: openPullRequests
+        ) { entry in
+            entry.handedFeedback += feedback.filter { !entry.handedFeedback.contains($0) }
+            if failure, !signature.isEmpty, !entry.userFailures.contains(signature) { entry.userFailures.append(signature) }
         }
     }
 
