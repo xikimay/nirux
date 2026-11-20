@@ -8,7 +8,8 @@
 # (two per CPU, six at most: six on the CI's three cores took 2.5 minutes;
 # eight made tests that time themselves fail). Fails when a class fails,
 # crashes or runs past NIRUX_TESTS_CLASS_TIMEOUT (600 s), or when fewer tests
-# ran than `swift test list` names.
+# ran than `swift test list` names. Warns when all classes take longer than
+# NIRUX_TESTS_BUDGET seconds, if set.
 set -euo pipefail
 
 # One class, run by a worker below. xargs, bash and perl are protected
@@ -65,6 +66,12 @@ fi
 sed -E 's#/.*##' "$work/list" | sort -u > "$work/classes"
 echo "$expected tests in $(wc -l < "$work/classes" | tr -d ' ') classes, $workers at a time"
 
+# The longest classes first (scripts/test-class-times.sh), so the last to
+# start are short and no worker is left running a long one alone. A class
+# with no time yet may be long: it starts with them.
+awk 'NR == FNR { seconds[$2] = $1; next } { print ($1 in seconds ? seconds[$1] : 999999), $1 }' \
+    scripts/test-class-times.txt "$work/classes" | sort -k1,1nr -k2,2 | cut -d' ' -f2 > "$work/order"
+
 # What `swift test` sets for xctest on macOS.
 platform="$(xcrun --sdk macosx --show-sdk-platform-path)/Developer"
 xctest="$(xcrun --sdk macosx --find xctest)"
@@ -78,11 +85,19 @@ export NIRUX_TESTS_CLASS_TIMEOUT="${NIRUX_TESTS_CLASS_TIMEOUT:-600}"
 status=0
 start=$SECONDS
 # A worker always exits 0: xargs failing means one was killed.
-xargs -P "$workers" -n 1 bash "$script" --class < "$work/classes" || {
+xargs -P "$workers" -n 1 bash "$script" --class < "$work/order" || {
     echo "::error::a worker stopped early (xargs exit $?)"
     status=1
 }
-echo "All classes done in $((SECONDS - start))s"
+elapsed=$((SECONDS - start))
+echo "All classes done in ${elapsed}s"
+if [[ -n "${NIRUX_TESTS_BUDGET:-}" ]]; then
+    summary="Tests: ${elapsed}s, budget ${NIRUX_TESTS_BUDGET}s"
+    if [[ $elapsed -gt $NIRUX_TESTS_BUDGET ]]; then
+        echo "::warning::$summary"
+    fi
+    echo "$summary" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+fi
 
 # A class that crashed has no summary, and one whose worker never ran no log.
 executed=0
