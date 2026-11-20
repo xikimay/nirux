@@ -18,6 +18,9 @@ set -euo pipefail
 if [[ "${1:-}" == --class ]]; then
     class="$2"
     log="$NIRUX_TESTS_WORK/$class.log"
+    if [[ -n "${NIRUX_TESTS_PROFILES:-}" ]]; then
+        export LLVM_PROFILE_FILE="$NIRUX_TESTS_PROFILES/$class.%p.profraw"
+    fi
     start=$SECONDS
     status=0
     perl -e '$ENV{DYLD_FRAMEWORK_PATH} = $ENV{NIRUX_TESTS_FRAMEWORK_PATH};
