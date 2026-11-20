@@ -544,7 +544,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         try handle.write(contentsOf: Data((#"{"type":"user","timestamp":""# + stamp
             + #"","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"# + "\n").utf8))
         try handle.close()
-        try await waitUntil("the message waiting, typed once the turn is over", timeout: 5) {
+        try await waitUntil("the message waiting, typed once the turn is over") {
             agent.input.contains("Go on with the parser")
         }
         XCTAssertTrue(agent.input.hasPrefix("\u{1B}"), "Esc first")
@@ -630,8 +630,11 @@ final class StuckAgentSidebarTests: XCTestCase {
             + "waited=175s reason=draft messages=1 fg=claude/690s working=0 inFlight=0 turn=- dialogs=[] prompt="), line)
         XCTAssertTrue(line.contains(" draft=text/") && line.contains(" verdict=none ") && line.contains(" last=stop/"), line)
         let second = try XCTUnwrap(ask(at: now - 10))
-        let waiting = SidebarWaitingMessages(count: 2, since: first.timestamp, refusal: .draft, now: now)
-        XCTAssertEqual(waits(at: now)[column.id], waiting)
+        // Its line is written at the check: past midnight, it names the day.
+        @MainActor func waiting(at time: TimeInterval) -> SidebarWaitingMessages {
+            SidebarWaitingMessages(count: 2, since: first.timestamp, refusal: .draft, now: time)
+        }
+        XCTAssertEqual(waits(at: now)[column.id], waiting(at: now))
         XCTAssertEqual(lines.count, 1, "once per message and reason")
 
         // The row says so: the refresh takes a check made just before.
@@ -641,7 +644,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         shell.missionWaits.checkedAt = nil
         shell.updateSidebar(snapshot: snapshot)
         XCTAssertTrue(shell.sidebar.expandedViews.contains {
-            ($0 as? NSTextField)?.stringValue == waiting.line
+            ($0 as? NSTextField)?.stringValue == waiting(at: now).line
         }, "what the check kept, not a check of its own")
         _ = waits(at: now + 30)
         XCTAssertEqual(lines.count, 2, "each message once per reason")
@@ -649,7 +652,8 @@ final class StuckAgentSidebarTests: XCTestCase {
         // What Nirux just typed reads as a draft until it goes in.
         shell.missionWaits.noteTyped(into: column, at: now + 31)
         XCTAssertTrue(waits(at: now + 32).isEmpty)
-        XCTAssertEqual(waits(at: now + 31 + NiruxShellView.typedTextGrace)[column.id], waiting)
+        let pastGrace = now + 31 + NiruxShellView.typedTextGrace
+        XCTAssertEqual(waits(at: pastGrace)[column.id], waiting(at: pastGrace))
         // Codex in front collects its own messages.
         let codex = ProcessSnapshot(entries: [
             ProcessSnapshot.Entry(
