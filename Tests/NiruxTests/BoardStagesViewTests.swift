@@ -101,6 +101,66 @@ final class BoardStagesViewTests: XCTestCase {
 
     // MARK: - Lines
 
+    func testFrozenBoardKeepsTaskAndMergedRowsDrawn() throws {
+        let view = board(content([section(units: [.task(line("Task title"), subtasks: [])], merged: [
+            BoardStages.Merged(lineID: nil, title: "Merged title", number: 7, mergedAt: now)
+        ])], order: .progress))
+        let window = try XCTUnwrap(view.window)
+        let host = BoardStagesFlippedView(frame: view.bounds)
+        host.wantsLayer = true
+        window.contentView = host
+        host.addSubview(view)
+        host.layoutSubtreeIfNeeded()
+        window.display()
+        CATransaction.flush()
+
+        let row = try XCTUnwrap(view.lineViews.first)
+        let merged = try XCTUnwrap(view.mergedView(section: "nirux")?.entries.first)
+        let rail = BoardStagesView.Columns(width: row.bounds.width).rail
+        let areas = [
+            ("task title", host.convert(row.titleLabel.bounds, from: row.titleLabel)),
+            ("stations", host.convert(rail, from: row)),
+            ("Now", host.convert(row.phraseLabel.bounds, from: row.phraseLabel)),
+            ("merged title", host.convert(merged.titleLabel.bounds, from: merged.titleLabel))
+        ]
+        func assertRowsDrawn(in layer: CALayer, _ phase: String) throws {
+            let pixel = try paint(width: Int(host.bounds.width), height: Int(host.bounds.height)) {
+                guard let context = NSGraphicsContext.current?.cgContext else { return }
+                context.translateBy(x: 0, y: host.bounds.height)
+                context.scaleBy(x: 1, y: -1)
+                layer.render(in: context)
+            }
+            for (name, area) in areas {
+                let hasInk = (Int(area.minY)..<Int(area.maxY)).contains { y in
+                    (Int(area.minX)..<Int(area.maxX)).contains { x in
+                        (distance(pixel(CGFloat(x), CGFloat(y)), to: Theme.Color.canvas) ?? 0) > 0.3
+                    }
+                }
+                XCTAssertTrue(hasInk, "\(name) \(phase)")
+            }
+        }
+        let live = try XCTUnwrap(host.layer)
+        try assertRowsDrawn(in: live, "before freezing")
+        let picture = try XCTUnwrap(FrozenView.freeze(host))
+        // A discarded picture can purge mutable contents shared with a live label.
+        func drawingContents(of layer: CALayer) -> Set<ObjectIdentifier> {
+            var contents = Set((layer.sublayers ?? []).flatMap { drawingContents(of: $0) })
+            if let value = layer.contents as AnyObject?, CFGetTypeID(value) != CGImage.typeID {
+                contents.insert(ObjectIdentifier(value))
+            }
+            return contents
+        }
+        let boardLayer = try XCTUnwrap(view.layer)
+        XCTAssertTrue(drawingContents(of: boardLayer).isDisjoint(with: drawingContents(of: picture.content)),
+                      "discarding the picture must leave the Board's backing stores intact")
+        host.addSubview(picture)
+        CATransaction.flush()
+        try assertRowsDrawn(in: try XCTUnwrap(picture.layer), "in the transition")
+        picture.removeFromSuperview()
+        CATransaction.flush()
+        try assertRowsDrawn(in: live, "after the transition")
+    }
+
     func testTheLinesAreDrawnInOrderEachJoinedToItsOwn() throws {
         let view = board(content([section(units: [
             .task(line("task"), subtasks: [line("first"), line("last")]),
