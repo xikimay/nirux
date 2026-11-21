@@ -159,16 +159,20 @@ extension ProjectMemory {
     /// Reads what agents know about the repository holding `folder`: the
     /// brief at `brief`, the team's files of `folder`'s checkout, and the
     /// memory `location` finds. Call it off the main thread.
-    static func knowledge(folder: String, brief: URL?, location: Location) -> Knowledge {
+    static func knowledge(folder: String, brief: URL?, location: Location, followingSymlinks: Bool = true) -> Knowledge {
         let briefFile = brief.flatMap { url in
-            SpaceBrief.readBrief(at: url).map { RuleFile(url: url, label: "Space brief", rules: rules(in: $0)) }
+            SpaceBrief.readBrief(at: url, followingSymlinks: followingSymlinks).map {
+                RuleFile(url: url, label: "Space brief", rules: rules(in: $0))
+            }
         }
         let checkout = URL(fileURLWithPath: AgentSessionRecord.checkoutRoot(containing: folder) ?? folder)
         let teamFiles = teamFileNames.compactMap { name -> RuleFile? in
             let url = checkout.appendingPathComponent(name)
-            return readText(url.path).map { RuleFile(url: url, label: name, rules: rules(in: $0, blockCommentsOnly: true)) }
+            return readText(url.path, followingSymlinks: followingSymlinks).map {
+                RuleFile(url: url, label: name, rules: rules(in: $0, blockCommentsOnly: true))
+            }
         }
-        return Knowledge(brief: briefFile, teamFiles: teamFiles, memory: read(directory: location.directory))
+        return Knowledge(brief: briefFile, teamFiles: teamFiles, memory: read(directory: location.directory, followingSymlinks: followingSymlinks))
     }
 
     // MARK: - The panel's list

@@ -105,16 +105,17 @@ extension ProjectMemory {
     /// Where Claude Code, launched in `folder`, keeps its memory. Reads a
     /// few small files: call it off the main thread.
     static func locate(
-        folder: String, home: String, environment: [String: String], managed: ManagedFolders = .system
+        folder: String, home: String, environment: [String: String], managed: ManagedFolders = .system,
+        followingSymlinks: Bool = true
     ) -> Location {
         let launchFolder = (folder.realPath ?? normalized(folder)).precomposedStringWithCanonicalMapping
-        let projectRoot = canonicalRoot(of: launchFolder) ?? launchFolder
+        let projectRoot = canonicalRoot(of: launchFolder, followingSymlinks: followingSymlinks) ?? launchFolder
         let configDirectory = configDirectory(home: home, environment: environment)
         let settings = settingsSources(
             launchFolder: launchFolder, projectRoot: projectRoot, configDirectory: configDirectory, home: home, managed: managed
         ).map { source in
             (source, source.files.reduce(into: [String: Any]()) { merged, file in
-                merged.merge(readSettings(file)) { $1 }
+                merged.merge(readSettings(file, followingSymlinks: followingSymlinks)) { $1 }
             })
         }
 
@@ -232,8 +233,8 @@ extension ProjectMemory {
     private static func isTruthy(_ value: String?) -> Bool { value.flatMap(truth) == true }
 
     /// A settings file's keys: JSON, or a property list for MDM.
-    private static func readSettings(_ url: URL) -> [String: Any] {
-        guard let data = ProjectMemory.readData(url.path, limit: 4_000_000) else { return [:] }
+    private static func readSettings(_ url: URL, followingSymlinks: Bool) -> [String: Any] {
+        guard let data = ProjectMemory.readData(url.path, limit: 4_000_000, followingSymlinks: followingSymlinks) else { return [:] }
         let object = url.pathExtension == "plist"
             ? try? PropertyListSerialization.propertyList(from: data, format: nil)
             : try? JSONSerialization.jsonObject(with: data)
@@ -246,7 +247,7 @@ extension ProjectMemory {
     /// reads it: the nearest folder with a `.git`; for a linked worktree,
     /// the checkout its `commondir` belongs to, once the worktree's git
     /// folder points back at it. Nil outside a repository.
-    static func canonicalRoot(of folder: String) -> String? {
+    static func canonicalRoot(of folder: String, followingSymlinks: Bool = true) -> String? {
         let manager = FileManager.default
         var root = folder
         while !manager.fileExists(atPath: (root as NSString).appendingPathComponent(".git")) {
@@ -254,19 +255,22 @@ extension ProjectMemory {
             guard parent != root, !parent.isEmpty else { return nil }
             root = parent
         }
-        return (mainCheckout(ofWorktree: root) ?? root).precomposedStringWithCanonicalMapping
+        return (mainCheckout(ofWorktree: root, followingSymlinks: followingSymlinks) ?? root).precomposedStringWithCanonicalMapping
     }
 
-    private static func mainCheckout(ofWorktree root: String) -> String? {
+    private static func mainCheckout(ofWorktree root: String, followingSymlinks: Bool) -> String? {
         let dotGit = (root as NSString).appendingPathComponent(".git")
-        guard let text = ProjectMemory.readText(dotGit, limit: 64 * 1024),
+        guard let text = ProjectMemory.readText(dotGit, limit: 64 * 1024, followingSymlinks: followingSymlinks),
               let line = text.split(whereSeparator: \.isNewline).first(where: { $0.hasPrefix("gitdir:") })
         else { return nil }
         let gitDirectory = resolve(line.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespaces), from: root)
-        guard let common = ProjectMemory.readText((gitDirectory as NSString).appendingPathComponent("commondir"), limit: 64 * 1024)
+        func gitText(_ file: String) -> String? {
+            ProjectMemory.readText((gitDirectory as NSString).appendingPathComponent(file), limit: 64 * 1024, followingSymlinks: followingSymlinks)
+        }
+        guard let common = gitText("commondir")
                 .map({ resolve($0.trimmingCharacters(in: .whitespacesAndNewlines), from: gitDirectory) }),
               (gitDirectory as NSString).deletingLastPathComponent == (common as NSString).appendingPathComponent("worktrees"),
-              let back = ProjectMemory.readText((gitDirectory as NSString).appendingPathComponent("gitdir"), limit: 64 * 1024)
+              let back = gitText("gitdir")
         else { return nil }
         // Compared resolved, as Claude Code does: git writes the path as it
         // was typed, in any case.

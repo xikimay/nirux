@@ -154,14 +154,10 @@ enum SpaceBrief {
     }
 
     /// Nil unless a regular file of at most `maxFileBytes` (a FIFO would block).
-    static func readBrief(at url: URL) -> String? {
-        // attributesOfItem doesn't follow a symlinked brief.md; resolve it.
-        let url = url.resolvingSymlinksInPath()
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              attributes[.type] as? FileAttributeType == .typeRegular,
-              let size = attributes[.size] as? Int, size <= maxFileBytes
-        else { return nil }
-        return try? String(contentsOf: url, encoding: .utf8)
+    static func readBrief(at url: URL, followingSymlinks: Bool = true) -> String? {
+        guard let data = ProjectMemory.readData(url.path, limit: maxFileBytes + 1, followingSymlinks: followingSymlinks),
+              data.count <= maxFileBytes else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     /// `<state dir>/projects/<space id>/`, where a space keeps its brief and
