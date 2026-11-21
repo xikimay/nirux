@@ -6,10 +6,12 @@ final class SidebarTaskPreview {
     private(set) var pending: DispatchWorkItem?
     private(set) var workspaceID: String?
     private(set) var card: TaskPreviewCard?
+    private(set) var pinnedBody: TaskThreadContentView?
 
     init(sidebar: SidebarView) { self.sidebar = sidebar }
 
     func enter(_ id: String) {
+        guard pinnedBody == nil else { return }
         if workspaceID == id {
             if card != nil { cancelPending() }
             return
@@ -20,7 +22,7 @@ final class SidebarTaskPreview {
     }
 
     func leave(_ id: String) {
-        guard workspaceID == id else { return }
+        guard pinnedBody == nil, workspaceID == id else { return }
         guard card != nil else { dismiss(); return }
         guard pending == nil else { return }
         schedule(after: 0.25) { preview in
@@ -45,15 +47,39 @@ final class SidebarTaskPreview {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
+    func pin(workspaceID id: String, card: TaskPreviewCard) {
+        guard self.card === card, workspaceID == id, card.window != nil, pinnedBody == nil else { return }
+        cancelPending()
+        let body = TaskThreadContentView()
+        body.onDismiss = { [weak self, weak card] in
+            guard let self, let card, self.card === card else { return }
+            dismiss()
+        }
+        pinnedBody = body
+        card.onOpen = body.onDismiss
+        refresh()
+    }
+
+    func dismissHover() {
+        if pinnedBody == nil { dismiss() }
+    }
+
     func dismiss() {
         cancelPending()
         workspaceID = nil
+        pinnedBody = nil
         card?.removeFromSuperview()
         card = nil
     }
 
     func refresh() {
-        if card != nil { present() }
+        guard let card else { return }
+        guard let body = pinnedBody else { return present() }
+        guard let sidebar, let id = workspaceID, let host = card.superview,
+              let info = sidebar.lastInfos.first(where: { $0.id == id }) else { return dismiss() }
+        let x = host.convert(sidebar.bounds, from: sidebar).maxX + 2
+        let row = sidebar.rowFrame(workspaceID: id).map { host.convert($0, from: sidebar) } ?? card.frame
+        card.showPinned(info, body: body, in: host.bounds, leading: x, top: host.isFlipped ? row.minY : row.maxY)
     }
 
     private func present() {
@@ -130,6 +156,11 @@ final class TaskPreviewCard: NSView {
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
     func show(_ info: WorkspaceInfo, opensThread: Bool, width: CGFloat) {
+        let header = layoutHeader(info, buttonTitle: opensThread ? "Open task thread" : "Open task", width: width)
+        setFrameSize(NSSize(width: width, height: header + Theme.Space.md))
+    }
+
+    private func layoutHeader(_ info: WorkspaceInfo, buttonTitle: String, width: CGFloat) -> CGFloat {
         let row = info.rowSummary.status
         title.stringValue = info.title
         goal.stringValue = WorkspaceInfo.oneRunOfWords(info.purpose) ?? ""
@@ -146,10 +177,22 @@ final class TaskPreviewCard: NSView {
             field.frame = NSRect(x: Theme.Space.md, y: y, width: inner, height: height)
             y += height + Theme.Space.xs
         }
-        open.title = opensThread ? "Open task thread" : "Open task"
+        open.title = buttonTitle
         open.sizeToFit()
         open.setFrameOrigin(NSPoint(x: Theme.Space.md, y: y))
-        setFrameSize(NSSize(width: width, height: open.frame.maxY + Theme.Space.md))
+        return open.frame.maxY
+    }
+
+    func showPinned(_ info: WorkspaceInfo, body: TaskThreadContentView, in bounds: NSRect, leading: CGFloat, top: CGFloat) {
+        let width = min(372, bounds.width)
+        let height = min(560, bounds.height)
+        let bodyTop = layoutHeader(info, buttonTitle: "Close thread", width: width) + Theme.Space.sm
+        body.frame = NSRect(x: 0, y: bodyTop, width: width, height: max(0, height - bodyTop))
+        if body.superview !== self { addSubview(body) }
+        let x = min(leading, bounds.maxX - width)
+        let y = superview?.isFlipped == true ? top : top - height
+        frame = NSRect(x: max(bounds.minX, x), y: max(bounds.minY, min(y, bounds.maxY - height)), width: width, height: height)
+        setAccessibilityLabel("Pinned thread for " + info.title)
     }
 
     @objc private func openTask() { onOpen?() }

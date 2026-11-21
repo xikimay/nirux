@@ -76,6 +76,65 @@ final class TaskThreadContentTests: XCTestCase {
         }
     }
 
+    func testRowAndRailPinTheirOwnThreadThroughRefreshUntilEscape() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let sidebar = shell.sidebar
+            let space = shell.activeProfileID
+            let tasks = [UUID().uuidString, UUID().uuidString]
+            for (index, id) in tasks.enumerated() {
+                shell.addWorkspace(title: "Thread task", cwd: harness.worktree, workspaceID: id, activate: false)
+                TaskThread.Store.append([.init(time: 1, kind: .request, text: "Request for task \(index)")],
+                                        workspaceID: id, spaceID: space, stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
+            }
+            shell.updateSidebar()
+            for (index, id) in tasks.enumerated() {
+                let expanded = index == 0
+                if shell.isSidebarExpanded != expanded { shell.toggleSidebar() }
+                harness.waitUntil("the requested sidebar layout") { sidebar.isExpanded == expanded }
+                harness.window.contentView?.layoutSubtreeIfNeeded()
+                if expanded {
+                    let frame = try XCTUnwrap(sidebar.rowFrame(workspaceID: id))
+                    let point = sidebar.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
+                    let event = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [],
+                        timestamp: 0, windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+                    sidebar.mouseMoved(with: event)
+                } else {
+                    try XCTUnwrap(sidebar.iconRail.itemViews[id]).mouseEntered(with: NSEvent())
+                }
+                harness.waitUntil("the preview for the hovered task") { sidebar.taskPreview.workspaceID == id && sidebar.taskPreview.card != nil }
+                let preview = try XCTUnwrap(sidebar.taskPreview.card)
+                let open = try XCTUnwrap(preview.subviews.compactMap { $0 as? NSButton }.first { $0.title == "Open task thread" })
+                preview.mouseExited(with: NSEvent())
+                XCTAssertNotNil(sidebar.taskPreview.pending)
+                open.performClick(nil)
+                XCTAssertNil(sidebar.taskPreview.pending)
+                let body = try XCTUnwrap(preview.subviews.compactMap { $0 as? TaskThreadContentView }.first)
+                harness.waitUntil("the pinned workspace's recorded request") {
+                    self.labels(body).contains { $0.contains("Request for task \(index)") }
+                }
+                preview.mouseExited(with: NSEvent())
+                sidebar.taskPreview.enter(tasks[1 - index])
+                XCTAssertNil(sidebar.taskPreview.pending)
+                TaskThread.Store.append([.init(time: 2, kind: .status, text: "Updated task \(index)")], workspaceID: id,
+                                        spaceID: space, stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
+                sidebar.rebuildContent()
+                shell.updateSidebar()
+                harness.waitUntil("the same card shows the new entry") {
+                    self.labels(body).contains { $0.contains("Updated task \(index)") }
+                }
+                XCTAssertTrue(sidebar.taskPreview.card === preview)
+                XCTAssertEqual(sidebar.taskPreview.workspaceID, id)
+                XCTAssertTrue(preview.window === harness.window)
+                XCTAssertTrue(body.isDescendant(of: preview))
+                XCTAssertTrue(self.labels(body).contains { $0.contains("Request for task \(index)") })
+                harness.press(.escape, in: harness.window)
+                harness.waitUntil("Escape closes the pinned card") { preview.superview == nil }
+                XCTAssertNil(sidebar.taskPreview.pinnedBody)
+            }
+        }
+    }
+
     func testContentReadsOnlyTheSelectedSpacesFrozenThread() throws {
         try UIFlowHarness.run { harness in
             let space = harness.shell.activeProfileID

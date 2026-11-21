@@ -1,19 +1,19 @@
 import Foundation
 
 extension TaskThread {
-    struct Timeline: Sendable {
+    struct Timeline: Equatable, Sendable {
         enum Stage: String, CaseIterable, Sendable {
             case request = "Request", plan = "Plan", code = "Code", review = "Review", checks = "Checks", merged = "Merged"
         }
 
-        struct Line: Sendable {
+        struct Line: Equatable, Sendable {
             var label: String
             var text: String
             var time: TimeInterval?
             var needsUser = false
         }
 
-        struct Section: Sendable {
+        struct Section: Equatable, Sendable {
             let stage: Stage
             let entries: [Line]
         }

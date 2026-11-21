@@ -358,6 +358,11 @@ final class NiruxShellView: NSView {
         wireWorkspace(workspace)
         workspaces.append(workspace)
         verticalStrip.addSubview(workspace.containerView)
+        sidebar.onOpenTaskThread = { [weak self] id, card in
+            guard let self else { return }
+            sidebar.taskPreview.pin(workspaceID: id, card: card)
+            refreshPinnedTaskThread()
+        }
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
         sidebar.worktreeCleanupOffer = { [weak self] index in self?.worktreeCleanupOffer(workspaceIndex: index) }

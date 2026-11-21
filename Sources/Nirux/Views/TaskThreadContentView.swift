@@ -17,11 +17,15 @@ final class TaskThreadContentView: NSView, NSOutlineViewDataSource, NSOutlineVie
         }
     }
 
+    var onDismiss: (() -> Void)?
+    private var escapeMonitor: Any?
     let outline = NSOutlineView()
     private var items: [Item] = []
     private var workspaceID: String?
     private var spaceID: String?
-    private var request = UUID()
+    private var request: UUID?
+    private var displayed: TaskThread.Timeline?
+    var isReading: Bool { request != nil }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -48,6 +52,20 @@ final class TaskThreadContentView: NSView, NSOutlineViewDataSource, NSOutlineVie
 
     required init?(coder: NSCoder) { nil }
 
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+        escapeMonitor = nil
+        if let newWindow {
+            escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak newWindow] event in
+                guard let newWindow, event.window === newWindow, RequestPanel.isEscape(event),
+                      let dismiss = self?.onDismiss else { return event }
+                dismiss()
+                return nil
+            }
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
     func show(workspaceID: String, spaceID: String, read: Read) {
         let token = UUID()
         request = token
@@ -55,11 +73,15 @@ final class TaskThreadContentView: NSView, NSOutlineViewDataSource, NSOutlineVie
         self.workspaceID = workspaceID
         self.spaceID = spaceID
         if changed {
+            displayed = nil
             replace(with: [message("Loading thread…")])
             outline.scroll(.zero)
         }
         read(workspaceID, spaceID) { [weak self] timeline in
             guard let self, request == token else { return }
+            request = nil
+            if let timeline, timeline == displayed { return }
+            displayed = timeline
             guard let timeline else { return replace(with: [message("Thread unavailable")]) }
             let expanded = items.compactMap { outline.isItemExpanded($0) ? $0.section : nil }
             let sections = timeline.sections.map { section in
@@ -142,6 +164,12 @@ private final class ThreadLineCell: NSTableCellView {
 }
 
 extension NiruxShellView {
+    func refreshPinnedTaskThread() {
+        guard let body = sidebar.taskPreview.pinnedBody, !body.isReading,
+              let id = sidebar.taskPreview.workspaceID else { return }
+        body.show(workspaceID: id, spaceID: activeProfileID, read: readThreadTimeline)
+    }
+
     func readThreadTimeline(workspaceID: String, spaceID: String, completion: @escaping @MainActor (TaskThread.Timeline?) -> Void) {
         readTaskThread(workspaceID: workspaceID, spaceID: spaceID, render: TaskThread.Timeline.init, completion: completion)
     }
