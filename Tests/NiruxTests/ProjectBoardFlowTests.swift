@@ -564,10 +564,10 @@ final class ProjectBoardFlowTests: BoardRepositoryTestCase {
             shell.addWorkspace(title: "tools task", cwd: root, profileID: third.id)
             let toolsTask = try XCTUnwrap(shell.workspaces.first { $0.title == "tools task" })
             try select("widgets", in: shell)
-            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.keys) }, [widgets.workspace.id])
+            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.tasks.keys) }, [widgets.workspace.id])
             shell.moveWorkspaceToSpace(workspaceID: widgets.workspace.id, profileID: third.id)
             XCTAssertEqual(widgets.board.projectID, third.id)
-            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.keys) }, [toolsTask.id, widgets.workspace.id])
+            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.tasks.keys) }, [toolsTask.id, widgets.workspace.id])
             XCTAssertEqual(widgets.board.view.stages.content?.header.name, "Tools")
             XCTAssertEqual(widgets.board.view.header.titleToolTip, "Board · Tools")
 
@@ -939,7 +939,7 @@ final class ProjectBoardFlowTests: BoardRepositoryTestCase {
 
             // The Lead, in the space's header: its workspace.
             try select("login", in: shell)
-            XCTAssertEqual(board.view.stages.content?.header.lead?.text, "Lead · No activity yet")
+            XCTAssertEqual(board.view.stages.content?.header.lead?.text, "Lead · No identifiable session")
             try BoardStagesClicks.click(board.view.stages.leadButton)
             XCTAssertEqual(shell.activeWorkspace?.title, "Lead")
 
