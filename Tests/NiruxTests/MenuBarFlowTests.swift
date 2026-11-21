@@ -354,7 +354,8 @@ extension MenuBarFlowTests {
 /// a nil-target item goes to the app once it validates, a closure item to
 /// its own target.
 @MainActor
-private struct MenuBar {
+/// The main menu as NiruxApp builds it, run item by item.
+struct MenuBar {
     let app: NiruxApp
     let menu: NSMenu
 

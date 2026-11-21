@@ -28,16 +28,7 @@ extension NiruxShellView {
     ) -> Bool {
         guard workspace.columns.contains(where: { $0 === column }),
               let deferred = column.takeDeferredAgent() else { return false }
-        // Its folder may be gone since the restore (a removed worktree): the
-        // workspace's then, as at restore. Its environment is the one a new
-        // terminal gets now: the workspace may have moved to another space,
-        // Settings may have changed.
-        if let agentUUID = column.agentUUID {
-            column.setLaunch(
-                directory: column.launchDirectory.flatMap(Self.existingDirectory) ?? workspace.cwd,
-                environment: workspace.terminalEnvironment(agentUUID: agentUUID)
-            )
-        }
+        refreshLaunch(of: column, in: workspace)
         let command = resumeLaunchCommand(
             deferred.launch.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)), in: workspace, column: column,
             settingsFiles: settingsFiles
@@ -45,6 +36,16 @@ extension NiruxShellView {
         sideEffects.startRestoredAgent(column, command)
         scheduleMetadataRefresh()
         return true
+    }
+
+    /// Use the space's current environment for a resume or restart. If the
+    /// column's directory has disappeared, launch in the workspace directory.
+    func refreshLaunch(of column: ColumnState, in workspace: WorkspaceState) {
+        guard let agentUUID = column.agentUUID else { return }
+        column.setLaunch(
+            directory: column.launchDirectory.flatMap(Self.existingDirectory) ?? workspace.cwd,
+            environment: workspace.terminalEnvironment(agentUUID: agentUUID)
+        )
     }
 
     /// How long a column stays on screen before its agent resumes on its

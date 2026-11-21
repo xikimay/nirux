@@ -635,7 +635,8 @@ extension NiruxShellView {
                   let column = workspace.columns.first(where: { $0.agentUUID == notice.agentUUID })
             else { return false }
             guard let pty = column.pty else { return true }
-            guard notice.isFor(claudeStartedAt: pty.foregroundProcess(snapshot: snapshot)?.instance.startedAt) else { return false }
+            if let process = pty.foregroundProcess(snapshot: snapshot), process.interactiveAgent == .claude,
+               !notice.isFor(claudeStartedAt: process.instance.startedAt), !workspace.runsRestartedLead(process) { return false }
             let refusal = pty.missionPromptRefusal(runningSince: now, snapshot: snapshot, seenByUser: column.id == seenAtPrompt)
             if column.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
             guard refusal == nil, let paste = TypedPromptSanitizer.bracketedPaste(for: notice.text) else { return true }

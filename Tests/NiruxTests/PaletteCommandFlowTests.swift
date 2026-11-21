@@ -23,6 +23,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex", "Open Antigravity", "Next Waiting Agent"],
             "testSessionHistoryCommand": ["Session History…"],
+            "testRestartLeadCommand": [NiruxShellView.restartLeadTitle],
             "testProjectMemoryCommand": ["Space Memory…"],
             "testResumeAllAgentsCommand": ["Resume All Agents"],
             "testWorkspaceCommands": ["Rename Workspace", "Show/Hide Sidebar", "Show/Hide Archived", "Open Board"],
@@ -44,7 +45,13 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
             let titles = harness.paletteCommandTitles()
             XCTAssertEqual(titles.count, Set(titles).count, "two palette commands share a title: \(titles)")
-            Self.commandCoverage.checkEveryItemIsCovered(offered: titles, testNames: UIFlowCoverage.testNames(of: Self.self))
+            // Restart Lead… is offered only in a space with a Lead.
+            _ = try harness.makeLead()
+            let withLead = harness.paletteCommandTitles()
+            XCTAssertEqual(withLead.count, Set(withLead).count, "two palette commands share a title: \(withLead)")
+            Self.commandCoverage.checkEveryItemIsCovered(
+                offered: Array(Set(titles + withLead)), testNames: UIFlowCoverage.testNames(of: Self.self)
+            )
         }
     }
 
@@ -181,6 +188,17 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.shell.closeActiveColumn()
             harness.waitUntil("the closed column's shell to go") { closedShell == nil }
             XCTAssertTrue(panel.isVisible)
+        }
+    }
+
+    /// Offered in a space with a Lead: it asks first.
+    func testRestartLeadCommand() throws {
+        try UIFlowHarness.run { harness in
+            XCTAssertFalse(harness.paletteCommandTitles().contains(NiruxShellView.restartLeadTitle), "no Lead in General")
+            _ = try harness.makeLead()
+            harness.runPaletteCommand(NiruxShellView.restartLeadTitle)
+            XCTAssertEqual(harness.alerts.last, "Restart the Lead of “Tools”?")
+            XCTAssertEqual(harness.terminalRestarts, [], "cancelled")
         }
     }
 

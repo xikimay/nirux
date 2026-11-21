@@ -52,6 +52,11 @@ final class UIFlowHarness {
     private(set) var agentLaunches: [String] = []
     /// Launch lines of restored agents resuming, in order.
     private(set) var restoredAgentLaunches: [String] = []
+    /// Launch lines of terminals restarted for an agent (Restart Lead), in
+    /// order.
+    private(set) var terminalRestarts: [String] = []
+    /// What a restarted terminal runs in place of the agent's launch line.
+    var restartedAgent = ":"
     /// `messageText` of every app-modal alert, in order.
     private(set) var alerts: [String] = []
     /// `informativeText` of every app-modal alert, in order.
@@ -199,6 +204,11 @@ final class UIFlowHarness {
         }
         shell.sideEffects.startRestoredAgent = { [weak self] _, command in
             self?.restoredAgentLaunches.append(command)
+        }
+        shell.sideEffects.restartTerminal = { [weak self] column, command, starts in
+            guard let self else { return }
+            terminalRestarts.append(command)
+            column.restartTerminal(running: restartedAgent, starts: starts)
         }
         shell.sideEffects.generateTaskNames = { _, _ in nil }
         shell.sideEffects.homeDirectory = { [home] in home }
