@@ -219,7 +219,7 @@ extension MergeQueue {
         if let reason = exclusionReason(pullRequest, settings: settings) { return leftOut(reason) }
         if let error = candidate.error { return leftOut("Couldn’t read it in full: \(error)") }
         let entry = ConfirmedEntry(number: pullRequest.number, head: pullRequest.headOid, branch: pullRequest.headRefName)
-        if let problem = MergeQueueController.problem(with: [entry]) { return leftOut(problem) }
+        if let problem = MergeQueue.ConfirmedEntry.problem(in: [entry]) { return leftOut(problem) }
         if case .some(nil) = candidate.comparison {
             return leftOut("GitHub can’t compare its head \(Engine.short(pullRequest.headOid)) with \(settings.baseBranch).")
         }

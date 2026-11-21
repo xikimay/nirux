@@ -157,14 +157,14 @@ extension NiruxShellView {
     /// there now. The label names the workspace, the agent, the column's
     /// place and folder: a terminal title changes as the agent works.
     func reviewSendColumns(root: String, allWorktrees: [String], snapshot: ProcessSnapshot) -> [ReviewSendColumn] {
-        let roots = [Self.comparablePath(root)]
-        let others = allWorktrees.map(Self.comparablePath)
+        let roots = [root.comparablePath]
+        let others = allWorktrees.map(\.comparablePath)
         var columns: [ReviewSendColumn] = []
         for workspace in workspaces where !workspace.isClosing {
             for (index, column) in workspace.columns.enumerated() where !column.isClosing {
                 guard let pty = column.pty, let agent = pty.runningAgent(snapshot: snapshot),
                       let folder = pty.agentCwd(snapshot: snapshot),
-                      MergeQueue.isInside(Self.comparablePath(folder), roots: roots, allWorktrees: others) else { continue }
+                      MergeQueue.isInside(folder.comparablePath, roots: roots, allWorktrees: others) else { continue }
                 let foreground = pty.foregroundProcess(snapshot: snapshot)
                 let inFront = foreground?.agent != nil
                 let refusal = inFront ? pty.reviewSendRefusal(snapshot: snapshot) : Self.reviewSendRefusal(behind: foreground)

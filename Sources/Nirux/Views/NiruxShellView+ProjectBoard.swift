@@ -355,7 +355,7 @@ extension NiruxShellView {
             // A dialog only: the Merge Queue holds a pull request while its
             // agent waits there, not while it waits for an answer in prose.
             openDialog: activity.codexChoice ?? pty.agentVisibleDialog(foreground: foreground)?.reason,
-            workingFor: pty.agentTurnStartedAt.map { SidebarRenderer.shortDuration(now - $0.timeIntervalSince1970) }
+            workingFor: pty.agentTurnStartedAt.map { (now - $0.timeIntervalSince1970).shortDuration }
         )
         var failedAt: TimeInterval?
         if case .stoppedOnError(_, _, let at, _)? = stuck { failedAt = at }

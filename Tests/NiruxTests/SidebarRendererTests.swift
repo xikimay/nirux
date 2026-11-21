@@ -33,25 +33,25 @@ final class SidebarRendererTests: XCTestCase {
     // MARK: - shortDuration
 
     func testShortDurationSeconds() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(0), "0s")
-        XCTAssertEqual(SidebarRenderer.shortDuration(42), "42s")
-        XCTAssertEqual(SidebarRenderer.shortDuration(59.9), "59s")
+        XCTAssertEqual(TimeInterval(0).shortDuration, "0s")
+        XCTAssertEqual(TimeInterval(42).shortDuration, "42s")
+        XCTAssertEqual(TimeInterval(59.9).shortDuration, "59s")
     }
 
     func testShortDurationMinutes() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(60), "1m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(732), "12m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(3599), "59m")
+        XCTAssertEqual(TimeInterval(60).shortDuration, "1m")
+        XCTAssertEqual(TimeInterval(732).shortDuration, "12m")
+        XCTAssertEqual(TimeInterval(3599).shortDuration, "59m")
     }
 
     func testShortDurationHours() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(3600), "1h00m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(3920), "1h05m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(7384), "2h03m")
+        XCTAssertEqual(TimeInterval(3600).shortDuration, "1h00m")
+        XCTAssertEqual(TimeInterval(3920).shortDuration, "1h05m")
+        XCTAssertEqual(TimeInterval(7384).shortDuration, "2h03m")
     }
 
     func testShortDurationNegativeClampsToZero() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(-5), "0s")
+        XCTAssertEqual(TimeInterval(-5).shortDuration, "0s")
     }
 
     // MARK: - Attention reason

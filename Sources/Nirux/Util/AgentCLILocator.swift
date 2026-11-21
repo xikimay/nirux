@@ -3,7 +3,7 @@ import Foundation
 /// Tells whether `claude`, `codex` and `agy` are installed where a Nirux
 /// terminal would find them, for the first-launch checklist.
 ///
-/// Terminals start the login shell with `PtySession.effectivePath`; its
+/// Terminals start the login shell with `Shell.effectivePath`; its
 /// startup files then add per-user install locations (npm prefixes, Node
 /// version managers, shims). Running those startup files from the app
 /// could have side effects, so the lookup only reads the file system: that
@@ -11,7 +11,7 @@ import Foundation
 /// somewhere else reads as missing; the checklist can still be closed.
 enum AgentCLILocator {
     static func locate(
-        path: String = PtySession.effectivePath,
+        path: String = Shell.effectivePath,
         home: String = NSHomeDirectory(),
         systemDirectories: [String] = systemInstallDirectories
     ) -> AgentCLIAvailability {
