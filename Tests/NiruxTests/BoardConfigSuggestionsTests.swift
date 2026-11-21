@@ -35,10 +35,7 @@ final class BoardConfigSuggestionsTests: XCTestCase {
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let text = String(decoding: data, as: UTF8.self)
+        let text = String(decoding: try process.runToEnd(reading: output), as: UTF8.self)
         guard process.terminationStatus == 0 else {
             throw NSError(domain: "git", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: text])
         }

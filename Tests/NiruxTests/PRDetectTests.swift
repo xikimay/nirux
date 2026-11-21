@@ -657,8 +657,7 @@ private extension PRDetectTests {
         process.currentDirectoryURL = directory
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
+        try process.runToEnd()
         guard process.terminationStatus == 0 else {
             throw NSError(domain: "PRDetectTests.Git", code: Int(process.terminationStatus))
         }

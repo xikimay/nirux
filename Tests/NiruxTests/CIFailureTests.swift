@@ -131,8 +131,7 @@ final class CIFailureTests: XCTestCase {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
             process.arguments = ["-c", "user.name=Nirux Tests", "-c", "user.email=nirux@example.test"] + arguments
             process.currentDirectoryURL = directory
-            try process.run()
-            process.waitUntilExit()
+            try process.runToEnd()
         }
         try git(["init", "-q", "-b", "one"])
         try git(["commit", "-q", "--allow-empty", "-m", "initial"])

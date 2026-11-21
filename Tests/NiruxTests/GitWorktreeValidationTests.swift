@@ -31,8 +31,7 @@ final class GitWorktreeValidationTests: XCTestCase {
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
+        try process.runToEnd()
         guard process.terminationStatus == 0 else {
             throw NSError(domain: "GitWorktreeValidationTests.git", code: Int(process.terminationStatus))
         }
@@ -46,9 +45,7 @@ final class GitWorktreeValidationTests: XCTestCase {
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        let data = try process.runToEnd(reading: output)
         guard process.terminationStatus == 0 else {
             throw NSError(domain: "GitWorktreeValidationTests.gitOutput", code: Int(process.terminationStatus))
         }
