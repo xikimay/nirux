@@ -401,6 +401,7 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertNil(queue.run(world))
         XCTAssertEqual(queue.stopReason?.kind, .checks)
         XCTAssertTrue(queue.stopReason?.message.contains("failed again") == true)
+        XCTAssertEqual(queue.stopReason?.url, "https://github.com/acme/widgets/actions/runs/900")
         XCTAssertEqual(queue.mutations, [.rerun(runID: 900)])
     }
 
