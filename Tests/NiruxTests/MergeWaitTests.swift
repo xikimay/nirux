@@ -4,12 +4,10 @@ import XCTest
 /// A merge wait's steps (docs/design/task-dependencies.md): what each read of
 /// the awaited task's pull request, its closing, and GitHub's answers mean.
 final class MergeWaitTests: XCTestCase {
-    private func wait(branch: String? = "feat/login", repository: String? = "/repo", pullRequest: MergeWait.PullRequest? = nil) -> MergeWait {
+    private func wait(pullRequest: MergeWait.PullRequest? = nil, mergedAt: TimeInterval? = nil) -> MergeWait {
         MergeWait(
-            id: "w", awaited: MergeWait.Awaited(
-                workspaceID: "a", title: "Fix login", branch: branch, repository: repository, pullRequest: pullRequest
-            ),
-            action: .tell(message: "merge origin/main"), createdAt: 0
+            id: "w", awaited: MergeWait.Awaited(workspaceID: "a", title: "Fix login", pullRequest: pullRequest),
+            action: .tell(message: "merge origin/main"), createdAt: 0, mergedAt: mergedAt
         )
     }
 
@@ -18,6 +16,10 @@ final class MergeWaitTests: XCTestCase {
             number: number, state: state, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil,
             url: "https://github.com/o/r/pull/\(number)", additions: nil, deletions: nil, changedFiles: nil
         )
+    }
+
+    private func found(_ number: Int, _ state: String) -> MergeWait.LookedUp {
+        MergeWait.LookedUp(number: number, state: state, url: "https://github.com/o/r/pull/\(number)")
     }
 
     private let recorded = MergeWait.PullRequest(number: 41, url: "https://github.com/o/r/pull/41")
@@ -33,50 +35,66 @@ final class MergeWaitTests: XCTestCase {
         XCTAssertEqual(fresh.awaitedName, "#41", "named by the pull request that merged")
     }
 
-    func testAClosedReadFailsForTheRecordedPullRequestOnly() {
+    func testOnlyTheRecordedPullRequestCounts() {
         var wait = wait(pullRequest: recorded)
         XCTAssertEqual(wait.step(after: .read(pullRequest(41, "CLOSED"))), .fail(.closedUnmerged(number: 41)))
-        var older = self.wait(pullRequest: MergeWait.PullRequest(number: 42, url: "https://github.com/o/r/pull/42"))
-        XCTAssertEqual(older.step(after: .read(pullRequest(41, "CLOSED"))), .lookUp, "#42 may still be open")
+        for state in ["OPEN", "MERGED", "CLOSED"] {
+            var other = self.wait(pullRequest: recorded)
+            XCTAssertEqual(other.step(after: .read(pullRequest(42, state))), .lookUp, "#42 \(state): #41 is asked about")
+            XCTAssertEqual(other.awaited.pullRequest, recorded)
+            XCTAssertEqual(other.step(after: .lookedUp(found(42, state), awaitedGone: true)), .lookUp, "close_task's word on another one")
+        }
         var unrecorded = self.wait()
         XCTAssertEqual(unrecorded.step(after: .read(pullRequest(41, "CLOSED"))), .fail(.closedUnmerged(number: 41)))
     }
 
-    func testAReadWithoutThePullRequestAsksGitHub() {
+    func testAReadWithoutThePullRequestAsksGitHubAboutTheRecordedOne() {
         var recordedWait = wait(pullRequest: recorded)
         XCTAssertEqual(recordedWait.step(after: .read(nil)), .lookUp)
-        XCTAssertEqual(recordedWait.lookUpTarget, MergeWait.LookUpTarget(pullRequest: recorded.url, folder: "/repo"))
-        var branchOnly = wait()
-        XCTAssertEqual(branchOnly.step(after: .read(nil)), .lookUp)
-        XCTAssertEqual(branchOnly.lookUpTarget, MergeWait.LookUpTarget(pullRequest: "feat/login", folder: "/repo"))
-        var nowhere = wait(repository: nil)
-        XCTAssertNil(nowhere.lookUpTarget, "a branch alone, with nowhere to ask")
-        XCTAssertEqual(nowhere.step(after: .read(nil)), .keep)
+        var unrecorded = wait()
+        XCTAssertEqual(unrecorded.step(after: .read(nil)), .keep, "no branch look-up: a reused branch name has old pull requests")
     }
 
     func testTheTaskClosingAsksGitHubOrFails() {
         var recordedWait = wait(pullRequest: recorded)
         XCTAssertEqual(recordedWait.step(after: .gone), .lookUp)
-        var nowhere = wait(branch: nil)
-        XCTAssertEqual(nowhere.step(after: .gone), .fail(.closedFirst(number: nil)))
+        var unrecorded = wait()
+        XCTAssertEqual(unrecorded.step(after: .gone), .fail(.closedFirst(number: nil)))
     }
 
     func testWhatGitHubSays() {
-        func step(_ found: MergeWait.LookedUp?, gone: Bool) -> (MergeWait.Step, MergeWait.PullRequest?) {
+        func step(_ answer: MergeWait.LookedUp?, gone: Bool) -> (MergeWait.Step, MergeWait.PullRequest?) {
             var wait = wait()
-            return (wait.step(after: .lookedUp(found, awaitedGone: gone)), wait.awaited.pullRequest)
+            return (wait.step(after: .lookedUp(answer, awaitedGone: gone)), wait.awaited.pullRequest)
         }
-        let open = MergeWait.LookedUp(number: 41, state: "OPEN", url: recorded.url)
-        XCTAssertEqual(step(MergeWait.LookedUp(number: 41, state: "MERGED", url: recorded.url), gone: true).0, .release)
-        XCTAssertEqual(step(MergeWait.LookedUp(number: 41, state: "CLOSED", url: recorded.url), gone: false).0, .fail(.closedUnmerged(number: 41)))
-        XCTAssertEqual(step(open, gone: false).0, .keep)
-        XCTAssertEqual(step(open, gone: false).1, recorded, "found open: recorded")
-        XCTAssertEqual(step(open, gone: true).0, .fail(.closedFirst(number: 41)))
+        XCTAssertEqual(step(found(41, "MERGED"), gone: true).0, .release)
+        XCTAssertEqual(step(found(41, "CLOSED"), gone: false).0, .fail(.closedUnmerged(number: 41)))
+        XCTAssertEqual(step(found(41, "OPEN"), gone: false).0, .keep)
+        XCTAssertEqual(step(found(41, "OPEN"), gone: false).1, recorded, "found open: recorded")
+        XCTAssertEqual(step(found(41, "OPEN"), gone: true).0, .fail(.closedFirst(number: 41)))
         XCTAssertEqual(step(nil, gone: false).0, .keep)
         XCTAssertEqual(step(nil, gone: true).0, .fail(.closedFirst(number: nil)))
-        var unanswered = wait()
-        XCTAssertEqual(unanswered.step(after: .unanswered("gh: offline", awaitedGone: false)), .keep)
-        XCTAssertEqual(unanswered.step(after: .unanswered("gh: offline", awaitedGone: true)), .fail(.unanswered("gh: offline")))
+    }
+
+    /// GitHub not answering ends a wait only once its task is gone, and
+    /// after a few tries.
+    func testGitHubNotAnswering() {
+        var wait = wait(pullRequest: recorded)
+        let last = MergeWait.maxUnansweredLookUps
+        XCTAssertEqual(wait.step(after: .unanswered("gh: offline", awaitedGone: false, attempt: last)), .keep)
+        XCTAssertEqual(wait.step(after: .unanswered("gh: offline", awaitedGone: true, attempt: last - 1)), .keep)
+        XCTAssertEqual(wait.step(after: .unanswered("gh: offline", awaitedGone: true, attempt: last)), .fail(.unanswered("gh: offline")))
+    }
+
+    /// Merged, the wait is over: what reads say no longer counts, and it is
+    /// tried for a day.
+    func testAMergedWaitTakesNoMoreReadings() {
+        var merged = wait(pullRequest: recorded, mergedAt: 100)
+        XCTAssertEqual(merged.step(after: .read(pullRequest(41, "CLOSED"))), .keep)
+        XCTAssertEqual(merged.step(after: .gone), .keep)
+        XCTAssertFalse(merged.isPastDelivery(at: 100 + MergeWait.deliveryLifetime - 1))
+        XCTAssertTrue(merged.isPastDelivery(at: 100 + MergeWait.deliveryLifetime))
+        XCTAssertFalse(wait().isPastDelivery(at: .greatestFiniteMagnitude))
     }
 
     func testWhyItWontHappen() {
@@ -91,24 +109,23 @@ final class MergeWaitTests: XCTestCase {
     /// Saved with its workspace; one this build can't read is dropped, the
     /// workspace and the other waits kept.
     func testWaitsAreSavedWithTheirWorkspace() throws {
-        let saved = PersistedWorkspace(
-            id: "b", title: "Add a filter", cwd: "/tmp", columns: [], focusedColumnIndex: 0, mergeWaits: [wait(pullRequest: recorded)]
-        )
+        let waits = [wait(pullRequest: recorded), wait(pullRequest: recorded, mergedAt: 100)]
+        let saved = PersistedWorkspace(id: "b", title: "Add a filter", cwd: "/tmp", columns: [], focusedColumnIndex: 0, mergeWaits: waits)
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any])
-        var waits = try XCTUnwrap(json["mergeWaits"] as? [[String: Any]])
-        XCTAssertEqual(waits.count, 1)
-        var later = waits[0]
+        var written = try XCTUnwrap(json["mergeWaits"] as? [[String: Any]])
+        XCTAssertEqual(written.count, 2)
+        var later = written[0]
         later["action"] = ["start": ["description": "a later build's action"]]
-        waits.append(later)
-        json["mergeWaits"] = waits
+        written.append(later)
+        json["mergeWaits"] = written
         let restored = try JSONDecoder().decode(PersistedWorkspace.self, from: JSONSerialization.data(withJSONObject: json))
-        XCTAssertEqual(restored.mergeWaits, [wait(pullRequest: recorded)])
+        XCTAssertEqual(restored.mergeWaits, waits)
         json["mergeWaits"] = "not a list"
         let unreadable = try JSONDecoder().decode(PersistedWorkspace.self, from: JSONSerialization.data(withJSONObject: json))
         XCTAssertNil(unreadable.mergeWaits)
         let none = PersistedWorkspace(id: "c", title: "c", cwd: "/tmp", columns: [], focusedColumnIndex: 0)
-        let written = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(none)) as? [String: Any])
-        XCTAssertNil(written["mergeWaits"], "nothing written without waits")
+        let empty = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(none)) as? [String: Any])
+        XCTAssertNil(empty["mergeWaits"], "nothing written without waits")
     }
 
     func testTheRowSaysWhatItHolds() {
@@ -118,9 +135,30 @@ final class MergeWaitTests: XCTestCase {
         XCTAssertEqual(one?.tooltip, "Typed as the Lead's message once #41 (“Fix login”) merges: “merge origin/main”")
         var other = wait()
         other.awaited = MergeWait.Awaited(workspaceID: "c", title: "Add a filter")
+        let merged = wait(pullRequest: recorded, mergedAt: 100)
         XCTAssertEqual(
-            SidebarHeldMessages([wait(pullRequest: recorded), wait(pullRequest: recorded), other])?.line,
-            "After #41, “Add a filter” merge · 3 messages from the Lead"
+            SidebarHeldMessages([wait(pullRequest: recorded), wait(pullRequest: recorded), other, merged])?.line,
+            "After #41, “Add a filter” merge · 3 messages from the Lead",
+            "those still waiting first"
+        )
+        XCTAssertEqual(SidebarHeldMessages([merged])?.line, "#41 merged · a message from the Lead waits to go")
+    }
+
+    /// A sub-task's row keeps its indent over the line: it asks nothing.
+    @MainActor
+    func testANestedRowKeepsItsIndentOverItsHeldLine() throws {
+        var info = WorkspaceInfo(
+            id: "b", index: 1, title: "Add a filter", profileID: "space", isInactive: false, columnCount: 0, focusedColumn: 0,
+            gitBranch: nil, notification: nil, isActive: false, columns: [], prInfo: nil, diffStats: nil, purpose: nil,
+            nextStep: nil, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
+        )
+        info.parentTitle = "Fix login"
+        let held = try XCTUnwrap(SidebarHeldMessages([wait(pullRequest: recorded)]))
+        info.heldMessages = held
+        XCTAssertEqual(info.cardActions, [.heldMessages(held)])
+        XCTAssertEqual(
+            SidebarCardLayout(workspace: info, sidebarWidth: 260).cardX,
+            SidebarExpandedMetrics.workspaceInsetX + SidebarExpandedMetrics.nestIndent
         )
     }
 }

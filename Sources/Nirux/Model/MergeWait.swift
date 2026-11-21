@@ -2,24 +2,23 @@ import Foundation
 
 /// "Once task A's pull request merges, do this" (docs/design/task-dependencies.md),
 /// kept on the workspace it acts on and saved with it. A's pull request is
-/// followed through its usual reads (`refreshPRInfo`); GitHub is asked once
-/// more whenever they stop showing the one recorded, or A closes.
+/// followed through its usual reads (`refreshPRInfo`); GitHub is asked about
+/// the one recorded whenever reads stop showing it, or A closes.
 struct MergeWait: Codable, Equatable, Sendable {
     let id: String
     var awaited: Awaited
     let action: Action
     let createdAt: TimeInterval
+    /// When its pull request was seen merged, while the message couldn't go
+    /// yet (no Lead, no agent to take it): tried again until
+    /// `deliveryLifetime` after.
+    var mergedAt: TimeInterval?
 
-    /// The task whose pull request must merge, as last seen: what names it,
-    /// and where GitHub is asked, once it is gone.
+    /// The task whose pull request must merge, as last seen.
     struct Awaited: Codable, Equatable, Sendable {
         let workspaceID: String
         var title: String
-        var branch: String?
-        /// A folder of its repository that outlives the task (the space's
-        /// anchor): where gh looks the branch up.
-        var repository: String?
-        /// Its pull request, last read open.
+        /// The pull request read open first, or merged: the one that counts.
         var pullRequest: PullRequest?
     }
 
@@ -33,7 +32,7 @@ struct MergeWait: Codable, Equatable, Sendable {
         case tell(message: String)
     }
 
-    /// A pull request as `gh pr view` gives it.
+    /// A pull request as GitHub gives it.
     struct LookedUp: Equatable, Sendable {
         let number: Int
         let state: String
@@ -45,11 +44,11 @@ struct MergeWait: Codable, Equatable, Sendable {
         case read(PRInfo?)
         /// The awaited task closed.
         case gone
-        /// What GitHub said of the recorded pull request, or the branch's;
-        /// nil: none.
+        /// What GitHub said: of the recorded pull request, or, as the task
+        /// closed, of its branch's; nil: none.
         case lookedUp(LookedUp?, awaitedGone: Bool)
-        /// GitHub didn't answer.
-        case unanswered(String, awaitedGone: Bool)
+        /// GitHub didn't answer, for the `attempt`th time in a row.
+        case unanswered(String, awaitedGone: Bool, attempt: Int)
     }
 
     enum Failure: Equatable, Sendable {
@@ -65,75 +64,67 @@ struct MergeWait: Codable, Equatable, Sendable {
         case fail(Failure)
     }
 
-    /// What a reading means for the wait. The pull request read open or
-    /// merged, or looked up, is recorded.
+    /// What a reading means for the wait. Once a pull request is recorded,
+    /// only it counts: a read of another one sends GitHub to the recorded
+    /// one. A merged wait is over: readings leave it.
     mutating func step(after reading: Reading) -> Step {
+        guard mergedAt == nil else { return .keep }
         switch reading {
         case .read(let info?):
-            switch info.state.uppercased() {
-            case "OPEN":
-                awaited.pullRequest = PullRequest(number: info.number, url: info.url)
-                return .keep
-            case "MERGED":
-                awaited.pullRequest = PullRequest(number: info.number, url: info.url)
-                return .release
-            case "CLOSED" where awaited.pullRequest.map({ $0.url == info.url }) ?? true:
-                return .fail(.closedUnmerged(number: info.number))
-            default:
-                return lookUpTarget == nil ? .keep : .lookUp
-            }
+            if let recorded = awaited.pullRequest, recorded.url != info.url { return .lookUp }
+            return step(found: LookedUp(number: info.number, state: info.state, url: info.url), awaitedGone: false)
         case .read(nil):
-            return lookUpTarget == nil ? .keep : .lookUp
+            return awaited.pullRequest == nil ? .keep : .lookUp
         case .gone:
-            return lookUpTarget == nil ? .fail(.closedFirst(number: nil)) : .lookUp
+            return awaited.pullRequest == nil ? .fail(.closedFirst(number: nil)) : .lookUp
         case .lookedUp(let found?, let awaitedGone):
-            awaited.pullRequest = PullRequest(number: found.number, url: found.url)
-            switch found.state.uppercased() {
-            case "MERGED":
-                return .release
-            case "CLOSED":
-                return .fail(.closedUnmerged(number: found.number))
-            default:
-                return awaitedGone ? .fail(.closedFirst(number: found.number)) : .keep
-            }
+            if let recorded = awaited.pullRequest, recorded.url != found.url { return .lookUp }
+            return step(found: found, awaitedGone: awaitedGone)
         case .lookedUp(nil, let awaitedGone):
             return awaitedGone ? .fail(.closedFirst(number: nil)) : .keep
-        case .unanswered(let reason, let awaitedGone):
-            return awaitedGone ? .fail(.unanswered(reason)) : .keep
+        case .unanswered(let reason, let awaitedGone, let attempt):
+            return awaitedGone && attempt >= Self.maxUnansweredLookUps ? .fail(.unanswered(reason)) : .keep
         }
+    }
+
+    private mutating func step(found: LookedUp, awaitedGone: Bool) -> Step {
+        switch found.state.uppercased() {
+        case "OPEN":
+            awaited.pullRequest = PullRequest(number: found.number, url: found.url)
+            return awaitedGone ? .fail(.closedFirst(number: found.number)) : .keep
+        case "MERGED":
+            awaited.pullRequest = PullRequest(number: found.number, url: found.url)
+            return .release
+        case "CLOSED":
+            return .fail(.closedUnmerged(number: found.number))
+        default:
+            return awaited.pullRequest == nil ? .keep : .lookUp
+        }
+    }
+
+    /// Whether a message whose pull request merged at `mergedAt` is past
+    /// trying at `now`.
+    func isPastDelivery(at now: TimeInterval) -> Bool {
+        mergedAt.map { now - $0 >= Self.deliveryLifetime } ?? false
     }
 
     // MARK: - Looking it up
 
-    /// What `gh pr view` is given, and where it runs.
-    struct LookUpTarget: Equatable, Sendable {
-        /// The pull request's URL, else the branch.
-        let pullRequest: String
-        let folder: String?
-    }
-
-    var lookUpTarget: LookUpTarget? {
-        if let pullRequest = awaited.pullRequest { return LookUpTarget(pullRequest: pullRequest.url, folder: awaited.repository) }
-        guard let branch = awaited.branch, let repository = awaited.repository else { return nil }
-        return LookUpTarget(pullRequest: branch, folder: repository)
-    }
-
-    /// The pull request `target` names, nil when its branch has none, or why
-    /// GitHub couldn't say. Runs gh: call it off the main thread.
-    static func lookUp(_ target: LookUpTarget) -> Result<LookedUp?, LookUpFailure> {
+    /// The pull request at `url`, nil when GitHub has none there, or why it
+    /// couldn't say. Runs gh: call it off the main thread.
+    static func lookUp(_ url: String) -> Result<LookedUp?, LookUpFailure> {
         guard let ghPath = PRDetect.installedGHPath() else {
             return .failure(LookUpFailure(reason: "the GitHub CLI (gh) isn't installed"))
         }
-        let folder = target.folder.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil } ?? NSHomeDirectory()
         guard let result = BoundedProcess.run(
             executableURL: URL(fileURLWithPath: ghPath),
-            arguments: ["pr", "view", target.pullRequest, "--json", "number,state,url"],
-            currentDirectoryURL: URL(fileURLWithPath: folder),
+            arguments: ["pr", "view", url, "--json", "number,state,url"],
+            currentDirectoryURL: URL(fileURLWithPath: NSHomeDirectory()),
             timeout: 30
         ) else { return .failure(LookUpFailure(reason: "gh didn't answer")) }
         let errors = String(decoding: result.standardError, as: UTF8.self)
         if result.terminationStatus != 0 {
-            if errors.lowercased().contains("no pull requests found") { return .success(nil) }
+            if errors.lowercased().contains("could not resolve to a pullrequest") { return .success(nil) }
             let line = errors.split(whereSeparator: \.isNewline).first.map(String.init) ?? "exit \(result.terminationStatus)"
             return .failure(LookUpFailure(reason: "gh: \(line)"))
         }
@@ -171,10 +162,19 @@ struct MergeWait: Codable, Equatable, Sendable {
         }
     }
 
-    /// How much of a held message notices quote.
+    /// How much of a held message a row's tooltip and list_tasks quote.
     static let quotedLength = 200
+    /// How much of it a notice quotes: the Lead may want to send it again.
+    static let noticeQuoteLength = 1_000
 
     /// How often GitHub is asked again while reads keep saying the same
-    /// (no pull request, say, where it has one under another branch name).
+    /// (no pull request, say, where it has one under another branch name),
+    /// and a merged message that couldn't go is tried again.
     static let lookUpInterval: TimeInterval = 600
+    /// Look-ups GitHub may leave unanswered, once the task is gone, before
+    /// the wait gives up.
+    static let maxUnansweredLookUps = 6
+    /// How long a merged message that can't go is tried, as a tell waits
+    /// for a free prompt.
+    static let deliveryLifetime = MissionEventCLI.instructionLifetime
 }

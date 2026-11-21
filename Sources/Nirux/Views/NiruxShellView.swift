@@ -109,7 +109,8 @@ final class NiruxShellView: NSView {
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
     /// Event-driven git/PR refresh scheduling (FSEvents + throttles).
-    let gitRefresh = GitRefreshCoordinator()
+    /// Tests give it a clock of their own.
+    var gitRefresh = GitRefreshCoordinator()
     /// See scheduleMetadataRefresh(): one process-table scan per window.
     var isMetadataRefreshScheduled = false
     /// Restored agents on screen resume after a wait (see
@@ -168,8 +169,12 @@ final class NiruxShellView: NSView {
     var missionWaits = MissionWaitState()
     /// What merge waits looked up (NiruxShellView+MergeWaits).
     var mergeWaitTracking = MergeWaitTracking()
-    /// How a merge wait asks GitHub; tests answer for it.
-    var mergeWaitLookUp: @Sendable (MergeWait.LookUpTarget) -> Result<MergeWait.LookedUp?, MergeWait.LookUpFailure> = MergeWait.lookUp
+    /// How a merge wait asks GitHub about a pull request; tests answer for it.
+    var mergeWaitLookUp: @Sendable (String) -> Result<MergeWait.LookedUp?, MergeWait.LookUpFailure> = MergeWait.lookUp
+    /// How a workspace's pull request is read; tests answer for it.
+    var fetchPullRequest: @MainActor (
+        _ branch: String, _ cwd: String, _ startFolder: String?, _ done: @escaping @MainActor @Sendable (PRDetect.FetchResult) -> Void
+    ) -> Void = { PRDetect.fetchAsync(branch: $0, cwd: $1, startFolder: $2, completion: $3) }
     /// A Lead's tasks waiting to be proposed in the New sheet, one sheet at
     /// a time, and the timer that shows the next once no sheet is up.
     var pendingLeadProposals: [LeadProposal] = []
@@ -466,8 +471,10 @@ final class NiruxShellView: NSView {
                 self.heartbeatTick &+= 1
                 // Git and PR reads are event-driven; the tick only starts
                 // the ones that are due (see GitRefreshPolicy).
+                let now = Date().timeIntervalSince1970
                 self.refreshGitAndPullRequests()
-                self.checkMissionWaits(snapshot: snapshot, now: Date().timeIntervalSince1970)
+                self.sweepMergeWaits(now: now)
+                self.checkMissionWaits(snapshot: snapshot, now: now)
                 self.refreshMetadata(snapshot: snapshot)
                 // Save state every ~10s (every 5th tick)
                 if self.heartbeatTick % 5 == 0 {

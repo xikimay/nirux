@@ -125,7 +125,8 @@ extension NiruxShellView {
             resumeAllDeferredAgents()
         }
         updateSidebar()
-        settleOrphanedMergeWaits()
+        // Those whose task didn't come back ask GitHub.
+        sweepMergeWaits(now: Date().timeIntervalSince1970)
     }
 
     private func restoreSidebarState(_ settings: PersistedSettings?) {

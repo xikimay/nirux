@@ -45,11 +45,14 @@ keeps its id when it starts.
 
 `MergeWait` holds:
 
-- `awaited`: A's workspace id;
-- `pullRequest`: A's PR url and number, recorded at each read that sees it
-  open (A may have none yet);
+- `awaited`: A's workspace id and title;
+- `pullRequest`: A's PR url and number, recorded at the first read that sees
+  one open (A may have none yet), or merged. Once recorded, only that pull
+  request counts: a read of another one (a branch switched in A's worktree, a
+  stacked branch) sends GitHub to the recorded one;
 - `action`: `.tell(message)` or `.start(PendingStart)`;
-- `failure`: the reason and the time, once failed.
+- `mergedAt`: set when the recorded PR is seen merged, while the message
+  can't go yet.
 
 `PendingStart` holds the description, the template (a copy taken when the
 wait is created) and the repository's anchor key. Nirux reads the agent and
@@ -60,9 +63,16 @@ States:
 - **waiting**;
 - **released**: the tell goes to the Mission ledger, or the task starts, and
   the record is removed;
+- **merged, held back**: the merge was seen, but the tell couldn't go: the
+  space has no Lead, or the task has no agent to take it (one restored after
+  a relaunch and not resumed yet, which a one-way tell can't reach). The
+  record stays, marked `mergedAt`, and is tried again every 10 minutes for a
+  day, as a tell waits a day for a free prompt; the Lead hears once that it
+  can't go yet, and again if it is dropped. Readings no longer change it;
 - **failed**.
 
-A failed tell is removed and the Lead gets a notice. That notice lives in
+A failed tell is removed and the Lead gets a notice, quoting the message (up
+to 1,000 characters). That notice lives in
 memory, like the held and given-up notices of tells today; this is a known
 gap. A failed start stays, and its row turns **Needs you** (amber) until the
 Lead or the user acts.
@@ -86,19 +96,26 @@ when it is written.
   local HEAD, which is the case after a merge queue's update-branch or a
   dirty tree. It is one read per change of what the poll sees, not a timer.
 - **A closes:**
-  - by `close_task`: its `WorktreeCleanup` inspection already holds the
-    verdict;
+  - by `close_task`: its `WorktreeCleanup` inspection already holds GitHub's
+    verdict on the branch (merged when its head holds the tip), which counts
+    even when no read ever saw the PR open;
   - by any other close: one read of the recorded url; no PR ever recorded
-    means it fails.
+    means it fails. There is no look-up by branch: a reused branch name has
+    old pull requests, and `gh pr view <branch>` doesn't compare heads.
 - **Cadence:** a workspace that a wait follows is read at the "hot" cadence
-  (120 s in the background instead of 600 s), and still read while archived.
-  Both changes are in `PullRequestRefreshPolicy` and `PRDetect.shouldRefresh`,
-  one predicate.
+  (120 s in the background instead of 600 s), and still read while archived:
+  its git tier is then the background's, so its git state stays current and
+  its reads aren't thrown away. Diff stats, feedback, red checks and the
+  follow-up stay off for an archived one.
+- **Away from Nirux:** the heartbeat stops while Nirux isn't the active app.
+  The 30 s stuck-agent timer that runs then reads the awaited workspaces'
+  git state and pull requests, at the same cadence, and sweeps the waits
+  (`sweepMergeWaits`), so a merge at night releases the message at night.
 - **Asking again:** while reads keep saying the same thing (no pull request,
-  say, for a branch pushed under another name), GitHub is asked again at most
-  every 10 minutes (`MergeWait.lookUpInterval`), and only when a read happens.
-  A look-up GitHub doesn't answer is asked again at the next read. Once A is
-  gone, there is no next read, so the wait fails and says why.
+  say, for a branch pushed under another name), GitHub is asked again once
+  per 10-minute window (`MergeWait.lookUpInterval`), and only when a read
+  happens. Once A is gone, the sweep asks once per window; after 6 look-ups
+  GitHub left unanswered (an hour), the wait fails and says why.
 
 ## 4. Release (start) and failure
 

@@ -323,7 +323,10 @@ extension NiruxShellView {
             }
             for wait in task.mergeWaits {
                 guard case .tell(let message) = wait.action else { continue }
-                line += "\n  held until \(wait.awaitedLongName) merges: your message “\(Self.heldQuote(message))”"
+                line += wait.mergedAt == nil
+                    ? "\n  held until \(wait.awaitedLongName) merges: your message “\(Self.heldQuote(message))”"
+                    : "\n  \(wait.awaitedLongName) merged, but your message “\(Self.heldQuote(message))” couldn't go yet: "
+                        + "Nirux tries again every \(Int(MergeWait.lookUpInterval / 60)) minutes for a day"
             }
             line += taskListStatusLine(task)
             lines.append(line)
@@ -569,7 +572,7 @@ extension NiruxShellView {
         let message = LeadTools.string(arguments, "message") ?? ""
         guard let workspace = spaceTask(name, in: space) else { return answer(noSpaceTask(name, in: space), true) }
         if let after = LeadTools.string(arguments, "after") {
-            return holdTell(message, to: workspace, after: after, in: space, lead: lead, answer: answer)
+            return holdTell(message, to: workspace, after: after, in: space, lead: lead, now: Date().timeIntervalSince1970, answer: answer)
         }
         tellTask(message, to: workspace, lead: lead, answer: answer)
     }

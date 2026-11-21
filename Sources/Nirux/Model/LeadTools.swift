@@ -396,7 +396,7 @@ enum LeadTools {
         case tell, reply:
             let target = tool == tell ? "task" : "question"
             guard string(arguments, target) != nil else { return "\(target) is missing." }
-            if tool == tell, let after = arguments["after"], !(after is NSNull), string(arguments, "after") == nil {
+            if tool == tell, let after = arguments["after"], !(after is NSNull), !(after is String) {
                 return "after must name a task of this space."
             }
             if tool == reply {

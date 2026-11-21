@@ -177,7 +177,7 @@ struct SidebarCardLayout {
         let showsColumns = workspace.isActive && !isCompact && !workspace.isLead
         // A row asking the user (an approval) keeps its full width: the
         // request text is never cut.
-        nestIndent = workspace.isNested && workspace.cardActions.isEmpty ? Metrics.nestIndent : 0
+        nestIndent = workspace.isNested && workspace.cardActions.allSatisfy(\.keepsIndent) ? Metrics.nestIndent : 0
         let rowWidth = sidebarWidth - Metrics.workspaceInsetX - Metrics.cardPaddingX - Metrics.textX - nestIndent
         // Too wide for the line: the diff goes first, then the feedback; the
         // pull request and its checks stay.

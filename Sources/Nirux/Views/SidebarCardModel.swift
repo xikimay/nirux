@@ -311,6 +311,13 @@ enum SidebarCardAction: Hashable {
     /// The Lead's messages held until other tasks' pull requests merge.
     case heldMessages(SidebarHeldMessages)
 
+    /// A nested row keeps its indent over it: it neither asks the user nor
+    /// needs the width.
+    var keepsIndent: Bool {
+        if case .heldMessages = self { return true }
+        return false
+    }
+
     /// Information rather than something to do: no separator above. A
     /// proposed rule waits on nothing: it stays as quiet.
     var isQuiet: Bool {

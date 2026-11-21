@@ -359,7 +359,7 @@ final class GitRefreshTests: XCTestCase {
     }
 
     /// A merge wait follows its task's pull request at the hot cadence,
-    /// archived or not.
+    /// archived or not (its tier is then the background's).
     func testAwaitedPullRequestsAreReadClosely() {
         let harness = CoordinatorHarness()
         let background = WorkspaceState(title: "background", cwd: NSTemporaryDirectory())
@@ -371,7 +371,7 @@ final class GitRefreshTests: XCTestCase {
                 identity: GitIdentity(repositoryRoot: "/repo/\(workspace.title)", head: "abc")
             ))
         }
-        let tiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] = [(background, .background), (archived, .archived)]
+        let tiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] = [(background, .background), (archived, .background)]
         let awaited: Set<String> = [background.id, archived.id]
         XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers).map(\.title), ["background"])
         XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers, awaited: awaited).map(\.title), ["background", "archived"])
