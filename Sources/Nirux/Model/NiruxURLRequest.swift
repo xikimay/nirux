@@ -67,7 +67,8 @@ struct NiruxURLRequest: Equatable, Sendable {
 
     struct NewWorktree: Equatable, Sendable {
         var branch: String
-        /// The workspace's title; nil: the branch.
+        /// The workspace's title, cleaned as rename_task cleans one; nil: the
+        /// branch.
         var title: String?
         var repo: String
         var agent: NiruxApp.WorkspaceAgent?
@@ -113,7 +114,7 @@ struct NiruxURLRequest: Equatable, Sendable {
             else { return nil }
             action = .newWorktree(NewWorktree(
                 branch: branch,
-                title: value("title"),
+                title: value("title").flatMap { AgentText.clean($0, maxLength: LeadTools.maxTitleLength) },
                 repo: repo,
                 agent: agent,
                 handoverPath: value("handover"),

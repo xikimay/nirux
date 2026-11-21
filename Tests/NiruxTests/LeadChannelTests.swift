@@ -159,6 +159,13 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(try names(context(lead: false, inWorkspace: false)), [HistorySearchTool.name])
         // A workspace opened by a link from outside Nirux has no launch id.
         XCTAssertEqual(try names(context(lead: false, launchID: "")), [HistorySearchTool.name])
+        // Both start_task schemas take a title and a branch.
+        for lead in [true, false] {
+            let tools = (try send(list, context: context(lead: lead))["result"] as? [String: Any])?["tools"] as? [[String: Any]]
+            let start = tools?.first { $0["name"] as? String == LeadTools.startTask }
+            let properties = (start?["inputSchema"] as? [String: Any])?["properties"] as? [String: Any]
+            XCTAssertEqual(properties.map { Set($0.keys).isSuperset(of: ["description", "title", "branch"]) }, true, "lead: \(lead)")
+        }
         XCTAssertNotNil(try call(LeadTools.queueMerge, ["prs": [1]], context: context(lead: false))["error"], "the Lead's only")
         XCTAssertNotNil(try call(LeadTools.listTasks, [:], context: context(lead: false, inWorkspace: false))["error"], "unknown outside")
         let allowed = NiruxMCPServer.claudeArguments(executable: "/x/Nirux").first { $0.hasPrefix("--allowedTools=") }
@@ -191,8 +198,9 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertNotNil(problem(["description": "x", "title": longest + "t"]))
         XCTAssertNotNil(problem(["description": "x", "title": " \n "]))
         XCTAssertNotNil(problem(["description": "x", "branch": "feat/a..b"]))
+        XCTAssertNotNil(problem(["description": "x", "branch": "origin/main"]), "it would hide origin's")
         XCTAssertNotNil(problem(["description": "x", "branch": 3]))
-        XCTAssertEqual(LeadTools.naming(["title": " CSV\n export ", "branch": "fix/x"]), NewTask.Naming(title: "CSV export", branch: "fix/x"))
+        XCTAssertEqual(LeadTools.startOptions(["title": " CSV\n export ", "branch": "fix/x"]), NewTask.StartOptions(title: "CSV export", branch: "fix/x"))
     }
 
     /// reply takes a message, or accept: true (a JSON boolean) in its place.

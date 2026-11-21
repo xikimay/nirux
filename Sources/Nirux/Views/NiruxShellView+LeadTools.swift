@@ -71,10 +71,10 @@ extension NiruxShellView {
             repository = repositories.first { $0.key == space.anchors.defaultAnchor?.key } ?? repositories.first
         }
         let templateName = LeadTools.string(arguments, "template")
-        let naming = LeadTools.naming(arguments)
+        let options = LeadTools.startOptions(arguments)
         guard leadStartsTasksWithoutAsking(spaceID: space.id) else {
             return leadProposeTask(
-                description, naming: naming, repository: repository, withoutRepository: asksNoRepository,
+                description, options: options, repository: repository, withoutRepository: asksNoRepository,
                 templateName: templateName, in: space, parent: parent, answer: answer
             )
         }
@@ -93,13 +93,13 @@ extension NiruxShellView {
                 let tasksFolder = self.tasksFolder()
                 folder = .folder(
                     parent: repository?.folder ?? tasksFolder.path,
-                    name: NewTask.suggestedFolderName(description: naming.title ?? description),
+                    name: NewTask.suggestedFolderName(description: options.title ?? description),
                     makesParent: repository == nil && tasksFolder.isDefault
                 )
             }
             // It opens behind what the user is doing.
             self.startAgentTask(
-                description, naming: naming, templateName: templateName, info: info, agent: agent, spaceID: space.id, parent: parent,
+                description, options: options, templateName: templateName, info: info, agent: agent, spaceID: space.id, parent: parent,
                 folder: folder, repository: repository, configure: { $0.startedByLead = true }, answer: answer
             )
         }
@@ -108,12 +108,12 @@ extension NiruxShellView {
     /// What a Lead's start_task and a task's do once the space's templates
     /// and the repository's info are read: the template asked for, then the
     /// task in `folder`, or on a new branch of `repository`: the branch
-    /// `naming` gives, else one made from its title or the description.
+    /// `options` gives, else one made from its title or the description.
     /// `configure` marks the request as the caller's.
     // The request's fields, as start_task gathered them.
     // swiftlint:disable:next function_parameter_count
     func startAgentTask(
-        _ description: String, naming: NewTask.Naming, templateName: String?, info: NewTaskPanel.ProjectInfo,
+        _ description: String, options: NewTask.StartOptions, templateName: String?, info: NewTaskPanel.ProjectInfo,
         agent: NiruxApp.WorkspaceAgent,
         spaceID: String, parent: NewTask.MissionParent, folder: NewTask.Place?, repository: NewTaskPanel.Repository?,
         configure: @escaping @MainActor @Sendable (inout NewTask.Request) -> Void, answer: @escaping LeadAnswer
@@ -128,14 +128,15 @@ extension NiruxShellView {
                 description: description, template: template, agent: agent, projectID: spaceID,
                 place: folder, fetchesFirst: false, reportsTo: parent
             )
-            request.title = naming.title
+            request.title = options.title
             configure(&request)
             return startLeadTask(request, repository: nil, fetchError: nil, answer: answer)
         }
         guard let repository, let target = info.target else {
             return answer("\(repository?.name ?? "This repository") isn’t a git repository Nirux can start a task in.", true)
         }
-        let suggested = naming.branch ?? NewTask.suggestedBranch(description: naming.title ?? description, templateName: template?.name)
+        let suggested = options.branch
+            ?? NewTask.suggestedBranch(description: description, title: options.title, templateName: template?.name)
         guard !suggested.isEmpty else {
             return answer("No branch name comes out of that description: give a title, or a branch.", true)
         }
@@ -145,7 +146,7 @@ extension NiruxShellView {
                 description: description, template: template, agent: agent, projectID: spaceID,
                 place: .worktree(target, branch: branch), fetchesFirst: true, reportsTo: parent
             )
-            request.title = naming.title
+            request.title = options.title
             configure(&request)
             self.startLeadTask(request, repository: repository.name, fetchError: nil, answer: answer)
         }
@@ -225,13 +226,13 @@ extension NiruxShellView {
     // The proposal's fields, as start_task gathered them.
     // swiftlint:disable:next function_parameter_count
     private func leadProposeTask(
-        _ description: String, naming: NewTask.Naming, repository: NewTaskPanel.Repository?, withoutRepository: Bool,
+        _ description: String, options: NewTask.StartOptions, repository: NewTaskPanel.Repository?, withoutRepository: Bool,
         templateName: String?, in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
         let proposal = LeadProposal(
             spaceID: space.id,
             repository: repository.map { .named(key: $0.key) } ?? (withoutRepository ? .noRepository : .spaceDefault),
-            description: description, naming: naming, templateName: templateName, parent: parent
+            description: description, options: options, templateName: templateName, parent: parent
         )
         if pendingLeadProposals.isEmpty, showLeadProposal(proposal) {
             return answer("Proposed to the user in the New sheet (the space’s setting “Starts tasks without asking” is off). "
@@ -254,8 +255,8 @@ extension NiruxShellView {
             else { return false }
             panel.reportsToTaskAgent = proposal.parent
             panel.prefill(
-                description: proposal.sheetDescription, templateName: proposal.templateName, branch: proposal.naming.branch,
-                proposedBy: "“\(task.title)”"
+                description: proposal.sheetDescription, templateName: proposal.templateName, title: proposal.options.title,
+                branch: proposal.sheetBranch, proposedBy: "“\(task.title)”"
             )
             let firstLine = NewTask.workspaceTitle(description: proposal.sheetDescription) ?? proposal.description
             panel.onDeclineProposal = { [weak self] in
@@ -269,7 +270,10 @@ extension NiruxShellView {
               )
         else { return false }
         panel.reportsTo = proposal.parent
-        panel.prefill(description: proposal.sheetDescription, templateName: proposal.templateName, branch: proposal.naming.branch)
+        panel.prefill(
+            description: proposal.sheetDescription, templateName: proposal.templateName, title: proposal.options.title,
+            branch: proposal.sheetBranch
+        )
         return true
     }
 
@@ -917,7 +921,7 @@ struct LeadProposal: Equatable {
     let spaceID: String
     let repository: Repository
     let description: String
-    var naming = NewTask.Naming()
+    var options = NewTask.StartOptions()
     let templateName: String?
     let parent: NewTask.MissionParent
     /// A task's agent proposed it, a sub-task of this task (its
@@ -927,8 +931,16 @@ struct LeadProposal: Equatable {
     /// What the sheet shows: the description under its title, when one was
     /// given (the sheet names a task after its first line).
     var sheetDescription: String {
-        guard let title = naming.title, NewTask.firstLine(of: description) != title else { return description }
+        guard let title = options.title, NewTask.firstLine(of: description) != title else { return description }
         return title + "\n\n" + description
+    }
+
+    /// The branch the sheet shows as typed: the one given, else the one
+    /// start_task would make from the title, so both ways name it alike.
+    var sheetBranch: String? {
+        options.branch ?? options.title
+            .map { NewTask.suggestedBranch(description: description, title: $0, templateName: templateName) }
+            .flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 

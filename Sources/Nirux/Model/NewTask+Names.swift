@@ -16,36 +16,44 @@ extension NewTask {
 
     /// First words that make the branch a `fix/` one, left out of the slug:
     /// `fix/crash-on-launch`, not `fix/fix-crash-on-launch`.
-    static let fixVerbs: Set<String> = ["fix", "fixes", "fixed", "bugfix", "hotfix", "corrige", "corriger"]
+    static let fixVerbs: Set<String> = [
+        "fix", "fixes", "fixed", "bugfix", "hotfix", "corrige", "corriger", "corriges", "corrigez", "repare", "reparer",
+        "repares", "reparez"
+    ]
     /// First words that make it a `fix/` one too, but say what is broken:
     /// they stay in the slug (`fix/crash-on-launch`).
-    static let bugWords: Set<String> = ["bug", "crash", "repair", "regression", "correction", "repare", "reparer", "flaky", "broken"]
+    static let bugWords: Set<String> = ["bug", "crash", "repair", "regression", "correction", "flaky", "broken"]
 
     /// Words no slug keeps, in English and French: articles, pronouns,
-    /// possessives, "is" and "and". Prepositions and negations stay ("crash
-    /// on launch"); "can't" is one word by then (see `slugWords`).
+    /// possessives, elisions, "is" and "and". Prepositions and negations stay
+    /// ("crash on launch"); "can't" is one word by then (see `slugWords`).
     static let slugStopWords: Set<String> = [
         "a", "an", "the", "and", "or", "but", "so", "then", "than", "that", "this", "these", "those", "which", "who",
         "its", "it", "is", "are", "was", "were", "be", "been", "i", "me", "my", "we", "our", "you", "your", "he",
         "she", "they", "them", "their", "le", "la", "les", "l", "un", "une", "des", "de", "du", "d", "au", "aux",
         "et", "ou", "que", "qu", "qui", "ce", "ces", "cet", "cette", "c", "notre", "nos", "votre", "vos", "son",
         "sa", "ses", "leur", "leurs", "mon", "ma", "mes", "y", "je", "j", "tu", "il", "elle", "nous", "vous",
-        "ils", "elles", "se", "s", "si", "est", "sont", "trucs", "truc"
+        "ils", "elles", "se", "s", "n", "m", "t", "si", "est", "sont", "trucs", "truc"
     ]
 
     /// What a line may open with before it says the task: a request to the
-    /// agent ("can you", "je veux que tu"), lowercase, straight apostrophes.
+    /// agent ("can you", "je veux que tu"), lowercase, straight apostrophes,
+    /// a longer one before its start.
     static let requestPhrases = [
         "please", "can you", "could you", "would you", "i want you to", "i'd like you to", "i would like you to",
-        "i need you to", "we need to", "we should", "let's", "lets", "je veux que tu", "je voudrais que tu",
+        "i need you to", "we need to", "we should", "let's", "je veux que tu", "je voudrais que tu",
         "j'aimerais que tu", "je veux qu'on", "j'aimerais qu'on", "tu peux", "tu pourrais", "peux-tu", "pourrais-tu",
-        "est-ce que tu peux", "est-ce qu'on peut", "est-ce qu'on pourrait", "on peut", "il faudrait", "il faut",
-        "merci de", "stp"
+        "est-ce que tu peux", "est-ce qu'on peut", "est-ce qu'on pourrait", "il faudrait qu'on", "il faudrait que",
+        "il faudrait", "il faut qu'on", "il faut que", "il faut", "merci de", "stp"
     ].map { $0.split(separator: " ").map(String.init) }
 
-    /// The title and branch start_task gave; nil ones come from the
-    /// description (the branch from the title, when there is one).
-    struct Naming: Equatable, Sendable {
+    /// Longest part of a first line its name is read from: a pasted log
+    /// line costs nothing more.
+    static let maxNameLineLength = 500
+
+    /// What start_task gave beside its description; nil fields come from
+    /// the description (the branch from the title, when there is one).
+    struct StartOptions: Equatable, Sendable {
         var title: String?
         var branch: String?
     }
@@ -55,57 +63,73 @@ extension NewTask {
         /// The branch the line asks for: a "(branch feat/x)" note, or a
         /// leading `feat/x — …` whose type is one of `branchTypes`.
         var branch: String?
-        /// The type a leading `fix: …` or `fix/x — …` gives.
+        /// The type a leading `fix: …`, `fix(ui): …` or `fix/x — …` gives.
         var type: String?
-        /// The writer's own short name, from a leading `area/name — …` of
-        /// another kind (`daily-pass/forgotten — …`): the slug's words.
+        /// The writer's own short name, from a leading `area/name — …` or
+        /// `short-name — …` of another kind: the slug's words.
         var shortName: String?
         /// The title: what is left once the short name, the branch note, an
-        /// opening request and links (their host stands in) are out.
+        /// opening request and links are out (a link's host stands in, "#657"
+        /// for a GitHub pull request or issue).
         var text: String
     }
 
-    static func nameLine(_ line: String) -> NameLine {
+    static func nameLine(_ fullLine: String) -> NameLine {
+        let line = String(fullLine.prefix(maxNameLineLength))
         var name = NameLine(text: line)
         let note = line.firstMatch(of: #/\s*\(\s*branch:?\s+`?([A-Za-z0-9._-]+/[A-Za-z0-9._/-]+)`?\s*\)/#.ignoresCase())
             ?? line.firstMatch(of: #/\s+[—–-]\s+branch:?\s+`?([A-Za-z0-9._-]+/[A-Za-z0-9._/-]+)`?\s*$/#.ignoresCase())
-        if let note, BoardConfig.isValidBranchName(String(note.1)) {
+        if let note, isTaskBranchName(String(note.1)) {
             name.branch = String(note.1)
             name.text.removeSubrange(note.range)
         }
-        if let lead = name.text.wholeMatch(of: #/([a-z0-9][a-z0-9._-]*)/([a-z0-9][a-z0-9._/-]*)(?:\s+[—–-]|\s*[—–:])\s+(\S.*)/#) {
-            let area = String(lead.1), branch = "\(lead.1)/\(lead.2)"
-            if branchTypes.contains(area) {
-                name.type = area
-                if name.branch == nil, BoardConfig.isValidBranchName(branch) { name.branch = branch }
-            } else {
-                name.shortName = branch
-            }
-            name.text = String(lead.3)
-        } else if let typed = name.text.wholeMatch(of: #/(feat|fix|docs|refactor|chore|test|ci|perf)(?:\([^)]*\))?!?:\s+(\S.*)/#.ignoresCase()) {
+        // A type's own branch may end with a colon; a short name of another
+        // kind needs a dash, and words, not a date, a counter or a file.
+        if let typed = name.text.wholeMatch(of: #/([a-z]+)/([a-z0-9][a-z0-9_/-]*)(?:\s+[—–-]|\s*[—–:])\s+(\S.*)/#),
+           branchTypes.contains(String(typed.1)) {
+            let branch = "\(typed.1)/\(typed.2)"
+            name.type = String(typed.1)
+            if name.branch == nil, isTaskBranchName(branch) { name.branch = branch }
+            name.text = capitalized(String(typed.3))
+        } else if let short = name.text.wholeMatch(of: #/([a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*|-[a-z0-9-]+))\s+[—–-]\s+(\S.*)/#) {
+            name.shortName = String(short.1)
+            name.text = capitalized(String(short.2))
+        } else if let typed = name.text.firstMatch(of: #/^(feat|fix|docs|refactor|chore|test|ci|perf)(?:\([^)]*\))?!?:\s/#.ignoresCase()) {
             name.type = typed.1.lowercased()
-            name.text = String(typed.2)
         }
         name.text = withoutRequest(withLinksAsHosts(name.text))
         return name
     }
 
-    /// The branch a task gets from its description's first line: the one the
-    /// line asks for (see `NameLine`), else `<type>/<slug>`. The slug is the
-    /// line's words in ASCII lowercase, stop words and repeats left out,
-    /// joined by `-`, cut at a word before `maxSlugLength`. The type is the
-    /// line's, else `fix` for a template that speaks of a bug or a fix, else
-    /// the first word's (see `firstWordType`), else `feat`. Empty when the
-    /// line has no letter or digit to use. Always a valid branch name
-    /// otherwise.
-    static func suggestedBranch(description: String, templateName: String?) -> String {
+    /// A branch a line or start_task may ask for: a valid name, and not one
+    /// that reads as origin's (`origin/main` would hide it in every checkout).
+    static func isTaskBranchName(_ name: String) -> Bool {
+        BoardConfig.isValidBranchName(name) && !name.hasPrefix("origin/")
+    }
+
+    /// The branch a task gets: the one its description's first line asks
+    /// for (see `NameLine`), else `<type>/<slug>` of `title`, else of that
+    /// line. The slug is the words in ASCII lowercase, stop words and repeats
+    /// left out, joined by `-`, cut at a word before `maxSlugLength`. The
+    /// type is the line's, else `fix` for a template that speaks of a bug or
+    /// a fix, else the first word's (see `firstWordType`), else `feat`.
+    /// Empty when neither has a letter or digit to use. Always a valid branch
+    /// name otherwise.
+    static func suggestedBranch(description: String, title: String? = nil, templateName: String?) -> String {
         let line = nameLine(firstLine(of: description) ?? "")
         if let branch = line.branch { return branch }
-        var words = slugWords(line.shortName ?? line.text)
-        guard let first = words.first else { return "" }
         let template = templateName?.lowercased() ?? ""
+        let type = line.type ?? (template.contains("bug") || template.contains("fix") ? "fix" : nil)
+        return title.flatMap { branch(of: slugWords($0), type: type) }
+            ?? branch(of: slugWords(line.shortName ?? line.text), type: type) ?? ""
+    }
+
+    /// `<type>/<slug>` of `words` (see `suggestedBranch`); nil without a word.
+    private static func branch(of allWords: [String], type givenType: String?) -> String? {
+        var words = allWords
+        guard let first = words.first else { return nil }
         let firstType = firstWordType(first)
-        let type = line.type ?? (template.contains("bug") || template.contains("fix") ? "fix" : nil) ?? firstType?.type ?? "feat"
+        let type = givenType ?? firstType?.type ?? "feat"
         if words.count > 1, first == type || (firstType?.type == type && firstType?.isDropped == true) {
             words.removeFirst()
         }
@@ -144,18 +168,6 @@ extension NewTask {
     static func titleText(of line: String) -> String {
         let text = nameLine(line).text
         return text.isEmpty ? line.split(whereSeparator: \.isWhitespace).joined(separator: " ") : text
-    }
-
-    /// A workspace opened on an existing branch: the branch's words, past a
-    /// `feat/` that says nothing ("feat/dark-mode" → "Dark mode", "fix/x-y"
-    /// → "Fix x y"). The branch itself when it has no type.
-    static func branchTitle(_ branch: String) -> String {
-        guard let slash = branch.firstIndex(of: "/"), branchTypes.contains(String(branch[..<slash])) else { return branch }
-        let type = branch[..<slash]
-        let words = branch[branch.index(after: slash)...].split { $0 == "-" || $0 == "/" }.joined(separator: " ")
-        guard !words.isEmpty else { return branch }
-        let title = type == "feat" ? words : type + " " + words
-        return title.prefix(1).uppercased() + title.dropFirst()
     }
 
     /// `text` up to `limit` characters, "…" ending a cut one, at a word
@@ -197,12 +209,26 @@ extension NewTask {
         return ascii.split { !($0.isASCII && ($0.isLetter || $0.isNumber)) }.map(String.init)
     }
 
-    /// Links replaced by their host: "youtube.com", not the words of a URL.
+    /// Links replaced by what names them: "#657" for a GitHub pull request
+    /// or issue, else the host ("youtube.com"), not the words of a URL.
     private static func withLinksAsHosts(_ text: String) -> String {
         text.replacing(#/https?://\S+/#.ignoresCase()) { link in
-            let host = URL(string: String(link.output))?.host() ?? ""
+            guard let url = URL(string: String(link.output)), let host = url.host() else { return "" }
+            let parts = url.pathComponents.filter { $0 != "/" }
+            if host.hasSuffix("github.com"), parts.count >= 4, ["pull", "issues"].contains(parts[2]), Int(parts[3]) != nil {
+                return "#" + parts[3]
+            }
             return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
         }
+    }
+
+    /// `text` with its first word capitalized when that word is all
+    /// lowercase letters: "the rows" → "The rows", but "iOS" or "github.com"
+    /// as typed.
+    private static func capitalized(_ text: String) -> String {
+        let word = text.prefix { !$0.isWhitespace }
+        guard !word.isEmpty, word.allSatisfy({ $0.isLowercase || $0 == "-" || $0 == "'" || $0 == "’" }) else { return text }
+        return text.prefix(1).uppercased() + text.dropFirst()
     }
 
     /// Whitespace folded, and an opening request to the agent left out, the
@@ -219,7 +245,7 @@ extension NewTask {
             words.removeFirst(phrase.count)
             removedAny = true
         }
-        if removedAny, let first = words.first { words[0] = first.prefix(1).uppercased() + first.dropFirst() }
-        return words.joined(separator: " ")
+        let text = words.joined(separator: " ")
+        return removedAny ? capitalized(text) : text
     }
 }

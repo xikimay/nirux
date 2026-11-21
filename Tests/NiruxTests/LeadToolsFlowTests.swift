@@ -1112,8 +1112,8 @@ final class LeadToolsFlowTests: XCTestCase {
                 ["feat/deeper", "feat/late", "feat/leads", "feat/loose", "feat/side", "feat/sub", "requested"]
             )
 
-            // The skill's title names the workspace, cleaned as rename_task's.
-            shell.createWorktreeWorkspace(branch: "feat/titled", title: "CSV\n  export", repoRoot: harness.repo, agent: nil, profileID: lead.space)
+            // The skill's title names the workspace.
+            shell.createWorktreeWorkspace(branch: "feat/titled", title: "CSV export", repoRoot: harness.repo, agent: nil, profileID: lead.space)
             harness.waitUntil("the titled workspace") { shell.workspaces.contains { $0.title == "CSV export" } }
         }
     }
@@ -1223,16 +1223,22 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertFalse(sheet.panel?.firstResponder === sheet.descriptionView, "nor do stray keys reach it")
 
             // One sheet at a time: the next waits for this one to close. Its
-            // title heads the description; its branch fills the field.
+            // title heads the description; the branch start_task would make
+            // fills the field.
+            // Started as proposed, it keeps the title whole.
+            let title = "Other: a proposal whose title runs past fifty characters"
             let queued = try call(
-                LeadTools.startTask, ["description": "Another one", "title": "Other", "branch": "fix/other"], lead: lead, in: harness
+                LeadTools.startTask, ["description": "fix: another one", "title": title], lead: lead, in: harness
             )
             XCTAssertFalse(queued.isError)
             XCTAssertTrue(queued.text.hasPrefix("Queued for the user"), queued.text)
             sheet.cancelButton.performClick(nil)
-            harness.waitUntil("the next proposal") { shell.newTaskPanel?.descriptionView.string == "Other\n\nAnother one" }
-            XCTAssertEqual(shell.newTaskPanel?.branchField.stringValue, "fix/other")
-            shell.newTaskPanel?.cancelButton.performClick(nil)
+            harness.waitUntil("the next proposal") { shell.newTaskPanel?.descriptionView.string == title + "\n\nfix: another one" }
+            let next = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertEqual(next.branchField.stringValue, "fix/other-proposal-whose-title-runs")
+            harness.waitUntil("the repository read") { next.startButton.isEnabled }
+            next.startButton.performClick(nil)
+            harness.waitUntil("the proposed task") { shell.workspaces.contains { $0.title == title } }
         }
     }
 

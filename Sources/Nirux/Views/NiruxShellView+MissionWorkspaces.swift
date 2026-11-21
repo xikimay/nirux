@@ -12,8 +12,7 @@ extension NiruxShellView {
     ///
     /// A new branch starts from origin's base branch, fetched first (see
     /// `newWorktreeStart`), unless `startsFromHead` (a stacked branch): then
-    /// from `repoRoot`'s HEAD. `title` names the workspace, cleaned as
-    /// rename_task cleans one; nil: the branch.
+    /// from `repoRoot`'s HEAD. `title` names the workspace; nil: the branch.
     func createWorktreeWorkspace(
         branch: String,
         title: String? = nil,
@@ -117,7 +116,7 @@ extension NiruxShellView {
                         identity: identity, parentWorkspaceID: parentWorkspaceID, startedFromSpaceID: requestedProfileID
                     )
                     self.addWorkspace(
-                        title: title.flatMap { AgentText.clean($0, maxLength: LeadTools.maxTitleLength) } ?? branch,
+                        title: title ?? branch,
                         cwd: path,
                         agent: agent,
                         profileID: decision.spaceID,

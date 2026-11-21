@@ -54,9 +54,13 @@ enum LeadTools {
         ]
     }
 
-    /// start_task's `title` and `branch`, for the Lead's tasks and a task's
-    /// sub-tasks.
-    static var nameProperties: [String: Any] {
+    /// start_task's arguments: `own`, then `title` and `branch`, for the
+    /// Lead's tasks and a task's sub-tasks.
+    static func startTaskProperties(_ own: [String: Any]) -> [String: Any] {
+        own.merging(nameProperties) { first, _ in first }
+    }
+
+    private static var nameProperties: [String: Any] {
         [
             "title": [
                 "type": "string",
@@ -106,11 +110,11 @@ enum LeadTools {
                     start it in that repository. When the user turned "Starts tasks without asking" off, it opens \
                     the New sheet filled in for the user to start instead.
                     """,
-                properties: [
+                properties: startTaskProperties([
                     "description": ["type": "string", "description": "What the task must do, as you would tell the agent."],
                     "repo": ["type": "string", "description": "The repository's name in this space (see list_tasks); its default one when left out. \"\(noRepository)\": a new folder, no repository."],
                     "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."]
-                ].merging(nameProperties) { first, _ in first },
+                ]),
                 required: ["description"]
             ),
             definition(
@@ -390,8 +394,8 @@ enum LeadTools {
     }
 
     /// start_task's `title` and `branch`, checked by `problem` first.
-    static func naming(_ arguments: [String: Any]) -> NewTask.Naming {
-        NewTask.Naming(title: title(arguments), branch: string(arguments, "branch"))
+    static func startOptions(_ arguments: [String: Any]) -> NewTask.StartOptions {
+        NewTask.StartOptions(title: title(arguments), branch: string(arguments, "branch"))
     }
 
     /// `key` is there, and not null.
@@ -416,8 +420,8 @@ enum LeadTools {
             if isGiven(arguments, "title"), title(arguments).map({ $0.count <= maxTitleLength }) != true {
                 return "title must hold 1 to \(maxTitleLength) characters."
             }
-            if isGiven(arguments, "branch"), string(arguments, "branch").map(BoardConfig.isValidBranchName) != true {
-                return "branch must be a valid git branch name, such as fix/stale-labels."
+            if isGiven(arguments, "branch"), string(arguments, "branch").map(NewTask.isTaskBranchName) != true {
+                return "branch must be a valid git branch name of its own, such as fix/stale-labels (not origin/…)."
             }
             return nil
         case listTasks:

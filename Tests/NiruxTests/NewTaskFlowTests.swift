@@ -681,7 +681,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
     /// Existing Branch… lists the selected repository's worktrees, its main
     /// checkout too, then its branches without one, local then origin's. It
     /// goes back to the worktree the active workspace is in, and makes one
-    /// for a branch, titled by its words.
+    /// for a branch.
     func testExistingBranchListsTheRepositorysWorktreesThenBranches() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -714,7 +714,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             harness.type("feat/remote", into: try XCTUnwrap(palette.searchField))
             XCTAssertEqual(palette.filteredActions.first?.title, "feat/remote")
             harness.press(.returnKey, in: palette.panel)
-            harness.waitUntil("the branch's worktree") { shell.workspaces.contains { $0.title == "Remote" } }
+            harness.waitUntil("the branch's worktree") { shell.workspaces.contains { $0.title == "feat/remote" } }
             let opened = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(NiruxShellView.comparablePath(opened.cwd), NiruxShellView.comparablePath(harness.root + "/repo.feat-remote"))
             XCTAssertEqual(

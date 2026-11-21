@@ -60,6 +60,9 @@ final class NiruxURLRequestTests: XCTestCase {
             parentAgentUUID: "A"
         ))
         XCTAssertEqual(request?.startsFromHead, false)
+        // The title as the workspace gets it: cleaned, or none.
+        XCTAssertEqual(worktree("nirux://new-worktree?branch=x&repo=/r&title=CSV%0A%20%20export%E2%80%AE")?.title, "CSV export")
+        XCTAssertNil(worktree("nirux://new-worktree?branch=x&repo=/r&title=%20%20")?.title)
         // A stacked branch asks for the checkout's HEAD.
         XCTAssertEqual(worktree("nirux://new-worktree?branch=x&repo=/r&from=head")?.startsFromHead, true)
         XCTAssertEqual(worktree("nirux://new-worktree?branch=x&repo=/r&from=origin")?.startsFromHead, false)
@@ -420,7 +423,7 @@ final class NiruxURLRequestTests: XCTestCase {
     func testSkillsPassTheLaunchIDAndCreateHandoversWithMktemp() {
         let worktree = NiruxShellView.worktreeSkillContent
         XCTAssertTrue(worktree.contains("launch_query=\"&launch=${NIRUX_LAUNCH_ID}\""))
-        XCTAssertTrue(worktree.contains("${launch_query}${profile_query}${parent_query}\""))
+        XCTAssertTrue(worktree.contains("${launch_query}${profile_query}${parent_query}&title=<url-encoded-title>\""))
         // The parent and its terminal go with every request, for routing
         // and nesting; Nirux decides on a Mission.
         XCTAssertTrue(worktree.contains("parent_query=\"&parentWorkspace=${NIRUX_WORKSPACE_ID}\""))

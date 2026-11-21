@@ -108,15 +108,15 @@ extension NiruxShellView {
         }
         let description = LeadTools.string(arguments, "description") ?? ""
         let templateName = LeadTools.string(arguments, "template")
-        let naming = LeadTools.naming(arguments)
+        let options = LeadTools.startOptions(arguments)
         guard leadStartsTasksWithoutAsking(spaceID: space.id) else {
-            return taskProposeSubtask(description, naming: naming, templateName: templateName, under: caller, parent: parent, answer: answer)
+            return taskProposeSubtask(description, options: options, templateName: templateName, under: caller, parent: parent, answer: answer)
         }
         let folder: NewTask.Place?
         let repository: NewTaskPanel.Repository?
         switch place {
         case .folder(let path):
-            folder = .folder(parent: path, name: NewTask.suggestedFolderName(description: naming.title ?? description), makesParent: false)
+            folder = .folder(parent: path, name: NewTask.suggestedFolderName(description: options.title ?? description), makesParent: false)
             repository = nil
         case .repository(let key):
             folder = nil
@@ -144,7 +144,7 @@ extension NiruxShellView {
             // It lists under the task, reports to its agent with Missions
             // off, and opens behind what the user is doing.
             self.startAgentTask(
-                description, naming: naming, templateName: templateName, info: info, agent: agent, spaceID: space.id, parent: parent,
+                description, options: options, templateName: templateName, info: info, agent: agent, spaceID: space.id, parent: parent,
                 folder: folder, repository: repository, configure: { request in
                     request.parentWorkspaceID = callerID
                     request.reportsToTask = true
@@ -159,11 +159,11 @@ extension NiruxShellView {
     /// proposal waits); the sub-task reports to the agent if the user
     /// starts it as a sub-task, and the agent hears what the user did.
     private func taskProposeSubtask(
-        _ description: String, naming: NewTask.Naming, templateName: String?, under caller: WorkspaceState,
+        _ description: String, options: NewTask.StartOptions, templateName: String?, under caller: WorkspaceState,
         parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
         let proposal = LeadProposal(
-            spaceID: caller.profileID, repository: .spaceDefault, description: description, naming: naming,
+            spaceID: caller.profileID, repository: .spaceDefault, description: description, options: options,
             templateName: templateName, parent: parent, subtaskOf: caller.id
         )
         let followUp = "If they start it under your task, it reports to you; either way, a line tells you what they did."
