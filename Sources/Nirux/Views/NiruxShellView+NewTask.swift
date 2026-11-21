@@ -50,7 +50,9 @@ extension NiruxShellView {
         }
         panel.onStart = { [weak self, weak panel] request in
             guard let self, let panel else { return }
-            self.startTask(request) { [weak self, weak panel] outcome in
+            let settings = PersistedSettings.effective(Persistence.load()?.settings)
+            let names = panel.nameSuggestion(for: request, using: settings.generateTaskNames ? self.sideEffects.generateTaskNames : nil)
+            self.startTask(request, names: names) { [weak self, weak panel] outcome in
                 // Its picture, before it closes: it folds toward the
                 // task's row.
                 if case .opened = outcome, let panel { self?.takeTaskSheetPicture(of: panel) }
@@ -157,13 +159,13 @@ extension NiruxShellView {
 
     /// The space's Lead as a Mission parent: its workspace and the column
     /// its Claude runs in (or will, once a restored one resumes), else its
-    /// first terminal.
+    /// Claude column.
     func leadMissionParent(inSpace spaceID: String) -> NewTask.MissionParent? {
         guard let lead = leadWorkspace(inSpace: spaceID) else { return nil }
         let snapshot = ProcessSnapshot()
         let terminals = lead.columns.filter { !$0.isClosing && $0.agentUUID != nil && ($0.pty != nil || $0.deferredAgent != nil) }
         let claude = terminals.first { $0.runsClaude(snapshot: snapshot) }
-        guard let agentUUID = (claude ?? terminals.first)?.agentUUID else { return nil }
+        guard let agentUUID = (claude ?? lead.leadTerminal ?? terminals.first)?.agentUUID else { return nil }
         return NewTask.MissionParent(workspaceID: lead.id, agentUUID: agentUUID)
     }
 
@@ -222,11 +224,11 @@ extension NiruxShellView {
     /// it comes back to show a failure. `opened` follows `.opened`, once the
     /// workspace is there, with its id and what was made.
     func startTask(
-        _ request: NewTask.Request,
+        _ request: NewTask.Request, names: Task<TaskNameSuggestion?, Never>? = nil,
         completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void,
         opened: (@MainActor (_ workspaceID: String, _ created: CreatedTask) -> Void)? = nil
     ) {
-        createTask(request) { [weak self] result in
+        createTask(request, names: names) { [weak self] named, result in
             guard let self else { return }
             switch result {
             case .failed(let message):
@@ -234,9 +236,8 @@ extension NiruxShellView {
             case .fetchFailed(let message):
                 completion(.fetchFailed(message))
             case .created(let created):
-                // The sheet goes first: the new terminal then takes the focus.
                 completion(.opened)
-                let workspaceID = self.openTaskWorkspace(request, created)
+                let workspaceID = self.openTaskWorkspace(named, created)
                 opened?(workspaceID, created)
             }
         }
@@ -270,7 +271,8 @@ extension NiruxShellView {
         let mission = request.reportsTo.flatMap { parent in
             createMission(
                 parent: parent, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
-                agent: request.agent, branch: created.folderName == nil ? label : title, reportsToTask: request.reportsToTask
+                agent: request.agent, branch: created.folderName == nil ? label : title, reportsToTask: request.reportsToTask,
+                startedByParent: request.startedByLead || request.startedByTaskAgent
             )
         }
         addWorkspace(
@@ -354,9 +356,9 @@ extension NiruxShellView {
     }
 
     enum TaskResult: Sendable {
+        case fetchFailed(String)
         case created(CreatedTask)
         case failed(String)
-        case fetchFailed(String)
     }
 
     /// Off the main thread through nonisolated functions, so the closures
@@ -387,35 +389,45 @@ extension NiruxShellView {
     }
 
     func createTask(_ request: NewTask.Request, completion: @escaping @MainActor @Sendable (TaskResult) -> Void) {
-        let destination = request.target.map { $0.repository + "." + request.name.replacingOccurrences(of: "/", with: "-").lowercased() }
-        if let destination, !taskWorktreesBeingCreated.insert(destination).inserted {
-            return completion(.failed("Another task is creating this worktree. Try again once it opens."))
-        }
-        Self.createTask(request, handoverFilename: HandoverFile.filename(for: request.agent), routesByAnchor: routesByAnchor) { [weak self] result in
-            if let destination { self?.taskWorktreesBeingCreated.remove(destination) }
-            completion(result)
+        createTask(request, names: nil) { _, result in completion(result) }
+    }
+
+    private func createTask(
+        _ request: NewTask.Request, names: Task<TaskNameSuggestion?, Never>?,
+        completion: @escaping @MainActor @Sendable (NewTask.Request, TaskResult) -> Void
+    ) {
+        Task {
+            if request.fetchesFirst, let target = request.target, let remote = target.remoteBranch {
+                let error = await withCheckedContinuation { continuation in
+                    Self.offMain({ GitWorktree.fetch(branch: remote, repoRoot: target.repository) }) {
+                        continuation.resume(returning: $0)
+                    }
+                }
+                if let error { return completion(request, .fetchFailed(error)) }
+            }
+            let named = request.applying(await names?.value)
+            let destination = named.target.map { $0.repository + "." + named.name.replacingOccurrences(of: "/", with: "-").lowercased() }
+            if let destination, !taskWorktreesBeingCreated.insert(destination).inserted {
+                return completion(named, .failed("Another task is creating this worktree. Try again once it opens."))
+            }
+            let routes = routesByAnchor
+            Self.offMain({
+                Self.createTask(named, handoverFilename: HandoverFile.filename(for: named.agent), routesByAnchor: routes)
+            }) { [weak self] result in
+                if let destination { self?.taskWorktreesBeingCreated.remove(destination) }
+                completion(named, result)
+            }
         }
     }
 
     nonisolated private static func createTask(
-        _ request: NewTask.Request,
-        handoverFilename: String,
-        routesByAnchor: Bool,
-        completion: @escaping @MainActor @Sendable (TaskResult) -> Void
-    ) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result: TaskResult
-            switch request.place {
-            case .worktree(let target, let branch):
-                result = makeTaskWorktree(
-                    request, target: target, branch: branch, handoverFilename: handoverFilename, routesByAnchor: routesByAnchor
-                )
-            case .folder(let parent, let name, let makesParent):
-                result = makeTaskFolder(request, parent: parent, name: name, makesParent: makesParent, handoverFilename: handoverFilename)
-            }
-            DispatchQueue.main.async { @MainActor in
-                completion(result)
-            }
+        _ request: NewTask.Request, handoverFilename: String, routesByAnchor: Bool
+    ) -> TaskResult {
+        switch request.place {
+        case .worktree(let target, let branch):
+            makeTaskWorktree(request, target: target, branch: branch, handoverFilename: handoverFilename, routesByAnchor: routesByAnchor)
+        case .folder(let parent, let name, let makesParent):
+            makeTaskFolder(request, parent: parent, name: name, makesParent: makesParent, handoverFilename: handoverFilename)
         }
     }
 
@@ -467,15 +479,8 @@ extension NiruxShellView {
         _ request: NewTask.Request, target: NewTask.Target, branch: String, handoverFilename: String, routesByAnchor: Bool
     ) -> TaskResult {
         let start: NewTask.Start
-        if let remoteBranch = target.remoteBranch, let name = target.remoteBranchName {
-            if request.fetchesFirst {
-                if let error = GitWorktree.fetch(branch: remoteBranch, repoRoot: target.repository) {
-                    return .fetchFailed(error)
-                }
-                start = .fetched(name)
-            } else {
-                start = .lastFetched(name)
-            }
+        if let name = target.remoteBranchName {
+            start = request.fetchesFirst ? .fetched(name) : .lastFetched(name)
         } else {
             start = .checkoutHead(repository: target.repository, branch: target.checkoutBranch)
         }

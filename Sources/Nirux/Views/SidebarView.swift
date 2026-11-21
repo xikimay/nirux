@@ -858,7 +858,8 @@ final class SidebarView: NSView {
         }
         if let columnIndex {
             // The column too, by id: one closing meanwhile shifts the others.
-            let columnID = workspace?.columns.first { $0.index == columnIndex }?.id
+            let columnInfo = workspace?.columns.first { $0.index == columnIndex }
+            let columnID = columnInfo?.id
             let column = { [weak self] () -> (workspace: Int, column: Int)? in
                 guard let self, let workspaceID, let columnID, let index = self.currentIndex(ofWorkspace: workspaceID),
                       let column = self.columnIndexForID?(workspaceID, columnID)
@@ -870,10 +871,12 @@ final class SidebarView: NSView {
                 self?.onColumnClicked?(target.workspace, target.column)
             }
             // Wording and ⌘W match the main menu's Column ▸ Close Column.
-            menu.addClosureItem(title: "Close Column", keyEquivalent: "w") { [weak self] in
+            let close = menu.addClosureItem(title: "Close Column", keyEquivalent: "w") { [weak self] in
                 guard let target = column() else { return }
                 self?.onWorkspaceAction?(.closeColumn(columnIndex: target.column), target.workspace)
-            }.isEnabled = (workspace?.columnCount ?? 0) > 1
+            }
+            close.isEnabled = (workspace?.columnCount ?? 0) > 1 && columnInfo?.isLeadTerminal != true
+            if columnInfo?.isLeadTerminal == true { close.toolTip = NiruxShellView.leadStaysText }
             menu.addItem(.separator())
         }
 
@@ -909,8 +912,12 @@ final class SidebarView: NSView {
         // Apart, so a click aimed at the context doesn't close the workspace.
         menu.addItem(.separator())
         if cleanup == .available { addWorktreeCleanupItem(to: menu, act: act) }
-        menu.addClosureItem(title: "Close Workspace") { act(.close) }
-            .isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
+        if workspace?.isLead == true {
+            menu.addClosureItem(title: Self.turnOffLeadTitle) { act(.turnOffLead) }
+        } else {
+            menu.addClosureItem(title: "Close Workspace") { act(.close) }
+                .isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
+        }
         return menu
     }
 
@@ -921,6 +928,7 @@ final class SidebarView: NSView {
     }
 
     static let newSubtaskTitle = "New Sub-task…"
+    static let turnOffLeadTitle = "Turn Off Lead…"
     static let addRuleTitle = "Add a Rule to the Brief…"
     static let dismissQuestionTitle = "Dismiss Question"
 

@@ -15,6 +15,20 @@ final class NewTaskTests: XCTestCase {
         )
     }
 
+    func testModelTaskNamesRequireTwoShortEnglishLines() {
+        let answer = #"{"title":"Cache expiry","goal":"Refresh stale cache entries"}"#
+        XCTAssertEqual(TaskNameSuggestion.parse(answer, titleLimit: 22), .init(title: "Cache expiry", goal: "Refresh stale cache entries"))
+        XCTAssertNil(TaskNameSuggestion.parse(answer, titleLimit: 8))
+        for invalid in [
+            "I cannot name that task", #"{"title":"Cache expiry"}"#,
+            #"{"title":"Cache expiry","goal":"Refresh every stale cache entry before the next build starts"}"#,
+            #"{"title":"Cache\nexpiry","goal":"Refresh stale entries"}"#,
+            #"{"title":"Mémoire périmée","goal":"Vider les anciennes entrées"}"#
+        ] {
+            XCTAssertNil(TaskNameSuggestion.parse(invalid, titleLimit: 22), invalid)
+        }
+    }
+
     /// Stop words, repeats and an opening request leave the slug; "can't"
     /// keeps its negation, a link its host.
     func testBranchKeepsOnlyTheWordsThatSaySomething() {

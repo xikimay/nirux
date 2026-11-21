@@ -47,7 +47,7 @@ enum NewTask {
         let agent: CodingAgent
         var model: String?
         let projectID: String
-        let place: Place
+        var place: Place
         /// False once the user chose to start without fetching, after a
         /// fetch failed. A folder fetches nothing.
         var fetchesFirst: Bool
