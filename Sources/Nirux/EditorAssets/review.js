@@ -170,6 +170,31 @@
 
   // MARK: Sections
 
+  function receipts(rows) {
+    if (!rows?.length) return null;
+    const section = element("section", "section receipts");
+    section.append(element("h2", "label", "Verification receipts"));
+    let list = section;
+    for (const [index, row] of rows.entries()) {
+      if (index === 3) {
+        list = element("details", "more-receipts");
+        list.append(element("summary", null, P.count(rows.length - index, "more receipt")));
+        section.append(list);
+      }
+      const item = element("div", "receipt");
+      const url = P.safeURL(row.url);
+      const clickable = row.provenance === "CI" && url && /^https:\/\//i.test(url) && P.visible(url) === url && URL.canParse(url);
+      const title = P.visible(row.title);
+      item.append(clickable ? link(title, url) : element("strong", null, title));
+      item.append(element("span", "receipt-meta", [row.status, row.provenance, row.freshness].map(P.visible).join(" · ")));
+      if (row.command && row.command !== row.title) item.append(element("code", null, P.visible(row.command)));
+      if (row.summary) item.append(element("span", null, P.visible(row.summary)));
+      item.append(element("time", "receipt-time", P.visible(row.recordedAt)));
+      list.append(item);
+    }
+    return section;
+  }
+
   function header(page) {
     const { header: info } = page;
     const meta = element("div", "meta");
@@ -1690,7 +1715,7 @@
     const gone = element("div", "section gone-comments");
     gone.hidden = true;
     gone.append(element("div", "label", "Comments on files no longer in the diff"), element("div", "gone-list"));
-    const sections = [header(page), gone, accounts(page), checked(page), risks(page), groups(page)].filter(Boolean);
+    const sections = [header(page), receipts(page.receipts), gone, accounts(page), checked(page), risks(page), groups(page)].filter(Boolean);
     statusElement.classList.remove("shown");
     bannerElement.hidden = true;
     pageElement.replaceChildren(...sections);

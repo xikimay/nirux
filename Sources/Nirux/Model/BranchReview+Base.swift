@@ -133,7 +133,7 @@ extension BranchReview {
         guard let repository = headRepository(branch: branch, root: root, options: options) else {
             return .failure(LookupFailure(message: "\(branch) isn't pushed to GitHub."))
         }
-        let fields = "number,title,body,url,baseRefName,headRefOid,isDraft,headRepository,headRepositoryOwner"
+        let fields = "number,title,body,url,baseRefName,headRefOid,isDraft,headRepository,headRepositoryOwner,statusCheckRollup"
         let arguments = ["pr", "list", "--head", branch, "--state", "open", "--json", fields, "--limit", "100"]
         return gh(arguments, root: root, options: options) { $0 as? [[String: Any]] }
             .map { json in json.compactMap { pullRequest(from: $0, headRepository: repository) }.sorted { $0.number > $1.number } }
@@ -154,8 +154,7 @@ extension BranchReview {
         guard let number = json["number"] as? Int,
               let url = json["url"] as? String,
               let baseRefName = json["baseRefName"] as? String,
-              let headRefOid = (json["headRefOid"] as? String)?.lowercased(),
-              [40, 64].contains(headRefOid.count), headRefOid.allSatisfy(\.isHexDigit),
+              let headRefOid = GitHub.objectID(json["headRefOid"]),
               let owner = (json["headRepositoryOwner"] as? [String: Any])?["login"] as? String,
               let name = (json["headRepository"] as? [String: Any])?["name"] as? String,
               GitHubRepository(repositoryURL: url, owner: owner, name: name) == headRepository
@@ -167,7 +166,11 @@ extension BranchReview {
             url: url,
             baseRefName: baseRefName,
             headRefOid: headRefOid,
-            isDraft: json["isDraft"] as? Bool ?? false
+            isDraft: json["isDraft"] as? Bool ?? false,
+            checkReceipts: ciReceipts(
+                checks: (json["statusCheckRollup"] as? [[String: Any]] ?? []).compactMap(GitHub.check(from:)),
+                head: headRefOid, observedAt: Date()
+            )
         )
     }
 
