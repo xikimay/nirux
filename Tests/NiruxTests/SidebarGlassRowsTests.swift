@@ -104,7 +104,7 @@ final class SidebarGlassRowsTests: XCTestCase {
 
         // With its station: inside the still ring, and under the turning arc.
         var atChecks = running
-        atChecks.boardProgress = SidebarBoardProgress(station: .checks)
+        atChecks.boardProgress = SidebarBoardProgress(station: .checks, number: 39)
         let stillAtChecks = SidebarWorkspaceCardRenderer(workspace: atChecks, sidebarWidth: 260, yOffset: 500, animates: false, now: 5_000)
             .render().views
         XCTAssertEqual(icons(in: stillAtChecks).map(\.icon), [StateIcon(.waiting, stage: 3)])
@@ -114,7 +114,7 @@ final class SidebarGlassRowsTests: XCTestCase {
         // The icon's own ring and pie, where it draws them: the arc on the ring, Code's quarter from 12 to 3 o'clock (the
         // layer's y goes up).
         var atCode = running
-        atCode.boardProgress = SidebarBoardProgress(station: .code)
+        atCode.boardProgress = SidebarBoardProgress(station: .code, number: 39)
         let layers = try XCTUnwrap(views(atCode).first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID }?.layer?.sublayers)
         let unit = size.width / 16
         let arc = try XCTUnwrap((layers.first as? CAShapeLayer)?.path?.boundingBoxOfPath)
