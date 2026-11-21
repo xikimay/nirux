@@ -16,10 +16,7 @@ import Sources/Nirux/Util/TerminalScreenText.swift
 import Sources/Nirux/Util/Theme.swift
 typecheck Sources/Nirux/Model/AgentAttention.swift
 typecheck Sources/Nirux/Model/AgentHookCenter.swift
-typecheck Sources/Nirux/Model/BoardStages+Units.swift
-typecheck Sources/Nirux/Model/BoardStages.swift
 typecheck Sources/Nirux/Model/GitRefreshCoordinator.swift
 typecheck Sources/Nirux/Model/OnboardingChecklistRows.swift
-typecheck Sources/Nirux/Model/QuickSwitch.swift
 typecheck Sources/Nirux/Model/WorkspaceState+ReviewBadges.swift
 typecheck Sources/Nirux/Model/WorkspaceStore.swift

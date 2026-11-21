@@ -229,7 +229,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(sheet.templatePopup.titleOfSelectedItem, "Investigation (no code)")
 
             select("Codex", in: sheet.agentPopup)
-            XCTAssertEqual(sheet.branch, "feat/why-is-the-cache-cold")
+            XCTAssertEqual(sheet.branch, "feat/why-cache-cold")
             // Closed while it starts: the workspace still opens.
             sheet.startButton.performClick(nil)
             sheet.cancelButton.performClick(nil)
@@ -240,7 +240,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(workspace.title, "Why is the cache cold?")
             XCTAssertEqual(workspace.profileID, space.id)
-            let worktree = harness.root + "/repo.feat-why-is-the-cache-cold"
+            let worktree = harness.root + "/repo.feat-why-cache-cold"
             XCTAssertEqual(workspace.cwd.comparablePath, (worktree + "/docs").comparablePath)
             // Where the agent starts, which its prompt names it from.
             let handover = try String(contentsOfFile: worktree + "/docs/.codex-handover.md", encoding: .utf8)
@@ -326,7 +326,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(sheet.repositoryPopup.titleOfSelectedItem, "repo")
             harness.waitUntil("the repository's info") { sheet.info?.target != nil }
             XCTAssertEqual(sheet.info?.target?.repository, harness.repo)
-            XCTAssertEqual(sheet.branch, "feat/wire-the-cache", "the branch, now")
+            XCTAssertEqual(sheet.branch, "feat/wire-cache", "the branch, now")
             XCTAssertTrue(sheet.startButton.isEnabled)
             sheet.startButton.performClick(nil)
             harness.waitUntil("the task's workspace") { shell.workspaces.contains { $0.title == "Wire the cache" } }

@@ -67,7 +67,7 @@ enum QuickSwitchAgentState: Equatable {
     case working
     /// An agent waits on a dialog, since this epoch time (the longest);
     /// `reason` is its row icon's glyph.
-    case waiting(since: TimeInterval, reason: StateIcon.Reason = .question)
+    case waiting(since: TimeInterval, reason: AgentInputReason = .question)
     /// An agent's turn failed, or it exited mid-turn.
     case failed(AgentAttentionReason)
 

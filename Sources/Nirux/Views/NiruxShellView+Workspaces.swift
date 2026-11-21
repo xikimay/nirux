@@ -12,6 +12,7 @@ extension NiruxShellView {
 
     func addWorkspace(
         title: String? = nil,
+        purpose: String? = nil,
         cwd: String? = nil,
         agent: CodingAgent? = nil,
         profileID requestedProfileID: String? = nil,
@@ -65,6 +66,7 @@ extension NiruxShellView {
             initialAgentUUID: initialAgentUUID,
             firstColumn: waitingStart.map { _ in ColumnState(waitingTask: WaitingTaskView()) }
         )
+        workspace.purpose = purpose
         workspace.mergeWaits = waitingStart.map { [$0] } ?? []
         wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace, activate: activate)
@@ -568,6 +570,8 @@ extension NiruxShellView {
             edgeGlowBottom.frame = frames.glowBottom
             columnIndicator.frame = frames.indicator
         }
+        sidebarResizeHandle.isHidden = !isSidebarExpanded
+        sidebarResizeHandle.frame = frames.divider.insetBy(dx: -3, dy: 0)
         statusBar.frame = frames.statusBar
     }
 

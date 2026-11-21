@@ -167,6 +167,28 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
     }
 
+    func testCloseTaskCleansItsMissionFolderAfterSwitchingBranches() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            _ = try harness.stubCleanupTools()
+            let started = try harness.callLeadTool(LeadTools.startTask, ["description": "Cache names"], lead: lead, timeout: 180)
+            XCTAssertFalse(started.isError, started.text)
+            let task = try XCTUnwrap(harness.shell.workspaces.first { $0.title == "Cache names" })
+            XCTAssertNotNil(task.missionID)
+            let original = try UIFlowHarness.git(["branch", "--show-current"], at: task.cwd).trimmingCharacters(in: .whitespacesAndNewlines)
+            try UIFlowHarness.git(["switch", "-c", "fix/cache-labels"], at: task.cwd)
+            try UIFlowHarness.git(["remote", "add", "acme", "https://github.com/acme/widgets.git"], at: harness.repo)
+            try harness.markBranchMerged("fix/cache-labels", in: task.cwd, number: 9)
+
+            let closed = try harness.callLeadTool(LeadTools.closeTask, ["task": task.title], lead: lead, timeout: 180)
+            XCTAssertFalse(closed.isError, closed.text)
+            XCTAssertTrue(closed.text.contains("pull request #9 merged"), closed.text)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: task.cwd))
+            XCTAssertEqual(try UIFlowHarness.git(["branch", "--list", "fix/cache-labels"], at: harness.repo), "")
+            XCTAssertFalse(try UIFlowHarness.git(["branch", "--list", original], at: harness.repo).isEmpty)
+        }
+    }
+
     /// A task without a repository: it closes, and its folder goes to the
     /// Trash once its processes ended, where Put Back restores it; unless
     /// another workspace is open in it, a process outlives the task, or it

@@ -31,25 +31,7 @@ struct StateIcon: Hashable, Sendable {
         case idle
     }
 
-    /// Why an agent waits for the user, drawn in its amber disc.
-    enum Reason: Hashable, Sendable {
-        /// A permission: a command or a tool to allow.
-        case command
-        /// A question: at the end of a turn, in a dialog or a message, or a
-        /// plan to approve.
-        case question
-
-        /// The reason of an attention signal that waits for the user; nil
-        /// for one that doesn't (a finished turn, an error).
-        init?(_ attention: AgentAttentionReason?) {
-            switch attention {
-            case .permission(let tool, _)?: self = tool == "ExitPlanMode" ? .question : .command
-            case .question?, .askedInReply?, .message?, nil: self = .question
-            case .stillWaiting(let dialog, _)?: self.init(dialog)
-            case .turnFinished?, .apiError?, .exitedMidTurn?, .silent?: return nil
-            }
-        }
-    }
+    typealias Reason = AgentInputReason
 
     var kind: Kind
     /// How many of the four stations the ring shows, 0 to 4: the station a

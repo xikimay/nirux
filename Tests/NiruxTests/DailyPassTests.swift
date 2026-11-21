@@ -558,4 +558,326 @@ final class DailyPassTests: XCTestCase {
             "Tests wait on state. (learned 2026-11-11, #395)", "One owner per state, whatever the view."
         ])
     }
+
+    // MARK: Forgotten tasks
+
+    private let day: TimeInterval = 86_400
+
+    private func pullRequest(
+        _ state: GitHub.PullRequestState = .open, checks: String? = "SUCCESS", mergeable: String? = "MERGEABLE", draft: Bool = false,
+        base: String? = "main", checkStartedAt: TimeInterval? = nil
+    ) -> PRInfo {
+        let check = checkStartedAt.map {
+            GitHub.Check(name: "test", workflowName: "Tests", result: .success, startedAt: DailyPass.isoTime($0), url: nil)
+        }
+        return PRInfo(
+            number: 640, state: state, isDraft: draft, ciStatus: checks, checks: check.map { [$0] } ?? [], reviewDecision: nil,
+            mergeable: mergeable, url: "https://github.com/acme/app/pull/640", additions: nil, deletions: nil, changedFiles: nil,
+            baseRefName: base
+        )
+    }
+
+    /// The Lead's task, its pull request read an hour ago.
+    private func task(_ title: String, lastTurn: TimeInterval?, pullRequest: PRInfo? = nil) -> DailyPass.TaskActivity {
+        DailyPass.TaskActivity(
+            id: title, title: title, branch: "feat/\(title.lowercased())", pullRequest: pullRequest, pullRequestReadAt: now - hour,
+            repositoryBase: "main", lastTurnAt: lastTurn
+        )
+    }
+
+    private func forgotten(_ tasks: [DailyPass.TaskActivity]) -> [String] {
+        DailyPass.forgottenTasks(tasks, now: now, timeZone: utc).map(\.line)
+    }
+
+    /// A merged pull request at once (the window's merged list too, newer
+    /// than the sidebar's), a closed one for the user to confirm; a result
+    /// with nothing after it a day on, once its turn is over and a pull
+    /// request was read as missing. Closable first, oldest first.
+    func testAMergedPullRequestOrAnUnattendedResultIsClosable() {
+        var merged = task("Glass", lastTurn: now - 2 * hour, pullRequest: pullRequest(.merged))
+        merged.notYours = "not yours (started by the user)"
+        var mergedOvernight = task("Overnight", lastTurn: now - 3 * hour, pullRequest: pullRequest())
+        mergedOvernight.mergedLately = true
+        let closed = task("Dropped", lastTurn: nil, pullRequest: pullRequest(.closed))
+        var finished = task("Report", lastTurn: now - day - 10 * 60)
+        finished.resultAt = now - day - 20 * 60
+        var fresh = task("Fresh", lastTurn: now - day + 5 * 60)
+        fresh.resultAt = now - day
+        // Without hooks: its result counts from when it came.
+        var hookless = task("Hookless", lastTurn: nil)
+        (hookless.lastCommitAt, hookless.resultAt) = (now - 2 * day, now - hour)
+        var reworked = task("Reworked", lastTurn: now - 4 * day)
+        reworked.resultAt = now - 4 * day - DailyPass.resultTurn - 60
+        var unread = task("Unread", lastTurn: now - 3 * day)
+        (unread.resultAt, unread.pullRequestReadAt) = (now - 3 * day, nil)
+        XCTAssertEqual(forgotten([merged, mergedOvernight, fresh, hookless, reworked, unread, finished, closed]), [
+            "- “Dropped” · branch feat/dropped · PR #640 closed unmerged · no activity recorded → ask the user whether it was dropped, "
+                + "then close_task",
+            "- “Report” · branch feat/report · result sent 01-14 07:40, nothing since, no pull request · "
+                + "last activity 01-14 07:50 (a turn), 1 d ago → close_task",
+            "- “Overnight” · branch feat/overnight · PR #640 merged · last activity 01-15 05:00 (a turn), 3 h ago → close_task",
+            "- “Glass” · branch feat/glass · not yours (started by the user) · PR #640 merged · last activity 01-15 06:00 (a turn), 2 h ago "
+                + "→ close_task",
+            "- “Reworked” · branch feat/reworked · no pull request · quiet: last activity 01-11 08:00 (a turn), 4 d ago "
+                + "→ tell it what comes next, or close_task if it was dropped",
+            "- “Unread” · branch feat/unread · its pull request not read yet · quiet: last activity 01-12 08:00 (a turn), 3 d ago "
+                + "→ tell it what comes next, or close_task if it was dropped"
+        ])
+        var folder = finished
+        folder.isFolderTask = true
+        folder.pullRequestReadAt = nil
+        XCTAssertTrue(forgotten([folder])[0].hasSuffix("→ close_task once the user has its result (its folder goes to the Trash)"))
+        var subtask = finished
+        (subtask.notYours, subtask.parentTitle) = ("not yours (another agent started it)", "Parent")
+        XCTAssertTrue(forgotten([subtask])[0].hasSuffix("→ tell “Parent”, the task that started it"))
+    }
+
+    /// Open, green (or no check at all), mergeable, no draft, no change
+    /// asked, not merging by itself, on its repository's base branch (or a
+    /// base nobody named), a day without activity: waiting. Anything short
+    /// of that is an open task, quiet after three days.
+    func testAGreenMergeablePullRequestNobodyMergesIsWaiting() {
+        var unnamed = task("Unnamed", lastTurn: now - day - 2 * hour, pullRequest: pullRequest(base: "feat/parent"))
+        unnamed.repositoryBase = nil
+        let pull = { (review: String?, autoMerges: Bool) in
+            PRInfo(
+                number: 640, state: .open, isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: review, mergeable: "MERGEABLE",
+                url: "https://github.com/acme/app/pull/640", additions: nil, deletions: nil, changedFiles: nil, autoMerges: autoMerges
+            )
+        }
+        let tasks = [
+            task("Green", lastTurn: now - day - hour, pullRequest: pullRequest()), unnamed,
+            task("Unchecked", lastTurn: now - day - 3 * hour, pullRequest: pullRequest(checks: nil)),
+            task("Early", lastTurn: now - day + hour, pullRequest: pullRequest()),
+            task("Red", lastTurn: now - 2 * day, pullRequest: pullRequest(checks: "FAILURE")),
+            task("Failing", lastTurn: now - 3 * day, pullRequest: pullRequest(checks: "FAILURE")),
+            task("Draft", lastTurn: now - 3 * day - 60, pullRequest: pullRequest(draft: true)),
+            task("Conflict", lastTurn: now - 3 * day - 120, pullRequest: pullRequest(mergeable: "CONFLICTING")),
+            task("Stacked", lastTurn: now - 3 * day - 180, pullRequest: pullRequest(base: "feat/parent")),
+            task("Changes", lastTurn: now - 3 * day - 240, pullRequest: pull("CHANGES_REQUESTED", false)),
+            task("Auto", lastTurn: now - 3 * day - 300, pullRequest: pull(nil, true))
+        ]
+        let move = "→ tell it what comes next, or close_task if it was dropped"
+        let waiting = "green and mergeable, unmerged"
+        XCTAssertEqual(forgotten(tasks), [
+            "- “Unchecked” · branch feat/unchecked · PR #640 \(waiting) · last activity 01-14 05:00 (a turn), 1 d 3 h ago "
+                + "→ ask the user to merge it",
+            "- “Unnamed” · branch feat/unnamed · PR #640 \(waiting) · last activity 01-14 06:00 (a turn), 1 d 2 h ago → ask the user to merge it",
+            "- “Green” · branch feat/green · PR #640 \(waiting) · last activity 01-14 07:00 (a turn), 1 d 1 h ago → ask the user to merge it",
+            "- “Auto” · branch feat/auto · PR #640 open, checks green, set to merge by itself · quiet: last activity 01-12 07:55 (a turn), "
+                + "3 d ago \(move)",
+            "- “Changes” · branch feat/changes · PR #640 open, checks green, changes requested · quiet: last activity 01-12 07:56 (a turn), "
+                + "3 d ago \(move)",
+            "- “Stacked” · branch feat/stacked · PR #640 open, checks green, on feat/parent · quiet: last activity 01-12 07:57 (a turn), "
+                + "3 d ago \(move)",
+            "- “Conflict” · branch feat/conflict · PR #640 open, checks green, conflicting · quiet: last activity 01-12 07:58 (a turn), "
+                + "3 d ago \(move)",
+            "- “Draft” · branch feat/draft · PR #640 draft, checks green · quiet: last activity 01-12 07:59 (a turn), 3 d ago \(move)",
+            "- “Failing” · branch feat/failing · PR #640 open, checks failing · quiet: last activity 01-12 08:00 (a turn), 3 d ago \(move)"
+        ])
+    }
+
+    /// The latest of its last turn, commit and check run (its checks'
+    /// newest start) dates a task: each alone keeps it off the list, and
+    /// the line names it. Nothing to date it by: never listed.
+    func testEachSourceOfActivityCounts() {
+        var committed = task("Committed", lastTurn: now - 5 * day)
+        committed.lastCommitAt = now - 2 * day
+        let checked = task("Checked", lastTurn: now - 5 * day, pullRequest: pullRequest(checks: "FAILURE", checkStartedAt: now - 2 * day))
+        XCTAssertEqual(forgotten([committed, checked, task("Unknown", lastTurn: nil)]), [])
+        committed.lastCommitAt = now - 4 * day
+        let checkedEarlier = task("Checked", lastTurn: now - 5 * day, pullRequest: pullRequest(checks: "FAILURE", checkStartedAt: now - 3 * day))
+        let lines = forgotten([committed, checkedEarlier])
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertTrue(lines[0].contains("quiet: last activity 01-11 08:00 (a commit), 4 d ago"), lines[0])
+        XCTAssertTrue(lines[1].contains("quiet: last activity 01-12 08:00 (a check run), 3 d ago"), lines[1])
+    }
+
+    /// A quiet task's move follows what it waits on: the user's answer to
+    /// a question handed to them, the Lead's reply, the user in its
+    /// terminal; else whose it is: the Lead's is told, a sub-task goes to
+    /// the task that started it, the user's to the user.
+    func testTheMoveFollowsWhatItWaitsOnAndWhoseItIs() {
+        let quiet = now - 3 * day
+        var handed = task("Handed", lastTurn: quiet - 50)
+        handed.question = .init(id: "q2", handedToUser: true)
+        var asking = task("Asking", lastTurn: quiet - 40)
+        asking.question = .init(id: "q1")
+        var stuck = task("Stuck", lastTurn: quiet - 30)
+        stuck.waitsOnUser = "a permission for Bash"
+        var subtask = task("Sub", lastTurn: quiet - 20)
+        (subtask.notYours, subtask.parentTitle) = ("not yours (another agent started it)", "Parent")
+        var theirs = task("Theirs", lastTurn: quiet - 10)
+        theirs.notYours = "not yours (started by the user)"
+        let lines = forgotten([theirs, subtask, stuck, asking, handed, task("Mine", lastTurn: quiet)])
+        let moves = lines.map { String($0[$0.range(of: " → ")!.upperBound...]) }
+        XCTAssertEqual(moves, [
+            "ask the user: it waits on their answer to question q2", "reply to its question q1",
+            "ask the user: it waits on them (a permission for Bash)", "tell “Parent”, the task that started it", "ask the user",
+            "tell it what comes next, or close_task if it was dropped"
+        ])
+        XCTAssertTrue(lines[3].hasPrefix("- “Sub” · sub-task of “Parent” · branch feat/sub · not yours (another agent started it) · "), lines[3])
+    }
+
+    /// A result is a task's last word when no question followed, nor a
+    /// tell typed after it (one held, sent before) or on its way (a Lead's
+    /// one-way tell too); an answer typed late or a tell given up untyped
+    /// leave it.
+    func testTheResultIsTheTasksLastWord() {
+        let result = event(.completed, "Done", at: now - 5 * hour)
+        let question = event(.question, "Base?", at: now - 9 * hour, id: "q1")
+        var lost = event(.instruction, "Also Y", at: now - 4 * hour)
+        lost.expiredAt = now - 2 * hour
+        let lateAnswer = event(.response, "main", at: now - 3 * hour, inReplyTo: "q1")
+        XCTAssertEqual(DailyPass.resultAt([mission([question, result, lost, lateAnswer])]), now - 5 * hour)
+        XCTAssertNil(DailyPass.resultAt([mission([result, event(.question, "And the tests?", at: now - 4 * hour)])]))
+        var held = event(.instruction, "Also Y", at: now - 6 * hour)
+        held.childConsumedAt = now - 4 * hour
+        XCTAssertNil(DailyPass.resultAt([mission([held, result])]), "typed after the result")
+        var oneWay = mission([event(.instruction, "Also Z", at: now - 6 * hour)])
+        oneWay.oneWay = true
+        XCTAssertNil(DailyPass.resultAt([mission([result]), oneWay]), "a tell on its way")
+        XCTAssertNil(DailyPass.resultAt([mission([question])]))
+    }
+
+    /// A forgotten task is news until a read lists it, and again once its
+    /// kind or last activity changes. Every digest lists them all, the
+    /// nothing day's too, those listed last time after the others, after
+    /// the rules and with no fact of the window.
+    func testAForgottenTaskIsNewsUntilListed() throws {
+        var quiet = facts()
+        quiet.findings = quiet.findings.filter { !window.contains($0.time) }
+        quiet.repositories = []
+        quiet.tasks = [task("Old", lastTurn: now - 5 * day), task("Merged", lastTurn: now - hour, pullRequest: pullRequest(.merged))]
+        XCTAssertTrue(quiet.hasNews)
+        let first = DailyPass.digest(quiet, timeZone: utc)
+        XCTAssertEqual(first.listed.count, 2)
+        quiet.reported = Set(first.listed)
+        XCTAssertFalse(quiet.hasNews, "listed last time")
+        let said = DailyPass.digest(quiet, timeZone: utc).text
+        XCTAssertTrue(said.contains("Nothing happened since 01-14 08:00: no review recorded, no pull request merged, no CI failure, "
+            + "no Mission message held, no rule decided. Nothing to propose.\n"), said)
+        XCTAssertTrue(said.contains("""
+            ## Tasks you may have forgotten
+            Nirux only lists them: nothing was closed or told. Make each move, or tell the user why not.
+            Listed last time too, nothing changed since:
+            - “Merged” ·
+            """), said)
+        quiet.tasks[0].lastCommitAt = now - 4 * day
+        XCTAssertTrue(quiet.hasNews, "its last activity moved")
+        let again = DailyPass.digest(quiet, timeZone: utc).text
+        XCTAssertTrue(again.contains("why not.\n- “Old” ·"), again)
+
+        var busy = facts()
+        busy.tasks = (0...DailyPass.maxItems).map { task("T\($0)", lastTurn: now - 4 * day + Double($0) * 60) }
+        let read = DailyPass.digest(busy, timeZone: utc)
+        XCTAssertEqual(read.readUntil, now, "no fact of the window")
+        XCTAssertEqual(read.listed.count, DailyPass.maxItems)
+        busy.reported = Set(DailyPass.forgottenTasks(busy.tasks, now: now).map(\.key))
+        XCTAssertEqual(DailyPass.digest(busy, timeZone: utc).listed.count, DailyPass.maxItems + 1, "left out for room, still known")
+        let start = try XCTUnwrap(read.text.range(of: "## Tasks you may have forgotten"))
+        let section = String(read.text[start.lowerBound...]).components(separatedBy: "\n\n")[0]
+        XCTAssertTrue(section.contains("- “T0” ·") && !section.contains("“T\(DailyPass.maxItems)”"), section)
+        XCTAssertTrue(section.hasSuffix("- … and 1 more"), section)
+        let rules = try XCTUnwrap(read.text.range(of: "## The brief's rules learned"))
+        XCTAssertLessThan(rules.lowerBound, start.lowerBound)
+    }
+
+    /// What is read off the main thread reaches its task: its last commit,
+    /// by order, its repository's base branch, and whether GitHub's merged
+    /// list of its repository has its pull request.
+    func testWhatIsReadOffTheMainThreadReachesItsTask() {
+        var report = DailyPass.RepositoryReport(name: "Acme/App")
+        report.mergedLately = [640]
+        var other = DailyPass.RepositoryReport(name: "acme/other")
+        other.mergedLately = [640]
+        let reads = DailyPass.Reads(
+            repositories: [other, report], findings: [], commits: [now - day, nil],
+            bases: ["/w/app": DailyPass.Base(remote: "origin", branch: "trunk")]
+        )
+        let elsewhere = PRInfo(
+            number: 640, state: .open, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil,
+            url: "https://github.com/acme/third/pull/640", additions: nil, deletions: nil, changedFiles: nil
+        )
+        let read = DailyPass.tasks([
+            (DailyPass.TaskActivity(id: "A", title: "A", pullRequest: pullRequest()), "/w/app"),
+            (DailyPass.TaskActivity(id: "B", title: "B", pullRequest: elsewhere), nil)
+        ], with: reads)
+        XCTAssertEqual(read.map(\.id), ["A", "B"])
+        XCTAssertEqual(read.map(\.lastCommitAt), [now - day, nil])
+        XCTAssertEqual(read.map(\.repositoryBase), ["trunk", nil])
+        XCTAssertEqual(read.map(\.mergedLately), [true, false])
+    }
+
+    /// GitHub's merged list reaches back to the oldest read of a task's open
+    /// pull request when that came before the window (a week at most), by
+    /// numbers alone; the merged section keeps the window's.
+    func testTheMergedListReachesTheOldestReadOfAnOpenPullRequest() {
+        var open = task("Open", lastTurn: nil, pullRequest: pullRequest())
+        open.pullRequestReadAt = now - 3 * day
+        var merged = task("Merged", lastTurn: nil, pullRequest: pullRequest(.merged))
+        merged.pullRequestReadAt = now - 6 * day
+        XCTAssertEqual(DailyPass.mergedSince([open, merged], window: window), now - 3 * day)
+        open.pullRequestReadAt = now - 30 * day
+        XCTAssertEqual(DailyPass.mergedSince([open], window: window), now - 7 * day)
+        open.pullRequestReadAt = now - hour
+        XCTAssertNil(DailyPass.mergedSince([open], window: window), "the window covers it")
+
+        let pulls = Data("""
+            [{"number": 2, "title": "In", "headRefName": "b", "mergedAt": "2027-01-15T07:00:00Z"}]
+            """.utf8)
+        final class Calls: @unchecked Sendable { var numbers: [[String]] = [] }
+        let calls = Calls()
+        let read: GitHub.CLI.Runner = { call in
+            let arguments = call.arguments
+            let data: Data
+            if arguments.contains("number") {
+                calls.numbers.append(arguments)
+                data = Data(#"[{"number": 7}, {"number": 2}]"#.utf8)
+            } else {
+                data = arguments.first == "pr" ? pulls : Data("[]".utf8)
+            }
+            return .success(.init(status: 0, standardOutput: data, standardError: Data()))
+        }
+        let reached = DailyPass.readGitHub(["acme/app"], window: window, mergedSince: now - 3 * day, gh: read)
+        XCTAssertEqual(reached.first?.merged.map(\.number), [2])
+        XCTAssertEqual(reached.first?.mergedLately, [2, 7])
+        XCTAssertEqual(calls.numbers.first?.contains("merged:>=\(DailyPass.isoTime(now - 3 * day)) sort:updated-desc"), true)
+        XCTAssertEqual(DailyPass.readGitHub(["acme/app"], window: window, gh: read).first?.mergedLately, [2])
+        XCTAssertEqual(calls.numbers.count, 1, "no reach without a stale read")
+        XCTAssertEqual(calls.numbers.first?.contains("github.com/acme/app"), true)
+        let partial = DailyPass.readGitHub(["acme/app"], window: window, mergedSince: now - 3 * day) { call in
+            call.arguments.contains("number") ? .failure(.noAnswer("timeout")) : read(call)
+        }
+        XCTAssertEqual(partial.first?.mergedLately, [2])
+        XCTAssertEqual(partial.first?.problems, ["pull requests merged before the window: timeout"])
+        XCTAssertEqual(partial.first?.readsAgain, false, "the window itself was read")
+    }
+
+    /// A folder's newest commit off its base branch by its committer date
+    /// (of HEAD without one; none outside git, or with no commit of its
+    /// own), and its base branch as `<remote>/HEAD` names it (none for a
+    /// folder without a GitHub remote).
+    @MainActor
+    func testCommitTimesAndBaseBranchesComeFromGit() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: folder) }
+        @MainActor func commit(at time: TimeInterval) throws {
+            try UIFlowHarness.git(
+                ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "c", "--date=@1700000000"],
+                at: folder, environment: ["GIT_COMMITTER_DATE": "@\(Int(time))"]
+            )
+        }
+        try UIFlowHarness.git(["init", "-q", "-b", "trunk"], at: folder)
+        try commit(at: now - 2 * day)
+        try UIFlowHarness.git(["update-ref", "refs/remotes/origin/trunk", "HEAD"], at: folder)
+        try UIFlowHarness.git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"], at: folder)
+        let bases = DailyPass.baseBranches([(folder, .gitHub(repository: "acme/app", remote: "origin")), (folder + "/missing", .noRemote)])
+        XCTAssertEqual(bases, [folder: DailyPass.Base(remote: "origin", branch: "trunk")])
+        let base = bases[folder]?.ref
+        XCTAssertEqual(DailyPass.commitTimes([(folder, base), (folder, nil), (folder + "/missing", nil)]), [nil, now - 2 * day, nil])
+        try commit(at: now - day)
+        XCTAssertEqual(DailyPass.commitTimes([(folder, base)]), [now - day])
+    }
 }
