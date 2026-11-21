@@ -37,11 +37,12 @@ extension NiruxShellView {
     /// Reads GitHub off the main thread, then answers the digest, marks
     /// its window read (unless GitHub may answer next time), and keeps the
     /// note the Lead's row shows.
-    func leadDailyPass(in space: WorkspaceProfile, lead: WorkspaceState, answer: @escaping LeadAnswer) {
+    func leadDailyPass(in space: WorkspaceProfile, lead: WorkspaceState, store: MissionStore = .shared, answer: @escaping LeadAnswer) {
+        guard store.ensureLoaded() else { return answer("The Mission ledger could not be read. Try again.", true) }
         let state = dailyPassState(inSpace: space.id)
-        if let page = state.nextWaitPage { return continueWaitPage(page, in: space, answer: answer) }
+        if let page = state.nextWaitPage { return continueWaitPage(page, in: space, missions: store.missions, answer: answer) }
         let (window, next) = state.reading(now: Date().timeIntervalSince1970)
-        gatherDailyPassFacts(in: space, lead: lead, window: window) { [weak self] facts in
+        gatherDailyPassFacts(in: space, lead: lead, window: window, ledger: store.missions) { [weak self] facts in
             guard let self, let facts else { return answer("This space keeps no daily pass.", true) }
             let digest = DailyPass.digest(facts)
             let readsAgain = self.dailyPassRereads[space.id, default: DailyPass.Rereads()].readsAgain(facts.readsAgain)
@@ -58,9 +59,8 @@ extension NiruxShellView {
         }
     }
 
-    private func continueWaitPage(_ page: DailyPass.WaitPage, in space: WorkspaceProfile, answer: @escaping LeadAnswer) {
-        guard MissionStore.shared.ensureLoaded() else { return answer("The Mission ledger could not be read. Try again.", true) }
-        let read = dailyWaitsReader(in: space, window: page.window, missions: MissionStore.shared.missions)
+    private func continueWaitPage(_ page: DailyPass.WaitPage, in space: WorkspaceProfile, missions: [Mission], answer: @escaping LeadAnswer) {
+        let read = dailyWaitsReader(in: space, window: page.window, missions: missions)
         let id = space.id
         let directory = Persistence.stateDirectory
         Self.offMain({
@@ -98,7 +98,7 @@ extension NiruxShellView {
     /// What happened in the space in the window, read off the main thread
     /// for GitHub; nil for a space that keeps no pass.
     func gatherDailyPassFacts(
-        in space: WorkspaceProfile, lead: WorkspaceState, window: DailyPass.Window,
+        in space: WorkspaceProfile, lead: WorkspaceState, window: DailyPass.Window, ledger: [Mission],
         completion: @escaping @MainActor @Sendable (DailyPass.Facts?) -> Void
     ) {
         guard let briefURL = SpaceBrief.briefURL(spaceID: space.id) else { return completion(nil) }
@@ -107,8 +107,7 @@ extension NiruxShellView {
         let open = workspaces.filter { $0.profileID == space.id }.map(\.id)
         let elsewhere = Set(workspaces.filter { $0.profileID != space.id }.map(\.id))
         let members = Set(open).union(sessionLedger.sessions(inSpace: space.id).compactMap(\.workspaceID).filter { !elsewhere.contains($0) })
-        _ = MissionStore.shared.ensureLoaded()
-        let missions = MissionStore.shared.missions.filter { mission in
+        let missions = ledger.filter { mission in
             mission.parentWorkspaceID == lead.id || members.contains(mission.childWorkspaceID) || members.contains(mission.parentWorkspaceID)
         }
         let waitWindow = dailyPassState(inSpace: space.id).waitWindow(for: window)
@@ -179,16 +178,20 @@ extension NiruxShellView {
     /// did, else marks the pass checked. Quiet is asked again after the
     /// read: GitHub takes seconds.
     func checkDailyPasses(
-        now: TimeInterval = Date().timeIntervalSince1970, isQuiet: DailyPassQuietCheck? = nil, send: DailyPassSend? = nil
+        now: TimeInterval = Date().timeIntervalSince1970, store: MissionStore = .shared, isQuiet: DailyPassQuietCheck? = nil, send: DailyPassSend? = nil
     ) {
         let quiet = isQuiet ?? { [weak self] column in self?.dailyPassIsQuiet(column) == true }
         for lead in workspaces where lead.isLead && !lead.isClosing && !dailyPassChecks.contains(lead.profileID) {
             guard let space = profiles.first(where: { $0.id == lead.profileID }), dailyPassIsDue(inSpace: space.id, now: now),
                   let column = dailyPassColumn(of: lead), quiet(column)
             else { continue }
+            guard store.ensureLoaded() else {
+                dailyPassRetryAt[space.id] = now + DailyPass.retryAfter
+                continue
+            }
             dailyPassChecks.insert(space.id)
             let window = dailyPassState(inSpace: space.id).reading(now: now, extending: false).window
-            gatherDailyPassFacts(in: space, lead: lead, window: window) { [weak self] facts in
+            gatherDailyPassFacts(in: space, lead: lead, window: window, ledger: store.missions) { [weak self] facts in
                 guard let self else { return }
                 self.dailyPassChecks.remove(space.id)
                 // Read again: the user, a pass or the Lead's end may have come meanwhile.

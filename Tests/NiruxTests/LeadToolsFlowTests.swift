@@ -843,6 +843,49 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    func testUnreadableMissionsLeaveTheFirstDailyWindowForRecovery() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let profile = try XCTUnwrap(shell.profiles.first { $0.id == lead.space })
+            shell.addWorkspace(title: "Reader", cwd: harness.worktree, profileID: lead.space)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Reader" })
+            let file = URL(fileURLWithPath: harness.stateDirectory).appendingPathComponent("test-missions.json")
+            let store = MissionStore(fileURL: file)
+            try Data("unreadable".utf8).write(to: file)
+
+            @MainActor func read() throws -> (text: String, isError: Bool) {
+                var result: (String, Bool)?
+                shell.leadDailyPass(in: profile, lead: lead.workspace, store: store) { result = ($0, $1) }
+                harness.waitUntil("the daily pass response") { result != nil }
+                return try XCTUnwrap(result)
+            }
+
+            let before = DailyPassState.load(spaceID: lead.space)
+            let failed = try read()
+            XCTAssertTrue(failed.isError)
+            XCTAssertTrue(failed.text.contains("Mission ledger"))
+            let now = Date().timeIntervalSince1970
+            shell.checkDailyPasses(now: now, store: store, isQuiet: { _ in true }, send: { _, _ in XCTFail("no pass to announce") })
+            XCTAssertEqual(shell.dailyPassRetryAt[lead.space], now + DailyPass.retryAfter)
+            XCTAssertEqual(DailyPassState.load(spaceID: lead.space), before)
+
+            let question = MissionEvent(id: "q", missionID: "m", childWorkspaceID: task.id, childAgentUUID: "agent",
+                                        kind: .question, message: "Which branch?", inReplyTo: nil, timestamp: now - 180)
+            let answer = MissionEvent(id: "a", missionID: "m", childWorkspaceID: task.id, childAgentUUID: "agent",
+                                      kind: .response, message: "main", inReplyTo: "q", timestamp: now - 60)
+            let mission = Mission(id: "m", parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                                  childWorkspaceID: task.id, childAgentUUID: "agent", childAgentKind: "codex", branch: harness.worktreeBranch,
+                                  status: .active, createdAt: now - 240, updatedAt: now - 60, events: [question, answer], reportsToLead: true)
+            try JSONEncoder().encode([mission]).write(to: file)
+            let recovered = try read()
+            XCTAssertFalse(recovered.isError, recovered.text)
+            XCTAssertTrue(recovered.text.contains("Lead 2 min"), recovered.text)
+            XCTAssertNotNil(DailyPassState.load(spaceID: lead.space).waitsThrough)
+            XCTAssertFalse(try read().text.contains("Lead 2 min"))
+        }
+    }
+
     /// The daily pass, on after 06:00 unless Space Settings › Lead says:
     /// once its hour struck and the Lead is quiet, a day with nothing marks
     /// it checked; a day with a recorded review types the daily line into
