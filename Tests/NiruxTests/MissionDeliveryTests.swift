@@ -175,7 +175,27 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertTrue(store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 21))
         let asked = try XCTUnwrap(store.accept(childEvent(.question, "Token for the bench?", at: 30), enabled: true))
         XCTAssertNotEqual(old.event.id, asked.event.id)
-        XCTAssertEqual(NiruxShellView.questionToHand(in: try XCTUnwrap(store.missions.first))?.id, asked.event.id)
+        XCTAssertEqual(store.missions.first?.waitingQuestion?.id, asked.event.id)
+
+        _ = try XCTUnwrap(store.accept(childEvent(.completed, "Done", at: 40), enabled: true))
+        let followUp = try XCTUnwrap(store.accept(parentEvent(.instruction, "Check the docs", at: 50), enabled: true))
+        XCTAssertTrue(store.markInstructionTyped(eventID: followUp.event.id, at: 51))
+        XCTAssertNil(store.missions.first?.waitingQuestion, "reopening the task must not reopen its completed question")
+    }
+
+    func testDeliveryRefreshesAQuestionRetiredAfterTheQueueWasRead() throws {
+        let store = makeStore()
+        let question = try XCTUnwrap(store.accept(childEvent(.question, "Which API?", at: 20), enabled: true))
+        let queued = try XCTUnwrap(store.pendingPromptDeliveries(now: 21).first)
+        XCTAssertEqual(store.pendingPromptDelivery(queued, now: 21)?.event.id, question.event.id)
+        XCTAssertTrue(store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 22))
+        XCTAssertNil(store.pendingPromptDelivery(queued, now: 23))
+
+        let answered = makeStore()
+        let other = try XCTUnwrap(answered.accept(childEvent(.question, "Which API?", at: 20), enabled: true))
+        let response = try XCTUnwrap(answered.respond(to: other.event.id, message: "Use v2", enabled: true, now: 22))
+        XCTAssertNil(answered.pendingPromptDelivery(other, now: 23))
+        XCTAssertEqual(answered.pendingPromptDelivery(response, now: 23)?.event.message, "Use v2")
     }
 
     /// A Codex child's `ask` waits and prints the answer itself: nothing is

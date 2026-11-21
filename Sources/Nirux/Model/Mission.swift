@@ -49,6 +49,14 @@ struct Mission: Codable, Equatable {
         handoffsEnabled || isAlwaysCarried
     }
 
+    var waitingQuestion: MissionEvent? {
+        guard status == .active else { return nil }
+        return events.lazy.filter { question in
+            question.kind == .question && question.parentConsumedAt == nil
+                && !events.contains { $0.kind == .response && $0.inReplyTo == question.id }
+        }.min { $0.timestamp < $1.timestamp }
+    }
+
     /// The agent its child runs, as Nirux's lines name it, when Nirux
     /// delivers its parent's messages to it (`agentName(ofKind:)`).
     var childAgentName: String? { Self.agentName(ofKind: childAgentKind) }
@@ -629,7 +637,7 @@ final class MissionStore {
             // An answered one was consumed with its answer.
             for index in mission.events.indices where mission.events[index].kind == .question
                 && mission.events[index].parentConsumedAt == nil && mission.events[index].timestamp < promptedAt
-                && (missionID == nil || mission.events[index].parentTypedAt != nil || mission.events[index].handedToUserAt != nil) {
+                && (missionID == nil || mission.events[index].parentTypedAt != nil || mission.events[index].handedToUserBecause != nil) {
                 mission.events[index].parentConsumedAt = promptedAt
                 mission.events[index].retiredAt = promptedAt
             }
@@ -650,6 +658,14 @@ final class MissionStore {
                 Self.isPendingDelivery(event, in: mission, now: now) ? AcceptedEvent(mission: mission, event: event) : nil
             }
         }.sorted { $0.event.timestamp < $1.event.timestamp }
+    }
+
+    func pendingPromptDelivery(_ pending: AcceptedEvent, now: TimeInterval = Date().timeIntervalSince1970) -> AcceptedEvent? {
+        guard let mission = missions.first(where: { $0.id == pending.mission.id }),
+              let event = mission.events.first(where: { $0.id == pending.event.id }),
+              Self.isPendingDelivery(event, in: mission, now: now)
+        else { return nil }
+        return AcceptedEvent(mission: mission, event: event)
     }
 
     /// The answer waiting to be typed into this child's prompt, if any.
@@ -729,15 +745,8 @@ final class MissionStore {
     /// active Mission: the child waits for it.
     func waitingQuestion(childWorkspaceID: String, childAgentUUID: String) -> AcceptedEvent? {
         missions.lazy
-            .filter {
-                $0.status == .active && $0.childWorkspaceID == childWorkspaceID && $0.childAgentUUID == childAgentUUID
-            }
-            .flatMap { mission in
-                mission.events.lazy.filter { question in
-                    question.kind == .question && question.parentConsumedAt == nil
-                        && !mission.events.contains { $0.kind == .response && $0.inReplyTo == question.id }
-                }.map { AcceptedEvent(mission: mission, event: $0) }
-            }
+            .filter { $0.childWorkspaceID == childWorkspaceID && $0.childAgentUUID == childAgentUUID }
+            .compactMap { mission in mission.waitingQuestion.map { AcceptedEvent(mission: mission, event: $0) } }
             .min { $0.event.timestamp < $1.event.timestamp }
     }
 

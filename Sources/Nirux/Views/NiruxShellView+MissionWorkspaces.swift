@@ -299,6 +299,7 @@ extension NiruxShellView {
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
             if Self.goesToCodex(delivery) {
+                guard let delivery = MissionStore.shared.pendingPromptDelivery(delivery) else { continue }
                 queueForCodex(delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title, snapshot: snapshot, now: now)
                 continue
             }
@@ -312,6 +313,7 @@ extension NiruxShellView {
             )
             if recipient.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
             guard refusal == nil,
+                  let delivery = MissionStore.shared.pendingPromptDelivery(delivery),
                   let text = MissionPromptText.text(
                       for: delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title
                   ),
