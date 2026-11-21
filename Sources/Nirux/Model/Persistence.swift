@@ -271,6 +271,7 @@ struct PersistedSettings: Codable {
     var claudeNoFlicker: Bool? = true
     var codexLaunchMode: CodexLaunchMode?
     var sidebarExpanded: Bool?
+    var sidebarWidth: Double?
     /// Parent/child messages between worktree agents (Missions). On for a
     /// new install; a state file keeps what it holds (before the Lead it
     /// was an opt-in Experimental setting, always written). A space's Lead
@@ -368,6 +369,7 @@ struct PersistedSettings: Codable {
         case claudeNoFlicker
         case codexLaunchMode
         case sidebarExpanded
+        case sidebarWidth
         case missionHandoffsEnabled
         case sidebarApprovalsEnabled
         case keepMacAwakeWhileAgentsWork
@@ -413,6 +415,7 @@ struct PersistedSettings: Codable {
         claudeNoFlicker = try container.decodeIfPresent(Bool.self, forKey: .claudeNoFlicker) ?? true
         codexLaunchMode = (try? container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)) ?? nil
         sidebarExpanded = try container.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
+        sidebarWidth = try? container.decode(Double.self, forKey: .sidebarWidth)
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? true
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? true
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
@@ -469,6 +472,7 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(claudeNoFlicker, forKey: .claudeNoFlicker)
         try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
         try container.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)
+        try container.encodeIfPresent(sidebarWidth, forKey: .sidebarWidth)
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
