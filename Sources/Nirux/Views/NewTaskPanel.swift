@@ -231,9 +231,6 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     let startButton = NSButton(title: "Start", target: nil, action: nil)
     let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
 
-    static let agents: [(agent: NiruxApp.WorkspaceAgent, title: String)] = [
-        (.claude, "Claude Code"), (.codex, "Codex"), (.agy, "Antigravity")
-    ]
     static let noTemplateTitle = "No Template"
     static let noRepositoryTitle = "No Repository"
     /// Tags of the repository popup's items that add one instead of
@@ -260,7 +257,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// Repository; `agent`: the one its tasks start by default.
     func show(
         attachedTo window: NSWindow, space: Space, repositories: [Repository], selectedKey: String?,
-        parentTask: ParentTask? = nil, agent: NiruxApp.WorkspaceAgent, homeFolder: String, tasksFolder: String,
+        parentTask: ParentTask? = nil, agent: CodingAgent, homeFolder: String, tasksFolder: String,
         tasksFolderIsDefault: Bool = true
     ) {
         parentWindow = window
@@ -273,7 +270,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         selectedRepositoryKey = repositories.contains { $0.key == selectedKey } ? selectedKey : nil
         let panel = buildPanel()
         self.panel = panel
-        agentPopup.selectItem(at: Self.agents.firstIndex { $0.agent == agent } ?? 0)
+        agentPopup.selectItem(at: CodingAgent.launchable.firstIndex(of: agent) ?? 0)
         updateForSubtask()
         rebuildRepositoryPopup()
         // Laid out first: the sheet comes down at its size.
@@ -337,8 +334,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         return index > 0 ? info?.templates[safe: index - 1] : nil
     }
 
-    var selectedAgent: NiruxApp.WorkspaceAgent {
-        Self.agents[safe: agentPopup.indexOfSelectedItem]?.agent ?? .claude
+    var selectedAgent: CodingAgent {
+        CodingAgent.launchable[safe: agentPopup.indexOfSelectedItem] ?? .claude
     }
 
     var branch: String {
@@ -1056,7 +1053,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         repositoryPopup.autoenablesItems = false
         repositoryPopup.setAccessibilityLabel("Repository")
         agentPopup.removeAllItems()
-        agentPopup.addItems(withTitles: Self.agents.map(\.title))
+        agentPopup.addItems(withTitles: CodingAgent.launchable.map(\.productName))
         agentPopup.setAccessibilityLabel("Agent")
         agentPopup.target = self
         agentPopup.action = #selector(agentChanged(_:))

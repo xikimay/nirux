@@ -44,7 +44,7 @@ enum NewTask {
     struct Request: Sendable {
         let description: String
         let template: TaskTemplates.Template?
-        let agent: NiruxApp.WorkspaceAgent
+        let agent: CodingAgent
         let projectID: String
         var place: Place
         /// False once the user chose to start without fetching, after a
@@ -110,7 +110,7 @@ enum NewTask {
     /// the checkout's HEAD. Nil when `folder` isn't in a git repository.
     /// Runs git (no network): call it off the main thread.
     static func resolveTarget(folder: String, baseBranch: String?, gitPath: String = "/usr/bin/git") -> Target? {
-        guard let topLevel = GitWorktree.repoRoot(at: folder) else { return nil }
+        guard let topLevel = GitWorktree.repoRoot(at: folder, timeout: GitCommand.defaultTimeout) else { return nil }
         let checkout = GitWorktree.mainWorktreeRoot(of: topLevel)
         let hasOrigin = GitCommand.output(["remote"], cwd: checkout, gitPath: gitPath, timeout: 10)?
             .split(separator: "\n").contains("origin") == true

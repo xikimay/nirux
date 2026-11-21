@@ -5,13 +5,6 @@ import Foundation
 /// `hook-events.jsonl` in the state directory by `Nirux --hook`, then
 /// drained and routed by `AgentHookCenter`.
 struct AgentHookEvent: Codable, Equatable {
-    enum Kind: String, Codable {
-        case claude, codex
-        /// Antigravity's hooks.json, read only for the conversation a
-        /// column runs: its status comes from OSC 7501.
-        case agy
-    }
-
     /// Normalized event names. The Claude hooks map 1:1 (PostToolUse and
     /// PostToolUseFailure both mean "the tool call is over"); Codex only
     /// has a single "agent turn complete" notification.
@@ -29,7 +22,7 @@ struct AgentHookEvent: Codable, Equatable {
         case approvalResolved
     }
 
-    let kind: Kind
+    let kind: CodingAgent
     let name: Name
     /// NIRUX_AGENT_UUID from the hook process's environment (inherited from
     /// the shell of the column that launched the agent). The receiver drops
@@ -144,12 +137,10 @@ struct AgentHookEvent: Codable, Equatable {
     /// The call's exact text, as the receiver checked it.
     var approvalText: String?
     var approvalOutcome: PermissionApproval.Outcome?
-    /// On a PermissionRequest, what it is about, whether a line naming that
-    /// covers exactly what prompted (`promptTarget(toolName:input:cwd:)`),
-    /// and the session's mode (`permission_mode`), for the space's recap
-    /// (LoopLog). Nil from older receivers.
+    /// The permission target and whether its label covers the whole prompt (LoopLog).
     var promptTarget: String?
     var promptExact: Bool?
+    /// The session mode reported by a Claude hook.
     var permissionMode: String?
     /// On the PermissionRequest of a question dialog (AskUserQuestion):
     /// its questions and the options each offers, bounded, for the row of
@@ -164,7 +155,7 @@ struct AgentHookEvent: Codable, Equatable {
     /// argv) into an event. Returns nil for payloads we don't care about —
     /// unknown events are ignored, never errors.
     init?(
-        kind: Kind,
+        kind: CodingAgent,
         payload: [String: Any],
         env: [String: String],
         now: TimeInterval,
@@ -186,6 +177,7 @@ struct AgentHookEvent: Codable, Equatable {
             self.cwd = cwd
             source = [.sessionStart, .userPromptSubmit].contains(name) ? payload["source"] as? String : nil
             agentID = (payload["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            permissionMode = (payload["permission_mode"] as? String).flatMap { AgentText.clean($0, maxLength: 40) }
             let toolName = [.preToolUse, .permissionRequest, .postToolUse].contains(name)
                 ? payload["tool_name"] as? String
                 : nil
@@ -201,7 +193,6 @@ struct AgentHookEvent: Codable, Equatable {
                 }
                 if name == .permissionRequest {
                     (promptTarget, promptExact) = Self.promptTarget(toolName: toolName, input: input, cwd: cwd)
-                    permissionMode = (payload["permission_mode"] as? String).flatMap { AgentText.clean($0, maxLength: 40) }
                 }
             } else {
                 toolSummary = nil
@@ -315,6 +306,8 @@ struct AgentHookEvent: Codable, Equatable {
             reviewHeader = nil
             finalMessage = nil
             stopHookActive = nil
+        case .gemini, .opencode:
+            return nil
         }
     }
 
@@ -428,7 +421,7 @@ struct AgentHookEvent: Codable, Equatable {
 
     /// Direct construction (tests, synthesized events).
     init(
-        kind: Kind,
+        kind: CodingAgent,
         name: Name,
         agentUUID: String? = nil,
         workspaceID: String? = nil,
@@ -523,7 +516,7 @@ struct AgentHookEvent: Codable, Equatable {
 /// exits. Must be fast and must NEVER fail loudly: a non-zero exit from a
 /// sync hook surfaces inside the agent's UI.
 enum AgentHookCLI {
-    static func run(kind: AgentHookEvent.Kind, payload: String?) -> Int32 {
+    static func run(kind: CodingAgent, payload: String?) -> Int32 {
         // Claude runs each hook under a shell it kills when it gives up on
         // the hook (an interrupted turn): this process is then reparented.
         // Read first, before anything slow.
