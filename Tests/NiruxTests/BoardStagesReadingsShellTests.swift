@@ -21,7 +21,7 @@ final class BoardStagesReadingsShellTests: XCTestCase {
                 shell.boardReadings(
                     ofSpace: side.id, sidebarInfos: infos, foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:],
                     snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970
-                )
+                ).tasks
             }
             let state = task.columns.first?.pty?.cachedAgentState
             let first = read([])
@@ -38,7 +38,7 @@ final class BoardStagesReadingsShellTests: XCTestCase {
             let built = try XCTUnwrap(shell.boardReadings(
                 ofSpace: shell.activeProfileID, foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:],
                 snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970
-            ).keys.first)
+            ).tasks.keys.first)
             XCTAssertNotEqual(built, task.id)
             var info = shell.sidebarWorkspaceInfo(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), columns: [],
                                                   isActive: false, parentTitle: nil)

@@ -242,6 +242,10 @@ extension NiruxShellView {
         return instructions.isEmpty ? nil : instructions.joined(separator: " ")
     }
 
+    private nonisolated static let missionAskEndGuide = "Status 4 means the Mission is over or unavailable; do not retry. "
+        + "Status 5 means the question was retired. Continue with the new prompt without retrying that ask. "
+        + "Report the final result with \"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
+
     /// A Claude Code child: Nirux types the answer into its prompt
     /// (`MissionPromptText`).
     nonisolated static let typedAnswerMission = "This is a Nirux mission workspace. To ask the parent agent, run "
@@ -250,8 +254,7 @@ extension NiruxShellView {
         + "\(MissionEventCLI.maxRecommendationLength)), then end your turn: Nirux types "
         + "the answer into your prompt as a message starting with \(MissionPromptText.prefix). "
         + "\(MissionEventCLI.askGuide) If it exits with status 3, run the exact same command again: it does not ask twice. "
-        + "Status 4 means the Mission is over; do not retry. Report the final result with "
-        + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
+        + missionAskEndGuide
 
     /// A Codex child, and every child before Nirux typed answers: `ask`
     /// waits for the answer.
@@ -263,8 +266,7 @@ extension NiruxShellView {
         + "It waits up to \(Int(MissionEventCLI.defaultWaitTimeout)) seconds, so allow it a shell-tool timeout "
         + "of at least 120 seconds. If it exits with status 3, or your shell tool stops it before it "
         + "prints anything, run the exact same command again: it resumes the same question. "
-        + "Status 4 means the Mission is over; do not retry. Report the final result with "
-        + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
+        + missionAskEndGuide
 
     /// `worktreeBranch` is the branch read back from the checkout
     /// (`GitWorktree.currentBranch(at:)`) of a worktree workspace Nirux just
@@ -445,6 +447,9 @@ extension NiruxShellView {
             if didChange { dismissTurnQuestions(in: archived) }
         case .close:
             requestCloseWorkspace(at: workspaceIndex)
+            return
+        case .turnOffLead:
+            showSpaceSettings(profileID: workspaces[workspaceIndex].profileID, tab: .lead)
             return
         case .editContext:
             showWorkspaceContextPanel(workspaceIndex: workspaceIndex)

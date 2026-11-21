@@ -125,6 +125,7 @@ extension NiruxShellView {
             workspaces: members.map { WorktreeCleanupCandidate.Workspace(id: $0.id, title: $0.title, cwd: $0.cwd) },
             agents: members.flatMap { $0.openColumns.compactMap { $0.liveAgent(snapshot: snapshot) } },
             foreignAgents: foreignAgents,
+            leads: members.filter(\.isLead).map { lead in profiles.first { $0.id == lead.profileID }?.name ?? lead.title },
             unsavedEditors: unsavedEditors,
             inspection: nil
         )

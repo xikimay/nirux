@@ -235,11 +235,14 @@ clicked. The sizes are the mockup's.
   each station's over its place on the rails. On a narrow Board they give way
   in this order: the summary, the Lead's line, the order switch; the name is
   the last to (a name longer than 160 pt keeps that much beside the switch).
-  The Lead's dot keeps its place, in its state's colour, and says its line
-  under the pointer. A click on the Lead (its dot and its line, one target,
-  with a hand, read once by VoiceOver) focuses the Lead's workspace, where
-  the table's row focused its most urgent agent, a task's if it shared the
-  worktree. It asks where the pointer aimed, as a line's station does; and
+  The Lead’s line names the terminal its Missions report to and shows that
+  CLI’s state. When Missions report to multiple sessions, the header names
+  them. Its tooltip and VoiceOver help list the affected tasks and each
+  terminal’s status. An unresolved destination is shown as unknown. With
+  no reporting Missions, a sole identifiable session supplies the status.
+  The Lead’s dot keeps its place on a narrow Board. Clicking the dot or line
+  focuses the routed terminal when known, otherwise the Lead workspace.
+  It asks where the pointer aimed, as a line's station does; and
   since the header isn't held, a Lead that comes or grows under the pointer,
   or another space's, acts only once the pointer moves, even one still
   aiming (nothing else then waits: the list is held). A press that ends once
