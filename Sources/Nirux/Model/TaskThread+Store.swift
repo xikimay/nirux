@@ -38,9 +38,12 @@ extension TaskThread {
 
         /// The lines it can read, in the order they came.
         static func load(workspaceID: String, stateDirectory: URL) -> [Event] {
-            guard let url = locate(workspaceID: workspaceID, stateDirectory: stateDirectory),
-                  case .data(let data) = BoardConfigStore.read(url, maxBytes: maxFileBytes + 65_536)
-            else { return [] }
+            guard let url = locate(workspaceID: workspaceID, stateDirectory: stateDirectory) else { return [] }
+            return load(from: url)
+        }
+
+        private static func load(from url: URL) -> [Event] {
+            guard case .data(let data) = BoardConfigStore.read(url, maxBytes: maxFileBytes + 65_536) else { return [] }
             let decoder = JSONDecoder()
             return data.split(separator: UInt8(ascii: "\n")).compactMap { try? decoder.decode(Event.self, from: $0) }
         }
@@ -59,33 +62,54 @@ extension TaskThread {
                    let elsewhere = locate(workspaceID: workspaceID, stateDirectory: stateDirectory) {
                     try manager.moveItem(at: elsewhere, to: url)
                 }
-                let descriptor = open(url.path, O_RDWR | O_CREAT | O_APPEND | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0o600)
-                guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-                let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-                var status = stat()
-                guard fstat(descriptor, &status) == 0, status.st_mode & S_IFMT == S_IFREG else { throw POSIXError(.EFTYPE) }
-                var size = Int(status.st_size)
-                var lines = Data()
-                // A line a crash cut keeps its end: the next one starts on its own.
-                var last: UInt8 = 0
-                if size > 0, pread(descriptor, &last, 1, off_t(size - 1)) == 1, last != UInt8(ascii: "\n") {
-                    lines.append(UInt8(ascii: "\n"))
-                }
-                var written = 0
-                for event in events {
-                    guard var line = try? JSONEncoder().encode(capped(event)) else { continue }
-                    line.append(UInt8(ascii: "\n"))
-                    guard event.kind == .closed || size + line.count <= maxFileBytes else { continue }
-                    lines.append(line)
-                    size += line.count
-                    written += 1
-                }
-                try handle.write(contentsOf: lines)
-                return written
+                return try write(events, to: url, create: true)
             } catch {
                 NiruxDebugLog.log("TaskThread: could not append to \(url.path): \(error)")
                 return 0
             }
+        }
+
+        /// GitHub can answer after retention has removed the frozen file.
+        static func appendHistory(
+            _ events: [Event], workspaceID: String, spaceID: String, keeping open: Set<String>, stateDirectory: URL
+        ) {
+            guard !events.isEmpty, !open.contains(workspaceID),
+                  let url = fileURL(workspaceID: workspaceID, spaceID: spaceID, stateDirectory: stateDirectory),
+                  load(from: url).contains(where: { $0.kind == .closed }) else { return }
+            do {
+                if try write(events, to: url, create: false) > 0 {
+                    prune(spaceID: spaceID, keeping: open, now: Date().timeIntervalSince1970, stateDirectory: stateDirectory)
+                }
+            } catch {
+                NiruxDebugLog.log("TaskThread: could not append history to \(url.path): \(error)")
+            }
+        }
+
+        private static func write(_ events: [Event], to url: URL, create: Bool) throws -> Int {
+            let flags = O_RDWR | O_APPEND | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC
+            let descriptor = open(url.path, create ? flags | O_CREAT : flags, 0o600)
+            guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+            var status = stat()
+            guard fstat(descriptor, &status) == 0, status.st_mode & S_IFMT == S_IFREG else { throw POSIXError(.EFTYPE) }
+            var size = Int(status.st_size)
+            var lines = Data()
+            // A line a crash cut keeps its end: the next one starts on its own.
+            var last: UInt8 = 0
+            if size > 0, pread(descriptor, &last, 1, off_t(size - 1)) == 1, last != UInt8(ascii: "\n") {
+                lines.append(UInt8(ascii: "\n"))
+            }
+            var written = 0
+            for event in events {
+                guard var line = try? JSONEncoder().encode(capped(event)) else { continue }
+                line.append(UInt8(ascii: "\n"))
+                guard event.kind == .closed || size + line.count <= maxFileBytes else { continue }
+                lines.append(line)
+                size += line.count
+                written += 1
+            }
+            try handle.write(contentsOf: lines)
+            return written
         }
 
         /// `prune` in every space's folder, a deleted space's too.

@@ -47,7 +47,7 @@ nor a workspace in the main checkout.
 live in `TaskThread+Sources.swift`. The store requires an explicit state
 directory URL. `TaskThread.events(from:)` is pure (no AppKit); `Sources.load` reads the
 files by the task's workspace id, then by its pull requests' URLs, from
-`sessions.jsonl` in every space (the live pull request follows the focused
+`sessions.jsonl` in every space, including sessions that received no prompt (the live pull request follows the focused
 column, which may be another checkout). Nothing is copied.
 
 - by workspace id: its Missions (a question with its kind and
@@ -72,6 +72,7 @@ no sources): the files it was joined from drop the task in time.
 
 - Not while `missions.json` can't be read: the thread then has no close and
   is joined at each read.
+- A late GitHub response enriches its retained, closed thread and reapplies the space budget.
 - A history `gh` couldn't give (offline, signed out, a quit right after the
   close) is missing; the close names the pull requests, so a later read can
   ask again.

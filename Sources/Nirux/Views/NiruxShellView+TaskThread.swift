@@ -46,7 +46,7 @@ extension NiruxShellView {
         let spaceIDs = profiles.map(\.id)
         // The ledger's, not the live pull request's: that one follows the
         // focused column, which may be another checkout.
-        let urls = Set(spaceIDs.flatMap { sessionLedger.sessions(inSpace: $0) }.filter { $0.workspaceID == id }.compactMap(\.pullRequest?.url))
+        let urls = sessionLedger.pullRequestURLs(workspaceID: id)
         let missions = MissionStore.shared.missions.filter { $0.childWorkspaceID == id }
         let reviewRuns = workspace.reviewRuns
         let isSingleRepository = (profiles.first { $0.id == space }?.anchors.count ?? 0) <= 1
@@ -67,8 +67,13 @@ extension NiruxShellView {
                 let result = GitHub.CLI.run(.init(["pr", "view", url, "--json", TaskThread.pullRequestFields])).flatMap(\.result)
                 return (try? result.get()).flatMap(TaskThread.pullRequestHistory) ?? []
             }
-            TaskThread.Store.queue.async {
-                TaskThread.Store.append(history, workspaceID: id, spaceID: space, stateDirectory: directory)
+            guard !history.isEmpty else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let open = Set(self.workspaces.filter { !$0.isClosing }.map(\.id))
+                TaskThread.Store.queue.async {
+                    TaskThread.Store.appendHistory(history, workspaceID: id, spaceID: space, keeping: open, stateDirectory: directory)
+                }
             }
         }
     }

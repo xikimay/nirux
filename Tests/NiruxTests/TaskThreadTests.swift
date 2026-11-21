@@ -215,6 +215,47 @@ final class TaskThreadTests: XCTestCase {
         XCTAssertEqual([open, recent, older, newer].map { FileManager.default.fileExists(atPath: $0.path) }, [true, true, false, true])
     }
 
+    func testLateHistoryOnlyEnrichesARetainedClosedThread() throws {
+        let close = TaskThread.Event(time: 1, kind: .closed)
+        let history = TaskThread.Event(time: 2, kind: .merged)
+        let request = TaskThread.Event(time: 1, kind: .request)
+        TaskThread.Store.append([close], workspaceID: "removed", spaceID: "s", stateDirectory: directory)
+        let removed = try XCTUnwrap(TaskThread.Store.locate(workspaceID: "removed", stateDirectory: directory))
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: removed.path)
+        TaskThread.Store.prune(spaceID: "s", keeping: [], now: Date().timeIntervalSince1970, stateDirectory: directory)
+        TaskThread.Store.append([request], workspaceID: "unfinished", spaceID: "s", stateDirectory: directory)
+        TaskThread.Store.append([close], workspaceID: "retained", spaceID: "s", stateDirectory: directory)
+        for id in ["removed", "unfinished", "retained"] {
+            TaskThread.Store.appendHistory([history], workspaceID: id, spaceID: "s", keeping: [], stateDirectory: directory)
+        }
+        XCTAssertNil(TaskThread.Store.locate(workspaceID: "removed", stateDirectory: directory))
+        XCTAssertEqual(TaskThread.Store.load(workspaceID: "unfinished", stateDirectory: directory), [request])
+        XCTAssertEqual(TaskThread.Store.load(workspaceID: "retained", stateDirectory: directory), [close, history])
+    }
+
+    func testLateHistoryEnforcesTheArchiveBudgetAndKeepsOpenTasks() throws {
+        let now = Date().timeIntervalSince1970
+        let close = TaskThread.Event(time: now, kind: .closed)
+        TaskThread.Store.append([close], workspaceID: "target", spaceID: "s", stateDirectory: directory)
+        let target = try XCTUnwrap(TaskThread.Store.locate(workspaceID: "target", stateDirectory: directory))
+        let size = try Data(contentsOf: target).count
+        let open = Set(["open"])
+        TaskThread.Store.append([.init(time: now, kind: .request)], workspaceID: "open", spaceID: "s", stateDirectory: directory)
+        let openURL = try XCTUnwrap(TaskThread.Store.locate(workspaceID: "open", stateDirectory: directory))
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: openURL.path)
+        let older = target.deletingLastPathComponent().appendingPathComponent("older.jsonl")
+        try Data(count: TaskThread.Store.maxSpaceBytes - size).write(to: older)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: now - 100)], ofItemAtPath: older.path)
+        TaskThread.Store.prune(spaceID: "s", keeping: open, now: now, stateDirectory: directory)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: older.path))
+
+        let history = TaskThread.Event(time: now, kind: .merged)
+        TaskThread.Store.appendHistory([history], workspaceID: "target", spaceID: "s", keeping: open, stateDirectory: directory)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: older.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: openURL.path))
+        XCTAssertEqual(TaskThread.Store.load(workspaceID: "target", stateDirectory: directory), [close, history])
+    }
+
     /// The files are read by the task's workspace id (findings in every
     /// space), then by its pull requests' URLs (follow-ups, triage, rules).
     func testTheFilesAreReadByWorkspaceThenPullRequest() throws {
