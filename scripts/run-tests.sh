@@ -66,6 +66,7 @@ fi
 sed -E 's#/.*##' "$work/list" | sort -u > "$work/classes"
 # Flake gate (DO NOT MERGE): each gated class 10 times, beside the others.
 for c in LeadStaysOpenFlowTests SidebarPanelFlowTests; do for i in 2 3 4 5 6 7 8 9 10; do echo "$c#$i"; done; done >> "$work/classes"
+for c in LeadTaskToolsFlowTests HistorySearchTests; do for i in 2 3 4 5; do echo "$c#$i"; done; done >> "$work/classes"
 awk 'BEGIN{srand()}{print rand()"\t"$0}' "$work/classes" | sort -n | cut -f2- > "$work/shuffled" && mv "$work/shuffled" "$work/classes"
 echo "$expected tests in $(wc -l < "$work/classes" | tr -d ' ') classes, $workers at a time"
 
@@ -95,11 +96,7 @@ while read -r class; do
     # The last summary is the whole run's: "Executed 12 tests, with …".
     count=$({ grep -E 'Executed [0-9]+ tests?' "$log" 2>/dev/null || true; } | tail -1 | sed -E 's/.*Executed ([0-9]+) tests?.*/\1/')
     executed=$((executed + ${count:-0}))
-    if ! grep -qxF "$class" "$work/failed"; then
-        echo "::group::$class"
-        cat "$log" 2>/dev/null || echo "(no log)"
-        echo "::endgroup::"
-    fi
+    : # gate: passing logs left out, so the failures' fit in the job log
 done < "$work/classes"
 
 echo "Slowest classes:"
