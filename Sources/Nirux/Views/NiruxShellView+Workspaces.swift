@@ -568,6 +568,8 @@ extension NiruxShellView {
             edgeGlowBottom.frame = frames.glowBottom
             columnIndicator.frame = frames.indicator
         }
+        sidebarResizeHandle.isHidden = !isSidebarExpanded
+        sidebarResizeHandle.frame = frames.divider.insetBy(dx: -3, dy: 0)
         statusBar.frame = frames.statusBar
     }
 
