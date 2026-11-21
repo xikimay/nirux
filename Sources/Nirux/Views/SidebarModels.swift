@@ -53,6 +53,9 @@ struct ColumnInfo: Hashable {
     var waitingMessages: SidebarWaitingMessages?
     /// The column's identity (`ColumnState.id`): a menu's items find it by it.
     var id: UUID?
+    /// The Lead's Claude column (`WorkspaceState.leadTerminal`), which
+    /// closes only with the Lead.
+    var isLeadTerminal = false
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
@@ -95,6 +98,7 @@ struct ColumnInfo: Hashable {
             && lhs.dialog == rhs.dialog
             && lhs.circling == rhs.circling
             && lhs.waitingMessages == rhs.waitingMessages
+            && lhs.isLeadTerminal == rhs.isLeadTerminal
     }
 
     func hash(into hasher: inout Hasher) {
@@ -124,6 +128,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(dialog)
         hasher.combine(circling)
         hasher.combine(waitingMessages)
+        hasher.combine(isLeadTerminal)
     }
 }
 
@@ -561,6 +566,8 @@ enum WorkspaceSidebarAction {
     case startWaitingTask
     case moveUp, moveDown, markActive, markInactive
     case close, rename, editContext, reviewBranch, newSubtask, moveOutOfParent
+    /// "Turn Off Lead…": Space Settings › Lead, where the Lead closes.
+    case turnOffLead
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI
