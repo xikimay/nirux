@@ -245,7 +245,7 @@ final class LeadRestartFlowTests: XCTestCase {
             let lead = try harness.makeLead()
             let column = try XCTUnwrap(lead.workspace.leadTerminal)
             // nohup: the shell ends on the hang-up, the program it runs doesn't.
-            let stuck = try run("nohup /bin/sleep 600 > /dev/null 2>&1", named: "sleep", in: column, harness: harness)
+            let stuck = try run("exec nohup /bin/sleep 600 > /dev/null 2>&1", named: "sleep", in: column, harness: harness)
             defer { if ProcessInstance.running(pid: stuck.pid) == stuck { kill(stuck.pid, SIGKILL) } }
             let fresh = AgentStandIn()
             defer { fresh.remove() }
@@ -341,7 +341,7 @@ final class LeadRestartFlowTests: XCTestCase {
             let shell = harness.shell
             let lead = try harness.makeLead()
             let column = try XCTUnwrap(lead.workspace.leadTerminal)
-            let stuck = try run("nohup /bin/sleep 600 > /dev/null 2>&1", named: "sleep", in: column, harness: harness)
+            let stuck = try run("exec nohup /bin/sleep 600 > /dev/null 2>&1", named: "sleep", in: column, harness: harness)
             defer { if ProcessInstance.running(pid: stuck.pid) == stuck { kill(stuck.pid, SIGKILL) } }
             harness.alertResponses = [.alertSecondButtonReturn]
             shell.requestRestartLead(spaceID: lead.space)
