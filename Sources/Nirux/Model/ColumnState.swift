@@ -508,10 +508,9 @@ final class ColumnState {
     var launchDirectory: String? { terminalSpec?.cwd }
     var launchEnvironment: [String: String]? { terminalSpec?.environment }
 
-    /// Where, and with what environment, the shell of a column created
-    /// without one starts. No effect once it started.
+    /// Directory and environment for the next shell in this terminal.
     func setLaunch(directory: String, environment: [String: String]) {
-        guard !isShellStartScheduled, let spec = terminalSpec else { return }
+        guard let spec = terminalSpec else { return }
         terminalSpec = (directory, spec.shellArgs, environment)
     }
 
