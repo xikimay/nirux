@@ -6,8 +6,8 @@ name: Tests
 # (nightly.yml) already runs the tests there, and a second run held another
 # macOS runner on every merge.
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [test/board-now-review-726]
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -33,6 +33,7 @@ jobs:
           # merged pull request's commits runs here, before merge, rather
           # than first in the nightly.
           fetch-depth: 0
+          ref: 4df7fbe525d5624809a23dd5a2cefe6f935fc16f
 
       # The dependencies' clones and binaries (GhosttyKit's download sometimes
       # fails to connect), per toolchain: a new runner image's SwiftPM starts
@@ -56,3 +57,15 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      - name: Check both controller regressions against the reviewed revision
+        run: |
+          git restore --source=8e2c5e09 -- Sources/Nirux/Model/BoardStages.swift Sources/Nirux/Model/BoardStages+Facts.swift Sources/Nirux/Model/ProjectBoard.swift Sources/Nirux/Model/ProjectBoard+GitHub.swift
+          swift build --build-tests
+          filter='BoardStagesContentFlowTests/(testTheContentIsWhatTheTableListsAsStages|testARepositorysPillSaysWhatWentWrongOrThatItHasNoSettings)'
+          if swift test --skip-build --filter "$filter" > "$RUNNER_TEMP/before.log" 2>&1; then
+            cat "$RUNNER_TEMP/before.log"
+            exit 1
+          fi
+          grep 'error:.*Merge manually.*Merge blocked by GitHub' "$RUNNER_TEMP/before.log"
+          grep 'error:.*GitHub status unavailable.*Wait for the design review' "$RUNNER_TEMP/before.log"
