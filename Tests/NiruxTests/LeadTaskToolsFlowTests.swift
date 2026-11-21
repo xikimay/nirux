@@ -471,7 +471,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
     /// is a stand-in in a column of its own, its session started: what it is
     /// sent, and its hooks.
     private func reportingTask(
-        _ title: String, lead: UIFlowHarness.Lead, harness: UIFlowHarness, readsSlowly: Bool = false, reports: Bool = true
+        _ title: String, lead: UIFlowHarness.Lead, harness: UIFlowHarness, holdable: Bool = false, reports: Bool = true
     ) throws -> (
         agent: AgentStandIn, column: ColumnState, claude: ProcessInstance, hook: @MainActor (AgentHookEvent.Name) -> Void,
         workspace: WorkspaceState
@@ -489,7 +489,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         )
         let task = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
         let agent = AgentStandIn()
-        task.addColumn(command: agent.command(slowly: readsSlowly), agentUUID: agentUUID, cwd: harness.worktree)
+        task.addColumn(command: agent.command(holdable: holdable), agentUUID: agentUUID, cwd: harness.worktree)
         let column = try XCTUnwrap(task.columns.first { $0.agentUUID == agentUUID })
         let pty = try XCTUnwrap(column.pty)
         harness.waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
@@ -677,12 +677,12 @@ final class LeadTaskToolsFlowTests: XCTestCase {
     }
 
     /// tell carries up to 4,000 characters: typed as the agent reads it,
-    /// past what one write to the terminal takes, then Enter. An agent slow
-    /// to read never holds the app meanwhile.
+    /// past what one write to the terminal takes, then Enter. An agent that
+    /// reads nothing meanwhile never holds the app.
     func testALongTellIsTypedWhole() throws {
         try UIFlowHarness.run { harness in
             let lead = try harness.makeLead()
-            let task = try reportingTask("Reader", lead: lead, harness: harness, readsSlowly: true)
+            let task = try reportingTask("Reader", lead: lead, harness: harness, holdable: true)
             defer { task.agent.remove() }
             task.hook(.userPromptSubmit)
             task.hook(.stop)
@@ -692,12 +692,14 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == task.column.agentUUID }
                     .map { $0.childConsumedAt != nil }
             }
+            task.agent.hold()
             let start = Date()
             let told = try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead)
             XCTAssertFalse(told.isError, told.text)
             XCTAssertLessThan(Date().timeIntervalSince(start), 2, "the app isn't held while the agent reads")
             XCTAssertTrue(told.text.contains("is typing it"), told.text)
             XCTAssertEqual(typed(), [false], "typed only once its Enter went in")
+            task.agent.release()
             harness.waitUntil("all of it, then Enter") { task.agent.input.contains("\u{1B}[201~") && task.agent.input.hasSuffix("\n") }
             XCTAssertTrue(task.agent.input.contains("Line 70: read the file and add up the totals."))
             harness.waitUntil("then typed") { typed() == [true] }
@@ -707,18 +709,25 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             // the message's.
             task.hook(.userPromptSubmit)
             task.hook(.stop)
+            task.agent.hold()
             XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
             _ = task.column.pty?.applyAgentHook(AgentHookEvent(
                 kind: .claude, name: .preToolUse, agentUUID: task.column.agentUUID, sessionID: "task", emitterProcess: task.claude,
                 agentID: "background", timestamp: Date().timeIntervalSince1970
             ), isUserFocused: false)
+            task.agent.release()
             harness.waitUntil("the second, then Enter") { task.agent.input.components(separatedBy: "\u{1B}[201~\n").count == 3 }
 
 
             // A key of the user's while it goes in: Enter would send it too.
             task.hook(.userPromptSubmit)
             task.hook(.stop)
+            task.agent.hold()
             XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            // Released first: the key would wait for room in the queue, and
+            // hold the app. Enter can't come before it: it goes through the
+            // main queue once the paste is in.
+            task.agent.release()
             task.column.pty?.sendRaw("z")
             harness.waitUntil("its sender told") { harness.shell.pendingLeadNotices.contains { $0.text.contains("wasn't sent") } }
             XCTAssertEqual(task.agent.input.components(separatedBy: "\u{1B}[201~\n").count, 3, "the third went in without Enter")
@@ -794,19 +803,22 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                     .map { $0.childConsumedAt != nil ? "typed" : $0.expiredAt != nil ? "given up" : "waiting" }
             }
             for cut in ["leaves", "closes"] {
-                let task = try reportingTask("Reader \(cut)", lead: lead, harness: harness, readsSlowly: true)
+                let task = try reportingTask("Reader \(cut)", lead: lead, harness: harness, holdable: true)
                 defer { task.agent.remove() }
                 let agentUUID = try XCTUnwrap(task.column.agentUUID)
                 task.hook(.userPromptSubmit)
                 task.hook(.stop)
+                task.agent.hold()
                 XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader \(cut)", "message": message], lead: lead).isError)
-                harness.waitUntil("it goes in") { task.agent.input.contains("Line 1:") }
+                harness.waitUntil("it goes in") { task.agent.input.contains("\u{1B}[200~") }
                 XCTAssertEqual(state(agentUUID), ["waiting"])
                 if cut == "leaves" {
                     kill(task.claude.pid, SIGKILL)
                 } else {
                     let index = try XCTUnwrap(harness.shell.workspaces.firstIndex { $0.columns.contains { $0 === task.column } })
                     harness.shell.closeWorkspace(at: index, refocusing: false)
+                    // Its agent reads on while it closes.
+                    task.agent.release()
                 }
                 harness.waitUntil("its typing over (\(cut))", timeout: 60) { harness.shell.missionWaits.typing.isEmpty }
                 harness.shell.sweepWaitingInstructions(now: Date().timeIntervalSince1970, snapshot: ProcessSnapshot())
