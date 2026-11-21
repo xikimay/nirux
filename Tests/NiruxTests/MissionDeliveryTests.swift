@@ -79,6 +79,28 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertTrue(store.pendingPromptDeliveries(now: 42).isEmpty)
     }
 
+    func testThreadStopsCountingAHandedQuestionWhenItsChildTakesANewPrompt() throws {
+        let store = makeStore()
+        let asked = try XCTUnwrap(store.accept(childEvent(.question, "Which account?", at: 20), enabled: true))
+        XCTAssertNotNil(store.handToUser(questionID: asked.event.id, because: "Only the user knows", now: 25))
+        func read() -> [TaskThread.Event] {
+            TaskThread.thread(recorded: [], joining: .init(missions: store.missions))
+        }
+        XCTAssertEqual(TaskThread.Timeline(events: read(), context: .init()).current.map(\.label), ["Needs you"])
+        XCTAssertTrue(store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 32))
+        XCTAssertEqual(store.missions.first?.status, .active)
+        let events = read()
+        let question = try XCTUnwrap(TaskThread.questions(in: events).first)
+        XCTAssertEqual(question.asked.text, "Which account?")
+        XCTAssertNil(question.answer)
+        XCTAssertFalse(question.isOpen)
+        XCTAssertEqual(question.retiredAt, 32)
+        XCTAssertTrue(TaskThread.Timeline(events: events, context: .init()).current.isEmpty)
+        let waits = try XCTUnwrap(DailyPass.threadWaits(in: events, task: "Thread", workspaceID: childWorkspaceID,
+                                                       window: .init(start: 0, end: 100)))
+        XCTAssertEqual(waits.user, 7)
+    }
+
     /// A question stops waiting once its child took a later prompt: the
     /// user's (`retireQuestions`), or its parent's tell, for a question of
     /// that Mission the parent or the user saw. Not one asked after that
