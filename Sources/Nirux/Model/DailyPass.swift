@@ -21,7 +21,7 @@ enum DailyPass {
     /// The sightings a kind lists at most.
     static let maxSightings = 6
 
-    struct Window: Equatable, Sendable {
+    struct Window: Codable, Equatable, Sendable {
         var start: TimeInterval
         var end: TimeInterval
 
@@ -425,6 +425,7 @@ enum DailyPass {
         var repositories: [RepositoryReport]
         var triagedRuns: [TriagedRun]
         var flakyTests: [String]
+        var waitWindow: Window?
         var threadWaits: [ThreadWaits] = []
         var missions: [MissionFact]
         /// RuleProposalStore's: pending, and decided in the last 90 days.
@@ -458,6 +459,7 @@ enum DailyPass {
     struct Digest: Equatable, Sendable {
         let text: String
         let readUntil: TimeInterval
+        var nextWaitPage: WaitPage?
     }
 
     /// How much a section lists, lowered until the digest fits
@@ -478,6 +480,7 @@ enum DailyPass {
         var text: String?
         var leftOut: [TimeInterval] = []
         var times: [TimeInterval] = []
+        var waitRows = 0
     }
 
     static func digest(_ facts: Facts, timeZone: TimeZone = .current) -> Digest {
@@ -514,7 +517,11 @@ enum DailyPass {
             text += "\n\nLeft out: what came after \(clock(readUntil, timeZone: timeZone)). The window is read up to there only: "
                 + "call daily_pass again for the rest once you have proposed."
         }
-        return Digest(text: text, readUntil: readUntil)
+        let shown = parts.last?.waitRows ?? 0
+        let page = WaitPage(window: facts.waitWindow ?? window)
+        let continuation = page.next(afterShowing: shown, of: facts.threadWaits)
+        if continuation != nil { text += "\n\n" + WaitPage.more }
+        return Digest(text: text, readUntil: readUntil, nextWaitPage: continuation)
     }
 
     private static func joined(_ header: String, _ parts: [Part]) -> String {
@@ -630,12 +637,10 @@ enum DailyPass {
     }
 
     private static func threadWaitsSection(_ facts: Facts, _ limit: Limits) -> Part {
-        let waits = facts.threadWaits.sorted { ($0.at, $0.workspaceID) < ($1.at, $1.workspaceID) }
+        let waits = WaitPage(window: facts.waitWindow ?? facts.window).remaining(in: facts.threadWaits)
         guard !waits.isEmpty else { return Part() }
-        return Part(
-            text: section("Task waits in this window", waits.prefix(limit.items).map(\.line), total: waits.count),
-            leftOut: waits.dropFirst(limit.items).map(\.at), times: waits.map(\.at)
-        )
+        let shown = waits.prefix(limit.items)
+        return Part(text: section("Task waits in this window", shown.map(\.line), total: waits.count), waitRows: shown.count)
     }
 
     private static func missionsSection(_ facts: Facts, _ limit: Limits, timeZone: TimeZone) -> Part {
@@ -831,6 +836,13 @@ struct DailyPassState: Codable, Equatable, Sendable {
     var checkedAt: TimeInterval?
     /// The last pass's counts, for the Lead row.
     var note: DailyPass.Note?
+    var nextWaitPage: DailyPass.WaitPage?
+    var waitsThrough: TimeInterval?
+
+    func waitWindow(for window: DailyPass.Window) -> DailyPass.Window {
+        guard let waitsThrough else { return window }
+        return DailyPass.Window(start: max(window.start, waitsThrough), end: window.end)
+    }
 
     /// The window a call at `now` reads, and the state to save once it
     /// was read; nil for a call that reads the last window again, so calls

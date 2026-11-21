@@ -33,6 +33,36 @@ final class TaskThreadReadingTests: XCTestCase {
         XCTAssertFalse(TaskThread.canReadArchive([request, .init(time: 2, kind: .closed, detail: "external")]))
     }
 
+    func testLegacyMissionResultsCannotRetireAnotherMissionsQuestion() {
+        let asked = TaskThread.Event(time: 1, kind: .question, text: "Task A", ref: "q")
+        let other = TaskThread.Event(time: 2, kind: .result, text: "Mission B completed", ref: "result-b")
+        let answer = TaskThread.Event(time: 3, kind: .answer, by: .lead, ref: "q")
+        XCTAssertTrue(TaskThread.questions(in: [asked, other]).first?.isOpen == true)
+        XCTAssertNil(TaskThread.questions(in: [asked, other, answer]).first?.retiredAt)
+        XCTAssertEqual(TaskThread.questions(in: [asked, other, answer]).first?.answer, answer)
+        XCTAssertEqual(TaskThread.questions(in: [asked, other, .init(time: 4, kind: .closed)]).first?.retiredAt, 4)
+    }
+
+    func testWaitPagesKeepTheSameWindowAcrossSimultaneousOpenWaits() throws {
+        let window = DailyPass.Window(start: 100, end: 3700)
+        let events: [TaskThread.Event] = [.init(time: 1, kind: .question, ref: "q", recipient: .lead)]
+        let rows = (0..<(DailyPass.maxItems + 3)).compactMap { index in
+            DailyPass.threadWaits(in: events, task: "Task", workspaceID: String(format: "W%03d", index), window: window)
+        }
+        let facts = DailyPass.Facts(spaceName: "A", window: window, findings: [], repositories: [], triagedRuns: [], flakyTests: [],
+                                    threadWaits: rows.reversed(), missions: [], proposals: [], briefRules: [])
+        let first = DailyPass.digest(facts)
+        let cursor = try XCTUnwrap(first.nextWaitPage)
+        XCTAssertEqual(cursor.window, window)
+        let second = cursor.read(rows)
+        XCTAssertNil(second.next)
+        let lines = (first.text + "\n" + second.text).components(separatedBy: "\n").filter { $0.hasPrefix("- Task · id ") }
+        XCTAssertEqual(lines, rows.map(\.line))
+        XCTAssertTrue(lines.allSatisfy { $0.hasSuffix("Lead 1 h") })
+        let next = DailyPassState(waitsThrough: window.end).waitWindow(for: .init(start: 100, end: 3760))
+        XCTAssertEqual(DailyPass.threadWaits(in: events, task: "Task", workspaceID: "W000", window: next)?.lead, 60)
+    }
+
     func testDailyWaitsSplitAtHandoffAndCountConcurrentIntervalsOnce() throws {
         let events: [TaskThread.Event] = [
             .init(time: 0, kind: .request), .init(time: 2, kind: .question, ref: "q1", recipient: .lead, missionID: "one"),

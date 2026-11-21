@@ -1,10 +1,35 @@
 import Foundation
 
 extension DailyPass {
+    /// All pages measure the same interval. Workspace IDs break ties between concurrent waits.
+    struct WaitPage: Codable, Equatable, Sendable {
+        static let more = "Call daily_pass again for the remaining tasks in this wait window."
+        let window: Window
+        var afterID: String?
+
+        func remaining(in waits: [ThreadWaits]) -> [ThreadWaits] {
+            waits.filter { $0.workspaceID > (afterID ?? "") }.sorted { $0.workspaceID < $1.workspaceID }
+        }
+
+        func next(afterShowing count: Int, of waits: [ThreadWaits]) -> Self? {
+            let rows = remaining(in: waits)
+            guard count < rows.count else { return nil }
+            return Self(window: window, afterID: rows.prefix(count).last?.workspaceID ?? afterID)
+        }
+
+        func read(_ waits: [ThreadWaits]) -> (text: String, next: Self?) {
+            let rows = remaining(in: waits)
+            let shown = rows.prefix(DailyPass.maxItems)
+            let next = next(afterShowing: shown.count, of: waits)
+            let header = "Task waits · " + DailyPass.clock(window.start) + " to " + DailyPass.clock(window.end)
+            let lines = shown.isEmpty ? ["No remaining waits in this space."] : shown.map(\.line)
+            return (([header] + lines + (next == nil ? [] : [Self.more])).joined(separator: "\n"), next)
+        }
+    }
+
     struct ThreadWaits: Sendable {
         let task: String
         let workspaceID: String
-        let at: TimeInterval
         let firstPR: TimeInterval?
         let questions: Int
         let reviewRounds: Int
@@ -27,8 +52,7 @@ extension DailyPass {
     static func threadWaits(
         in ordered: [TaskThread.Event], task: String, workspaceID: String, window: Window
     ) -> ThreadWaits? {
-        var firstFact: TimeInterval?
-        func note(_ at: TimeInterval) { firstFact = min(firstFact ?? at, at) }
+        func inWindow(_ at: TimeInterval) -> Bool { at > window.start && at <= window.end }
         enum Wait { case user, lead, parent, ci }
         var intervals: [Wait: [Range<TimeInterval>]] = [:]
         func count(_ owner: Wait?, from start: TimeInterval, until end: TimeInterval) {
@@ -36,13 +60,11 @@ extension DailyPass {
             let upper = min(end, window.end)
             guard let owner, upper > lower else { return }
             intervals[owner, default: []].append(lower..<upper)
-            note(upper)
         }
         var questions = 0
         for question in TaskThread.questions(in: ordered) {
-            if window.contains(question.asked.time) {
+            if inWindow(question.asked.time) {
                 questions += 1
-                note(question.asked.time)
             }
             let end = min(question.answer?.time ?? window.end, question.retiredAt ?? window.end)
             let owner = question.asked.recipient ?? question.handoff?.by
@@ -59,28 +81,25 @@ extension DailyPass {
         let close = ordered.first { $0.kind == .closed }?.time
         var firstPR: TimeInterval?
         if let born = ordered.first(where: { $0.kind == .request })?.time,
-           let opened = ordered.first(where: { $0.kind == .pullRequest })?.time, opened >= born, window.contains(opened) {
+           let opened = ordered.first(where: { $0.kind == .pullRequest })?.time, opened >= born, inWindow(opened) {
             firstPR = opened - born
-            note(opened)
         }
         var rounds = 0
         var reviews = 0
         for event in ordered {
-            if window.contains(event.time) {
+            if inWindow(event.time) {
                 if event.kind == .findings {
                     reviews += 1
-                    note(event.time)
                 }
                 if event.kind == .followUp {
                     rounds += 1
-                    note(event.time)
                 }
             }
             if event.kind == .checkRun, let end = event.until ?? close {
                 count(.ci, from: event.time, until: min(end, close ?? end))
             }
         }
-        guard let at = firstFact else { return nil }
+        guard !intervals.isEmpty || firstPR != nil || questions + rounds + reviews > 0 else { return nil }
         func seconds(_ owner: Wait) -> TimeInterval {
             var total: TimeInterval = 0
             var until = window.start
@@ -90,7 +109,7 @@ extension DailyPass {
             }
             return total
         }
-        return ThreadWaits(task: task, workspaceID: workspaceID, at: at, firstPR: firstPR, questions: questions, reviewRounds: reviews, followUps: rounds,
+        return ThreadWaits(task: task, workspaceID: workspaceID, firstPR: firstPR, questions: questions, reviewRounds: reviews, followUps: rounds,
                            user: seconds(.user), lead: seconds(.lead), parent: seconds(.parent), ci: seconds(.ci))
     }
 
