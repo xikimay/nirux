@@ -55,9 +55,6 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run full test suite
-        run: scripts/run-tests.sh
-
       - name: Repeat the thread body and row/rail interaction tests ten times under contention
         shell: bash
         run: |
@@ -101,6 +98,9 @@ jobs:
             fi
             echo "Run $attempt: $class passed $executed/$expected tests"
           ' _ < "$GATE_WORK/jobs"
+
+      - name: Run full test suite
+        run: scripts/run-tests.sh
 
       - name: Release build
         run: swift build -c release
