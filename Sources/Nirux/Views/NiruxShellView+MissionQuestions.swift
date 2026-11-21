@@ -116,9 +116,13 @@ extension NiruxShellView {
                 if let pty = parent.pty, !pty.hasExited {
                     let process = foreground(parent)
                     foregroundKnown = process != nil
+                    var typedAt = question.parentTypedAt
+                    if let process, let previous = typedAt, previous < process.instance.startedAt,
+                       parentEnd?.workspace.runsRestartedLead(process) == true {
+                        typedAt = nil
+                    }
                     parentState = Self.missionParent(
-                        // Typed into a Lead restarted since: the new one reads it in list_tasks.
-                        foreground: process, typedAt: question.parentTypedAt.flatMap { parent.leadRestartedAt ?? 0 > $0 ? nil : $0 },
+                        foreground: process, typedAt: typedAt,
                         finishedTurnAfterTyping: pty.finishedTurn(afterTypingAt:),
                         tookPrompt: { process in
                             pty.agentTookPrompt(since: process).map { $0 || pty.sitsAtFirstPrompt(process, now: now, record: sessionRecord(of:)) }

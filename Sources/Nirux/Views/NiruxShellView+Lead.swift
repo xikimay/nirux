@@ -138,7 +138,6 @@ extension NiruxShellView {
             lead.addColumn(agentUUID: lead.leadAgentUUID ?? reportedTo ?? UUID().uuidString)
             guard let column = lead.columns[safe: lead.focusedIndex] else { return }
             lead.leadAgentUUID = column.agentUUID
-            column.leadRestartedAt = Date().timeIntervalSince1970
             relayout(animated: false)
             return sideEffects.launchAgent(column, command)
         }
@@ -147,18 +146,17 @@ extension NiruxShellView {
         } else if let pty = column.pty, pty.shellPID == nil, !pty.hasExited {
             return showToast("The Lead is starting: restart it in a moment.")
         }
-        sideEffects.restartTerminal(column, command) { [weak self, weak lead, weak column] stillRunning in
+        sideEffects.restartTerminal(column, command) { [weak self, weak lead] stillRunning in
             // Turned off meanwhile: nothing starts in its column.
             guard let self, lead?.isClosing == false else { return false }
             guard stillRunning.isEmpty else {
                 self.showToast(
                     "The Lead’s Claude didn’t stop within \(Int(Self.exitTimeout)) s (\(stillRunning.joined(separator: ", "))): "
-                        + "nothing was launched. Restart Lead again to start it anyway.",
+                        + "nothing was launched. Once it stops, choose Restart Lead again.",
                     tone: .error
                 )
                 return false
             }
-            column?.leadRestartedAt = Date().timeIntervalSince1970
             return true
         }
     }
@@ -265,6 +263,12 @@ extension NiruxShellView {
 }
 
 extension WorkspaceState {
+    /// The restart prompt belongs to the launched Claude. A later Claude
+    /// started by hand in the same terminal has its own conversation.
+    func runsRestartedLead(_ process: ForegroundProcess) -> Bool {
+        isLead && AgentHookCenter.isInteractiveClaude(process) && process.arguments.last == NiruxShellView.leadRestartPrompt
+    }
+
     /// A Lead's Claude column, by its agent UUID.
     var leadTerminal: ColumnState? {
         guard isLead, let leadAgentUUID else { return nil }
