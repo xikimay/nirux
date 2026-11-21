@@ -29,10 +29,13 @@ final class NewTaskTests: XCTestCase {
         )
         XCTAssertEqual(NewTask.suggestedBranch(description: "It is", templateName: nil), "feat/it", "nothing but stop words: the first")
         XCTAssertEqual(NewTask.suggestedBranch(description: "Le menu n'est pas visible", templateName: nil), "feat/menu-pas-visible")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Fix N+1 queries on the board", templateName: nil), "fix/n-1-queries-on-board")
         XCTAssertEqual(NewTask.suggestedBranch(description: "Je veux que tu corriges le crash", templateName: nil), "fix/crash")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Il faut que tu corriges le crash", templateName: nil), "fix/crash")
         let pullRequest = "Review https://github.com/xikimay/nirux/pull/657"
         XCTAssertEqual(NewTask.workspaceTitle(description: pullRequest), "Review #657")
         XCTAssertEqual(NewTask.suggestedBranch(description: pullRequest, templateName: nil), "feat/review-657")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "Answer \(pullRequest.dropFirst(7))."), "Answer #657.", "its period after it")
     }
 
     /// The branch a line asks for wins: a "(branch …)" note, or a leading
@@ -57,6 +60,8 @@ final class NewTaskTests: XCTestCase {
         XCTAssertEqual(NewTask.suggestedBranch(description: "docs(readme): the setup steps", templateName: nil), "docs/readme-setup-steps")
         XCTAssertEqual(NewTask.workspaceTitle(description: "Fix: crash on launch"), "Fix: crash on launch", "a typed prefix stays")
         XCTAssertEqual(NewTask.suggestedBranch(description: "Rebase it (branch origin/main)", templateName: nil), "feat/rebase-branch-origin-main")
+        let longLine = String(repeating: "word ", count: 120) + "— branch fix/stale-labels"
+        XCTAssertEqual(NewTask.suggestedBranch(description: longLine, templateName: nil), "fix/stale-labels", "a note past the part read")
         // Not a short name: a file, a counter. A short name without a slash.
         XCTAssertEqual(NewTask.suggestedBranch(description: "src/app.ts: crashes when empty", templateName: nil), "feat/src-app-ts-crashes-when-empty")
         XCTAssertEqual(NewTask.workspaceTitle(description: "1/3 — Add the schema"), "1/3 — Add the schema")
@@ -76,6 +81,7 @@ final class NewTaskTests: XCTestCase {
     func testATitleNamesTheBranchUnlessTheLineAsksForOne() {
         XCTAssertEqual(NewTask.suggestedBranch(description: "Labels stay stale after a rename", title: "Stale labels", templateName: nil), "feat/stale-labels")
         XCTAssertEqual(NewTask.suggestedBranch(description: "fix: labels stay stale", title: "Stale labels", templateName: nil), "fix/stale-labels")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Fix the labels after a rename", title: "Stale labels", templateName: nil), "fix/stale-labels")
         XCTAssertEqual(NewTask.suggestedBranch(description: "Labels (branch fix/labels)", title: "Stale labels", templateName: nil), "fix/labels")
         XCTAssertEqual(NewTask.suggestedBranch(description: "Add a CSV export", title: "🚀", templateName: nil), "feat/add-csv-export")
     }

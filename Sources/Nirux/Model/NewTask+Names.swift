@@ -25,15 +25,16 @@ extension NewTask {
     static let bugWords: Set<String> = ["bug", "crash", "repair", "regression", "correction", "flaky", "broken"]
 
     /// Words no slug keeps, in English and French: articles, pronouns,
-    /// possessives, elisions, "is" and "and". Prepositions and negations stay
-    /// ("crash on launch"); "can't" is one word by then (see `slugWords`).
+    /// possessives, "is" and "and". Prepositions and negations stay ("crash
+    /// on launch"); "can't" is one word and "l'" gone by then (see
+    /// `slugWords`).
     static let slugStopWords: Set<String> = [
         "a", "an", "the", "and", "or", "but", "so", "then", "than", "that", "this", "these", "those", "which", "who",
         "its", "it", "is", "are", "was", "were", "be", "been", "i", "me", "my", "we", "our", "you", "your", "he",
         "she", "they", "them", "their", "le", "la", "les", "l", "un", "une", "des", "de", "du", "d", "au", "aux",
         "et", "ou", "que", "qu", "qui", "ce", "ces", "cet", "cette", "c", "notre", "nos", "votre", "vos", "son",
         "sa", "ses", "leur", "leurs", "mon", "ma", "mes", "y", "je", "j", "tu", "il", "elle", "nous", "vous",
-        "ils", "elles", "se", "s", "n", "m", "t", "si", "est", "sont", "trucs", "truc"
+        "ils", "elles", "se", "s", "si", "est", "sont", "trucs", "truc"
     ]
 
     /// What a line may open with before it says the task: a request to the
@@ -43,8 +44,8 @@ extension NewTask {
         "please", "can you", "could you", "would you", "i want you to", "i'd like you to", "i would like you to",
         "i need you to", "we need to", "we should", "let's", "je veux que tu", "je voudrais que tu",
         "j'aimerais que tu", "je veux qu'on", "j'aimerais qu'on", "tu peux", "tu pourrais", "peux-tu", "pourrais-tu",
-        "est-ce que tu peux", "est-ce qu'on peut", "est-ce qu'on pourrait", "il faudrait qu'on", "il faudrait que",
-        "il faudrait", "il faut qu'on", "il faut que", "il faut", "merci de", "stp"
+        "est-ce que tu peux", "est-ce qu'on peut", "est-ce qu'on pourrait", "il faudrait que tu", "il faudrait qu'on",
+        "il faudrait que", "il faudrait", "il faut que tu", "il faut qu'on", "il faut que", "il faut", "merci de", "stp"
     ].map { $0.split(separator: " ").map(String.init) }
 
     /// Longest part of a first line its name is read from: a pasted log
@@ -74,8 +75,7 @@ extension NewTask {
         var text: String
     }
 
-    static func nameLine(_ fullLine: String) -> NameLine {
-        let line = String(fullLine.prefix(maxNameLineLength))
+    static func nameLine(_ line: String) -> NameLine {
         var name = NameLine(text: line)
         let note = line.firstMatch(of: #/\s*\(\s*branch:?\s+`?([A-Za-z0-9._-]+/[A-Za-z0-9._/-]+)`?\s*\)/#.ignoresCase())
             ?? line.firstMatch(of: #/\s+[—–-]\s+branch:?\s+`?([A-Za-z0-9._-]+/[A-Za-z0-9._/-]+)`?\s*$/#.ignoresCase())
@@ -83,6 +83,7 @@ extension NewTask {
             name.branch = String(note.1)
             name.text.removeSubrange(note.range)
         }
+        name.text = String(name.text.prefix(maxNameLineLength))
         // A type's own branch may end with a colon; a short name of another
         // kind needs a dash, and words, not a date, a counter or a file.
         if let typed = name.text.wholeMatch(of: #/([a-z]+)/([a-z0-9][a-z0-9_/-]*)(?:\s+[—–-]|\s*[—–:])\s+(\S.*)/#),
@@ -120,8 +121,9 @@ extension NewTask {
         if let branch = line.branch { return branch }
         let template = templateName?.lowercased() ?? ""
         let type = line.type ?? (template.contains("bug") || template.contains("fix") ? "fix" : nil)
-        return title.flatMap { branch(of: slugWords($0), type: type) }
-            ?? branch(of: slugWords(line.shortName ?? line.text), type: type) ?? ""
+        let lineWords = slugWords(line.shortName ?? line.text)
+        let lineType = type ?? lineWords.first.flatMap(firstWordType)?.type
+        return title.flatMap { branch(of: slugWords($0), type: lineType) } ?? branch(of: lineWords, type: type) ?? ""
     }
 
     /// `<type>/<slug>` of `words` (see `suggestedBranch`); nil without a word.
@@ -200,12 +202,13 @@ extension NewTask {
 
     /// Letters and digits in ASCII lowercase (accents dropped, other scripts
     /// transliterated), split at everything else; "can't" as "cant", "the
-    /// Lead's" as "the lead".
+    /// Lead's" as "the lead", "l'écran" as "ecran".
     private static func slugWords(_ text: String) -> [String] {
         let latin = text.applyingTransform(.toLatin, reverse: false) ?? text
         let ascii = (latin.applyingTransform(.stripDiacritics, reverse: false) ?? latin).lowercased()
             .replacing(#/n['’]t\b/#, with: "nt")
             .replacing(#/['’]s\b/#, with: "")
+            .replacing(#/\b(?:qu|[cdjlmnst])['’]/#, with: "")
         return ascii.split { !($0.isASCII && ($0.isLetter || $0.isNumber)) }.map(String.init)
     }
 
@@ -213,12 +216,16 @@ extension NewTask {
     /// or issue, else the host ("youtube.com"), not the words of a URL.
     private static func withLinksAsHosts(_ text: String) -> String {
         text.replacing(#/https?://\S+/#.ignoresCase()) { link in
-            guard let url = URL(string: String(link.output)), let host = url.host() else { return "" }
+            // A sentence's own mark after the link stays after its name.
+            var address = String(link.output)
+            var mark = ""
+            while let last = address.last, ".,;:!?)]".contains(last) { mark = String(address.removeLast()) + mark }
+            guard let url = URL(string: address), let host = url.host() else { return mark }
             let parts = url.pathComponents.filter { $0 != "/" }
             if host.hasSuffix("github.com"), parts.count >= 4, ["pull", "issues"].contains(parts[2]), Int(parts[3]) != nil {
-                return "#" + parts[3]
+                return "#" + parts[3] + mark
             }
-            return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+            return (host.hasPrefix("www.") ? String(host.dropFirst(4)) : host) + mark
         }
     }
 
