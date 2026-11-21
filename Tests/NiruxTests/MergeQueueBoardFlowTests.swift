@@ -83,6 +83,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertEqual(header.startButton.title, "Start Dry Run… · 2")
             XCTAssertEqual(header.queueLabel.stringValue, "2 pull requests queued")
 
+            XCTAssertTrue(header.journalButton.isHidden)
             try BoardStagesClicks.click(header.startButton)
             let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
             XCTAssertFalse(header.startButton.isEnabled, "one sheet at a time")
@@ -153,6 +154,52 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertTrue(header.stopButton.isHidden)
             XCTAssertEqual(header.startButton.isEnabled, true, "a new Start opens a new sheet")
             XCTAssertEqual(board.view.stages.runningQueueViews.count, 0)
+
+            try BoardStagesClicks.click(header.journalButton)
+            let journal = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
+            waitUntil("the journal includes Stop") { journal.snapshot?.entriesText.contains("Stopped by the user.") == true }
+            let snapshot = try XCTUnwrap(journal.snapshot)
+            XCTAssertEqual(snapshot.status, "Stopped: Stopped by the user.")
+            XCTAssertTrue(snapshot.title.contains("Dry Run"))
+            XCTAssertEqual(snapshot.link?.absoluteString, "https://github.com/acme/widgets/pull/12")
+            journal.pasteboard = NSPasteboard.withUniqueName()
+            defer { journal.pasteboard.releaseGlobally() }
+            try click(journal.copyButton)
+            XCTAssertEqual(journal.pasteboard.string(forType: .string), snapshot.copyText)
+
+            let files = try XCTUnwrap(queue.files)
+            MergeQueue.Journal(url: files.journal).append([.init(time: "later", pr: 12, step: "queue", result: "refreshed")])
+            try click(journal.refreshButton)
+            waitUntil("Refresh reads the latest line") { journal.snapshot?.entriesText.hasSuffix("refreshed") == true }
+            try click(journal.doneButton)
+            waitUntil("the journal closed") { board.view.window?.attachedSheet == nil }
+        }
+    }
+
+    @MainActor
+    func testJournalOpensFromItsRotatedFileWithoutSavedState() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a])
+        let last = MergeQueue.Journal.Line(time: "now", pr: 12, step: "preflight", result: "Stopped: draft")
+        try withBoard(world: world, isDryRun: false, previousJournal: [last]) { shell, board in
+            let header = try self.header(of: board)
+            waitUntil("the Board found the rotated live journal") { !header.journalButton.isHidden }
+            var opened: [URL] = []
+            shell.sideEffects.openURL = { opened.append($0) }
+            try BoardStagesClicks.click(header.journalButton)
+            let panel = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
+            waitUntil("the stop is shown") { panel.copyButton.isEnabled }
+            let snapshot = try XCTUnwrap(panel.snapshot)
+            XCTAssertEqual(snapshot.status, last.result)
+            XCTAssertFalse(snapshot.title.contains("Dry Run"))
+            let scroll = try XCTUnwrap(panel.contentView?.subviews.compactMap { $0 as? NSScrollView }.first)
+            let text = try XCTUnwrap(scroll.documentView as? NSTextView)
+            XCTAssertTrue(text.string.hasPrefix("Stopped: draft\nOpen on GitHub"))
+            XCTAssertTrue(text.string.hasSuffix("now · #12 · preflight · Stopped: draft"))
+            let index = (text.string as NSString).range(of: "Open on GitHub").location
+            let link = try XCTUnwrap(text.textStorage?.attribute(.link, at: index, effectiveRange: nil) as? URL)
+            XCTAssertTrue(panel.textView(text, clickedOnLink: link, at: index))
+            XCTAssertEqual(opened.map(\.absoluteString), ["https://github.com/acme/widgets/pull/12"])
+            try click(panel.doneButton)
         }
     }
 
@@ -318,6 +365,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         boardClient: ProjectBoardFlowTests.FakeGitHub? = nil,
         isDryRun: Bool = true,
         saved: MergeQueue.SavedQueue? = nil,
+        previousJournal: [MergeQueue.Journal.Line] = [],
         _ body: (NiruxShellView, ProjectBoardController) throws -> Void
     ) throws {
         let stateDirectory = root + "/state"
@@ -350,10 +398,11 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             window.close()
         }
         let space = shell.workspaceStore.createProfile(named: "Board")
-        if let saved {
+        if saved != nil || !previousJournal.isEmpty {
             let files = try XCTUnwrap(MergeQueue.Files(projectID: space.id, repository: MQ.widgets,
                                                        stateDirectory: URL(fileURLWithPath: stateDirectory), dryRun: isDryRun))
-            saved.save(to: files.state)
+            saved?.save(to: files.state)
+            MergeQueue.Journal(url: files.journal.appendingPathExtension("1")).append(previousJournal)
         }
         let repo = root + "/widgets"
         try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
