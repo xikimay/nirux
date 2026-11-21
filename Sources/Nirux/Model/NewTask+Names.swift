@@ -119,7 +119,10 @@ extension NewTask {
     /// Empty when neither has a letter or digit to use. Always a valid branch
     /// name otherwise.
     static func suggestedBranch(description: String, title: String? = nil, templateName: String?) -> String {
-        let line = nameLine(description.firstLine ?? "")
+        suggestedBranch(for: nameLine(description.firstLine ?? ""), title: title, templateName: templateName)
+    }
+
+    static func suggestedBranch(for line: NameLine, title: String?, templateName: String?) -> String {
         if let branch = line.branch { return branch }
         let template = templateName?.lowercased() ?? ""
         let type = line.type ?? (template.contains("bug") || template.contains("fix") ? "fix" : nil)

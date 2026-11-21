@@ -200,6 +200,7 @@ final class UIFlowHarness {
         shell.sideEffects.startRestoredAgent = { [weak self] _, command in
             self?.restoredAgentLaunches.append(command)
         }
+        shell.sideEffects.generateTaskNames = { _, _ in nil }
         shell.sideEffects.homeDirectory = { [home] in home }
         // Never UNUserNotificationCenter in xctest.
         shell.sideEffects.notifySetupFailure = { [weak self] workspaceID, _ in self?.setupFailures.append(workspaceID) }
