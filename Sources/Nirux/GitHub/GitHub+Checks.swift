@@ -33,6 +33,8 @@ extension GitHub {
         /// TIMED_OUT…); nil for a commit status.
         var conclusion: String?
         var completedAt: String?
+        /// GitHub’s run status or commit status state, before board-level grouping.
+        var status: String?
 
         /// `Workflow / job`, as board.json may name it.
         var qualifiedName: String? { GitHub.qualifiedName(name: name, workflow: workflowName) }
@@ -54,7 +56,7 @@ extension GitHub {
             case "FAILURE", "ERROR": result = .failure
             default: result = .pending
             }
-            return Check(name: context, workflowName: nil, result: result, startedAt: startedAt, url: url)
+            return Check(name: context, workflowName: nil, result: result, startedAt: startedAt, url: url, status: json["state"] as? String)
         }
         guard let name = json["name"] as? String else { return nil }
         let status = (json["status"] as? String)?.uppercased() ?? ""
@@ -73,7 +75,8 @@ extension GitHub {
         }
         return Check(
             name: name, workflowName: json["workflowName"] as? String, result: result, startedAt: startedAt, url: url,
-            conclusion: result == .pending || conclusion.isEmpty ? nil : conclusion, completedAt: json["completedAt"] as? String
+            conclusion: result == .pending || conclusion.isEmpty ? nil : conclusion, completedAt: json["completedAt"] as? String,
+            status: status
         )
     }
 

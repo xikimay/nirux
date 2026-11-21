@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -550,7 +551,12 @@ extension BranchReview {
             options: options
         )
         for index in files.indices {
-            files[index].fold = namedFolds[files[index].path] ?? files[index].fold
+            let path = files[index].path
+            guard let ranges = rangesByKey[path] else { return .inconsistent }
+            var hash = SHA256()
+            for range in ranges { hash.update(data: data[range]) }
+            files[index].rawPatchDigest = Data(hash.finalize())
+            files[index].fold = namedFolds[path] ?? files[index].fold
             RiskRules.settle(&files[index])
         }
         let inlineBytes = files.filter { $0.fold == nil && $0.patchBytes <= maxFileBytes }.map(\.patchBytes).reduce(0, +)
