@@ -122,10 +122,10 @@ final class ColumnState {
     /// Nirux ends the shell to start it again (`restartTerminal`): its exit
     /// shows no "Session ended", and nothing else starts it meanwhile.
     private(set) var isRestartingShell = false
+    // A hung-up shell can exit before its jobs. Keep their identities
+    // across retries, when a fresh process tree can no longer find them.
+    private var restartProcesses: [ProcessInstance: String] = [:]
     var isShowingShellExit: Bool { shellExitedOverlay?.isHidden == false }
-    /// When Restart Lead started a new Claude here: a question typed into
-    /// the one before stays with the Lead, which reads it in list_tasks.
-    var leadRestartedAt: TimeInterval?
     /// An agent died mid-turn in the shell that still runs here
     /// (ColumnState+StuckAgent.swift).
     var agentExitOverlay: ShellExitedOverlay?
@@ -836,12 +836,14 @@ final class ColumnState {
            let shell = ProcessInstance.running(pid: pid) {
             processes.append((shell, shellName))
         }
+        for (process, name) in processes { restartProcesses[process] = name }
         isRestartingShell = true
         pty?.hangUp()
-        NiruxShellView.waitForExit(processes) { [weak self] stillRunning in
+        NiruxShellView.waitForExit(restartProcesses.map { (process: $0.key, name: $0.value) }) { [weak self] stillRunning in
             guard let self else { return }
             self.isRestartingShell = false
             let remaining = stillRunning.isEmpty && self.pty?.hasExited != true ? [shellName] : stillRunning
+            if remaining.isEmpty { self.restartProcesses.removeAll() }
             guard starts(remaining), remaining.isEmpty else {
                 if self.pty?.hasExited == true { self.showShellExitedOverlay() }
                 return

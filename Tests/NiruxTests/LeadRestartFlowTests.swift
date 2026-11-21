@@ -56,7 +56,7 @@ final class LeadRestartFlowTests: XCTestCase {
             guard case .accepted = MissionStore.shared.process(question, enabled: false) else { return XCTFail("not asked") }
             let fresh = AgentStandIn()
             defer { fresh.remove() }
-            harness.restartedAgent = fresh.command()
+            harness.restartedAgent = fresh.command(launchPrompt: NiruxShellView.leadRestartPrompt)
             harness.alertResponses = [.alertSecondButtonReturn]
             shell.requestRestartLead(spaceID: lead.space)
             let command = try XCTUnwrap(harness.terminalRestarts.last)
@@ -69,6 +69,7 @@ final class LeadRestartFlowTests: XCTestCase {
                 pty.foregroundProcess(snapshot: ProcessSnapshot()).map { $0.name == "claude" && $0.instance != oldClaude } == true
             }
             shell.typeMissionMessages()
+            XCTAssertTrue(MissionStore.shared.pendingPromptDeliveries().contains { $0.event.id == question.id })
             XCTAssertFalse(fresh.input.contains(question.message))
             try reportFirstTurnEnded(in: pty, agentUUID: lead.agentUUID)
             shell.typeMissionMessages()
@@ -128,7 +129,7 @@ final class LeadRestartFlowTests: XCTestCase {
 
             let fresh = AgentStandIn()
             defer { fresh.remove() }
-            harness.restartedAgent = fresh.command()
+            harness.restartedAgent = fresh.command(launchPrompt: NiruxShellView.leadRestartPrompt)
             harness.alertResponses = [.alertSecondButtonReturn]
             shell.requestRestartLead(spaceID: lead.space)
             let pty = try XCTUnwrap(column.pty)
@@ -141,7 +142,12 @@ final class LeadRestartFlowTests: XCTestCase {
             let later = shell.missionQuestions(foreground: foreground, now: now + NiruxShellView.missionParentGrace + 5)
             XCTAssertNotNil(later[ObjectIdentifier(task)], "it still waits")
             XCTAssertNil(later[ObjectIdentifier(task)]?.handOff, "with the Lead, not the user")
-            XCTAssertEqual(shell.runningSince(of: question, in: column, snapshot: ProcessSnapshot(), now: now), now, "what waits goes to the new one")
+            let manual = ForegroundProcess(
+                instance: try XCTUnwrap(foreground(column)).instance, name: "claude", arguments: ["claude"]
+            )
+            _ = shell.missionQuestions(foreground: { _ in manual }, now: now)
+            let handStarted = shell.missionQuestions(foreground: { _ in manual }, now: now + NiruxShellView.missionParentGrace + 5)
+            XCTAssertEqual(handStarted[ObjectIdentifier(task)]?.handOff, .parentRestarted)
             // The user answers it: the restarted Lead hears it.
             XCTAssertTrue(shell.answerMissionQuestion(question.id, text: "Keep it"))
             let notice = try XCTUnwrap(shell.pendingLeadNotices.last)
@@ -166,14 +172,17 @@ final class LeadRestartFlowTests: XCTestCase {
             let claudeColumn = try XCTUnwrap(state.workspaces[saved].columns.firstIndex { $0.agentUUID == lead.agentUUID })
             state.workspaces[saved].columns[claudeColumn].columnType = .claudeCode
             state.workspaces[saved].columns[claudeColumn].claudeSessionID = UUID().uuidString
-            // Its folder is gone since: it starts in the Lead's.
-            state.workspaces[saved].columns[claudeColumn].cwd = harness.root + "/gone"
+            let folder = harness.root + "/worktree"
+            try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: false)
+            state.workspaces[saved].columns[claudeColumn].cwd = folder
             XCTAssertTrue(Persistence.save(state))
             shell.restoreState()
             let restored = try XCTUnwrap(shell.leadWorkspace(inSpace: lead.space))
             let column = try XCTUnwrap(restored.leadTerminal)
             XCTAssertTrue(column.isAwaitingResume)
             XCTAssertNotNil(column.restoredColumn)
+            XCTAssertEqual(column.launchDirectory, folder)
+            try FileManager.default.removeItem(atPath: folder)
 
             let fresh = AgentStandIn()
             defer { fresh.remove() }
@@ -224,7 +233,7 @@ final class LeadRestartFlowTests: XCTestCase {
             let column = try XCTUnwrap(lead.workspace.leadTerminal)
             // nohup: the shell ends on the hang-up, the program it runs doesn't.
             let stuck = try run("nohup /bin/sleep 600 > /dev/null 2>&1", named: "sleep", in: column, harness: harness)
-            defer { kill(stuck.pid, SIGKILL) }
+            defer { if ProcessInstance.running(pid: stuck.pid) == stuck { kill(stuck.pid, SIGKILL) } }
             let fresh = AgentStandIn()
             defer { fresh.remove() }
             harness.restartedAgent = fresh.command()
@@ -242,12 +251,20 @@ final class LeadRestartFlowTests: XCTestCase {
                 harness.shell.toast?.message.hasPrefix("The Lead’s Claude didn’t stop") == true
             }
             XCTAssertTrue(harness.shell.toast?.message.contains("(sleep)") == true, harness.shell.toast?.message ?? "")
-            XCTAssertTrue(harness.shell.toast?.message.hasSuffix("Restart Lead again to start it anyway.") == true)
+            XCTAssertTrue(harness.shell.toast?.message.hasSuffix("Once it stops, choose Restart Lead again.") == true)
             XCTAssertEqual(column.pty?.hasExited, true, "its terminal stays ended")
             XCTAssertTrue(column.isShowingShellExit)
-            XCTAssertNil(column.leadRestartedAt, "the one before may still run")
             XCTAssertEqual(harness.terminalRestarts.count, 1)
             XCTAssertEqual(fresh.input, "", "no Claude started")
+
+            harness.alertResponses = [.alertSecondButtonReturn]
+            harness.shell.requestRestartLead(spaceID: lead.space)
+            harness.waitUntil("the retry to finish", timeout: NiruxShellView.exitTimeout + 20) { !column.isRestartingShell }
+            XCTAssertTrue(pty.hasExited, "the shell is gone but its original job still runs")
+            if ProcessInstance.running(pid: stuck.pid) == stuck { kill(stuck.pid, SIGKILL) }
+            harness.alertResponses = [.alertSecondButtonReturn]
+            harness.shell.requestRestartLead(spaceID: lead.space)
+            harness.waitUntil("the new Lead after the job exits") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
         }
     }
 
@@ -312,7 +329,7 @@ final class LeadRestartFlowTests: XCTestCase {
             let lead = try harness.makeLead()
             let column = try XCTUnwrap(lead.workspace.leadTerminal)
             let stuck = try run("nohup /bin/sleep 600 > /dev/null 2>&1", named: "sleep", in: column, harness: harness)
-            defer { kill(stuck.pid, SIGKILL) }
+            defer { if ProcessInstance.running(pid: stuck.pid) == stuck { kill(stuck.pid, SIGKILL) } }
             harness.alertResponses = [.alertSecondButtonReturn]
             shell.requestRestartLead(spaceID: lead.space)
             let pty = try XCTUnwrap(column.pty)
