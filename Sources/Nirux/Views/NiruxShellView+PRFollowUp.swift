@@ -104,8 +104,8 @@ extension NiruxShellView {
         guard let pullRequest = workspace.prInfo, !pullRequest.url.isEmpty else { return }
         let center = prFollowUpCenter
         guard pullRequest.state == .open else {
-            // Merged or closed: nothing more to follow.
-            if center.file.value.pullRequests[pullRequest.url] != nil {
+            if let entry = center.file.value.pullRequests[pullRequest.url] {
+                if keepsThread(workspace) { recordThread(TaskThread.followUpEvents(entry, url: pullRequest.url), of: workspace) }
                 center.file.update { $0.pullRequests[pullRequest.url] = nil }
             }
             return

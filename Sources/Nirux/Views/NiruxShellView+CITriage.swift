@@ -154,16 +154,19 @@ extension NiruxShellView {
             && workspace.prInfo.map { CITriage.signature(of: CIFailure.redChecks($0)) } == signature
         if isCurrent, let read {
             let now = Date().timeIntervalSince1970
-            center.updateStore { store in
-                // Not a run `gh` couldn't read: there is nothing to keep.
-                for item in read where item.outcome.wasRead {
-                    store.keep(CITriageStore.RunRecord(
-                        signature: item.signature, redChecks: item.redChecks, tests: item.outcome.tests,
-                        verdict: item.outcome.verdict, isUnanswered: item.outcome.isUnanswered, triagedAt: now,
-                        pullRequest: workspace.prInfo?.number
-                    ), of: item.run)
-                }
+            // Not a run `gh` couldn't read: there is nothing to keep.
+            let kept = read.filter(\.outcome.wasRead).map { item in
+                (item.run, CITriageStore.RunRecord(
+                    signature: item.signature, redChecks: item.redChecks, tests: item.outcome.tests,
+                    verdict: item.outcome.verdict, isUnanswered: item.outcome.isUnanswered, triagedAt: now,
+                    pullRequest: workspace.prInfo?.number
+                ))
             }
+            center.updateStore { store in
+                for (run, record) in kept { store.keep(record, of: run) }
+            }
+            // A rerun that passes takes it out of the store: its task's thread keeps it.
+            if keepsThread(workspace) { recordThread(kept.map(\.1).filter(\.isFinal).map(TaskThread.event(of:)), of: workspace) }
             let isOwed = read.contains { $0.outcome.isUnanswered || !$0.outcome.wasRead }
             let retryAt = isOwed && center.retried[workspace.id] != signature ? now + center.retryDelay : nil
             workspace.ciTriage = (signature, CITriage.combine(known + read.map(\.outcome.verdict)), retryAt)

@@ -24,10 +24,10 @@ extension NiruxShellView {
         missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
         snapshot: ProcessSnapshot,
         now: TimeInterval
-    ) -> [String: BoardStages.TaskReading] {
+    ) -> ProjectBoardController.StagesReadings {
         let built = Dictionary(sidebarInfos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let parents = workspaceStore.activeParents(in: spaceID)
-        var readings: [String: BoardStages.TaskReading] = [:]
+        var readings = ProjectBoardController.StagesReadings()
         for index in workspaceStore.visibleWorkspaceIndices(in: spaceID) where !workspaces[index].isClosing {
             let workspace = workspaces[index]
             let info = built[workspace.id] ?? {
@@ -44,6 +44,11 @@ extension NiruxShellView {
                     at: index, columns: columns, isActive: isActive, parentTitle: parents[index].map { workspaces[$0].title }
                 )
             }()
+            if workspace.isLead {
+                let status = boardLeadStatus(of: workspace, columns: info.columns, foreground: foregroundProcesses, snapshot: snapshot, now: now)
+                readings.lead = (workspace.id, status)
+                continue
+            }
             var reading = BoardStages.TaskReading(
                 info,
                 summary: workspace.lastSummaryIsManual ? WorkspaceInfo.oneRunOfWords(workspace.lastSummary) : nil,
@@ -66,7 +71,7 @@ extension NiruxShellView {
                 }
             )
             reading.terminalStatusKnown = !snapshot.isEmpty || workspace.openColumns.allSatisfy { $0.pty == nil }
-            readings[workspace.id] = reading
+            readings.tasks[workspace.id] = reading
         }
         return readings
     }
@@ -85,10 +90,11 @@ extension NiruxShellView {
     /// Board's foot), the clean-ups running.
     func stagesInputs(
         of board: ProjectBoardController, members: [WorkspaceState], workspaces: [ProjectBoard.Workspace],
-        readings: [String: BoardStages.TaskReading], order: BoardStages.Order
+        readings: ProjectBoardController.StagesReadings, order: BoardStages.Order
     ) -> ProjectBoardController.StagesInputs {
         let spaceID = board.projectID
         let queues = projectBoardQueues(board)
+        let lead = members.first { $0.isLead }?.id
         return ProjectBoardController.StagesInputs(
             space: profiles.first { $0.id == spaceID }.map { profile in
                 ProjectBoardController.StagesInputs.Space(name: profile.name, color: NSColor.niruxColor(hex: profile.colorHex) ?? Theme.Color.accent)
@@ -103,8 +109,9 @@ extension NiruxShellView {
             parents: Dictionary(workspaceStore.activeParents(in: spaceID).map {
                 (self.workspaces[$0.key].id, self.workspaces[$0.value].id)
             }, uniquingKeysWith: { first, _ in first }),
-            lead: members.first { $0.isLead }?.id,
-            readings: readings,
+            lead: lead,
+            leadStatus: readings.lead?.id == lead ? readings.lead?.status : nil,
+            readings: readings.tasks,
             queues: queues.states,
             runningQueues: queues.running,
             cleaningUp: worktreeCleanupsInFlight,
