@@ -58,7 +58,9 @@ final class TaskResumeFlowTests: XCTestCase {
         _ worker: AgentStandIn, named agent: String, harness: UIFlowHarness, lead: UIFlowHarness.Lead
     ) throws -> (WorkspaceState, PtySession, ProcessInstance) {
         let title = "Review invoices"
-        let started = try harness.callLeadTool(LeadTools.startTask, ["description": title], lead: lead)
+        let started = try harness.callLeadTool(
+            LeadTools.startTask, ["description": title, "repo": LeadTools.noRepository], lead: lead
+        )
         XCTAssertFalse(started.isError, started.text)
         let task = try XCTUnwrap(harness.shell.workspaces.first { $0.title == title })
         let pty = try XCTUnwrap(task.columns.first?.pty)
