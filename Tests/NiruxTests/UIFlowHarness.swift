@@ -163,14 +163,11 @@ final class UIFlowHarness {
         installDoubles()
         installModalWatchdog()
 
-        // The default workspace opens in the real home folder: work in the
-        // repository instead.
-        let homeWorkspace = shell.workspaces.first
-        shell.addWorkspace(title: "repo", cwd: repo)
-        shell.closeWorkspace(at: 0)
-        waitUntil("the home-folder workspace to close") {
-            !self.shell.workspaces.contains { $0 === homeWorkspace }
+        // Fixture setup doesn't need the workspace's exit animation.
+        if let homeWorkspace = shell.workspaces.first {
+            shell.workspaceStore.removeWorkspace(homeWorkspace)?.containerView.removeFromSuperview()
         }
+        shell.addWorkspace(title: "repo", cwd: repo)
     }
 
     /// Dismisses what the test left open and closes the windows it created.
@@ -203,6 +200,7 @@ final class UIFlowHarness {
         shell.sideEffects.startRestoredAgent = { [weak self] _, command in
             self?.restoredAgentLaunches.append(command)
         }
+        shell.sideEffects.generateTaskNames = { _, _ in nil }
         shell.sideEffects.homeDirectory = { [home] in home }
         // Never UNUserNotificationCenter in xctest.
         shell.sideEffects.notifySetupFailure = { [weak self] workspaceID, _ in self?.setupFailures.append(workspaceID) }
@@ -569,6 +567,10 @@ final class UIFlowHarness {
     /// pull request holding its tip.
     func mergedWorktree(_ branch: String, in folder: String, number: Int) throws {
         try UIFlowHarness.git(["worktree", "add", "-q", "-b", branch, folder], at: repo)
+        try markBranchMerged(branch, in: folder, number: number)
+    }
+
+    func markBranchMerged(_ branch: String, in folder: String, number: Int) throws {
         try UIFlowHarness.git(
             ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "work"], at: folder
         )
@@ -598,11 +600,12 @@ final class UIFlowHarness {
     }
 
     /// Runs git in `directory`, never in a repository a GIT_* variable
-    /// points at (`swift test` run from a git hook exports GIT_DIR).
+    /// points at (`swift test` run from a git hook exports GIT_DIR) other
+    /// than `environment`'s.
     @discardableResult
-    static func git(_ arguments: [String], at directory: String) throws -> String {
+    static func git(_ arguments: [String], at directory: String, environment: [String: String] = [:]) throws -> String {
         let process = Process()
-        process.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("GIT_") }
+        process.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("GIT_") }.merging(environment) { $1 }
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false"] + arguments
         process.currentDirectoryURL = URL(fileURLWithPath: directory)

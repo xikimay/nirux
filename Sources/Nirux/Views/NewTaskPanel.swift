@@ -97,6 +97,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// The name the user typed for the other kind, kept while the field
     /// shows this one: picking a repository again brings it back.
     private var otherEditedName: String?
+    private var proposal: LeadProposal?
+    private var namingAttempt: (description: String, titleLimit: Int, task: Task<TaskNameSuggestion?, Never>)?
     /// Edit was clicked: the branch shows in a field.
     private(set) var isEditingBranch = false
     private(set) var isStarting = false
@@ -294,6 +296,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         panel.sheetParent?.endSheet(panel)
         panel.orderOut(nil)
         self.panel = nil
+        namingAttempt?.task.cancel()
+        namingAttempt = nil
         isHidden = false
         onDismiss?()
     }
@@ -374,10 +378,18 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// A proposal (`start_task` with "Starts tasks without asking" off),
     /// from the Lead or a task's agent: its description, and its template,
     /// picked once the repository's templates are read.
-    func prefill(description: String, templateName: String?, proposedBy: String = "the Lead") {
+    func prefill(_ proposal: LeadProposal, proposedBy: String = "the Lead") {
         guard panel != nil else { return }
-        descriptionView.string = description
-        if let templateName { pickedTemplateName = templateName }
+        self.proposal = proposal
+        descriptionView.string = proposal.sheetDescription
+        pickedTemplateName = proposal.templateName
+        let branch = proposal.options.branch
+        if let branch, namesFolder {
+            otherEditedName = branch
+        } else if let branch {
+            branchField.stringValue = branch
+            branchIsEdited = true
+        }
         self.proposedBy = proposedBy
         updateForSubtask()
         hideError()
@@ -607,7 +619,28 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         )
         request.reportsToTask = agentParent != nil
         request.proposedByTaskAgent = reportsToTaskAgent
+        if let proposal, taskText.firstLine == (proposal.options.title ?? proposal.description.firstLine) {
+            request.title = proposal.options.title
+            request.goal = proposal.options.goal
+        }
         return request
+    }
+
+    func nameSuggestion(for request: NewTask.Request, using generate: TaskNameSuggestion.Generator?) -> Task<TaskNameSuggestion?, Never>? {
+        guard proposal == nil, !branchIsEdited, let generate else {
+            namingAttempt?.task.cancel()
+            namingAttempt = nil
+            return nil
+        }
+        let description = request.description
+        let limit = request.parentWorkspaceID == nil ? LeadTools.maxTaskTitleLength : LeadTools.maxSubtaskTitleLength
+        if let namingAttempt, namingAttempt.description == description, namingAttempt.titleLimit == limit {
+            return namingAttempt.task
+        }
+        namingAttempt?.task.cancel()
+        let task = Task { await generate(description, limit) }
+        namingAttempt = (description, limit, task)
+        return task
     }
 
     private func beginEditingBranch() {
@@ -640,9 +673,15 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             editBranchButton.setAccessibilityLabel(folder ? "Edit Folder Name" : "Edit Branch")
         }
         guard !branchIsEdited else { return }
-        branchField.stringValue = folder
-            ? NewTask.suggestedFolderName(description: descriptionView.string)
-            : NewTask.suggestedBranch(description: descriptionView.string, templateName: selectedTemplate?.name)
+        if folder {
+            branchField.stringValue = NewTask.suggestedFolderName(description: taskText)
+        } else if let proposal, let title = proposal.options.title, title != proposal.description.firstLine {
+            let lines = taskText.split(maxSplits: 1, whereSeparator: \.isNewline)
+            let body = lines.dropFirst().first.map(String.init) ?? taskText
+            branchField.stringValue = NewTask.suggestedBranch(description: body, title: taskText.firstLine, templateName: selectedTemplate?.name)
+        } else {
+            branchField.stringValue = NewTask.suggestedBranch(description: taskText, templateName: selectedTemplate?.name)
+        }
     }
 
     // MARK: - Text

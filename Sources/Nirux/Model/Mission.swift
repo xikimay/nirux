@@ -34,6 +34,11 @@ struct Mission: Codable, Equatable {
     /// only, never the task's questions or result, and code counting a
     /// parent's Missions or a child's leaves it out. Nil means no.
     var oneWay: Bool?
+    /// The parent started the child and wrote its first prompt (a Lead's or
+    /// a task's start_task, an agent's worktree request): until the user
+    /// types to the child, its turn-end questions are the parent's. Nil:
+    /// the user started it (⌘N), or an older build's record.
+    var startedByParent: Bool?
 
     var childAgent: CodingAgent? { CodingAgent(rawValue: childAgentKind) }
 
@@ -45,6 +50,14 @@ struct Mission: Codable, Equatable {
     /// handoffs setting.
     func isCarried(handoffsEnabled: Bool) -> Bool {
         handoffsEnabled || isAlwaysCarried
+    }
+
+    var waitingQuestion: MissionEvent? {
+        guard status == .active else { return nil }
+        return events.lazy.filter { question in
+            question.kind == .question && question.parentConsumedAt == nil
+                && !events.contains { $0.kind == .response && $0.inReplyTo == question.id }
+        }.min { $0.timestamp < $1.timestamp }
     }
 
     /// The agent its child runs, when Nirux delivers its parent's messages:
@@ -237,6 +250,8 @@ struct MissionCreationRequest {
     var reportsToTask = false
     /// A Lead's tells to a task that doesn't report to it (see `Mission.oneWay`).
     var oneWay = false
+    /// See `Mission.startedByParent`.
+    var startedByParent = false
 }
 
 /// Durable mission state. Writes are immediate because this store is also
@@ -325,7 +340,8 @@ final class MissionStore {
             events: [],
             reportsToLead: request.reportsToLead ? true : nil,
             reportsToTask: request.reportsToTask ? true : nil,
-            oneWay: request.oneWay ? true : nil
+            oneWay: request.oneWay ? true : nil,
+            startedByParent: request.startedByParent ? true : nil
         )
         var updated = missions
         updated.append(mission)
@@ -578,9 +594,52 @@ final class MissionStore {
             updated[missionIndex].events[eventIndex].childConsumedAt = timestamp
             updated[missionIndex].status = .active
             updated[missionIndex].updatedAt = timestamp
-            return commit(updated)
+            let mission = updated[missionIndex]
+            return commit(Self.retiringQuestions(
+                in: updated, childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID, before: timestamp,
+                seenIn: mission.id
+            ))
         }
         return false
+    }
+
+    /// The user typed a prompt to the child at `promptedAt`: the questions it
+    /// asked before stop waiting. False when none waited, or the ledger
+    /// isn't written.
+    @discardableResult
+    func retireQuestions(childWorkspaceID: String, childAgentUUID: String, before promptedAt: TimeInterval) -> Bool {
+        guard ensureLoaded() else { return false }
+        let updated = Self.retiringQuestions(
+            in: missions, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: promptedAt
+        )
+        return updated != missions && commit(updated)
+    }
+
+    /// `missions` with the questions the child asked before `promptedAt`
+    /// and nobody answered retired, as its completion retires them: the
+    /// prompt it took since answered them or moved it on. `seenIn`: only
+    /// that Mission's questions its parent or the user saw (typed into the
+    /// parent's prompt, handed to the user), for a parent's tell, which says
+    /// nothing of one it never saw. Asked again, a question starts a new
+    /// exchange.
+    private static func retiringQuestions(
+        in missions: [Mission], childWorkspaceID: String, childAgentUUID: String, before promptedAt: TimeInterval,
+        seenIn missionID: String? = nil
+    ) -> [Mission] {
+        missions.map { mission in
+            guard mission.childWorkspaceID == childWorkspaceID, mission.childAgentUUID == childAgentUUID,
+                  missionID.map({ $0 == mission.id }) ?? true
+            else { return mission }
+            var mission = mission
+            // An answered one was consumed with its answer.
+            for index in mission.events.indices where mission.events[index].kind == .question
+                && mission.events[index].parentConsumedAt == nil && mission.events[index].timestamp < promptedAt
+                && (missionID == nil || mission.events[index].parentTypedAt != nil || mission.events[index].handedToUserBecause != nil) {
+                mission.events[index].parentConsumedAt = promptedAt
+                mission.events[index].retiredAt = promptedAt
+            }
+            return mission
+        }
     }
 
     /// Messages Nirux may type into an agent's prompt, oldest first: a
@@ -596,6 +655,14 @@ final class MissionStore {
                 Self.isPendingDelivery(event, in: mission, now: now) ? AcceptedEvent(mission: mission, event: event) : nil
             }
         }.sorted { $0.event.timestamp < $1.event.timestamp }
+    }
+
+    func pendingPromptDelivery(_ pending: AcceptedEvent, now: TimeInterval = Date().timeIntervalSince1970) -> AcceptedEvent? {
+        guard let mission = missions.first(where: { $0.id == pending.mission.id }),
+              let event = mission.events.first(where: { $0.id == pending.event.id }),
+              Self.isPendingDelivery(event, in: mission, now: now)
+        else { return nil }
+        return AcceptedEvent(mission: mission, event: event)
     }
 
     /// The answer waiting to be typed into this child's prompt, if any.
@@ -623,20 +690,29 @@ final class MissionStore {
                   question.expectsTypedAnswer == true
             else { return false }
             return !mission.events.contains { $0.kind == .completed && $0.timestamp > question.timestamp }
+        case .question, .completed:
+            return event.parentTypedAt == nil && now - event.timestamp < MissionEventCLI.parentMessageLifetime
+                && awaitsParentReceipt(event, in: mission)
+        case .acknowledged:
+            return false
+        }
+    }
+
+    /// A question or final report still owed to the parent. Only automatic prompt delivery expires.
+    nonisolated static func awaitsParentReceipt(_ event: MissionEvent, in mission: Mission) -> Bool {
+        switch event.kind {
         case .question:
             // Not once its parent handed it to the user (`ask_user`).
-            return mission.status == .active && event.parentTypedAt == nil && event.parentConsumedAt == nil
+            return mission.status == .active && event.parentConsumedAt == nil
                 && event.handedToUserBecause == nil
-                && now - event.timestamp < MissionEventCLI.parentMessageLifetime
                 && !mission.events.contains { $0.kind == .response && $0.inReplyTo == event.id }
         case .completed:
             // Not once the child got more work from the parent: it moved on.
-            return event.parentTypedAt == nil && event.parentConsumedAt == nil
-                && now - event.timestamp < MissionEventCLI.parentMessageLifetime
+            return event.parentConsumedAt == nil
                 && !mission.events.contains {
                     $0.kind == .instruction && $0.timestamp > event.timestamp && $0.childConsumedAt != nil
                 }
-        case .acknowledged:
+        default:
             return false
         }
     }
@@ -675,15 +751,8 @@ final class MissionStore {
     /// active Mission: the child waits for it.
     func waitingQuestion(childWorkspaceID: String, childAgentUUID: String) -> AcceptedEvent? {
         missions.lazy
-            .filter {
-                $0.status == .active && $0.childWorkspaceID == childWorkspaceID && $0.childAgentUUID == childAgentUUID
-            }
-            .flatMap { mission in
-                mission.events.lazy.filter { question in
-                    question.kind == .question && question.parentConsumedAt == nil
-                        && !mission.events.contains { $0.kind == .response && $0.inReplyTo == question.id }
-                }.map { AcceptedEvent(mission: mission, event: $0) }
-            }
+            .filter { $0.childWorkspaceID == childWorkspaceID && $0.childAgentUUID == childAgentUUID }
+            .compactMap { mission in mission.waitingQuestion.map { AcceptedEvent(mission: mission, event: $0) } }
             .min { $0.event.timestamp < $1.event.timestamp }
     }
 

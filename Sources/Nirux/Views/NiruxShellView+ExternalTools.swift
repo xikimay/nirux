@@ -312,6 +312,9 @@ extension NiruxShellView {
         1. **Determine the branch name** from the user's request. If not specified, check recent
            branch names (`git branch -a`) for a naming convention and follow it. Default to
            `feat/short-description` or `fix/short-description` if no convention is apparent.
+           Also write the title the task's row shows: English, its distinctive word first, at most
+           22 characters (20 when you are a task: it lists under yours), no branch, slug or PR number
+           ("Clearer task rows"), URL-encoded in step 4 (`Clearer%20task%20rows`).
         2. **Detect the git repo root** — the top level of the current checkout, even inside a
            linked worktree. Nirux still places the new worktree next to the main checkout, named
            after it:
@@ -371,7 +374,8 @@ extension NiruxShellView {
              fi
            fi
            open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
-        &agent=<claude-codex-or-agy>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}"
+        &agent=<claude-codex-or-agy>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}\
+        &title=<url-encoded-title>"
            ```
            For a stacked branch, put `&from=head` right after the handover parameter. Nirux moves
            the handover file into the worktree on launch; no manual cleanup is needed.
@@ -450,6 +454,7 @@ extension NiruxShellView {
           for example because the user answered it in Nirux, (for `reply --accept`) it has no
           recommendation to accept, or (for `tell`) no Mission on that branch came from this
           terminal, or its child runs none of Claude Code, Codex and Antigravity.
+        - 5: the question was retired while `ask` waited. Continue with the new prompt without retrying that ask.
         - 2: invalid usage, or not a Mission terminal; the error message says which.
         - 1: Nirux's state could not be read or written. If a sandbox blocks it, run the command
           outside the sandbox.
