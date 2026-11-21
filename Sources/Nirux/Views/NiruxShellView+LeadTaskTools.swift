@@ -32,12 +32,17 @@ extension NiruxShellView {
         guard let task = spaceTask(name, in: space) else { return answer(noSpaceTask(name, in: space), true) }
         let title = MissionPromptText.quoted(task.title)
         // A task whose folder is gone only closes (see finishLeadClose).
-        guard Self.isTask(task) || !FileManager.default.fileExists(atPath: task.cwd) else {
+        guard task.isWaitingTask || Self.isTask(task) || !FileManager.default.fileExists(atPath: task.cwd) else {
             return answer("“\(title)” isn't a task (a worktree of one of the space's repositories, or a task's folder): "
                 + "ask the user to close it.", true)
         }
         let snapshot = ProcessSnapshot()
         if let refusal = leadCloseRefusal(of: task, snapshot: snapshot) { return answer(refusal, true) }
+        if task.isWaitingTask {
+            guard !task.isStarting else { return answer("The task is starting. Try again once it opens.", true) }
+            closeLeadTask(task)
+            return answer("Closed “\(title)”.", false)
+        }
         if let folder = task.taskFolder { return closeFolderTask(task, folder: folder, snapshot: snapshot, answer: answer) }
         guard let path = Self.worktreeCleanupPath(forCwd: task.cwd) else {
             closeLeadTask(task)

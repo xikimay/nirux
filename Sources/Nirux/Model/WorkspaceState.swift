@@ -40,7 +40,9 @@ final class WorkspaceState {
     /// Where the camera stays while the pointer works on a card; nil: where
     /// the strip wants it.
     var heldCamera: CameraHold?
-    let cwd: String
+    /// Where it works; a waiting task's moves once, to its worktree
+    /// (`beginTask`).
+    private(set) var cwd: String
     var title: String
     var titleIsManual: Bool = false
     var profileID: String = WorkspaceProfile.defaultID
@@ -49,7 +51,7 @@ final class WorkspaceState {
     /// until its exit animation ends. It no longer counts as remaining and
     /// must not be selected or closed again.
     var isClosing = false
-    let missionID: String?
+    private(set) var missionID: String?
     /// The task this one is a sub-task of: it lists under it in the
     /// sidebar (see `WorkspaceStore.visibleWorkspaceIndices(in:)`). Set
     /// when it opens: by ⌘N's "Sub-task of", or by the worktree skill's
@@ -70,7 +72,7 @@ final class WorkspaceState {
     var missionHandoffsEnabled: Bool
     /// A task a space's Lead started (`Mission.reportsToLead`): like the
     /// Lead's, its shells get the Mission variables whatever the setting.
-    let reportsToLead: Bool
+    private(set) var reportsToLead: Bool
     /// A sub-task a task's agent started with its tools
     /// (`Mission.reportsToTask`): its shells get the Mission variables
     /// whatever the setting, as a Lead's task's do.
@@ -193,6 +195,20 @@ final class WorkspaceState {
     /// here (docs/design/task-dependencies.md). Kept across launches.
     var mergeWaits: [MergeWait] = []
 
+    /// The wait of a waiting task: no worktree, no agent until it starts.
+    var waitingStart: MergeWait? { mergeWaits.first { $0.pendingStart != nil } }
+    var isWaitingTask: Bool { waitingStart != nil }
+    var isStarting: Bool { waitingStart?.startingBranch != nil }
+
+    /// A waiting task starts: its worktree is made, and its Mission, before
+    /// its first terminal opens there.
+    func beginTask(at cwd: String, mission: Mission?) {
+        self.cwd = cwd
+        self.missionID = mission?.id
+        reportsToLead = mission?.reportsToLead == true
+        taskLocationCache = nil
+    }
+
     var effectivePhase: WorkspacePhase {
         if let phase { return phase }
         return WorkspacePhase.derived(
@@ -244,7 +260,8 @@ final class WorkspaceState {
         reportsToLead: Bool = false,
         reportsToTask: Bool = false,
         taskFolder: String? = nil,
-        initialAgentUUID: String = UUID().uuidString
+        initialAgentUUID: String = UUID().uuidString,
+        firstColumn: ColumnState? = nil
     ) {
         self.id = id
         self.taskFolder = taskFolder
@@ -271,7 +288,11 @@ final class WorkspaceState {
         stripView.wantsLayer = true
         containerView.addSubview(stripView)
 
-        addColumn(agentUUID: initialAgentUUID)
+        if let firstColumn {
+            insertColumn(firstColumn)
+        } else {
+            addColumn(agentUUID: initialAgentUUID)
+        }
     }
 }
 
@@ -1086,6 +1107,7 @@ extension WorkspaceState {
     }
 
     func addColumn(agentUUID: String = UUID().uuidString, cwd: String? = nil) {
+        guard !isWaitingTask else { return }
         let col = ColumnState(
             cwd: cwd ?? focusedWorkingDirectory,
             environment: terminalEnvironment(agentUUID: agentUUID)
@@ -1095,6 +1117,7 @@ extension WorkspaceState {
     }
 
     func addColumn(command: String, agentUUID: String = UUID().uuidString, cwd: String? = nil) {
+        guard !isWaitingTask else { return }
         let col = ColumnState(
             cwd: cwd ?? focusedWorkingDirectory,
             command: command,
@@ -1105,6 +1128,7 @@ extension WorkspaceState {
     }
 
     func addColumn(deferredAgent: DeferredAgentLaunch, agentUUID: String, cwd: String?) {
+        guard !isWaitingTask else { return }
         let environment = terminalEnvironment(agentUUID: agentUUID)
         let col = ColumnState(cwd: cwd ?? focusedWorkingDirectory, deferredAgent: deferredAgent, environment: environment)
         setupAllTracking(for: col)
@@ -1112,6 +1136,7 @@ extension WorkspaceState {
     }
 
     func addColumn(webViewURL: String) {
+        guard !isWaitingTask else { return }
         let col = ColumnState(url: webViewURL)
         insertColumn(col)
         // A browser column on a proposed port makes that proposal moot.
@@ -1124,6 +1149,7 @@ extension WorkspaceState {
     /// open path — session restore passes false so a binary or huge file in
     /// the persisted tabs can't pop a modal alert at every launch.
     func addEditorColumn(initialFile: String? = nil, workspaceCwd: String? = nil, interactive: Bool = true) {
+        guard !isWaitingTask else { return }
         let col = ColumnState(editorWorkspaceCwd: workspaceCwd ?? cwd)
         insertColumn(col)
         if let initialFile {
@@ -1133,11 +1159,13 @@ extension WorkspaceState {
 
     /// Insert a Project Board column next to the focused one.
     func addProjectBoardColumn(_ board: ProjectBoardController) {
+        guard !isWaitingTask else { return }
         insertColumn(ColumnState(projectBoard: board))
     }
 
     /// Insert a Branch Review column next to the focused one.
     func addBranchReviewColumn(_ review: BranchReviewController) {
+        guard !isWaitingTask else { return }
         insertColumn(ColumnState(branchReview: review))
     }
 

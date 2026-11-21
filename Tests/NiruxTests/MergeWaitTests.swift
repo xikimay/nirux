@@ -120,7 +120,7 @@ final class MergeWaitTests: XCTestCase {
         var written = try XCTUnwrap(json["mergeWaits"] as? [[String: Any]])
         XCTAssertEqual(written.count, 2)
         var later = written[0]
-        later["action"] = ["start": ["description": "a later build's action"]]
+        later["action"] = ["unknownAction": ["description": "a later build's action"]]
         written.append(later)
         json["mergeWaits"] = written
         let restored = try JSONDecoder().decode(PersistedWorkspace.self, from: JSONSerialization.data(withJSONObject: json))
@@ -131,6 +131,19 @@ final class MergeWaitTests: XCTestCase {
         let none = PersistedWorkspace(id: "c", title: "c", cwd: "/tmp", columns: [], focusedColumnIndex: 0)
         let empty = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(none)) as? [String: Any])
         XCTAssertNil(empty["mergeWaits"], "nothing written without waits")
+    }
+
+    func testAStartInProgressOrNeedingHelpIgnoresLaterPRReadings() throws {
+        let start = MergeWait.PendingStart(description: "Write docs", repositoryKey: "git:/repo/.git", repository: "repo",
+                                           template: .init(name: "Docs", body: "Include examples"))
+        var pending = MergeWait(id: "start", awaited: wait().awaited, action: .start(start), createdAt: 1)
+        pending.startingBranch = "feat/write-docs"
+        XCTAssertEqual(pending.step(after: .read(pullRequest(41, "MERGED"))), .keep)
+        XCTAssertEqual(pending.step(after: .gone), .keep)
+        pending.startingBranch = nil
+        pending.failure = "Couldn’t fetch origin/main"
+        XCTAssertEqual(pending.step(after: .read(pullRequest(41, "MERGED"))), .keep)
+        XCTAssertEqual(try JSONDecoder().decode(MergeWait.self, from: JSONEncoder().encode(pending)), pending)
     }
 
     func testTheRowSaysWhatItHolds() {

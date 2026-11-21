@@ -37,6 +37,7 @@ extension NiruxShellView {
             focusProjectBoard(existing)
             return
         }
+        guard !workspace.isWaitingTask else { return }
         let board = makeProjectBoard(projectID: projectID, offersSettings: true)
         workspace.addProjectBoardColumn(board)
         relayout(animated: false)
@@ -283,7 +284,7 @@ extension NiruxShellView {
                 title: workspace.title,
                 folder: board.comparableFolder(workspace.cwd),
                 // Checked off the main thread when the worktrees are listed.
-                folderIsGone: board.local?.missingFolders.contains(workspace.cwd) ?? false,
+                folderIsGone: !workspace.isWaitingTask && board.local?.missingFolders.contains(workspace.cwd) == true,
                 isInactive: workspace.isInactive,
                 agent: .mostUrgent(workspace.openColumns.map { column in
                     projectBoardAgent(

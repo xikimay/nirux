@@ -191,7 +191,7 @@ extension NiruxShellView {
     }
 
     func openClaudeCode() {
-        guard let workspace = activeWorkspace else { return }
+        guard let workspace = activeWorkspace, !workspace.isWaitingTask else { return }
         launchInNewColumn(Self.claudeCommand(
             mode: Self.claudeLaunchMode(for: workspace),
             briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
@@ -200,7 +200,7 @@ extension NiruxShellView {
     }
 
     func openCodex() {
-        guard let workspace = activeWorkspace else { return }
+        guard let workspace = activeWorkspace, !workspace.isWaitingTask else { return }
         launchInNewColumn(Self.codexCommand(
             mode: Self.codexLaunchMode(for: workspace),
             briefFile: Self.codexBriefFile(
@@ -210,7 +210,7 @@ extension NiruxShellView {
     }
 
     func openAgy() {
-        guard let workspace = activeWorkspace else { return }
+        guard let workspace = activeWorkspace, !workspace.isWaitingTask else { return }
         AgentHookInstaller.installAgyHooksIfInstalling()
         launchInNewColumn(Self.agyCommand(), in: workspace)
     }

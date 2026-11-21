@@ -9,10 +9,14 @@ struct MergeWait: Codable, Equatable, Sendable {
     var awaited: Awaited
     let action: Action
     let createdAt: TimeInterval
-    /// When its pull request was seen merged, while the message couldn't go
-    /// yet (no Lead, no agent to take it): tried again until
-    /// `deliveryLifetime` after.
+    /// When the merge was seen. A held message can be retried for `deliveryLifetime`.
     var mergedAt: TimeInterval?
+    /// Why a waiting task didn't start: its row reads Needs you until the
+    /// Lead or the user starts it, points it at another task, or closes it.
+    var failure: String?
+
+    /// A relaunch during creation asks the user to check this branch before retrying.
+    var startingBranch: String?
 
     /// The task whose pull request must merge, as last seen.
     struct Awaited: Codable, Equatable, Sendable {
@@ -30,6 +34,23 @@ struct MergeWait: Codable, Equatable, Sendable {
     enum Action: Codable, Equatable, Sendable {
         /// Typed into the workspace's agent as the Lead's `tell`.
         case tell(message: String)
+        /// Starts the workspace, a waiting task (`start_task`'s `after`).
+        case start(PendingStart)
+    }
+
+    /// What a waiting task starts with, as `start_task` got it.
+    struct PendingStart: Codable, Equatable, Sendable {
+        let description: String
+        let repositoryKey: String
+        let repository: String
+        /// The template's name and text as they were.
+        let template: TaskTemplates.Template?
+    }
+
+    /// The waiting task's start, when this is one.
+    var pendingStart: PendingStart? {
+        if case .start(let start) = action { return start }
+        return nil
     }
 
     /// A pull request as GitHub gives it.
@@ -67,9 +88,9 @@ struct MergeWait: Codable, Equatable, Sendable {
 
     /// What a reading means for the wait. Once a pull request is recorded,
     /// only it counts: a read of another one sends GitHub to the recorded
-    /// one. A merged wait is over: readings leave it.
+    /// one. A merged or failed wait is over: readings leave it.
     mutating func step(after reading: Reading) -> Step {
-        guard mergedAt == nil else { return .keep }
+        guard mergedAt == nil, startingBranch == nil, failure == nil else { return .keep }
         switch reading {
         case .read(let info?):
             if let recorded = awaited.pullRequest, recorded.url != info.url { return .lookUp }

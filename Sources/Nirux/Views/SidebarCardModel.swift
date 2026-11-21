@@ -165,6 +165,7 @@ extension WorkspaceInfo {
     /// Waiting on the user first, then something broken, then work; a red
     /// check only once no agent works (it may be fixing it).
     var cardState: SidebarCardState {
+        if case .needsYou = waitingTask { return .waiting }
         let signals = columns.compactMap(\.attention)
         if signals.contains(.waiting) { return .waiting }
         if signals.contains(.error) { return .error }
@@ -186,7 +187,8 @@ extension WorkspaceInfo {
     /// An agent waits on the user or broke: the folded archived list
     /// lists the workspace anyway.
     var asksUser: Bool {
-        columns.contains { $0.attention == .waiting || $0.attention == .error }
+        if case .needsYou = waitingTask { return true }
+        return columns.contains { $0.attention == .waiting || $0.attention == .error }
     }
 
     /// One line in the archived list: parked work that asks nothing, offers

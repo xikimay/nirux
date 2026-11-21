@@ -7,6 +7,7 @@ import Foundation
 /// a worktree and a branch, once its pull request is merged.
 enum LeadTools {
     static let startTask = "start_task"
+    static let setTaskAfter = "set_task_after"
     static let listTasks = "list_tasks"
     static let tell = "tell"
     static let reply = "reply"
@@ -23,7 +24,7 @@ enum LeadTools {
     static let recordReview = "record_review"
     static let dailyPass = "daily_pass"
     static let names = [
-        startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule, recordReview, dailyPass,
+        startTask, setTaskAfter, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule, recordReview, dailyPass,
         closeTask, moveTask, renameTask, setTaskParent, readTask, interruptTask
     ]
 
@@ -98,9 +99,19 @@ enum LeadTools {
                 properties: [
                     "description": ["type": "string", "description": "What the task must do, as you would tell the agent. Its first line names the task and its branch or folder."],
                     "repo": ["type": "string", "description": "The repository's name in this space (see list_tasks); its default one when left out. \"\(noRepository)\": a new folder, no repository."],
+                    "after": ["type": "string", "description": "Create a waiting task. Once the named task’s pull request merges, fetch the base and start the agent. Requires a repository and Starts tasks without asking."],
                     "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."]
                 ],
                 required: ["description"]
+            ),
+            definition(
+                setTaskAfter, title: "Change a waiting task’s dependency",
+                description: "Point a waiting task at another task, or omit after to start it now.",
+                properties: [
+                    "task": ["type": "string", "description": taskDescription],
+                    "after": ["type": "string", "description": "The task whose pull request must merge before this one starts."]
+                ],
+                required: ["task"]
             ),
             definition(
                 listTasks, title: "List the space's tasks",
@@ -388,6 +399,9 @@ enum LeadTools {
     /// What's wrong with a call's arguments before it reaches the app, or nil.
     static func problem(tool: String, arguments: [String: Any]) -> String? {
         let messageLimit = MissionEventCLI.maxInstructionLength
+        if [startTask, setTaskAfter].contains(tool), arguments["after"] != nil, string(arguments, "after") == nil {
+            return "after must name a task of this space."
+        }
         switch tool {
         case startTask:
             return string(arguments, "description") == nil ? "description must say what the task must do." : nil
@@ -419,7 +433,7 @@ enum LeadTools {
                 return "title must hold 1 to \(maxTitleLength) characters."
             }
             return nil
-        case setTaskParent, readTask, interruptTask:
+        case setTaskAfter, setTaskParent, readTask, interruptTask:
             return string(arguments, "task") == nil ? "task is missing." : nil
         case recordReview:
             guard string(arguments, "task") != nil else { return "task is missing." }

@@ -28,6 +28,7 @@ extension NiruxShellView {
         setupScript: URL? = nil,
         isLead: Bool = false,
         taskFolder: String? = nil,
+        waitingStart: MergeWait? = nil,
         activate: Bool = true,
         fadesBackdrop: Bool = false
     ) {
@@ -60,8 +61,10 @@ extension NiruxShellView {
             reportsToLead: reportsToLead,
             reportsToTask: reportsToTask,
             taskFolder: taskFolder,
-            initialAgentUUID: initialAgentUUID
+            initialAgentUUID: initialAgentUUID,
+            firstColumn: waitingStart.map { _ in ColumnState(waitingTask: WaitingTaskView()) }
         )
+        workspace.mergeWaits = waitingStart.map { [$0] } ?? []
         wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace, activate: activate)
         verticalStrip.addSubview(workspace.containerView)
@@ -121,6 +124,7 @@ extension NiruxShellView {
     /// worktree removed is no task, one re-added or repaired may be another
     /// repository's.
     static func taskLocation(of workspace: WorkspaceState) -> FolderIdentity? {
+        guard !workspace.isWaitingTask else { return nil }
         if let cached = workspace.taskLocationCache, FileManager.default.fileExists(atPath: workspace.cwd),
            modificationDate(of: cached.gitFile) == cached.gitFileDate {
             return cached.location
@@ -263,7 +267,7 @@ extension NiruxShellView {
     /// (`GitWorktree.currentBranch(at:)`) of a worktree workspace Nirux just
     /// opened; nil when unreadable, detached, or not a worktree workspace. It
     /// names the Claude session (see `SessionName`).
-    private func launchAgent(
+    func launchAgent(
         _ agent: NiruxApp.WorkspaceAgent,
         in workspace: WorkspaceState,
         deliveredHandover: Bool,
@@ -464,6 +468,9 @@ extension NiruxShellView {
             return
         case .reviewBranch:
             openBranchReview(in: workspaces[workspaceIndex])
+            return
+        case .startWaitingTask:
+            startWaitingTask(workspaces[workspaceIndex])
             return
         case .newSubtask:
             showNewSubtaskPanel(under: workspaces[workspaceIndex])

@@ -190,6 +190,9 @@ extension NiruxShellView {
     /// A task's row, from its columns' facts.
     func sidebarWorkspaceInfo(at index: Int, columns: [ColumnInfo], isActive: Bool, parentTitle: String?) -> WorkspaceInfo {
         let workspace = workspaces[index]
+        if let wait = workspace.waitingStart, let start = wait.pendingStart, let state = wait.waitingState {
+            workspace.columns.first?.waitingTask?.configure(.init(state: state, repository: start.repository, description: start.description))
+        }
         return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
                       profileID: workspace.profileID, isInactive: workspace.isInactive,
                       columnCount: workspace.columns.count,
@@ -213,7 +216,7 @@ extension NiruxShellView {
                       ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0,
                       dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil,
                       followUp: followUpRow(of: workspace),
-                      heldMessages: SidebarHeldMessages(workspace.mergeWaits))
+                      heldMessages: SidebarHeldMessages(workspace.mergeWaits), waitingTask: workspace.waitingStart?.waitingState)
     }
 
     /// Every column's foreground process, shown or not, and what follows
@@ -632,7 +635,7 @@ extension NiruxShellView {
 
     var gitRefreshTiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] {
         let awaited = awaitedWorkspaceIDs
-        return workspaces.map { ($0, gitRefreshTier(for: $0, awaited: awaited)) }
+        return workspaces.filter { !$0.isWaitingTask }.map { ($0, gitRefreshTier(for: $0, awaited: awaited)) }
     }
 
     func refreshGitAndPullRequests() {
@@ -646,6 +649,7 @@ extension NiruxShellView {
     /// Focus, a focused-column switch or an unarchive: read now instead of
     /// waiting for the throttles.
     func refreshGitContextNow(for workspace: WorkspaceState) {
+        guard !workspace.isWaitingTask else { return }
         gitRefresh.refreshNow(workspace, tier: gitRefreshTier(for: workspace))
     }
 

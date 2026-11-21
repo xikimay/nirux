@@ -28,6 +28,7 @@ extension NiruxShellView {
         let parent = NewTask.MissionParent(workspaceID: lead.id, agentUUID: request.agentUUID)
         switch request.tool {
         case LeadTools.startTask: leadStartTask(arguments, in: space, parent: parent, answer: answer)
+        case LeadTools.setTaskAfter: changeWaitingTask(arguments, in: space, answer: answer)
         case LeadTools.listTasks: answer(leadTaskList(in: space, lead: lead.id), false)
         case LeadTools.tell: leadTell(arguments, in: space, lead: parent, answer: answer)
         case LeadTools.reply: leadReply(arguments, in: space, lead: lead.id, answer: answer)
@@ -71,7 +72,9 @@ extension NiruxShellView {
             repository = repositories.first { $0.key == space.anchors.defaultAnchor?.key } ?? repositories.first
         }
         let templateName = LeadTools.string(arguments, "template")
+        let after = LeadTools.string(arguments, "after")
         guard leadStartsTasksWithoutAsking(spaceID: space.id) else {
+            if after != nil { return answer("Waiting tasks require Starts tasks without asking in Space Settings.", true) }
             return leadProposeTask(
                 description, repository: repository, withoutRepository: asksNoRepository, templateName: templateName,
                 in: space, parent: parent, answer: answer
@@ -82,6 +85,17 @@ extension NiruxShellView {
             spaceID: space.id, folder: repository?.folder, anchors: space.anchors, stateDirectory: Persistence.stateDirectory
         ) { [weak self] info in
             guard let self else { return }
+            if let after {
+                guard self.leadWorkspace(inSpace: space.id)?.id == parent.workspaceID else {
+                    return answer("The space’s Lead changed before the task could be queued.", true)
+                }
+                guard let repository, info.target != nil else { return answer("A waiting task needs a repository.", true) }
+                let template = info.templates.first { $0.name.caseInsensitiveCompare(templateName ?? "") == .orderedSame }
+                if let templateName, template == nil { return answer("No template named “\(templateName)”.", true) }
+                let pending = MergeWait.PendingStart(description: description, repositoryKey: repository.key,
+                                                     repository: repository.name, template: template)
+                return self.queueWaitingTask(pending, after: after, in: space, answer: answer)
+            }
             var folder: NewTask.Place?
             if repository == nil || info.target == nil {
                 // No repository, or a folder of the space surely outside
@@ -306,6 +320,10 @@ extension NiruxShellView {
         )
         var lines: [String] = []
         for task in tasks {
+            if let wait = task.waitingStart, let state = wait.waitingState {
+                lines.append("“\(MissionPromptText.quoted(task.title))” · \(state.line) · \(wait.pendingStart?.repository ?? "")")
+                continue
+            }
             var line = taskListHead(task, in: space, parentTitle: parentTitles[task.id], snapshot: snapshot)
             // Only what its own tasks sent it: another agent's Mission
             // isn't its to answer, and its tells don't make a task its own.
@@ -619,6 +637,7 @@ extension NiruxShellView {
     /// a link from outside Nirux opened it (its agent acts for whoever sent
     /// the link), or it isn't a task.
     func leadRefusal(for workspace: WorkspaceState, title: String) -> String? {
+        if workspace.isWaitingTask { return "“\(title)” hasn’t started yet." }
         if workspace.startedOutsideNirux { return "“\(title)” was opened by a link from outside Nirux: leave it to the user." }
         guard Self.isTask(workspace) else {
             return "“\(title)” isn't a task (a worktree of one of the space's repositories, or a task's folder): ask the user instead."

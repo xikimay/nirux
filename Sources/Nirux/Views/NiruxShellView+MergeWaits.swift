@@ -26,12 +26,12 @@ extension NiruxShellView {
     /// The workspaces a wait follows: their pull request is read at the
     /// hot cadence, archived or not, away from Nirux too.
     var awaitedWorkspaceIDs: Set<String> {
-        Set(workspaces.lazy.flatMap(\.mergeWaits).filter { $0.mergedAt == nil }.map(\.awaited.workspaceID))
+        Set(workspaces.lazy.flatMap(\.mergeWaits).filter { $0.mergedAt == nil && $0.failure == nil }.map(\.awaited.workspaceID))
     }
 
     /// Whether reads of `workspace`'s pull request go on.
     func followsPullRequest(_ workspace: WorkspaceState) -> Bool {
-        !workspace.isInactive || awaitedWorkspaceIDs.contains(workspace.id)
+        !workspace.isWaitingTask && (!workspace.isInactive || awaitedWorkspaceIDs.contains(workspace.id))
     }
 
     // MARK: Holding a tell
@@ -50,7 +50,7 @@ extension NiruxShellView {
         if leadMission(of: workspace, lead: lead.workspaceID) == nil, let refusal = leadRefusal(for: workspace, title: title) {
             return answer(refusal, true)
         }
-        guard !awaited.isFolderTask, Self.isTask(awaited) else {
+        guard !awaited.isFolderTask, awaited.isWaitingTask || Self.isTask(awaited) else {
             return answer("“\(MissionPromptText.quoted(awaited.title))” has no pull request to wait for: "
                 + "only a task in a worktree of one of the space's repositories has one.", true)
         }
@@ -136,8 +136,13 @@ extension NiruxShellView {
     /// After a restore: those whose task didn't come back ask GitHub, and
     /// merged messages wait one window for their agents to resume.
     func restoreMergeWaits(now: TimeInterval) {
+        for task in workspaces {
+            if let branch = task.waitingStart?.startingBranch {
+                failWaitingTask(task, reason: "Nirux quit while starting \(branch). Check the repository for a worktree before retrying")
+            }
+        }
         let window = Int(now / MergeWait.lookUpInterval)
-        for wait in workspaces.lazy.flatMap(\.mergeWaits) where wait.mergedAt != nil { mergeWaitTracking.triedIn[wait.id] = window }
+        for wait in workspaces.lazy.flatMap(\.mergeWaits) where wait.mergedAt != nil && wait.pendingStart == nil { mergeWaitTracking.triedIn[wait.id] = window }
         sweepMergeWaits(now: now)
     }
 
@@ -149,7 +154,8 @@ extension NiruxShellView {
         let window = Int(now / MergeWait.lookUpInterval)
         for holder in workspaces where !holder.isClosing {
             for wait in holder.mergeWaits {
-                if wait.isPastDelivery(at: now) {
+                if wait.pendingStart != nil, wait.failure != nil || wait.startingBranch != nil { continue }
+                if wait.pendingStart == nil, wait.isPastDelivery(at: now) {
                     dropUndelivered(wait, of: holder)
                 } else if wait.mergedAt != nil {
                     if mergeWaitTracking.triedIn[wait.id] != window { deliverMergeWait(wait.id, of: holder, now: now) }
@@ -200,6 +206,7 @@ extension NiruxShellView {
             saveState()
             deliverMergeWait(waitID, of: holder, now: now)
         case .fail(let failure):
+            if wait.pendingStart != nil { return failWaitingTask(holder, reason: wait.sentence(failure)) }
             holder.mergeWaits.remove(at: index)
             forgetMergeWait(waitID)
             saveState()
@@ -240,7 +247,14 @@ extension NiruxShellView {
     /// that can't (no Lead, no agent to take it) stays, tried again by
     /// `sweepMergeWaits`; the Lead hears it once.
     private func deliverMergeWait(_ waitID: String, of holder: WorkspaceState, now: TimeInterval) {
-        guard let wait = holder.mergeWaits.first(where: { $0.id == waitID }), case .tell(let message) = wait.action else { return }
+        guard let wait = holder.mergeWaits.first(where: { $0.id == waitID }) else { return }
+        if wait.pendingStart != nil {
+            guard leadStartsTasksWithoutAsking(spaceID: holder.profileID) else {
+                return failWaitingTask(holder, reason: "Starts tasks without asking is off in this space")
+            }
+            return startWaitingTask(holder)
+        }
+        guard case .tell(let message) = wait.action else { return }
         mergeWaitTracking.triedIn[waitID] = Int(now / MergeWait.lookUpInterval)
         guard let lead = leadMissionParent(inSpace: holder.profileID) else {
             return Self.mergeWaitLog.info("wait=\(waitID, privacy: .public) merged, with no Lead to send it")
@@ -281,7 +295,7 @@ extension NiruxShellView {
     }
 
     /// A line for the Lead of `workspace`'s space, if it has one.
-    private func noticeLead(of workspace: WorkspaceState, _ text: String) {
+    func noticeLead(of workspace: WorkspaceState, _ text: String) {
         guard let lead = leadMissionParent(inSpace: workspace.profileID) else { return }
         tellProposer(lead, text)
     }
