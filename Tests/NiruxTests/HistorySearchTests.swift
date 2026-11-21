@@ -326,10 +326,7 @@ final class HistorySearchTests: XCTestCase {
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let text = String(bytes: data, encoding: .utf8) ?? ""
+        let text = String(bytes: try process.runToEnd(reading: output), encoding: .utf8) ?? ""
         guard process.terminationStatus == 0 else {
             throw NSError(domain: "git", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: text])
         }

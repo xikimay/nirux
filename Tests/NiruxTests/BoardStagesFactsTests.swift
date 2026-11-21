@@ -404,6 +404,17 @@ final class BoardStagesFactsTests: XCTestCase {
 
     // MARK: - Queue
 
+    func testAutoQueueNamesOnlyPendingRequiredChecksOnTheWatchedHead() throws {
+        let pr = pullRequest(708, checks: [check("macOS checks", .pending), check("lint", .pending)])
+        func phrase(watched: String) throws -> String {
+            let active = queue(.running(isStopping: false), [entry(708, step: .waitingForChecks(watched))])
+            let section = facts([row(workspaces: ["task"], pullRequest: pr)], required: ["macOS checks"], queue: active)
+            return BoardStages.line(try XCTUnwrap(section.lines.first)).phrase.text
+        }
+        XCTAssertEqual(try phrase(watched: head), "Auto · macOS checks")
+        XCTAssertEqual(try phrase(watched: moved), "Auto · Waiting for checks")
+    }
+
     func testARunningQueueSaysEachPullRequestsPlaceAndStep() {
         let steps: [(MergeQueue.Step, BoardStages.QueueStep?)] = [
             (.preflight, .checks("Checking")), (.updating(from: head), .checks("Updating branch")),
@@ -424,7 +435,7 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual(BoardStages.queue(of: 12, head: nil, in: merged),
                        BoardStages.Queue(list: whileRunning, order: 2, step: .merge("Waiting for nightly")))
         XCTAssertEqual(BoardStages.queue(of: 7, head: nil, in: merged), BoardStages.Queue(list: whileRunning), "the queue is through with it")
-        XCTAssertEqual(BoardStages.queue(of: 13, head: head, in: merged), BoardStages.Queue(list: whileRunning, order: 3))
+        XCTAssertEqual(BoardStages.queue(of: 13, head: head, in: merged), BoardStages.Queue(list: whileRunning, awaitsTurn: true, order: 3))
         XCTAssertEqual(BoardStages.queue(of: 99, head: head, in: merged), BoardStages.Queue(list: whileRunning), "not in the queue that runs")
         XCTAssertEqual(BoardStages.queue(of: 12, head: head, in: nil), BoardStages.Queue(), "a section without a queue has no list")
         // Run by another Nirux: its saved entries, read the same; no list for a next Start here.
@@ -626,6 +637,59 @@ final class BoardStagesFactsTests: XCTestCase {
 
     // MARK: - A repository's queue, as its header says it
 
+    func testTimeoutComparesTheLastQueuedHeadWithNewerCheckReadings() throws {
+        let then = Date(timeIntervalSince1970: 1_795_266_909)
+        let now = then.addingTimeInterval(600)
+        var state = queue(.ended, [
+            entry(660, step: .done, isMerged: true),
+            entry(708, step: .stopped(.init(kind: .checks, message: "Checks timed out", checksTimedOut: true)), isUpdated: true)
+        ], selection: [708])
+        state.stoppedAt = then
+        var green = check("test", .success)
+        green.conclusion = "SUCCESS"
+        func report(_ pr: ProjectBoard.PullRequest?, read: Date? = nil) throws -> BoardStages.CheckTimeout {
+            try XCTUnwrap(BoardStages.checkTimeout(
+                in: state, rows: [row(pullRequest: pr)], required: ["test"], baseBranch: "main", currentRead: read, now: now
+            ))
+        }
+        let pr = pullRequest(708, checks: [green], oid: updated)
+        let passed = try report(pr, read: now)
+        XCTAssertEqual(passed.reading, .passed)
+        XCTAssertTrue(passed.status.contains("#708 queue timed out"))
+        XCTAssertTrue(passed.status.hasSuffix("test passed on bbbbbbb"))
+        XCTAssertEqual(BoardStagesView.sectionQueue(state, proposed: 1, timeout: passed).start?.title, "Retry #708…")
+        state.selection.append(709)
+        XCTAssertEqual(BoardStagesView.sectionQueue(state, proposed: 2, timeout: passed).start?.title, "Start… · 2")
+        for early in [nil, then.addingTimeInterval(-1)] {
+            XCTAssertEqual(try report(pr, read: early).reading, .unavailable)
+        }
+        for (result, expected) in [(GitHub.CheckResult.failure, BoardStages.CheckTimeout.Reading.failed),
+                                   (.pending, .pending), (.skipped, .failed), (.neutral, .failed)] {
+            let current = try report(pullRequest(708, checks: [check("test", result)], oid: updated), read: now)
+            XCTAssertEqual(current.reading, expected)
+            XCTAssertFalse(current.canRetry)
+        }
+        for oid in [head, moved] {
+            XCTAssertEqual(try report(pullRequest(708, checks: [green], oid: oid), read: now).reading, .changed)
+        }
+        for unknown in [nil, pullRequest(709, checks: [green]), pullRequest(708, oid: updated),
+                        pullRequest(708, checks: [check("test", .success)], oid: updated)] {
+            XCTAssertEqual(try report(unknown, read: now).reading, .unavailable)
+        }
+        XCTAssertFalse(try report(pullRequest(708, draft: true, checks: [green], oid: updated), read: now).canRetry)
+        var blocked = pr
+        blocked.mergeIsBlocked = true
+        var automatic = pr
+        automatic.autoMerges = true
+        var needsReview = pr
+        needsReview.reviewDecision = "REVIEW_REQUIRED"
+        for held in [blocked, automatic, needsReview] {
+            let current = try report(held, read: now)
+            XCTAssertEqual(current.reading, .passed)
+            XCTAssertFalse(current.canRetry)
+        }
+    }
+
     func testARepositorysHeaderSaysItsQueueByTheTablesRules() {
         let start = { (state: ProjectBoard.QueueState, proposed: Int) in BoardStagesView.sectionQueue(state, proposed: proposed) }
         var rest = queue(.none, selection: [12, 13])
@@ -681,7 +745,7 @@ final class BoardStagesFactsTests: XCTestCase {
         var running = queue(.running(isStopping: false), [entry(12, step: .merging(head))])
         running.status = "#12 merging, 1 of 1"
         let busy = start(running, 0)
-        XCTAssertEqual([busy.status, busy.start?.title], ["#12 merging, 1 of 1", nil])
+        XCTAssertEqual([busy.status, busy.start?.title], ["Auto · #12 merging, 1 of 1", nil])
         XCTAssertEqual(busy.tone, .working)
         XCTAssertEqual(busy.stop?.title, "Stop")
         XCTAssertEqual(busy.stop?.isEnabled, true)
@@ -707,7 +771,7 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual([stopping?.tone, start(running, 0).tone], [.working, .working])
         running.run = .running(isStopping: false)
         XCTAssertEqual(BoardStagesView.runningQueue(id: "widgets", title: "widgets", state: running),
-                       BoardStagesView.RunningQueue(id: "widgets", title: "widgets", status: "#12 merging, 1 of 1", stop: busy.stop))
+                       BoardStagesView.RunningQueue(id: "widgets", title: "widgets", status: "Auto · #12 merging, 1 of 1", stop: busy.stop))
         let orphan = "old isn’t one of this board’s repositories now"
         XCTAssertEqual(BoardStagesView.runningQueue(id: "old", title: "old", tooltip: orphan, state: other),
                        BoardStagesView.RunningQueue(id: "old", title: "old", tooltip: orphan, status: "Running in another Nirux · #12 merging"))

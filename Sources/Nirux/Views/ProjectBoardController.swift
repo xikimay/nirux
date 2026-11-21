@@ -68,6 +68,12 @@ final class ProjectBoardController {
             }
         }
 
+        func pullRequestsAreFresh(now: Date) -> Bool {
+            let age = pullRequestsReadAt.map { now.timeIntervalSince($0) }
+            let interval = ProjectBoard.RefreshSchedule.interval(of: .openPullRequests, hasPendingChecks: hasPendingChecks)
+            return ProjectBoardController.stands(age: age, interval: interval)
+        }
+
         var availableSources: Set<ProjectBoard.Source> {
             var sources: Set<ProjectBoard.Source> = [.openPullRequests, .mergedPullRequests]
             if baseBranch != nil, workflow != nil { sources.insert(.postMergeRun) }
@@ -457,14 +463,13 @@ final class ProjectBoardController {
         let ids = sections.map(\.id) + Array(reads.keys) + [Self.noRepositoryID]
         return Set(ids.filter { id in
             guard let read = reads[id] else { return worktrees }
-            let age = read.pullRequestsReadAt.map { now.timeIntervalSince($0) }
-            return Self.stands(age: age, interval: interval(.openPullRequests, read.hasPendingChecks))
+            return read.pullRequestsAreFresh(now: now)
         })
     }
 
     /// A reading made `age` seconds ago, of a source read every `interval`:
     /// it stands for two intervals. Never made, it doesn't.
-    static func stands(age: TimeInterval?, interval: TimeInterval) -> Bool {
+    nonisolated static func stands(age: TimeInterval?, interval: TimeInterval) -> Bool {
         age.map { $0 <= 2 * interval } ?? false
     }
 
