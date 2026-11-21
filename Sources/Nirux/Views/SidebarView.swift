@@ -136,7 +136,7 @@ final class SidebarView: NSView {
     }
     var isExpanded: Bool = false {
         didSet {
-            if isExpanded != oldValue { taskPreview.dismiss() }
+            if isExpanded != oldValue { taskPreview.dismissHover() }
             isRailHidden = false
             // Reset on each switch so the new mode follows the active
             // workspace instead of staying at whatever offset was left.
@@ -343,7 +343,7 @@ final class SidebarView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     @objc private func taskPreviewWindowResigned(_ note: Notification) {
-        if note.object as? NSWindow === window { taskPreview.dismiss() }
+        if note.object as? NSWindow === window { taskPreview.dismissHover() }
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {

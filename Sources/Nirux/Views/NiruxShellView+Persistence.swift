@@ -10,6 +10,8 @@ extension NiruxShellView {
             ReviewFindings.lines.trimInBackground(spaceIDs: profiles.map(\.id))
         }
         let persisted = Persistence.load()
+        // Not over a state it couldn't read: its tasks would look gone.
+        defer { if persisted != nil || !Persistence.hasStoredState { pruneThreads() } }
         circlingHintEnabled = PersistedSettings.effective(persisted?.settings).agentCirclingHint
         turnStatusEnabled = PersistedSettings.effective(persisted?.settings).showTurnStatus
         catchUpEnabled = PersistedSettings.effective(persisted?.settings).showCatchUp
@@ -353,8 +355,9 @@ extension NiruxShellView {
         settings.sidebarWidth = sidebarFold.preferredWidth
         settings.sidebarExpanded = sidebarFold.chosenExpanded
         settings.boardOrder = boardOrder
+        let keptWorkspaces = workspaces.filter { !$0.isClosing }
         return PersistedState(
-            workspaces: workspaces.filter { !$0.isClosing || $0.columns.first?.waitingTask == nil }.map { workspace in
+            workspaces: keptWorkspaces.map { workspace in
                 PersistedWorkspace(
                     id: workspace.id, title: workspace.title,
                     cwd: Self.persistedWorkspaceCwd(for: workspace),
@@ -382,15 +385,13 @@ extension NiruxShellView {
                     ),
                     startedOutsideNirux: workspace.startedOutsideNirux,
                     startedByAgent: workspace.startedByAgent,
-                    // One closing is no longer the Lead: a new one may
-                    // start before it goes.
-                    isLead: workspace.isLead && !workspace.isClosing,
+                    isLead: workspace.isLead,
                     reportsToLead: workspace.reportsToLead,
                     reportsToTask: workspace.reportsToTask,
                     taskFolder: workspace.taskFolder,
                     mergeWaits: workspace.mergeWaits.isEmpty ? nil : workspace.mergeWaits)
             },
-            activeWorkspaceIndex: activeWSIndex,
+            activeWorkspaceIndex: keptWorkspaces.firstIndex { $0 === activeWorkspace } ?? 0,
             settings: settings,
             workspaceProfiles: workspaceStore.profiles,
             activeProfileID: activeProfileID,

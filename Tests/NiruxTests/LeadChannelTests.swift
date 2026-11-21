@@ -159,6 +159,8 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(try names(context(lead: false, inWorkspace: false)), [HistorySearchTool.name])
         // A workspace opened by a link from outside Nirux has no launch id.
         XCTAssertEqual(try names(context(lead: false, launchID: "")), [HistorySearchTool.name])
+        XCTAssertNotNil(try call(LeadTools.readThread, ["task": "sample"], context: context(lead: false))["error"])
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.readThread, arguments: [:]))
         XCTAssertNotNil(try call(LeadTools.queueMerge, ["prs": [1]], context: context(lead: false))["error"], "the Lead's only")
         XCTAssertNotNil(try call(LeadTools.listTasks, [:], context: context(lead: false, inWorkspace: false))["error"], "unknown outside")
         let allowed = NiruxMCPServer.claudeArguments(executable: "/x/Nirux").first { $0.hasPrefix("--allowedTools=") }

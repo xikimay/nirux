@@ -109,6 +109,11 @@ final class NiruxShellView: NSView {
     }
 
     // Heartbeat
+    lazy var pinnedThreadReader: TaskThreadContentView.Read = { [weak self] id, space, done in
+        guard let self else { return done(nil) }
+        readThreadTimeline(workspaceID: id, spaceID: space, completion: done)
+    }
+
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
     /// Event-driven git/PR refresh scheduling (FSEvents + throttles).
@@ -372,6 +377,18 @@ final class NiruxShellView: NSView {
         wireWorkspace(workspace)
         workspaces.append(workspace)
         verticalStrip.addSubview(workspace.containerView)
+        sidebar.onOpenTaskThread = { [weak self] id, card in
+            guard let self else { return }
+            let space = activeProfileID
+            sidebar.taskPreview.pin(workspaceID: id, card: card) { [weak self, weak card] questionID, text in
+                guard let self, let card, sidebar.taskPreview.card === card,
+                      sidebar.taskPreview.workspaceID == id, activeProfileID == space,
+                      workspaces.contains(where: { $0.id == id && $0.profileID == space && !$0.isClosing })
+                else { return .noLongerOpen }
+                return replyToThreadQuestion(questionID, in: id, text: text)
+            }
+            refreshPinnedTaskThread()
+        }
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
         sidebar.worktreeCleanupOffer = { [weak self] index in self?.worktreeCleanupOffer(workspaceIndex: index) }
@@ -481,6 +498,7 @@ final class NiruxShellView: NSView {
                 self.sweepMergeWaits(now: now)
                 self.checkMissionWaits(snapshot: snapshot, now: now)
                 self.refreshMetadata(snapshot: snapshot)
+                self.refreshPinnedTaskThread()
                 // Save state every ~10s (every 5th tick)
                 if self.heartbeatTick % 5 == 0 {
                     self.saveState(snapshot: snapshot)
@@ -866,7 +884,7 @@ extension NiruxShellView {
         workspaceContextPanel?.onSave = { [weak self, weak workspace] values in
             guard let self, let workspace,
                   self.workspaces.contains(where: { $0 === workspace }) else { return }
-            workspace.purpose = WorkspaceState.normalizedContextText(values.purpose)
+            workspace.setPurpose(values.purpose, by: .user)
             workspace.phase = values.phase
             if values.phase != nil {
                 workspace.unknownPhaseRawValue = nil
@@ -875,11 +893,8 @@ extension NiruxShellView {
             workspace.setContextByHand(.nextStep, values.nextStep, presented: presentedNextStep)
             workspace.setContextByHand(.blocker, values.blocker, presented: presentedBlocker)
 
-            let savedSummary = WorkspaceState.normalizedContextText(values.lastSummary)
-            if savedSummary != presentedSummary {
-                workspace.lastSummary = savedSummary
-                workspace.lastSummaryIsManual = savedSummary != nil
-                workspace.lastSummaryIsStatus = false
+            if WorkspaceState.normalizedContextText(values.lastSummary) != presentedSummary {
+                workspace.setSummaryByHand(values.lastSummary)
             }
             self.updateSidebar()
             self.saveState()
@@ -1217,6 +1232,8 @@ extension NiruxShellView {
         // leaves them to the workspace it goes to, which shows under it.
         if let spacePlan, !spacePlan.isDiving { return true }
         if NSApp.keyWindow is NSPanel { return true }
+        if let body = sidebar.taskPreview.pinnedBody, let responder = window?.firstResponder as? NSView,
+           responder.isDescendant(of: body) { return true }
         // A popover hanging from the window has the keyboard (the Mission
         // reply's field): AppKit keeps the window key, gives it the
         // popover's first responder and hands it the keys. Not once that
