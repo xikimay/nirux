@@ -166,6 +166,13 @@ final class AgentSessionLedger {
         return Self.matching(spaces[spaceID].map { Array($0.records.values) } ?? [], query)
     }
 
+    func pullRequestURLs(workspaceID: String) -> Set<String> {
+        loadIfNeeded()
+        return Set(spaces.values.flatMap { space in
+            space.records.values.compactMap { $0.workspaceID == workspaceID ? $0.pullRequest?.url : nil }
+        })
+    }
+
     func session(agent: CodingAgent, sessionID: String) -> AgentSessionRecord? {
         loadIfNeeded()
         return locate(AgentSessionRecord.key(agent: agent.rawValue, sessionID: sessionID))?.record
