@@ -55,7 +55,8 @@ struct PRFollowUpStore: Codable, Equatable {
         }
     }
 
-    static var url: URL { Persistence.stateDirectory.appendingPathComponent("pr-follow-up.json") }
+    static let fileName = "pr-follow-up.json"
+    static var url: URL { Persistence.stateDirectory.appendingPathComponent(fileName) }
 
     /// Empty for a missing or unreadable file.
     static func load(from url: URL = url) -> PRFollowUpStore {

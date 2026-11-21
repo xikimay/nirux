@@ -870,7 +870,7 @@ extension NiruxShellView {
         workspaceContextPanel?.onSave = { [weak self, weak workspace] values in
             guard let self, let workspace,
                   self.workspaces.contains(where: { $0 === workspace }) else { return }
-            workspace.purpose = WorkspaceState.normalizedContextText(values.purpose)
+            workspace.setPurpose(values.purpose, by: .user)
             workspace.phase = values.phase
             if values.phase != nil {
                 workspace.unknownPhaseRawValue = nil
@@ -879,11 +879,8 @@ extension NiruxShellView {
             workspace.setContextByHand(.nextStep, values.nextStep, presented: presentedNextStep)
             workspace.setContextByHand(.blocker, values.blocker, presented: presentedBlocker)
 
-            let savedSummary = WorkspaceState.normalizedContextText(values.lastSummary)
-            if savedSummary != presentedSummary {
-                workspace.lastSummary = savedSummary
-                workspace.lastSummaryIsManual = savedSummary != nil
-                workspace.lastSummaryIsStatus = false
+            if WorkspaceState.normalizedContextText(values.lastSummary) != presentedSummary {
+                workspace.setSummaryByHand(values.lastSummary)
             }
             self.updateSidebar()
             self.saveState()

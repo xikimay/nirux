@@ -98,6 +98,48 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.nextStep, "my own note")
     }
 
+    /// What a task's thread keeps reaches the shell as it happens, with
+    /// who did it: the Lead's and the user's context, a merge clearing the
+    /// Lead's, the goal, each status line, each turn end.
+    func testWhatTheThreadKeepsReachesItWithItsAuthor() throws {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        var events: [TaskThread.Event] = []
+        workspace.onThreadEvent = { events.append($0) }
+        @MainActor func took() -> [String] {
+            defer { events.removeAll() }
+            return events.map { [$0.kind.rawValue, $0.by?.rawValue ?? "·", $0.text ?? "cleared"].joined(separator: " ") }
+        }
+
+        _ = workspace.setContextByLead(.nextStep, "write tests")
+        _ = workspace.setContextByLead(.nextStep, "write tests")
+        workspace.setContextByHand(.blocker, "no API key", presented: nil)
+        _ = workspace.setContextByLead(.blocker, "something else")
+        XCTAssertEqual(took(), ["nextStep lead write tests", "blocker user no API key"], "nothing for a field left as it was")
+        workspace.clearLeadContext()
+        XCTAssertEqual(took(), ["nextStep nirux cleared"], "the user's blocker stays")
+        workspace.setPurpose("Exports CSV", by: .user)
+        workspace.setPurpose(" Exports CSV ", by: .user)
+        XCTAssertEqual(took(), ["goal user Exports CSV"])
+
+        for (turn, status) in [(10.0, TurnStatus.line("export half done")), (20, .line("export half done")), (30, .unchanged)] {
+            workspace.awaitTurnStatus(turnEndedAt: turn)
+            workspace.settleTurnStatus(status, turnEndedAt: turn)
+        }
+        XCTAssertEqual(events.map(\.time), [10, 20], "at its turn's end; a repeat is dropped at read")
+        XCTAssertEqual(took(), ["status nirux export half done", "status nirux export half done"])
+        workspace.setSummaryByHand("my own summary")
+        workspace.awaitTurnStatus(turnEndedAt: 40)
+        workspace.settleTurnStatus(.line("export done"), turnEndedAt: 40)
+        XCTAssertEqual(took(), ["status user my own summary"], "the user's summary stays")
+
+        let stop = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: ["hook_event_name": "Stop"], env: [:], now: 50))
+        let prompt = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: ["hook_event_name": "UserPromptSubmit"], env: [:], now: 60))
+        workspace.recordAgentHookActivity(stop)
+        workspace.recordAgentHookActivity(prompt)
+        XCTAssertEqual(events.map { "\($0.time) \($0.detail ?? "")" }, ["50.0 claude"])
+        XCTAssertEqual(took(), ["turnEnd · cleared"])
+    }
+
     func testUserPromptUpdatesActivityWithoutReplacingSummaryOrCountingToolUse() throws {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         workspace.lastSummary = "Keep the completed work summary"
