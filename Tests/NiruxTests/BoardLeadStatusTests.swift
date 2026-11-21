@@ -52,14 +52,15 @@ final class BoardLeadStatusTests: XCTestCase {
         func header(at time: TimeInterval = 200, showsCodex: Bool = true) -> BoardStagesView.Lead {
             var front = [ObjectIdentifier(claude): claudeProcess]
             if showsCodex { front[ObjectIdentifier(codex)] = codexProcess }
+            let snapshot = ProcessSnapshot(entries: [])
             let columns = lead.columns.enumerated().map { index, column in
                 shell.sidebarColumnInfo(
                     column, at: index, isUserFocused: false, agentStatus: column.pty?.cachedAgentState ?? .idle,
                     foregroundProcess: front[ObjectIdentifier(column)], approvalHold: nil, missionQuestion: nil,
-                    showsDialog: false, snapshot: ProcessSnapshot(entries: []), now: time
+                    showsDialog: false, snapshot: snapshot, now: time
                 )
             }
-            return shell.boardLeadStatus(of: lead, columns: columns, foreground: front, now: time, store: store)
+            return shell.boardLeadStatus(of: lead, columns: columns, foreground: front, snapshot: snapshot, now: time, store: store)
         }
     }
 
@@ -136,8 +137,13 @@ final class BoardLeadStatusTests: XCTestCase {
         try UIFlowHarness.run { harness in
             var fixture = try Fixture(harness)
             _ = try fixture.route(to: fixture.claude)
+            let previous = fixture.claudeProcess.instance
             fixture.claudeProcess = .init(instance: .init(pid: 1001, startedAt: 60), name: "claude", arguments: ["claude"])
             XCTAssertEqual(fixture.header().text, "Lead · Claude Code · Idle")
+            _ = fixture.claude.pty?.applyAgentHook(.init(
+                kind: .claude, name: .stopFailure, emitterProcess: previous, errorKind: "server_error", timestamp: 80
+            ), isUserFocused: false)
+            XCTAssertEqual(fixture.header().text, "Lead · Claude Code · Status unknown", "the late failure names the previous emitter")
         }
     }
 

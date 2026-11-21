@@ -45,7 +45,8 @@ extension NiruxShellView {
                 )
             }()
             if workspace.isLead {
-                readings.lead = (workspace.id, boardLeadStatus(of: workspace, columns: info.columns, foreground: foregroundProcesses, now: now))
+                let status = boardLeadStatus(of: workspace, columns: info.columns, foreground: foregroundProcesses, snapshot: snapshot, now: now)
+                readings.lead = (workspace.id, status)
                 continue
             }
             readings.tasks[workspace.id] = BoardStages.TaskReading(

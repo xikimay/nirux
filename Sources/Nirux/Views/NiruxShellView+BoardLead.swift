@@ -3,11 +3,11 @@ import Foundation
 extension NiruxShellView {
     func boardLeadStatus(
         of lead: WorkspaceState, columns: [ColumnInfo], foreground: [ObjectIdentifier: ForegroundProcess],
-        now: TimeInterval, store: MissionStore = .shared
+        snapshot: ProcessSnapshot, now: TimeInterval, store: MissionStore = .shared
     ) -> BoardStagesView.Lead {
         let sessions = lead.openColumns.compactMap { column -> BoardLeadSession? in
             guard let info = columns.first(where: { $0.id == column.id }) else { return nil }
-            return BoardLeadSession(column, info: info, foreground: foreground[ObjectIdentifier(column)], now: now)
+            return BoardLeadSession(column, info: info, foreground: foreground[ObjectIdentifier(column)], snapshot: snapshot, now: now)
         }
         guard store.ensureLoaded() else { return .init(state: .idle, text: "Lead · Mission routes unavailable") }
         lazy var handoffsEnabled = Self.currentMissionHandoffsEnabled()
@@ -37,7 +37,7 @@ private struct BoardLeadSession {
     var status: BoardStagesView.Lead
 
     @MainActor
-    init?(_ column: ColumnState, info: ColumnInfo, foreground: ForegroundProcess?, now: TimeInterval) {
+    init?(_ column: ColumnState, info: ColumnInfo, foreground: ForegroundProcess?, snapshot: ProcessSnapshot, now: TimeInterval) {
         guard let uuid = column.agentUUID, NiruxShellView.terminalCarriesMissions(column.launchEnvironment),
               let agent = column.missionAgent(foreground: foreground) ?? info.stuck?.agentName.flatMap(NiruxApp.WorkspaceAgent.init(rawValue:)),
               let name = Mission.agentName(ofKind: agent.rawValue)
@@ -46,7 +46,12 @@ private struct BoardLeadSession {
         self.agent = agent
         self.index = info.index
         self.name = name
-        status = Self.status(of: column, info: info, agent: agent, foreground: foreground, now: now)
+        if agent == .claude, case .stoppedOnError? = info.stuck, let emitter = column.pty?.agentTurnFailure?.emitter,
+           let foreground, !snapshot.ownsEmitter(emitter, foreground: foreground) {
+            status = .init(state: .idle, text: "Status unknown")
+        } else {
+            status = Self.status(of: column, info: info, agent: agent, foreground: foreground, now: now)
+        }
         status.columnID = column.id
     }
 
