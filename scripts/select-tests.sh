@@ -7,10 +7,11 @@
 # more than test classes or whose class others inherit, or any other file
 # but documentation.
 #
-# Usage: git diff --no-renames --name-only -z <indexed commit> HEAD | scripts/select-tests.sh <index>
+# Usage: git diff --no-renames --name-only -z <indexed commit> HEAD | scripts/select-tests.sh <index> <discovered classes>
 set -euo pipefail
 
 index="$1"
+discovered="$2"
 cd "$(dirname "$0")/.."
 
 whole() {
@@ -29,18 +30,27 @@ while IFS= read -r -d '' path; do
             ;;
         Tests/NiruxTests/*.swift)
             [[ -f $path ]] || whole "removed test or helper: $path"
-            # Only imports and classes may appear at file scope. The runner
-            # checks every class name against XCTest discovery.
+            # A file-local fixture can only be used by this file's classes.
+            # Ask the compiler for file-scope declarations and their access.
             classes=$(swiftc -frontend -dump-parse "$path" | awk '
-                /^  \(import_decl / { next }
-                /^  \(class_decl / && match($0, /] "[A-Za-z_][A-Za-z0-9_]*"/) {
-                    print substr($0, RSTART + 3, RLENGTH - 4)
-                    next
+                FILENAME != "-" { test[$0] = 1; next }
+                function finish() {
+                    if (name != "" && ("NiruxTests." name) in test) print name
+                    else if (kind != "" && kind != "(import_decl" && !localDecl) shared = 1
                 }
-                /^  \(/ { exit 1 }') || whole "$path contains shared test code"
+                /^  \(/ {
+                    finish()
+                    kind = $1; name = ""; localDecl = 0
+                    if (kind == "(class_decl" && match($0, /] "[A-Za-z_][A-Za-z0-9_]*"/))
+                        name = substr($0, RSTART + 3, RLENGTH - 4)
+                }
+                /^    \(access_control_attr .*access_level=(private|fileprivate)\)/ { localDecl = 1 }
+                END { finish(); if (shared) exit 1 }' "$discovered" -) ||
+                whole "$path contains shared test code"
             [[ -n $classes ]] || whole "$path declares no test class"
             while IFS= read -r class; do
-                if git grep -lwF -e "$class" -- Tests | grep -vxF "$path" > /dev/null; then
+                references=$(git grep -lwF -e "$class" -- Tests) || whole "cannot locate $class"
+                if grep -vxF "$path" <<< "$references" > /dev/null; then
                     whole "other files reference $class"
                 fi
                 echo "NiruxTests.$class" >> "$selected"

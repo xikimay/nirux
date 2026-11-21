@@ -97,8 +97,9 @@ jobs:
             exit 0
           fi
           git diff --no-renames --name-only -z "$revision" HEAD > "$RUNNER_TEMP/changed"
+          swift test list --skip-build | cut -d/ -f1 | sort -u > "$RUNNER_TEMP/test-classes"
           status=0
-          scripts/select-tests.sh .build/coverage-index.txt < "$RUNNER_TEMP/changed" > "$RUNNER_TEMP/selected" || status=$?
+          scripts/select-tests.sh .build/coverage-index.txt "$RUNNER_TEMP/test-classes" < "$RUNNER_TEMP/changed" > "$RUNNER_TEMP/selected" || status=$?
           if [[ $status -eq 0 ]]; then
             echo "$(wc -l < "$RUNNER_TEMP/selected" | tr -d ' ') classes selected:"
             cat "$RUNNER_TEMP/selected"
