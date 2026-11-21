@@ -2,8 +2,7 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// A task row's two lines (docs/design/spaces.md, Interface): the one thing to know
-/// first, amber only when the user is needed; the selected row's columns.
+/// Task summaries and their expanded, selected and compact presentations.
 @MainActor
 final class SidebarTaskRowTests: XCTestCase {
     private func column(
@@ -30,12 +29,12 @@ final class SidebarTaskRowTests: XCTestCase {
 
     private func workspace(
         _ columns: [ColumnInfo], branch: String? = "fix/login", pr: PRInfo? = nil, cleanup: MergedCleanupOffer? = nil,
-        isActive: Bool = false, nextStep: String? = nil, blocker: String? = nil
+        isActive: Bool = false, nextStep: String? = nil, blocker: String? = nil, purpose: String? = nil
     ) -> WorkspaceInfo {
         WorkspaceInfo(
             id: "ws", index: 4, title: "Fix login", profileID: WorkspaceProfile.defaultID, isInactive: false,
             columnCount: columns.count, focusedColumn: 0, gitBranch: branch, notification: nil, isActive: isActive,
-            columns: columns, prInfo: pr, diffStats: nil, purpose: nil, nextStep: nextStep, blocker: blocker, phase: .active,
+            columns: columns, prInfo: pr, diffStats: nil, purpose: purpose, nextStep: nextStep, blocker: blocker, phase: .active,
             lastSummary: nil, lastActivityAt: Date().timeIntervalSince1970 - 720, mergedCleanup: cleanup
         )
     }
@@ -127,7 +126,7 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(workspace([column()], isActive: true, nextStep: next, blocker: blocker).cardActions, [.next(next)])
 
         XCTAssertEqual(status(workspace([column()], nextStep: next)), "Next · \(next)")
-        XCTAssertEqual(workspace([column()], isActive: true, nextStep: next).cardActions, [], "the status line says it")
+        XCTAssertEqual(workspace([column()], isActive: true, nextStep: next).cardActions, [.next(next)])
         XCTAssertEqual(status(workspace([finished], nextStep: next)), "Done")
         XCTAssertEqual(status(workspace([column()], pr: pullRequest(ci: "PENDING"), nextStep: next)), "#39 · checks running")
         XCTAssertEqual(workspace([column()], pr: pullRequest(ci: "PENDING"), isActive: true, nextStep: next).cardActions, [.next(next)])
@@ -199,8 +198,74 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(line(pullRequest(.closed)).status.text, "fix/login")
     }
 
-    /// Only the selected row lists its columns and its links; every row
-    /// keeps two lines, amber only for the user.
+    func testTheGoalFitsBetweenTitleAndStepAndTakesNoSpaceWhenBlank() throws {
+        func render(_ purpose: String?) -> SidebarWorkspaceCardRenderResult {
+            let info = workspace([column()], nextStep: "Build Sources/Importer.swift", purpose: purpose)
+            return SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 400).render()
+        }
+        let row = render(" Explain  the login\n flow ")
+        let labels = row.views.compactMap { $0 as? NSTextField }
+        let title = try XCTUnwrap(labels.first { $0.stringValue == "Fix login" })
+        let goal = try XCTUnwrap(labels.first { $0.stringValue == "Explain the login flow" })
+        let step = try XCTUnwrap(row.views.first { $0.accessibilityLabel() == "Code" })
+        XCTAssertLessThanOrEqual(goal.frame.maxY, title.frame.minY)
+        XCTAssertLessThanOrEqual(step.frame.maxY, goal.frame.minY)
+        XCTAssertFalse(labels.contains { $0.stringValue.contains("Sources/") || $0.stringValue == "fix/login" })
+        XCTAssertEqual(render(nil).bottomY, render("  \n ").bottomY)
+        XCTAssertEqual(render(nil).bottomY - row.bottomY, SidebarExpandedMetrics.statusRowHeight)
+    }
+
+    func testTheChipUsesTheBoardStationAndTheOpenPullRequest() throws {
+        let green = pullRequest(ci: "SUCCESS")
+        var task = workspace([column()], pr: green)
+        func chip(_ info: WorkspaceInfo) -> String? {
+            SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 400).render().views
+                .compactMap { $0 as? SidebarBadgeView }.first { $0.accessibilityRole() == .staticText }?.accessibilityLabel()
+        }
+        XCTAssertEqual(chip(task), "Ready #39")
+        task.boardProgress = SidebarBoardProgress(station: .reviews, number: 39)
+        XCTAssertEqual(chip(task), "Review #39")
+        XCTAssertEqual(task.rowSummary.mark, .idle, "the state icon follows the Board too")
+        task.boardProgress = SidebarBoardProgress(station: .checks, number: 39)
+        XCTAssertEqual(chip(task), "Checks #39")
+        XCTAssertEqual(chip(workspace([column()], pr: pullRequest(.merged))), "Merged #39")
+        XCTAssertEqual(chip(workspace([column()], pr: pullRequest(.closed))), "Code")
+        var changes = workspace([column()], pr: pullRequest(ci: "SUCCESS", review: "CHANGES_REQUESTED"))
+        changes.boardProgress = SidebarBoardProgress(station: .merge, number: 39)
+        XCTAssertEqual(chip(changes), "Review #39")
+        var planning = column(0, .working)
+        planning.isPlanning = true
+        XCTAssertEqual(chip(workspace([planning])), "Plan")
+        XCTAssertEqual(chip(workspace([planning, column(1, .working)])), "Code")
+        task.boardProgress = SidebarBoardProgress(station: .reviews, number: 12)
+        XCTAssertEqual(chip(task), "Ready #39", "a board reading for another PR cannot move this one")
+        var boardOnly = workspace([column()])
+        boardOnly.boardProgress = SidebarBoardProgress(station: .merge, number: 41, mergeStep: .merged)
+        XCTAssertEqual(chip(boardOnly), "Merged #41")
+    }
+
+    func testChipAndStatusFollowTheCurrentPullRequestWhenBoardReadingsAge() throws {
+        let ready = SidebarBoardProgress(station: .merge, number: 39, mergeStep: .ready)
+        let beforePR = SidebarBoardProgress(station: .code)
+        func shown(_ board: SidebarBoardProgress, _ pr: PRInfo?) throws -> [String] {
+            var task = workspace([column()], pr: pr)
+            task.boardProgress = board
+            let views = SidebarWorkspaceCardRenderer(workspace: task, sidebarWidth: 260, yOffset: 400).render().views
+            let chip = try XCTUnwrap(views.compactMap { $0 as? SidebarBadgeView }.first { $0.accessibilityRole() == .staticText })
+            let status = views.compactMap { $0 as? NSTextField }.first { $0.frame.midY == chip.frame.midY }
+            return [try XCTUnwrap(chip.accessibilityLabel()), status?.stringValue ?? ""]
+        }
+        XCTAssertEqual(try shown(ready, pullRequest(ci: "SUCCESS")), ["Ready #39", "Checks passed"])
+        XCTAssertEqual(try shown(ready, pullRequest(ci: "FAILURE")), ["Checks #39", "checks failed"])
+        XCTAssertEqual(try shown(ready, pullRequest(ci: "PENDING")), ["Checks #39", "checks running"])
+        XCTAssertEqual(try shown(ready, pullRequest(ci: "SUCCESS", draft: true)), ["Code #39", "draft"])
+        XCTAssertEqual(try shown(ready, pullRequest(ci: "SUCCESS", review: "CHANGES_REQUESTED")), ["Review #39", "checks passed"])
+        XCTAssertEqual(try shown(beforePR, nil), ["Code", ""])
+        XCTAssertEqual(try shown(beforePR, pullRequest(ci: "SUCCESS")), ["Ready #39", "Checks passed"])
+        XCTAssertEqual(try shown(.init(station: .reviews, number: 39), pullRequest(ci: "SUCCESS")), ["Review #39", "checks passed"])
+        XCTAssertEqual(try shown(ready, nil), ["Ready #39", ""])
+    }
+
     func testOnlyTheSelectedRowShowsItsColumns() throws {
         let columns = [column(0, .working), column(1, process: "zsh")]
         func render(_ info: WorkspaceInfo) -> SidebarWorkspaceCardRenderResult {
@@ -237,8 +302,8 @@ final class SidebarTaskRowTests: XCTestCase {
         let waiting = workspace([column(0, .needsAttention, reason: .message(sentence))])
         XCTAssertEqual(lines(waiting), 4)
         XCTAssertEqual(lines(workspace([column()], blocker: sentence)), 4, "a blocker says what the task waits on")
-        XCTAssertEqual(lines(workspace([column()], nextStep: sentence)), 2)
-        XCTAssertEqual(lines(workspace([column()], isActive: true, nextStep: sentence)), 4, "the selected row")
+        XCTAssertEqual(lines(workspace([column()], nextStep: sentence)), 1)
+        XCTAssertEqual(lines(workspace([column()], isActive: true, nextStep: sentence)), 1, "the selected row has a separate next-step block")
         XCTAssertEqual(lines(workspace([column()], branch: "feat/" + String(repeating: "a-very-long-name-", count: 6))), 1)
         XCTAssertEqual(workspace([column()], pr: pullRequest(.merged), cleanup: .available).rowSummary.statusLineLimit(isSelected: true), 1)
         let broken = SidebarRowSummary(mark: .error, status: SidebarStatusLine(text: sentence, tone: .error), trailing: nil)
@@ -283,8 +348,8 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(step.frame.minY, selected.bottomY + SidebarExpandedMetrics.rowPaddingY, accuracy: 0.5)
 
         // What follows a status of several lines starts under it.
-        let tall = render(workspace([column()], isActive: true, nextStep: sentence))
-        let status = try XCTUnwrap(tall.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Next · \(sentence)" })
+        let tall = render(workspace([column()], isActive: true, blocker: sentence))
+        let status = try XCTUnwrap(tall.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Blocked · \(sentence)" })
         let chip = try XCTUnwrap(tall.hitAreas.first { if case .column = $0.region { true } else { false } })
         XCTAssertLessThanOrEqual(chip.frame.maxY, status.frame.minY)
     }

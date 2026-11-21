@@ -104,7 +104,7 @@ final class SidebarGlassRowsTests: XCTestCase {
 
         // With its station: inside the still ring, and under the turning arc.
         var atChecks = running
-        atChecks.station = .checks
+        atChecks.boardProgress = SidebarBoardProgress(station: .checks, number: 39)
         let stillAtChecks = SidebarWorkspaceCardRenderer(workspace: atChecks, sidebarWidth: 260, yOffset: 500, animates: false, now: 5_000)
             .render().views
         XCTAssertEqual(icons(in: stillAtChecks).map(\.icon), [StateIcon(.waiting, stage: 3)])
@@ -114,7 +114,7 @@ final class SidebarGlassRowsTests: XCTestCase {
         // The icon's own ring and pie, where it draws them: the arc on the ring, Code's quarter from 12 to 3 o'clock (the
         // layer's y goes up).
         var atCode = running
-        atCode.station = .code
+        atCode.boardProgress = SidebarBoardProgress(station: .code, number: 39)
         let layers = try XCTUnwrap(views(atCode).first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID }?.layer?.sublayers)
         let unit = size.width / 16
         let arc = try XCTUnwrap((layers.first as? CAShapeLayer)?.path?.boundingBoxOfPath)
@@ -400,7 +400,7 @@ final class SidebarGlassRowsTests: XCTestCase {
             header: BoardStagesView.Header(name: "Acme", color: Theme.Color.accent, summary: "", lead: nil), order: .sidebar,
             sections: [BoardStagesView.Section(id: "widgets", title: "widgets", detail: nil, status: nil, lines: lines)], now: 0
         )
-        XCTAssertEqual(NiruxShellView.taskStations(of: content, fresh: ["widgets"]), ["checkout": .checks, "tests": .reviews])
+        XCTAssertEqual(NiruxShellView.taskStations(of: content, fresh: ["widgets"]).mapValues(\.station), ["checkout": .checks, "tests": .reviews])
         XCTAssertEqual(NiruxShellView.taskStations(of: content, fresh: []), [:], "its reading aged: none")
         // A reading stands for two read intervals.
         XCTAssertTrue(ProjectBoardController.stands(age: 120, interval: 60))
@@ -438,7 +438,7 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertTrue(shell.noteTaskStations(of: board, content: content(.checks), fresh: ["widgets"]))
         let row = shell.sidebarWorkspaceInfo(at: index, columns: [], isActive: true, parentTitle: nil)
         let bar = NiruxShellView.commandBarContent(space: WorkspaceProfile.defaultProfile, task: row, waitingCount: 0)
-        let palette = PaletteBadge(.working, station: shell.taskStations[workspace.id], now: 0)
+        let palette = PaletteBadge(.working, station: shell.taskStations[workspace.id]?.station, now: 0)
         XCTAssertEqual(row.station, .checks)
         XCTAssertEqual([row.stateIcon.stage, row.railIcon.stage, bar.taskIcon?.stage, palette.icon.stage], [3, 3, 3, 3])
         XCTAssertFalse(shell.noteTaskStations(of: board, content: content(.checks), fresh: ["widgets"]), "nothing changed")
@@ -453,7 +453,7 @@ final class SidebarGlassRowsTests: XCTestCase {
     /// catch-up card's, not only the rail's.
     func testTheCardsIconFillsUpToItsStation() {
         var info = row([column(.working)])
-        info.station = .reviews
+        info.boardProgress = SidebarBoardProgress(station: .reviews)
         XCTAssertEqual(icons(in: views(info)).first?.icon, StateIcon(.working, stage: 2))
         XCTAssertEqual(SidebarCatchUp.icon(for: .working, row: info.stateIcon), StateIcon(.working, stage: 2))
     }

@@ -17,8 +17,6 @@ struct SidebarWorkspaceCardRenderResult {
     let approvalButtons: [String: SidebarBadgeView]
 }
 
-/// A task row (`SidebarCardLayout`): the state mark, the title and the time,
-/// then the status line; the selected row's columns; then the action block.
 /// No border: the selected row is tinted, the others light under the
 /// pointer. An archived row that asks nothing is one line.
 @MainActor
@@ -101,6 +99,16 @@ final class SidebarWorkspaceCardRenderer {
         var top = frame.maxY - Metrics.rowPaddingY
         buildTitleRow(top: top)
         top -= Metrics.titleRowHeight + Metrics.statusGap
+        if let goal = layout.goal {
+            let label = textLabel(goal, font: Theme.Font.body, color: Theme.Color.textSecondary)
+            label.frame = NSRect(x: layout.indentX, y: top - Metrics.statusRowHeight,
+                                 width: max(0, layout.contentMaxX - layout.indentX), height: Metrics.statusRowHeight)
+            label.toolTip = goal
+            append(label)
+            top -= Metrics.statusRowHeight
+        }
+        buildStep(top: top)
+        if layout.statusBelowStep { top -= Metrics.statusRowHeight }
         let statusLink = buildStatusLine(top: top)
         top -= CGFloat(layout.statusLineCount) * Metrics.statusRowHeight
         let lineCount = max(layout.chipRows.count, layout.links.isEmpty ? 0 : 1)
@@ -158,8 +166,8 @@ final class SidebarWorkspaceCardRenderer {
     /// "Merged" line doesn't name. `trailing` overrides the summary's.
     private func trailingLabel(_ trailing: SidebarRowSummary.Trailing? = nil) -> NSTextField? {
         var shown = trailing ?? layout.summary.trailing
-        // The selected row's links name the pull request already.
-        if case .pullRequest? = shown, !layout.links.isEmpty { shown = Self.age(of: workspace) }
+        // The task step names the pull request.
+        if case .pullRequest? = shown, !layout.isCompact && !workspace.isLead { shown = Self.age(of: workspace) }
         guard let shown else { return nil }
         let label = textLabel(shown.text, font: Theme.Font.caption, color: Theme.Color.textTertiary)
         label.alignment = .right
@@ -463,6 +471,21 @@ final class SidebarWorkspaceCardRenderer {
         append(host)
     }
 
+    private func buildStep(top: CGFloat) {
+        let color: NSColor = switch layout.step {
+        case .merged: Theme.Color.done
+        case .ready: Theme.Color.success
+        default: layout.summary.mark == .error ? Theme.Color.error : Theme.Color.textSecondary
+        }
+        let badge = SidebarBadgeView(text: layout.stepTitle, textColor: color, fillColor: color.withAlphaComponent(0.12),
+                                    font: Theme.Font.captionEmphasized)
+        badge.frame = NSRect(x: layout.indentX, y: top - Metrics.statusRowHeight, width: layout.stepWidth, height: Metrics.statusRowHeight)
+        badge.setAccessibilityElement(true)
+        badge.setAccessibilityRole(.staticText)
+        badge.setAccessibilityLabel(layout.stepTitle)
+        append(badge)
+    }
+
     // MARK: - Status line
 
     /// "Needs you · npm run migrate" in amber, "Stopped on an API error"
@@ -473,13 +496,14 @@ final class SidebarWorkspaceCardRenderer {
     /// popover, the pull request, Clean up) is a link as wide as its text.
     private func buildStatusLine(top: CGFloat) -> SidebarHitArea? {
         let status = layout.summary.status
-        let text = Self.statusText(layout.summary)
+        let text = layout.statusText
+        guard text.length > 0 else { return nil }
         let label = layout.statusLineLimit > 1
             ? SidebarWrappedText.label(text, lineHeight: Metrics.statusRowHeight, maxLines: layout.statusLineLimit)
             : NSTextField.sidebarLine(text)
-        let x = layout.indentX
+        let x = layout.indentX + (layout.statusBelowStep ? 0 : layout.stepWidth + Theme.Space.xs)
         let height = CGFloat(layout.statusLineCount) * Metrics.statusRowHeight
-        label.frame = NSRect(x: x, y: top - height, width: layout.contentMaxX - x, height: height)
+        label.frame = NSRect(x: x, y: top - height, width: max(0, layout.contentMaxX - x), height: height)
         label.toolTip = statusToolTip(status)
         // The grey check says it on screen.
         if layout.summary.mark == .finished { label.setAccessibilityLabel("Done: \(status.text)") }
@@ -502,7 +526,7 @@ final class SidebarWorkspaceCardRenderer {
         // Over the link's words only ("Clean up"), else the whole text.
         let full = ceil(label.attributedStringValue.size().width)
         var start: CGFloat = 0
-        let printed = layout.summary.lineText
+        let printed = text.string
         if let link = status.linkText, printed.hasSuffix(link) {
             let prefix = label.attributedStringValue.attributedSubstring(
                 from: NSRange(location: 0, length: (printed as NSString).length - (link as NSString).length)
@@ -510,6 +534,7 @@ final class SidebarWorkspaceCardRenderer {
             start = floor(prefix.size().width)
         }
         let width = min(label.frame.width, full + 4) - start
+        guard width > 0 else { return nil }
         return SidebarHitArea(
             frame: NSRect(x: label.frame.minX - 2 + start, y: label.frame.minY - 2, width: width + 2, height: label.frame.height + 4),
             region: .link(url: url, label: label)
@@ -517,7 +542,7 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     /// The status line as the row prints it (`SidebarRowSummary.lineText`).
-    static func statusText(_ summary: SidebarRowSummary) -> NSAttributedString {
+    static func statusText(_ summary: SidebarRowSummary, shown: String) -> NSAttributedString {
         let status = summary.status
         let font = status.tone == .branch ? Theme.Font.mono : Theme.Font.body
         let color: NSColor = switch status.tone {
@@ -525,7 +550,6 @@ final class SidebarWorkspaceCardRenderer {
         case .error: Theme.Color.error
         case .neutral, .branch: Theme.Color.textSecondary
         }
-        let shown = summary.lineText
         let text = NSMutableAttributedString(string: shown, attributes: [.font: font, .foregroundColor: color])
         if let link = status.linkText, shown.hasSuffix(link) {
             text.addAttribute(

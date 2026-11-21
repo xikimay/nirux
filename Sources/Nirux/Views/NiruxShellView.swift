@@ -257,7 +257,7 @@ final class NiruxShellView: NSView {
     var boardSettingsPanel: BoardSettingsPanel?
     /// Each task's station by workspace id: its line's on its space's Board
     /// (`noteTaskStations`), drawn or not. No Board, none.
-    var taskStations: [String: BoardStages.Station] = [:]
+    var taskStations: [String: SidebarBoardProgress] = [:]
     /// The Board tab reading board.json and the checkouts: one read at a
     /// time.
     var isReadingBoardSettings = false
