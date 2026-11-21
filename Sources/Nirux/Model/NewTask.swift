@@ -57,6 +57,10 @@ enum NewTask {
         /// The task this one is a sub-task of (the sheet's "Sub-task of"):
         /// it lists under it in the sidebar. Nil: a task of its own.
         var parentWorkspaceID: String?
+        /// The title start_task gave; nil: the description's first line.
+        var title: String?
+        /// The goal start_task gave: the workspace's purpose.
+        var goal: String?
         /// A task its Lead started by itself (`start_task`): it opens in the
         /// Lead's space, without taking the user's focus or space.
         var startedByLead = false
@@ -71,6 +75,10 @@ enum NewTask {
         /// user started, a sub-task reporting to it or not.
         var proposedByTaskAgent: MissionParent?
         var opensInFront: Bool { !startedByLead && !startedByTaskAgent }
+
+        /// What the task's row shows; nil for a blank description and no
+        /// title.
+        var workspaceTitle: String? { title ?? NewTask.workspaceTitle(description: description) }
 
         /// The repository it branches from; nil for a folder.
         var target: Target? {
@@ -146,73 +154,6 @@ enum NewTask {
         return relative.isEmpty ? nil : relative
     }
 
-    // MARK: - Names
-
-    /// Longest slug a suggested branch gets after its `feat/` or `fix/`.
-    static let maxSlugLength = 40
-    static let maxTitleLength = 50
-
-    /// First words of a description that make the branch a `fix/` one,
-    /// left out of the slug: `fix/crash-on-launch`, not
-    /// `fix/fix-crash-on-launch`.
-    static let fixVerbs: Set<String> = ["fix", "fixes", "fixed", "bugfix", "hotfix", "corrige", "corriger"]
-    /// First words that make it a `fix/` one too, but say what is broken:
-    /// they stay in the slug (`fix/crash-on-launch`).
-    static let bugWords: Set<String> = ["bug", "crash", "repair", "regression", "correction", "repare", "reparer"]
-
-    /// `feat/<slug>` or `fix/<slug>` from the description's first line: its
-    /// words in ASCII lowercase, joined by `-`, up to `maxSlugLength`. A
-    /// `fix/` one when the template's name speaks of a bug or a fix, or the
-    /// description starts with one of `fixVerbs` or `bugWords`. Empty when
-    /// the line has no letter or digit to use. Always a valid branch name
-    /// otherwise.
-    static func suggestedBranch(description: String, templateName: String?) -> String {
-        var words = slugWords(description.firstLine ?? "")
-        let template = templateName?.lowercased() ?? ""
-        var isFix = template.contains("bug") || template.contains("fix")
-        if let first = words.first, fixVerbs.contains(first) || bugWords.contains(first) {
-            isFix = true
-            if fixVerbs.contains(first), words.count > 1 { words.removeFirst() }
-        }
-        var slug = ""
-        for word in words {
-            let candidate = slug.isEmpty ? word : slug + "-" + word
-            guard candidate.count <= maxSlugLength else { break }
-            slug = candidate
-        }
-        if slug.isEmpty, let first = words.first {
-            slug = String(first.prefix(maxSlugLength))
-        }
-        guard !slug.isEmpty else { return "" }
-        return (isFix ? "fix/" : "feat/") + slug
-    }
-
-    /// The workspace's name: the description's first line, its whitespace
-    /// collapsed, cut at `maxTitleLength`. Nil for a blank description.
-    static func workspaceTitle(description: String) -> String? {
-        guard let line = description.firstLine else { return nil }
-        let words = line.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        guard words.count > maxTitleLength else { return words }
-        return String(words.prefix(maxTitleLength - 1)).trimmingCharacters(in: .whitespaces) + "…"
-    }
-
-    /// A plain workspace's name: its folder's, `~` for the home folder. Not
-    /// its branch, which would name every shell in a main checkout "main".
-    static func folderTitle(_ path: String, home: String) -> String {
-        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
-        guard standardized != URL(fileURLWithPath: home).standardizedFileURL.path else { return "~" }
-        let name = URL(fileURLWithPath: standardized).lastPathComponent
-        return name.isEmpty ? standardized : name
-    }
-
-    /// Letters and digits in ASCII lowercase (accents dropped, other scripts
-    /// transliterated), split at everything else.
-    private static func slugWords(_ text: String) -> [String] {
-        let latin = text.applyingTransform(.toLatin, reverse: false) ?? text
-        let ascii = (latin.applyingTransform(.stripDiacritics, reverse: false) ?? latin).lowercased()
-        return ascii.split { !($0.isASCII && ($0.isLetter || $0.isNumber)) }.map(String.init)
-    }
-
     // MARK: - Handover
 
     /// How the task's branch started, for the handover.
@@ -228,9 +169,10 @@ enum NewTask {
     /// The handover the agent reads first: the description as the user typed
     /// it, then the template's way of working.
     static func handover(
-        description: String, template: TaskTemplates.Template?, branch: String, start: Start, subdirectory: String?
+        description: String, title: String? = nil, template: TaskTemplates.Template?, branch: String, start: Start,
+        subdirectory: String?
     ) -> String {
-        let title = workspaceTitle(description: description) ?? branch
+        let title = title ?? workspaceTitle(description: description) ?? branch
         let origin: String
         switch start {
         case .fetched(let remoteBranch):

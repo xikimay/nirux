@@ -32,13 +32,10 @@ enum TaskTools {
                     \(maxRunningSubtasks) at once. When the user turned "Starts tasks without asking" off for the \
                     space, it opens the New Sub-task sheet filled in for them to start instead.
                     """,
-                properties: [
-                    "description": [
-                        "type": "string",
-                        "description": "What the sub-task must do, as you would tell the agent. Its first line names it and its branch or folder."
-                    ],
+                properties: LeadTools.startTaskProperties([
+                    "description": ["type": "string", "description": "What the sub-task must do, as you would tell the agent."],
                     "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."]
-                ].merging(LeadTools.agentProperties) { _, selection in selection },
+                ]),
                 required: ["description"]
             ),
             LeadTools.definition(

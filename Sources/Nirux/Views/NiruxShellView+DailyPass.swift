@@ -44,8 +44,9 @@ extension NiruxShellView {
             let digest = DailyPass.digest(facts)
             let readsAgain = self.dailyPassRereads[space.id, default: DailyPass.Rereads()].readsAgain(facts.readsAgain)
             // On what holds now: a check may have saved meanwhile.
-            let saved = self.dailyPassState(inSpace: space.id)
+            var saved = self.dailyPassState(inSpace: space.id)
                 .afterReading(next, readsAgain: readsAgain, note: facts.note(at: window.end), readUntil: digest.readUntil)
+            saved.listedTasks = digest.listed
             self.saveDailyPassState(saved, spaceID: space.id)
             answer(digest.text, false)
         }
@@ -94,13 +95,50 @@ extension NiruxShellView {
             briefRules: LearnedRules.learnedRules(in: LearnedRules.briefText(at: briefURL))
         )
         let folders = BoardSections.repositoryAnchors(space.anchors).compactMap(\.folder)
-        let spaceID = space.id
-        Self.readDailyPassSources(folders: folders, spaceID: spaceID, window: window) { repositories, findings in
+        let tasks = dailyPassTasks(in: space, lead: lead)
+        let reported = Set(dailyPassState(inSpace: space.id).listedTasks ?? [])
+        let read = tasks.map { (folder: $0.folder, repository: $0.repository) }
+        let mergedSince = DailyPass.mergedSince(tasks.map(\.activity), window: window)
+        Self.readDailyPassSources(folders: folders, tasks: read, spaceID: space.id, window: window, mergedSince: mergedSince) { reads in
             var facts = base
-            facts.findings = findings
-            facts.repositories = repositories
-            (facts.triagedRuns, facts.flakyTests) = DailyPass.ciFacts(ciStore, repositories: repositories.map(\.name), window: window)
+            facts.findings = reads.findings
+            facts.repositories = reads.repositories
+            (facts.triagedRuns, facts.flakyTests) = DailyPass.ciFacts(ciStore, repositories: reads.repositories.map(\.name), window: window)
+            facts.tasks = DailyPass.tasks(tasks.map { ($0.activity, $0.repository) }, with: reads)
+            facts.reported = reported
             completion(facts)
+        }
+    }
+
+    /// list_tasks' tasks as the pass reads them, archived ones and plain
+    /// checkouts aside (the Lead's own tasks stay), each with its folder and
+    /// its repository's.
+    private func dailyPassTasks(
+        in space: WorkspaceProfile, lead: WorkspaceState
+    ) -> [(activity: DailyPass.TaskActivity, folder: String, repository: String?)] {
+        let snapshot = ProcessSnapshot()
+        let store = MissionStore.shared
+        let parentTitles = Dictionary(
+            workspaceStore.activeParents(in: space.id).map { (workspaces[$0.key].id, workspaces[$0.value].title) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return workspaceStore.visibleWorkspaceIndices(in: space.id).map { workspaces[$0] }.compactMap { task in
+            let own = store.missions.filter { $0.childWorkspaceID == task.id }
+            let leads = own.filter { $0.parentWorkspaceID == lead.id && $0.oneWay != true }
+            guard !task.isLead, !task.isInactive, !task.isClosing, !leads.isEmpty || Self.isTask(task) else { return nil }
+            let question = leads.max(by: { $0.createdAt < $1.createdAt }).flatMap { mission in
+                store.waitingQuestion(childWorkspaceID: task.id, childAgentUUID: mission.childAgentUUID)?.event
+            }
+            let waiting = agentReadings(of: task, snapshot: snapshot).first(where: \.needsUser)
+            let activity = DailyPass.TaskActivity(
+                id: task.id, title: task.title, branch: task.gitBranch, parentTitle: parentTitles[task.id],
+                notYours: leads.isEmpty ? Self.notYours(startedByAgent: task.startedByAgent) : nil, isFolderTask: task.isFolderTask,
+                waitsOnUser: waiting.map { $0.dialog ?? "in its terminal" },
+                question: question.map { DailyPass.TaskActivity.Question(id: $0.id, handedToUser: $0.handedToUserBecause != nil) },
+                pullRequest: task.prInfo, pullRequestReadAt: task.pullRequestReadAt, lastTurnAt: task.lastActivityAt,
+                resultAt: DailyPass.resultAt(own)
+            )
+            return (activity, task.cwd, repositoryAnchor(of: task, in: space)?.folder)
         }
     }
 
@@ -261,21 +299,28 @@ extension NiruxShellView {
     }
 
     /// The space's GitHub repositories (each repository's base remote) and
-    /// what GitHub says of them in the window, and its recorded reviews.
+    /// what GitHub says of them in the window, its recorded reviews, its
+    /// repositories' base branches and its tasks' last commits off them.
     nonisolated private static func readDailyPassSources(
-        folders: [String], spaceID: String, window: DailyPass.Window,
-        completion: @escaping @MainActor @Sendable ([DailyPass.RepositoryReport], [ReviewFindings.Entry]) -> Void
+        folders: [String], tasks: [(folder: String, repository: String?)], spaceID: String, window: DailyPass.Window,
+        mergedSince: TimeInterval?, completion: @escaping @MainActor @Sendable (DailyPass.Reads) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let remotes = DailyPass.repositories(from: folders.map { ($0, GitHubBaseRemote.read(at: $0)) })
-            var reports = DailyPass.readGitHub(remotes.gitHub.map(\.name), window: window, gh: GitHub.CLI.installed)
+            let reads = folders.map { ($0, GitHubBaseRemote.read(at: $0)) }
+            let remotes = DailyPass.repositories(from: reads)
+            var reports = DailyPass.readGitHub(
+                remotes.gitHub.map(\.name), window: window, mergedSince: mergedSince, gh: GitHub.CLI.installed
+            )
             for index in reports.indices { reports[index].folders = remotes.gitHub[index].folders }
             reports += remotes.unread
             let findings = ReviewFindings.lines.queue.sync {
                 ReviewFindings.lines.trim(spaceID: spaceID)
                 return ReviewFindings.lines.load(spaceID: spaceID)
             }
-            DispatchQueue.main.async { @MainActor in completion(reports, findings) }
+            let bases = DailyPass.baseBranches(reads)
+            let commits = DailyPass.commitTimes(tasks.map { ($0.folder, $0.repository.flatMap { bases[$0]?.ref }) })
+            let read = DailyPass.Reads(repositories: reports, findings: findings, commits: commits, bases: bases)
+            DispatchQueue.main.async { @MainActor in completion(read) }
         }
     }
 }

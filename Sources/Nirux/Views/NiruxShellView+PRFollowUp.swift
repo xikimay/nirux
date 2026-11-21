@@ -11,9 +11,7 @@ final class PRFollowUpCenter {
     let file = FileBackedValue(url: PRFollowUpStore.url, read: { PRFollowUpStore.load(from: $0) }, write: { $0.save(to: $1) })
     /// When this Nirux started following.
     let trackedSince: TimeInterval
-    /// By workspace: when the read that gave its pull request, and its
-    /// feedback, started.
-    var readAt: [String: TimeInterval] = [:]
+    /// By workspace: when the read that gave its PR feedback started.
     var feedbackReadAt: [String: TimeInterval] = [:]
     /// By workspace: the failure a round may take
     /// (`PRFollowUp.failureSignature`), and when Nirux first saw it.
@@ -268,7 +266,7 @@ extension NiruxShellView {
             followedSince: center.followedSince(space: workspace.profileID), feedbackReadAt: center.feedbackReadAt[workspace.id],
             triage: followUpTriage(of: workspace, pullRequest: pullRequest), redSince: center.redSince[workspace.id]?.since,
             localHead: workspace.gitContext?.identity.head, baseRemote: followUpBaseRemote(of: workspace, pullRequest: pullRequest),
-            hasTrackedChanges: nil, isInMergeQueue: mergeQueueHolds(pullRequest), readAt: center.readAt[workspace.id],
+            hasTrackedChanges: nil, isInMergeQueue: mergeQueueHolds(pullRequest), readAt: workspace.pullRequestReadAt,
             agent: target.column?.agentUUID, agentRefusal: gate.refusal, agentIsBusy: gate.isBusy,
             trackedSince: center.trackedSince, now: now
         )

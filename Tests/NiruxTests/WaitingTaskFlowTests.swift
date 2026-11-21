@@ -26,6 +26,28 @@ final class WaitingTaskFlowTests: XCTestCase {
         return try XCTUnwrap(harness.shell.workspaces.first { $0.title == title })
     }
 
+    func testQueuedStartPreservesTheExplicitNameBranchAndGoal() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let upstream = try upstreamTask("Prepare catalog", lead: lead, in: harness)
+            harness.shell.refreshGitContextNow(for: upstream)
+            harness.waitUntil("the upstream branch") { upstream.gitBranch != nil }
+            upstream.prInfo = pullRequest(.open)
+            let result = try harness.callLeadTool(LeadTools.startTask, [
+                "description": "Ship the updated catalog", "after": upstream.title,
+                "title": "Catalog release", "branch": "release/catalog", "goal": "Publish the catalog"
+            ], lead: lead)
+            XCTAssertFalse(result.isError, result.text)
+            let task = try XCTUnwrap(harness.shell.workspaces.first { $0.title == "Catalog release" })
+            XCTAssertEqual(task.purpose, "Publish the catalog")
+            let wait = try XCTUnwrap(task.waitingStart)
+            let restored = try JSONDecoder().decode(MergeWait.self, from: JSONEncoder().encode(wait))
+            XCTAssertEqual(restored.pendingStart?.suggestedBranch, "release/catalog")
+            XCTAssertEqual(restored.pendingStart?.options?.title, task.title)
+            XCTAssertEqual(restored.pendingStart?.options?.goal, task.purpose)
+        }
+    }
+
     func testMergeStartsTheRestoredRowFromTheNewRemoteTipOnce() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
