@@ -74,11 +74,18 @@ jobs:
             git restore "$path"
           done
 
+      - name: Exercise the intermediate Board dependency order
+        run: |
+          set -o pipefail
+          git switch --detach e0c49323bd3fad9f4a365fdb4621dcc2191ba09a
+          swift test --filter 'BoardStages(Units|ContentFlow)Tests' 2>&1 | tee "$RUNNER_TEMP/intermediate.log"
+          grep -E 'testWaitingWorkspaceFollowsItsDependencyAcrossSectionsUntilRelease.*passed' "$RUNNER_TEMP/intermediate.log"
+
       - name: Exercise the simulated Board stack
         if: ${{ !cancelled() }}
         run: |
           set -o pipefail
-          git switch --detach 3530c95026cf235b3f46e426dbfa339dba89ebba
-          test "$(git rev-parse HEAD)" = 3530c95026cf235b3f46e426dbfa339dba89ebba
-          swift test --filter 'BoardStages(Line|Units|ContentFlow|View)Tests|WaitingTaskFlowTests/testImmediateAndReleasedStartsDeliverTheSelectedAgentsHandover' 2>&1 | tee "$RUNNER_TEMP/board.log"
+          git switch --detach 779c8e34aaf75825a1dc4870124706ec819bb5fe
+          test "$(git rev-parse HEAD)" = 779c8e34aaf75825a1dc4870124706ec819bb5fe
+          swift test --filter 'BoardStages(Line|Units|ContentFlow|View|Readings|ReadingsShell)Tests|WaitingTaskFlowTests/testImmediateAndReleasedStartsDeliverTheSelectedAgentsHandover' 2>&1 | tee "$RUNNER_TEMP/board.log"
           grep -E 'testWaitingWorkspaceFollowsItsDependencyAcrossSectionsUntilRelease.*passed' "$RUNNER_TEMP/board.log"
