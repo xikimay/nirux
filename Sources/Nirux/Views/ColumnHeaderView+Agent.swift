@@ -79,8 +79,7 @@ extension ColumnHeaderView.Icon {
     /// it (its app icon, else its symbol).
     @MainActor
     static func terminal(processName: String?) -> Self {
-        guard let processName else { return .symbol(Theme.Symbol.terminal) }
-        if let image = SidebarRenderer.agentAppIcon(processName: processName) { return .image(image) }
-        return .symbol(SidebarRenderer.agentSymbol(processName: processName) ?? Theme.Symbol.terminal)
+        guard let agent = processName.flatMap(CodingAgent.init(rawValue:)) else { return .symbol(Theme.Symbol.terminal) }
+        return agent.appIcon.map(Self.image) ?? .symbol(agent.symbolName)
     }
 }

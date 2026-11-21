@@ -17,6 +17,20 @@ final class BranchReviewSendTests: XCTestCase {
         if let directory { try? FileManager.default.removeItem(at: directory) }
     }
 
+    /// An agent not in front: a shell in front runs it stopped or in the
+    /// background, a login shell or one Nirux doesn't start too; another
+    /// program runs it as a launcher.
+    func testAShellInFrontHoldsTheAgentBehindIt() {
+        func foreground(_ name: String) -> ForegroundProcess {
+            ForegroundProcess(instance: ProcessInstance(pid: 7, startedAt: 1), name: name, arguments: [name])
+        }
+        for shell in ["zsh", "-zsh", "mksh", "nu"] {
+            XCTAssertEqual(NiruxShellView.reviewSendRefusal(behind: foreground(shell)), .notInFront, shell)
+        }
+        XCTAssertEqual(NiruxShellView.reviewSendRefusal(behind: foreground("time")), .underLauncher("time"))
+        XCTAssertEqual(NiruxShellView.reviewSendRefusal(behind: nil), .underLauncher("another program"))
+    }
+
     // MARK: - The paste
 
     /// A terminal whose program reads only after a second, raw: nothing

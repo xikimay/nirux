@@ -19,8 +19,6 @@ enum AgentTrustPrompt {
     /// a Claude Code without hooks, would otherwise be read for the whole
     /// window, each read taking the terminal's lock.
     static let maxMisses = 10
-    /// The agents that ask it.
-    static let agentProcesses: Set<String> = ["claude", "codex", "agy"]
 
     /// Each agent's trust screen: its answer, and one of the lines next to
     /// it (a short terminal may show no more), so a conversation that
@@ -63,7 +61,7 @@ extension AgentStatusMachine {
     /// that no hook and no input reached since, not seen asking yet, nor
     /// seen `maxMisses` times without it.
     func watchesForTrustPrompt(foreground: ForegroundProcess?, now: TimeInterval) -> Bool {
-        guard let foreground, AgentTrustPrompt.agentProcesses.contains(foreground.name) else { return false }
+        guard let foreground, (foreground.agent?.folderTrust ?? .never) != .never else { return false }
         let started = foreground.instance.startedAt
         guard (0..<AgentTrustPrompt.watchWindow).contains(now - started),
               lastEventAt < started, lastInputAt < started

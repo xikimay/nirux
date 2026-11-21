@@ -232,7 +232,7 @@ final class GlobalSearchPanel: NSObject {
         let place = Self.place(of: session, customTitle: result.customTitle, aiTitle: result.aiTitle)
         let now = Date()
         let added = result.matches.prefix(Self.maxSessionRows - progress.sessionRows).map { match in
-            let who = match.role == .user ? "you" : "Claude"
+            let who = match.role == .user ? "you" : session.record.agent.name
             let when = match.timestamp.map { SessionHistory.ago(now.timeIntervalSince($0)) }
             // Its terminal may hold the same lines, with a find bar.
             let running = session.record.isActive ? "running" : nil

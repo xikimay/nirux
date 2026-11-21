@@ -31,6 +31,32 @@ final class BoardStagesUnitsTests: XCTestCase {
         return facts
     }
 
+    func testWaitingChainsStayWithTheirTaskAndKeepStackNumbersInBothOrders() throws {
+        func wait(_ id: String, after parent: String, repo: String = "other") throws -> BoardStages.WaitingTask {
+            try XCTUnwrap(BoardStages.WaitingTask(id: id, title: "Same title", wait: BoardStagesLineTests.startWait(after: parent, repo: repo)))
+        }
+        let chain = try [wait("second", after: "first"), wait("first", after: "base"), wait("sibling", after: "base")]
+        let missing = try [wait("later", after: "orphan"), wait("orphan", after: "gone", repo: "removed")]
+        let grouped = BoardStages.waitingBySection(chain + missing, locations: ["base": "widgets"],
+                                                 sections: ["widgets", "other"], fallback: "none")
+        XCTAssertEqual(grouped["widgets"], chain)
+        XCTAssertEqual(grouped["none"], missing, "the root lost its repository; its dependents stay with it")
+        let orphanSection = BoardStages.section(.init(id: "other", lines: [], waiting: missing), now: now)
+        XCTAssertEqual(orphanSection.units.flatMap(\.lines).map(\.id), ["orphan", "later"])
+        let base = task("base", 52, stack: place(0)), tip = task("tip", 53, stack: place(1))
+        for order in [BoardStages.Order.sidebar, .progress] {
+            let section = BoardStages.section(.init(id: "widgets", lines: [tip, base], waiting: chain), order: order, now: now)
+            guard case .stack(_, let members) = section.units.first else { return XCTFail("the PR stack should stay together") }
+            XCTAssertEqual(members.map(\.id), ["base", "tip"])
+            XCTAssertEqual(section.units.flatMap(\.lines).map(\.id), ["base", "first", "second", "sibling", "tip"])
+            let merged = BoardStages.section(.init(id: "widgets", lines: [task("base", 52, merged: true)],
+                                                  merged: [.init(number: 52, title: "Sign in", mergedAt: now)], waiting: chain),
+                                            order: order, now: now)
+            XCTAssertEqual(merged.units.flatMap(\.lines).map(\.id), ["base", "first", "second", "sibling"])
+            XCTAssertTrue(merged.merged.isEmpty)
+        }
+    }
+
     /// The place of the pull request at `order` in a straight stack.
     private func place(_ order: Int, of chain: [Int] = [52, 53, 54], merged: ProjectBoard.MergedBase? = nil) -> ProjectBoard.StackPlace {
         ProjectBoard.StackPlace(
@@ -241,25 +267,23 @@ final class BoardStagesUnitsTests: XCTestCase {
         XCTAssertEqual(untitled.merged.map(\.title), ["#44"], "GitHub's text is whatever its author typed")
     }
 
-    func testAMergedLineDoesNotComeAndGoWithItsAgent() {
+    func testAMergedLineWithAnOpenRequestStaysVisible() {
         var asking = task("asking", 40, merged: true)
         asking.activity = .needsYou("a question")
         var working = task("working", 41, merged: true)
         working.activity = .working(since: nil)
         let result = section([asking, working], merged: [mergedToday(40), mergedToday(41, minutesAgo: 5)])
-        XCTAssertEqual(shape(result.units), [], "whatever their agents do next, turn after turn")
-        XCTAssertEqual(result.merged.map(\.lineID), ["working", "asking"])
-        XCTAssertEqual(result.merged.map(\.needsYou), [false, true], "amber is never hidden: the closing line carries it")
+        XCTAssertEqual(shape(result.units), ["asking"])
+        XCTAssertEqual(result.merged.map(\.lineID), ["working"])
+        XCTAssertEqual(result.merged.map(\.needsYou), [false])
     }
 
-    /// A merged entry's glyph and its amber come from one line, the one it
-    /// opens: a permission there shows the command's glyph.
-    func testAMergedEntrysGlyphComesFromTheLineItOpens() {
+    func testAMergedTasksPermissionStaysOnItsActionableLine() {
         var allowing = task("allowing", 40, merged: true)
-        allowing.activity = .needsYou("Bash(rm)", reason: .command)
+        allowing.activity = .needsYou("Bash(rm)", action: .permission)
         let result = section([allowing], merged: [mergedToday(40)])
-        XCTAssertEqual(result.merged.map(\.needsYou), [true])
-        XCTAssertEqual(result.merged.map(\.reason), [.command])
+        XCTAssertEqual(result.units.flatMap(\.lines).map(\.state), [.needsYou])
+        XCTAssertEqual(result.units.flatMap(\.lines).map(\.reason), [.command])
     }
 
     func testTheQueueKeepsItsLineUntilItIsThroughWithIt() {

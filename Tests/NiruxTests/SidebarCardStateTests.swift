@@ -198,7 +198,7 @@ final class SidebarCardStateTests: XCTestCase {
     /// after every launch the rows keep their size, the parked ones their
     /// single line, and another row says "Paused".
     func testRestoredAgentResumesFromItsChip() throws {
-        let deferred = SidebarDeferredAgent(processName: "codex", summary: "codex session", columnID: UUID())
+        let deferred = SidebarDeferredAgent(agent: .codex, summary: "codex session", columnID: UUID())
         let resting = ColumnInfo(
             index: 2, processName: nil, abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
             terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil, deferredAgent: deferred

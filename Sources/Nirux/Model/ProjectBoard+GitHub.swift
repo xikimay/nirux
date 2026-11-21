@@ -70,7 +70,7 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
 
     static let openFields = [
         "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository",
-        "baseRefName", "baseRefOid", "isDraft", "mergeable", "statusCheckRollup", "url", "title"
+        "baseRefName", "baseRefOid", "isDraft", "mergeable", "mergeStateStatus", "reviewDecision", "autoMergeRequest", "statusCheckRollup", "url", "title"
     ].joined(separator: ",")
     /// What `gh pr list` gives of a merged pull request.
     static let mergedFields = [
@@ -199,7 +199,10 @@ extension ProjectBoard {
             isFromConfiguredRepository: WorktreeCleanup.pullRequest(from: json, headRepository: repository) != nil,
             baseOid: (json["baseRefOid"] as? String)?.lowercased(),
             title: json["title"] as? String ?? "",
-            mergedAt: (json["mergedAt"] as? String).flatMap { try? Date($0, strategy: .iso8601) }
+            mergedAt: (json["mergedAt"] as? String).flatMap { try? Date($0, strategy: .iso8601) },
+            reviewDecision: json["reviewDecision"] as? String,
+            autoMerges: json["autoMergeRequest"] is [String: Any],
+            mergeIsBlocked: json["mergeStateStatus"] as? String == "BLOCKED"
         )
     }
 

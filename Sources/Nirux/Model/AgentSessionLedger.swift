@@ -58,7 +58,7 @@ final class AgentSessionLedger {
 
         var state = State.any
         var pullRequest = PullRequestFilter.any
-        var agent: AgentHookEvent.Kind?
+        var agent: CodingAgent?
         /// Sessions never prompted have nothing to read or resume.
         var includesUnprompted = false
         var limit: Int?
@@ -173,7 +173,7 @@ final class AgentSessionLedger {
         })
     }
 
-    func session(agent: AgentHookEvent.Kind, sessionID: String) -> AgentSessionRecord? {
+    func session(agent: CodingAgent, sessionID: String) -> AgentSessionRecord? {
         loadIfNeeded()
         return locate(AgentSessionRecord.key(agent: agent.rawValue, sessionID: sessionID))?.record
     }
@@ -338,7 +338,8 @@ final class AgentSessionLedger {
                 continue
             }
             let key = AgentSessionRecord.key(agent: agent, sessionID: sessionID)
-            if version <= schemaVersion, hasOnlyKnownKeys(object),
+            // Records come from hooks: one of an agent without them is a newer build's.
+            if version <= schemaVersion, hasOnlyKnownKeys(object), CodingAgent(rawValue: agent)?.sendsHooks == true,
                let record = try? decoder.decode(AgentSessionRecord.self, from: lineData) {
                 parsed.records[key] = record
                 parsed.foreignLines[key] = nil

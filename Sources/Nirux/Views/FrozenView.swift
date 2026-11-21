@@ -3,12 +3,8 @@ import IOSurface
 import Metal
 import MetalPerformanceShaders
 
-/// What a view shows, frozen in a few milliseconds for a transition (depth
-/// study P4): a clone of its layers, each sharing its contents, minus what
-/// is hidden or clipped out of sight. A layer showing an IOSurface (a
-/// terminal: Ghostty draws its next frame over the one it shows) shows a
-/// copy instead. Drawing the view again (`cacheDisplay`) took about 90 ms
-/// in a large window and left the terminals blank. Takes no click.
+/// A transition picture of the visible layers. The Board's rows and the
+/// terminals' mutable IOSurfaces each get an independent copy. Takes no click.
 final class FrozenView: NSView {
     /// The frozen layers, in a layer of their own: AppKit owns the view's.
     let content = CALayer()
@@ -116,6 +112,13 @@ final class FrozenView: NSView {
         }
         let shown = shown(layer)
         for key in keys { copy.setValue(shown.value(forKey: key), forKey: key) }
+        if let board = layer.delegate as? BoardStagesView {
+            // A transition must not share the rows' purgeable AppKit backing stores.
+            guard !board.bounds.isEmpty, let bitmap = board.bitmapImageRepForCachingDisplay(in: board.bounds) else { return nil }
+            board.cacheDisplay(in: board.bounds, to: bitmap)
+            copy.contents = bitmap.cgImage
+            return copy
+        }
         copy.contents = layer.contents
         if let image = images[ObjectIdentifier(layer)] {
             copy.contents = image.surface
