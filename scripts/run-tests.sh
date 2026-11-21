@@ -33,11 +33,19 @@ if [[ "${1:-}" == --class ]]; then
     fi
     start=$SECONDS
     status=0
-    perl -e '$ENV{DYLD_FRAMEWORK_PATH} = $ENV{NIRUX_TESTS_FRAMEWORK_PATH};
+    run_xctest() {
+        perl -e '$ENV{DYLD_FRAMEWORK_PATH} = $ENV{NIRUX_TESTS_FRAMEWORK_PATH};
         $ENV{DYLD_LIBRARY_PATH} = $ENV{NIRUX_TESTS_LIBRARY_PATH};
         alarm shift; exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!\n"' \
-        "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$filter" "$NIRUX_TESTS_BUNDLE" \
-        > "$log" 2>&1 || status=$?
+            "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$filter" "$NIRUX_TESTS_BUNDLE"
+    }
+    if [[ ${NIRUX_STREAM_TEST_ERRORS:-} == 1 ]]; then
+        NSUnbufferedIO=YES run_xctest 2>&1 | tee "$log" | perl -ne '
+            BEGIN { $| = 1 } print if /:\d+(?::\d+)?: error: / && !$seen++
+        ' || status=$?
+    else
+        run_xctest > "$log" 2>&1 || status=$?
+    fi
     # 128 + SIGALRM.
     if [[ $status -eq 142 ]]; then
         echo "Stopped after ${NIRUX_TESTS_CLASS_TIMEOUT}s." >> "$log"
