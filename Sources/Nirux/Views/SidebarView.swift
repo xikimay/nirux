@@ -166,8 +166,8 @@ final class SidebarView: NSView {
     }
 
     lazy var taskPreview = SidebarTaskPreview(sidebar: self)
-    /// Opens the task thread from either preview anchor.
-    var onOpenTaskThread: ((String) -> Void)?
+    /// Called synchronously while the preview is still attached to its window.
+    var onOpenTaskThread: ((_ workspaceID: String, _ card: TaskPreviewCard) -> Void)?
     var lastInfos: [WorkspaceInfo] = []
     var lastProfiles: [ProfileInfo] = []
     /// The workspace each row of the last build stands for, by the index

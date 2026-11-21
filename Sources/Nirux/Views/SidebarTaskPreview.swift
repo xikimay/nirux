@@ -3,7 +3,7 @@ import AppKit
 @MainActor
 final class SidebarTaskPreview {
     private weak var sidebar: SidebarView?
-    private var pending: DispatchWorkItem?
+    private(set) var pending: DispatchWorkItem?
     private(set) var workspaceID: String?
     private(set) var card: TaskPreviewCard?
 
@@ -71,11 +71,15 @@ final class SidebarTaskPreview {
         card.onEnter = { [weak self] in self?.cancelPending() }
         card.onLeave = { [weak self] in self?.leave(id) }
         card.onOpen = { [weak self, weak sidebar, weak card] in
-            guard let self, self.card === card, workspaceID == id, let sidebar,
+            guard let self, let card, self.card === card, card.window != nil, workspaceID == id, let sidebar,
                   let current = sidebar.lastInfos.first(where: { $0.id == id }) else { return }
-            dismiss()
-            if let open = sidebar.onOpenTaskThread { open(id) }
-            else { sidebar.clickRow(current.index) }
+            if let open = sidebar.onOpenTaskThread {
+                cancelPending()
+                open(id, card)
+            } else {
+                dismiss()
+                sidebar.clickRow(current.index)
+            }
         }
         card.show(info, opensThread: sidebar.onOpenTaskThread != nil, width: width)
         let y = host.isFlipped ? anchor.minY : anchor.maxY - card.frame.height

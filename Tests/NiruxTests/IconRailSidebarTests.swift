@@ -379,13 +379,13 @@ final class IconRailSidebarTests: XCTestCase {
         let responder = window.firstResponder
         var selected: Int?
         var opened: [String] = []
-        sidebar.onWorkspaceClicked = { selected = $0 }
         func card() throws -> TaskPreviewCard {
             waitUntil("the task preview appears", timeout: 3) { sidebar.taskPreview.card != nil }
             return try XCTUnwrap(sidebar.taskPreview.card)
         }
         func press(_ title: String, in preview: TaskPreviewCard) throws {
-            try XCTUnwrap(preview.subviews.compactMap { $0 as? NSButton }.first { $0.title == title }).performClick(nil)
+            let button = try XCTUnwrap(preview.subviews.compactMap { $0 as? NSButton }.first { $0.title == title })
+            XCTAssertTrue(button.sendAction(try XCTUnwrap(button.action), to: button.target))
         }
 
         func moveOverRow() throws {
@@ -402,13 +402,35 @@ final class IconRailSidebarTests: XCTestCase {
         XCTAssertEqual(lines, ["Fix Login", "Keep users signed in", "Active", "Next · Run the login tests"])
         XCTAssertTrue(window.firstResponder === responder)
         XCTAssertGreaterThanOrEqual(expanded.frame.minX, sidebar.frame.maxX)
+        sidebar.onWorkspaceClicked = { [unowned sidebar, unowned expanded] index in
+            XCTAssertNil(sidebar.taskPreview.card)
+            XCTAssertNil(sidebar.taskPreview.workspaceID)
+            XCTAssertNil(expanded.superview)
+            selected = index
+        }
         try press("Open task", in: expanded)
         XCTAssertEqual(selected, task.index)
         XCTAssertNil(sidebar.taskPreview.card)
 
-        sidebar.onOpenTaskThread = { opened.append($0) }
+        var expectedCard: TaskPreviewCard?
+        var scheduledClose: DispatchWorkItem?
+        sidebar.onOpenTaskThread = { [unowned sidebar, unowned window] id, displayed in
+            XCTAssertEqual(scheduledClose?.isCancelled, true)
+            XCTAssertTrue(displayed === expectedCard)
+            XCTAssertTrue(sidebar.taskPreview.card === displayed)
+            XCTAssertEqual(sidebar.taskPreview.workspaceID, id)
+            XCTAssertTrue(displayed.window === window)
+            opened.append(id)
+        }
+        func openThread(in preview: TaskPreviewCard) throws {
+            expectedCard = preview
+            sidebar.taskPreview.leave(task.id)
+            scheduledClose = try XCTUnwrap(sidebar.taskPreview.pending)
+            XCTAssertEqual(scheduledClose?.isCancelled, false)
+            try press("Open task thread", in: preview)
+        }
         try moveOverRow()
-        try press("Open task thread", in: card())
+        try openThread(in: card())
         sidebar.isExpanded = false
         sidebar.frame.size.width = SidebarView.foldedWidth
         host.layoutSubtreeIfNeeded()
@@ -416,16 +438,17 @@ final class IconRailSidebarTests: XCTestCase {
         icon.mouseEntered(with: NSEvent())
         let rail = try card()
         XCTAssertLessThan(rail.frame.minX, expanded.frame.minX)
-        try press("Open task thread", in: rail)
+        try openThread(in: rail)
         XCTAssertEqual(opened, [task.id, task.id])
 
         icon.mouseExited(with: NSEvent())
         icon.mouseEntered(with: NSEvent())
         let refreshed = try card()
+        let fullHeight = refreshed.frame.height
         sidebar.update(profiles: [], workspaces: [row(task.id, index: task.index)])
         let visible = refreshed.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }
         XCTAssertEqual(visible.map(\.stringValue), ["Fix Login", "Active"])
-        XCTAssertLessThan(refreshed.frame.height, rail.frame.height)
+        XCTAssertLessThan(refreshed.frame.height, fullHeight)
         sidebar.update(profiles: [], workspaces: [row("replacement", index: task.index)])
         XCTAssertNil(sidebar.taskPreview.card)
         refreshed.onOpen?()
