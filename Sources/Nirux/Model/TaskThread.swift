@@ -21,10 +21,14 @@ enum TaskThread {
         var number: Int?
         /// The Mission event, commit or URL it is about.
         var ref: String?
+        var recipient: Author?
+        var missionID: String?
+        var until: TimeInterval?
 
         init(
             time: TimeInterval, kind: Kind, by: Author? = nil, text: String? = nil, note: String? = nil,
-            detail: String? = nil, number: Int? = nil, ref: String? = nil
+            detail: String? = nil, number: Int? = nil, ref: String? = nil, recipient: Author? = nil,
+            missionID: String? = nil, until: TimeInterval? = nil
         ) {
             self.time = time
             self.kind = kind
@@ -34,10 +38,13 @@ enum TaskThread {
             self.detail = detail
             self.number = number
             self.ref = ref
+            self.recipient = recipient
+            self.missionID = missionID
+            self.until = until
         }
 
         enum CodingKeys: String, CodingKey {
-            case time = "t", kind, by, text, note, detail, number = "n", ref
+            case time = "t", kind, by, text, note, detail, number = "n", ref, recipient, missionID, until
         }
     }
 
@@ -70,6 +77,7 @@ enum TaskThread {
         static let pullRequest = Kind("pullRequest")
         static let commit = Kind("commit")
         static let prReview = Kind("prReview")
+        static let checkRun = Kind("checkRun")
         static let checks = Kind("checks")
         static let merged = Kind("merged")
         static let prClosed = Kind("prClosed")

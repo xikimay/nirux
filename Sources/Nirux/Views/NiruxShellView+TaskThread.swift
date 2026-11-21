@@ -34,6 +34,20 @@ extension NiruxShellView {
         )], of: workspace)
     }
 
+    func threadSources(
+        workspaceID: String, spaceID: String, urls: Set<String>, reviews: [ReviewPass: ReviewRun], directory: URL
+    ) -> @Sendable () -> TaskThread.Sources {
+        let missions = MissionStore.shared.missions.filter { $0.childWorkspaceID == workspaceID }
+        let spaces = profiles.map(\.id)
+        let single = (profiles.first { $0.id == spaceID }?.anchors.count ?? 0) <= 1
+        return {
+            TaskThread.Sources.load(
+                workspaceID: workspaceID, missions: missions, reviewRuns: reviews, pullRequestURLs: urls,
+                spaceID: spaceID, spaceIDs: spaces, isSingleRepository: single, stateDirectory: directory
+            )
+        }
+    }
+
     /// A closing task's thread takes what the files say of it, then its
     /// pull requests' history once GitHub answers. Not while the Missions
     /// can't be read: its thread then stays open, joined at each read.
@@ -43,21 +57,15 @@ extension NiruxShellView {
             return NiruxDebugLog.log("TaskThread: \(workspace.id) not frozen: the Missions can't be read")
         }
         let (id, space, directory) = (workspace.id, workspace.profileID, Persistence.stateDirectory)
-        let spaceIDs = profiles.map(\.id)
         // The ledger's, not the live pull request's: that one follows the
         // focused column, which may be another checkout.
         let urls = sessionLedger.pullRequestURLs(workspaceID: id)
-        let missions = MissionStore.shared.missions.filter { $0.childWorkspaceID == id }
-        let reviewRuns = workspace.reviewRuns
-        let isSingleRepository = (profiles.first { $0.id == space }?.anchors.count ?? 0) <= 1
+        let sources = threadSources(workspaceID: id, spaceID: space, urls: urls, reviews: workspace.reviewRuns, directory: directory)
         let open = Set(workspaces.filter { !$0.isClosing }.map(\.id))
+        let origin = workspace.startedOutsideNirux ? "external" : "local"
         let now = Date().timeIntervalSince1970
         TaskThread.Store.queue.async {
-            let sources = TaskThread.Sources.load(
-                workspaceID: id, missions: missions, reviewRuns: reviewRuns, pullRequestURLs: urls,
-                spaceID: space, spaceIDs: spaceIDs, isSingleRepository: isSingleRepository, stateDirectory: directory
-            )
-            let frozen = TaskThread.frozen(sources, closedAt: now, pullRequests: urls)
+            let frozen = TaskThread.frozen(sources(), closedAt: now, pullRequests: urls, origin: origin)
             TaskThread.Store.append(frozen, workspaceID: id, spaceID: space, stateDirectory: directory)
             TaskThread.Store.pruneAll(keeping: open, now: now, stateDirectory: directory)
         }

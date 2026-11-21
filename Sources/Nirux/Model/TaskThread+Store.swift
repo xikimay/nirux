@@ -42,7 +42,7 @@ extension TaskThread {
             return load(from: url)
         }
 
-        private static func load(from url: URL) -> [Event] {
+        static func load(from url: URL) -> [Event] {
             guard case .data(let data) = BoardConfigStore.read(url, maxBytes: maxFileBytes + 65_536) else { return [] }
             let decoder = JSONDecoder()
             return data.split(separator: UInt8(ascii: "\n")).compactMap { try? decoder.decode(Event.self, from: $0) }

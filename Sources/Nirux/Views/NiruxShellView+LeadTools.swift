@@ -40,6 +40,7 @@ extension NiruxShellView {
         case LeadTools.moveTask: leadMoveTask(arguments, in: space, answer: answer)
         case LeadTools.renameTask: leadRenameTask(arguments, in: space, answer: answer)
         case LeadTools.setTaskParent: leadSetTaskParent(arguments, in: space, answer: answer)
+        case LeadTools.readThread: leadReadThread(arguments, in: space, answer: answer)
         case LeadTools.readTask: leadReadTask(arguments, in: space, answer: answer)
         case LeadTools.interruptTask: leadInterruptTask(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.recordReview: leadRecordReview(arguments, in: space, lead: lead.id, answer: answer)
