@@ -117,7 +117,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             harness.waitUntil("the named workspace") { harness.shell.activeWorkspace?.title == "Cache expiry" }
             let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
             XCTAssertEqual(workspace.purpose, "Refresh stale entries")
-            XCTAssertEqual(try UIFlowHarness.git(["branch", "--show-current"], at: workspace.cwd), "fix/cache-expiry")
+            XCTAssertEqual(GitWorktree.currentBranch(at: workspace.cwd), "fix/cache-expiry")
             let handover = try String(contentsOfFile: workspace.cwd + "/.claude-handover.md", encoding: .utf8)
             XCTAssertTrue(handover.hasPrefix("# Task: Cache expiry"))
             XCTAssertTrue(handover.contains(prompt))
