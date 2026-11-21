@@ -13,10 +13,12 @@ extension BoardStages {
         case stack(title: String, [Line])
 
         var lines: [Line] {
+            let members: [Line]
             switch self {
-            case .task(let task, let subtasks): return [task] + subtasks
-            case .stack(_, let lines): return lines
+            case .task(let task, let subtasks): members = [task] + subtasks
+            case .stack(_, let lines): members = lines
             }
+            return members.flatMap { [$0] + $0.following }
         }
     }
 
@@ -94,6 +96,7 @@ extension BoardStages {
         /// The pull requests known merged: GitHub's lists say so, or only a
         /// task's line knows it (`BoardStages.nextStartList`).
         var knownMerged: Set<Int> = []
+        var waiting: [WaitingTask] = []
     }
 
     enum Order: String, Sendable {
@@ -128,7 +131,8 @@ extension BoardStages {
     static func section(
         _ facts: SectionFacts, order: Order = .sidebar, rules: Rules = Rules(), now: TimeInterval, timeZone: TimeZone = .current
     ) -> Section {
-        let lines = facts.lines.map { line($0, rules: rules) }
+        var lines = facts.lines.map { line($0, rules: rules) }
+        let orphans = attach(facts.waiting, to: &lines)
         let tree = Tree(ids: facts.lines.map(\.id), parents: facts.parents)
 
         let midnight = Self.midnight(of: now, timeZone: timeZone)
@@ -138,7 +142,7 @@ extension BoardStages {
         // merged line's is): the queue is through with it.
         let isThrough = facts.lines.indices.map { index -> Bool in
             guard let number = facts.lines[index].pullRequest?.number, mergedToday.contains(number) else { return false }
-            return lines[index].rail?.marks.contains(.current) == false
+            return lines[index].following.isEmpty && lines[index].rail?.marks.contains(.current) == false
         }
         // In the tree's order, sub-tasks before their task: one that is
         // through leaves, unless a sub-task of it stays.
@@ -163,7 +167,7 @@ extension BoardStages {
         }
         return Section(
             id: facts.id,
-            units: arranged(placed.filter(\.hasTask)),
+            units: arranged(placed.filter(\.hasTask)) + orphans,
             withoutTask: arranged(placed.filter { !$0.hasTask }),
             merged: today.compactMap { pullRequest in
                 let gone = left[pullRequest.number] ?? []
