@@ -52,6 +52,14 @@ struct Mission: Codable, Equatable {
         handoffsEnabled || isAlwaysCarried
     }
 
+    var waitingQuestion: MissionEvent? {
+        guard status == .active else { return nil }
+        return events.lazy.filter { question in
+            question.kind == .question && question.parentConsumedAt == nil
+                && !events.contains { $0.kind == .response && $0.inReplyTo == question.id }
+        }.min { $0.timestamp < $1.timestamp }
+    }
+
     /// The agent its child runs, when Nirux delivers its parent's messages:
     /// typed into Claude Code or Antigravity, or handed to Codex's queue.
     var deliveryAgent: CodingAgent? {
@@ -122,6 +130,9 @@ struct MissionEvent: Codable, Equatable {
     var handedToUserBecause: String?
     /// When, epoch seconds; nil on one an older build handed over.
     var handedToUserAt: TimeInterval?
+    /// On a question: when it stopped waiting because its child took a
+    /// prompt after it, unanswered (`MissionStore.retireQuestions`).
+    var retiredAt: TimeInterval?
     /// On an instruction: Nirux types it at the child's next free prompt
     /// until then (`MissionEventCLI.instructionLifetime` after it was sent).
     /// Nil on one an older build recorded, which had an hour.
@@ -583,9 +594,52 @@ final class MissionStore {
             updated[missionIndex].events[eventIndex].childConsumedAt = timestamp
             updated[missionIndex].status = .active
             updated[missionIndex].updatedAt = timestamp
-            return commit(updated)
+            let mission = updated[missionIndex]
+            return commit(Self.retiringQuestions(
+                in: updated, childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID, before: timestamp,
+                seenIn: mission.id
+            ))
         }
         return false
+    }
+
+    /// The user typed a prompt to the child at `promptedAt`: the questions it
+    /// asked before stop waiting. False when none waited, or the ledger
+    /// isn't written.
+    @discardableResult
+    func retireQuestions(childWorkspaceID: String, childAgentUUID: String, before promptedAt: TimeInterval) -> Bool {
+        guard ensureLoaded() else { return false }
+        let updated = Self.retiringQuestions(
+            in: missions, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: promptedAt
+        )
+        return updated != missions && commit(updated)
+    }
+
+    /// `missions` with the questions the child asked before `promptedAt`
+    /// and nobody answered retired, as its completion retires them: the
+    /// prompt it took since answered them or moved it on. `seenIn`: only
+    /// that Mission's questions its parent or the user saw (typed into the
+    /// parent's prompt, handed to the user), for a parent's tell, which says
+    /// nothing of one it never saw. Asked again, a question starts a new
+    /// exchange.
+    private static func retiringQuestions(
+        in missions: [Mission], childWorkspaceID: String, childAgentUUID: String, before promptedAt: TimeInterval,
+        seenIn missionID: String? = nil
+    ) -> [Mission] {
+        missions.map { mission in
+            guard mission.childWorkspaceID == childWorkspaceID, mission.childAgentUUID == childAgentUUID,
+                  missionID.map({ $0 == mission.id }) ?? true
+            else { return mission }
+            var mission = mission
+            // An answered one was consumed with its answer.
+            for index in mission.events.indices where mission.events[index].kind == .question
+                && mission.events[index].parentConsumedAt == nil && mission.events[index].timestamp < promptedAt
+                && (missionID == nil || mission.events[index].parentTypedAt != nil || mission.events[index].handedToUserBecause != nil) {
+                mission.events[index].parentConsumedAt = promptedAt
+                mission.events[index].retiredAt = promptedAt
+            }
+            return mission
+        }
     }
 
     /// Messages Nirux may type into an agent's prompt, oldest first: a
@@ -601,6 +655,14 @@ final class MissionStore {
                 Self.isPendingDelivery(event, in: mission, now: now) ? AcceptedEvent(mission: mission, event: event) : nil
             }
         }.sorted { $0.event.timestamp < $1.event.timestamp }
+    }
+
+    func pendingPromptDelivery(_ pending: AcceptedEvent, now: TimeInterval = Date().timeIntervalSince1970) -> AcceptedEvent? {
+        guard let mission = missions.first(where: { $0.id == pending.mission.id }),
+              let event = mission.events.first(where: { $0.id == pending.event.id }),
+              Self.isPendingDelivery(event, in: mission, now: now)
+        else { return nil }
+        return AcceptedEvent(mission: mission, event: event)
     }
 
     /// The answer waiting to be typed into this child's prompt, if any.
@@ -680,15 +742,8 @@ final class MissionStore {
     /// active Mission: the child waits for it.
     func waitingQuestion(childWorkspaceID: String, childAgentUUID: String) -> AcceptedEvent? {
         missions.lazy
-            .filter {
-                $0.status == .active && $0.childWorkspaceID == childWorkspaceID && $0.childAgentUUID == childAgentUUID
-            }
-            .flatMap { mission in
-                mission.events.lazy.filter { question in
-                    question.kind == .question && question.parentConsumedAt == nil
-                        && !mission.events.contains { $0.kind == .response && $0.inReplyTo == question.id }
-                }.map { AcceptedEvent(mission: mission, event: $0) }
-            }
+            .filter { $0.childWorkspaceID == childWorkspaceID && $0.childAgentUUID == childAgentUUID }
+            .compactMap { mission in mission.waitingQuestion.map { AcceptedEvent(mission: mission, event: $0) } }
             .min { $0.event.timestamp < $1.event.timestamp }
     }
 

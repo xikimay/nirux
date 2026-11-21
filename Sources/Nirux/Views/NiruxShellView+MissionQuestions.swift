@@ -147,6 +147,18 @@ extension NiruxShellView {
         return result
     }
 
+    /// The user typed a prompt to a column's agent: the Mission questions it
+    /// asked before are behind it, and stop waiting on its parent or the
+    /// user.
+    func retireMissionQuestions(
+        of column: ColumnState, in workspace: WorkspaceState, promptedAt: TimeInterval, store: MissionStore = .shared
+    ) {
+        guard let agentUUID = column.agentUUID,
+              store.retireQuestions(childWorkspaceID: workspace.id, childAgentUUID: agentUUID, before: promptedAt)
+        else { return }
+        scheduleMetadataRefresh()
+    }
+
     /// A Mission child's turn ended on a question its parent sent the prompt
     /// for: the last prompt typed to it was Nirux's (a Mission message, a
     /// notice), or none was and the parent started it. The question goes to
@@ -250,7 +262,7 @@ extension NiruxShellView {
         popover.close()
         missionReplyPopover = nil
         missionReplyQuestionID = nil
-        showToast("That question was answered")
+        showToast("That question was answered, or its task moved on")
     }
 
     /// The card's question row was clicked: the whole question and a reply

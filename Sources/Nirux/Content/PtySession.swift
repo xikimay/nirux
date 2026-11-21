@@ -1097,6 +1097,11 @@ final class PtySession: @unchecked Sendable {
     /// Requests whose dialogs a prompt typed at the box closed, as its
     /// transcript told: their receivers wait for nothing (main queue).
     var onApprovalsAbandoned: (([AgentPermissionRequest]) -> Void)?
+    /// The user typed a prompt to its agent, at the box or elsewhere, as its
+    /// hook or its transcript line told, with its time
+    /// (`AgentStatusMachine.lastPromptByUserAt`). Not one Nirux typed, nor
+    /// one Claude took in by itself (main queue).
+    var onUserPrompt: ((TimeInterval) -> Void)?
 
     /// What the transcript of the `claude` in front gained since the last
     /// read: who sent its prompts (see
@@ -1107,8 +1112,15 @@ final class PtySession: @unchecked Sendable {
         _ = reader.readAppended(budget: Self.transcriptPromptBudget)
         let prompts = reader.takePrompts()
         state.transcriptPrompts = reader
+        let userPromptBefore = state.machine.lastPromptByUserAt
         let abandoned = prompts.flatMap { state.machine.noteTranscriptPrompt($0) }
         if !abandoned.isEmpty { onApprovalsAbandoned?(abandoned) }
+        noteUserPrompt(since: userPromptBefore)
+    }
+
+    private func noteUserPrompt(since before: TimeInterval?) {
+        guard let typedAt = state.machine.lastPromptByUserAt, typedAt != before else { return }
+        onUserPrompt?(typedAt)
     }
 
     /// A read on the main queue stays short; a long tool output takes a few.
@@ -1173,7 +1185,9 @@ final class PtySession: @unchecked Sendable {
             state.machine.readsTranscript = true
         }
         let dialogsBefore = state.machine.pendingDialogs.count
+        let userPromptBefore = state.machine.lastPromptByUserAt
         let outcome = state.machine.apply(event, isUserFocused: isUserFocused)
+        noteUserPrompt(since: userPromptBefore)
         state.lifeSigns.note(awake: awakeClock(), wall: event.timestamp)
         if event.agentID == nil, !state.promptWatchers.isEmpty { state.settlePromptWatchers(on: event) }
         let dialogs = state.machine.pendingDialogs
