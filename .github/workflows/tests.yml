@@ -6,8 +6,8 @@ name: Tests
 # (nightly.yml) already runs the tests there, and a second run held another
 # macOS runner on every merge.
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [test/check-waiting-launch-after-666]
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -33,6 +33,7 @@ jobs:
           # merged pull request's commits runs here, before merge, rather
           # than first in the nightly.
           fetch-depth: 0
+          ref: ac4d9060b1fe046f92219de51c0ac9cc54675e8f
 
       # The dependencies' clones and binaries (GhosttyKit's download sometimes
       # fails to connect), per toolchain: a new runner image's SwiftPM starts
@@ -51,8 +52,33 @@ jobs:
             .build/workspace-state.json
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
-      - name: Build
-        run: swift build --build-tests
+      - name: Exercise the resolved immediate and deferred launches
+        run: |
+          set -o pipefail
+          test "$(git rev-parse HEAD)" = ac4d9060b1fe046f92219de51c0ac9cc54675e8f
+          swift test --filter 'WaitingTaskFlowTests|NewTaskFlowTests|HandoverFileTests|LeadToolsFlowTests/testTheLeadStartsFollowsAndHandsOverATask' 2>&1 | tee "$RUNNER_TEMP/launch.log"
+          grep -E "testImmediateAndReleasedStartsDeliverTheSelectedAgentsHandover.*passed" "$RUNNER_TEMP/launch.log"
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      - name: Detect a missing waiting-task guard and an incorrect agent handover
+        run: |
+          method=testImmediateAndReleasedStartsDeliverTheSelectedAgentsHandover
+          for file in ExternalTools NewTask; do
+            path="Sources/Nirux/Views/NiruxShellView+$file.swift"
+            if [[ "$file" == ExternalTools ]]; then
+              sed -i '' 's/guard let workspace = activeWorkspace, !workspace.isWaitingTask,/guard let workspace = activeWorkspace,/' "$path"
+            else
+              sed -i '' 's/handoverFilename: HandoverFile.filename(for: request.agent)/handoverFilename: HandoverFile.filename(for: .claude)/' "$path"
+            fi
+            if swift test --filter "WaitingTaskFlowTests/$method" > "$RUNNER_TEMP/$file.log" 2>&1; then exit 1; fi
+            grep -m1 -E ": error: .*$method.*XCTAssert" "$RUNNER_TEMP/$file.log"
+            git restore "$path"
+          done
+
+      - name: Exercise the simulated Board stack
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          git switch --detach 3530c95026cf235b3f46e426dbfa339dba89ebba
+          test "$(git rev-parse HEAD)" = 3530c95026cf235b3f46e426dbfa339dba89ebba
+          swift test --filter 'BoardStages(Line|Units|ContentFlow|View)Tests|WaitingTaskFlowTests/testImmediateAndReleasedStartsDeliverTheSelectedAgentsHandover' 2>&1 | tee "$RUNNER_TEMP/board.log"
+          grep -E 'testWaitingWorkspaceFollowsItsDependencyAcrossSectionsUntilRelease.*passed' "$RUNNER_TEMP/board.log"
