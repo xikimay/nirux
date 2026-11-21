@@ -1,4 +1,5 @@
 import AppKit
+import os
 import XCTest
 @testable import Nirux
 
@@ -193,6 +194,59 @@ final class NewTaskFlowTests: UIFlowTestCase {
             harness.waitUntil("the task's workspace") { shell.workspaces.contains { $0.title == "Other work" } }
             XCTAssertNil(shell.newTaskPanel)
             XCTAssertTrue(FileManager.default.fileExists(atPath: harness.root + "/repo.feat-other-work/.claude-handover.md"))
+        }
+    }
+
+    func testFetchRetryReusesNamesUntilTheModelInputChanges() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            try UIFlowHarness.git(["remote", "add", "origin", harness.root + "/missing.git"], at: harness.repo)
+            try UIFlowHarness.git(["update-ref", "refs/remotes/origin/main", "HEAD"], at: harness.repo)
+            _ = try Self.anchoredSpace(harness)
+            let calls = OSAllocatedUnfairLock(initialState: [String]())
+            let pending = OSAllocatedUnfairLock<CheckedContinuation<Void, Never>?>(initialState: nil)
+            let original = "stale-labels — labels stay stale"
+            let draft = "Update metadata"
+            let revised = draft + "\nRefresh the index."
+            shell.sideEffects.generateTaskNames = { description, _ in
+                let firstCall = calls.withLock {
+                    $0.append(description)
+                    return $0.count == 1
+                }
+                if firstCall {
+                    await withCheckedContinuation { continuation in pending.withLock { $0 = continuation } }
+                }
+                if description == revised { return TaskNameSuggestion(title: "Index refresh", goal: "Refresh the metadata index") }
+                return TaskNameSuggestion(title: "Label refresh", goal: "Update outdated labels")
+            }
+
+            @MainActor func failFetch(_ description: String) throws -> NewTaskPanel {
+                let sheet = try openSheet(harness)
+                describe(description, in: sheet)
+                sheet.startButton.performClick(nil)
+                harness.waitUntil("the fetch to fail") { sheet.startsWithoutFetch }
+                return sheet
+            }
+
+            let unchanged = try failFetch(original)
+            harness.waitUntil("the outstanding naming call") { pending.withLock { $0 != nil } }
+            unchanged.startButton.performClick(nil)
+            pending.withLock { $0 }?.resume()
+            harness.waitUntil("the task with the explicit short name") { shell.activeWorkspace?.title == "Label refresh" }
+            let first = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(GitWorktree.currentBranch(at: first.cwd), "feat/stale-labels")
+            XCTAssertEqual(first.purpose, "Update outdated labels")
+            XCTAssertEqual(calls.withLock { $0 }, [original])
+
+            let edited = try failFetch(draft)
+            harness.waitUntil("the first naming call for this sheet") { calls.withLock { $0.contains(draft) } }
+            describe(revised, in: edited)
+            edited.startButton.performClick(nil)
+            harness.waitUntil("the task with the revised description") { shell.activeWorkspace?.title == "Index refresh" }
+            let second = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(GitWorktree.currentBranch(at: second.cwd), "feat/index-refresh")
+            XCTAssertEqual(second.purpose, "Refresh the metadata index")
+            XCTAssertEqual(calls.withLock { $0 }, [original, draft, revised])
         }
     }
 

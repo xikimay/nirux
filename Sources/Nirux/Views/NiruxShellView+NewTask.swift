@@ -51,8 +51,8 @@ extension NiruxShellView {
         panel.onStart = { [weak self, weak panel] request in
             guard let self, let panel else { return }
             let settings = PersistedSettings.effective(Persistence.load()?.settings)
-            let generate = panel.proposal == nil && !panel.branchIsEdited && settings.generateTaskNames ? self.sideEffects.generateTaskNames : nil
-            self.startTask(request, generateNames: generate) { [weak self, weak panel] outcome in
+            let names = panel.nameSuggestion(for: request, using: settings.generateTaskNames ? self.sideEffects.generateTaskNames : nil)
+            self.startTask(request, names: names) { [weak self, weak panel] outcome in
                 // Its picture, before it closes: it folds toward the
                 // task's row.
                 if case .opened = outcome, let panel { self?.takeTaskSheetPicture(of: panel) }
@@ -226,15 +226,13 @@ extension NiruxShellView {
     /// it comes back to show a failure. `opened` follows `.opened`, once the
     /// workspace is there, with its id and what was made.
     func startTask(
-        _ request: NewTask.Request, generateNames: TaskNameSuggestion.Generator? = nil,
+        _ request: NewTask.Request, names: Task<TaskNameSuggestion?, Never>? = nil,
         completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void,
         opened: (@MainActor (_ workspaceID: String, _ created: CreatedTask) -> Void)? = nil
     ) {
         let handoverFilename = Self.handoverFilename(for: request.agent)
         let routes = routesByAnchor
         Task { [weak self] in
-            let titleLimit = request.parentWorkspaceID == nil ? LeadTools.maxTaskTitleLength : LeadTools.maxSubtaskTitleLength
-            async let names = generateNames?(request.description, titleLimit)
             if request.fetchesFirst, let target = request.target, let remote = target.remoteBranch {
                 let error = await withCheckedContinuation { continuation in
                     Self.offMain({ GitWorktree.fetch(branch: remote, repoRoot: target.repository) }) {
@@ -246,7 +244,7 @@ extension NiruxShellView {
                     return
                 }
             }
-            let named = request.applying(await names)
+            let named = request.applying(await names?.value)
             Self.offMain({
                 Self.createTask(named, handoverFilename: handoverFilename, routesByAnchor: routes)
             }) { [weak self] result in

@@ -45,7 +45,8 @@ extension NewTask.Request {
         request.goal = names.goal
         switch place {
         case .worktree(let target, _):
-            let branch = NewTask.suggestedBranch(description: description, title: names.title, templateName: template?.name)
+            let line = NewTask.nameLine(description.firstLine ?? "")
+            let branch = NewTask.suggestedBranch(for: line, title: line.shortName == nil ? names.title : nil, templateName: template?.name)
             if !branch.isEmpty { request.place = .worktree(target, branch: branch) }
         case .folder(let parent, _, let makesParent):
             let name = NewTask.suggestedFolderName(description: names.title)
