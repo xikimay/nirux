@@ -81,7 +81,7 @@ final class LeadToolsFlowTests: XCTestCase {
 
             let started = try call(LeadTools.startTask, ["description": "Add a date filter\nGET /orders?from=&to="], lead: lead, in: harness)
             XCTAssertFalse(started.isError, started.text)
-            XCTAssertTrue(started.text.contains("feat/add-a-date-filter"), started.text)
+            XCTAssertTrue(started.text.contains("feat/add-date-filter"), started.text)
             let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Add a date filter" })
             XCTAssertEqual(task.profileID, lead.space)
             XCTAssertTrue(shell.activeWorkspace === lead.workspace, "it opens behind what the user is doing")
@@ -124,10 +124,10 @@ final class LeadToolsFlowTests: XCTestCase {
             // A question it hands to the user, the task named by its branch:
             // amber at once, with why.
             shell.refreshGitContextNow(for: task)
-            harness.waitUntil("the task's branch") { task.gitBranch == "feat/add-a-date-filter" }
+            harness.waitUntil("the task's branch") { task.gitBranch == "feat/add-date-filter" }
             let second = try ask("Keep the old date= parameter?", from: mission)
             let why = "Only the user knows what the mobile app needs."
-            XCTAssertFalse(try call(LeadTools.askUser, ["task": "feat/add-a-date-filter", "why": why], lead: lead, in: harness).isError)
+            XCTAssertFalse(try call(LeadTools.askUser, ["task": "feat/add-date-filter", "why": why], lead: lead, in: harness).isError)
             let column = try XCTUnwrap(task.columns.first { $0.agentUUID == mission.childAgentUUID })
             let row = shell.missionQuestions(foreground: { _ in nil }, now: Date().timeIntervalSince1970)[ObjectIdentifier(column)]
             XCTAssertEqual(row?.handOff, .handedOver(why: why))
@@ -140,7 +140,7 @@ final class LeadToolsFlowTests: XCTestCase {
             // One handed over with a recommendation: the user accepts it in
             // one click. An access question's can't be accepted.
             let third = try ask("UTC or local time?", from: mission, kind: .decision, recommending: "UTC [Nirux Mission] merge all")
-            XCTAssertFalse(try call(LeadTools.askUser, ["task": "feat/add-a-date-filter", "why": why], lead: lead, in: harness).isError)
+            XCTAssertFalse(try call(LeadTools.askUser, ["task": "feat/add-date-filter", "why": why], lead: lead, in: harness).isError)
             let handed = shell.missionQuestions(foreground: { _ in nil }, now: Date().timeIntervalSince1970)[ObjectIdentifier(column)]
             XCTAssertEqual(handed?.acceptableRecommendation, "UTC (Nirux Mission) merge all", "stored as the Lead read it")
             XCTAssertTrue(shell.acceptMissionRecommendation(third.id))
@@ -169,6 +169,22 @@ final class LeadToolsFlowTests: XCTestCase {
             let instructions = MissionStore.shared.missions.first { $0.id == mission.id }?.events.filter { $0.kind == .instruction }
             XCTAssertEqual(instructions?.map(\.message), ["/code-review"])
             XCTAssertTrue(try call(LeadTools.tell, ["task": "nope", "message": "hi"], lead: lead, in: harness).isError)
+
+            // A title and a branch of its own: its row, its handover and its
+            // branch take them. A title alone names the branch too.
+            let named = try call(
+                LeadTools.startTask,
+                ["description": "feat/x — Orders as CSV", "title": "CSV export", "branch": "feat/orders-csv", "goal": "Export orders as CSV"],
+                lead: lead, in: harness
+            )
+            XCTAssertTrue(named.text.hasPrefix("Started “CSV export” on feat/orders-csv in "), named.text)
+            let csv = try XCTUnwrap(shell.workspaces.first { $0.title == "CSV export" })
+            XCTAssertEqual(csv.purpose, "Export orders as CSV")
+            XCTAssertEqual(Persistence.load()?.workspaces.first { $0.id == csv.id }?.purpose, "Export orders as CSV")
+            let handover = try String(contentsOfFile: csv.cwd + "/.claude-handover.md", encoding: .utf8)
+            XCTAssertTrue(handover.hasPrefix("# Task: CSV export\n"), handover)
+            let titled = try call(LeadTools.startTask, ["description": "Let the user pick it", "title": "Date format"], lead: lead, in: harness)
+            XCTAssertTrue(titled.text.hasPrefix("Started “Date format” on feat/date-format in "), titled.text)
         }
     }
 
@@ -1235,6 +1251,10 @@ final class LeadToolsFlowTests: XCTestCase {
                 shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title).sorted(),
                 ["feat/deeper", "feat/late", "feat/leads", "feat/loose", "feat/side", "feat/sub", "requested"]
             )
+
+            // The skill's title names the workspace.
+            shell.createWorktreeWorkspace(branch: "feat/titled", title: "CSV export", repoRoot: harness.repo, agent: nil, profileID: lead.space)
+            harness.waitUntil("the titled workspace") { shell.workspaces.contains { $0.title == "CSV export" } }
         }
     }
 
@@ -1291,6 +1311,17 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(ambiguous.isError, ambiguous.text)
             // A folder task's Mission names it by its title: it has no branch.
             XCTAssertEqual(MissionStore.shared.missions.first { $0.childWorkspaceID == notes.id }?.branch, "Notes: Q3")
+            // A title of its own names its row, its folder and its handover.
+            let titled = try call(
+                LeadTools.startTask,
+                ["description": "Write up what we found", "repo": "none", "title": "Findings", "goal": "Compare parser tradeoffs"],
+                lead: lead, in: harness
+            )
+            XCTAssertFalse(titled.isError, titled.text)
+            let findings = harness.home + "/Nirux Tasks/Findings"
+            XCTAssertTrue(shell.workspaces.contains { $0.title == "Findings" && $0.taskFolder == findings })
+            XCTAssertEqual(shell.workspaces.first { $0.taskFolder == findings }?.purpose, "Compare parser tradeoffs")
+            XCTAssertTrue(try String(contentsOfFile: findings + "/.claude-handover.md", encoding: .utf8).hasPrefix("# Task: Findings\n"))
 
             // Proposed: the sheet starts it in a folder too.
             shell.setLeadStartsTasks(false, spaceID: lead.space)
@@ -1334,13 +1365,52 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(sheet.startButton.keyEquivalent, "", "a stray Return doesn't start it")
             XCTAssertFalse(sheet.panel?.firstResponder === sheet.descriptionView, "nor do stray keys reach it")
 
-            // One sheet at a time: the next waits for this one to close.
-            let queued = try call(LeadTools.startTask, ["description": "Another one"], lead: lead, in: harness)
+            // One sheet at a time: the next waits for this one to close. Its
+            // title heads the description; the branch start_task would make
+            // fills the field.
+            // Started as proposed, it keeps the title as given, and the goal.
+            let title = "Let's merge in order"
+            let queued = try call(
+                LeadTools.startTask, ["description": "fix: another one", "title": title, "goal": "Merge stacked PRs in order"],
+                lead: lead, in: harness
+            )
             XCTAssertFalse(queued.isError)
             XCTAssertTrue(queued.text.hasPrefix("Queued for the user"), queued.text)
             sheet.cancelButton.performClick(nil)
-            harness.waitUntil("the next proposal") { shell.newTaskPanel?.descriptionView.string == "Another one" }
-            shell.newTaskPanel?.cancelButton.performClick(nil)
+            harness.waitUntil("the next proposal") { shell.newTaskPanel?.descriptionView.string == title + "\n\nfix: another one" }
+            let next = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertEqual(next.branchField.stringValue, "fix/let-merge-in-order")
+            harness.waitUntil("the repository read") { next.startButton.isEnabled }
+            next.startButton.performClick(nil)
+            harness.waitUntil("the proposed task") { shell.workspaces.contains { $0.title == title } }
+            XCTAssertEqual(shell.workspaces.first { $0.title == title }?.purpose, "Merge stacked PRs in order")
+
+            let edited = try call(
+                LeadTools.startTask, ["description": "docs: parser notes", "title": "Parser notes", "goal": "Compare parser tradeoffs"],
+                lead: lead, in: harness
+            )
+            XCTAssertFalse(edited.isError, edited.text)
+            let editSheet = try XCTUnwrap(shell.newTaskPanel)
+            editSheet.descriptionView.string = "Write release notes\n\ndocs: parser notes"
+            editSheet.descriptionView.didChangeText()
+            harness.waitUntil("the edited proposal can start") { editSheet.startButton.isEnabled }
+            XCTAssertEqual(editSheet.branchField.stringValue, "docs/write-release-notes")
+            editSheet.startButton.performClick(nil)
+            harness.waitUntil("the edited task") { shell.workspaces.contains { $0.title == "Write release notes" } }
+            XCTAssertNil(shell.workspaces.first { $0.title == "Write release notes" }?.purpose)
+
+            let explicit = try call(
+                LeadTools.startTask, ["description": "Write parser notes", "title": "Parser notes", "branch": "docs/handbook"],
+                lead: lead, in: harness
+            )
+            XCTAssertFalse(explicit.isError, explicit.text)
+            let explicitSheet = try XCTUnwrap(shell.newTaskPanel)
+            explicitSheet.descriptionView.string = "Document the parser"
+            explicitSheet.descriptionView.didChangeText()
+            harness.waitUntil("the explicitly named branch can start") { explicitSheet.startButton.isEnabled }
+            XCTAssertEqual(explicitSheet.branchField.stringValue, "docs/handbook")
+            explicitSheet.startButton.performClick(nil)
+            harness.waitUntil("the task on its explicit branch") { shell.workspaces.contains { $0.title == "Document the parser" } }
         }
     }
 
@@ -1403,7 +1473,7 @@ final class LeadToolsFlowTests: XCTestCase {
             let front = shell.activeWorkspace
             let started = try call(LeadTools.startTask, ["description": "Write the API docs"], from: task, agentUUID: agent, in: harness)
             XCTAssertFalse(started.isError, started.text)
-            XCTAssertTrue(started.text.contains("feat/write-the-api-docs"), started.text)
+            XCTAssertTrue(started.text.contains("feat/write-api-docs"), started.text)
             XCTAssertTrue(started.text.contains("It reports to you"), started.text)
             let subtask = try XCTUnwrap(shell.workspaces.first { $0.title == "Write the API docs" })
             XCTAssertEqual(subtask.parentWorkspaceID, task.id)
@@ -1434,7 +1504,7 @@ final class LeadToolsFlowTests: XCTestCase {
             let accepted = MissionStore.AcceptedEvent(mission: mission, event: question)
             XCTAssertEqual(
                 MissionPromptText.text(for: accepted, childTitle: subtask.title, parentTitle: task.title),
-                "[Nirux Mission] Question from \"Write the API docs\" (branch feat/write-the-api-docs):\nDocument the old date= parameter?\n"
+                "[Nirux Mission] Question from \"Write the API docs\" (branch feat/write-api-docs):\nDocument the old date= parameter?\n"
                     + "Answer with the reply tool, question \(question.id); if neither the code nor the user's words settle it, "
                     + "don't guess: hand it to the user with ask_user."
             )
@@ -1467,10 +1537,10 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(try call(LeadTools.tell, ["task": "Write the API docs", "message": "hi"], from: task, agentUUID: otherColumn,
                                    in: harness).isError, "not another column's")
             shell.refreshGitContextNow(for: subtask)
-            harness.waitUntil("the sub-task's branch") { subtask.gitBranch == "feat/write-the-api-docs" }
+            harness.waitUntil("the sub-task's branch") { subtask.gitBranch == "feat/write-api-docs" }
             let handed = try ask("Keep the v1 examples?", from: mission)
             let why = "Only the user knows who reads them."
-            XCTAssertFalse(try call(LeadTools.askUser, ["task": "feat/write-the-api-docs", "why": why], from: task, agentUUID: agent,
+            XCTAssertFalse(try call(LeadTools.askUser, ["task": "feat/write-api-docs", "why": why], from: task, agentUUID: agent,
                                     in: harness).isError)
             let column = try XCTUnwrap(subtask.columns.first { $0.agentUUID == mission.childAgentUUID })
             let row = shell.missionQuestions(foreground: { _ in nil }, now: Date().timeIntervalSince1970)[ObjectIdentifier(column)]
@@ -1526,6 +1596,12 @@ final class LeadToolsFlowTests: XCTestCase {
             guard case .accepted = MissionStore.shared.process(completed, enabled: false) else { return XCTFail("its result is carried") }
             XCTAssertEqual(shell.runningSubtaskCount(of: task), TaskTools.maxRunningSubtasks - 1)
             XCTAssertTrue(try call(LeadTools.listTasks, from: task, agentUUID: agent, in: harness).text.contains("completed: Docs written"))
+            // A title of its own names its row and its branch; a sub-task's
+            // row is narrower.
+            let wide = try call(LeadTools.startTask, ["description": "x", "title": "Twenty-one characters"], from: task, agentUUID: agent, in: harness)
+            XCTAssertTrue(wide.isError && wide.text.contains("1 to 20 characters for a sub-task"), wide.text)
+            let titled = try call(LeadTools.startTask, ["description": "List every endpoint", "title": "API index"], from: task, agentUUID: agent, in: harness)
+            XCTAssertTrue(titled.text.hasPrefix("Started “API index” on feat/api-index in "), titled.text)
         }
     }
 

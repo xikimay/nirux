@@ -235,7 +235,7 @@ enum NiruxMCPServer {
     /// A Lead's or a task's tool: checked here, then sent to the running
     /// app, which acts and answers (see LeadChannel).
     static func callAppTool(_ name: String, arguments: [String: Any], context: Context) -> ToolResult {
-        if let problem = LeadTools.problem(tool: name, arguments: arguments) {
+        if let problem = LeadTools.problem(tool: name, arguments: arguments, subtask: !context.isLead) {
             return ToolResult(text: problem, isError: true)
         }
         guard let workspaceID = context.nonEmpty("NIRUX_WORKSPACE_ID"), let agentUUID = context.nonEmpty("NIRUX_AGENT_UUID"),
