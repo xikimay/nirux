@@ -207,6 +207,9 @@ final class NiruxShellView: NSView {
     var sideEffects = ShellSideEffects()
     /// The CI failure triage's state (docs/design/ci-failure-triage.md).
     let ciTriageCenter = CITriageCenter()
+    var fetchPullRequest: (
+        String, String, String?, @escaping @MainActor @Sendable (PRDetect.FetchResult) -> Void
+    ) -> Void = PRDetect.fetchAsync
     let prFollowUpCenter = PRFollowUpCenter()
 
     // Panel references (stored properties must live in main class declaration)

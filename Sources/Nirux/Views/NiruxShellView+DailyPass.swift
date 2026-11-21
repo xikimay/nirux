@@ -135,7 +135,7 @@ extension NiruxShellView {
                 notYours: leads.isEmpty ? Self.notYours(startedByAgent: task.startedByAgent) : nil, isFolderTask: task.isFolderTask,
                 waitsOnUser: waiting.map { $0.dialog ?? "in its terminal" },
                 question: question.map { DailyPass.TaskActivity.Question(id: $0.id, handedToUser: $0.handedToUserBecause != nil) },
-                pullRequest: task.prInfo, pullRequestReadAt: prFollowUpCenter.readAt[task.id], lastTurnAt: task.lastActivityAt,
+                pullRequest: task.prInfo, pullRequestReadAt: task.pullRequestReadAt, lastTurnAt: task.lastActivityAt,
                 resultAt: DailyPass.resultAt(own)
             )
             return (activity, task.cwd, repositoryAnchor(of: task, in: space)?.folder)

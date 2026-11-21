@@ -796,7 +796,9 @@ final class LeadToolsFlowTests: XCTestCase {
             )
             guard case .accepted = MissionStore.shared.process(result, enabled: true) else { return XCTFail("its result is carried") }
             export.lastActivityAt = threeDaysAgo - 86_400
-            shell.prFollowUpCenter.readAt[export.id] = Date().timeIntervalSince1970
+            let revision = try XCTUnwrap(GitDetect.context(at: harness.repo))
+            export.updateGitContext(revision)
+            export.applyPullRequestInfo(nil, for: revision)
 
             let day = try call(LeadTools.dailyPass, lead: lead, in: harness)
             XCTAssertFalse(day.isError, day.text)
@@ -815,6 +817,76 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(again.contains("Listed last time too, nothing changed since:\n- “"), again)
             let read = try XCTUnwrap(DailyPassState.load(spaceID: lead.space).end)
             XCTAssertEqual(read, Date().timeIntervalSince1970, accuracy: 60)
+        }
+    }
+
+    func testDailyPassRequiresAPullRequestReadForTheCurrentCheckout() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let started = try call(LeadTools.startTask, ["description": "Check export"], lead: lead, in: harness)
+            XCTAssertFalse(started.isError, started.text)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Check export" })
+            let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childWorkspaceID == task.id })
+            let finishedAt = Date().timeIntervalSince1970 - 2 * 86_400
+            let result = MissionEvent(
+                id: UUID().uuidString, missionID: mission.id, childWorkspaceID: task.id, childAgentUUID: mission.childAgentUUID,
+                kind: .completed, message: "Export done", timestamp: finishedAt
+            )
+            guard case .accepted = MissionStore.shared.process(result, enabled: true) else { return XCTFail("expected a completed mission") }
+            task.lastActivityAt = finishedAt
+            try UIFlowHarness.git(
+                ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "export"],
+                at: task.cwd, environment: ["GIT_COMMITTER_DATE": "@\(Int(finishedAt))"]
+            )
+
+            var pending: (@MainActor @Sendable (PRDetect.FetchResult) -> Void)?
+            shell.fetchPullRequest = { branch, _, _, answer in
+                guard branch == "feat/a" || branch == "feat/b" else { return answer(.failure) }
+                pending = answer
+            }
+            @MainActor func checkout(_ branch: String) throws -> GitContext {
+                try UIFlowHarness.git(["checkout", "-qb", branch], at: task.cwd)
+                let context = try XCTUnwrap(GitDetect.context(at: task.cwd, startFolder: task.cwd))
+                task.updateGitContext(context)
+                return context
+            }
+            @MainActor func answerRead(_ result: PRDetect.FetchResult) throws {
+                let answer = try XCTUnwrap(pending)
+                pending = nil
+                answer(result)
+            }
+            @MainActor func taskLine() throws -> String? {
+                let digest = try call(LeadTools.dailyPass, lead: lead, in: harness)
+                XCTAssertFalse(digest.isError, digest.text)
+                return digest.text.components(separatedBy: "\n").first { $0.hasPrefix("- “Check export” ·") }
+            }
+
+            let first = try checkout("feat/a")
+            try answerRead(.success(context: first, info: nil))
+            harness.waitUntil("A's empty PR read") { task.pullRequestReadAt != nil }
+            XCTAssertTrue(try XCTUnwrap(taskLine()).hasSuffix(" → close_task"))
+
+            let second = try checkout("feat/b")
+            XCTAssertNotNil(pending)
+            XCTAssertNil(try taskLine(), "B's first PR read is still pending")
+            try answerRead(.failure)
+            XCTAssertNil(try taskLine(), "a failed read leaves B's PR unknown")
+
+            let open = PRInfo(
+                number: 8, state: "OPEN", isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: nil, mergeable: "MERGEABLE",
+                url: "https://github.com/acme/app/pull/8", additions: nil, deletions: nil, changedFiles: nil
+            )
+            shell.refreshPRInfo(for: [task])
+            try answerRead(.success(context: second, info: open))
+            harness.waitUntil("B's open PR") { task.prInfo == open }
+            XCTAssertTrue(try XCTUnwrap(taskLine()).contains("PR #8 green and mergeable"))
+
+            shell.refreshPRInfo(for: [task])
+            try answerRead(.success(context: second, info: nil))
+            harness.waitUntil("B's empty PR read") { task.prInfo == nil }
+            let line = try XCTUnwrap(taskLine())
+            XCTAssertTrue(line.contains("no pull request") && line.hasSuffix(" → close_task"), line)
         }
     }
 

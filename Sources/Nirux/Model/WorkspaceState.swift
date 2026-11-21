@@ -6,6 +6,7 @@ struct GitContextObservation: Sendable {
 }
 
 struct PullRequestObservation: Sendable {
+    fileprivate let startedAt = Date().timeIntervalSince1970
     fileprivate let generation: UInt64
     fileprivate let context: GitContext
 }
@@ -121,6 +122,8 @@ final class WorkspaceState {
     /// The most urgent of what happened while the user looked elsewhere.
     var notification: AttentionSignal?
     var hasNotification: Bool { notification != nil }
+    /// Start of the last successful PR read for this revision, including an empty result.
+    private(set) var pullRequestReadAt: TimeInterval?
     var prInfo: PRInfo? {
         didSet {
             if prInfo?.url != oldValue?.url || prInfo?.state != "OPEN" { prFeedback = nil }
@@ -410,6 +413,7 @@ extension WorkspaceState {
                 == context?.upstreamRepositoryObservation
         if !sameRevision || (context?.identity.isDirty == true && Self.isTerminalPullRequest(prInfo)) {
             prInfo = nil
+            pullRequestReadAt = nil
         }
         diffStats = nil
         if !titleIsManual, let branch = context?.branch, !branch.isEmpty {
@@ -434,11 +438,14 @@ extension WorkspaceState {
     }
 
     @discardableResult
-    func applyPullRequestInfo(_ info: PRInfo?, for context: GitContext) -> Bool {
+    func applyPullRequestInfo(
+        _ info: PRInfo?, for context: GitContext, readStartedAt: TimeInterval = Date().timeIntervalSince1970
+    ) -> Bool {
         guard gitContext == context,
-              !(context.identity.isDirty && Self.isTerminalPullRequest(info)),
-              prInfo != info
+              !(context.identity.isDirty && Self.isTerminalPullRequest(info))
         else { return false }
+        pullRequestReadAt = readStartedAt
+        guard prInfo != info else { return false }
         prInfo = info
         return true
     }
@@ -497,7 +504,7 @@ extension WorkspaceState {
     ) -> Bool {
         guard isCurrentPullRequestObservation(observation, for: context) else { return false }
         pullRequestObservation = nil
-        return applyPullRequestInfo(info, for: context)
+        return applyPullRequestInfo(info, for: context, readStartedAt: observation.startedAt)
     }
 
     func beginDiffStatsObservation(

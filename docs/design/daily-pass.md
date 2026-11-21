@@ -114,8 +114,9 @@ Nirux is in the background, which is when the pass runs, so a pull request
 GitHub's merged list has counts as merged: the pass's own read of the
 window, reaching back by numbers alone to the oldest read of a task's open
 pull request when that came first (a week at most).
-"No pull request" needs a read that found none
-(`PRFollowUpCenter.readAt`); a task never read says so.
+"No pull request" needs a successful read for the current revision
+(`WorkspaceState.pullRequestReadAt`). Changing revision invalidates the read
+along with the PR, so a pending or failed first read leaves its status unknown.
 
 **Kinds**, checked in this order:
 - **closable**:

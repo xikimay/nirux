@@ -666,8 +666,7 @@ extension NiruxShellView {
             guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
             gitRefresh.notePullRequestRefresh(workspace)
             startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext)
-            let readStartedAt = Date().timeIntervalSince1970
-            PRDetect.fetchAsync(branch: branch, cwd: cwd, startFolder: workspace.cwd) { [weak self, weak workspace] result in
+            fetchPullRequest(branch, cwd, workspace.cwd) { [weak self, weak workspace] result in
                 guard let workspace else { return }
                 guard !workspace.isInactive else {
                     workspace.finishPullRequestObservation(observation)
@@ -684,7 +683,7 @@ extension NiruxShellView {
                     guard let workspace else { return }
                     guard !workspace.isInactive,
                           case .observed(let currentContext) = result,
-                          currentContext == queriedContext else {
+                          workspace.isCurrentPullRequestObservation(observation, for: currentContext) else {
                         workspace.finishPullRequestObservation(observation)
                         return
                     }
@@ -702,7 +701,6 @@ extension NiruxShellView {
                     if workspace.prInfo == info { self?.refreshPRFeedback(for: workspace) }
                     self?.reportNewRedChecks(in: workspace)
                     if workspace.prInfo == info {
-                        self?.prFollowUpCenter.readAt[workspace.id] = readStartedAt
                         self?.followUpPullRequest(of: workspace)
                     }
                     guard changed else { return }
