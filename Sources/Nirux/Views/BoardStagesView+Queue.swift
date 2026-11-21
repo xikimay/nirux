@@ -12,6 +12,7 @@ extension BoardStagesView {
         // The Board shows a place for some of the list, never more.
         let proposed = min(proposed, state.selection.count)
         var queue = SectionQueue(tone: tone(of: state), dryRun: state.isDryRun ? MergeQueue.dryRunTooltip(reason: state.dryRunReason) : nil)
+        queue.showsJournal = state.run != .none || state.hasJournalFile
         let queued = "\(proposed) pull request\(proposed == 1 ? "" : "s") queued"
         let count = proposed > 0 ? " · \(proposed)" : ""
         switch state.run {

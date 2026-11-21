@@ -1,13 +1,13 @@
 # Project Board
 
-> **Design record:** shipped, except B3b. The board, its config and the merge queue are in the app.\
-> **Differs today:** B3b (the journal view and Ask Agent to Resolve) was not built, the text says "project" where the app says "space", and the Board shows the stages of [Board Stages](board-stages.md) in place of the table; the config and the merge queue are as here.\
+> **Design record:** implemented through the B3b journal view. The board, its config and the merge queue are in the app.\
+> **Differs today:** Ask Agent to Resolve is pending, the text says "project" where the app says "space", and the Board shows the stages of [Board Stages](board-stages.md) in place of the table; the config and the merge queue are as here.\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
 Status: design, validated by the user on 2026-09-27. B4 (the config), B1 (the
 read-only board), B2 (the merge queue's engine) and B3a (starting, following
-and stopping the queue) are implemented; B3b (the journal view and Ask Agent
-to Resolve) isn't. What B1, B2 and B3a decided along the way is in sections
+and stopping the queue) are implemented, along with B3b’s journal view. Ask
+Agent to Resolve is pending. What B1, B2 and B3a decided along the way is in sections
 2.1, 3.7 and 3.8. Since S12 ([spaces](spaces.md)), a space with several
 repositories has a section, a config and a merge queue per repository
 (sections 2.2 and 5.1).
