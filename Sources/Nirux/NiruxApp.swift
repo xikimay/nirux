@@ -12,6 +12,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var updaterController: SPUStandardUpdaterController?
     /// Settings without a shell (tests); the app's are the shell's.
     var standaloneSettings: SettingsWindow?
+    weak var settingsTaskNamesCheckbox: NSButton?
     weak var settingsKeepAwakeCheckbox: NSButton?
     weak var settingsAnimationsCheckbox: NSButton?
     weak var settingsTransparencyPicker: TransparencyPicker?
