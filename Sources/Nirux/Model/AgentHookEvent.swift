@@ -5,13 +5,6 @@ import Foundation
 /// `hook-events.jsonl` in the state directory by `Nirux --hook`, then
 /// drained and routed by `AgentHookCenter`.
 struct AgentHookEvent: Codable, Equatable {
-    enum Kind: String, Codable {
-        case claude, codex
-        /// Antigravity's hooks.json, read only for the conversation a
-        /// column runs: its status comes from OSC 7501.
-        case agy
-    }
-
     /// Normalized event names. The Claude hooks map 1:1 (PostToolUse and
     /// PostToolUseFailure both mean "the tool call is over"); Codex only
     /// has a single "agent turn complete" notification.
@@ -29,7 +22,7 @@ struct AgentHookEvent: Codable, Equatable {
         case approvalResolved
     }
 
-    let kind: Kind
+    let kind: CodingAgent
     let name: Name
     /// NIRUX_AGENT_UUID from the hook process's environment (inherited from
     /// the shell of the column that launched the agent). The receiver drops
@@ -164,7 +157,7 @@ struct AgentHookEvent: Codable, Equatable {
     /// argv) into an event. Returns nil for payloads we don't care about —
     /// unknown events are ignored, never errors.
     init?(
-        kind: Kind,
+        kind: CodingAgent,
         payload: [String: Any],
         env: [String: String],
         now: TimeInterval,
@@ -315,6 +308,8 @@ struct AgentHookEvent: Codable, Equatable {
             reviewHeader = nil
             finalMessage = nil
             stopHookActive = nil
+        case .gemini, .opencode:
+            return nil
         }
     }
 
@@ -428,7 +423,7 @@ struct AgentHookEvent: Codable, Equatable {
 
     /// Direct construction (tests, synthesized events).
     init(
-        kind: Kind,
+        kind: CodingAgent,
         name: Name,
         agentUUID: String? = nil,
         workspaceID: String? = nil,
@@ -523,7 +518,7 @@ struct AgentHookEvent: Codable, Equatable {
 /// exits. Must be fast and must NEVER fail loudly: a non-zero exit from a
 /// sync hook surfaces inside the agent's UI.
 enum AgentHookCLI {
-    static func run(kind: AgentHookEvent.Kind, payload: String?) -> Int32 {
+    static func run(kind: CodingAgent, payload: String?) -> Int32 {
         // Claude runs each hook under a shell it kills when it gives up on
         // the hook (an interrupted turn): this process is then reparented.
         // Read first, before anything slow.

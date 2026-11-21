@@ -119,6 +119,10 @@ extension WorkspaceInfo {
             SidebarRowSummary(mark: mark, status: SidebarStatusLine(text: text, tone: tone, action: action), trailing: trailing ?? age)
         }
 
+        if let waitingTask {
+            if case .needsYou = waitingTask { return row(.needsYou, waitingTask.line, .needsYou) }
+            return row(.blocked, waitingTask.line, .neutral)
+        }
         let step = agentStep
         if case .needsYou(let waiting, let words, let isHandedOff)? = step {
             var summary: SidebarRowSummary
@@ -147,7 +151,7 @@ extension WorkspaceInfo {
         if case .stopped(let words)? = followUp, !columns.contains(where: { $0.agentStatus == .working }) {
             return row(.needsYou, "Needs you · \(words)", .needsYou)
         }
-        if let pullRequest = prInfo, pullRequest.state == "OPEN", pullRequest.ciStatus == "FAILURE",
+        if let pullRequest = prInfo, pullRequest.state == .open, pullRequest.ciStatus == "FAILURE",
            !columns.contains(where: { $0.agentStatus == .working }) {
             // Only a likely flake says more (docs/design/ci-failure-triage.md).
             return row(.error, "#\(pullRequest.number) · checks failed" + (ciFlakyReason == nil ? "" : " · likely flaky"), .error)
@@ -229,8 +233,10 @@ extension WorkspaceInfo {
         case answered(SidebarMissionQuestion)
     }
 
-    var agentStep: AgentStep? {
-        if let waiting = columns.first(where: { $0.attention == .waiting }) {
+    var agentStep: AgentStep? { agentStep(in: columns, includingWait: { _ in true }) }
+
+    func agentStep(in columns: [ColumnInfo], includingWait: (ColumnInfo) -> Bool) -> AgentStep? {
+        if let waiting = columns.first(where: { $0.attention == .waiting && includingWait($0) }) {
             if let question = waiting.missionQuestion, question.handOff != nil, !question.isAnswered {
                 return .needsYou(waiting, words: question.needsYouDetail, isHandedOff: true)
             }
@@ -302,13 +308,13 @@ extension WorkspaceInfo {
             )
         }
         switch pullRequest.state {
-        case "MERGED":
+        case .merged:
             switch cleanup {
             case .available?: return row(.merged, "Merged · Clean up", .cleanUp, trailing: number, linkText: "Clean up")
             case .inProgress?: return row(.merged, "Merged · cleaning up…", nil, trailing: number)
             case nil: return row(.merged, "Merged", nil, trailing: number)
             }
-        case "OPEN":
+        case .open:
             if pullRequest.isDraft { return row(.idle, "#\(pullRequest.number) · draft", nil, trailing: age) }
             switch pullRequest.ciStatus {
             case "PENDING"?: return row(.checksRunning, "#\(pullRequest.number) · checks running", nil, trailing: age)

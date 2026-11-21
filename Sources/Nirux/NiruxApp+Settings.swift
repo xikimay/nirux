@@ -526,8 +526,11 @@ extension NiruxApp {
 
     @objc func settingsClaudeLaunchModeChanged(_ sender: NSPopUpButton) {
         guard let raw = sender.selectedItem?.representedObject as? String, let mode = ClaudeLaunchMode(rawValue: raw) else { return }
-        saveSetting(revert: { SettingsForm.select(NiruxShellView.currentClaudeLaunchMode().rawValue, in: sender) }) {
+        if saveSetting(revert: { SettingsForm.select(NiruxShellView.currentClaudeLaunchMode().rawValue, in: sender) }, {
             $0.claudeLaunchMode = mode
+        }), let shell {
+            for lead in shell.workspaces where lead.isLead { lead.leadOptionsCache = nil }
+            shell.updateSidebar()
         }
     }
 

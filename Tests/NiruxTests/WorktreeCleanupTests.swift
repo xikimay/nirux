@@ -12,35 +12,47 @@ final class WorktreeCleanupTests: XCTestCase {
     private var environment: [String: String]!
     private var tools: WorktreeCleanup.Tools!
 
-    override func setUpWithError() throws {
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("nirux-cleanup-tests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        root = try XCTUnwrap(base.path.realPath)
-        let home = root + "/home"
-        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
-        environment = ["HOME": home, "XDG_CONFIG_HOME": home, "GIT_CONFIG_NOSYSTEM": "1"]
+    /// The repositories every test starts from, made once per class: each
+    /// test works on a copy.
+    nonisolated(unsafe) private static var template: String?
 
+    override class func setUp() {
+        super.setUp()
+        template = try? makeTemplate()
+    }
+
+    override class func tearDown() {
+        if let template { try? FileManager.default.removeItem(atPath: template) }
+        template = nil
+        super.tearDown()
+    }
+
+    override func setUpWithError() throws {
+        root = try Self.makeRoot()
+        environment = Self.environment(root: root)
         remote = root + "/remote.git"
         repo = root + "/widgets"
         worktree = root + "/widgets.feat-x"
-        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
-        try git(["init", "-q", "--bare", "--template=", remote], at: root)
-        try git(["init", "-q", "--template=", "-b", "main"], at: repo)
-        try commit("initial", at: repo)
-        try git(["remote", "add", "origin", remote], at: repo)
-        try git(["push", "-q", "-u", "origin", "main"], at: repo)
-        try git(["worktree", "add", "-q", "-b", "feat/x", worktree], at: repo)
-        try commit("work on x", at: worktree)
-        try git(["push", "-q", "-u", "origin", "feat/x"], at: worktree)
-        // gh matches the head repository on the push URL; git never pushes again.
-        try git(["remote", "set-url", "--push", "origin", "https://github.com/acme/widgets.git"], at: repo)
+        let template = try Self.template ?? Self.makeTemplate()
+        Self.template = template
+        for folder in ["remote.git", "widgets", "widgets.feat-x"] {
+            try FileManager.default.copyItem(atPath: template + "/" + folder, toPath: root + "/" + folder)
+        }
+        // Where the repository, its worktree and its remote name each other.
+        // Their commits are empty: no index holds a file whose inode changed.
+        for file in ["widgets/.git/config", "widgets/.git/worktrees/widgets.feat-x/gitdir", "widgets.feat-x/.git"] {
+            let path = root + "/" + file
+            try String(contentsOfFile: path, encoding: .utf8).replacingOccurrences(of: template, with: root)
+                .write(toFile: path, atomically: true, encoding: .utf8)
+        }
 
         let gh = root + "/gh"
         try """
         #!/bin/sh
         dir="$(dirname "$0")"
         printf '%s\\n' "$*" >> "$dir/gh-args"
+        printf '%s\\n' "NO_COLOR=$NO_COLOR CLICOLOR_FORCE=$CLICOLOR_FORCE GIT_OPTIONAL_LOCKS=$GIT_OPTIONAL_LOCKS HOME=$HOME" >> "$dir/gh-env"
+        pwd -P >> "$dir/gh-folder"
         if [ -f "$dir/gh-error" ]; then cat "$dir/gh-error" >&2; exit 1; fi
         cat "$dir/gh-prs.json"
         """.write(toFile: gh, atomically: true, encoding: .utf8)
@@ -61,10 +73,55 @@ final class WorktreeCleanupTests: XCTestCase {
         if let root { try? FileManager.default.removeItem(atPath: root) }
     }
 
+    private static func makeRoot() throws -> String {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nirux-cleanup-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let root = try XCTUnwrap(base.path.realPath)
+        try FileManager.default.createDirectory(atPath: root + "/home", withIntermediateDirectories: true)
+        return root
+    }
+
+    private static func environment(root: String) -> [String: String] {
+        ["HOME": root + "/home", "XDG_CONFIG_HOME": root + "/home", "GIT_CONFIG_NOSYSTEM": "1"]
+    }
+
+    private static func makeTemplate() throws -> String {
+        let root = try makeRoot()
+        do {
+            try makeRepositories(in: root)
+            return root
+        } catch {
+            try? FileManager.default.removeItem(atPath: root)
+            throw error
+        }
+    }
+
+    private static func makeRepositories(in root: String) throws {
+        let environment = Self.environment(root: root)
+        let git = { (arguments: [String], directory: String) in _ = try Self.git(arguments, at: directory, environment: environment) }
+        let remote = root + "/remote.git", repo = root + "/widgets", worktree = root + "/widgets.feat-x"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        try git(["init", "-q", "--bare", "--template=", remote], root)
+        try git(["init", "-q", "--template=", "-b", "main"], repo)
+        try git(["commit", "-q", "--allow-empty", "-m", "initial"], repo)
+        try git(["remote", "add", "origin", remote], repo)
+        try git(["push", "-q", "-u", "origin", "main"], repo)
+        try git(["worktree", "add", "-q", "-b", "feat/x", worktree], repo)
+        try git(["commit", "-q", "--allow-empty", "-m", "work on x"], worktree)
+        try git(["push", "-q", "-u", "origin", "feat/x"], worktree)
+        // gh matches the head repository on the push URL; git never pushes again.
+        try git(["remote", "set-url", "--push", "origin", "https://github.com/acme/widgets.git"], repo)
+    }
+
     // MARK: - Helpers
 
     @discardableResult
     private func git(_ arguments: [String], at directory: String) throws -> String {
+        try Self.git(arguments, at: directory, environment: environment)
+    }
+
+    private static func git(_ arguments: [String], at directory: String, environment: [String: String]) throws -> String {
         let pinned = [
             "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "tag.gpgSign=false",
             "-c", "user.name=Nirux Tests", "-c", "user.email=nirux@example.test"
@@ -185,6 +242,11 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertEqual(plan.worktree.buildOutput, ["build/"])
         XCTAssertTrue(plan.worktree.folderMatchesBranch)
         XCTAssertTrue(try String(contentsOfFile: root + "/gh-args", encoding: .utf8).contains("--head=feat/x"))
+        XCTAssertEqual(
+            try String(contentsOfFile: root + "/gh-env", encoding: .utf8),
+            "NO_COLOR=1 CLICOLOR_FORCE=0 GIT_OPTIONAL_LOCKS=0 HOME=\(root!)/home\n", "no colour forced; git's read-only and the tools' environment"
+        )
+        XCTAssertEqual(try String(contentsOfFile: root + "/gh-folder", encoding: .utf8), worktree + "\n", "gh finds the repository from the worktree")
 
         // The squash left feat/x unmerged as far as git knows: -D after -d.
         XCTAssertEqual(
@@ -477,13 +539,16 @@ final class WorktreeCleanupTests: XCTestCase {
             .write(toFile: root + "/gh-error", atomically: true, encoding: .utf8)
         XCTAssertEqual(
             try report().problems,
-            ["gh couldn't list the pull requests of feat/x: gh: To get started with GitHub CLI, please run: gh auth login"]
+            ["gh couldn't list the pull requests of feat/x: gh isn’t signed in to github.com"]
         )
+
+        tools.ghPath = root + "/no-gh"
+        XCTAssertEqual(try report().problems, ["gh couldn't list the pull requests of feat/x: gh couldn’t start, or took longer than 30 s"])
 
         tools.ghPath = nil
         XCTAssertEqual(
             try report().problems,
-            ["The GitHub CLI (gh) isn't installed: the pull request can't be checked."]
+            ["The GitHub CLI (gh) isn’t installed: the pull request can’t be checked."]
         )
     }
 
@@ -896,7 +961,7 @@ final class WorktreeCleanupVerdictTests: XCTestCase {
     private let other = String(repeating: "b", count: 40)
 
     private func pullRequest(_ number: Int, _ state: String, head: String) -> WorktreeCleanup.PullRequest {
-        WorktreeCleanup.PullRequest(number: number, state: state, headOid: head, url: "https://github.com/acme/w/pull/\(number)")
+        WorktreeCleanup.PullRequest(number: number, state: GitHub.PullRequestState(state)!, headOid: head, url: "https://github.com/acme/w/pull/\(number)")
     }
 
     func testStatusEntriesSkipTheOriginalPathOfARename() {
@@ -992,7 +1057,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
             buildOutput: ignored.filter(WorktreeCleanup.isRegenerable)
         )
         let pullRequest = WorktreeCleanup.PullRequest(
-            number: 12, state: "MERGED", headOid: String(repeating: "a", count: 40), url: "https://github.com/acme/widgets/pull/12"
+            number: 12, state: .merged, headOid: String(repeating: "a", count: 40), url: "https://github.com/acme/widgets/pull/12"
         )
         return WorktreeCleanup.Plan(worktree: worktree, branch: "feat/x", tip: worktree.tip ?? "", pullRequest: pullRequest)
     }
@@ -1020,7 +1085,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
         let ready = plan()
         XCTAssertEqual(candidate(ready).availability, .ready(ready, preselected: true))
         XCTAssertEqual(
-            candidate(ready, agents: [LiveAgent(processName: "claude", status: .idle)]).availability,
+            candidate(ready, agents: [LiveAgent(agent: .claude, status: .idle)]).availability,
             .ready(ready, preselected: true)
         )
     }
@@ -1029,7 +1094,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
         let ready = plan()
         for status in [AgentStatus.working, .needsAttention, nil] {
             XCTAssertEqual(
-                candidate(ready, agents: [LiveAgent(processName: "claude", status: status)]).availability,
+                candidate(ready, agents: [LiveAgent(agent: .claude, status: status)]).availability,
                 .ready(ready, preselected: false)
             )
         }
@@ -1095,7 +1160,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
     func testConfirmationListsExactlyWhatGoes() {
         let ignored = [".build/", ".env", "a/", "b/", "c/", "d/", "e/", "f/", "g/", "h/"]
         let ready = plan(disposable: [".claude-handover.md"], ignored: ignored)
-        let lines = candidate(ready, agents: [LiveAgent(processName: "claude", status: .idle)], titles: ["x", "x tests"])
+        let lines = candidate(ready, agents: [LiveAgent(agent: .claude, status: .idle)], titles: ["x", "x tests"])
             .confirmationLines(for: ready)
         XCTAssertEqual(lines, [
             "Pull request #12 is merged. This:",
@@ -1120,7 +1185,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
     func testSummaryRecapsEachCheckedWorktreeAndTheAgents() {
         let ready = plan(disposable: [".claude-handover.md"], ignored: [".build/"])
         let lines = WorktreeCleanupCandidate.summaryLines(for: [
-            candidate(ready, agents: [LiveAgent(processName: "claude", status: .idle)]),
+            candidate(ready, agents: [LiveAgent(agent: .claude, status: .idle)]),
             candidate(nil, titles: ["old"])
         ])
         XCTAssertEqual(lines, [

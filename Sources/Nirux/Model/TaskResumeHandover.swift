@@ -42,7 +42,7 @@ enum TaskResumeHandover {
     }
 
     @MainActor static func prompt(
-        task: WorkspaceState, previous: AgentSessionRecord?, agent: NiruxApp.WorkspaceAgent, missions: [Mission], thread: [String]
+        task: WorkspaceState, previous: AgentSessionRecord?, agent: CodingAgent, missions: [Mission], thread: [String]
     ) -> String {
         var lines = ["Continue the existing Nirux task “\(MissionAnswerContext.clipped(task.title, 160))” in this checkout. Preserve work in progress."]
         lines += thread

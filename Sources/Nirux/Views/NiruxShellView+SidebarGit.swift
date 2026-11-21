@@ -59,9 +59,13 @@ extension NiruxShellView {
                 info.isLeadTerminal = col === leadTerminal
                 return info
             }
-            return sidebarWorkspaceInfo(
+            var info = sidebarWorkspaceInfo(
                 at: index, columns: colInfos, isActive: isActive, parentTitle: parents[index].map { workspaces[$0].title }
             )
+            if workspace.isLead {
+                info.leadLaunchIssue = leadLaunchIssue(in: workspace, foreground: leadTerminal.flatMap { foregroundProcesses[ObjectIdentifier($0)] }, snapshot: snapshot)
+            }
+            return info
         }
         tickHiddenSpaceAgents(
             visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses, processTableRead: processTableRead
@@ -193,12 +197,15 @@ extension NiruxShellView {
     /// A task's row, from its columns' facts.
     func sidebarWorkspaceInfo(at index: Int, columns: [ColumnInfo], isActive: Bool, parentTitle: String?) -> WorkspaceInfo {
         let workspace = workspaces[index]
+        if let wait = workspace.waitingStart, let start = wait.pendingStart, let state = wait.waitingState {
+            workspace.columns.first?.waitingTask?.configure(.init(state: state, repository: start.repository, description: start.description))
+        }
         return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
                       profileID: workspace.profileID, isInactive: workspace.isInactive,
                       columnCount: workspace.columns.count,
                       focusedColumn: workspace.focusedIndex,
                       gitBranch: workspace.gitBranch, notification: workspace.notification, isActive: isActive,
-                      columns: columns, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback?.sidebarCounts,
+                      columns: columns, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback?.counts,
                       ciFlakyReason: workspace.ciFlakyReason,
                       diffStats: workspace.diffStats,
                       purpose: workspace.purpose, nextStep: workspace.nextStep,
@@ -215,7 +222,8 @@ extension NiruxShellView {
                       turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil,
                       ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0,
                       dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil,
-                      followUp: followUpRow(of: workspace))
+                      followUp: followUpRow(of: workspace),
+                      heldMessages: SidebarHeldMessages(workspace.mergeWaits), waitingTask: workspace.waitingStart?.waitingState)
     }
 
     /// Every column's foreground process, shown or not, and what follows
@@ -241,7 +249,7 @@ extension NiruxShellView {
                 }
                 // A task's new folder is where an agent asks for trust; agy
                 // trusts exact paths, so a new worktree asks again.
-                if workspace.isFolderTask || foregroundProcess?.name == "agy" {
+                if workspace.isFolderTask || foregroundProcess?.agent?.folderTrust == .everyFolder {
                     watchTrustPrompt(of: column, foreground: foregroundProcess, now: now)
                 }
                 refreshStuckAgent(
@@ -479,7 +487,7 @@ extension NiruxShellView {
         // After this drain: a turn that ended may have freed a Mission
         // agent's prompt for a message waiting to be typed.
         // Codex's turn end too: it may prove the thread its OSC `done` came before.
-        if events.contains(where: { $0.event.kind != .agy && [.stop, .stopFailure, .turnComplete].contains($0.event.name) }) {
+        if events.contains(where: { $0.event.kind.statusSource == .hooks && [.stop, .stopFailure, .turnComplete].contains($0.event.name) }) {
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
     }
@@ -624,21 +632,23 @@ extension NiruxShellView {
     // MARK: - Git & PR Refresh
 
     /// The workspace on screen is followed closely even when archived (its
-    /// PR still is not: PRDetect.shouldRefresh keeps archived ones offline).
-    func gitRefreshTier(for workspace: WorkspaceState) -> GitRefreshTier {
+    /// PR still is not: PRDetect.shouldRefresh keeps archived ones offline),
+    /// and an archived one a merge wait follows as any other (`awaited`).
+    func gitRefreshTier(for workspace: WorkspaceState, awaited: Set<String>? = nil) -> GitRefreshTier {
         if workspace === activeWorkspace { return .focused }
-        if workspace.isInactive { return .archived }
+        if workspace.isInactive, !(awaited ?? awaitedWorkspaceIDs).contains(workspace.id) { return .archived }
         return .background
     }
 
     var gitRefreshTiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] {
-        workspaces.map { ($0, gitRefreshTier(for: $0)) }
+        let awaited = awaitedWorkspaceIDs
+        return workspaces.filter { !$0.isWaitingTask }.map { ($0, gitRefreshTier(for: $0, awaited: awaited)) }
     }
 
     func refreshGitAndPullRequests() {
         let tiers = gitRefreshTiers
         gitRefresh.tick(tiers)
-        refreshPRInfo(for: gitRefresh.pullRequestsDue(tiers))
+        refreshPRInfo(for: gitRefresh.pullRequestsDue(tiers, awaited: awaitedWorkspaceIDs))
         // After the PR pass, which recomputes diff stats for what it touched.
         refreshDiffStats(for: gitRefresh.diffStatsDue(tiers))
     }
@@ -646,6 +656,7 @@ extension NiruxShellView {
     /// Focus, a focused-column switch or an unarchive: read now instead of
     /// waiting for the throttles.
     func refreshGitContextNow(for workspace: WorkspaceState) {
+        guard !workspace.isWaitingTask else { return }
         gitRefresh.refreshNow(workspace, tier: gitRefreshTier(for: workspace))
     }
 
@@ -661,18 +672,18 @@ extension NiruxShellView {
     func refreshPRInfo(for candidates: [WorkspaceState]) {
         for workspace in candidates {
             guard PRDetect.shouldRefresh(
-                isInactive: workspace.isInactive,
+                isInactive: !followsPullRequest(workspace),
                 branch: workspace.gitBranch
             ), let requestedContext = workspace.gitContext else { continue }
             let branch = requestedContext.branch
             let cwd = workspace.focusedWorkingDirectory
             guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
             gitRefresh.notePullRequestRefresh(workspace)
-            startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext)
+            if !workspace.isInactive { startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext) }
             let readStartedAt = Date().timeIntervalSince1970
-            PRDetect.fetchAsync(branch: branch, cwd: cwd, startFolder: workspace.cwd) { [weak self, weak workspace] result in
+            fetchPullRequest(branch, cwd, workspace.cwd) { [weak self, weak workspace] result in
                 guard let workspace else { return }
-                guard !workspace.isInactive else {
+                guard self?.followsPullRequest(workspace) == true else {
                     workspace.finishPullRequestObservation(observation)
                     return
                 }
@@ -685,7 +696,7 @@ extension NiruxShellView {
                 let currentCwd = workspace.focusedWorkingDirectory
                 GitDetect.contextAsync(at: currentCwd, startFolder: workspace.cwd) { [weak self, weak workspace] result in
                     guard let workspace else { return }
-                    guard !workspace.isInactive,
+                    guard self?.followsPullRequest(workspace) == true,
                           case .observed(let currentContext) = result,
                           currentContext == queriedContext else {
                         workspace.finishPullRequestObservation(observation)
@@ -696,6 +707,12 @@ extension NiruxShellView {
                         for: queriedContext,
                         observation: observation
                     )
+                    self?.followMergeWaits(awaiting: workspace, read: info, now: readStartedAt)
+                    // An archived task is read for the waits on it only.
+                    guard !workspace.isInactive else {
+                        if changed { self?.scheduleMetadataRefresh() }
+                        return
+                    }
                     // Even unchanged: the history may have loaded since,
                     // and the first read after launch records what is
                     // already red.
@@ -742,18 +759,16 @@ extension NiruxShellView {
 
     // MARK: - Terminal Redraw
 
-    private static let shells: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
-    /// Recognized agents redraw correctly from SIGWINCH alone — Ctrl+L clears their session/screen.
-    /// Claude Code rebinds Ctrl+L to `/clear` and Gemini CLI's clears its history, so
-    /// broadcasting it on every layout change (e.g. Cmd+E width cycle)
-    /// wiped active sessions.
-    private static func redrawsFromSigwinchAlone(_ name: String) -> Bool {
-        AgentStatusMachine.isRecognizedAgentProcess(name)
+    /// Ctrl+L repaints a TUI in front (vim, htop). Not a shell, nor an
+    /// agent: it redraws from SIGWINCH alone, and Ctrl+L clears its
+    /// session (Claude Code rebinds it to `/clear`, Gemini CLI clears its
+    /// history), so a layout change (⌘E's width cycle) wiped active ones.
+    nonisolated static func repaintsWithCtrlL(_ processName: String) -> Bool {
+        !Shell.isShell(processName) && CodingAgent(rawValue: processName) == nil
     }
 
-    /// Heavy redraw: refresh every terminal surface and additionally send
-    /// Ctrl+L (0x0C) to any foreground process that isn't a plain shell or
-    /// a recognized agent (vim, htop, etc.) so TUI apps repaint their buffer.
+    /// Heavy redraw: refresh every terminal surface, and Ctrl+L to the
+    /// programs that need it to repaint their buffer.
     func redrawAllTerminals() {
         let snap = ProcessSnapshot()
         for workspace in workspaces {
@@ -761,11 +776,7 @@ extension NiruxShellView {
                 col.terminalView?.fitToSize()
                 col.pty?.forceRedraw()
                 col.terminalView?.needsDisplay = true
-                // Ctrl+L to any non-shell TUI (vim, htop, etc.)
-                // Skip processes that handle SIGWINCH correctly on their own.
-                if let name = col.pty?.foregroundProcessName(snapshot: snap),
-                   !Self.shells.contains(name),
-                   !Self.redrawsFromSigwinchAlone(name) {
+                if let name = col.pty?.foregroundProcessName(snapshot: snap), Self.repaintsWithCtrlL(name) {
                     col.pty?.sendRaw(Data([0x0C]))
                 }
             }

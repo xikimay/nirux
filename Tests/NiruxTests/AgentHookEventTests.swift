@@ -350,11 +350,10 @@ final class AgentHookEventTests: XCTestCase {
         let print = ForegroundProcess(instance: instance, name: "claude", arguments: ["claude", "--print"])
         let interactive = ForegroundProcess(instance: instance, name: "claude", arguments: ["claude", "--resume", "x"])
         let codex = ForegroundProcess(instance: instance, name: "codex", arguments: ["codex", "-p", "profile"])
-        XCTAssertTrue(AgentHookCenter.isHeadlessClaude(headless))
-        XCTAssertTrue(AgentHookCenter.isHeadlessClaude(print))
-        XCTAssertFalse(AgentHookCenter.isHeadlessClaude(interactive))
-        XCTAssertFalse(AgentHookCenter.isHeadlessClaude(codex))
-        XCTAssertFalse(AgentHookCenter.isHeadlessClaude(nil))
+        XCTAssertEqual(headless.headlessAgent, .claude)
+        XCTAssertEqual(print.headlessAgent, .claude)
+        XCTAssertEqual(interactive.interactiveAgent, .claude)
+        XCTAssertEqual(codex.interactiveAgent, .codex)
     }
 
     // MARK: - AgentText

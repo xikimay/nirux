@@ -162,21 +162,15 @@ extension NiruxShellView {
         var columns: [ReviewSendColumn] = []
         for workspace in workspaces where !workspace.isClosing {
             for (index, column) in workspace.columns.enumerated() where !column.isClosing {
-                guard let pty = column.pty, let name = pty.runningAgentName(snapshot: snapshot),
+                guard let pty = column.pty, let agent = pty.runningAgent(snapshot: snapshot),
                       let folder = pty.agentCwd(snapshot: snapshot),
                       MergeQueue.isInside(Self.comparablePath(folder), roots: roots, allWorktrees: others) else { continue }
                 let foreground = pty.foregroundProcess(snapshot: snapshot)
-                let inFront = foreground.map { AgentStatusMachine.isRecognizedAgentProcess($0.name) } == true
-                let refusal: ReviewSendRefusal? = if inFront {
-                    pty.reviewSendRefusal(snapshot: snapshot)
-                } else if let foreground, Self.interactiveShells.contains(foreground.name) {
-                    .notInFront
-                } else {
-                    .underLauncher(foreground?.name ?? "another program")
-                }
+                let inFront = foreground?.agent != nil
+                let refusal = inFront ? pty.reviewSendRefusal(snapshot: snapshot) : Self.reviewSendRefusal(behind: foreground)
                 columns.append(ReviewSendColumn(
                     workspaceID: workspace.id, columnID: column.id,
-                    label: "\(workspace.title) — \(name), column \(index + 1) · \((folder as NSString).abbreviatingWithTildeInPath)",
+                    label: "\(workspace.title) — \(agent.rawValue), column \(index + 1) · \((folder as NSString).abbreviatingWithTildeInPath)",
                     refusal: refusal,
                     hasDraft: pty.hasPromptDraft, process: inFront ? foreground?.instance : nil
                 ))
@@ -185,9 +179,13 @@ extension NiruxShellView {
         return columns
     }
 
-    /// Shells: one in front of an agent of its own runs it stopped or in
-    /// the background, not as a launcher.
-    static let interactiveShells: Set<String> = ["zsh", "bash", "sh", "fish", "dash", "ksh", "tcsh", "csh", "nu", "xonsh", "elvish"]
+    /// Why the comments can't go to an agent that isn't in front of its
+    /// terminal: a shell in front runs it stopped or in the background,
+    /// another program runs it as a launcher.
+    nonisolated static func reviewSendRefusal(behind foreground: ForegroundProcess?) -> ReviewSendRefusal {
+        guard let foreground else { return .underLauncher("another program") }
+        return Shell.isShell(foreground.name) ? .notInFront : .underLauncher(foreground.name)
+    }
 
     /// What the sheet says of `send` and the columns it could go to.
     static func reviewSendContent(

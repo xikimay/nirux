@@ -165,7 +165,7 @@ enum PRFollowUp {
     /// settles the last one, sets or clears `entry.stop`.
     static func next(_ entry: inout Entry, _ facts: Facts) -> Action {
         let pullRequest = facts.pullRequest
-        guard pullRequest.state.uppercased() == "OPEN", let head = pullRequest.headRefOid else { return .none }
+        guard pullRequest.state == .open, let head = pullRequest.headRefOid else { return .none }
         // The queue reruns checks and stops on its own; auto-merge would
         // merge a round's commit unseen.
         if facts.isInMergeQueue { return .wait("the merge queue holds it") }
@@ -318,7 +318,7 @@ enum PRFollowUp {
     }
 
     /// The red checks a commit can fix.
-    private static func fixableFailures(_ pullRequest: PRInfo) -> [ProjectBoard.Check] {
+    private static func fixableFailures(_ pullRequest: PRInfo) -> [GitHub.Check] {
         CIFailure.redChecks(pullRequest).filter { $0.conclusion.map(fixableConclusions.contains) ?? false }
     }
 

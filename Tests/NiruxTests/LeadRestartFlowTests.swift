@@ -19,13 +19,246 @@ final class LeadRestartFlowTests: XCTestCase {
         return try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
     }
 
-    private func reportFirstTurnEnded(in pty: PtySession, agentUUID: String) throws {
+    private func reportFirstTurnEnded(in pty: PtySession, agentUUID: String, sessionID: String = "fresh") throws {
         let process = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
         for event in [AgentHookEvent.Name.userPromptSubmit, .stop] {
             _ = pty.applyAgentHook(AgentHookEvent(
-                kind: .claude, name: event, agentUUID: agentUUID, sessionID: "fresh", emitterProcess: process,
+                kind: .claude, name: event, agentUUID: agentUUID, sessionID: sessionID, emitterProcess: process,
                 timestamp: Date().timeIntervalSince1970
             ), isUserFocused: false)
+        }
+    }
+
+    private func askLead(_ lead: UIFlowHarness.Lead) throws -> MissionEvent {
+        let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+            id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+            childWorkspaceID: UUID().uuidString, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+            branch: "feat/export", reportsToLead: true
+        ), enabled: true))
+        let question = MissionEvent(
+            id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID,
+            childAgentUUID: mission.childAgentUUID, kind: .question, message: "Which date format?",
+            timestamp: Date().timeIntervalSince1970
+        )
+        guard case .accepted = MissionStore.shared.process(question, enabled: false) else {
+            XCTFail("the Lead’s task could not ask its question")
+            return question
+        }
+        return question
+    }
+
+    private func clickLeadLine(_ text: String, in harness: UIFlowHarness) throws {
+        let sidebar = harness.shell.sidebar
+        let area = try XCTUnwrap(sidebar.hitAreas.first {
+            if case .link(_, let label) = $0.region { return label.stringValue == text }
+            return false
+        })
+        let location = sidebar.contentDocumentView.convert(NSPoint(x: area.frame.midX, y: area.frame.midY), to: nil)
+        let hit = try XCTUnwrap(harness.window.contentView?.superview?.hitTest(location))
+        hit.mouseDown(with: try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0
+        )))
+    }
+
+    func testRelaunchFromTheLeadRowResumesItsConversation() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.isSidebarExpanded = true
+            shell.sidebar.isExpanded = true
+            shell.relayout(animated: false)
+            let lead = try harness.makeLead()
+            let column = try XCTUnwrap(lead.workspace.leadTerminal)
+            let pty = try XCTUnwrap(column.pty)
+            let old = AgentStandIn(), resumed = AgentStandIn()
+            defer { old.remove(); resumed.remove() }
+            let settings = try XCTUnwrap(ClaudeSpaceSettings.fileURL(spaceID: lead.space))
+            let flags = NiruxMCPServer.claudeArguments(executable: "/test/Nirux") + ["--settings=" + settings.path]
+            let original = try run(old.command(arguments: flags), in: column, harness: harness)
+            shell.updateSidebar()
+            let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === lead.workspace })
+            @MainActor func menu() -> NSMenu { shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil) }
+            XCTAssertNil(shell.sidebar.lastInfos.first(where: \.isLead)?.leadLaunchIssue)
+            XCTAssertNil(menu().item(withTitle: "Relaunch with New Options…"))
+            shell.setClaudeSafety(.sandbox, on: true, spaceID: lead.space)
+            shell.updateSidebar()
+            XCTAssertEqual(shell.sidebar.lastInfos.first(where: \.isLead)?.leadLaunchIssue, .olderOptions)
+            let sessionID = UUID().uuidString
+            try clickLeadLine("Launched with older options · Relaunch", in: harness)
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            XCTAssertEqual(shell.toast?.message, "Claude hasn’t recorded a conversation to resume yet.")
+            let snapshot = ProcessSnapshot()
+            let process = try XCTUnwrap(pty.foregroundProcess(snapshot: snapshot))
+            let event = AgentHookEvent(kind: .claude, name: .userPromptSubmit, agentUUID: lead.agentUUID,
+                                       sessionID: sessionID, emitterProcess: original, timestamp: Date().timeIntervalSince1970)
+            _ = column.admitClaudeHook(event, foregroundProcess: process, snapshot: snapshot)
+            _ = pty.applyAgentHook(event, isUserFocused: false)
+            harness.perform(["Relaunch with New Options…"], in: menu())
+            XCTAssertEqual(harness.alerts.last, "Relaunch the Lead of “Tools”?")
+            XCTAssertTrue(harness.alertDetails.last?.contains("its turn stops") == true)
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            XCTAssertEqual(ProcessInstance.running(pid: original.pid), original)
+            shell.setClaudeSafety(.sandbox, on: false, spaceID: lead.space)
+            shell.updateSidebar()
+            XCTAssertNil(shell.sidebar.lastInfos.first(where: \.isLead)?.leadLaunchIssue)
+            shell.setClaudeSafety(.sandbox, on: true, spaceID: lead.space)
+            shell.changeSpaceDefaults(spaceID: lead.space) { $0.claudeLaunchMode = .manual }
+            shell.updateSidebar()
+            let question = try askLead(lead)
+            harness.restartedAgent = resumed.command(arguments: flags + ["--resume", sessionID, "--permission-mode", "default"],
+                                                     launchPrompt: NiruxShellView.leadRelaunchPrompt)
+            harness.alertResponses = [.alertSecondButtonReturn]
+            try clickLeadLine("Launched with older options · Relaunch", in: harness)
+            let command = try XCTUnwrap(harness.terminalRestarts.last)
+            for part in ["--resume " + NiruxShellView.shellQuotedArgument(sessionID), "--permission-mode default",
+                         "--settings=", NiruxShellView.shellQuotedArgument(NiruxShellView.leadRelaunchPrompt)] {
+                XCTAssertTrue(command.contains(part), command)
+            }
+            harness.waitUntil("the resumed Lead") {
+                pty.foregroundProcess(snapshot: ProcessSnapshot())?.arguments.last == NiruxShellView.leadRelaunchPrompt
+            }
+            XCTAssertNotEqual(ProcessInstance.running(pid: original.pid), original)
+            XCTAssertIdentical(column, lead.workspace.leadTerminal)
+            XCTAssertEqual(column.agentUUID, lead.agentUUID)
+            let relaunched = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+            XCTAssertTrue(lead.workspace.runsRestartedLead(relaunched))
+            shell.typeMissionMessages()
+            XCTAssertTrue(MissionStore.shared.pendingPromptDeliveries().contains { $0.event.id == question.id })
+            XCTAssertFalse(resumed.input.contains(question.message))
+            try reportFirstTurnEnded(in: pty, agentUUID: lead.agentUUID, sessionID: sessionID)
+            shell.typeMissionMessages()
+            harness.waitUntil("the Mission question in the resumed conversation") { resumed.input.contains(question.message) }
+            XCTAssertEqual(column.persistedClaudeRestore(foregroundProcess: relaunched), .resume(sessionID))
+            shell.updateSidebar()
+            XCTAssertNil(shell.sidebar.lastInfos.first(where: \.isLead)?.leadLaunchIssue)
+        }
+    }
+
+    func testRelaunchProtectsTheTranscriptAndReservesItAcrossTheHangup() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let column = try XCTUnwrap(lead.workspace.leadTerminal)
+            let pty = try XCTUnwrap(column.pty)
+            let old = AgentStandIn(), resumed = AgentStandIn()
+            defer { old.remove(); resumed.remove() }
+            let flags = NiruxMCPServer.claudeArguments(executable: "/test/Nirux")
+            let original = try run(old.command(arguments: flags), in: column, harness: harness)
+            let sessionID = UUID().uuidString
+            let transcript = URL(fileURLWithPath: harness.root).appendingPathComponent(sessionID + ".jsonl")
+            try Data().write(to: transcript)
+            let snapshot = ProcessSnapshot()
+            let event = AgentHookEvent(kind: .claude, name: .userPromptSubmit, agentUUID: lead.agentUUID,
+                                       sessionID: sessionID, emitterProcess: original, timestamp: Date().timeIntervalSince1970)
+            _ = column.admitClaudeHook(event, foregroundProcess: pty.foregroundProcess(snapshot: snapshot), snapshot: snapshot)
+            @MainActor func record(_ event: AgentHookEvent.Name) {
+                shell.sessionLedger.record(AgentSessionObservation(
+                    agent: .claude, sessionID: sessionID, event: event, source: nil, timestamp: Date().timeIntervalSince1970,
+                    agentProcess: original, name: nil, cwd: harness.repo, transcriptPath: transcript.path, checkout: nil,
+                    pullRequest: nil, workspaceID: lead.workspace.id, workspaceTitle: "Lead", agentUUID: lead.agentUUID, columnIndex: 0
+                ), spaceID: lead.space)
+            }
+            record(.userPromptSubmit)
+            record(.stop)
+            let knownPath = try XCTUnwrap(shell.sessionLedger.session(agent: .claude, sessionID: sessionID)?.transcriptPath)
+            XCTAssertEqual(knownPath, transcript.path)
+            @MainActor func relaunch() {
+                harness.alertResponses = [.alertSecondButtonReturn]
+                shell.requestLeadRecovery(.olderOptions, in: lead.workspace)
+            }
+            try FileManager.default.removeItem(at: transcript)
+            relaunch()
+            XCTAssertEqual(shell.toast?.message, SessionHistory.message(.transcriptGone, agent: .claude))
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            XCTAssertEqual(ProcessInstance.running(pid: original.pid), original)
+            try Data().write(to: transcript)
+
+            let key = AgentSessionRecord.key(agent: "claude", sessionID: sessionID)
+            shell.sessionResume.inFlight.insert(key)
+            relaunch()
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            XCTAssertEqual(ProcessInstance.running(pid: original.pid), original)
+            shell.sessionResume.inFlight.remove(key)
+            lead.workspace.addColumn(cwd: harness.repo)
+            let other = try XCTUnwrap(lead.workspace.columns.last)
+            @MainActor func holdInOtherColumn(_ id: String) {
+                shell.sessionResume.noteLaunch(of: id, in: other, now: ProcessInfo.processInfo.systemUptime)
+            }
+            holdInOtherColumn(sessionID)
+            relaunch()
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            XCTAssertEqual(ProcessInstance.running(pid: original.pid), original)
+            holdInOtherColumn(UUID().uuidString)
+            let restartTerminal = shell.sideEffects.restartTerminal
+            defer { shell.sideEffects.restartTerminal = restartTerminal }
+            shell.sideEffects.restartTerminal = { _, _, starts in
+                XCTAssertEqual(column.relaunchingLeadSessionID, sessionID)
+                XCTAssertFalse(starts(["claude"]))
+            }
+            relaunch()
+            XCTAssertNil(column.relaunchingLeadSessionID, "timeout releases the reservation")
+            shell.sideEffects.restartTerminal = { _, _, starts in
+                holdInOtherColumn(sessionID)
+                XCTAssertFalse(starts([]), "another holder appeared during the wait")
+            }
+            relaunch()
+            XCTAssertNil(column.relaunchingLeadSessionID)
+            holdInOtherColumn(UUID().uuidString)
+
+            let history = try XCTUnwrap(shell.sessionLedger.session(agent: .claude, sessionID: sessionID))
+            let columnCount = lead.workspace.columns.count
+            shell.sideEffects.restartTerminal = { target, _, starts in
+                target.restartTerminal(running: resumed.command(arguments: flags + ["--resume", sessionID])) { survivors in
+                    record(.sessionEnd)
+                    XCTAssertNotEqual(ProcessInstance.running(pid: original.pid), original)
+                    let holders = shell.agentSessionHolders(snapshot: ProcessSnapshot())
+                    XCTAssertEqual(HeldAgentSession.find(sessionID, in: holders)?.columnID, column.id)
+                    shell.resumeSession(history, spaceID: lead.space)
+                    XCTAssertFalse(shell.sessionResume.inFlight.contains(history.key))
+                    return starts(survivors)
+                }
+            }
+            relaunch()
+            harness.waitUntil("one resumed Claude in the Lead") {
+                pty.foregroundProcess(snapshot: ProcessSnapshot())?.arguments.last == sessionID
+            }
+            XCTAssertEqual(lead.workspace.columns.count, columnCount)
+            XCTAssertNil(column.relaunchingLeadSessionID)
+            let holders = shell.agentSessionHolders(snapshot: ProcessSnapshot()).filter { HeldAgentSession.find(sessionID, in: [$0]) != nil }
+            XCTAssertEqual(holders.map(\.columnID), [column.id])
+        }
+    }
+
+    func testStoppedAndUnmanagedLeadRowsStartFresh() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.isSidebarExpanded = true
+            shell.sidebar.isExpanded = true
+            shell.relayout(animated: false)
+            let lead = try harness.makeLead()
+            let column = try XCTUnwrap(lead.workspace.leadTerminal)
+            let pty = try XCTUnwrap(column.pty)
+            harness.waitUntil("the bare shell") { pty.foregroundProcess(snapshot: ProcessSnapshot()) != nil }
+            let manual = AgentStandIn(), fresh = AgentStandIn()
+            defer { manual.remove(); fresh.remove() }
+            harness.restartedAgent = manual.command(arguments: ["--mcp-config={}", "--permission-mode", "plan"])
+            shell.updateSidebar()
+            harness.alertResponses = [.alertSecondButtonReturn]
+            try clickLeadLine("Claude isn’t running · Restart Lead", in: harness)
+            harness.waitUntil("the unmanaged Claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            shell.updateSidebar()
+            XCTAssertEqual(shell.sidebar.lastInfos.first(where: \.isLead)?.leadLaunchIssue, .missingTools)
+            harness.restartedAgent = fresh.command(launchPrompt: NiruxShellView.leadRestartPrompt)
+            harness.alertResponses = [.alertSecondButtonReturn]
+            try clickLeadLine("Started without Nirux’s tools · Restart Lead", in: harness)
+            harness.waitUntil("the fresh conversation") {
+                pty.foregroundProcess(snapshot: ProcessSnapshot())?.arguments.last == NiruxShellView.leadRestartPrompt
+            }
+            XCTAssertEqual(harness.terminalRestarts.count, 2)
+            for command in harness.terminalRestarts {
+                XCTAssertFalse(command.contains("--resume"))
+                XCTAssertTrue(command.contains(NiruxShellView.shellQuotedArgument(NiruxShellView.leadRestartPrompt)))
+            }
         }
     }
 
@@ -55,17 +288,7 @@ final class LeadRestartFlowTests: XCTestCase {
             XCTAssertTrue(harness.alertDetails.last?.contains("launch mode (Manual)") == true, harness.alertDetails.last ?? "")
             XCTAssertEqual(harness.terminalRestarts, [], "cancelled")
 
-            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
-                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
-                childWorkspaceID: UUID().uuidString, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
-                branch: "feat/export", reportsToLead: true
-            ), enabled: true))
-            let question = MissionEvent(
-                id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID,
-                childAgentUUID: mission.childAgentUUID, kind: .question, message: "Which date format?",
-                timestamp: Date().timeIntervalSince1970
-            )
-            guard case .accepted = MissionStore.shared.process(question, enabled: false) else { return XCTFail("not asked") }
+            let question = try askLead(lead)
             let fresh = AgentStandIn()
             defer { fresh.remove() }
             harness.restartedAgent = record + fresh.command(launchPrompt: NiruxShellView.leadRestartPrompt)

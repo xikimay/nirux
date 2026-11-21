@@ -17,9 +17,9 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         _ = MissionStore.shared.ensureLoaded()
         let current = taskWorker(task, snapshot: snapshot)?.missionAgent(snapshot: snapshot)
-        let agents = NiruxApp.WorkspaceAgent.allCases.filter { $0 != current }
+        let agents = CodingAgent.launchable.filter { $0 != current }
         let picker = NSPopUpButton(frame: .zero, pullsDown: false)
-        picker.addItems(withTitles: agents.map { Mission.agentName(ofKind: $0.rawValue) ?? $0.rawValue })
+        picker.addItems(withTitles: agents.map(\.productName))
         picker.setAccessibilityLabel("CLI")
         let model = NSTextField()
         model.placeholderString = "Model ID (CLI default if blank)"
@@ -102,7 +102,10 @@ extension NiruxShellView {
                   pty.foregroundProcess(snapshot: latest)?.instance == foreground?.instance,
                   Self.existingDirectory(task.cwd) != nil else { return finish("The task changed before the switch. Try again.", true) }
             let prompt = TaskResumeHandover.prompt(task: task, previous: previous, agent: choice.agent, missions: store.missions, thread: context)
-            let launch = freshAgentCommand(choice.agent, in: task, column: column, launchDirectory: task.cwd, worktreeBranch: task.gitBranch)
+            guard let agentLaunch = Self.launch(of: choice.agent, resume: nil, in: task) else {
+                return finish("Choose a CLI Nirux can launch.", true)
+            }
+            let launch = freshAgentCommand(agentLaunch, in: task, column: column, launchDirectory: task.cwd, worktreeBranch: task.gitBranch)
             let command = choice.command([launch], prompt: prompt)
             sideEffects.restartTaskTerminal(column, command + " || exit 1", {
                 if let draft = pty.taskResumeDraft(foreground: foreground?.instance), draft != approvedDraft {

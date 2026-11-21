@@ -55,7 +55,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let worktreeIndex = try XCTUnwrap(shell.activeWorkspace.flatMap { active in
                 shell.workspaces.firstIndex { $0 === active }
             })
-            shell.workspaces[worktreeIndex].prInfo = Self.redPullRequest
+            shell.workspaces[worktreeIndex].prInfo = try Self.redPullRequest()
             let gone = harness.root + "/gone"
             try FileManager.default.createDirectory(atPath: gone, withIntermediateDirectories: true)
             shell.addWorkspace(title: "gone", cwd: gone)
@@ -255,7 +255,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             // Set and read in one run-loop turn: a git refresh can't clear it
             // in between.
             worktreeWorkspace.prInfo = PRInfo(
-                number: 7, state: "MERGED", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
+                number: 7, state: .merged, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
                 mergeable: nil, url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil
             )
             let merged = try menu(for: worktreeWorkspace)
@@ -519,13 +519,15 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
     }
 
     /// A pull request whose `test` job failed in a GitHub Actions run.
-    static let redPullRequest = PRDetect.pullRequestInfo(from: [
-        "number": 52, "state": "OPEN", "url": "https://github.com/acme/widgets/pull/52",
-        "statusCheckRollup": [[
-            "name": "test", "workflowName": "Tests", "status": "COMPLETED", "conclusion": "FAILURE",
-            "startedAt": "2026-10-02T10:00:00Z", "detailsUrl": "https://github.com/acme/widgets/actions/runs/7/job/11"
-        ]]
-    ])
+    static func redPullRequest() throws -> PRInfo {
+        try XCTUnwrap(PRDetect.pullRequestInfo(from: [
+            "number": 52, "state": "OPEN", "url": "https://github.com/acme/widgets/pull/52",
+            "statusCheckRollup": [[
+                "name": "test", "workflowName": "Tests", "status": "COMPLETED", "conclusion": "FAILURE",
+                "startedAt": "2026-10-02T10:00:00Z", "detailsUrl": "https://github.com/acme/widgets/actions/runs/7/job/11"
+            ]]
+        ]))
+    }
 
     /// Without an agent in the workspace, Why opens the failed check; a
     /// rerun asks first, and only a confirmed one reaches GitHub.
@@ -534,7 +536,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let shell = harness.shell
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace })
-            workspace.prInfo = Self.redPullRequest
+            workspace.prInfo = try Self.redPullRequest()
             shell.updateSidebar()
 
             harness.perform(["Ask Agent Why CI Failed"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil))

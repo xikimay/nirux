@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class TaskResumeFlowTests: XCTestCase {
     func testModelChoiceAndCLIArguments() throws {
-        for agent in NiruxApp.WorkspaceAgent.allCases {
+        for agent in CodingAgent.launchable {
             let omitted = try TaskAgentChoice.parse(["agent": agent.rawValue]).get()
             let blank = try TaskAgentChoice.parse(["agent": agent.rawValue, "model": " "]).get()
             XCTAssertEqual(omitted, blank)
@@ -185,7 +185,7 @@ final class TaskResumeFlowTests: XCTestCase {
             pty.sendShellLaunchCommand("(\(old.command()))")
             harness.waitUntil("old Claude worker") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
             let original = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
-            let pullRequest = SidebarPanelFlowTests.redPullRequest
+            let pullRequest = try SidebarPanelFlowTests.redPullRequest()
             task.prInfo = pullRequest
             let previousID = UUID().uuidString
             shell.sessionLedger.record(AgentSessionObservation(

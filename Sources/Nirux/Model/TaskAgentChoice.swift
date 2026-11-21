@@ -1,7 +1,7 @@
 import Foundation
 
 struct TaskAgentChoice: Equatable {
-    let agent: NiruxApp.WorkspaceAgent
+    let agent: CodingAgent
     let model: String?
 
     @MainActor func command(_ launch: [String], prompt: String?) -> String {
@@ -26,7 +26,7 @@ struct TaskAgentChoice: Equatable {
     }
 
     static func parse(_ arguments: [String: Any]) -> Result<Self, Problem> {
-        guard let name = arguments["agent"] as? String, let agent = NiruxApp.WorkspaceAgent(rawValue: name)
+        guard let name = arguments["agent"] as? String, let agent = CodingAgent(launchable: name)
         else { return .failure(.agent) }
         guard let raw = arguments["model"] else { return .success(Self(agent: agent, model: nil)) }
         guard let text = raw as? String, text.rangeOfCharacter(from: .controlCharacters) == nil else { return .failure(.model) }

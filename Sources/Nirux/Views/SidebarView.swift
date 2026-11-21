@@ -750,7 +750,10 @@ final class SidebarView: NSView {
             lastButtonActionAt = event.timestamp
             onCatchUpAction?(action)
         case .link(let url, let label):
-            if let target = Self.missionQuestionTarget(url) {
+            if let issue = LeadLaunchIssue.allCases.first(where: { url.hasPrefix(Self.leadRecoveryURL($0, workspaceID: "")) }) {
+                let id = String(url.dropFirst(Self.leadRecoveryURL(issue, workspaceID: "").count))
+                if let index = currentIndex(ofWorkspace: id) { onWorkspaceAction?(.recoverLead(issue), index) }
+            } else if let target = Self.missionQuestionTarget(url) {
                 onMissionQuestionClicked?(target.workspaceIndex, target.columnIndex, label)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.diffActionPrefix) {
                 onDiffStatsClicked?(workspaceIndex)
@@ -834,6 +837,11 @@ final class SidebarView: NSView {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
+        if let waiting = workspace?.waitingTask {
+            menu.addClosureItem(title: "Start Now") { act(.startWaitingTask) }.isEnabled = waiting != .starting
+            menu.addClosureItem(title: "Close Workspace") { act(.close) }.isEnabled = waiting != .starting
+            return menu
+        }
         if let columnIndex {
             // The column too, by id: one closing meanwhile shifts the others.
             let columnInfo = workspace?.columns.first { $0.index == columnIndex }
@@ -894,6 +902,9 @@ final class SidebarView: NSView {
         menu.addItem(.separator())
         if cleanup == .available { addWorktreeCleanupItem(to: menu, act: act) }
         if workspace?.isLead == true {
+            if workspace?.leadLaunchIssue == .olderOptions {
+                menu.addClosureItem(title: "Relaunch with New Options…") { act(.recoverLead(.olderOptions)) }
+            }
             menu.addClosureItem(title: NiruxShellView.restartLeadTitle) { act(.restartLead) }
             menu.addClosureItem(title: Self.turnOffLeadTitle) { act(.turnOffLead) }
         } else {
@@ -1013,6 +1024,10 @@ final class SidebarView: NSView {
         label.attributedStringValue = attr
         hoveredLabel = nil
         NSCursor.arrow.set()
+    }
+
+    static func leadRecoveryURL(_ issue: LeadLaunchIssue, workspaceID: String) -> String {
+        "action:lead-\(issue.rawValue):\(workspaceID)"
     }
 
     private static let diffActionPrefix = "action:diff:"

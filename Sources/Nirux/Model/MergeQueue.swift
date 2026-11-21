@@ -81,17 +81,11 @@ extension MergeQueue {
             case .rerunning: return "rerunning the failed checks of \(pr)"
             case .merging: return "merging \(pr)"
             case .waitingForPostMerge:
-                return "waiting for the \(MergeQueue.workflowLabel(workflow)) of \(pr)"
+                return "waiting for the \(GitHub.workflowLabel(workflow)) of \(pr)"
             case .done: return "\(pr) merged"
             case .stopped(let reason): return "\(pr) stopped: \(reason.message)"
             }
         }
-    }
-
-    /// "nightly" for `nightly.yml`.
-    static func workflowLabel(_ workflow: String?) -> String {
-        guard let workflow else { return "post-merge workflow" }
-        return (workflow as NSString).deletingPathExtension
     }
 }
 
@@ -145,13 +139,22 @@ extension MergeQueue {
 
         let kind: Kind
         let message: String
+        private let checksTimedOut: Bool?
+
+        var isChecksTimeout: Bool {
+            // Queues saved before the timeout flag carry only the diagnostic.
+            guard kind == .checks else { return false }
+            return checksTimedOut ?? (message.hasPrefix("After ") && message.contains("minutes, required checks are still missing or running on "))
+        }
+
         /// A page that shows the problem: two heads compared, a run.
         var url: String?
 
         /// A token that a gh error echoes never reaches the saved queue.
-        init(kind: Kind, message: String, url: String? = nil) {
+        init(kind: Kind, message: String, url: String? = nil, checksTimedOut: Bool? = nil) {
             self.kind = kind
             self.message = MergeQueue.redacted(message)
+            self.checksTimedOut = checksTimedOut
             self.url = url
         }
     }
@@ -206,14 +209,15 @@ extension MergeQueue {
         /// Nil: GitHub doesn't know one of the commits (404).
         case comparison(Comparison?)
         case commit(CommitInfo)
-        case runs([Run])
+        case runs([GitHub.WorkflowRun])
         case local(LocalState)
     }
 
     /// Why a batch of reads failed.
     enum ReadFailure: Error, Equatable, Sendable {
         case ghMissing
-        case notSignedIn(String)
+        /// What gh said, unless it only asked for `gh auth login`.
+        case notSignedIn(String?)
         /// The primary rate limit: reads resume at this time (`systemUptime`).
         case rateLimited(resumeAt: TimeInterval)
         case secondaryRateLimit
@@ -289,8 +293,7 @@ extension MergeQueue {
 extension MergeQueue {
     struct PullRequestSnapshot: Equatable, Sendable {
         let number: Int
-        /// OPEN, MERGED or CLOSED.
-        let state: String
+        let state: GitHub.PullRequestState
         let isDraft: Bool
         let headRefName: String
         let headOid: String
@@ -305,7 +308,7 @@ extension MergeQueue {
         let mergeCommitParents: [String]
         let url: String
 
-        var isOpen: Bool { state == "OPEN" }
+        var isOpen: Bool { state == .open }
     }
 
     /// What the confirmation sheet shows of a pull request beyond its
@@ -368,27 +371,6 @@ extension MergeQueue {
         /// a GitHub account's.
         let committerLogin: String?
         let parents: [String]
-    }
-
-    /// A run of the post-merge workflow.
-    struct Run: Equatable, Sendable {
-        let id: Int
-        /// `completed`, `in_progress`, `queued`, `waiting`…
-        let status: String
-        /// `success`, `failure`, `cancelled`… once completed.
-        let conclusion: String?
-        let headSha: String
-        /// `push`, `workflow_dispatch`…
-        let event: String
-        /// 1, then 2… for each rerun of the same run.
-        var attempt = 1
-        /// The commit's first line, for a push.
-        let title: String?
-        let url: String?
-
-        var isCompleted: Bool { status == "completed" }
-        /// A rerun is the same run, but not the same result.
-        var attemptKey: String { "\(id)#\(attempt)" }
     }
 
     struct RateLimit: Equatable, Sendable {
