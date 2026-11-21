@@ -6,19 +6,7 @@ import XCTest
 /// read (docs/design/board-stages.md, sections 5 and 6): a real shell, git
 /// for real in temporary repositories, a fake `gh` (`ProjectBoardFlowTests`).
 /// The content is asked for directly, beside what the column shows.
-final class BoardStagesContentFlowTests: XCTestCase {
-    private var root: String!
-
-    override func setUpWithError() throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-board-stages-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        root = try XCTUnwrap(base.path.realPath)
-    }
-
-    override func tearDown() {
-        if let root { try? FileManager.default.removeItem(atPath: root) }
-        super.tearDown()
-    }
+final class BoardStagesContentFlowTests: BoardRepositoryTestCase {
 
     private static let pullRequests = """
     [
@@ -51,13 +39,13 @@ final class BoardStagesContentFlowTests: XCTestCase {
         )
         try withShell(client: client) { shell, space in
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             let login = root + "/widgets.feat-login", scratch = root + "/widgets.scratch", notes = root + "/widgets.lead-notes"
             try git(["worktree", "add", "-q", "-b", "feat/login", login], at: repo)
             try git(["worktree", "add", "-q", "-b", "scratch", scratch], at: repo)
             try git(["worktree", "add", "-q", "-b", "lead/notes", notes], at: repo)
             let gadgets = root + "/gadgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: gadgets, remote: "https://github.com/acme/gadgets.git")
+            try makeRepository(at: gadgets, remote: "https://github.com/acme/gadgets.git")
             let folder = root + "/release-notes"
             try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
             // Saved with its own capitals: the section is named as saved.
@@ -171,7 +159,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
         )
         try withShell(client: client) { shell, space in
             let repo = root + "/widgets", login = root + "/widgets.feat-login"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             try git(["worktree", "add", "-q", "-b", "feat/login", login], at: repo)
             try writeConfig(for: space)
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
@@ -254,7 +242,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
         )
         try withShell(client: client) { shell, space in
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             try writeConfig(for: space)
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "widgets" }))
@@ -303,7 +291,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // Another space, its repository anchored but not saved in Board Settings: read from its remote, read-only.
             let other = shell.workspaceStore.createProfile(named: "Gadgets")
             let gadgets = root + "/gadgets-app"
-            try BoardConfigSuggestionsTests.makeRepository(at: gadgets, remote: "https://github.com/acme/gadgets.git")
+            try makeRepository(at: gadgets, remote: "https://github.com/acme/gadgets.git")
             var anchor = try XCTUnwrap(FolderIdentity.identify(gadgets, timeout: 10)).anchor
             anchor.isDefault = true
             XCTAssertTrue(shell.workspaceStore.setAnchors([anchor], forProfile: other.id))
@@ -321,7 +309,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // A third space whose board.json a newer Nirux saved: read-only, why under the pointer, no Board Settings… to offer.
             let locked = shell.workspaceStore.createProfile(named: "Locked")
             let tools = root + "/tools-app"
-            try BoardConfigSuggestionsTests.makeRepository(at: tools, remote: "https://github.com/acme/tools.git")
+            try makeRepository(at: tools, remote: "https://github.com/acme/tools.git")
             var toolsAnchor = try XCTUnwrap(FolderIdentity.identify(tools, timeout: 10)).anchor
             toolsAnchor.isDefault = true
             XCTAssertTrue(shell.workspaceStore.setAnchors([toolsAnchor], forProfile: locked.id))
@@ -332,8 +320,8 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // No remote of the space's is read for a read-only file: another repository's workspace has its section all
             // the same, and a second clone of its own repository none (under Other workspaces: its section reads nothing).
             let outside = root + "/outside-app", toolsCopy = root + "/tools-copy"
-            try BoardConfigSuggestionsTests.makeRepository(at: outside, remote: "https://github.com/acme/outside.git")
-            try BoardConfigSuggestionsTests.makeRepository(at: toolsCopy, remote: "git@github.com:acme/tools.git")
+            try makeRepository(at: outside, remote: "https://github.com/acme/outside.git")
+            try makeRepository(at: toolsCopy, remote: "git@github.com:acme/tools.git")
             shell.addWorkspace(title: "outside", cwd: outside, profileID: locked.id)
             shell.addWorkspace(title: "tools copy", cwd: toolsCopy, profileID: locked.id)
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "tool" }))
@@ -352,7 +340,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // repository's workspace has its section all the same.
             let folderSpace = shell.workspaceStore.createProfile(named: "Folder")
             let docs = root + "/docs-app"
-            try BoardConfigSuggestionsTests.makeRepository(at: docs, remote: "https://github.com/acme/docs.git")
+            try makeRepository(at: docs, remote: "https://github.com/acme/docs.git")
             var docsAnchor = try XCTUnwrap(FolderIdentity.identify(docs, timeout: 10)).anchor
             docsAnchor.isDefault = true
             XCTAssertTrue(shell.workspaceStore.setAnchors([docsAnchor], forProfile: folderSpace.id))
@@ -381,7 +369,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // A fourth whose board.json names no valid GitHub repository: its settings are there, but invalid.
             let invalid = shell.workspaceStore.createProfile(named: "Invalid")
             let site = root + "/site-app"
-            try BoardConfigSuggestionsTests.makeRepository(at: site, remote: "https://github.com/acme/site.git")
+            try makeRepository(at: site, remote: "https://github.com/acme/site.git")
             var siteAnchor = try XCTUnwrap(FolderIdentity.identify(site, timeout: 10)).anchor
             siteAnchor.isDefault = true
             XCTAssertTrue(shell.workspaceStore.setAnchors([siteAnchor], forProfile: invalid.id))
