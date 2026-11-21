@@ -11,6 +11,7 @@ struct ColumnInfo: Hashable {
     let agentStatus: AgentStatus
     let isEditor: Bool
     let editorFileName: String?
+    var isPlanning = false
     var isProjectBoard = false
     var isBranchReview = false
     /// Active editor tab has unsaved changes — rendered as a dirty dot
@@ -76,6 +77,7 @@ struct ColumnInfo: Hashable {
             && lhs.agentStatus == rhs.agentStatus
             && lhs.isEditor == rhs.isEditor
             && lhs.editorFileName == rhs.editorFileName
+            && lhs.isPlanning == rhs.isPlanning
             && lhs.isProjectBoard == rhs.isProjectBoard
             && lhs.isBranchReview == rhs.isBranchReview
             && lhs.editorIsDirty == rhs.editorIsDirty
@@ -103,6 +105,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(agentStatus)
         hasher.combine(isEditor)
         hasher.combine(editorFileName)
+        hasher.combine(isPlanning)
         hasher.combine(isProjectBoard)
         hasher.combine(isBranchReview)
         hasher.combine(editorIsDirty)
@@ -315,7 +318,15 @@ struct WorkspaceInfo: Hashable {
     var reviewBadges: ReviewBadges? = nil
     /// Its task's Board station (`NiruxShellView.taskStations`): its
     /// icon's ring fills up to it.
-    var station: BoardStages.Station?
+    var boardProgress: SidebarBoardProgress?
+    var currentBoardProgress: SidebarBoardProgress? {
+        guard let boardProgress, let prInfo else { return boardProgress }
+        guard boardProgress.number == prInfo.number, prInfo.state != .closed else { return nil }
+        if (boardProgress.mergeStep == .merged) != (prInfo.state == .merged) { return nil }
+        if boardProgress.mergeStep == .ready, prInfo.blocksMerge(hasFeedback: prFeedback != nil) { return nil }
+        return boardProgress
+    }
+    var station: BoardStages.Station? { currentBoardProgress?.station }
     /// What the card shows after "#N merged"; nil shows nothing.
     var mergedCleanup: MergedCleanupOffer?
     /// The space's Lead: first, never moved, dragged or parked.
@@ -335,6 +346,9 @@ struct WorkspaceInfo: Hashable {
     var dailyPassNote: String?
     /// Its pull request's automatic follow-up, when the row says it.
     var followUp: SidebarFollowUp?
+    /// The Lead's messages it holds until other tasks' pull requests merge.
+    var heldMessages: SidebarHeldMessages?
+    var waitingTask: WaitingTaskView.Facts.State?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
@@ -463,6 +477,7 @@ enum WorktreeCleanupMenuOffer {
 }
 
 enum WorkspaceSidebarAction {
+    case startWaitingTask
     case moveUp, moveDown, markActive, markInactive
     case close, rename, editContext, reviewBranch, newSubtask, moveOutOfParent
     case closeColumn(columnIndex: Int)

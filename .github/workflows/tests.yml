@@ -45,8 +45,7 @@ jobs:
 
       # The dependencies' clones and binaries (GhosttyKit's download sometimes
       # fails to connect), per toolchain: a new runner image's SwiftPM starts
-      # afresh. A pull request reads the cache the nightly saves on main;
-      # build products aren't cached (a stale one once crashed tests).
+      # afresh. A pull request reads the cache the nightly saves on main.
       - name: Toolchain
         id: toolchain
         run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
@@ -60,8 +59,27 @@ jobs:
             .build/workspace-state.json
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
+      # The dependencies' build products, which the nightly saves on main for
+      # this toolchain and Package.resolved, so they don't compile again
+      # (45 s of the build). This package's modules aren't in it and always
+      # build from scratch: a stale object of ours once crashed tests. A
+      # dependency left out here only builds, it can't go stale.
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/arm64-apple-macosx/debug/GhosttyKit.build
+            .build/arm64-apple-macosx/debug/DisplayLink.build
+            .build/arm64-apple-macosx/debug/GhosttyTerminal.build
+            .build/arm64-apple-macosx/debug/Modules/GhosttyKit.*
+            .build/arm64-apple-macosx/debug/Modules/DisplayLink.*
+            .build/arm64-apple-macosx/debug/Modules/GhosttyTerminal.*
+          key: deps-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+
       - name: Build
         run: swift build --build-tests
 
       - name: Run tests
+        # A warning past it, not a failure: runners vary up to 4x.
+        env:
+          NIRUX_TESTS_BUDGET: 500
         run: scripts/run-tests.sh

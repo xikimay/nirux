@@ -593,6 +593,17 @@ the text stays flat and sharp.
   own glass (26 and later, which refracts what passes under it; the rim of
   14 and 15 would show the cards plainly), above Opaque, while the
   interface may move.
+- **Under the bar (study P6, second part):** the command bar is an island
+  of the same glass over the work. While floors play (a workspace switch,
+  0.44 s), what moves passes under it: the viewport reaches up under the
+  title band (its frame alone; what it holds lays out from its bottom),
+  and a frost like the window's (`TitleBandCover`: its blur and tint)
+  covers the band but for the bar's capsule, so only the bar shows the
+  floor that steps back, through its glass. Every other row turns clear
+  meanwhile, so that nothing but the floors shows. It ends with the floors,
+  on their deadline after the commit, and at once where the bar stops
+  floating or movement turns off. At rest nothing lies under it. No
+  reflection is drawn: macOS's glass draws its own.
 
 ## Plan
 

@@ -23,6 +23,9 @@ final class NiruxShellView: NSView {
     var underGlassGeneration = 0
     /// The workspace whose cards pass under the rail, until its edge closes.
     weak var passingUnderRail: WorkspaceState?
+    /// Over the title band while floors play, but for the command bar
+    /// (NiruxShellView+UnderBar).
+    var titleBandCover: TitleBandCover?
     /// Counts space crossings: a crossing's end acts only on its own, and
     /// its pictures over the viewport (NiruxShellView+SpaceCrossing).
     var spaceCrossingGeneration = 0
@@ -109,7 +112,8 @@ final class NiruxShellView: NSView {
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
     /// Event-driven git/PR refresh scheduling (FSEvents + throttles).
-    let gitRefresh = GitRefreshCoordinator()
+    /// Tests give it a clock of their own.
+    var gitRefresh = GitRefreshCoordinator()
     /// See scheduleMetadataRefresh(): one process-table scan per window.
     var isMetadataRefreshScheduled = false
     /// Restored agents on screen resume after a wait (see
@@ -166,6 +170,15 @@ final class NiruxShellView: NSView {
     var pendingLeadNotices: [LeadNotice] = []
     /// Mission messages that wait too long for a prompt (`waitingMissionMessages`).
     var missionWaits = MissionWaitState()
+    /// What merge waits looked up (NiruxShellView+MergeWaits).
+    var mergeWaitTracking = MergeWaitTracking()
+    /// How a merge wait asks GitHub about a pull request; tests answer for it.
+    var taskWorktreesBeingCreated = Set<String>()
+    var mergeWaitLookUp: @Sendable (String) -> Result<MergeWait.LookedUp?, MergeWait.LookUpFailure> = MergeWait.lookUp
+    /// How a workspace's pull request is read; tests answer for it.
+    var fetchPullRequest: @MainActor (
+        _ branch: String, _ cwd: String, _ startFolder: String?, _ done: @escaping @MainActor @Sendable (PRDetect.FetchResult) -> Void
+    ) -> Void = { PRDetect.fetchAsync(branch: $0, cwd: $1, startFolder: $2, completion: $3) }
     /// A Lead's tasks waiting to be proposed in the New sheet, one sheet at
     /// a time, and the timer that shows the next once no sheet is up.
     var pendingLeadProposals: [LeadProposal] = []
@@ -244,7 +257,7 @@ final class NiruxShellView: NSView {
     var boardSettingsPanel: BoardSettingsPanel?
     /// Each task's station by workspace id: its line's on its space's Board
     /// (`noteTaskStations`), drawn or not. No Board, none.
-    var taskStations: [String: BoardStages.Station] = [:]
+    var taskStations: [String: SidebarBoardProgress] = [:]
     /// The Board tab reading board.json and the checkouts: one read at a
     /// time.
     var isReadingBoardSettings = false
@@ -462,8 +475,10 @@ final class NiruxShellView: NSView {
                 self.heartbeatTick &+= 1
                 // Git and PR reads are event-driven; the tick only starts
                 // the ones that are due (see GitRefreshPolicy).
+                let now = Date().timeIntervalSince1970
                 self.refreshGitAndPullRequests()
-                self.checkMissionWaits(snapshot: snapshot, now: Date().timeIntervalSince1970)
+                self.sweepMergeWaits(now: now)
+                self.checkMissionWaits(snapshot: snapshot, now: now)
                 self.refreshMetadata(snapshot: snapshot)
                 // Save state every ~10s (every 5th tick)
                 if self.heartbeatTick % 5 == 0 {
@@ -487,6 +502,9 @@ final class NiruxShellView: NSView {
     /// sidebar refresh, terminal link opening. Used by init, addWorkspace
     /// and session restore.
     func wireWorkspace(_ workspace: WorkspaceState) {
+        workspace.columns.first?.waitingTask?.onStart = { [weak self, weak workspace] in
+            if let workspace { self?.startWaitingTask(workspace) }
+        }
         wireMetadataAndGitRefresh(workspace)
         workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url in
             self?.openWebView(url: url, in: targetWorkspace)
@@ -756,7 +774,7 @@ extension NiruxShellView {
     // MARK: - Columns
 
     func addColumn() {
-        guard let ws = activeWorkspace else { return }
+        guard let ws = activeWorkspace, !ws.isWaitingTask else { return }
         ws.addColumn()
         // The strip glides to its new place, a centred one aside; the new
         // column comes in at its own.

@@ -448,6 +448,7 @@ final class MergeQueueEngineTests: XCTestCase {
         var queue = started(world)
         queue.run(world)
         let message = queue.stopReason?.message ?? ""
+        XCTAssertEqual(queue.stopReason?.isChecksTimeout, true)
         XCTAssertTrue(message.contains("test (queued)"), message)
         XCTAssertTrue(message.contains("raise the checks timeout"), message)
         XCTAssertFalse(message.contains("misspelled"), message)

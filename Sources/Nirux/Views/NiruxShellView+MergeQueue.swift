@@ -185,6 +185,7 @@ extension NiruxShellView {
         } else {
             shown = nil
         }
+        if state.run == .ended { state.stoppedAt = controller.saved?.savedAt }
         if let shown {
             state.workflow = shown.workflow
             state.entries = shown.entries

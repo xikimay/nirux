@@ -250,6 +250,7 @@ final class MissionStore {
         case available
         case unavailable
     }
+    var hasLoadedLedger: Bool { ledgerState == .available }
     private var ledgerState: LedgerState
 
     nonisolated static var defaultFileURL: URL {

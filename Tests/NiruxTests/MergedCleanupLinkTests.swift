@@ -27,7 +27,8 @@ final class MergedCleanupLinkTests: XCTestCase {
             mainCheckout.prInfo = pullRequest(state: .merged)
             shell.updateSidebar()
             XCTAssertEqual(cleanupTexts(in: shell.sidebar), [], "merged, but in the main checkout")
-            XCTAssertEqual(texts(in: shell.sidebar).filter { $0.hasSuffix("#7") }.count, 2, "both cards show the PR")
+            let steps = shell.sidebar.expandedViews.compactMap { ($0 as? SidebarBadgeView)?.accessibilityLabel() }
+            XCTAssertEqual(steps.filter { $0 == "Merged #7" }.count, 2, "both cards show the merged PR")
 
             shell.focusColumnByIndex(0)
             waitForGitContext(of: worktreeWorkspace, at: harness.worktree, shell: shell, harness: harness)

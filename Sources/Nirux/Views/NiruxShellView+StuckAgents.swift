@@ -94,6 +94,9 @@ extension NiruxShellView {
         noteMissionQuestionHandOffs(missionQuestions(foreground: { $0.pty?.foregroundProcess(snapshot: snapshot) }, now: now))
         // The log, and one more try, away too.
         checkMissionWaits(snapshot: snapshot, now: now)
+        // A merge a message waits for, away too.
+        refreshAwaitedPullRequests()
+        sweepMergeWaits(now: now)
     }
 
     /// What the column's row shows of a stuck agent.
