@@ -98,15 +98,16 @@ final class GitRefreshTests: XCTestCase {
     // MARK: - PullRequestRefreshPolicy
 
     func testPullRequestCadenceTracksPendingChecksAndTier() {
-        let pending = makePullRequest(state: "OPEN", ciStatus: "PENDING")
-        let settled = makePullRequest(state: "OPEN", ciStatus: "SUCCESS")
-        let merged = makePullRequest(state: "MERGED", ciStatus: "PENDING")
+        let pending = makePullRequest(state: .open, ciStatus: "PENDING")
+        let settled = makePullRequest(state: .open, ciStatus: "SUCCESS")
+        let merged = makePullRequest(state: .merged, ciStatus: "PENDING")
         XCTAssertEqual(PullRequestRefreshPolicy.interval(for: .focused, pullRequest: pending), 30)
         XCTAssertEqual(PullRequestRefreshPolicy.interval(for: .focused, pullRequest: settled), 120)
         XCTAssertEqual(PullRequestRefreshPolicy.interval(for: .focused, pullRequest: nil), 120)
         XCTAssertEqual(PullRequestRefreshPolicy.interval(for: .focused, pullRequest: merged), 120)
         XCTAssertEqual(PullRequestRefreshPolicy.interval(for: .background, pullRequest: pending), 120)
         XCTAssertEqual(PullRequestRefreshPolicy.interval(for: .background, pullRequest: settled), 600)
+        XCTAssertEqual(PullRequestRefreshPolicy.interval(for: .background, pullRequest: settled, awaited: true), 120)
         XCTAssertNil(PullRequestRefreshPolicy.interval(for: .archived, pullRequest: pending))
 
         XCTAssertTrue(PullRequestRefreshPolicy.isDue(tier: .background, pullRequest: nil, lastRefresh: nil, now: 0))
@@ -120,7 +121,7 @@ final class GitRefreshTests: XCTestCase {
             PRDetect.pullRequestInfo(from: [
                 "number": 1, "state": "OPEN", "url": "https://example.test/pull/1",
                 "statusCheckRollup": rollup
-            ]).ciStatus
+            ])?.ciStatus
         }
         let passed: [String: Any] = ["status": "COMPLETED", "conclusion": "SUCCESS"]
         XCTAssertEqual(ciStatus([passed, ["status": "IN_PROGRESS", "conclusion": ""]]), "PENDING")
@@ -358,6 +359,30 @@ final class GitRefreshTests: XCTestCase {
         XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers).map(\.title), ["focused", "background"])
     }
 
+    /// A merge wait follows its task's pull request at the hot cadence,
+    /// archived or not (its tier is then the background's).
+    func testAwaitedPullRequestsAreReadClosely() {
+        let harness = CoordinatorHarness()
+        let background = WorkspaceState(title: "background", cwd: NSTemporaryDirectory())
+        let archived = WorkspaceState(title: "archived", cwd: NSTemporaryDirectory())
+        archived.isInactive = true
+        for workspace in [background, archived] {
+            workspace.updateGitContext(GitContext(
+                branch: "feature/\(workspace.title)",
+                identity: GitIdentity(repositoryRoot: "/repo/\(workspace.title)", head: "abc")
+            ))
+        }
+        let tiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] = [(background, .background), (archived, .background)]
+        let awaited: Set<String> = [background.id, archived.id]
+        XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers).map(\.title), ["background"])
+        XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers, awaited: awaited).map(\.title), ["background", "archived"])
+        harness.coordinator.notePullRequestRefresh(background)
+        harness.coordinator.notePullRequestRefresh(archived)
+        harness.advance(120)
+        XCTAssertTrue(harness.coordinator.pullRequestsDue(tiers).isEmpty)
+        XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers, awaited: awaited).map(\.title), ["background", "archived"])
+    }
+
     func testPushFollowsThePullRequestClosely() {
         let harness = CoordinatorHarness()
         let focused = makeWorkspace("focused")
@@ -432,7 +457,7 @@ final class GitRefreshTests: XCTestCase {
         }
     }
 
-    private func makePullRequest(state: String, ciStatus: String?) -> PRInfo {
+    private func makePullRequest(state: GitHub.PullRequestState, ciStatus: String?) -> PRInfo {
         PRInfo(
             number: 1,
             state: state,

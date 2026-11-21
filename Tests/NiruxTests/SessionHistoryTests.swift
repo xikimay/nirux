@@ -48,6 +48,16 @@ final class SessionHistoryTests: XCTestCase {
         XCTAssertEqual(SessionHistory.subtitle(of: record(name: "x", branch: "HEAD"), now: 1000) { $0 }, "just now · /repos/app.feat-x")
     }
 
+    /// The merged pull request's label is drawn as done, whatever case the
+    /// record spells its state in.
+    func testAMergedPullRequestReadsAsDoneInAnyCase() {
+        let pullRequest = { AgentSessionRecord.PullRequest(number: 112, url: "https://github.com/o/r/pull/112", state: $0) }
+        XCTAssertEqual(SessionHistory.mergedPullRequestLabel(of: record(pullRequest: pullRequest("MERGED"))), "#112 merged")
+        XCTAssertEqual(SessionHistory.mergedPullRequestLabel(of: record(pullRequest: pullRequest("merged"))), "#112 merged")
+        XCTAssertNil(SessionHistory.mergedPullRequestLabel(of: record(pullRequest: pullRequest("OPEN"))))
+        XCTAssertNil(SessionHistory.mergedPullRequestLabel(of: record()))
+    }
+
     func testAgo() {
         XCTAssertEqual(SessionHistory.ago(-5), "just now")
         XCTAssertEqual(SessionHistory.ago(59), "just now")
@@ -108,10 +118,10 @@ final class SessionHistoryTests: XCTestCase {
     }
 
     func testADeferredAgentResumesASessionOnlyWithItsID() {
-        XCTAssertEqual(DeferredAgentLaunch.Agent.claude(resume: .session("s1"), mode: .default).sessionID, "s1")
-        XCTAssertEqual(DeferredAgentLaunch.Agent.codex(resume: .session("t1"), mode: .default).sessionID, "t1")
-        XCTAssertNil(DeferredAgentLaunch.Agent.claude(resume: .picker, mode: .default).sessionID)
-        XCTAssertNil(DeferredAgentLaunch.Agent.claude(resume: nil, mode: .default).sessionID)
+        XCTAssertEqual(AgentLaunch.claude(resume: .session("s1"), mode: .default).sessionID, "s1")
+        XCTAssertEqual(AgentLaunch.codex(resume: .session("t1"), mode: .default).sessionID, "t1")
+        XCTAssertNil(AgentLaunch.claude(resume: .picker, mode: .default).sessionID)
+        XCTAssertNil(AgentLaunch.claude(resume: nil, mode: .default).sessionID)
     }
 
     @MainActor
@@ -132,7 +142,7 @@ final class SessionHistoryTests: XCTestCase {
 /// What the Session History panel lists and says it will do (see
 /// SessionHistoryPanel).
 final class SessionHistoryPanelModelTests: XCTestCase {
-    private func record(_ id: String, title: String, agent: AgentHookEvent.Kind = .claude, branch: String = "feat/x") -> AgentSessionRecord {
+    private func record(_ id: String, title: String, agent: CodingAgent = .claude, branch: String = "feat/x") -> AgentSessionRecord {
         var record = AgentSessionRecord(
             schemaVersion: 1, agent: agent, sessionID: id, startedAt: 0, lastStartAt: 0,
             lastActivityAt: 1, endedAt: 1, status: .idle, hasConversation: true

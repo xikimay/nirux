@@ -24,6 +24,9 @@ final class SpacePlanFlowTests: XCTestCase {
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }), column: workspace.columns.count - 1)
 
             try harness.withApp {
+                harness.press("a", keyCode: 0x00, [])
+                harness.waitUntil("the terminal takes keys before the plan") { standIn.input.hasSuffix("a") }
+                let beforePlan = standIn.input
                 shell.toggleSpacePlan()
                 harness.waitUntil("the plan") { shell.spacePlan != nil }
                 XCTAssertIdentical(harness.window.firstResponder, shell.spacePlan, "it holds the keyboard")
@@ -32,7 +35,7 @@ final class SpacePlanFlowTests: XCTestCase {
                 harness.waitUntil("the plan gone") { shell.spacePlan == nil }
                 harness.press("x", keyCode: 0x07, [])
                 harness.waitUntil("the key typed after it") { standIn.input.contains("x") }
-                XCTAssertEqual(standIn.input, "x", "none of the plan's keys")
+                XCTAssertEqual(standIn.input, beforePlan + "x", "none of the plan's keys")
             }
         }
     }

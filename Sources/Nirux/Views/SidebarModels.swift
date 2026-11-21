@@ -260,7 +260,7 @@ struct SidebarMissionQuestion: Hashable {
 /// (see `DeferredAgentLaunch`). `columnID` tells a Resume click aimed at
 /// it from one that lands on another column after a rebuild.
 struct SidebarDeferredAgent: Hashable {
-    let processName: String
+    let agent: CodingAgent
     let summary: String
     let columnID: UUID
 
@@ -277,7 +277,7 @@ enum SidebarStuckState: Hashable {
     /// The turn failed on an API error. `failedAt` tells the failure a
     /// Resume click was aimed at from any later one.
     case stoppedOnError(kind: String?, detail: String?, failedAt: TimeInterval, resume: Resume)
-    case exitedMidTurn(processName: String)
+    case exitedMidTurn(agent: CodingAgent)
     /// A turn waits on the model with no sign of life, for how long, since
     /// when (`AgentSilence.since`: what Interrupt aims at), and whether
     /// Interrupt may press Esc there.
@@ -321,7 +321,7 @@ enum SidebarStuckState: Hashable {
     /// The name the row shows: the agent that died, not the shell that
     /// took its place in front.
     var agentName: String? {
-        if case .exitedMidTurn(let processName) = self { return processName }
+        if case .exitedMidTurn(let agent) = self { return agent.rawValue }
         return nil
     }
 
@@ -333,8 +333,8 @@ enum SidebarStuckState: Hashable {
         case .stoppedOnError(let kind, let detail, _, _):
             let error = AgentAttentionReason.apiError(kind: kind, detail: detail).detailLine
             return ["Stopped on an API error", error].compactMap { $0 }.joined(separator: " — ")
-        case .exitedMidTurn(let processName):
-            return "\(processName) exited in the middle of a turn, without ending its session"
+        case .exitedMidTurn(let agent):
+            return "\(agent.rawValue) exited in the middle of a turn, without ending its session"
         case .silent(let duration, _, _):
             return "Claude has been silent for \(duration). \(AgentAttentionReason.silentAdvice)"
         }
@@ -367,30 +367,6 @@ struct SidebarPermissionApproval: Hashable {
     }
 }
 
-struct PRInfo: Hashable, Sendable {
-    let number: Int
-    let state: String
-    let isDraft: Bool
-    let ciStatus: String?
-    /// The latest run of each check (docs/design/ci-failure-actions.md).
-    let checks: [ProjectBoard.Check]
-    let reviewDecision: String?
-    let mergeable: String?
-    let url: String
-    let additions: Int?
-    let deletions: Int?
-    let changedFiles: Int?
-    /// Lowercased.
-    var headRefOid: String?
-    var baseRefName: String?
-    /// GitHub merges it once its checks pass.
-    var autoMerges = false
-
-    var failedCheckUrl: String? {
-        checks.lazy.filter { $0.result == .failure }.compactMap(\.url).first
-    }
-}
-
 struct WorkspaceInfo: Hashable {
     /// Stable workspace identity (WorkspaceState.id). Used to re-resolve
     /// `index` when the store may have mutated since this snapshot.
@@ -408,7 +384,7 @@ struct WorkspaceInfo: Hashable {
     let columns: [ColumnInfo]
     let prInfo: PRInfo?
     /// The open PR's feedback: the card shows the counts only.
-    var prFeedback: SidebarPRFeedback?
+    var prFeedback: PRFeedback.Counts?
     /// Why the pull request's red checks look flaky
     /// (`WorkspaceState.ciFlakyReason`); nil: a failure like any other.
     var ciFlakyReason: String?
@@ -442,6 +418,9 @@ struct WorkspaceInfo: Hashable {
     var dailyPassNote: String?
     /// Its pull request's automatic follow-up, when the row says it.
     var followUp: SidebarFollowUp?
+    /// The Lead's messages it holds until other tasks' pull requests merge.
+    var heldMessages: SidebarHeldMessages?
+    var waitingTask: WaitingTaskView.Facts.State?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
@@ -570,6 +549,7 @@ enum WorktreeCleanupMenuOffer {
 }
 
 enum WorkspaceSidebarAction {
+    case startWaitingTask
     case moveUp, moveDown, markActive, markInactive
     case close, rename, editContext, reviewBranch, newSubtask, moveOutOfParent
     /// "Turn Off Lead…": Space Settings › Lead, where the Lead closes.

@@ -833,6 +833,11 @@ final class SidebarView: NSView {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
+        if let waiting = workspace?.waitingTask {
+            menu.addClosureItem(title: "Start Now") { act(.startWaitingTask) }.isEnabled = waiting != .starting
+            menu.addClosureItem(title: "Close Workspace") { act(.close) }.isEnabled = waiting != .starting
+            return menu
+        }
         if let columnIndex {
             // The column too, by id: one closing meanwhile shifts the others.
             let columnInfo = workspace?.columns.first { $0.index == columnIndex }

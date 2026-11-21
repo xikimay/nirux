@@ -748,11 +748,11 @@ extension PersistedStateCodingTests {
         func process(_ arguments: [String], pid: pid_t = 8) -> ForegroundProcess {
             ForegroundProcess(instance: ProcessInstance(pid: pid, startedAt: 1), name: "agy", arguments: arguments)
         }
-        XCTAssertTrue(AgentHookCenter.isHeadlessAgy(process(["agy", "-p", "summarize"])))
-        XCTAssertTrue(AgentHookCenter.isHeadlessAgy(process(["agy", "plugin", "list"])))
-        XCTAssertFalse(AgentHookCenter.isHeadlessAgy(process(["agy", "-i", "Read .agy-handover.md"])))
-        XCTAssertFalse(AgentHookCenter.isHeadlessAgy(agy))
-        XCTAssertFalse(AgentHookCenter.isHeadlessAgy(process(["agy", "fix the login form"])), "a prompt, not a subcommand")
+        XCTAssertEqual(process(["agy", "-p", "summarize"]).headlessAgent, .agy)
+        XCTAssertEqual(process(["agy", "plugin", "list"]).headlessAgent, .agy)
+        XCTAssertEqual(process(["agy", "-i", "Read .agy-handover.md"]).interactiveAgent, .agy)
+        XCTAssertEqual(agy.interactiveAgent, .agy)
+        XCTAssertEqual(process(["agy", "fix the login form"]).interactiveAgent, .agy, "a prompt, not a subcommand")
         // Its process's first conversation: its subagents' come from the same
         // process; a shell in front (Ctrl-Z) leaves it; another agy drops it.
         var live = ForegroundSessionTracker.agy

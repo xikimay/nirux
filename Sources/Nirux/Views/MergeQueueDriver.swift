@@ -7,7 +7,7 @@ struct MergeQueueLocalAccess {
     typealias Inspect = @Sendable (
         _ folders: [String], _ branch: String, _ head: String, _ settings: BoardConfig.QueueSettings,
         _ client: any MergeQueueGitHub
-    ) -> Result<MergeQueue.LocalInspection, MergeQueue.ClientError>
+    ) -> Result<MergeQueue.LocalInspection, GitHub.CLI.Failure>
 
     /// The project's workspace folders, where its repositories are found.
     var folders: @MainActor () -> [String]
@@ -104,7 +104,7 @@ final class MergeQueueDriver {
     private struct Fetched: Sendable {
         var answers: [MergeQueue.Read: MergeQueue.ReadResult] = [:]
         var inspections: [MergeQueue.Read: MergeQueue.LocalInspection] = [:]
-        var error: MergeQueue.ClientError?
+        var error: GitHub.CLI.Failure?
     }
 
     private nonisolated static func isLocal(_ read: MergeQueue.Read) -> Bool {
@@ -122,7 +122,7 @@ final class MergeQueueDriver {
     ) -> Fetched {
         var fetched = Fetched()
         for read in reads {
-            let result: Result<Void, MergeQueue.ClientError>
+            let result: Result<Void, GitHub.CLI.Failure>
             if case .local(let branch, let head) = read {
                 result = inspect(folders, branch, head, settings, client).map { fetched.inspections[read] = $0 }
             } else {
@@ -153,7 +153,7 @@ final class MergeQueueDriver {
     }
 
     /// A read's error, as the engine handles it (section 4).
-    func readFailure(_ error: MergeQueue.ClientError) -> MergeQueue.ReadFailure {
+    func readFailure(_ error: GitHub.CLI.Failure) -> MergeQueue.ReadFailure {
         MergeQueue.readFailure(error, now: clock.now(), date: clock.date())
     }
 
@@ -184,7 +184,7 @@ extension MergeQueue {
     /// A client error on a read: a rate limit pauses until its reset (a
     /// minute when unknown); a server error, no answer or unreadable
     /// output is retried; anything else GitHub refused stops.
-    static func readFailure(_ error: ClientError, now: TimeInterval, date: Date) -> ReadFailure {
+    static func readFailure(_ error: GitHub.CLI.Failure, now: TimeInterval, date: Date) -> ReadFailure {
         switch error {
         case .ghMissing:
             return .ghMissing
@@ -197,9 +197,9 @@ extension MergeQueue {
         case .secondaryRateLimit:
             return .secondaryRateLimit
         case .refused:
-            return .refused(GitHubCLIQueueClient.message(of: error))
+            return .refused(error.message)
         case .noAnswer, .unreadable:
-            return .transient(GitHubCLIQueueClient.message(of: error))
+            return .transient(error.message)
         }
     }
 }

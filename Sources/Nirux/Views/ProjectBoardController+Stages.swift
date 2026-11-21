@@ -18,6 +18,8 @@ extension ProjectBoardController {
         /// The space's tasks by workspace id, in the sidebar's order, the
         /// Lead left out.
         var tasks: [String]
+        var waiting: [BoardStages.WaitingTask] = []
+        var missionStatusAvailable = true
         /// A sub-task's workspace id → the one it is listed under.
         var parents: [String: String] = [:]
         /// The space's Lead's workspace id.
@@ -34,6 +36,21 @@ extension ProjectBoardController {
         /// The worktrees and folders a clean-up of which runs, by path.
         var cleaningUp: Set<String> = []
         var order: BoardStages.Order = .sidebar
+
+        func inputStatus(repositoryStatusKnown: Bool) -> String {
+            let waits = Set(waiting.map(\.id))
+            let requests = Set(readings.compactMap { id, reading in
+                if case .needsYou = reading.activity { return id }
+                return nil
+            }).subtracting(waits).union(waiting.filter { $0.state == .needsYou }.map(\.id))
+            let needingInput = workspaces.filter { requests.contains($0.id) }
+            if let first = needingInput.first {
+                return needingInput.count == 1 ? "1 needs you · " + first.title : "\(needingInput.count) need you"
+            }
+            let covered = Set(readings.filter { $0.value.terminalStatusKnown }.keys).union(waits)
+            let complete = repositoryStatusKnown && missionStatusAvailable && workspaces.allSatisfy { covered.contains($0.id) }
+            return complete ? "No input requested" : "Status incomplete"
+        }
     }
 
     /// Everything the stages are built from: the shell's inputs, the day
@@ -42,6 +59,7 @@ extension ProjectBoardController {
     /// `extraIDs`). The same key builds the same stages.
     struct StagesKey: Equatable {
         var inputs: StagesInputs
+        var freshSections: Set<String>
         var midnight: TimeInterval
         var loaded: BoardConfigStore.Loaded?
         var context: BoardSections.Context
@@ -117,8 +135,8 @@ extension ProjectBoardController {
 
     private func stagesKey(_ inputs: StagesInputs, now: Date) -> StagesKey {
         StagesKey(
-            inputs: inputs, midnight: BoardStages.midnight(of: now.timeIntervalSince1970), loaded: loaded, context: context,
-            sections: sections, extraIDs: extraIDs, isReadingRemotes: isReadingRemotes, local: local, reads: reads
+            inputs: inputs, freshSections: freshSections(now: now), midnight: BoardStages.midnight(of: now.timeIntervalSince1970),
+            loaded: loaded, context: context, sections: sections, extraIDs: extraIDs, isReadingRemotes: isReadingRemotes, local: local, reads: reads
         )
     }
 
@@ -131,33 +149,55 @@ extension ProjectBoardController {
             header: stagesHeader(inputs), order: inputs.order, sections: [], now: now.timeIntervalSince1970,
             runningQueues: inputs.runningQueues
         )
-        if let message = bodyMessage() {
-            content.message = BoardStagesView.Message(text: message.text, offersSettings: message.offersSettings)
-            return content
-        }
-        guard let local else {
-            content.message = BoardStagesView.Message(text: Self.listingWorktrees)
-            return content
-        }
+        let waitingIDs = Set(inputs.waiting.map(\.id))
         for workspace in inputs.workspaces {
             targets.focus[workspace.id] = Self.focus(workspace.agent, workspaces: [workspace.id])
+        }
+        if let message = bodyMessage() {
+            content.message = BoardStagesView.Message(text: message.text, offersSettings: message.offersSettings)
+        } else if local == nil {
+            content.message = BoardStagesView.Message(text: Self.listingWorktrees)
+        }
+        content.inputStatus = inputs.inputStatus(repositoryStatusKnown: content.message == nil && sections.allSatisfy { section in
+            guard let read = reads[section.id], read.mergedPullRequests != nil, read.errors[.mergedPullRequests] == nil else { return false }
+            return gitHubStatus(in: read, now: now) == .current
+        })
+        guard content.message == nil, let local else {
+            if !inputs.waiting.isEmpty {
+                let facts = BoardStages.SectionFacts(id: "waiting-tasks", lines: [], waiting: inputs.waiting)
+                let lines = BoardStages.section(facts, order: inputs.order, now: content.now)
+                content.sections = [BoardStagesView.Section(id: facts.id, title: "Waiting tasks", lines: lines)]
+                content.message?.showsWaitingTasks = true
+            }
+            return content
         }
         let heads = Dictionary(
             local.repositories.flatMap(\.worktrees).compactMap { worktree in worktree.head.map { (worktree.path, $0) } },
             uniquingKeysWith: { first, _ in first }
         )
         // A section with no rows still shows: a read that failed says so in its pill.
-        let listed = listedRows(local: local, workspaces: inputs.workspaces)
+        let listed = listedRows(local: local, workspaces: inputs.workspaces.filter { !waitingIDs.contains($0.id) })
+        var locations = Dictionary(
+            listed.bySection.flatMap { section, rows in rows.flatMap(\.workspaces).map { ($0.id, section) } },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for row in listed.others where row.worktreePath == nil {
+            for workspace in row.workspaces { locations[workspace.id] = Self.noRepositoryID }
+        }
+        let waiting = BoardStages.waitingBySection(
+            inputs.waiting, locations: locations, sections: Set(sections.map(\.id)), fallback: Self.noRepositoryID
+        )
         let others = listed.others
         content.sections = sections.map { section in
-            stagesSection(section, rows: listed.bySection[section.id] ?? [], inputs, heads: heads, now: now, targets: &targets)
+            stagesSection(section, rows: listed.bySection[section.id] ?? [], waiting: waiting[section.id] ?? [],
+                          inputs, heads: heads, now: now, targets: &targets)
         }
         // A workspace in no repository is a line there; one in another repository is no line (`sectionFacts`), but under
         // Other workspaces.
         let noRepository = BoardStages.section(
             BoardStages.sectionFacts(
                 BoardStages.RepositoryReading(id: Self.noRepositoryID, rows: others, readsPullRequests: false, cleaningUp: inputs.cleaningUp),
-                tasks: inputs.tasks, readings: inputs.readings, parents: inputs.parents
+                tasks: inputs.tasks, readings: inputs.readings, parents: inputs.parents, waiting: waiting[Self.noRepositoryID] ?? []
             ),
             order: inputs.order, now: now.timeIntervalSince1970
         )
@@ -209,7 +249,7 @@ extension ProjectBoardController {
     /// One repository: its lines from what it read and what the tasks
     /// read, its header's pill, queue and menu.
     private func stagesSection(
-        _ section: BoardSections.Section, rows: [ProjectBoard.Row], _ inputs: StagesInputs, heads: [String: String], now: Date,
+        _ section: BoardSections.Section, rows: [ProjectBoard.Row], waiting: [BoardStages.WaitingTask], _ inputs: StagesInputs, heads: [String: String], now: Date,
         targets: inout StagesTargets
     ) -> BoardStagesView.Section {
         // Another repository's section lists this space's workspaces there, and nothing else of that repository: no
@@ -217,13 +257,21 @@ extension ProjectBoardController {
         let readOnly = isExtra(section)
         let rows = readOnly ? rows.filter { !$0.workspaces.isEmpty } : rows
         let reads = reads[section.id]
+        let required = section.config?.requiredChecks ?? []
+        let base = reads?.baseBranch ?? section.config?.baseBranch
+        let timeout = BoardStages.checkTimeout(
+            in: inputs.queues[section.id], rows: rows, required: required, baseBranch: base,
+            currentRead: reads.flatMap { $0.errors[.openPullRequests] == nil && $0.pullRequestsAreFresh(now: now) ? $0.pullRequestsReadAt : nil }, now: now
+        )
         let reading = BoardStages.RepositoryReading(
             id: section.id, rows: rows, readsPullRequests: reads?.openPullRequests != nil,
-            requiredChecks: section.config?.requiredChecks ?? [], baseBranch: reads?.baseBranch ?? section.config?.baseBranch,
+            gitHubStatus: gitHubStatus(in: reads, now: now), requiredChecks: required, baseBranch: base,
             queue: inputs.queues[section.id], merged: reads?.mergedPullRequests ?? [], heads: heads, cleaningUp: inputs.cleaningUp,
-            gitHub: reads?.gitHub
+            gitHub: reads?.gitHub, checkTimeout: timeout
         )
-        let facts = BoardStages.sectionFacts(reading, tasks: inputs.tasks, readings: inputs.readings, parents: inputs.parents, lead: inputs.lead)
+        let facts = BoardStages.sectionFacts(
+            reading, tasks: inputs.tasks, readings: inputs.readings, parents: inputs.parents, lead: inputs.lead, waiting: waiting
+        )
         Self.noteFolders(of: facts, in: &targets)
         var shown = BoardStagesView.Section(
             // A space without an anchor: its repository's name ("widgets"), `owner/name` beside it.
@@ -245,7 +293,7 @@ extension ProjectBoardController {
             // The next Start's list, a merged one for none (as the queue, GitHub's lists or a task's line knows it),
             // whether or not the Board lists it (not read yet, closed, beyond the open pull requests read).
             let proposed = state.isLocked ? 0 : BoardStages.nextStartList(state, knownMerged: facts.knownMerged).count
-            shown.queue = BoardStagesView.sectionQueue(state, proposed: proposed)
+            shown.queue = BoardStagesView.sectionQueue(state, proposed: proposed, timeout: reading.checkTimeout)
         }
         // Board Settings… where it can set the repository up and save it, as the table offered it.
         let offersSettings = !isReadOnly && canBeSetUp(section)
@@ -278,6 +326,11 @@ extension ProjectBoardController {
     private var isReadOnly: Bool {
         if let loaded, case .readOnly = loaded.status { return true }
         return false
+    }
+
+    private func gitHubStatus(in reads: RepositoryReads?, now: Date) -> BoardStages.GitHubStatus {
+        guard let reads, reads.openPullRequests != nil else { return .unavailable }
+        return reads.errors[.openPullRequests] == nil && reads.pullRequestsAreFresh(now: now) ? .current : .stale
     }
 
     /// The header's pill: what went wrong reading the repository, else why

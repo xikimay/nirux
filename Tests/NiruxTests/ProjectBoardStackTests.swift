@@ -9,7 +9,7 @@ final class ProjectBoardStackTests: XCTestCase {
     private let widgets = GitHubRepository(owner: "acme", name: "widgets")
 
     private func pullRequest(
-        _ number: Int, _ branch: String, base: String = "main", state: String = "OPEN",
+        _ number: Int, _ branch: String, base: String = "main", state: GitHub.PullRequestState = .open,
         baseOid: String = String(repeating: "a", count: 40), fork: Bool = false
     ) -> ProjectBoard.PullRequest {
         // Every head is `aaa…`: a base reads untouched since its merge.
@@ -86,7 +86,7 @@ final class ProjectBoardStackTests: XCTestCase {
     func testOnceItsBaseMergedTheRootOffersToRetargetOntoThatBase() throws {
         let result = rows(
             open: [pullRequest(53, "stack/b", base: "stack/a"), pullRequest(54, "stack/c", base: "stack/b")],
-            merged: [pullRequest(52, "stack/a", state: "MERGED")]
+            merged: [pullRequest(52, "stack/a", state: .merged)]
         )
         let root = try row(53, in: result)
         XCTAssertEqual(root.stack?.mergedBase, ProjectBoard.MergedBase(number: 52, onto: "main"))
@@ -94,7 +94,7 @@ final class ProjectBoardStackTests: XCTestCase {
         XCTAssertEqual(root.stack?.tooltip, "Stack: #53 → #54, on stack/a (#52 merged)")
         XCTAssertNil(try row(54, in: result).stack?.mergedBase, "only the root can be retargeted")
 
-        let lone = rows(open: [pullRequest(53, "stack/b", base: "stack/a")], merged: [pullRequest(52, "stack/a", state: "MERGED")])
+        let lone = rows(open: [pullRequest(53, "stack/b", base: "stack/a")], merged: [pullRequest(52, "stack/a", state: .merged)])
         let loneRow = try row(53, in: lone)
         XCTAssertEqual(loneRow.stack?.mergedBase?.number, 52)
         XCTAssertNil(loneRow.stack?.label)
@@ -104,23 +104,23 @@ final class ProjectBoardStackTests: XCTestCase {
         // `baseRefOid` is the base's tip when the pull request was opened or last pushed, not now: a
         // base merged long ago may have moved on since, so it isn't offered a Retarget for ever.
         let open = [pullRequest(200, "stack/b", base: "stack/a")]
-        let base = pullRequest(70, "stack/a", state: "MERGED")
-        let others = (71...99).map { pullRequest($0, "done/\($0)", state: "MERGED") }
-        let older = (1...10).map { pullRequest($0, "done/\($0)", state: "MERGED") }
+        let base = pullRequest(70, "stack/a", state: .merged)
+        let others = (71...99).map { pullRequest($0, "done/\($0)", state: .merged) }
+        let older = (1...10).map { pullRequest($0, "done/\($0)", state: .merged) }
         XCTAssertEqual(try row(200, in: rows(open: open, merged: older + others + [base])).stack?.mergedBase?.number, 70,
                        "the thirtieth, whatever the list's order")
-        let oneMore = rows(open: open, merged: others + [pullRequest(100, "done/100", state: "MERGED"), base])
+        let oneMore = rows(open: open, merged: others + [pullRequest(100, "done/100", state: .merged), base])
         XCTAssertNil(try row(200, in: oneMore).stack, "the thirty-first: a pull request on another branch, as any")
         // The thirty count every merged pull request opened last: forks' among them, and each merge of one branch.
-        let forks = (71...100).map { pullRequest($0, "patch-\($0)", state: "MERGED", fork: true) }
+        let forks = (71...100).map { pullRequest($0, "patch-\($0)", state: .merged, fork: true) }
         XCTAssertNil(try row(200, in: rows(open: open, merged: forks + [base])).stack)
-        let releases = (71...100).map { pullRequest($0, "develop", state: "MERGED") }
+        let releases = (71...100).map { pullRequest($0, "develop", state: .merged) }
         XCTAssertNil(try row(200, in: rows(open: open, merged: releases + [base])).stack)
     }
 
     func testAPullRequestOnTheBaseBranchIsNeverRetargeted() {
         // A pull request once merged from `main` into a release branch.
-        let result = rows(open: [pullRequest(53, "feat/x")], merged: [pullRequest(40, "main", base: "release", state: "MERGED")])
+        let result = rows(open: [pullRequest(53, "feat/x")], merged: [pullRequest(40, "main", base: "release", state: .merged)])
         XCTAssertEqual(result.compactMap(\.stack), [])
         // Nor stacked on an open one from `main`.
         let released = rows(open: [pullRequest(40, "main", base: "release"), pullRequest(53, "feat/x"), pullRequest(54, "feat/y")])
@@ -131,12 +131,12 @@ final class ProjectBoardStackTests: XCTestCase {
     func testABaseWithNewCommitsSinceItsMergeIsNoStack() {
         // `develop` merged into `main` once, and moved on since.
         let result = rows(open: [pullRequest(53, "feat/x", base: "develop", baseOid: String(repeating: "b", count: 40))],
-                          merged: [pullRequest(40, "develop", state: "MERGED")])
+                          merged: [pullRequest(40, "develop", state: .merged)])
         XCTAssertEqual(result.compactMap(\.stack), [])
     }
 
     func testWithoutABaseBranchNothingIsRetargeted() {
-        let result = rows(open: [pullRequest(53, "feat/x")], merged: [pullRequest(40, "main", base: "release", state: "MERGED")],
+        let result = rows(open: [pullRequest(53, "feat/x")], merged: [pullRequest(40, "main", base: "release", state: .merged)],
                           baseBranch: nil)
         XCTAssertEqual(result.compactMap(\.stack), [])
     }
