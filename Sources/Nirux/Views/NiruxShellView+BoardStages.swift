@@ -71,7 +71,7 @@ extension NiruxShellView {
                 }
             )
             reading.terminalStatusKnown = !snapshot.isEmpty || workspace.openColumns.allSatisfy { $0.pty == nil }
-            readings[workspace.id] = reading
+            readings.tasks[workspace.id] = reading
         }
         return readings
     }
