@@ -28,6 +28,12 @@ extension AgentStatusMachine {
         return nil
     }
 
+    func codexReport(foreground: ForegroundProcess?) -> ReportedStatus? {
+        guard let foreground, foreground.interactiveAgent == .codex,
+              let codexStatus, codexStatus.isFrom(foreground.instance) else { return nil }
+        return codexStatus
+    }
+
     /// The dialog the foreground `claude` is showing, if any: open, raised
     /// by this very `claude` (not one before it: events queued while Nirux
     /// was closed replay at launch), and not reached by a keystroke since

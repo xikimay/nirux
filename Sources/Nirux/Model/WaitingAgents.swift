@@ -16,6 +16,7 @@ struct AgentWait: Equatable, Sendable {
     /// answered. Next Waiting Agent goes to it after what they have not
     /// seen. (A dialog, a failure or an exit never stands this way.)
     var isRead = false
+    var waitsWhileWorking = false
 }
 
 extension AgentWait {
@@ -24,7 +25,7 @@ extension AgentWait {
     /// again (an answered dialog lingers until its tool ends). ⌘J and the
     /// spaces' marks read waits through it.
     func blocks(whileStatus status: AgentStatus) -> Bool {
-        reason.signal != .waiting || status != .working
+        waitsWhileWorking || reason.signal != .waiting || status != .working
     }
 }
 
@@ -32,6 +33,9 @@ extension AgentStatusMachine {
     /// What blocks the agent on the user now, if anything (see
     /// `AgentWait`). `foreground` is the column's foreground process.
     func blockedWait(now: TimeInterval, silence: AgentSilence? = nil, foreground: ForegroundProcess?) -> AgentWait? {
+        if let report = codexReport(foreground: foreground), let reason = report.status.codexChoice {
+            return AgentWait(reason: reason, since: report.at, waitsWhileWorking: true)
+        }
         switch stuckState(now: now, waitThreshold: nil, silence: silence, foreground: foreground) {
         case .exitedMidTurn(let exit)?:
             return AgentWait(reason: .exitedMidTurn, since: exit.exitedAt)

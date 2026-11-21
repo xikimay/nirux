@@ -18,6 +18,11 @@ extension NiruxShellView {
         workspaces.reduce(0) { count, workspace in count + workspace.columns.filter(\.isAwaitingResume).count }
     }
 
+    private func needsCodexModeConfirmation(_ column: ColumnState, in workspace: WorkspaceState) -> Bool {
+        if case .codex(_, nil)? = column.deferredAgent?.launch { return workspace.startedOutsideNirux }
+        return false
+    }
+
     /// Start a column's deferred agent with the flags it ran with, in the
     /// directory it ran in. False when it has none (already resumed).
     /// `liveSessions` and `settingsFiles` (`claudeSpaceSettingsFiles`), when
@@ -26,25 +31,47 @@ extension NiruxShellView {
     func resumeDeferredAgent(
         _ column: ColumnState, in workspace: WorkspaceState, liveSessions: [String]? = nil, settingsFiles: [String: String]? = nil
     ) -> Bool {
-        guard workspace.columns.contains(where: { $0 === column }),
-              let deferred = column.takeDeferredAgent() else { return false }
-        // Its folder may be gone since the restore (a removed worktree): the
-        // workspace's then, as at restore. Its environment is the one a new
-        // terminal gets now: the workspace may have moved to another space,
-        // Settings may have changed.
-        if let agentUUID = column.agentUUID {
-            column.setLaunch(
-                directory: column.launchDirectory.flatMap(Self.existingDirectory) ?? workspace.cwd,
-                environment: workspace.terminalEnvironment(agentUUID: agentUUID)
-            )
+        guard workspace.columns.contains(where: { $0 === column }), var launch = column.deferredAgent?.launch else { return false }
+        if case .codex(let resume, nil) = launch {
+            let destination = codexLaunchForConfirmation(in: workspace.profileID)
+            var mode = destination.mode
+            if workspace.startedOutsideNirux {
+                let alert = NSAlert()
+                alert.messageText = "Resume Codex in \(NiruxURLRequest.displaySafe(destination.spaceName))?"
+                alert.informativeText = "This external task has no saved launch mode.\n" + NiruxURLRequest.displaySafe(column.launchDirectory ?? workspace.cwd)
+                alert.addButton(withTitle: "Cancel").keyEquivalent = "\r"
+                alert.addButton(withTitle: destination.mode.displayName)
+                if destination.mode != .default { alert.addButton(withTitle: CodexLaunchMode.default.displayName) }
+                switch runModal(alert) {
+                case .alertSecondButtonReturn: break
+                case .alertThirdButtonReturn: mode = .default
+                default: return false
+                }
+                guard workspace.profileID == destination.spaceID, !workspace.isClosing, workspace.columns.contains(where: { $0 === column })
+                else { return false }
+            }
+            launch = .codex(resume: resume, mode: mode)
+            column.restoredColumn?.codexLaunchMode = mode
         }
+        guard column.takeDeferredAgent() != nil else { return false }
+        refreshLaunch(of: column, in: workspace)
         let command = resumeLaunchCommand(
-            deferred.launch.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)), in: workspace, column: column,
+            launch.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)), in: workspace, column: column,
             settingsFiles: settingsFiles
         )
         sideEffects.startRestoredAgent(column, command)
         scheduleMetadataRefresh()
         return true
+    }
+
+    /// Use the space's current environment for a resume or restart. If the
+    /// column's directory has disappeared, launch in the workspace directory.
+    func refreshLaunch(of column: ColumnState, in workspace: WorkspaceState) {
+        guard let agentUUID = column.agentUUID else { return }
+        column.setLaunch(
+            directory: column.launchDirectory.flatMap(Self.existingDirectory) ?? workspace.cwd,
+            environment: workspace.terminalEnvironment(agentUUID: agentUUID)
+        )
     }
 
     /// How long a column stays on screen before its agent resumes on its
@@ -84,7 +111,8 @@ extension NiruxShellView {
         guard let workspace = activeWorkspace, workspace.columns.contains(where: \.isAwaitingResume) else { return nil }
         let focused = workspace.focusedIndex
         let columns = ([focused] + workspace.columns.indices.filter { $0 != focused }).compactMap { index -> ColumnState? in
-            guard let column = workspace.columns[safe: index], column.isAwaitingResume else { return nil }
+            guard let column = workspace.columns[safe: index], column.isAwaitingResume,
+                  !needsCodexModeConfirmation(column, in: workspace) else { return nil }
             return index == focused || workspace.showsColumn(at: index) ? column : nil
         }
         return columns.isEmpty ? nil : (workspace, columns)
@@ -115,7 +143,7 @@ extension NiruxShellView {
         let liveSessions = Self.liveSessionIDs(in: workspaces)
         let settingsFiles = claudeSpaceSettingsFiles(for: workspaces.filter { $0.columns.contains(where: \.isAwaitingResume) })
         for workspace in workspaces {
-            for column in workspace.columns where column.isAwaitingResume {
+            for column in workspace.columns where column.isAwaitingResume && !needsCodexModeConfirmation(column, in: workspace) {
                 resumed = resumeDeferredAgent(column, in: workspace, liveSessions: liveSessions, settingsFiles: settingsFiles) || resumed
             }
         }

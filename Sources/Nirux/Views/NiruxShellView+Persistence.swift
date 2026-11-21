@@ -178,7 +178,7 @@ extension NiruxShellView {
                 claimedSessionIDs: &claimedSessionIDs.codex
             )
             addDeferredAgentColumn(
-                .codex(resume: resumeTarget, mode: persistedColumn.codexLaunchMode ?? .default),
+                .codex(resume: resumeTarget, mode: persistedColumn.codexLaunchMode),
                 restoring: persistedColumn, in: workspace
             )
         case .agy:
@@ -466,7 +466,7 @@ extension NiruxShellView {
                 claudeRestore = col.persistedClaudeRestore(foregroundProcess: foregroundProcess)
             case .codex?:
                 kind = .codex; webURL = nil
-                codexMode = CodexLaunchMode.detect(arguments: foregroundProcess.arguments)
+                codexMode = CodexLaunchMode.detect(arguments: foregroundProcess.arguments) ?? .default
             case .agy? where foregroundProcess.interactiveAgent == .agy:
                 kind = .agy; webURL = nil
             default: kind = .terminal; webURL = nil

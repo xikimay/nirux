@@ -23,7 +23,8 @@ extension NiruxShellView {
         parentWorkspaceID: String? = nil,
         parentAgentUUID: String? = nil,
         startsFromHead: Bool = false,
-        startedOutsideNirux: Bool = false
+        startedOutsideNirux: Bool = false,
+        confirmedCodexLaunch: ConfirmedCodexLaunch? = nil
     ) {
         let routesByAnchor = routesByAnchor
         // The space the repository goes to, decided as below, holds the
@@ -64,7 +65,7 @@ extension NiruxShellView {
                 case .failure(let error): handoverError = error
                 }
             }
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async { [weak self, deliveredHandover, handoverError] in
                 guard let self else { return }
                 // An agent retrying the same `open` after its handover was
                 // delivered: focus the workspace the first request opened
@@ -117,28 +118,37 @@ extension NiruxShellView {
                     let decision = self.decideSpace(
                         identity: identity, parentWorkspaceID: parentWorkspaceID, startedFromSpaceID: requestedProfileID
                     )
-                    self.addWorkspace(
-                        title: title ?? branch,
-                        cwd: path,
-                        agent: agent,
-                        profileID: decision.spaceID,
-                        workspaceID: childWorkspaceID,
-                        initialAgentUUID: childAgentUUID,
-                        missionID: missionID,
-                        // It lists under that one, Missions on or off; under
-                        // its task when that one is a sub-task: two levels at
-                        // most. Its Mission, if any, stays with the asker.
-                        parentWorkspaceID: requester.map { self.isSubtask($0.workspace) ? $0.workspace.parentWorkspaceID : $0.workspace.id }
-                            ?? nil,
-                        reportsToLead: reportsToLead,
-                        deliveredHandover: deliveredHandover,
-                        worktreeBranch: checkedOutBranch,
-                        startedOutsideNirux: startedOutsideNirux,
-                        startedByAgent: !startedOutsideNirux,
-                        setupScript: firstSetup ? self.setupScript(for: decision) : nil
-                    )
-                    self.saveState()
-                    if decision.reason == .general { self.presentSpaceArrival(workspaceID: childWorkspaceID) }
+                    let openWorktree: @MainActor (CodingAgent?, CodexLaunchMode?) -> Void = {
+                        [missionID, reportsToLead] agent, mode in
+                        self.addWorkspace(
+                            title: title ?? branch,
+                            cwd: path,
+                            agent: agent,
+                            profileID: decision.spaceID,
+                            workspaceID: childWorkspaceID,
+                            initialAgentUUID: childAgentUUID,
+                            missionID: missionID,
+                            // It lists under that one, Missions on or off; under
+                            // its task when that one is a sub-task: two levels at
+                            // most. Its Mission, if any, stays with the asker.
+                            parentWorkspaceID: requester.map { self.isSubtask($0.workspace) ? $0.workspace.parentWorkspaceID : $0.workspace.id }
+                                ?? nil,
+                            reportsToLead: reportsToLead,
+                            deliveredHandover: deliveredHandover,
+                            worktreeBranch: checkedOutBranch,
+                            startedOutsideNirux: startedOutsideNirux,
+                            codexMode: mode, startedByAgent: !startedOutsideNirux,
+                            setupScript: firstSetup ? self.setupScript(for: decision) : nil
+                        )
+                        self.saveState()
+                        if decision.reason == .general { self.presentSpaceArrival(workspaceID: childWorkspaceID) }
+                    }
+                    // The first sheet approved the worktree and handover. Declining a different space's
+                    // Codex mode leaves that work accessible in a plain terminal.
+                    self.withConfirmedCodexLaunch(confirmedCodexLaunch, required: startedOutsideNirux && agent == .codex,
+                                                  in: decision.spaceID, folder: path, ifDeclined: {
+                        openWorktree(nil, nil)
+                    }) { mode in openWorktree(agent, mode) }
                     // Above the banner, when there is one.
                     if let start, let fetchError = start.fetchError {
                         let from = start.startPoint == nil ? "the checkout’s HEAD" : "it as last fetched"
@@ -293,6 +303,8 @@ extension NiruxShellView {
         for delivery in MissionStore.shared.pendingPromptDeliveries(now: now)
         where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
             let mission = delivery.mission
+            let recipientID = Self.goesToParent(delivery.event) ? mission.parentWorkspaceID : mission.childWorkspaceID
+            guard !resumingTasks.contains(recipientID) else { continue }
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
             guard let agent = Self.recipientAgent(of: delivery) else { continue }
@@ -635,7 +647,8 @@ extension NiruxShellView {
                   let column = workspace.columns.first(where: { $0.agentUUID == notice.agentUUID })
             else { return false }
             guard let pty = column.pty else { return true }
-            guard notice.isFor(claudeStartedAt: pty.foregroundProcess(snapshot: snapshot)?.instance.startedAt) else { return false }
+            if let process = pty.foregroundProcess(snapshot: snapshot), process.interactiveAgent == .claude,
+               !notice.isFor(claudeStartedAt: process.instance.startedAt), !workspace.runsRestartedLead(process) { return false }
             let refusal = pty.missionPromptRefusal(runningSince: now, snapshot: snapshot, seenByUser: column.id == seenAtPrompt)
             if column.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
             guard refusal == nil, let paste = TypedPromptSanitizer.bracketedPaste(for: notice.text) else { return true }

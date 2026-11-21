@@ -346,14 +346,15 @@ extension NiruxShellView {
         guard let pty = column.pty else { return ProjectBoard.Agent() }
         let stuck = sidebarStuckState(of: column, foregroundProcess: foreground, snapshot: snapshot, now: now)
         let agentInFront = foreground?.agent != nil
+        let activity = pty.taskActivity(foreground: foreground, status: pty.cachedAgentState)
         let state = ProjectBoard.agentState(
             stuck: stuck,
             hasAgent: agentInFront || pty.terminalAgent(snapshot: snapshot) != nil,
             agentInFront: agentInFront,
-            status: pty.cachedAgentState,
+            status: activity.status,
             // A dialog only: the Merge Queue holds a pull request while its
             // agent waits there, not while it waits for an answer in prose.
-            openDialog: pty.agentVisibleDialog(foreground: foreground)?.reason,
+            openDialog: activity.codexChoice ?? pty.agentVisibleDialog(foreground: foreground)?.reason,
             workingFor: pty.agentTurnStartedAt.map { SidebarRenderer.shortDuration(now - $0.timeIntervalSince1970) }
         )
         var failedAt: TimeInterval?

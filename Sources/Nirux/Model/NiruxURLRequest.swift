@@ -190,8 +190,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// It must not link the new agent to a live parent agent's Mission
     /// mailbox (that would give an outside caller a channel to it), and it
     /// opens in the space its folder belongs to, else the default space
-    /// (docs/design/spaces.md, "Routing"), never one the caller picked. None of
-    /// that is shown on the sheet.
+    /// (docs/design/spaces.md, "Routing"), never one the caller picked.
     func restrictedForConfirmation() -> NiruxURLRequest {
         var restricted = self
         restricted.profileID = nil
@@ -228,7 +227,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// launch ID. Everything the action will do is spelled out, including
     /// the agent's permission mode: a request from a web page would inherit
     /// it. Call it on a request that went through `resolvingPaths()`.
-    func confirmation(claudeMode: ClaudeLaunchMode, codexMode: CodexLaunchMode) -> Confirmation {
+    func confirmation(claudeMode: ClaudeLaunchMode, codexMode: CodexLaunchMode, spaceName: String? = nil) -> Confirmation {
         // One wording whether the launch ID is missing or stale: a caller
         // could add a fake `launch=` to pick a more reassuring text.
         let intro = "This request didn’t come from a current Nirux terminal. That happens with an agent "
@@ -240,10 +239,10 @@ struct NiruxURLRequest: Equatable, Sendable {
         let gitNote = "Nirux runs git in this folder: a repository you don’t trust can run code that way."
         func agentLine(_ agent: CodingAgent?) -> String {
             guard let agent else { return "Agent: none (plain shell)" }
-            let mode = switch AgentLaunch(agent, resume: nil, claudeMode: claudeMode, codexMode: codexMode) {
-            case .claude(_, let mode)?: mode.displayName
-            case .codex(_, let mode)?: mode.displayName
-            case .agy?, nil: "its own permission settings (Nirux sets none)"
+            let mode = switch agent {
+            case .claude: claudeMode.displayName
+            case .codex: codexMode.displayName + (spaceName.map { "\nSpace: \(Self.displaySafe($0))" } ?? "")
+            case .agy, .gemini, .opencode: "its own permission settings (Nirux sets none)"
             }
             return "Agent: \(agent.productName) — \(mode)"
         }
