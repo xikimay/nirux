@@ -127,7 +127,7 @@ final class TaskThreadTests: XCTestCase {
          "statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-11-21T00:30:00Z"},
                               {"name":"lint","status":"IN_PROGRESS","startedAt":"2026-11-21T00:31:00Z"}]}
         """.utf8)))
-        XCTAssertEqual(closed.map { line($0, since: start) }, ["1860 checks · failed 1 of 2 failed: test", "3600 prClosed · #9"])
+        XCTAssertEqual(closed.map { line($0, since: start) }, ["1860 checks · failed 1 of 2 failed: test", "1860 checkRun · lint https://github.com/o/r/pull/9", "3600 prClosed · #9"])
         let queued = try XCTUnwrap(TaskThread.pullRequestHistory(Data("""
         {"number":3,"url":"https://github.com/o/r/pull/3","state":"OPEN",
          "statusCheckRollup":[{"name":"test","status":"QUEUED","startedAt":"0001-01-01T00:00:00Z"}]}
