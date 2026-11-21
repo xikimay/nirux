@@ -121,7 +121,7 @@ enum LeadTools {
         [
             "agent": ["type": "string", "enum": CodingAgent.launchable.map(\.rawValue),
                       "description": "Agent to launch. Defaults to the space's task agent."],
-            "model": ["type": "string", "description": "Optional --model for that agent: an agy models slug, a codex debug models slug, or a Claude alias or full ID. Omit for its default. Only applies to automatic starts."]
+            "model": ["type": "string", "description": "Optional --model for that agent: an agy models slug, a codex debug models slug, or a Claude alias or full ID. Omit for its default. Preselected in the New sheet when approval is required."]
         ]
     }
 

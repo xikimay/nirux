@@ -105,7 +105,7 @@ extension NiruxShellView {
         guard leadStartsTasksWithoutAsking(spaceID: space.id) else {
             if after != nil { return answer("Waiting tasks require Starts tasks without asking in Space Settings.", true) }
             return leadProposeTask(
-                description, options: options, agent: arguments["agent"] == nil ? nil : selection.agent, hasModel: selection.model != nil,
+                description, options: options, selection: arguments["agent"] != nil || selection.model != nil ? selection : nil,
                 repository: repository, withoutRepository: asksNoRepository, templateName: templateName,
                 in: space, parent: parent, answer: answer
             )
@@ -280,25 +280,24 @@ extension NiruxShellView {
     // The proposal's fields, as start_task gathered them.
     // swiftlint:disable:next function_parameter_count
     private func leadProposeTask(
-        _ description: String, options: NewTask.StartOptions, agent: CodingAgent?, hasModel: Bool, repository: NewTaskPanel.Repository?,
+        _ description: String, options: NewTask.StartOptions, selection: TaskAgentSelection?, repository: NewTaskPanel.Repository?,
         withoutRepository: Bool, templateName: String?,
         in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
         let proposal = LeadProposal(
             spaceID: space.id,
             repository: repository.map { .named(key: $0.key) } ?? (withoutRepository ? .noRepository : .spaceDefault),
-            description: description, options: options, templateName: templateName, parent: parent, agent: agent
+            description: description, options: options, templateName: templateName, parent: parent, selection: selection
         )
-        let modelNotice = hasModel ? LeadProposal.defaultModelNotice : ""
         if pendingLeadProposals.isEmpty, showLeadProposal(proposal) {
             return answer("Proposed to the user in the New sheet (the space’s setting “Starts tasks without asking” is off). "
-                + "If they start it, it reports to you." + modelNotice, false)
+                + "If they start it, it reports to you.", false)
         }
         pendingLeadProposals.append(proposal)
         scheduleLeadProposals()
         let ahead = pendingLeadProposals.count - 1
         answer("Queued for the user: the New sheet shows it once \(ahead == 0 ? "the sheet open now closes" : "\(ahead) proposal(s) ahead are done"). "
-            + "If they start it, it reports to you." + modelNotice, false)
+            + "If they start it, it reports to you.", false)
     }
 
     /// Shows a proposal when no sheet is up and its Lead is still there; a
@@ -983,8 +982,6 @@ extension NiruxShellView {
 
 /// A task a Lead proposes (see `NiruxShellView.pendingLeadProposals`).
 struct LeadProposal: Equatable {
-    static let defaultModelNotice = " The sheet starts the selected agent with its default model."
-
     enum Repository: Equatable {
         case named(key: String)
         /// `repo: "none"`: No Repository, a folder of its own.
@@ -1008,7 +1005,7 @@ struct LeadProposal: Equatable {
     /// A task's agent proposed it, a sub-task of this task (its
     /// workspace's id); nil for a Lead's proposal.
     var subtaskOf: String?
-    var agent: CodingAgent?
+    var selection: TaskAgentSelection?
 
     /// What the sheet shows: the description under its title, when one was
     /// given (the sheet names a task after its first line).

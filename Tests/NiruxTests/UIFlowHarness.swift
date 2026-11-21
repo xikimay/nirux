@@ -202,6 +202,7 @@ final class UIFlowHarness {
         }
         shell.sideEffects.generateTaskNames = { _, _ in nil }
         shell.sideEffects.homeDirectory = { [home] in home }
+        shell.sideEffects.listTaskModels = { _, _ in [] }
         // Never UNUserNotificationCenter in xctest.
         shell.sideEffects.notifySetupFailure = { [weak self] workspaceID, _ in self?.setupFailures.append(workspaceID) }
         shell.sideEffects.notifyMissionQuestion = { [weak self] workspaceID, _, _, _ in self?.missionQuestionNotices.append(workspaceID) }

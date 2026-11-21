@@ -8,7 +8,7 @@ struct TaskAgentSelection: Codable, Equatable, Sendable {
 }
 
 enum AgentModels {
-    struct Choice: Equatable {
+    struct Choice: Equatable, Sendable {
         let slug: String
         let label: String
         var listed = true
@@ -25,13 +25,7 @@ enum AgentModels {
         _ selection: TaskAgentSelection, environment: [String: String], installed: AgentCLIAvailability = AgentCLILocator.locate(),
         catalog: (CodingAgent, String, [String: String]) throws -> [Choice] = choices
     ) throws -> TaskAgentSelection {
-        let executable = switch selection.agent {
-        case .claude: installed.claudePath
-        case .codex: installed.codexPath
-        case .agy: installed.agyPath
-        default: nil as String?
-        }
-        guard let executable else { throw Refusal("\(selection.agent.rawValue) isn't installed on this Mac.") }
+        let executable = try executable(for: selection.agent, installed: installed)
         guard let model = selection.model else { return selection }
         if selection.agent == .claude {
             let name = model.lowercased()
@@ -46,6 +40,23 @@ enum AgentModels {
                 + choices.filter(\.listed).map(\.label).joined(separator: ", ") + ".")
         }
         return TaskAgentSelection(agent: selection.agent, model: match.slug)
+    }
+
+    private static func executable(for agent: CodingAgent, installed: AgentCLIAvailability) throws -> String {
+        let executable = switch agent {
+        case .claude: installed.claudePath
+        case .codex: installed.codexPath
+        case .agy: installed.agyPath
+        default: nil as String?
+        }
+        guard let executable else { throw Refusal("\(agent.rawValue) isn't installed on this Mac.") }
+        return executable
+    }
+
+    static func listedChoices(for agent: CodingAgent, environment: [String: String]) throws -> [Choice] {
+        if agent == .claude { return claudeAliases.map { Choice(slug: $0, label: $0) } }
+        let path = try executable(for: agent, installed: AgentCLILocator.locate())
+        return try choices(for: agent, executable: path, environment: environment).filter(\.listed)
     }
 
     static func choices(for agent: CodingAgent, executable: String, environment: [String: String]) throws -> [Choice] {

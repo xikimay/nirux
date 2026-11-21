@@ -10,6 +10,12 @@ import GhosttyTerminal
 /// a click or reaching GitHub.
 @MainActor
 struct ShellSideEffects {
+    var listTaskModels: @MainActor (CodingAgent, [String: String]) async throws -> [AgentModels.Choice] = { agent, environment in
+        try await Task.detached(priority: .userInitiated) {
+            try AgentModels.listedChoices(for: agent, environment: environment)
+        }.value
+    }
+
     var validateTaskAgent: @Sendable (TaskAgentSelection, [String: String]) throws -> TaskAgentSelection = {
         try AgentModels.validate($0, environment: $1)
     }
