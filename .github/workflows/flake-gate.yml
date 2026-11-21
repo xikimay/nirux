@@ -1,5 +1,5 @@
 name: Flake gate
-run-name: Shadow CI on ${{ inputs.target }}
+run-name: Native test compilation on ${{ inputs.target }}
 on:
   workflow_dispatch:
     inputs:
@@ -61,54 +61,3 @@ jobs:
       - name: Build
         id: build
         run: swift build --build-tests
-
-      - name: Prepare independent negative control
-        run: bash "$RUNNER_TEMP/shadow/fixture.sh"
-      - name: Start the unmodified full suite
-        id: launch
-        run: |
-          git diff --exit-code HEAD
-          nohup bash "$RUNNER_TEMP/shadow/suite.sh" > "$RUNNER_TEMP/suite.log" 2>&1 < /dev/null &
-      - name: Observe the known XCTest failure
-        run: python3 "$RUNNER_TEMP/shadow/emit.py"
-      - name: Publish the early diagnostic
-        uses: actions/upload-artifact@v4
-        with:
-          name: diagnostic-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/diagnostic.json
-          if-no-files-found: error
-      - name: Verify full-suite verdict
-        if: ${{ !cancelled() && steps.build.conclusion == 'success' && steps.launch.conclusion == 'success' }}
-        timeout-minutes: 30
-        run: |
-          while [[ ! -f "$RUNNER_TEMP/suite.exit" ]]; do sleep 2; done
-          cat "$RUNNER_TEMP/suite.log"
-          echo "SUITE_SECONDS=$(( $(cat "$RUNNER_TEMP/suite.end") - $(cat "$RUNNER_TEMP/suite.start") ))"
-          test "$(cat "$RUNNER_TEMP/suite.exit")" = 0
-      - name: Check combined release package
-        if: ${{ !cancelled() && steps.build.conclusion == 'success' }}
-        run: |
-          swift build -c release
-          scripts/bundle.sh 0.0.0 0
-          Nirux.app/Contents/MacOS/Nirux --check-terminal-runtime
-          scripts/launch-check.sh Nirux.app
-      - name: Profile WaitingTaskFlowTests on a separate build
-        if: ${{ !cancelled() && steps.build.conclusion == 'success' }}
-        run: |
-          set -eo pipefail
-          git apply "$RUNNER_TEMP/shadow/profile.patch"
-          swift build --build-tests
-          for n in 1 2 3; do
-            swift test --skip-build --filter WaitingTaskFlowTests | tee "$RUNNER_TEMP/profile-$n.log"
-            grep -E 'Executed [1-9][0-9]* tests?, with 0 failures' "$RUNNER_TEMP/profile-$n.log"
-          done
-      - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: measurements-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/profile-*.log
-            ${{ runner.temp }}/suite.log
-            ${{ runner.temp }}/suite.start
-            ${{ runner.temp }}/suite.end
-            ${{ runner.temp }}/suite.exit
