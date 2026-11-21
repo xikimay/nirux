@@ -12,7 +12,7 @@ final class SidebarMergeMotionTests: XCTestCase {
         var time: CFTimeInterval = 9_000
     }
 
-    private func pullRequest(_ state: String = "OPEN", ci: String? = nil) -> PRInfo {
+    private func pullRequest(_ state: GitHub.PullRequestState = .open, ci: String? = nil) -> PRInfo {
         PRInfo(
             number: 39, state: state, isDraft: false, ciStatus: ci, checks: [], reviewDecision: nil, mergeable: nil,
             url: "https://example.test/pull/39", additions: nil, deletions: nil, changedFiles: nil
@@ -139,7 +139,7 @@ final class SidebarMergeMotionTests: XCTestCase {
     func testChecksPassingAndTheMergePlayOnce() throws {
         let clock = Clock()
         let before = [
-            row("ready", index: 0, pr: pullRequest(ci: "SUCCESS")), row("merged", index: 1, pr: pullRequest("MERGED")),
+            row("ready", index: 0, pr: pullRequest(ci: "SUCCESS")), row("merged", index: 1, pr: pullRequest(.merged)),
             row("running", index: 2, pr: pullRequest(ci: "PENDING")), row("open", index: 3, pr: pullRequest(ci: "SUCCESS")),
             row("loading", index: 4), row("unread", index: 5, pr: pullRequest())
         ]
@@ -151,9 +151,9 @@ final class SidebarMergeMotionTests: XCTestCase {
 
         let after = [
             before[0], before[1], row("running", index: 2, pr: pullRequest(ci: "SUCCESS")),
-            row("open", index: 3, pr: pullRequest("MERGED")),
+            row("open", index: 3, pr: pullRequest(.merged)),
             // Its pull request's state was only just read: merged long ago.
-            row("loading", index: 4, pr: pullRequest("MERGED")),
+            row("loading", index: 4, pr: pullRequest(.merged)),
             // Its checks were never seen running: no check drawn.
             row("unread", index: 5, pr: pullRequest(ci: "SUCCESS"))
         ]
@@ -217,7 +217,7 @@ final class SidebarMergeMotionTests: XCTestCase {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
         sidebar.isExpanded = true
         sidebar.update(profiles: [here], workspaces: [row("pr", index: 0, pr: pullRequest(ci: "SUCCESS")), row("other", index: 1)])
-        sidebar.update(profiles: [there], workspaces: [row("pr", index: 0, pr: pullRequest("MERGED"))])
+        sidebar.update(profiles: [there], workspaces: [row("pr", index: 0, pr: pullRequest(.merged))])
         XCTAssertTrue(sidebar.mergedAt.isEmpty)
         XCTAssertTrue(sidebar.folds.isEmpty)
         XCTAssertNil(sidebar.archivedBumpAt)
@@ -244,7 +244,7 @@ final class SidebarMergeMotionTests: XCTestCase {
     func testTheRailNotesNothing() {
         let sidebar = sidebar([row("a", index: 0, pr: pullRequest(ci: "PENDING")), row("b", index: 1)])
         sidebar.isExpanded = false
-        sidebar.update(profiles: [], workspaces: [row("a", index: 0, pr: pullRequest("MERGED")), row("b", index: 1, archived: true)])
+        sidebar.update(profiles: [], workspaces: [row("a", index: 0, pr: pullRequest(.merged)), row("b", index: 1, archived: true)])
         XCTAssertTrue(sidebar.mergedAt.isEmpty)
         XCTAssertTrue(sidebar.folds.isEmpty)
         XCTAssertNil(sidebar.archivedBumpAt)
@@ -253,8 +253,8 @@ final class SidebarMergeMotionTests: XCTestCase {
         XCTAssertTrue(views(in: sidebar, SidebarWorkspaceCardRenderer.mergeSweepID).isEmpty)
 
         // Noted while the list showed, then the rail: forgotten.
-        sidebar.update(profiles: [], workspaces: [row("a", index: 0, pr: pullRequest("MERGED")), row("c", index: 2)])
-        sidebar.update(profiles: [], workspaces: [row("a", index: 0, pr: pullRequest("MERGED"))])
+        sidebar.update(profiles: [], workspaces: [row("a", index: 0, pr: pullRequest(.merged)), row("c", index: 2)])
+        sidebar.update(profiles: [], workspaces: [row("a", index: 0, pr: pullRequest(.merged))])
         XCTAssertFalse(sidebar.folds.isEmpty)
         sidebar.isExpanded = false
         XCTAssertTrue(sidebar.folds.isEmpty)
@@ -457,7 +457,7 @@ final class SidebarMergeMotionTests: XCTestCase {
     /// one that was archived all along, folds nothing.
     func testNothingPlaysWithoutMovementOrWithoutADeparture() {
         let rows = [row("a", index: 0, pr: pullRequest(ci: "SUCCESS")), row("b", index: 1), row("old", index: 2, archived: true)]
-        let changed = [row("a", index: 0, pr: pullRequest("MERGED")), row("b", index: 1, archived: true), rows[2]]
+        let changed = [row("a", index: 0, pr: pullRequest(.merged)), row("b", index: 1, archived: true), rows[2]]
         let still = sidebar(rows)
         still.animates = false
         still.update(profiles: [], workspaces: changed)

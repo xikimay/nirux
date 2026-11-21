@@ -14,6 +14,7 @@ struct Mission: Codable, Equatable {
     let parentAgentUUID: String
     let childWorkspaceID: String
     let childAgentUUID: String
+    /// `CodingAgent`'s raw value, or "agent" when the child started none.
     let childAgentKind: String
     let branch: String
     var status: Status
@@ -39,6 +40,8 @@ struct Mission: Codable, Equatable {
     /// the user started it (⌘N), or an older build's record.
     var startedByParent: Bool?
 
+    var childAgent: CodingAgent? { CodingAgent(rawValue: childAgentKind) }
+
     /// Carried whatever the Mission handoffs setting: a Lead's task, a
     /// sub-task a task's agent started with its tools, or a Lead's tells.
     var isAlwaysCarried: Bool { reportsToLead == true || reportsToTask == true || oneWay == true }
@@ -57,19 +60,12 @@ struct Mission: Codable, Equatable {
         }.min { $0.timestamp < $1.timestamp }
     }
 
-    /// The agent its child runs, as Nirux's lines name it, when Nirux
-    /// delivers its parent's messages to it (`agentName(ofKind:)`).
-    var childAgentName: String? { Self.agentName(ofKind: childAgentKind) }
-
-    /// An agent kind (its process's name too), as Nirux's lines name it,
-    /// when Nirux delivers messages to it: typed into Claude Code's or
-    /// Antigravity's prompt, or handed to Codex's queue.
-    static func agentName(ofKind kind: String) -> String? {
-        switch kind {
-        case NiruxApp.WorkspaceAgent.claude.rawValue: "Claude Code"
-        case NiruxApp.WorkspaceAgent.codex.rawValue: "Codex"
-        case NiruxApp.WorkspaceAgent.agy.rawValue: "Antigravity"
-        default: nil
+    /// The agent its child runs, when Nirux delivers its parent's messages:
+    /// typed into Claude Code or Antigravity, or handed to Codex's queue.
+    var deliveryAgent: CodingAgent? {
+        switch childAgent {
+        case .claude?, .codex?, .agy?: childAgent
+        case .gemini?, .opencode?, nil: nil
         }
     }
 }
@@ -272,6 +268,7 @@ final class MissionStore {
         case available
         case unavailable
     }
+    var hasLoadedLedger: Bool { ledgerState == .available }
     private var ledgerState: LedgerState
 
     nonisolated static var defaultFileURL: URL {
@@ -460,7 +457,7 @@ final class MissionStore {
             // A Claude Code child's `ask` ends its turn (MissionEventCLI.ask):
             // the store decides from the recorded child, not from the queue.
             expectsTypedAnswer: incoming.kind == .question
-                && missions[index].childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue ? true : nil,
+                && missions[index].childAgent == .claude ? true : nil,
             answeredByUser: incoming.kind == .response && fromUser ? true : nil
         )
         if event.kind == .instruction {

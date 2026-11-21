@@ -44,7 +44,7 @@ enum NewTask {
     struct Request: Sendable {
         let description: String
         let template: TaskTemplates.Template?
-        let agent: NiruxApp.WorkspaceAgent
+        let agent: CodingAgent
         let projectID: String
         let place: Place
         /// False once the user chose to start without fetching, after a
@@ -102,7 +102,7 @@ enum NewTask {
     /// the checkout's HEAD. Nil when `folder` isn't in a git repository.
     /// Runs git (no network): call it off the main thread.
     static func resolveTarget(folder: String, baseBranch: String?, gitPath: String = "/usr/bin/git") -> Target? {
-        guard let topLevel = GitWorktree.repoRoot(at: folder) else { return nil }
+        guard let topLevel = GitWorktree.repoRoot(at: folder, timeout: GitCommand.defaultTimeout) else { return nil }
         let checkout = GitWorktree.mainWorktreeRoot(of: topLevel)
         let hasOrigin = GitCommand.output(["remote"], cwd: checkout, gitPath: gitPath, timeout: 10)?
             .split(separator: "\n").contains("origin") == true
@@ -166,7 +166,7 @@ enum NewTask {
     /// the line has no letter or digit to use. Always a valid branch name
     /// otherwise.
     static func suggestedBranch(description: String, templateName: String?) -> String {
-        var words = slugWords(firstLine(of: description) ?? "")
+        var words = slugWords(description.firstLine ?? "")
         let template = templateName?.lowercased() ?? ""
         var isFix = template.contains("bug") || template.contains("fix")
         if let first = words.first, fixVerbs.contains(first) || bugWords.contains(first) {
@@ -189,7 +189,7 @@ enum NewTask {
     /// The workspace's name: the description's first line, its whitespace
     /// collapsed, cut at `maxTitleLength`. Nil for a blank description.
     static func workspaceTitle(description: String) -> String? {
-        guard let line = firstLine(of: description) else { return nil }
+        guard let line = description.firstLine else { return nil }
         let words = line.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         guard words.count > maxTitleLength else { return words }
         return String(words.prefix(maxTitleLength - 1)).trimmingCharacters(in: .whitespaces) + "…"
@@ -202,13 +202,6 @@ enum NewTask {
         guard standardized != URL(fileURLWithPath: home).standardizedFileURL.path else { return "~" }
         let name = URL(fileURLWithPath: standardized).lastPathComponent
         return name.isEmpty ? standardized : name
-    }
-
-    /// The first line holding more than whitespace, trimmed.
-    static func firstLine(of text: String) -> String? {
-        text.split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { !$0.isEmpty }
     }
 
     /// Letters and digits in ASCII lowercase (accents dropped, other scripts

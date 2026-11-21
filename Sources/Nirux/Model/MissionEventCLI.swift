@@ -252,7 +252,7 @@ enum MissionEventCLI {
             return 4
         }
         let questionID = questionID(for: message, context: context, in: mission, now: now())
-        let typesAnswer = mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue
+        let typesAnswer = mission.childAgent == .claude
         if let recorded = mission.events.first(where: { $0.id == questionID }), kind != nil || recommendation != nil,
            recorded.questionKind != kind || recorded.recommendation != recommendation {
             notice("This question was recorded earlier with another kind or recommendation, which stand: "
@@ -797,11 +797,11 @@ extension MissionEventCLI {
             writeStandardError("No Mission on branch \(branch) was started from this terminal.")
             return 4
         }
-        guard mission.childAgentName != nil else {
+        guard mission.deliveryAgent != nil else {
             writeStandardError("Nirux delivers messages only to a Claude Code, Codex or Antigravity child; this one runs \(mission.childAgentKind).")
             return 4
         }
-        if mission.childAgentKind == NiruxApp.WorkspaceAgent.agy.rawValue, MissionPromptText.startsWithSlashCommand(message) {
+        if mission.childAgent == .agy, MissionPromptText.startsWithSlashCommand(message) {
             writeStandardError("Antigravity runs a slash command itself, with no turn to end, which would hold the messages after it: "
                 + "send the request in words.")
             return 2
@@ -829,7 +829,7 @@ extension MissionEventCLI {
                 event.childConsumedAt != nil ? true : event.expiredAt != nil ? false : nil
             }
         }
-        let codex = mission.childAgentKind == NiruxApp.WorkspaceAgent.codex.rawValue
+        let codex = mission.childAgent == .codex
         if typed == true {
             writeStandardOutput(codex ? "Nirux handed the message to the child's Codex, which starts it as a prompt."
                 : "Nirux typed the message into the child's prompt.")

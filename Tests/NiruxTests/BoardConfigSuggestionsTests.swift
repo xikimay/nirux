@@ -35,10 +35,7 @@ final class BoardConfigSuggestionsTests: XCTestCase {
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let text = String(decoding: data, as: UTF8.self)
+        let text = String(decoding: try process.runToEnd(reading: output), as: UTF8.self)
         guard process.terminationStatus == 0 else {
             throw NSError(domain: "git", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: text])
         }
@@ -212,10 +209,10 @@ final class BoardConfigSuggestionsTests: XCTestCase {
             ("ssh://git@ssh.github.com:443/Acme/Widgets.git", "Acme/Widgets"),
             ("https://github.com/Acme/Widgets/", "Acme/Widgets")
         ] {
-            XCTAssertEqual(BoardConfigSuggestions.repositoryName(remoteURL: url), expected, url)
+            XCTAssertEqual(GitHubRepository.gitHubOwnerAndName(remoteURL: url), expected, url)
         }
-        XCTAssertNil(BoardConfigSuggestions.repositoryName(remoteURL: "git@gitlab.com:acme/widgets.git"))
-        XCTAssertNil(BoardConfigSuggestions.repositoryName(remoteURL: "/local/path"))
+        XCTAssertNil(GitHubRepository.gitHubOwnerAndName(remoteURL: "git@gitlab.com:acme/widgets.git"))
+        XCTAssertNil(GitHubRepository.gitHubOwnerAndName(remoteURL: "/local/path"))
     }
 
     /// An SSH host alias of github.com reads as GitHub, as ssh resolves it
@@ -223,15 +220,16 @@ final class BoardConfigSuggestionsTests: XCTestCase {
     /// as an option.
     func testAnSSHAliasOfGitHubReadsAsGitHub() throws {
         let config = root + "/ssh_config"
-        try Data("Host github-work\n  HostName github.com\nHost lab-work\n  HostName gitlab.com\n".utf8)
+        try Data("Host github-work\n  HostName github.com\nHost github-dot\n  HostName github.com.\nHost lab-work\n  HostName gitlab.com\n".utf8)
             .write(to: URL(fileURLWithPath: config))
         // ssh, with the test's own config, given time on a busy runner.
         XCTAssertEqual(SSHHostAlias.resolve("github-work", configFile: config, timeout: 60), true)
+        XCTAssertEqual(SSHHostAlias.resolve("github-dot", configFile: config, timeout: 60), true, "github.com. is github.com")
         XCTAssertEqual(SSHHostAlias.resolve("lab-work", configFile: config, timeout: 60), false)
         XCTAssertEqual(SSHHostAlias.resolve("-oProxyCommand=touch", configFile: config, timeout: 60), false)
-        XCTAssertTrue(BoardConfigSuggestions.isSSH("git@github-work:acme/app.git"))
-        XCTAssertTrue(BoardConfigSuggestions.isSSH("ssh://git@github-work/acme/app.git"))
-        XCTAssertFalse(BoardConfigSuggestions.isSSH("https://github-work/acme/app.git"))
+        XCTAssertTrue(GitHubRepository.isSSH("git@github-work:acme/app.git"))
+        XCTAssertTrue(GitHubRepository.isSSH("ssh://git@github-work/acme/app.git"))
+        XCTAssertFalse(GitHubRepository.isSSH("https://github-work/acme/app.git"))
     }
 
     /// Where the pull requests live, not where the branch checked out is

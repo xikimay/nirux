@@ -134,12 +134,7 @@ struct SidebarCardLink {
     }
 }
 
-/// What a task row shows and where, before any view exists: the renderer
-/// draws it, `SidebarExpandedMetrics.workspaceHeight` measures it. Every row
-/// has its title and its status (`rowSummary`), which wraps when it is
-/// long; the selected one adds its columns, as chips, and its pull
-/// request's links; an action block follows when there is something to do.
-/// An archived row that asks nothing is one line.
+/// Shared by the row renderer and `SidebarExpandedMetrics.workspaceHeight`.
 @MainActor
 struct SidebarCardLayout {
     typealias Metrics = SidebarExpandedMetrics
@@ -161,8 +156,12 @@ struct SidebarCardLayout {
     let links: [SidebarCardLink]
     let chipRows: [[ChipPlacement]]
     let actions: [SidebarCardAction]
-    /// The lines the status may take (`SidebarRowSummary.statusLineLimit`),
-    /// and those its text takes in this row's width.
+    let goal: String?
+    let step: SidebarTaskStep
+    let stepTitle: String
+    let stepWidth: CGFloat
+    let statusText: NSAttributedString
+    let statusBelowStep: Bool
     let statusLineLimit: Int
     let statusLineCount: Int
     let height: CGFloat
@@ -172,12 +171,17 @@ struct SidebarCardLayout {
         self.sidebarWidth = sidebarWidth
         isCompact = workspace.showsCompactRow
         state = workspace.cardState
-        summary = workspace.rowSummary
+        summary = workspace.rowSummary(includesNextStep: isCompact || workspace.isLead)
+        goal = isCompact || workspace.isLead ? nil : WorkspaceInfo.oneRunOfWords(workspace.purpose)
+        step = SidebarTaskStep(workspace)
+        let number: Int? = if let pr = workspace.prInfo { pr.state == .closed ? nil : pr.number }
+            else { workspace.currentBoardProgress?.number }
+        stepTitle = step.rawValue + (number.map { " #\($0)" } ?? "")
         // The Lead's row is one line, columns and all: ⌘1…⌘9 reach them.
         let showsColumns = workspace.isActive && !isCompact && !workspace.isLead
         // A row asking the user (an approval) keeps its full width: the
         // request text is never cut.
-        nestIndent = workspace.isNested && workspace.cardActions.isEmpty ? Metrics.nestIndent : 0
+        nestIndent = workspace.isNested && workspace.cardActions.allSatisfy(\.keepsIndent) ? Metrics.nestIndent : 0
         let rowWidth = sidebarWidth - Metrics.workspaceInsetX - Metrics.cardPaddingX - Metrics.textX - nestIndent
         // Too wide for the line: the diff goes first, then the feedback; the
         // pull request and its checks stay.
@@ -187,9 +191,22 @@ struct SidebarCardLayout {
         }
         self.links = links
         actions = isCompact ? [] : workspace.cardActions
-        statusLineLimit = summary.statusLineLimit(isSelected: workspace.isActive)
-        statusLineCount = isCompact || workspace.isLead ? 1 : SidebarWrappedText.lineCount(
-            SidebarWorkspaceCardRenderer.statusText(summary), width: rowWidth,
+        let badgeWidth = ceil(stepTitle.size(withAttributes: [.font: Theme.Font.captionEmphasized]).width) + 2 * Metrics.buttonPaddingX
+        stepWidth = min(badgeWidth, max(0, rowWidth))
+        let prefix = number.map { "#\($0) · " }
+        var phrase = summary.lineText
+        if summary.mark == .readyToMerge { phrase = "Checks passed" }
+        else if summary.status.tone == .branch || (step == .merged && phrase == "Merged") { phrase = "" }
+        else if let prefix, phrase.hasPrefix(prefix) { phrase = String(phrase.dropFirst(prefix.count)) }
+        statusText = SidebarWorkspaceCardRenderer.statusText(summary, shown: phrase)
+        let besideStep = rowWidth - stepWidth - Theme.Space.xs
+        statusBelowStep = summary.mark == .working && SidebarWrappedText.lineCount(
+            statusText, width: max(1, besideStep), lineHeight: Metrics.statusRowHeight, maxLines: 2
+        ) > 1
+        statusLineLimit = [.needsYou, .error, .blocked, .asking].contains(summary.mark)
+            ? summary.statusLineLimit(isSelected: workspace.isActive) : 1
+        statusLineCount = isCompact || workspace.isLead || statusLineLimit == 1 ? 1 : SidebarWrappedText.lineCount(
+            statusText, width: max(1, statusBelowStep ? rowWidth : besideStep),
             lineHeight: Metrics.statusRowHeight, maxLines: statusLineLimit
         )
 
@@ -225,7 +242,7 @@ struct SidebarCardLayout {
             height = Metrics.leadRowHeight + blockHeight + (actions.isEmpty ? 0 : Metrics.rowPaddingY)
         } else {
             var height = Metrics.rowPaddingY * 2 + Metrics.titleRowHeight + Metrics.statusGap
-                + CGFloat(statusLineCount) * Metrics.statusRowHeight
+                + CGFloat(statusLineCount + (goal == nil ? 0 : 1) + (statusBelowStep ? 1 : 0)) * Metrics.statusRowHeight
             let lineCount = CGFloat(max(rows.count, links.isEmpty ? 0 : 1))
             if lineCount > 0 {
                 height += Metrics.columnsGap + lineCount * Metrics.chipHeight + (lineCount - 1) * Metrics.chipGap
@@ -271,7 +288,7 @@ struct SidebarCardLayout {
         let (_, color) = SidebarRenderer.prStateDisplay(pullRequest)
         let font = Theme.Font.mono
         let number = NSMutableAttributedString()
-        let symbol = pullRequest.state == "MERGED" ? Theme.Symbol.merged : Theme.Symbol.pullRequest
+        let symbol = pullRequest.state == .merged ? Theme.Symbol.merged : Theme.Symbol.pullRequest
         if let icon = SidebarRenderer.symbol(symbol, color: color) {
             number.append(SidebarColumnChip.attachment(icon, side: 12, font: font))
             number.append(SidebarColumnChip.spacer())
@@ -284,7 +301,7 @@ struct SidebarCardLayout {
             url: SidebarView.openActionURL(workspaceIndex: workspace.index, url: pullRequest.url),
             toolTip: SidebarRenderer.pullRequestToolTip(pullRequest)
         ))
-        if let ciStatus = pullRequest.ciStatus, pullRequest.state == "OPEN" {
+        if let ciStatus = pullRequest.ciStatus, pullRequest.state == .open {
             let display = SidebarRenderer.ciStatusDisplay(ciStatus)
             if let name = display.symbol, let icon = SidebarRenderer.symbol(name, color: display.color) {
                 // The failed check, else the PR's Checks tab, which lists
@@ -300,7 +317,7 @@ struct SidebarCardLayout {
         return links
     }
 
-    private static func feedbackText(_ feedback: SidebarPRFeedback) -> NSAttributedString {
+    private static func feedbackText(_ feedback: PRFeedback.Counts) -> NSAttributedString {
         let font = Theme.Font.caption
         let text = NSMutableAttributedString()
         for (symbol, count) in [(Theme.Symbol.prFeedback, feedback.humans), (Theme.Symbol.botFeedback, feedback.bots)] where count > 0 {

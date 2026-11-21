@@ -23,6 +23,8 @@ final class ColumnState {
     private(set) var projectBoard: ProjectBoardController?
     /// The branch this column reviews.
     private(set) var branchReview: BranchReviewController?
+    /// A waiting task's only column, until it starts: what it waits for.
+    private(set) var waitingTask: WaitingTaskView?
     /// Column width as a fraction of the columns viewport (0.15…2.0).
     /// Freeform (drag the resize handles); the ColumnWidth presets are just
     /// named stops the width cycler snaps to.
@@ -83,7 +85,6 @@ final class ColumnState {
     }
 
     // MARK: - Header (pushes the terminal down)
-    static let boringTitles: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
     /// A terminal column's header; the other types own theirs.
     private(set) var terminalHeader: ColumnHeaderView?
     /// The column's header, whatever its type (see `ColumnHeaderView`).
@@ -188,8 +189,8 @@ final class ColumnState {
     func updateHeaderTitle(snapshot: @autoclosure () -> ProcessSnapshot) {
         guard let header = terminalHeader else { return }
         if let deferredAgent {
-            header.title = deferredAgent.processName
-        } else if let termTitle = terminalTitle, !termTitle.isEmpty, !Self.boringTitles.contains(termTitle) {
+            header.title = deferredAgent.launch.agent.rawValue
+        } else if let termTitle = terminalTitle, !termTitle.isEmpty, !Shell.isShell(termTitle) {
             header.title = termTitle
         } else {
             header.title = pty?.foregroundProcessName(snapshot: snapshot()) ?? "shell"
@@ -205,7 +206,7 @@ final class ColumnState {
     /// task's station.
     func updateHeaderAgentState(_ column: ColumnInfo, wait: AgentWait?, now: TimeInterval, station: BoardStages.Station?) {
         guard let header = terminalHeader else { return }
-        header.icon = .terminal(processName: column.deferredAgent?.processName ?? column.processName)
+        header.icon = .terminal(processName: column.deferredAgent?.agent.rawValue ?? column.processName)
         header.status = .agent(column, wait: wait, now: now, station: station)
     }
 
@@ -438,12 +439,12 @@ final class ColumnState {
         // Only the agent's own, in front: any program can print the sequence.
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
             guard let self, let ptySession else { return }
-            guard status.process != AgentProgramStatus.codex else { return noteCodexStatus(status, in: ptySession) }
+            guard status.agent != .codex else { return noteCodexStatus(status, in: ptySession) }
             // One read on an empty process table goes to the agy last seen in front.
             let snapshot = readsProcesses()
             guard ptySession.isNewProgramStatus(status),
                   let agy = snapshot.isEmpty ? lastForegroundAgent : ptySession.foregroundProcess(snapshot: snapshot),
-                  agy.name == status.process
+                  agy.agent == status.agent
             else { return }
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
@@ -544,6 +545,17 @@ final class ColumnState {
         self.projectBoard = projectBoard
     }
 
+    /// A waiting task's column: no terminal, what it waits for.
+    init(waitingTask: WaitingTaskView) {
+        agentUUID = nil
+        view = Self.filled(NSView())
+
+        waitingTask.frame = view.bounds
+        waitingTask.autoresizingMask = [.width, .height]
+        view.addSubview(waitingTask)
+        self.waitingTask = waitingTask
+    }
+
     /// Branch Review column: one branch, read-only.
     init(branchReview: BranchReviewController) {
         agentUUID = nil
@@ -593,7 +605,7 @@ final class ColumnState {
     /// own, not a nested agy's that its shell tool started in its job.
     func captureAgySession(sessionID: String?, emitterProcess: ProcessInstance?, snapshot: ProcessSnapshot) -> Bool {
         guard let place = hookEmitterPlace(emitterProcess, snapshot: snapshot),
-              !AgentHookCenter.isHeadlessAgy(place.foreground) else { return false }
+              place.foreground?.headlessAgent != .agy else { return false }
         return agySessionTracker.capture(
             sessionID: sessionID, emitterBelongsToForegroundJob: emitterProcess == place.foreground?.instance,
             foregroundProcess: place.foreground
@@ -638,7 +650,7 @@ final class ColumnState {
     private func noteCodexStatus(_ status: AgentProgramStatus, in pty: PtySession) {
         let snapshot = ProcessSnapshot()
         let front = pty.foregroundProcess(snapshot: snapshot)
-        guard snapshot.isEmpty || front?.name == status.process else { return }
+        guard snapshot.isEmpty || front?.agent == status.agent else { return }
         pty.noteCodexStatus(status, from: snapshot.isEmpty ? nil : front?.instance)
         if [.done, .idle].contains(status.state) { onProgramTurnOver?() }
     }
@@ -656,8 +668,7 @@ final class ColumnState {
     /// Whether this column's `codex` will never prove a thread: one started
     /// without a prompt, and not resumed (`CodexLaunch.canProve`).
     func runsUnprovableCodex(snapshot: ProcessSnapshot) -> Bool {
-        guard let codex = pty?.foregroundProcess(snapshot: snapshot), codex.name == AgentProgramStatus.codex,
-              !AgentHookCenter.isHeadlessCodex(codex) else { return false }
+        guard let codex = pty?.foregroundProcess(snapshot: snapshot), codex.interactiveAgent == .codex else { return false }
         return provenCodexSessionID(of: codex) == nil && !CodexLaunch.canProve(codex)
     }
 
@@ -670,6 +681,13 @@ final class ColumnState {
 
     func prepareClaudeResume(sessionID: String) {
         claudeSessionTracker.prepareResume(sessionID: sessionID)
+    }
+
+    private var planningSession: (process: ProcessInstance, id: String)?
+
+    func isPlanning(in foreground: ForegroundProcess?) -> Bool {
+        guard let planningSession, let foreground, foreground.instance == planningSession.process else { return false }
+        return claudeSessionTracker.boundSessionID(for: foreground.instance) == planningSession.id
     }
 
     /// Whether a Claude hook event comes from this column's own `claude`
@@ -695,11 +713,15 @@ final class ColumnState {
         // Follow the transcript of the session now bound to the foreground
         // `claude` — never one a subagent, teammate or nested run reports.
         if admission != .rejected, event.agentID == nil,
-           let transcriptPath = event.transcriptPath.flatMap(AgentHookEvent.validTranscriptPath),
            let sessionID = event.sessionID,
            let foregroundProcess,
            claudeSessionTracker.boundSessionID(for: foregroundProcess.instance) == sessionID {
-            followClaudeTranscript(at: transcriptPath, sessionID: sessionID, process: foregroundProcess.instance)
+            if event.name == .sessionEnd || event.name == .sessionStart || event.permissionMode != nil {
+                planningSession = event.name != .sessionEnd && event.permissionMode == "plan" ? (foregroundProcess.instance, sessionID) : nil
+            }
+            if let path = event.transcriptPath.flatMap(AgentHookEvent.validTranscriptPath) {
+                followClaudeTranscript(at: path, sessionID: sessionID, process: foregroundProcess.instance)
+            }
         }
         return admission
     }

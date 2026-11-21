@@ -411,7 +411,7 @@ final class MissionTellTests: XCTestCase {
             machine.codexQueueRefusal(foreground: foreground, runningSince: since)
         }
         func report(_ state: AgentProgramStatus.State, kind: String? = nil, from process: ProcessInstance? = nil) {
-            let status = AgentProgramStatus(state: state, kind: kind, message: nil, process: "codex")
+            let status = AgentProgramStatus(state: state, kind: kind, message: nil, agent: .codex)
             machine.noteCodexStatus(status, from: process ?? claudeProcess, now: t0 + 50)
         }
         XCTAssertEqual(refusal(nil), .noClaude)
@@ -439,7 +439,7 @@ final class MissionTellTests: XCTestCase {
         report(.done, from: ProcessInstance(pid: 9, startedAt: t0))
         XCTAssertEqual(refusal(), .noPromptYet, "another codex's word")
         // Read on an empty process table: the codex in front then's.
-        machine.noteCodexStatus(AgentProgramStatus(state: .done, kind: nil, message: nil, process: "codex"), from: nil, now: t0 + 70)
+        machine.noteCodexStatus(AgentProgramStatus(state: .done, kind: nil, message: nil, agent: .codex), from: nil, now: t0 + 70)
         XCTAssertNil(refusal(), "one already running")
         XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 12, startedAt: t0 + 80), name: "codex", arguments: ["codex"])),
                        .noPromptYet, "not one started since")
@@ -454,11 +454,11 @@ final class MissionTellTests: XCTestCase {
         var machine = AgentStatusMachine()
         _ = machine.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0))
         func refusal(_ foreground: ForegroundProcess? = agy, since: TimeInterval = t0 + 100) -> AgentPromptRefusal? {
-            machine.promptRefusal(foreground: foreground, runningSince: since, agent: "agy")
+            machine.promptRefusal(foreground: foreground, runningSince: since, agent: .agy)
         }
         func report(_ state: AgentProgramStatus.State, kind: String? = nil, at offset: TimeInterval, from process: ProcessInstance? = nil) {
             _ = machine.noteProgramStatus(
-                AgentProgramStatus(state: state, kind: kind, message: nil, process: "agy"), from: process ?? claudeProcess,
+                AgentProgramStatus(state: state, kind: kind, message: nil, agent: .agy), from: process ?? claudeProcess,
                 isUserFocused: true, now: Date(timeIntervalSince1970: t0 + offset)
             )
         }
@@ -551,9 +551,9 @@ final class MissionTellTests: XCTestCase {
         // An agy that left with its dialog open: the keys of what runs next are drafts.
         var after = AgentStatusMachine()
         _ = after.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0))
-        _ = after.noteProgramStatus(AgentProgramStatus(state: .working, kind: nil, message: nil, process: "agy"), from: claudeProcess,
+        _ = after.noteProgramStatus(AgentProgramStatus(state: .working, kind: nil, message: nil, agent: .agy), from: claudeProcess,
                                     isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 1))
-        _ = after.noteProgramStatus(AgentProgramStatus(state: .blocked, kind: "permission", message: nil, process: "agy"), from: claudeProcess,
+        _ = after.noteProgramStatus(AgentProgramStatus(state: .blocked, kind: "permission", message: nil, agent: .agy), from: claudeProcess,
                                     isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 2))
         _ = after.tick(fgName: "claude", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 3))
         after.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 4), keys: Data("x".utf8))

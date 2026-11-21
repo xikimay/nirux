@@ -18,7 +18,7 @@ final class SidebarCardStateTests: XCTestCase {
         )
     }
 
-    private func pullRequest(state: String = "OPEN", ci: String? = nil) -> PRInfo {
+    private func pullRequest(state: GitHub.PullRequestState = .open, ci: String? = nil) -> PRInfo {
         PRInfo(
             number: 7, state: state, isDraft: false, ciStatus: ci, checks: [], reviewDecision: nil, mergeable: nil,
             url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil
@@ -124,7 +124,7 @@ final class SidebarCardStateTests: XCTestCase {
         XCTAssertEqual(workspace([column()], pullRequest: red).cardState, .error)
         XCTAssertEqual(workspace([column(status: .working)], pullRequest: red).cardState, .working)
         XCTAssertEqual(workspace([column()], pullRequest: pullRequest(ci: "PENDING")).cardState, .idle)
-        XCTAssertEqual(workspace([column()], pullRequest: pullRequest(state: "MERGED", ci: "FAILURE")).cardState, .done)
+        XCTAssertEqual(workspace([column()], pullRequest: pullRequest(state: .merged, ci: "FAILURE")).cardState, .done)
     }
 
     // MARK: - Project switcher ring
@@ -179,7 +179,7 @@ final class SidebarCardStateTests: XCTestCase {
 
     func testActionBlockOrderAndHeight() throws {
         let info = workspace(
-            [column(0, stuck: stopped)], pullRequest: pullRequest(state: "MERGED"), isActive: true,
+            [column(0, stuck: stopped)], pullRequest: pullRequest(state: .merged), isActive: true,
             blocker: "API access", cleanup: .available
         )
         XCTAssertEqual(info.cardActions, [
@@ -198,7 +198,7 @@ final class SidebarCardStateTests: XCTestCase {
     /// after every launch the rows keep their size, the parked ones their
     /// single line, and another row says "Paused".
     func testRestoredAgentResumesFromItsChip() throws {
-        let deferred = SidebarDeferredAgent(processName: "codex", summary: "codex session", columnID: UUID())
+        let deferred = SidebarDeferredAgent(agent: .codex, summary: "codex session", columnID: UUID())
         let resting = ColumnInfo(
             index: 2, processName: nil, abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
             terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil, deferredAgent: deferred
@@ -280,10 +280,10 @@ final class SidebarCardStateTests: XCTestCase {
     func testChipsNeverRunUnderThePullRequestLinks() {
         let stuck = column(stuck: .waiting(.question(nil), duration: "12h05m"))
         var info = workspace([stuck, column(1)], pullRequest: PRInfo(
-            number: 12345, state: "OPEN", isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil,
+            number: 12345, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil,
             mergeable: nil, url: "https://example.test/pull/12345", additions: nil, deletions: nil, changedFiles: nil
         ), isActive: true)
-        info.prFeedback = SidebarPRFeedback(humans: 12, bots: 34)
+        info.prFeedback = PRFeedback.Counts(humans: 12, bots: 34)
         let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render()
         let links = result.hitAreas.filter { if case .link = $0.region { return true }; return false }
         let chips = result.hitAreas.filter { if case .column = $0.region { return true }; return false }
