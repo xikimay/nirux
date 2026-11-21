@@ -226,8 +226,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         hooks.resolver = { [weak shellView] uuid in
             shellView?.resolveAgentColumn(uuid: uuid)
         }
-        hooks.asksParent = { [weak shellView] resolution, request in
-            shellView?.askParent(for: resolution, request) ?? false
+        hooks.asksParent = { [weak shellView] resolution, request, question in
+            shellView?.askParent(for: resolution, request, asking: question) ?? false
         }
         hooks.onEventsApplied = { [weak shellView] events in
             shellView?.applyAgentHookEvents(events)

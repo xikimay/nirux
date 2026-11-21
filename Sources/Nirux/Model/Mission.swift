@@ -33,6 +33,11 @@ struct Mission: Codable, Equatable {
     /// only, never the task's questions or result, and code counting a
     /// parent's Missions or a child's leaves it out. Nil means no.
     var oneWay: Bool?
+    /// The parent started the child and wrote its first prompt (a Lead's or
+    /// a task's start_task, an agent's worktree request): until the user
+    /// types to the child, its turn-end questions are the parent's. Nil:
+    /// the user started it (⌘N), or an older build's record.
+    var startedByParent: Bool?
 
     /// Carried whatever the Mission handoffs setting: a Lead's task, a
     /// sub-task a task's agent started with its tools, or a Lead's tells.
@@ -238,6 +243,8 @@ struct MissionCreationRequest {
     var reportsToTask = false
     /// A Lead's tells to a task that doesn't report to it (see `Mission.oneWay`).
     var oneWay = false
+    /// See `Mission.startedByParent`.
+    var startedByParent = false
 }
 
 /// Durable mission state. Writes are immediate because this store is also
@@ -325,7 +332,8 @@ final class MissionStore {
             events: [],
             reportsToLead: request.reportsToLead ? true : nil,
             reportsToTask: request.reportsToTask ? true : nil,
-            oneWay: request.oneWay ? true : nil
+            oneWay: request.oneWay ? true : nil,
+            startedByParent: request.startedByParent ? true : nil
         )
         var updated = missions
         updated.append(mission)

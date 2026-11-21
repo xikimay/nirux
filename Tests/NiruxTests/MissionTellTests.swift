@@ -1029,29 +1029,40 @@ final class MissionTellTests: XCTestCase {
         XCTAssertFalse(left.finishedTurn(afterTypingAt: typedAt))
     }
 
-    /// The last prompt typed at the box is the user's unless Nirux typed it,
-    /// its Enter too: a paste and its Enter in one write, or the Enter
-    /// after a long paste. None typed yet, the first prompt was Nirux's
-    /// (a task's handover).
-    func testAPromptNiruxTypedIsNotTheUsers() {
+    /// Who typed the last prompt: Nirux when it pressed its Enter (a paste
+    /// and its Enter in one write, or the Enter after a long paste), the
+    /// user at the box, or elsewhere (Remote Control) when the transcript
+    /// says a person typed one with no Enter at the box. Nobody before any:
+    /// a first prompt given at launch, Claude's own messages.
+    func testWhoTypedTheLastPrompt() {
         var machine = AgentStatusMachine()
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0))
         _ = machine.apply(hook(.sessionStart, at: 0), isUserFocused: false)
-        _ = machine.apply(hook(.userPromptSubmit, at: 1), isUserFocused: false)
+        machine.readsTranscript = true
+        _ = machine.apply(prompt("handover", at: 1), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "handover", at: t0 + 1.1, typed: false))
         _ = machine.apply(hook(.stop, at: 5), isUserFocused: false)
-        XCTAssertFalse(machine.lastPromptIsTheUsers, "none typed: its handover came with its launch")
+        XCTAssertEqual(machine.lastPromptTyper, .nobody, "its handover came with its launch")
         machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 6), keys: Data("\u{1B}[200~Go on\u{1B}[201~\r".utf8), byNirux: true)
-        _ = machine.apply(hook(.userPromptSubmit, at: 6.5), isUserFocused: false)
+        _ = machine.apply(prompt("tell", at: 6.5), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "tell", at: t0 + 6.6, typed: true))
         _ = machine.apply(hook(.stop, at: 7), isUserFocused: false)
-        XCTAssertFalse(machine.lastPromptIsTheUsers, "Nirux typed it")
+        XCTAssertEqual(machine.lastPromptTyper, .nirux)
+        _ = machine.apply(prompt("peer", at: 7.5), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "peer", at: t0 + 7.6, typed: false))
+        XCTAssertEqual(machine.lastPromptTyper, .nirux, "a peer's message")
         press("which one?\r", at: 8, into: &machine)
-        _ = machine.apply(hook(.userPromptSubmit, at: 8.2), isUserFocused: false)
-        _ = machine.apply(hook(.stop, at: 9), isUserFocused: false)
-        XCTAssertTrue(machine.lastPromptIsTheUsers)
+        _ = machine.apply(prompt("typed", at: 8.2), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "typed", at: t0 + 8.3, typed: true))
+        XCTAssertEqual(machine.lastPromptTyper, .user)
         press("\u{1B}[200~Rebase on main\u{1B}[201~", at: 10, into: &machine)
         machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 10.5), keys: Data("\r".utf8), byNirux: true)
-        _ = machine.apply(hook(.userPromptSubmit, at: 10.6), isUserFocused: false)
-        XCTAssertFalse(machine.lastPromptIsTheUsers, "Nirux's Enter after its paste")
+        _ = machine.apply(prompt("long", at: 10.6), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "long", at: t0 + 10.7, typed: true))
+        XCTAssertEqual(machine.lastPromptTyper, .nirux, "Nirux's Enter after its paste")
+        _ = machine.apply(prompt("phone", at: 12), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "phone", at: t0 + 12.1, typed: true))
+        XCTAssertEqual(machine.lastPromptTyper, .user, "typed elsewhere")
     }
 
     /// Claude Code shows some dialogs (trust, MCP servers) before any hook

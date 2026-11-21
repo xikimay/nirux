@@ -143,12 +143,27 @@ struct AgentStatusMachine {
     private(set) var boxEmptiedAt: TimeInterval?
     /// When the last prompt typed at the box went in (its UserPromptSubmit).
     private(set) var lastUserPromptAt: TimeInterval?
-    /// That prompt was one Nirux typed (a Mission message, a notice): its
-    /// Enter is one of `niruxSubmitKeys`.
-    private var lastTypedPromptIsNiruxs = false
+    /// When the last prompt the user typed went in, at the box or elsewhere
+    /// (Remote Control: its transcript line says a person typed it, with no
+    /// Enter at the box), and the last one Nirux typed (its Enter one of
+    /// `niruxSubmitKeys`).
+    private(set) var lastPromptByUserAt: TimeInterval?
+    private(set) var lastPromptByNiruxAt: TimeInterval?
     /// The Enters Nirux pressed after a message it typed, newest last (a
     /// few).
     private var niruxSubmitKeys: [TimeInterval] = []
+
+    enum PromptTyper: Equatable {
+        /// None typed yet: a first prompt given at launch (a task's
+        /// handover), and Claude's own (a peer's message, a task
+        /// notification) count for nobody.
+        case nobody
+        /// A message Nirux typed itself: a Mission message, a notice.
+        case nirux
+        /// At the box, or elsewhere (Remote Control), as its transcript
+        /// line says.
+        case user
+    }
     /// Enters that reached the prompt box, no dialog waiting for keys in
     /// front, newest last (a few): one of them sent each prompt typed there.
     private var submitKeys: [TimeInterval] = []
@@ -575,7 +590,7 @@ struct AgentStatusMachine {
             return noteTypedPrompt(hook)
         }
         if let id = hook.promptID, let index = readPrompts.firstIndex(where: { $0.id == id }) {
-            if readPrompts.remove(at: index).typed { noteTypedPrompt(hook) }
+            if readPrompts.remove(at: index).typed { noteTypedPrompt(hook, saidByTranscript: true) }
         } else {
             unreadPrompts = Array((unreadPrompts + [hook]).suffix(Self.promptMemory))
         }
@@ -600,7 +615,7 @@ struct AgentStatusMachine {
         let hook = unreadPrompts.remove(at: index)
         guard prompt.typed else { return [] }
         let held = heldApprovals
-        noteTypedPrompt(hook)
+        noteTypedPrompt(hook, saidByTranscript: true)
         return held.filter { request in !pendingDialogs.contains { $0.approval?.requestID == request.approval?.requestID } }
     }
 
@@ -609,11 +624,16 @@ struct AgentStatusMachine {
     /// covered the box: those listed then are closed, a subagent's an Esc
     /// left behind with no hook too. Typed elsewhere (Remote Control), or
     /// with an Enter Nirux didn't see, it leaves the box as it was.
-    private mutating func noteTypedPrompt(_ hook: PromptHook) {
-        guard let enter = submitKeys.last(where: { $0 <= hook.at }), enter > (boxEmptiedAt ?? 0) else { return }
+    /// `saidByTranscript`: its transcript line says a person typed it, so
+    /// with no Enter Nirux saw it was the user, elsewhere.
+    private mutating func noteTypedPrompt(_ hook: PromptHook, saidByTranscript: Bool = false) {
+        guard let enter = submitKeys.last(where: { $0 <= hook.at }), enter > (boxEmptiedAt ?? 0) else {
+            if saidByTranscript { lastPromptByUserAt = hook.at }
+            return
+        }
         boxEmptiedAt = enter
         lastUserPromptAt = hook.at
-        lastTypedPromptIsNiruxs = niruxSubmitKeys.contains(enter)
+        if niruxSubmitKeys.contains(enter) { lastPromptByNiruxAt = hook.at } else { lastPromptByUserAt = hook.at }
         submitKeys.removeAll { $0 <= enter }
         niruxSubmitKeys.removeAll { $0 <= enter }
         closeDialogs { $0.sessionID == hook.sessionID && $0.requestedAt <= enter }
@@ -810,11 +830,22 @@ struct AgentStatusMachine {
         isCurrentTurnEnd(turnEndedAt) && !turnEndQuestionIsBehind && turnFailure == nil && quietTurnEnd == nil && askedQuestion == nil
     }
 
-    /// The user typed the last prompt typed at the box: the agent answers
-    /// them. Not before any (a task's first prompt is Nirux's handover), nor
-    /// for one Nirux typed.
-    var lastPromptIsTheUsers: Bool {
-        lastUserPromptAt != nil && !lastTypedPromptIsNiruxs
+    /// Who typed the last prompt typed by a person or by Nirux.
+    var lastPromptTyper: PromptTyper {
+        switch (lastPromptByUserAt, lastPromptByNiruxAt) {
+        case (nil, nil): .nobody
+        case (let user?, let nirux?): user >= nirux ? .user : .nirux
+        case (_?, nil): .user
+        case (nil, _?): .nirux
+        }
+    }
+
+    /// Whether the turn end of `turnEndedAt` may go to the agent's parent:
+    /// still the last thing that happened, the turn's last Stop (a Stop hook
+    /// may keep it going), and nothing at its prompt since (the user is
+    /// there).
+    func mayAskParent(endingTurnAt turnEndedAt: TimeInterval) -> Bool {
+        isCurrentTurnEnd(turnEndedAt) && !turnEndQuestionIsBehind && turnFailure == nil && mainTurnEndIsLast && !hasDraft
     }
 
     /// The question asked at `turnEndedAt`, with the choices `message`
@@ -1859,7 +1890,8 @@ struct AgentStatusMachine {
         mainTurnMovedAt = nil
         boxEmptiedAt = nil
         lastUserPromptAt = nil
-        lastTypedPromptIsNiruxs = false
+        lastPromptByUserAt = nil
+        lastPromptByNiruxAt = nil
         submitKeys = []
         niruxSubmitKeys = []
         readsTranscript = false

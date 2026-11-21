@@ -525,8 +525,13 @@ final class PtySession: @unchecked Sendable {
     /// so every prompt). Nil before one.
     var agentLastUserPromptAt: TimeInterval? { state.machine.lastUserPromptAt }
 
-    /// See `AgentStatusMachine.lastPromptIsTheUsers`.
-    var agentLastPromptIsTheUsers: Bool { state.machine.lastPromptIsTheUsers }
+    /// See `AgentStatusMachine.lastPromptTyper`.
+    var agentLastPromptTyper: AgentStatusMachine.PromptTyper { state.machine.lastPromptTyper }
+
+    /// See `AgentStatusMachine.mayAskParent`.
+    func mayAskParent(endingTurnAt turnEndedAt: TimeInterval) -> Bool {
+        state.machine.mayAskParent(endingTurnAt: turnEndedAt)
+    }
 
     /// See `AgentStatusMachine.isCurrentTurnEnd`.
     func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {

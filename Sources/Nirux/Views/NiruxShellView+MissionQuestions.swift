@@ -147,15 +147,17 @@ extension NiruxShellView {
         return result
     }
 
-    /// A Mission child's turn ended on a question while its last prompt
-    /// wasn't the user's (the task's first prompt, or one Nirux typed): the
-    /// question is its parent's. It goes to the parent as the child's
-    /// question, which the parent answers or hands to the user, and the row
-    /// says "Asking …"; after the child completed, as a notice behind its
-    /// result. False, and the user is asked, when the user typed that
-    /// prompt, the child reports to nobody, or the ledger refuses it.
+    /// A Mission child's turn ended on a question its parent sent the prompt
+    /// for: the last prompt typed to it was Nirux's (a Mission message, a
+    /// notice), or none was and the parent started it. The question goes to
+    /// the parent as the child's question, which the parent answers or hands
+    /// to the user, and the row says "Asking …". False, and the user is
+    /// asked, when the user typed that prompt or started the task, is at its
+    /// prompt, or the turn may go on (a Stop hook), or when the ledger takes
+    /// no question (the Mission completed, handoffs are off).
     func askParent(
-        for resolution: AgentHookCenter.Resolution, _ request: TurnEndRequest, store: MissionStore = .shared
+        for resolution: AgentHookCenter.Resolution, _ request: TurnEndRequest, asking question: TurnEndQuestion?,
+        store: MissionStore = .shared
     ) -> Bool {
         guard let pty = resolution.column.pty, let agentUUID = resolution.column.agentUUID, store.ensureLoaded(),
               let mission = store.missions.last(where: {
@@ -166,23 +168,21 @@ extension NiruxShellView {
         guard mission.isCarried(handoffsEnabled: handoffs) else { return false }
         // Who sent the turn's prompt: its transcript line may be unread yet.
         pty.readTranscriptPrompts()
-        guard !pty.agentLastPromptIsTheUsers, let message = TurnEndText.questionForParent(request.message) else { return false }
-        guard mission.status == .active else {
-            pendingLeadNotices.append(LeadNotice(
-                workspaceID: mission.parentWorkspaceID, agentUUID: mission.parentAgentUUID,
-                text: "\(MissionPromptText.prefix) “\(MissionPromptText.quoted(resolution.workspace.title))” completed, then ended its "
-                    + "turn on: \(MissionPromptText.quoted(message))",
-                queuedAt: Date().timeIntervalSince1970
-            ))
-            typeLeadNotices()
-            return true
+        switch pty.agentLastPromptTyper {
+        case .user: return false
+        case .nobody where mission.startedByParent != true: return false
+        case .nobody, .nirux: break
         }
-        guard let question = store.accept(MissionEvent(
-            id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID,
-            childAgentUUID: agentUUID, kind: .question, message: message, timestamp: request.turnEndedAt
-        ), enabled: handoffs)
+        guard pty.mayAskParent(endingTurnAt: request.turnEndedAt) else { return false }
+        // It asked with `--mission ask` meanwhile: it waits on that one.
+        if store.waitingQuestion(childWorkspaceID: mission.childWorkspaceID, childAgentUUID: agentUUID) != nil { return true }
+        guard let message = TurnEndText.questionForParent(request.message, asking: question),
+              let asked = store.accept(MissionEvent(
+                  id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID,
+                  childAgentUUID: agentUUID, kind: .question, message: message, timestamp: request.turnEndedAt
+              ), enabled: handoffs)
         else { return false }
-        if handleMissionEvent(question.mission, event: question.event) { store.markDelivered(eventID: question.event.id) }
+        if handleMissionEvent(asked.mission, event: asked.event) { store.markDelivered(eventID: asked.event.id) }
         return true
     }
 

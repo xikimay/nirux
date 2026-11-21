@@ -78,7 +78,7 @@ final class AgentHookCenter {
     /// A turn end that asks, in a Mission child whose parent sent its last
     /// prompt: true when the question went to the parent, which answers it
     /// (`NiruxShellView.askParent`). Its row then says so, not the user.
-    var asksParent: ((Resolution, TurnEndRequest) -> Bool)?
+    var asksParent: ((Resolution, TurnEndRequest, TurnEndQuestion?) -> Bool)?
     /// A turn end older than this is no news: a backlog replayed at
     /// launch, a verdict that took too long.
     static let turnDoneFreshness: TimeInterval = 30
@@ -365,7 +365,7 @@ final class AgentHookCenter {
                   pty.mayNoteAgentQuestion(endingTurnAt: event.timestamp)
             else { return }
             let request = TurnEndRequest(message: message, turnEndedAt: event.timestamp)
-            guard self.asksParent?(resolution, request) == true
+            guard self.asksParent?(resolution, request, question) == true
                 || pty.noteAgentQuestion(question, in: message, endingTurnAt: event.timestamp, seen: seen)
             else { return }
             // No alert refreshes the sidebar for it, and no heartbeat with
@@ -429,7 +429,7 @@ final class AgentHookCenter {
     /// child that asked; else the user's.
     private func settleAsking(_ question: TurnEndQuestion?, for request: TurnEndRequest, agentUUID: String) {
         if awaitsVerdict(request, agentUUID: agentUUID), let resolution = resolver?(agentUUID),
-           asksParent?(resolution, request) == true {
+           asksParent?(resolution, request, question) == true {
             return applyTurnEndVerdict(.done, for: request, agentUUID: agentUUID, reportsDone: false)
         }
         applyTurnEndVerdict(.asks(question), for: request, agentUUID: agentUUID)

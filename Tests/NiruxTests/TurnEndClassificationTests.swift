@@ -1835,7 +1835,7 @@ final class TurnEndClassificationTests: XCTestCase {
             center.resolver = { _ in resolution }
             let toParent = LockedValue<[TurnEndRequest]>([])
             if parentAsked {
-                center.asksParent = { _, request in
+                center.asksParent = { _, request, _ in
                     toParent.value.append(request)
                     return true
                 }
@@ -2010,7 +2010,7 @@ final class TurnEndClassificationTests: XCTestCase {
             let done = Counter()
             center.onTurnDone = { _, _ in done.increment() }
             let asked = LockedValue<[TurnEndRequest]>([])
-            center.asksParent = { _, request in
+            center.asksParent = { _, request, _ in
                 asked.value.append(request)
                 return true
             }
@@ -2025,7 +2025,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let (center, _, column, request, alerts) = try turnEndColumn(message: "Tests pass. Ready to push?")
         center.turnEndClassifier = FakeClassifier(verdict: .done)
         center.questionVerdictDelay = 0
-        center.asksParent = { _, _ in false }
+        center.asksParent = { _, _, _ in false }
         center.classifyTurnEnd(request, agentUUID: try XCTUnwrap(column.agentUUID), waitsOnParent: false)
         try await waitUntil("its alert") { !alerts.value.isEmpty }
         XCTAssertEqual(alerts.value, [.askedInReply("Tests pass. Ready to push?")])
