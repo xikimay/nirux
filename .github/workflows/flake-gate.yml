@@ -1,57 +1,42 @@
-name: Flake gate
-
-# The flake gate of a new or reworked test class, in one job on one macOS
-# runner: each class runs N times, each run its own xctest process, beside
-# the six heaviest classes (scripts/run-tests.sh --repeat). Started by hand
-# on a branch, so it needs no throwaway pull request:
-#   gh workflow run flake-gate.yml --ref <branch> -f classes="NiruxTests.FooTests" [-f runs=10]
-on:
-  workflow_dispatch:
-    inputs:
-      classes:
-        description: Test classes (Module.Class), separated by spaces
-        required: true
-        type: string
-      runs:
-        description: Runs of each class
-        default: "10"
-        type: string
-
+name: Early XCTest consumer proof
+on: workflow_dispatch
 permissions:
   contents: read
-
+  actions: read
 jobs:
-  gate:
+  test:
     runs-on: macos-15
+    timeout-minutes: 7
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Toolchain
-        id: toolchain
-        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
-
-      # The cache tests.yml and the nightly use.
-      - uses: actions/cache/restore@v6
-        with:
-          path: |
-            .build/artifacts
-            .build/checkouts
-            .build/repositories
-            .build/workspace-state.json
-          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
-
       - name: Build
-        run: swift build --build-tests
-
-      - name: Repeat the classes
+        uses: ./.github/actions/ci-diagnostic
+        with:
+          command: build
+      - name: Start an independent reader
+        shell: bash
         env:
-          CLASSES: ${{ inputs.classes }}
-          RUNS: ${{ inputs.runs }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          read -ra classes <<< "${CLASSES//$'\n'/ }"
-          scripts/run-tests.sh --repeat "$RUNS" "${classes[@]}"
+          nohup bash -c '
+            scripts/watch-ci-failure.sh "$GITHUB_RUN_ID" > "$RUNNER_TEMP/receipt"; result=$?
+            if [[ "$result" == 1 ]] && jq -e --arg sha "$GITHUB_SHA" '\''(.checkout == $sha) and (.phase == "suite") and (.message|contains("early XCTest diagnostic fixture"))'\'' "$RUNNER_TEMP/receipt"; then
+              date -u > "$RUNNER_TEMP/consumer-read-diagnostic"
+            fi
+          ' > "$RUNNER_TEMP/reader.log" 2>&1 < /dev/null &
+      - name: Run tests
+        id: tests
+        continue-on-error: true
+        uses: ./.github/actions/ci-diagnostic
+        with:
+          command: suite
+      - name: Verify reader and final failure
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          cat "$RUNNER_TEMP/reader.log" "$RUNNER_TEMP/receipt"
+          test -s "$RUNNER_TEMP/consumer-read-diagnostic"
+          test "$OUTCOME" = failure
