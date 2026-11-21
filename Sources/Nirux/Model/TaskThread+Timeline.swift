@@ -11,6 +11,7 @@ extension TaskThread {
             var text: String
             var time: TimeInterval?
             var needsUser = false
+            var questionID: String?
         }
 
         struct Section: Equatable, Sendable {
@@ -36,7 +37,8 @@ extension TaskThread {
                 let owner = (question.asked.recipient ?? .parentTask).rawValue
                 let label = needsUser ? "Needs you" : "Waiting on \(owner)"
                 let text = [question.asked.text, question.asked.note].compactMap { $0 }.map(Self.words).joined(separator: "\n")
-                current.append(Line(label: label, text: text, time: question.asked.time, needsUser: needsUser))
+                current.append(Line(label: label, text: text, time: question.asked.time, needsUser: needsUser,
+                                    questionID: question.asked.ref))
             }
             self.current = current
 

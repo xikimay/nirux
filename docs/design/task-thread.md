@@ -100,11 +100,10 @@ The daily pass reports task activity within its existing window. It counts quest
 
 ## 6. The pinned thread
 
-Open task thread pins the displayed card to the workspace it previewed. Moving the pointer away leaves the thread open. While the card is pinned, the two-second heartbeat checks its inputs. Changes to the task’s live data or source files refresh its history and preserve expanded sections. Escape or Close thread dismisses it.
+Open task thread pins the displayed card to the workspace it previewed. Moving the pointer away leaves the thread open. While the card is pinned, the two-second heartbeat checks its inputs. Changes to the task’s live data or source files refresh its history and preserve expanded sections. Reply opens an answer field under the thread for the selected question. Send or ⌘↩ answers through the Mission. If the question is answered elsewhere or retired while typing, the draft stays available to copy until Done. Escape or Close thread dismisses the card.
 
 ## 7. Not yet
 
-- Replying to an open question in the pinned thread.
 - The Thread button in the browser column (after the panel).
 - Removing completed Missions older than 30 days from `missions.json`: approved
   only after their text is frozen, in a separate PR; open Missions stay.

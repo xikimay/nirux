@@ -248,7 +248,7 @@ extension MissionReplyViewController: NSTextViewDelegate {
 final class MissionReplyTextView: NSTextView {
     /// The answer field of a reply popover (a Mission question's, a turn's
     /// question's): plain text in a bordered scroll view, ⌘↩ sending.
-    static func field(width: CGFloat, onCommandReturn: @escaping () -> Void) -> (scroll: NSScrollView, text: MissionReplyTextView) {
+    static func field(width: CGFloat, onCommandReturn: (() -> Void)? = nil) -> (scroll: NSScrollView, text: MissionReplyTextView) {
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
