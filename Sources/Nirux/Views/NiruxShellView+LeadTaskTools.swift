@@ -82,9 +82,8 @@ extension NiruxShellView {
         candidate.inspection = inspection
         let others = candidate.workspaces.filter { $0.id != taskID }
         let availability = others.isEmpty ? candidate.availability : .blocked([Self.openInIt(others.map(\.title))])
-        // A folder named for another branch may be a base reused across
-        // branches, which the alert warns about.
-        guard case .ready(let plan, _) = availability, plan.worktree.folderMatchesBranch else {
+        guard case .ready(let plan, _) = availability,
+              plan.worktree.folderMatchesBranch || isOriginalMissionWorktree(plan.worktree, of: task) else {
             closeLeadTask(task)
             worktreeCleanupsInFlight.remove(key)
             return answer(Self.closedWithout(title, availability), false)
@@ -101,6 +100,13 @@ extension NiruxShellView {
                 answer(Self.cleanedUp(title, plan: plan, outcome: outcome), outcome?.succeeded != true)
             }
         }
+    }
+
+    private func isOriginalMissionWorktree(_ worktree: WorktreeCleanup.Worktree, of task: WorkspaceState) -> Bool {
+        guard let id = task.missionID, MissionStore.shared.ensureLoaded(),
+              let mission = MissionStore.shared.missions.first(where: { $0.id == id && $0.childWorkspaceID == task.id && $0.oneWay != true })
+        else { return false }
+        return worktree.path == GitWorktree.siblingPath(for: mission.branch, mainCheckout: worktree.mainCheckout)
     }
 
     /// A task without a repository: its folder goes to the Trash, where
