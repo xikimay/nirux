@@ -305,7 +305,7 @@ extension NiruxShellView {
     private static func readingKey(_ reading: MergeWait.Reading, now: TimeInterval) -> String {
         let window = Int(now / MergeWait.lookUpInterval)
         switch reading {
-        case .read(let info): return "read \(info?.state ?? "none") \(info?.url ?? "") \(window)"
+        case .read(let info): return "read \(info?.state.rawValue ?? "none") \(info?.url ?? "") \(window)"
         case .gone: return "gone \(window)"
         case .lookedUp, .unanswered: return "looked up"
         }

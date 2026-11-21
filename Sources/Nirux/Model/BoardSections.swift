@@ -178,7 +178,7 @@ enum BoardSections {
         let named = config.gitHubRepository.map { repository in
             anchors.filter { anchor in
                 let remotes = commonDir(of: anchor).flatMap { context.remotes[$0] } ?? []
-                return remotes.contains { $0.owner == repository.owner && $0.name == repository.name }
+                return remotes.contains { $0.hasOwnerAndName(of: repository) }
             }
         } ?? []
         if !named.isEmpty { return named.first(where: isFree) }

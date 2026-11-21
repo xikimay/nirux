@@ -11,14 +11,14 @@ final class MergeWaitTests: XCTestCase {
         )
     }
 
-    private func pullRequest(_ number: Int, _ state: String) -> PRInfo {
+    private func pullRequest(_ number: Int, _ state: GitHub.PullRequestState) -> PRInfo {
         PRInfo(
             number: number, state: state, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil,
             url: "https://github.com/o/r/pull/\(number)", additions: nil, deletions: nil, changedFiles: nil
         )
     }
 
-    private func found(_ number: Int, _ state: String) -> MergeWait.LookedUp {
+    private func found(_ number: Int, _ state: GitHub.PullRequestState) -> MergeWait.LookedUp {
         MergeWait.LookedUp(number: number, state: state, url: "https://github.com/o/r/pull/\(number)")
     }
 
@@ -26,19 +26,19 @@ final class MergeWaitTests: XCTestCase {
 
     func testAnOpenReadIsRecordedAndAMergedOneReleases() {
         var wait = wait()
-        XCTAssertEqual(wait.step(after: .read(pullRequest(41, "OPEN"))), .keep)
+        XCTAssertEqual(wait.step(after: .read(pullRequest(41, .open))), .keep)
         XCTAssertEqual(wait.awaited.pullRequest, recorded)
         XCTAssertEqual(wait.awaitedName, "#41")
-        XCTAssertEqual(wait.step(after: .read(pullRequest(41, "MERGED"))), .release)
+        XCTAssertEqual(wait.step(after: .read(pullRequest(41, .merged))), .release)
         var fresh = self.wait()
-        XCTAssertEqual(fresh.step(after: .read(pullRequest(41, "MERGED"))), .release, "first seen merged, after a relaunch")
+        XCTAssertEqual(fresh.step(after: .read(pullRequest(41, .merged))), .release, "first seen merged, after a relaunch")
         XCTAssertEqual(fresh.awaitedName, "#41", "named by the pull request that merged")
     }
 
     func testOnlyTheRecordedPullRequestCounts() {
         var wait = wait(pullRequest: recorded)
-        XCTAssertEqual(wait.step(after: .read(pullRequest(41, "CLOSED"))), .fail(.closedUnmerged(number: 41)))
-        for state in ["OPEN", "MERGED", "CLOSED"] {
+        XCTAssertEqual(wait.step(after: .read(pullRequest(41, .closed))), .fail(.closedUnmerged(number: 41)))
+        for state in [GitHub.PullRequestState.open, .merged, .closed] {
             var other = self.wait(pullRequest: recorded)
             XCTAssertEqual(other.step(after: .read(pullRequest(42, state))), .lookUp, "#42 \(state): #41 is asked about")
             XCTAssertEqual(other.awaited.pullRequest, recorded)
@@ -46,11 +46,11 @@ final class MergeWaitTests: XCTestCase {
         // GitHub's answer about #41 holds, under a URL the repository's new
         // name gave it.
         var renamed = self.wait(pullRequest: recorded)
-        let moved = MergeWait.LookedUp(number: 41, state: "MERGED", url: "https://github.com/o/renamed/pull/41")
+        let moved = MergeWait.LookedUp(number: 41, state: .merged, url: "https://github.com/o/renamed/pull/41")
         XCTAssertEqual(renamed.step(after: .lookedUp(moved, awaitedGone: true)), .release)
         XCTAssertEqual(renamed.awaited.pullRequest?.url, moved.url)
         var unrecorded = self.wait()
-        XCTAssertEqual(unrecorded.step(after: .read(pullRequest(41, "CLOSED"))), .fail(.closedUnmerged(number: 41)))
+        XCTAssertEqual(unrecorded.step(after: .read(pullRequest(41, .closed))), .fail(.closedUnmerged(number: 41)))
     }
 
     func testAReadWithoutThePullRequestAsksGitHubAboutTheRecordedOne() {
@@ -72,11 +72,11 @@ final class MergeWaitTests: XCTestCase {
             var wait = wait()
             return (wait.step(after: .lookedUp(answer, awaitedGone: gone)), wait.awaited.pullRequest)
         }
-        XCTAssertEqual(step(found(41, "MERGED"), gone: true).0, .release)
-        XCTAssertEqual(step(found(41, "CLOSED"), gone: false).0, .fail(.closedUnmerged(number: 41)))
-        XCTAssertEqual(step(found(41, "OPEN"), gone: false).0, .keep)
-        XCTAssertEqual(step(found(41, "OPEN"), gone: false).1, recorded, "found open: recorded")
-        XCTAssertEqual(step(found(41, "OPEN"), gone: true).0, .fail(.closedFirst(number: 41)))
+        XCTAssertEqual(step(found(41, .merged), gone: true).0, .release)
+        XCTAssertEqual(step(found(41, .closed), gone: false).0, .fail(.closedUnmerged(number: 41)))
+        XCTAssertEqual(step(found(41, .open), gone: false).0, .keep)
+        XCTAssertEqual(step(found(41, .open), gone: false).1, recorded, "found open: recorded")
+        XCTAssertEqual(step(found(41, .open), gone: true).0, .fail(.closedFirst(number: 41)))
         XCTAssertEqual(step(nil, gone: false).0, .keep)
         XCTAssertEqual(step(nil, gone: true).0, .fail(.closedFirst(number: nil)))
     }
@@ -95,7 +95,7 @@ final class MergeWaitTests: XCTestCase {
     /// tried for a day.
     func testAMergedWaitTakesNoMoreReadings() {
         var merged = wait(pullRequest: recorded, mergedAt: 100)
-        XCTAssertEqual(merged.step(after: .read(pullRequest(41, "CLOSED"))), .keep)
+        XCTAssertEqual(merged.step(after: .read(pullRequest(41, .closed))), .keep)
         XCTAssertEqual(merged.step(after: .gone), .keep)
         XCTAssertFalse(merged.isPastDelivery(at: 100 + MergeWait.deliveryLifetime - 1))
         XCTAssertTrue(merged.isPastDelivery(at: 100 + MergeWait.deliveryLifetime))
@@ -138,11 +138,11 @@ final class MergeWaitTests: XCTestCase {
                                            template: .init(name: "Docs", body: "Include examples"))
         var pending = MergeWait(id: "start", awaited: wait().awaited, action: .start(start), createdAt: 1)
         pending.startingBranch = "feat/write-docs"
-        XCTAssertEqual(pending.step(after: .read(pullRequest(41, "MERGED"))), .keep)
+        XCTAssertEqual(pending.step(after: .read(pullRequest(41, .merged))), .keep)
         XCTAssertEqual(pending.step(after: .gone), .keep)
         pending.startingBranch = nil
         pending.failure = "Couldn’t fetch origin/main"
-        XCTAssertEqual(pending.step(after: .read(pullRequest(41, "MERGED"))), .keep)
+        XCTAssertEqual(pending.step(after: .read(pullRequest(41, .merged))), .keep)
         XCTAssertEqual(try JSONDecoder().decode(MergeWait.self, from: JSONEncoder().encode(pending)), pending)
     }
 

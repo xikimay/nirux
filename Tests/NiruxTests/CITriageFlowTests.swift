@@ -15,7 +15,7 @@ final class CITriageFlowTests: XCTestCase {
     private static func pullRequest(_ checks: [[String: Any]]) -> PRInfo {
         PRDetect.pullRequestInfo(from: [
             "number": 52, "state": "OPEN", "url": "https://github.com/acme/widgets/pull/52", "statusCheckRollup": checks
-        ])
+        ])!
     }
 
     private static func check(

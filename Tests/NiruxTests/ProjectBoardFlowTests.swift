@@ -36,11 +36,11 @@ final class ProjectBoardFlowTests: XCTestCase {
         /// repositories; the others get `openPullRequests`.
         let openByRepository: [String: String]
         /// What gh answers instead for these `owner/name`.
-        let failures: [String: ProjectBoard.FetchError]
+        let failures: [String: GitHub.CLI.Failure]
 
         init(
             openPullRequests: String, mergedPullRequests: String = "[]", runs: String,
-            openByRepository: [String: String] = [:], failures: [String: ProjectBoard.FetchError] = [:]
+            openByRepository: [String: String] = [:], failures: [String: GitHub.CLI.Failure] = [:]
         ) {
             self.openPullRequests = openPullRequests
             self.mergedPullRequests = mergedPullRequests
@@ -61,26 +61,26 @@ final class ProjectBoardFlowTests: XCTestCase {
             lock.unlock()
         }
 
-        func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError> {
+        func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, GitHub.CLI.Failure> {
             record("pr \(state) \(repository)")
             if let failure = failures[repository] { return .failure(failure) }
             let open = openByRepository[repository] ?? openPullRequests
             return .success(Data((state == .open ? open : mergedPullRequests).utf8))
         }
 
-        func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError> {
+        func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, GitHub.CLI.Failure> {
             record("run \(repository) \(workflow) \(branch)")
             return .success(Data(runs.utf8))
         }
 
-        private var failure: ProjectBoard.FetchError?
+        private var failure: GitHub.CLI.Failure?
         /// What the next retargets answer, when GitHub refuses them.
-        var retargetFailure: ProjectBoard.FetchError? {
+        var retargetFailure: GitHub.CLI.Failure? {
             get { lock.lock(); defer { lock.unlock() }; return failure }
             set { lock.lock(); failure = newValue; lock.unlock() }
         }
 
-        func retarget(repository: String, number: Int, base: String) -> Result<Data, ProjectBoard.FetchError> {
+        func retarget(repository: String, number: Int, base: String) -> Result<Data, GitHub.CLI.Failure> {
             record("retarget \(repository) #\(number) \(base)")
             return retargetFailure.map { .failure($0) } ?? .success(Data(base.utf8))
         }
@@ -384,7 +384,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
 
-            let signedOut = "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
+            let signedOut = "gh isn’t signed in to github.com: run gh auth login in a terminal, then Refresh."
             let pills = { (board.view.stages.content?.sections ?? []).map { [$0.title, $0.status?.text ?? "-", $0.status?.toolTip ?? "-"] } }
             let expected = [
                 ["saved", "-", "-"],

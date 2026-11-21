@@ -32,18 +32,10 @@ extension BoardStages.TaskReading {
         cleanUp = info.mergedCleanup.map { $0 == .available ? .offered : .running }
         resume = Self.resume(of: info.columns)
         // The pull request detection found merged is one at the HEAD it merged at.
-        mergedPullRequest = info.prInfo.flatMap { $0.state == "MERGED" ? $0.number : nil }
-        mergedPullRequestRepository = info.prInfo.flatMap { $0.state == "MERGED" ? Self.repository(ofPullRequestAt: $0.url) : nil }
+        mergedPullRequest = info.prInfo.flatMap { $0.state == .merged ? $0.number : nil }
+        mergedPullRequestRepository = info.prInfo.flatMap { $0.state == .merged ? GitHubRepository(pullRequestURL: $0.url) : nil }
     }
 
-    /// The repository of a pull request's address, its host included:
-    /// "https://github.com/owner/name/pull/52".
-    static func repository(ofPullRequestAt address: String) -> GitHubRepository? {
-        guard let url = URL(string: address), let host = url.host else { return nil }
-        let parts = url.pathComponents.filter { $0 != "/" }
-        guard parts.count >= 4, parts[2] == "pull" else { return nil }
-        return GitHubRepository(host: host, owner: parts[0], name: parts[1])
-    }
 
     /// The agents' steps of the row's ladder (`WorkspaceInfo.agentStep`),
     /// in the Board's terms: red checks are the pull request's, read there.
@@ -89,7 +81,7 @@ extension BoardStages.TaskReading {
     /// What GitHub still asks of the open pull request: changes, then
     /// comments to answer, then a review.
     private static func reviewRequest(_ pullRequest: PRInfo?, hasFeedback: Bool) -> BoardStages.ReviewRequest? {
-        guard let pullRequest, pullRequest.state == "OPEN" else { return nil }
+        guard let pullRequest, pullRequest.state == .open else { return nil }
         if pullRequest.reviewDecision == "CHANGES_REQUESTED" { return .changesRequested }
         if hasFeedback { return .feedback }
         return pullRequest.reviewDecision == "REVIEW_REQUIRED" ? .reviewRequired : nil

@@ -620,7 +620,7 @@ extension BoardStages {
     /// whoever posted it can't send a click elsewhere.
     static func isGitHubAddress(_ url: String) -> Bool {
         guard let parsed = URL(string: url) else { return false }
-        return parsed.scheme == "https" && parsed.host?.lowercased() == "github.com"
+        return parsed.scheme == "https" && parsed.host?.lowercased() == GitHub.host
     }
 
     /// This many checks under the pointer, then how many more: a tooltip

@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class WaitingTaskFlowTests: XCTestCase {
-    private func pullRequest(_ state: String) -> PRInfo {
+    private func pullRequest(_ state: GitHub.PullRequestState) -> PRInfo {
         PRInfo(number: 42, state: state, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
                mergeable: nil, url: "https://github.com/o/r/pull/42", additions: nil, deletions: nil, changedFiles: nil)
     }
@@ -36,7 +36,7 @@ final class WaitingTaskFlowTests: XCTestCase {
             let upstream = try upstreamTask("Prepare catalog", lead: lead, in: harness)
             shell.refreshGitContextNow(for: upstream)
             harness.waitUntil("the upstream branch") { upstream.gitBranch != nil }
-            upstream.prInfo = pullRequest("OPEN")
+            upstream.prInfo = pullRequest(.open)
             let branches = try git(["branch", "--list"])
             let launched = harness.agentLaunches.count
             let task = try start("Publish catalog", after: upstream.title, template: "Bugfix", lead: lead, in: harness)
@@ -70,7 +70,7 @@ final class WaitingTaskFlowTests: XCTestCase {
             XCTAssertNotEqual(tip, oldTip)
             let source = try XCTUnwrap(shell.workspaces.first { $0.id == upstream.id })
             let beforeMerge = harness.agentLaunches.count
-            for _ in 0..<2 { shell.followMergeWaits(awaiting: source, read: pullRequest("MERGED"), now: 41) }
+            for _ in 0..<2 { shell.followMergeWaits(awaiting: source, read: pullRequest(.merged), now: 41) }
             harness.waitUntil("the waiting row to launch", timeout: 30) { !restored.isWaitingTask }
             XCTAssertEqual(harness.agentLaunches.count, beforeMerge + 1)
             XCTAssertEqual(try UIFlowHarness.git(["rev-parse", "HEAD"], at: restored.cwd), tip)
@@ -185,7 +185,7 @@ final class WaitingTaskFlowTests: XCTestCase {
             XCTAssertTrue(try change(["task": task.title, "after": task.title]).isError)
             XCTAssertTrue(try change(["task": task.title, "after": 123]).isError)
             XCTAssertEqual(task.waitingStart?.awaited.workspaceID, upstream.id)
-            shell.followMergeWaits(awaiting: upstream, read: pullRequest("CLOSED"), now: 100)
+            shell.followMergeWaits(awaiting: upstream, read: pullRequest(.closed), now: 100)
             let failed = try XCTUnwrap(shell.sidebar.lastInfos.first { $0.id == task.id })
             XCTAssertEqual(failed.rowSummary.status.tone, .needsYou)
             XCTAssertTrue(failed.rowSummary.status.text.contains("#42"))

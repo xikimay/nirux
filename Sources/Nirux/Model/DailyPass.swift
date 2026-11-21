@@ -74,28 +74,6 @@ enum DailyPass {
         var readsAgain = false
     }
 
-    struct ReadFailure: Error, Equatable {
-        let message: String
-        /// gh didn't answer in time: it may next time. Anything it said
-        /// (signed out, no access) holds until someone acts.
-        var retryable = false
-    }
-
-    typealias GitHubRead = @Sendable (_ arguments: [String]) -> Result<Data, ReadFailure>
-
-    static let installedGitHub: GitHubRead = { arguments in
-        guard let ghPath = PRDetect.installedGHPath() else { return .failure(ReadFailure(message: "gh isn’t installed")) }
-        guard let result = GitHubCLIBoardClient.runGH(ghPath, arguments: arguments, timeout: 30, maxStandardOutputBytes: 8_000_000) else {
-            return .failure(ReadFailure(message: "gh didn’t answer within 30 s", retryable: true))
-        }
-        guard result.terminationStatus == 0 else {
-            return .failure(readFailure(GitHubCLIQueueClient.Output(
-                status: result.terminationStatus, standardOutput: result.standardOutput, standardError: result.standardError
-            )))
-        }
-        return .success(result.standardOutput)
-    }
-
     /// Past 49, gh's query (each commit's authors) passes GitHub's 500,000
     /// nodes and is refused.
     static let mergedLimit = 40
@@ -106,14 +84,10 @@ enum DailyPass {
     /// A failed gh call, as the merge queue reads it: no answer (no
     /// network yet, a timeout, a 5xx) or a rate limit may pass; anything
     /// GitHub or gh said (signed out, refused) holds until someone acts.
-    static func readFailure(_ output: GitHubCLIQueueClient.Output) -> ReadFailure {
-        let error = GitHubCLIQueueClient.classify(output)
-        let message = GitHubCLIQueueClient.message(of: error)
-        switch error {
-        case .noAnswer, .rateLimited, .secondaryRateLimit:
-            return ReadFailure(message: message, retryable: true)
-        case .ghMissing, .notSignedIn, .refused, .unreadable:
-            return ReadFailure(message: message)
+    static func mayPassLater(_ failure: GitHub.CLI.Failure) -> Bool {
+        switch failure {
+        case .noAnswer, .rateLimited, .secondaryRateLimit: return true
+        case .ghMissing, .notSignedIn, .refused, .unreadable: return false
         }
     }
 
@@ -137,15 +111,15 @@ enum DailyPass {
 
     static func mergedArguments(repository: String, since: TimeInterval) -> [String] {
         [
-            "pr", "list", "--repo", repository, "--state", "merged", "--search", "merged:>=\(isoTime(since)) sort:updated-desc",
+            "pr", "list", "--repo", "\(GitHub.host)/\(repository)", "--state", "merged", "--search", "merged:>=\(isoTime(since)) sort:updated-desc",
             "--json", "number,title,headRefName,mergedAt,body,commits", "--limit", "\(mergedLimit)"
         ]
     }
 
     static func runArguments(repository: String, since: TimeInterval) -> [String] {
         [
-            "run", "list", "--repo", repository, "--created", ">=" + isoTime(since - rerunReach),
-            "--json", "databaseId,attempt,headBranch,conclusion,workflowName,startedAt", "--limit", "1000"
+            "run", "list", "--repo", "\(GitHub.host)/\(repository)", "--created", ">=" + isoTime(since - rerunReach),
+            "--json", GitHub.WorkflowRun.fields, "--limit", "1000"
         ]
     }
 
@@ -181,34 +155,36 @@ enum DailyPass {
     /// Each repository's pull requests merged and runs rerun in the
     /// window, the repositories read at once: the call's wait doesn't grow
     /// with their number. Never on the main thread.
-    static func readGitHub(_ repositories: [String], window: Window, read: GitHubRead) -> [RepositoryReport] {
+    static func readGitHub(_ repositories: [String], window: Window, gh: GitHub.CLI.Runner) -> [RepositoryReport] {
         let reports = OSAllocatedUnfairLock(initialState: [Int: RepositoryReport]())
         DispatchQueue.concurrentPerform(iterations: repositories.count) { index in
-            let report = readGitHub(repositories[index], window: window, read: read)
+            let report = readGitHub(repositories[index], window: window, gh: gh)
             reports.withLock { $0[index] = report }
         }
         return reports.withLock { found in repositories.indices.compactMap { found[$0] } }
     }
 
-    private static func readGitHub(_ name: String, window: Window, read: GitHubRead) -> RepositoryReport {
+    private static func readGitHub(_ name: String, window: Window, gh: GitHub.CLI.Runner) -> RepositoryReport {
         var report = RepositoryReport(name: name)
-        func failed(_ what: String, _ failure: ReadFailure) {
-            report.problems.append("\(what): \(failure.message)")
-            report.readsAgain = report.readsAgain || failure.retryable
+        func parsed<Value>(_ what: String, _ arguments: [String], _ parse: (Data) -> Value?) -> Value? {
+            let answer = gh(.init(arguments, maxStandardOutputBytes: 8_000_000)).flatMap(\.result)
+            switch answer.flatMap({ data in parse(data).map(Result.success) ?? .failure(.unreadable(output: data)) }) {
+            case .success(let value):
+                return value
+            case .failure(let failure):
+                report.problems.append("\(what): " + (AgentText.clean(failure.message, maxLength: 300) ?? ""))
+                report.readsAgain = report.readsAgain || mayPassLater(failure)
+                return nil
+            }
         }
-        switch read(mergedArguments(repository: name, since: window.start)).map(mergedPullRequests) {
-        case .success(let merged?):
+        if let merged = parsed("merged pull requests", mergedArguments(repository: name, since: window.start), mergedPullRequests) {
             report.merged = merged.filter { window.contains($0.mergedAt) }
             if merged.count >= mergedLimit {
                 report.problems.append("only the \(mergedLimit) most recently updated merged pull requests were read")
             }
-        case .success(nil): failed("merged pull requests", ReadFailure(message: "gh’s answer wasn’t its JSON"))
-        case .failure(let failure): failed("merged pull requests", failure)
         }
-        switch read(runArguments(repository: name, since: window.start)).map(reruns) {
-        case .success(let reruns?): report.reruns = reruns.filter { window.contains($0.startedAt) }
-        case .success(nil): failed("workflow runs", ReadFailure(message: "gh’s answer wasn’t its JSON"))
-        case .failure(let failure): failed("workflow runs", failure)
+        if let runs = parsed("workflow runs", runArguments(repository: name, since: window.start), reruns) {
+            report.reruns = runs.filter { window.contains($0.startedAt) }
         }
         return report
     }
@@ -231,17 +207,13 @@ enum DailyPass {
         }.sorted { $0.mergedAt < $1.mergedAt }
     }
 
-    /// Nil when `data` isn't a JSON list.
+    /// The runs started again; nil when gh's list can't be read.
     static func reruns(_ data: Data) -> [Rerun]? {
-        guard let list = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else { return nil }
-        return list.compactMap { item -> Rerun? in
-            guard let json = item as? [String: Any], let id = json["databaseId"] as? Int, let attempt = json["attempt"] as? Int, attempt > 1,
-                  let startedAt = (json["startedAt"] as? String).flatMap(time(fromISO:))
-            else { return nil }
-            let conclusion = (json["conclusion"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "running"
+        GitHub.parseWorkflowRuns(data)?.compactMap { run in
+            guard run.attempt > 1, let startedAt = run.startedAt else { return nil }
             return Rerun(
-                id: id, attempt: attempt, branch: json["headBranch"] as? String ?? "", workflow: json["workflowName"] as? String ?? "",
-                conclusion: conclusion, startedAt: startedAt
+                id: run.id, attempt: run.attempt, branch: run.headBranch ?? "", workflow: run.workflowName ?? "",
+                conclusion: run.conclusion ?? "running", startedAt: startedAt.timeIntervalSince1970
             )
         }
     }
