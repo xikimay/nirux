@@ -113,8 +113,8 @@ extension NiruxShellView {
         let templateName = LeadTools.string(arguments, "template")
         guard leadStartsTasksWithoutAsking(spaceID: space.id) else {
             return taskProposeSubtask(
-                description, templateName: templateName, agent: arguments["agent"] == nil ? nil : selection.agent,
-                hasModel: selection.model != nil, under: caller, parent: parent, answer: answer
+                description, templateName: templateName, selection: arguments["agent"] != nil || selection.model != nil ? selection : nil,
+                under: caller, parent: parent, answer: answer
             )
         }
         let folder: NewTask.Place?
@@ -163,15 +163,14 @@ extension NiruxShellView {
     /// proposal waits); the sub-task reports to the agent if the user
     /// starts it as a sub-task, and the agent hears what the user did.
     private func taskProposeSubtask(
-        _ description: String, templateName: String?, agent: CodingAgent?, hasModel: Bool, under caller: WorkspaceState, parent: NewTask.MissionParent,
+        _ description: String, templateName: String?, selection: TaskAgentSelection?, under caller: WorkspaceState, parent: NewTask.MissionParent,
         answer: @escaping LeadAnswer
     ) {
         let proposal = LeadProposal(
             spaceID: caller.profileID, repository: .spaceDefault, description: description, templateName: templateName,
-            parent: parent, subtaskOf: caller.id, agent: agent
+            parent: parent, subtaskOf: caller.id, selection: selection
         )
         let followUp = "If they start it under your task, it reports to you; either way, a line tells you what they did."
-            + (hasModel ? LeadProposal.defaultModelNotice : "")
         if pendingLeadProposals.isEmpty, showLeadProposal(proposal) {
             return answer("Proposed to the user in the New Sub-task sheet (the space’s setting “Starts tasks without asking” is off). "
                 + followUp, false)

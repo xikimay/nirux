@@ -1280,6 +1280,10 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: lead.space).leadStartsTasks, false)
             let tasksBefore = shell.workspaces.count
             shell.sideEffects.validateTaskAgent = { selection, _ in selection }
+            shell.sideEffects.listTaskModels = { agent, _ in
+                if agent == .codex { throw AgentModels.Refusal("Catalog offline") }
+                return [.init(slug: "sonnet", label: "Sonnet")]
+            }
             let proposed = try call(LeadTools.startTask, ["description": "Search page", "agent": "codex", "model": "fast"], lead: lead, in: harness)
             XCTAssertFalse(proposed.isError, proposed.text)
             XCTAssertTrue(proposed.text.hasPrefix("Proposed to the user"))
@@ -1287,19 +1291,32 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(sheet.space.id, lead.space)
             XCTAssertEqual(sheet.descriptionView.string, "Search page")
             XCTAssertEqual(sheet.selectedAgent, .codex)
-            XCTAssertTrue(proposed.text.contains("default model"))
+            harness.waitUntil("the failed catalog") { sheet.modelPopup.toolTip == "Catalog offline" }
+            XCTAssertEqual(sheet.selectedModel, "fast")
+            XCTAssertEqual(sheet.modelPopup.itemTitles.first, "Default")
             XCTAssertEqual(sheet.reportsTo, NewTask.MissionParent(workspaceID: lead.workspace.id, agentUUID: lead.agentUUID))
             XCTAssertEqual(shell.workspaces.count, tasksBefore, "nothing starts by itself")
             XCTAssertEqual(sheet.startButton.keyEquivalent, "", "a stray Return doesn't start it")
             XCTAssertFalse(sheet.panel?.firstResponder === sheet.descriptionView, "nor do stray keys reach it")
 
             // One sheet at a time: the next waits for this one to close.
-            let queued = try call(LeadTools.startTask, ["description": "Another one"], lead: lead, in: harness)
+            let queued = try call(LeadTools.startTask, ["description": "Another one", "model": "claude-custom"], lead: lead, in: harness)
             XCTAssertFalse(queued.isError)
             XCTAssertTrue(queued.text.hasPrefix("Queued for the user"), queued.text)
+            let store = try XCTUnwrap(SpaceDefaultsStore(spaceID: lead.space))
+            var defaults = store.load().defaults
+            defaults.agent = .agy
+            _ = try store.save(defaults).get()
             sheet.cancelButton.performClick(nil)
             harness.waitUntil("the next proposal") { shell.newTaskPanel?.descriptionView.string == "Another one" }
-            shell.newTaskPanel?.cancelButton.performClick(nil)
+            let next = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertEqual(next.selectedAgent, .claude)
+            harness.waitUntil("the Claude choices") { next.modelPopup.itemTitles.contains("Sonnet") }
+            XCTAssertEqual(next.selectedModel, "claude-custom")
+            harness.waitUntil("the proposed repository") { next.info != nil }
+            next.startButton.performClick(nil)
+            harness.waitUntil("the proposed task starts") { shell.workspaces.contains { $0.title == "Another one" } }
+            XCTAssertTrue(try XCTUnwrap(harness.agentLaunches.last).contains("--model 'claude-custom'"))
         }
     }
 
@@ -1520,8 +1537,9 @@ final class LeadToolsFlowTests: XCTestCase {
             let lead = try makeLead(harness)
             let (task, agent) = try startTask("Add a date filter", lead: lead, in: harness)
             shell.setLeadStartsTasks(false, spaceID: lead.space)
+            shell.sideEffects.validateTaskAgent = { selection, _ in selection }
             let busy = try XCTUnwrap(shell.showNewPanel(spaceID: lead.space))
-            let proposed = try call(LeadTools.startTask, ["description": "Write the API docs"], from: task, agentUUID: agent, in: harness)
+            let proposed = try call(LeadTools.startTask, ["description": "Write the API docs", "agent": "agy", "model": "neon"], from: task, agentUUID: agent, in: harness)
             XCTAssertFalse(proposed.isError, proposed.text)
             XCTAssertTrue(proposed.text.hasPrefix("Queued for the user: the New Sub-task sheet shows it once the sheet open now closes."),
                           proposed.text)
@@ -1530,6 +1548,7 @@ final class LeadToolsFlowTests: XCTestCase {
             let sheet = try XCTUnwrap(shell.newTaskPanel)
             XCTAssertEqual(sheet.headingLabel.stringValue, "Proposed by “Add a date filter” · Tools")
             XCTAssertEqual(sheet.descriptionView.string, "Write the API docs")
+            XCTAssertEqual(sheet.selectedModel, "neon")
             XCTAssertTrue(sheet.reportCheckbox.isHidden, "it reports to the task's agent, not the Lead")
             // Not a sub-task any more: the space's Lead is offered again,
             // and the heading still says who proposed it.
@@ -1543,6 +1562,7 @@ final class LeadToolsFlowTests: XCTestCase {
             harness.waitUntil("the sub-task to open") { shell.workspaces.contains { $0.title == "Write the API docs" } }
             let subtask = try XCTUnwrap(shell.workspaces.first { $0.title == "Write the API docs" })
             XCTAssertEqual(subtask.parentWorkspaceID, task.id)
+            XCTAssertTrue(try XCTUnwrap(harness.agentLaunches.last).contains("--model 'neon'"))
             XCTAssertFalse(subtask.startedByAgent, "the user started it")
             let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childWorkspaceID == subtask.id })
             XCTAssertEqual(mission.parentWorkspaceID, task.id)

@@ -45,6 +45,38 @@ final class NewTaskFlowTests: UIFlowTestCase {
         ))
     }
 
+    func testSwitchingAgentsDiscardsALateModelListAndDefaultStartsWithoutAModel() throws {
+        try UIFlowHarness.run { harness in
+            var loads: [CheckedContinuation<[AgentModels.Choice], Error>] = []
+            var returned: [Int] = []
+            harness.shell.sideEffects.listTaskModels = { _, _ in
+                let index = loads.count
+                defer { returned.append(index) }
+                return try await withCheckedThrowingContinuation { loads.append($0) }
+            }
+            let sheet = try openSheet(harness)
+            harness.waitUntil("the first Claude catalog request") { loads.count == 1 }
+            select("Codex", in: sheet.agentPopup)
+            harness.waitUntil("the Codex request") { loads.count == 2 }
+            select("Claude Code", in: sheet.agentPopup)
+            harness.waitUntil("the second Claude request") { loads.count == 3 }
+            try XCTUnwrap(loads[safe: 2]).resume(returning: [.init(slug: "sonnet", label: "Sonnet")])
+            harness.waitUntil("the current models") { sheet.modelPopup.itemTitles == ["Default", "Sonnet"] }
+            select("Sonnet", in: sheet.modelPopup)
+            try XCTUnwrap(loads[safe: 0]).resume(returning: [.init(slug: "old", label: "Old catalog")])
+            try XCTUnwrap(loads[safe: 1]).resume(throwing: AgentModels.Refusal("Codex offline"))
+            harness.waitUntil("both earlier requests to return") { returned.count == 3 }
+            XCTAssertEqual(sheet.selectedModel, "sonnet")
+            XCTAssertEqual(sheet.modelPopup.itemTitles, ["Default", "Sonnet"])
+            XCTAssertFalse(sheet.modelPopup.toolTip?.contains("offline") == true)
+            select("Default", in: sheet.modelPopup)
+            describe("Use the default", in: sheet)
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the agent launch") { !harness.agentLaunches.isEmpty }
+            XCTAssertFalse(try XCTUnwrap(harness.agentLaunches.last).contains("--model"))
+        }
+    }
+
     func testReturnStartsShiftReturnAddsALineAndEscapeCancels() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -196,6 +228,9 @@ final class NewTaskFlowTests: UIFlowTestCase {
     func testATaskInAFolderOfTheRepositoryWithCodex() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
+            shell.sideEffects.listTaskModels = { agent, _ in
+                agent == .codex ? [.init(slug: "codex-fast", label: "Fast")] : []
+            }
             let notes = harness.root + "/notes"
             try FileManager.default.createDirectory(atPath: notes, withIntermediateDirectories: true)
             let docs = try XCTUnwrap((harness.repo + "/docs").realPath)
@@ -229,6 +264,9 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(sheet.templatePopup.titleOfSelectedItem, "Investigation (no code)")
 
             select("Codex", in: sheet.agentPopup)
+            harness.waitUntil("the Codex models") { sheet.modelPopup.itemTitles == ["Default", "Fast"] }
+            XCTAssertEqual(sheet.modelPopup.titleOfSelectedItem, "Default")
+            select("Fast", in: sheet.modelPopup)
             XCTAssertEqual(sheet.branch, "feat/why-is-the-cache-cold")
             // Closed while it starts: the workspace still opens.
             sheet.startButton.performClick(nil)
@@ -252,6 +290,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(try UIFlowHarness.git(["status", "--porcelain"], at: worktree), "")
             let launch = try XCTUnwrap(harness.agentLaunches.last)
             XCTAssertTrue(launch.hasPrefix("command codex"), launch)
+            XCTAssertTrue(launch.contains("--model 'codex-fast'"), launch)
             XCTAssertTrue(launch.contains("Read .codex-handover.md for full context"), launch)
         }
     }
