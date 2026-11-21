@@ -151,13 +151,22 @@ extension MergeQueue {
 
         let kind: Kind
         let message: String
+        private let checksTimedOut: Bool?
+
+        var isChecksTimeout: Bool {
+            // Queues saved before the timeout flag carry only the diagnostic.
+            guard kind == .checks else { return false }
+            return checksTimedOut ?? (message.hasPrefix("After ") && message.contains("minutes, required checks are still missing or running on "))
+        }
+
         /// A page that shows the problem: two heads compared, a run.
         var url: String?
 
         /// A token that a gh error echoes never reaches the saved queue.
-        init(kind: Kind, message: String, url: String? = nil) {
+        init(kind: Kind, message: String, url: String? = nil, checksTimedOut: Bool? = nil) {
             self.kind = kind
             self.message = MergeQueue.redacted(message)
+            self.checksTimedOut = checksTimedOut
             self.url = url
         }
     }

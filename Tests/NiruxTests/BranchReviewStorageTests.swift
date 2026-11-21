@@ -513,19 +513,23 @@ final class BranchReviewStorageTests: XCTestCase {
         let access = try access(store)
         try FileManager.default.createDirectory(at: store.folder, withIntermediateDirectories: true)
         let first = try holdLock(store.lockURL)
+        defer { close(first) }
+        let replacement = store.lockURL.appendingPathExtension("replacement")
+        let second = try holdLock(replacement)
+        defer { close(second) }
+
         let written = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
-            _ = store.update(access) { _ in }
+            if case .failure(let error) = store.update(access, { _ in }) { XCTFail("write failed: \(error)") }
             written.signal()
         }
         XCTAssertEqual(written.wait(timeout: .now() + 0.3), .timedOut)
 
-        // Deleted while the writer waits, and taken again at the same path.
-        unlink(store.lockURL.path)
-        let second = try holdLock(store.lockURL)
-        close(first)
+        // The old name disappears and the already locked replacement takes it in one operation.
+        XCTAssertEqual(rename(replacement.path, store.lockURL.path), 0)
+        XCTAssertEqual(flock(first, LOCK_UN), 0)
         XCTAssertEqual(written.wait(timeout: .now() + 0.5), .timedOut, "the writer locked the deleted file")
-        close(second)
+        XCTAssertEqual(flock(second, LOCK_UN), 0)
         XCTAssertEqual(written.wait(timeout: .now() + 10), .success)
     }
 

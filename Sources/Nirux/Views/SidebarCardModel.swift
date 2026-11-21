@@ -159,6 +159,7 @@ extension WorkspaceInfo {
     /// Waiting on the user first, then something broken, then work; a red
     /// check only once no agent works (it may be fixing it).
     var cardState: SidebarCardState {
+        if case .needsYou = waitingTask { return .waiting }
         let signals = columns.compactMap(\.attention)
         if signals.contains(.waiting) { return .waiting }
         if signals.contains(.error) { return .error }
@@ -180,7 +181,8 @@ extension WorkspaceInfo {
     /// An agent waits on the user or broke: the folded archived list
     /// lists the workspace anyway.
     var asksUser: Bool {
-        columns.contains { $0.attention == .waiting || $0.attention == .error }
+        if case .needsYou = waitingTask { return true }
+        return columns.contains { $0.attention == .waiting || $0.attention == .error }
     }
 
     /// One line in the archived list: parked work that asks nothing, offers
@@ -190,7 +192,7 @@ extension WorkspaceInfo {
             && ![.waiting, .error, .working].contains(cardState)
     }
 
-    /// The block under a row's two lines, top to bottom; empty hides it.
+    /// The block under a row's status, top to bottom; empty hides it.
     /// "Clean up" and a Mission question are the status line's
     /// (`rowSummary`) when it shows them; when it says something else first
     /// they get a line here, so every question opens and every clean-up
@@ -238,11 +240,13 @@ extension WorkspaceInfo {
                 actions.append(.waitingMessages(columnIndex: column.index, waiting))
             }
         }
+        if let heldMessages {
+            actions.append(.heldMessages(heldMessages))
+        }
         // The blocker is the status line's, or waits behind what comes
         // first (the tooltip has it). The selected row adds the next step
-        // when its status line says something else; the Lead's row has no
-        // status line.
-        if isActive, let next = nextStepText, isLead || summary.status.text != Self.nextStepLine(next) {
+        // below its columns.
+        if isActive, let next = nextStepText {
             actions.append(.next(next))
         }
         if isLead, ruleProposalCount > 0 {
@@ -299,12 +303,21 @@ enum SidebarCardAction: Hashable {
     /// Mission messages that wait too long for an agent's prompt: a click
     /// shows its column.
     case waitingMessages(columnIndex: Int, SidebarWaitingMessages)
+    /// The Lead's messages held until other tasks' pull requests merge.
+    case heldMessages(SidebarHeldMessages)
+
+    /// A nested row keeps its indent over it: it neither asks the user nor
+    /// needs the width.
+    var keepsIndent: Bool {
+        if case .heldMessages = self { return true }
+        return false
+    }
 
     /// Information rather than something to do: no separator above. A
     /// proposed rule waits on nothing: it stays as quiet.
     var isQuiet: Bool {
         switch self {
-        case .next, .reviewBadges, .ruleProposals, .dailyPass: return true
+        case .next, .reviewBadges, .ruleProposals, .dailyPass, .heldMessages: return true
         case .missionQuestion(_, let question): return question.handOff == nil
         case .approval, .resume, .interrupt, .cleanup, .turnQuestion, .dialog, .waitingMessages, .missionRecommendation: return false
         }

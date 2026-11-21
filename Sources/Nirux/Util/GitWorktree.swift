@@ -197,8 +197,8 @@ enum GitWorktree {
     }
 
     /// Detect the git repo root from a path
-    static func repoRoot(at path: String) -> String? {
-        let output = gitRunFull(["rev-parse", "--show-toplevel"], cwd: path, timeout: mainThreadTimeout)
+    static func repoRoot(at path: String, timeout: TimeInterval = mainThreadTimeout) -> String? {
+        let output = gitRunFull(["rev-parse", "--show-toplevel"], cwd: path, timeout: timeout)
             .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return output.isEmpty ? nil : output
     }

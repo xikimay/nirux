@@ -17,6 +17,16 @@ CI runs the app’s XCTest suite one process per test class, several at a time.
 swift build --build-tests && scripts/run-tests.sh
 ```
 
+The longest classes start first, in the order `scripts/test-class-times.txt` gives. When classes have grown or new long ones came in, `scripts/test-class-times.sh` rewrites it from main's last green nightly runs.
+
+A new or reworked UI test class passes a flake gate before its pull request is ready. On a pushed branch:
+
+```bash
+gh workflow run flake-gate.yml --ref <branch> -f classes="NiruxTests.FooTests" -f runs=10
+```
+
+One job builds the branch and runs each class 10 times, each run in its own process, beside the six heaviest classes. It ends with a line like `NiruxTests.FooTests: 10 of 10 runs passed`. After a local build, `scripts/run-tests.sh --repeat 10 NiruxTests.FooTests` does the same.
+
 ## NiruxCore
 
 Put policy that only needs core types in `NiruxCore/Sources/NiruxCore` and its Swift Testing cases in `NiruxCore/Tests/NiruxCoreTests`. AppKit and Ghostty adapters stay in the app. Policies that still depend on app models can live in `Sources/Nirux/Model` and use the core API through the app’s re-export.

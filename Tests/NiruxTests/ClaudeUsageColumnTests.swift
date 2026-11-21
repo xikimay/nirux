@@ -24,6 +24,28 @@ final class ClaudeUsageColumnTests: XCTestCase {
         )
     }
 
+    func testPlanningFollowsOnlyTheCurrentForegroundSession() throws {
+        let column = ColumnState(cwd: "/tmp")
+        let snapshot = ProcessSnapshot()
+        func send(_ name: String, _ mode: String?, subagent: Bool = false) throws {
+            var payload = ["hook_event_name": name, "session_id": "s"]
+            payload["permission_mode"] = mode
+            if subagent { payload["agent_id"] = "helper" }
+            let event = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: [:], now: 1, emitterProcess: claude.instance))
+            _ = column.admitClaudeHook(event, foregroundProcess: claude, snapshot: snapshot)
+        }
+        try send("SessionStart", "plan")
+        XCTAssertTrue(column.isPlanning(in: claude))
+        XCTAssertFalse(column.isPlanning(in: nil))
+        try send("PreToolUse", "default", subagent: true)
+        XCTAssertTrue(column.isPlanning(in: claude))
+        try send("UserPromptSubmit", "default")
+        XCTAssertFalse(column.isPlanning(in: claude))
+        try send("UserPromptSubmit", "plan")
+        try send("SessionEnd", nil)
+        XCTAssertFalse(column.isPlanning(in: claude))
+    }
+
     func testColumnFollowsTheTranscriptOfItsOwnSessionOnly() {
         let column = ColumnState(cwd: "/tmp")
         let snapshot = ProcessSnapshot()
