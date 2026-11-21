@@ -1,42 +1,49 @@
-name: Flake gate
-
-# The flake gate of a new or reworked test class, in one job on one macOS
-# runner: each class runs N times, each run its own xctest process, beside
-# the six heaviest classes (scripts/run-tests.sh --repeat). Started by hand
-# on a branch, so it needs no throwaway pull request:
-#   gh workflow run flake-gate.yml --ref <branch> -f classes="NiruxTests.FooTests" [-f runs=10]
-on:
-  workflow_dispatch:
-    inputs:
-      classes:
-        description: Test classes (Module.Class), separated by spaces
-        required: true
-        type: string
-      runs:
-        description: Runs of each class
-        default: "10"
-        type: string
+name: Observe full macOS CI for PRs 749 and 750
+on: workflow_dispatch
 
 permissions:
   contents: read
 
 jobs:
-  gate:
+  core:
     runs-on: macos-15
+    timeout-minutes: 5
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          ref: 725a6d72d2afc3af66252f4b6208b93cfe1362d7
+      - run: scripts/test-core.sh
+      - run: scripts/check-core-boundary.sh
 
+  test:
+    name: ${{ github.event.pull_request.draft && 'test (selected)' || 'test' }}
+    runs-on: macos-15
+    # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift
+    # 6.1): libghostty-spm 2.2 needs Swift tools 6.2.
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    # A serial run took 13 minutes: a hung test fails the job instead of
+    # holding the runner for GitHub's six hours.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The whole history, as the nightly has it: a test that reads a
+          # merged pull request's commits runs here, before merge, rather
+          # than first in the nightly.
+          fetch-depth: 0
+          ref: 725a6d72d2afc3af66252f4b6208b93cfe1362d7
+
+      # The dependencies' clones and binaries (GhosttyKit's download sometimes
+      # fails to connect), per toolchain: a new runner image's SwiftPM starts
+      # afresh. A pull request reads the cache the nightly saves on main.
       - name: Toolchain
         id: toolchain
         run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
-      # The cache tests.yml and the nightly use.
-      - uses: actions/cache/restore@v6
+      - uses: actions/cache@v6
         with:
           path: |
             .build/artifacts
@@ -45,13 +52,67 @@ jobs:
             .build/workspace-state.json
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
-      - name: Build
-        run: swift build --build-tests
+      # The dependencies' build products, which the nightly saves on main for
+      # this toolchain and Package.resolved, so they don't compile again
+      # (45 s of the build). This package's modules aren't in it and always
+      # build from scratch: a stale object of ours once crashed tests. A
+      # dependency left out here only builds, it can't go stale.
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/arm64-apple-macosx/debug/GhosttyKit.build
+            .build/arm64-apple-macosx/debug/DisplayLink.build
+            .build/arm64-apple-macosx/debug/GhosttyTerminal.build
+            .build/arm64-apple-macosx/debug/Modules/GhosttyKit.*
+            .build/arm64-apple-macosx/debug/Modules/DisplayLink.*
+            .build/arm64-apple-macosx/debug/Modules/GhosttyTerminal.*
+          key: deps-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
-      - name: Repeat the classes
+      - name: Build
+        uses: ./.github/actions/ci-diagnostic
+        with:
+          command: build
+
+      # The latest index the Coverage map workflow saved on main.
+      - name: Coverage index
+        id: coverage
+        if: github.event.pull_request.draft
+        uses: actions/cache/restore@v6
+        with:
+          path: .build/coverage-index.txt
+          key: coverage-index-v2-${{ github.event.pull_request.base.sha }}
+          restore-keys: coverage-index-v2-
+
+      - name: Select tests
+        shell: bash
+        id: select
         env:
-          CLASSES: ${{ inputs.classes }}
-          RUNS: ${{ inputs.runs }}
+          INDEX_KEY: ${{ steps.coverage.outputs.cache-matched-key }}
+        if: github.event.pull_request.draft
         run: |
-          read -ra classes <<< "${CLASSES//$'\n'/ }"
-          scripts/run-tests.sh --repeat "$RUNS" "${classes[@]}"
+          revision="${INDEX_KEY#coverage-index-v2-}"
+          if [[ ! -s .build/coverage-index.txt || ! $revision =~ ^[0-9a-f]{40}$ ]] ||
+             ! git merge-base --is-ancestor "$revision" HEAD^1; then
+            echo "No coverage index from the base history. Running the whole suite."
+            exit 0
+          fi
+          git diff --no-renames --name-only -z "$revision" HEAD > "$RUNNER_TEMP/changed"
+          swift test list --skip-build | cut -d/ -f1 | sort -u > "$RUNNER_TEMP/test-classes"
+          status=0
+          scripts/select-tests.sh .build/coverage-index.txt "$RUNNER_TEMP/test-classes" < "$RUNNER_TEMP/changed" > "$RUNNER_TEMP/selected" || status=$?
+          if [[ $status -eq 0 ]]; then
+            echo "$(wc -l < "$RUNNER_TEMP/selected" | tr -d ' ') classes selected:"
+            cat "$RUNNER_TEMP/selected"
+            echo "only=$RUNNER_TEMP/selected" >> "$GITHUB_OUTPUT"
+          elif [[ $status -ne 3 ]]; then
+            exit "$status"
+          fi
+
+      - name: Run tests
+        # A warning past it, not a failure: runners vary up to 4x.
+        env:
+          NIRUX_TESTS_BUDGET: 500
+          NIRUX_TESTS_ONLY: ${{ steps.select.outputs.only }}
+        uses: ./.github/actions/ci-diagnostic
+        with:
+          command: suite
