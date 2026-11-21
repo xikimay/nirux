@@ -377,10 +377,18 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// A proposal (`start_task` with "Starts tasks without asking" off),
     /// from the Lead or a task's agent: its description, and its template,
     /// picked once the repository's templates are read.
-    func prefill(description: String, templateName: String?, proposedBy: String = "the Lead") {
+    /// `branch`, the one the proposal names, shows in the field as if typed
+    /// once the task gets a worktree.
+    func prefill(description: String, templateName: String?, branch: String? = nil, proposedBy: String = "the Lead") {
         guard panel != nil else { return }
         descriptionView.string = description
         if let templateName { pickedTemplateName = templateName }
+        if let branch, namesFolder {
+            otherEditedName = branch
+        } else if let branch {
+            branchField.stringValue = branch
+            branchIsEdited = true
+        }
         self.proposedBy = proposedBy
         updateForSubtask()
         hideError()

@@ -229,7 +229,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(sheet.templatePopup.titleOfSelectedItem, "Investigation (no code)")
 
             select("Codex", in: sheet.agentPopup)
-            XCTAssertEqual(sheet.branch, "feat/why-is-the-cache-cold")
+            XCTAssertEqual(sheet.branch, "feat/why-cache-cold")
             // Closed while it starts: the workspace still opens.
             sheet.startButton.performClick(nil)
             sheet.cancelButton.performClick(nil)
@@ -240,7 +240,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(workspace.title, "Why is the cache cold?")
             XCTAssertEqual(workspace.profileID, space.id)
-            let worktree = harness.root + "/repo.feat-why-is-the-cache-cold"
+            let worktree = harness.root + "/repo.feat-why-cache-cold"
             XCTAssertEqual(NiruxShellView.comparablePath(workspace.cwd), NiruxShellView.comparablePath(worktree + "/docs"))
             // Where the agent starts, which its prompt names it from.
             let handover = try String(contentsOfFile: worktree + "/docs/.codex-handover.md", encoding: .utf8)
@@ -326,7 +326,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(sheet.repositoryPopup.titleOfSelectedItem, "repo")
             harness.waitUntil("the repository's info") { sheet.info?.target != nil }
             XCTAssertEqual(sheet.info?.target?.repository, harness.repo)
-            XCTAssertEqual(sheet.branch, "feat/wire-the-cache", "the branch, now")
+            XCTAssertEqual(sheet.branch, "feat/wire-cache", "the branch, now")
             XCTAssertTrue(sheet.startButton.isEnabled)
             sheet.startButton.performClick(nil)
             harness.waitUntil("the task's workspace") { shell.workspaces.contains { $0.title == "Wire the cache" } }
@@ -681,7 +681,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
     /// Existing Branch… lists the selected repository's worktrees, its main
     /// checkout too, then its branches without one, local then origin's. It
     /// goes back to the worktree the active workspace is in, and makes one
-    /// for a branch.
+    /// for a branch, titled by its words.
     func testExistingBranchListsTheRepositorysWorktreesThenBranches() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -714,7 +714,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             harness.type("feat/remote", into: try XCTUnwrap(palette.searchField))
             XCTAssertEqual(palette.filteredActions.first?.title, "feat/remote")
             harness.press(.returnKey, in: palette.panel)
-            harness.waitUntil("the branch's worktree") { shell.workspaces.contains { $0.title == "feat/remote" } }
+            harness.waitUntil("the branch's worktree") { shell.workspaces.contains { $0.title == "Remote" } }
             let opened = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(NiruxShellView.comparablePath(opened.cwd), NiruxShellView.comparablePath(harness.root + "/repo.feat-remote"))
             XCTAssertEqual(

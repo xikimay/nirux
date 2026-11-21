@@ -33,12 +33,9 @@ enum TaskTools {
                     space, it opens the New Sub-task sheet filled in for them to start instead.
                     """,
                 properties: [
-                    "description": [
-                        "type": "string",
-                        "description": "What the sub-task must do, as you would tell the agent. Its first line names it and its branch or folder."
-                    ],
+                    "description": ["type": "string", "description": "What the sub-task must do, as you would tell the agent."],
                     "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."]
-                ],
+                ].merging(LeadTools.nameProperties) { first, _ in first },
                 required: ["description"]
             ),
             LeadTools.definition(

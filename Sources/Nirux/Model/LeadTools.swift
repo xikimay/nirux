@@ -54,6 +54,23 @@ enum LeadTools {
         ]
     }
 
+    /// start_task's `title` and `branch`, for the Lead's tasks and a task's
+    /// sub-tasks.
+    static var nameProperties: [String: Any] {
+        [
+            "title": [
+                "type": "string",
+                "description": "Its name on its row: English, the distinctive word first, at most 22 characters to show whole "
+                    + "(\"Clearer task rows\"). Left out: the description's first line."
+            ],
+            "branch": [
+                "type": "string",
+                "description": "Its new branch, type/kebab-words (fix/stale-labels). Left out: made from the title. "
+                    + "Taken: -2, -3… is added. A task without a repository has none."
+            ]
+        ]
+    }
+
     /// A next step or blocker: one line on the task's row.
     static let maxContextLength = 200
 
@@ -90,10 +107,10 @@ enum LeadTools {
                     the New sheet filled in for the user to start instead.
                     """,
                 properties: [
-                    "description": ["type": "string", "description": "What the task must do, as you would tell the agent. Its first line names the task and its branch or folder."],
+                    "description": ["type": "string", "description": "What the task must do, as you would tell the agent."],
                     "repo": ["type": "string", "description": "The repository's name in this space (see list_tasks); its default one when left out. \"\(noRepository)\": a new folder, no repository."],
                     "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."]
-                ],
+                ].merging(nameProperties) { first, _ in first },
                 required: ["description"]
             ),
             definition(
@@ -365,10 +382,22 @@ enum LeadTools {
         return numbers
     }
 
-    /// rename_task's title on one line, whitespace folded. A huge one is
-    /// cut past twice the limit, so a cut one is still refused as too long.
+    /// rename_task's and start_task's title on one line, whitespace folded.
+    /// A huge one is cut past twice the limit, so a cut one is still refused
+    /// as too long.
     static func title(_ arguments: [String: Any]) -> String? {
         (arguments["title"] as? String).flatMap { AgentText.clean($0, maxLength: maxTitleLength * 2) }
+    }
+
+    /// start_task's `title` and `branch`, checked by `problem` first.
+    static func naming(_ arguments: [String: Any]) -> NewTask.Naming {
+        NewTask.Naming(title: title(arguments), branch: string(arguments, "branch"))
+    }
+
+    /// `key` is there, and not null.
+    static func isGiven(_ arguments: [String: Any], _ key: String) -> Bool {
+        guard let value = arguments[key] else { return false }
+        return !(value is NSNull)
     }
 
     /// A whole positive number, as JSON gives it (not a boolean).
@@ -383,7 +412,14 @@ enum LeadTools {
         let messageLimit = MissionEventCLI.maxInstructionLength
         switch tool {
         case startTask:
-            return string(arguments, "description") == nil ? "description must say what the task must do." : nil
+            guard string(arguments, "description") != nil else { return "description must say what the task must do." }
+            if isGiven(arguments, "title"), title(arguments).map({ $0.count <= maxTitleLength }) != true {
+                return "title must hold 1 to \(maxTitleLength) characters."
+            }
+            if isGiven(arguments, "branch"), string(arguments, "branch").map(BoardConfig.isValidBranchName) != true {
+                return "branch must be a valid git branch name, such as fix/stale-labels."
+            }
+            return nil
         case listTasks:
             return nil
         case tell, reply:

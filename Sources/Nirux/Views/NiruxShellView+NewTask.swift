@@ -267,7 +267,7 @@ extension NiruxShellView {
         let childAgentUUID = UUID().uuidString
         // The branch, or the folder's name as it was made.
         let label = created.checkedOutBranch ?? created.folderName ?? request.name
-        let title = NewTask.workspaceTitle(description: request.description) ?? label
+        let title = request.workspaceTitle ?? label
         // A Mission names its child by its branch: a folder task has none,
         // so its title stands in ("Fix login", not "Fix login (branch Fix
         // login 2)"), and `--mission tell --branch` takes that title.
@@ -424,7 +424,7 @@ extension NiruxShellView {
         // Checked before the folder is made, with the longest name it may
         // get: a refusal leaves nothing behind.
         let longest = NewTask.folderHandover(
-            description: request.description, template: request.template,
+            description: request.description, title: request.title, template: request.template,
             folder: (parent as NSString).appendingPathComponent("\(name) \(NewTask.maxFolderAttempts)")
         )
         guard longest.utf8.count <= HandoverFile.maxBytes else {
@@ -447,7 +447,9 @@ extension NiruxShellView {
         case .success(let path): folder = path
         case .failure(let error): return .failed(error.message)
         }
-        let handover = NewTask.folderHandover(description: request.description, template: request.template, folder: folder)
+        let handover = NewTask.folderHandover(
+            description: request.description, title: request.title, template: request.template, folder: folder
+        )
         var handoverError: HandoverFile.TransferError?
         if case .failure(let failure) = HandoverFile.deliver(handover, toDirectory: folder, filename: handoverFilename) {
             handoverError = failure
@@ -475,7 +477,7 @@ extension NiruxShellView {
             start = .checkoutHead(repository: target.repository, branch: target.checkoutBranch)
         }
         let handover = NewTask.handover(
-            description: request.description, template: request.template, branch: branch,
+            description: request.description, title: request.title, template: request.template, branch: branch,
             start: start, subdirectory: target.subdirectory
         )
         guard handover.utf8.count <= HandoverFile.maxBytes else {

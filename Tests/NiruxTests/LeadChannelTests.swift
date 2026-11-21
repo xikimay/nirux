@@ -180,6 +180,21 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(LeadTools.contextText(["next_step": " write\n\tthe import\u{202E} side "], "next_step"), .some("write the import side"))
     }
 
+    /// start_task needs a description; a title within the rename limit and
+    /// a valid branch name when given, null being left out.
+    func testStartTaskArgumentsAreCheckedBeforeTheApp() {
+        let problem = { (arguments: [String: Any]) in LeadTools.problem(tool: LeadTools.startTask, arguments: arguments) }
+        let longest = String(repeating: "t", count: LeadTools.maxTitleLength)
+        XCTAssertNil(problem(["description": "x", "title": longest, "branch": "fix/stale-labels"]))
+        XCTAssertNil(problem(["description": "x", "title": NSNull(), "branch": NSNull()]))
+        XCTAssertNotNil(problem(["title": "CSV export"]))
+        XCTAssertNotNil(problem(["description": "x", "title": longest + "t"]))
+        XCTAssertNotNil(problem(["description": "x", "title": " \n "]))
+        XCTAssertNotNil(problem(["description": "x", "branch": "feat/a..b"]))
+        XCTAssertNotNil(problem(["description": "x", "branch": 3]))
+        XCTAssertEqual(LeadTools.naming(["title": " CSV\n export ", "branch": "fix/x"]), NewTask.Naming(title: "CSV export", branch: "fix/x"))
+    }
+
     /// reply takes a message, or accept: true (a JSON boolean) in its place.
     func testReplyArgumentsAreCheckedBeforeTheApp() {
         let problem = { (arguments: [String: Any]) in LeadTools.problem(tool: LeadTools.reply, arguments: arguments) }

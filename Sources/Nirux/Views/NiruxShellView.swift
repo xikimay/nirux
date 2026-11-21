@@ -1009,7 +1009,9 @@ extension NiruxShellView {
             guard let path else {
                 return self.presentProblem("Couldn’t create worktree “\(branch)”", error ?? "git worktree add failed")
             }
-            self.openRoutedWorkspace(title: branch, cwd: path, startedFromSpaceID: spaceID, worktreeBranch: checkedOutBranch)
+            self.openRoutedWorkspace(
+                title: NewTask.branchTitle(branch), cwd: path, startedFromSpaceID: spaceID, worktreeBranch: checkedOutBranch
+            )
         }
     }
 

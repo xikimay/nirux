@@ -46,12 +46,13 @@ final class NiruxURLRequestTests: XCTestCase {
 
     func testNewWorktreeParsesParameters() {
         let request = worktree(
-            "nirux://new-worktree?branch=feat%2Fx&repo=/Users/me/repo&agent=claude"
+            "nirux://new-worktree?branch=feat%2Fx&title=CSV%20export&repo=/Users/me/repo&agent=claude"
                 + "&handover=%2Ftmp%2Fnirux-handover-claude-feat-x.md"
                 + "&parentWorkspace=W&parentAgent=A"
         )
         XCTAssertEqual(request, NiruxURLRequest.NewWorktree(
             branch: "feat/x",
+            title: "CSV export",
             repo: "/Users/me/repo",
             agent: .claude,
             handoverPath: "/tmp/nirux-handover-claude-feat-x.md",
@@ -224,13 +225,13 @@ final class NiruxURLRequestTests: XCTestCase {
 
     func testWorktreeConfirmationSpellsOutRepoBranchModeAndHandover() throws {
         let request = try XCTUnwrap(parse(
-            "nirux://new-worktree?branch=feat/x&repo=/Users/me/repo&agent=codex"
+            "nirux://new-worktree?branch=feat/x&title=CSV%20export&repo=/Users/me/repo&agent=codex"
                 + "&handover=/tmp/nirux-handover-codex-feat-x.md"
         ))
         let text = try XCTUnwrap(request.confirmation(claudeMode: .default, codexMode: .fullAuto))
         XCTAssertEqual(text.message, "Create a worktree and start an agent?")
         XCTAssertTrue(text.details.contains("Repository: /Users/me/repo"))
-        XCTAssertTrue(text.details.contains("Branch: feat/x"))
+        XCTAssertTrue(text.details.contains("Branch: feat/x\nTitle: CSV export\n"), text.details)
         XCTAssertTrue(text.details.contains("starts from origin’s base branch, fetched first"))
         XCTAssertTrue(try XCTUnwrap(parse("nirux://new-worktree?branch=x&repo=/r&from=head"))
             .confirmation(claudeMode: .default, codexMode: .default).details.contains("starts from this checkout’s HEAD"))

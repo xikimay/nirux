@@ -57,7 +57,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     enum Action: Equatable, Sendable {
         /// nirux://new-workspace?cwd=...&title=...&agent=claude|codex|agy&profile=...
         case newWorkspace(cwd: String?, title: String?, agent: NiruxApp.WorkspaceAgent?)
-        /// nirux://new-worktree?branch=...&repo=...&agent=...&handover=...&profile=...&from=head
+        /// nirux://new-worktree?branch=...&title=...&repo=...&agent=...&handover=...&profile=...&from=head
         case newWorktree(NewWorktree)
         /// nirux://open-editor?file=...&line=...&endLine=...&workspace=...
         /// `target` is filled by `resolvingPaths()`: validating the file
@@ -67,6 +67,8 @@ struct NiruxURLRequest: Equatable, Sendable {
 
     struct NewWorktree: Equatable, Sendable {
         var branch: String
+        /// The workspace's title; nil: the branch.
+        var title: String?
         var repo: String
         var agent: NiruxApp.WorkspaceAgent?
         /// Kept even when it breaks the handover rules: only the handover is
@@ -111,6 +113,7 @@ struct NiruxURLRequest: Equatable, Sendable {
             else { return nil }
             action = .newWorktree(NewWorktree(
                 branch: branch,
+                title: value("title"),
                 repo: repo,
                 agent: agent,
                 handoverPath: value("handover"),
@@ -263,6 +266,7 @@ struct NiruxURLRequest: Equatable, Sendable {
                     : "A new branch starts from origin’s base branch, fetched first (a network access).",
                 agentLine(request.agent)
             ]
+            if let title = request.title { lines.insert("Title: \(Self.displaySafe(title))", at: 2) }
             if let handover = request.handoverPath {
                 let shown = Self.displaySafe(handover)
                 if !HandoverFile.isAllowedSourcePath(handover) {
