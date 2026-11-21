@@ -8,7 +8,7 @@ final class CIFailureTests: XCTestCase {
         PRDetect.pullRequestInfo(from: [
             "number": 52, "state": state, "url": "https://github.com/acme/widgets/pull/52",
             "statusCheckRollup": rollup
-        ])
+        ])!
     }
 
     private func checkRun(
@@ -131,8 +131,7 @@ final class CIFailureTests: XCTestCase {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
             process.arguments = ["-c", "user.name=Nirux Tests", "-c", "user.email=nirux@example.test"] + arguments
             process.currentDirectoryURL = directory
-            try process.run()
-            process.waitUntilExit()
+            try process.runToEnd()
         }
         try git(["init", "-q", "-b", "one"])
         try git(["commit", "-q", "--allow-empty", "-m", "initial"])
@@ -199,5 +198,19 @@ final class CIFailureTests: XCTestCase {
             CIFailure.rerunArguments(runs[0]),
             ["run", "rerun", "7", "--repo", "github.com/acme/widgets", "--failed"]
         )
+    }
+
+    func testARerunGhCantRunSaysWhichRunAndWhy() {
+        let run = CIFailure.Run(repository: "github.com/acme/widgets", id: 7)
+        XCTAssertEqual(CIFailure.rerun(run, gh: { GitHub.CLI.run($0, gh: nil) }), "The GitHub CLI (gh) isn’t installed: run 7 can’t be rerun.")
+        XCTAssertEqual(CIFailure.rerun(run, gh: { GitHub.CLI.run($0, gh: "/nonexistent/gh") }), "Run 7: gh couldn’t start, or took longer than 30 s")
+        let refusal = "HTTP 403: Must have admin rights to Repository. (https://api.github.com/repos/acme/widgets/actions/runs/7/rerun-failed-jobs)\n"
+        let refused: GitHub.CLI.Runner = { _ in .success(.init(status: 1, standardOutput: Data(), standardError: Data(refusal.utf8))) }
+        XCTAssertEqual(
+            CIFailure.rerun(run, gh: refused),
+            "Run 7: Must have admin rights to Repository. (https://api.github.com/repos/acme/widgets/actions/runs/7/rerun-failed-jobs) (HTTP 403)",
+            "worded as every gh refusal"
+        )
+        XCTAssertNil(CIFailure.rerun(run, gh: { _ in .success(.init(status: 0, standardOutput: Data(), standardError: Data())) }))
     }
 }

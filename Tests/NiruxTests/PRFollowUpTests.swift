@@ -11,13 +11,13 @@ final class PRFollowUpTests: XCTestCase {
     private func pullRequest(
         mergeable: String = "MERGEABLE", rollup: [[String: Any]] = [], head: String? = nil, base: String = "main",
         autoMerge: Bool = false
-    ) -> PRInfo {
+    ) throws -> PRInfo {
         var candidate: [String: Any] = [
             "number": 52, "state": "OPEN", "url": "https://github.com/acme/widgets/pull/52", "statusCheckRollup": rollup,
             "mergeable": mergeable, "headRefOid": (head ?? self.head).uppercased(), "baseRefName": base
         ]
         if autoMerge { candidate["autoMergeRequest"] = ["mergeMethod": "MERGE"] }
-        return PRDetect.pullRequestInfo(from: candidate)
+        return try XCTUnwrap(PRDetect.pullRequestInfo(from: candidate))
     }
 
     private func checkRun(
@@ -67,7 +67,7 @@ final class PRFollowUpTests: XCTestCase {
     /// A conflicting pull request runs no pull_request workflow: the merge
     /// comes first, and never a rebase (a pushed branch only moves fast-forward).
     func testTheConflictComesFirstAndMergesTheBase() throws {
-        let conflicting = facts(pullRequest(mergeable: "CONFLICTING", rollup: red), feedback: [item("c1", age: 600)])
+        let conflicting = facts(try pullRequest(mergeable: "CONFLICTING", rollup: red), feedback: [item("c1", age: 600)])
         let conflict = try XCTUnwrap(typed(next(conflicting)))
         XCTAssertEqual(conflict.round, PRFollowUp.Round(kind: .conflict, head: head, typedAt: now, agent: "agent-1"))
         XCTAssertEqual(conflict.prompt, "PR #52 conflicts with main. Run `git fetch upstream main`, merge upstream/main into "
@@ -76,7 +76,7 @@ final class PRFollowUpTests: XCTestCase {
         // Names go into no prompt unless plain; no remote for the base, no
         // merge, and no other round: its checks wouldn't run.
         var oddBase = conflicting
-        oddBase.pullRequest = pullRequest(mergeable: "CONFLICTING", rollup: red, base: "main`; rm -rf ~`")
+        oddBase.pullRequest = try pullRequest(mergeable: "CONFLICTING", rollup: red, base: "main`; rm -rf ~`")
         XCTAssertEqual(next(oddBase), .wait("no plain remote and base to merge"))
         var noRemote = conflicting
         noRemote.baseRemote = nil
@@ -84,18 +84,18 @@ final class PRFollowUpTests: XCTestCase {
     }
 
     func testAFailureWaitsForItsRunsTheTriageAndTheUser() throws {
-        let failed = facts(pullRequest(rollup: red))
+        let failed = facts(try pullRequest(rollup: red))
         XCTAssertEqual(try XCTUnwrap(typed(next(failed))).prompt, "CI failed on PR #52. Run "
             + "`gh run view 7 --repo github.com/acme/widgets --log-failed`, find why it failed, fix it, run the checks, "
             + "commit and push. If this branch didn't cause it, say so and push nothing. (Nirux follow-up, round 1 of 3.)")
 
         var running = failed
-        running.pullRequest = pullRequest(rollup: red + [checkRun("lint", conclusion: "", status: "IN_PROGRESS", run: 8)])
+        running.pullRequest = try pullRequest(rollup: red + [checkRun("lint", conclusion: "", status: "IN_PROGRESS", run: 8)])
         XCTAssertEqual(next(running), .wait("checks still run"))
         // Another workflow's job waiting on someone (an environment's
         // approval) holds nothing.
         var deploying = failed
-        deploying.pullRequest = pullRequest(rollup: red + [
+        deploying.pullRequest = try pullRequest(rollup: red + [
             checkRun("production", conclusion: "", status: "WAITING", run: 9, workflow: "Deploy")
         ])
         XCTAssertEqual(try XCTUnwrap(typed(next(deploying))).round.kind, .ci)
@@ -117,25 +117,25 @@ final class PRFollowUpTests: XCTestCase {
         let taken = PRFollowUp.Entry(userFailures: [PRFollowUp.failureSignature(failed.pullRequest)])
         XCTAssertEqual(next(failed, taken), .none)
         let cancelled = checkRun("Analyze (swift)", conclusion: "CANCELLED", run: 9)
-        XCTAssertEqual(next(facts(pullRequest(rollup: [cancelled]))), .none)
-        XCTAssertEqual(next(facts(pullRequest(rollup: red + [cancelled])), taken), .none, "still the failure the user took")
-        XCTAssertEqual(try XCTUnwrap(typed(next(facts(pullRequest(rollup: red + [cancelled]))))).prompt,
+        XCTAssertEqual(next(facts(try pullRequest(rollup: [cancelled]))), .none)
+        XCTAssertEqual(next(facts(try pullRequest(rollup: red + [cancelled])), taken), .none, "still the failure the user took")
+        XCTAssertEqual(try XCTUnwrap(typed(next(facts(try pullRequest(rollup: red + [cancelled]))))).prompt,
                        try XCTUnwrap(typed(next(failed))).prompt, "the cancelled run isn't the agent's to read")
-        XCTAssertNotNil(typed(next(facts(pullRequest(rollup: [checkRun("test", conclusion: "TIMED_OUT")])))))
+        XCTAssertNotNil(typed(next(facts(try pullRequest(rollup: [checkRun("test", conclusion: "TIMED_OUT")])))))
 
         // Nothing the agent could read.
         var foreign = checkRun("test")
         foreign["detailsUrl"] = "https://github.com/someone/else/actions/runs/9/job/1"
-        XCTAssertEqual(next(facts(pullRequest(rollup: [foreign]))), .none)
+        XCTAssertEqual(next(facts(try pullRequest(rollup: [foreign]))), .none)
         let status: [String: Any] = ["__typename": "StatusContext", "context": "ci/lint", "state": "FAILURE",
                                      "targetUrl": "https://ci.example.com/1", "startedAt": "2026-11-19T10:00:00Z"]
-        XCTAssertEqual(next(facts(pullRequest(rollup: [status]))), .none)
+        XCTAssertEqual(next(facts(try pullRequest(rollup: [status]))), .none)
     }
 
     /// A check that waits on someone (a deployment's approval) must not hold
     /// the feedback behind it.
     func testAWaitingKindLetsTheNextOneGo() throws {
-        var reading = facts(pullRequest(rollup: red), feedback: [item("c1", age: 600)])
+        var reading = facts(try pullRequest(rollup: red), feedback: [item("c1", age: 600)])
         reading.triage = .pending
         XCTAssertEqual(try XCTUnwrap(typed(next(reading))).round.kind, .feedback)
     }
@@ -149,13 +149,13 @@ final class PRFollowUpTests: XCTestCase {
             item("replied", age: 500, answered: true)
         ]
         var entry = PRFollowUp.Entry(since: now - 3600, handedFeedback: [item("old", age: 9000).url])
-        XCTAssertEqual(PRFollowUp.next(&entry, facts(pullRequest(), feedback: [item("burst", age: 60)] + items)),
+        XCTAssertEqual(PRFollowUp.next(&entry, facts(try pullRequest(), feedback: [item("burst", age: 60)] + items)),
                        .wait("feedback may still come"))
         // Turned off and on again since the entry began: what came between is the user's.
-        var turnedOn = facts(pullRequest(), feedback: items)
+        var turnedOn = facts(try pullRequest(), feedback: items)
         turnedOn.followedSince = now - 300
         XCTAssertEqual(typed(next(turnedOn, entry))?.round.items, [fresh.url], "only what came since it was turned on")
-        let action = PRFollowUp.next(&entry, facts(pullRequest(), feedback: items + [item("ask", age: 300, location: "comment")]))
+        let action = PRFollowUp.next(&entry, facts(try pullRequest(), feedback: items + [item("ask", age: 300, location: "comment")]))
         let round = try XCTUnwrap(typed(action))
         let handed = [fresh.url, item("bot-thread", age: 400).url, item("ask", age: 300).url]
         XCTAssertEqual(round.round.items, handed)
@@ -168,7 +168,7 @@ final class PRFollowUpTests: XCTestCase {
         // Pushed, the threads still listed: handed once.
         var afterPush = entry
         afterPush.endRound(at: now)
-        var later = facts(pullRequest(head: pushed), feedback: items + [item("ask", age: 300, location: "comment")])
+        var later = facts(try pullRequest(head: pushed), feedback: items + [item("ask", age: 300, location: "comment")])
         later.localHead = pushed
         later.now = now + 60
         later.readAt = now + 30
@@ -181,12 +181,12 @@ final class PRFollowUpTests: XCTestCase {
         XCTAssertEqual(entry, PRFollowUp.Entry(since: now - 3600, handedFeedback: [item("old", age: 9000).url]))
     }
 
-    func testNothingIsTypedUnlessTheTaskIsReady() {
-        let ready = facts(pullRequest(rollup: red))
+    func testNothingIsTypedUnlessTheTaskIsReady() throws {
+        let ready = facts(try pullRequest(rollup: red))
         var queued = ready
         queued.isInMergeQueue = true
         XCTAssertEqual(next(queued), .wait("the merge queue holds it"))
-        XCTAssertEqual(next(facts(pullRequest(rollup: red, autoMerge: true))), .wait("auto-merge is on"))
+        XCTAssertEqual(next(facts(try pullRequest(rollup: red, autoMerge: true))), .wait("auto-merge is on"))
         var behind = ready
         behind.localHead = pushed
         XCTAssertEqual(next(behind), .wait("the checkout's HEAD isn't the pull request's"))
@@ -205,9 +205,9 @@ final class PRFollowUpTests: XCTestCase {
 
     // MARK: - Rounds and stops
 
-    func testARoundIsJudgedOnceItsTurnEndedTheAgentRestsAndReadsCame() {
+    func testARoundIsJudgedOnceItsTurnEndedTheAgentRestsAndReadsCame() throws {
         let inFlight = PRFollowUp.Round(kind: .ci, head: head, typedAt: now - 60)
-        let failed = facts(pullRequest(rollup: red))
+        let failed = facts(try pullRequest(rollup: red))
         XCTAssertEqual(next(failed, PRFollowUp.Entry(rounds: [inFlight])), .wait("its round runs"))
         var busy = failed
         busy.agentIsBusy = true
@@ -215,7 +215,7 @@ final class PRFollowUpTests: XCTestCase {
         var unread = failed
         unread.readAt = now - 110
         XCTAssertEqual(next(unread, PRFollowUp.Entry(rounds: [round(.ci, on: head)])), .wait("no read since its round"))
-        var oldFeedback = facts(pullRequest(), feedback: [item("c1", age: 900)])
+        var oldFeedback = facts(try pullRequest(), feedback: [item("c1", age: 900)])
         oldFeedback.feedbackReadAt = now - 110
         XCTAssertEqual(next(oldFeedback, PRFollowUp.Entry(rounds: [round(.feedback, on: head, items: [item("c1", age: 900).url])])),
                        .wait("no feedback read since its round"))
@@ -247,9 +247,9 @@ final class PRFollowUpTests: XCTestCase {
     func testARoundThatPushedNothingHandsThePullRequestOver() throws {
         let feedback = item("c1", age: 900)
         for (kind, stillThere) in [
-            (PRFollowUp.Kind.conflict, facts(pullRequest(mergeable: "CONFLICTING"))),
-            (.ci, facts(pullRequest(rollup: red))),
-            (.feedback, facts(pullRequest(), feedback: [feedback]))
+            (PRFollowUp.Kind.conflict, facts(try pullRequest(mergeable: "CONFLICTING"))),
+            (.ci, facts(try pullRequest(rollup: red))),
+            (.feedback, facts(try pullRequest(), feedback: [feedback]))
         ] {
             var entry = PRFollowUp.Entry(rounds: [round(kind, on: head, items: [feedback.url])], handedFeedback: [feedback.url])
             XCTAssertEqual(PRFollowUp.next(&entry, stillThere), .wait("stopped: nothingPushed"), "\(kind)")
@@ -259,8 +259,8 @@ final class PRFollowUpTests: XCTestCase {
 
         // GitHub still computing, a rerun going: nothing is known yet.
         let unknown = [
-            (PRFollowUp.Kind.conflict, facts(pullRequest(mergeable: "UNKNOWN"))),
-            (.ci, facts(pullRequest(rollup: [checkRun("test", conclusion: "", status: "IN_PROGRESS")])))
+            (PRFollowUp.Kind.conflict, facts(try pullRequest(mergeable: "UNKNOWN"))),
+            (.ci, facts(try pullRequest(rollup: [checkRun("test", conclusion: "", status: "IN_PROGRESS")])))
         ]
         for (kind, computing) in unknown {
             XCTAssertEqual(next(computing, PRFollowUp.Entry(rounds: [round(kind, on: head)])), .wait("GitHub is still computing"))
@@ -273,14 +273,14 @@ final class PRFollowUpTests: XCTestCase {
         // Gone without a push (a question answered, a rerun that passed):
         // nothing to hand over; newer feedback is the next round's.
         var answered = PRFollowUp.Entry(rounds: [round(.feedback, on: head, items: [feedback.url])], handedFeedback: [feedback.url])
-        XCTAssertEqual(typed(PRFollowUp.next(&answered, facts(pullRequest(), feedback: [item("c2", age: 600)])))?.round.kind,
+        XCTAssertEqual(typed(PRFollowUp.next(&answered, facts(try pullRequest(), feedback: [item("c2", age: 600)])))?.round.kind,
                        .feedback)
         XCTAssertNil(answered.stop)
     }
 
     func testAPushSettlesTheRoundAndTheNextOneMayFollow() throws {
         var entry = PRFollowUp.Entry(rounds: [round(.ci, on: head)])
-        var failedAgain = facts(pullRequest(rollup: red, head: pushed))
+        var failedAgain = facts(try pullRequest(rollup: red, head: pushed))
         failedAgain.localHead = pushed
         let second = try XCTUnwrap(typed(PRFollowUp.next(&entry, failedAgain)))
         XCTAssertNotNil(entry.rounds[0].settledAt)
@@ -289,8 +289,8 @@ final class PRFollowUpTests: XCTestCase {
         XCTAssertTrue(second.prompt.hasSuffix("(Nirux follow-up, round 2 of 3.)"))
     }
 
-    func testACheckoutApartFromThePullRequestStopsItUntilTheyMeet() {
-        var apart = facts(pullRequest(rollup: red))
+    func testACheckoutApartFromThePullRequestStopsItUntilTheyMeet() throws {
+        var apart = facts(try pullRequest(rollup: red))
         apart.localHead = pushed
         var entry = PRFollowUp.Entry(rounds: [round(.ci, on: head, endedAgo: 300)])
         XCTAssertEqual(PRFollowUp.next(&entry, apart), .wait("the checkout isn't at the pull request's head"))
@@ -299,19 +299,19 @@ final class PRFollowUpTests: XCTestCase {
         XCTAssertEqual(PRFollowUp.next(&entry, apart), .wait("stopped: checkoutDiffers"))
 
         var met = entry
-        XCTAssertEqual(PRFollowUp.next(&met, facts(pullRequest())), .none, "the checkout moved to the pull request's head")
+        XCTAssertEqual(PRFollowUp.next(&met, facts(try pullRequest())), .none, "the checkout moved to the pull request's head")
         XCTAssertNil(met.stop)
-        var pulled = facts(pullRequest(head: pushed))
+        var pulled = facts(try pullRequest(head: pushed))
         pulled.localHead = pushed
         XCTAssertEqual(PRFollowUp.next(&entry, pulled), .none)
         XCTAssertNil(entry.stop)
     }
 
-    func testAfterThreeRoundsEachNewSignalGoesToTheUser() {
+    func testAfterThreeRoundsEachNewSignalGoesToTheUser() throws {
         var entry = PRFollowUp.Entry(rounds: [
             round(.ci, on: "1", settled: true), round(.conflict, on: "2", settled: true), round(.ci, on: "3", settled: true)
         ])
-        let failed = facts(pullRequest(rollup: red))
+        let failed = facts(try pullRequest(rollup: red))
         var busy = failed
         busy.agentRefusal = "working"
         XCTAssertEqual(PRFollowUp.next(&entry, busy), .wait("working"), "it may be fixing it with the user")
@@ -321,38 +321,38 @@ final class PRFollowUpTests: XCTestCase {
         XCTAssertEqual(PRFollowUp.next(&entry, failed), .wait("stopped: rounds"))
 
         // Pushed and red again: still the user's, about the new head.
-        var failedAgain = facts(pullRequest(rollup: red, head: pushed))
+        var failedAgain = facts(try pullRequest(rollup: red, head: pushed))
         failedAgain.localHead = pushed
         XCTAssertEqual(PRFollowUp.next(&entry, failedAgain), .wait("stopped: rounds"))
         XCTAssertEqual(entry.stop?.head, pushed)
 
         // Green: nothing waits on the user.
-        var green = facts(pullRequest(rollup: [checkRun("test", conclusion: "SUCCESS")], head: pushed))
+        var green = facts(try pullRequest(rollup: [checkRun("test", conclusion: "SUCCESS")], head: pushed))
         green.localHead = pushed
         XCTAssertEqual(PRFollowUp.next(&entry, green), .none)
         XCTAssertNil(entry.stop)
     }
 
     /// A stop is about what stopped it; while that isn't known, it holds.
-    func testAStopHoldsWhileItsCauseIsThereOrUnknown() {
+    func testAStopHoldsWhileItsCauseIsThereOrUnknown() throws {
         let conflictStop = PRFollowUp.Stop(kind: .conflict, cause: .nothingPushed, head: head, at: now - 60)
         var entry = PRFollowUp.Entry(stop: conflictStop)
-        XCTAssertEqual(PRFollowUp.next(&entry, facts(pullRequest(mergeable: "UNKNOWN"))), .wait("stopped: nothingPushed"))
-        XCTAssertEqual(PRFollowUp.next(&entry, facts(pullRequest())), .none)
+        XCTAssertEqual(PRFollowUp.next(&entry, facts(try pullRequest(mergeable: "UNKNOWN"))), .wait("stopped: nothingPushed"))
+        XCTAssertEqual(PRFollowUp.next(&entry, facts(try pullRequest())), .none)
         XCTAssertNil(entry.stop)
 
         let c1 = item("c1", age: 900)
         let feedbackStop = PRFollowUp.Stop(kind: .feedback, cause: .nothingPushed, head: head, at: now - 60, items: [c1.url])
-        var unread = facts(pullRequest())
+        var unread = facts(try pullRequest())
         unread.feedback = nil
         XCTAssertEqual(next(unread, PRFollowUp.Entry(stop: feedbackStop)), .wait("stopped: nothingPushed"))
         // Resolved: an older thread still listed doesn't keep it.
         var resolved = PRFollowUp.Entry(since: now - 1800, handedFeedback: [c1.url], stop: feedbackStop)
-        XCTAssertEqual(PRFollowUp.next(&resolved, facts(pullRequest(), feedback: [item("older", age: 3000)])), .none)
+        XCTAssertEqual(PRFollowUp.next(&resolved, facts(try pullRequest(), feedback: [item("older", age: 3000)])), .none)
         XCTAssertNil(resolved.stop)
         // Answered, its reviewer's turn: neither.
         var answered = PRFollowUp.Entry(since: now - 1800, handedFeedback: [c1.url], stop: feedbackStop)
-        XCTAssertEqual(PRFollowUp.next(&answered, facts(pullRequest(), feedback: [item("c1", age: 900, answered: true)])), .none)
+        XCTAssertEqual(PRFollowUp.next(&answered, facts(try pullRequest(), feedback: [item("c1", age: 900, answered: true)])), .none)
         XCTAssertNil(answered.stop)
     }
 
@@ -408,10 +408,10 @@ final class PRFollowUpTests: XCTestCase {
 
         let before = item("before", age: 900)
         let after = item("after", age: 400)
-        var upgraded = facts(pullRequest(), feedback: [before, after])
+        var upgraded = facts(try pullRequest(), feedback: [before, after])
         upgraded.followedSince = store.followedSince(space: "never-set")
         XCTAssertEqual(try XCTUnwrap(typed(next(upgraded))).round.items, [after.url])
-        var red = facts(pullRequest(rollup: self.red), feedback: [before])
+        var red = facts(try pullRequest(rollup: self.red), feedback: [before])
         red.followedSince = store.followedSince(space: "never-set")
         XCTAssertEqual(try XCTUnwrap(typed(next(red))).round.kind, .ci, "a check still red stays eligible")
     }
@@ -456,12 +456,12 @@ final class PRFollowUpTests: XCTestCase {
 
     /// A stop this build can't read holds while the head it names is the
     /// pull request's; one naming none holds until the pull request closes.
-    func testAnUnreadableStopHolds() {
-        let failed = facts(pullRequest(rollup: red))
+    func testAnUnreadableStopHolds() throws {
+        let failed = facts(try pullRequest(rollup: red))
         let named = PRFollowUp.Stop(kind: .ci, cause: .unreadable, head: head, at: now - 60)
         XCTAssertEqual(next(failed, PRFollowUp.Entry(stop: named)), .wait("stopped: unreadable"))
         XCTAssertEqual(next(failed, PRFollowUp.Entry(stop: .unreadable)), .wait("stopped: unreadable"))
-        var pushed = facts(pullRequest(rollup: red, head: self.pushed))
+        var pushed = facts(try pullRequest(rollup: red, head: self.pushed))
         pushed.localHead = self.pushed
         var moved = PRFollowUp.Entry(stop: named)
         XCTAssertNotNil(typed(PRFollowUp.next(&moved, pushed)), "its head moved: it no longer holds")
@@ -488,9 +488,9 @@ final class PRFollowUpTests: XCTestCase {
         XCTAssertEqual(gate { $0.isWatched = true }, ["the user is on its terminal", "idle"])
     }
 
-    func testTheRowSaysTheRoundAndWhyThePullRequestIsTheUsers() {
+    func testTheRowSaysTheRoundAndWhyThePullRequestIsTheUsers() throws {
         XCTAssertEqual(PRFollowUp.roundText(.ci, number: 2), "Auto follow-up 2/3 · failed checks")
-        let pullRequest = pullRequest(base: "develop")
+        let pullRequest = try pullRequest(base: "develop")
         let cases: [(PRFollowUp.Kind, PRFollowUp.Stop.Cause, String)] = [
             (.conflict, .rounds, "#52 conflicts with develop after 3 automatic rounds"),
             (.ci, .nothingPushed, "#52 still fails its checks: the automatic round pushed nothing"),
@@ -501,9 +501,8 @@ final class PRFollowUpTests: XCTestCase {
         for (kind, cause, text) in cases {
             XCTAssertEqual(PRFollowUp.stopText(PRFollowUp.Stop(kind: kind, cause: cause, head: head, at: now), pullRequest: pullRequest), text)
         }
-        XCTAssertEqual(NiruxShellView.pullRequestRepository("https://github.com/Acme/Widgets/pull/52"),
-                       GitHubRepository(owner: "acme", name: "widgets"))
-        XCTAssertNil(NiruxShellView.pullRequestRepository("https://github.com/acme/widgets/issues/52"))
+        XCTAssertEqual(GitHubRepository(pullRequestURL: "https://github.com/Acme/Widgets/pull/52"), GitHubRepository(owner: "acme", name: "widgets"))
+        XCTAssertNil(GitHubRepository(pullRequestURL: "https://github.com/acme/widgets/issues/52"))
     }
 
     /// Another Nirux on the same state directory writes the file too.
@@ -556,7 +555,7 @@ final class PRFollowUpTests: XCTestCase {
         let url = "https://github.com/acme/widgets/pull/52"
         let round = PRFollowUp.Round(kind: .ci, head: head, typedAt: now - 60, items: ["c1"], agent: "agent-1")
         @MainActor func typedRound() { center.file.update { $0.pullRequests[url] = PRFollowUp.Entry(rounds: [round], handedFeedback: ["c1"]) } }
-        let failed = facts(pullRequest(rollup: red))
+        let failed = facts(try pullRequest(rollup: red))
 
         typedRound()
         center.noteTyped(.sent, round: round, url: url, now: now)

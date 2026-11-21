@@ -690,7 +690,7 @@ final class CITriageTests: XCTestCase {
         )
     }
 
-    private func checks(_ results: [(String, ProjectBoard.CheckResult)]) -> [(run: CIFailure.Run, name: String, result: ProjectBoard.CheckResult)] {
+    private func checks(_ results: [(String, GitHub.CheckResult)]) -> [(run: CIFailure.Run, name: String, result: GitHub.CheckResult)] {
         results.map { (widgetsRun, $0.0, $0.1) }
     }
 

@@ -523,7 +523,7 @@ final class HeldMutationClient: MergeQueueGitHub, @unchecked Sendable {
 
     func release() { gate.signal() }
 
-    func read(_ read: MergeQueue.Read, settings: BoardConfig.QueueSettings) -> Result<MergeQueue.ReadResult, MergeQueue.ClientError> {
+    func read(_ read: MergeQueue.Read, settings: BoardConfig.QueueSettings) -> Result<MergeQueue.ReadResult, GitHub.CLI.Failure> {
         reads.read(read, settings: settings)
     }
 

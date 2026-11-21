@@ -288,16 +288,16 @@ final class BranchReviewExplainTests: BranchReviewRepositoryTestCase {
     /// not pending: the next Explain makes no run and no copy.
     func testAFileTooLargeForARunIsSeenNotPending() throws {
         try write("Sources/A.swift", "let a = 1\n")
-        try write("Sources/Big.swift", String(repeating: "let value = 1234567890\n", count: 7_000))
+        try write("Sources/Big.swift", Self.diffText(bytes: BranchReview.maxExplainDiffBytes))
         try commit("a and a large file")
         try answer(Self.answer(files: [("f0", "Adds A.")], notes: []), to: "events")
 
         XCTAssertEqual(BranchReview.explain(try job()).ending, .explained)
         let kept = try XCTUnwrap(try stored())
         XCTAssertEqual(kept.files["Sources/Big.swift"]?.notSent, "diff larger than one run takes")
-        XCTAssertEqual(kept.pathsToExplain(in: try snapshot(), includeUntracked: false), [])
-
         var again = try job()
+        XCTAssertEqual(kept.pathsToExplain(in: again.snapshot, includeUntracked: false), [])
+
         again.copyParent = URL(fileURLWithPath: root + "/README.md/copies")
         XCTAssertEqual(BranchReview.explain(again).ending, .upToDate)
         XCTAssertEqual(try runCount(), 1)
@@ -336,7 +336,7 @@ final class BranchReviewExplainTests: BranchReviewRepositoryTestCase {
     /// The page opens the review at a later head during part 2, then at the
     /// job's head again (the agent reset) during part 3: every part is kept.
     func testWhatARunFindsIsKeptWhenTheBranchComesBack() throws {
-        let lines = String(repeating: "let value = 1234567890\n", count: 4_000)
+        let lines = Self.diffText(bytes: BranchReview.maxExplainDiffBytes / 2)
         for name in ["A", "B", "C"] { try write("Sources/\(name).swift", lines) }
         try commit("three large files")
         try answer(Self.answer(files: [("f0", "Adds A.")], notes: []), to: "events.1")
@@ -540,16 +540,28 @@ final class BranchReviewExplainTests: BranchReviewRepositoryTestCase {
 
     // MARK: - Helpers
 
+    /// The review file of the branch checked out, named from its
+    /// repository and branch as a snapshot would, without taking one: that
+    /// takes seconds for a large branch.
+    private func store() throws -> BranchReview.Store {
+        let repository = try XCTUnwrap(BranchReview.repositoryIdentity(root: repo, options: options()))
+        let branch = try git(["symbolic-ref", "--short", "HEAD"]).trimmingCharacters(in: .newlines)
+        return try XCTUnwrap(BranchReview.Store(
+            repository: repository, branch: branch, stateDirectory: URL(fileURLWithPath: root + "/state")
+        ))
+    }
+
     private func storedRecord() throws -> BranchReview.Record? {
-        let snapshot = try snapshot()
-        let repository = try XCTUnwrap(BranchReview.repositoryIdentity(root: snapshot.root, options: options()))
-        return BranchReview.Store(
-            repository: repository, branch: snapshot.branch, stateDirectory: URL(fileURLWithPath: root + "/state")
-        )?.load().record
+        try store().load().record
+    }
+
+    private static func diffText(bytes: Int) -> String {
+        let line = "// " + String(repeating: "value ", count: 160) + "\n"
+        return String(repeating: line, count: bytes / line.utf8.count + 1)
     }
 
     private func twoLargeFiles() throws {
-        let lines = String(repeating: "let value = 1234567890\n", count: 4_000)
+        let lines = Self.diffText(bytes: BranchReview.maxExplainDiffBytes / 2)
         try write("Sources/A.swift", lines)
         try write("Sources/B.swift", lines)
         try commit("two large files")
@@ -567,12 +579,7 @@ final class BranchReviewExplainTests: BranchReviewRepositoryTestCase {
     }
 
     private func stored() throws -> BranchReview.Explanation? {
-        let snapshot = try snapshot()
-        let repository = try XCTUnwrap(BranchReview.repositoryIdentity(root: snapshot.root, options: options()))
-        let store = try XCTUnwrap(BranchReview.Store(
-            repository: repository, branch: snapshot.branch, stateDirectory: URL(fileURLWithPath: root + "/state")
-        ))
-        return store.load().record.explanation
+        try store().load().record.explanation
     }
 
     private func runCount() throws -> Int {
