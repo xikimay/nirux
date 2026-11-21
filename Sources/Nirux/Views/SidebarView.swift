@@ -136,6 +136,7 @@ final class SidebarView: NSView {
     }
     var isExpanded: Bool = false {
         didSet {
+            if isExpanded != oldValue { taskPreview.dismiss() }
             isRailHidden = false
             // Reset on each switch so the new mode follows the active
             // workspace instead of staying at whatever offset was left.
@@ -164,6 +165,9 @@ final class SidebarView: NSView {
         }
     }
 
+    lazy var taskPreview = SidebarTaskPreview(sidebar: self)
+    /// Called synchronously while the preview is still attached to its window.
+    var onOpenTaskThread: ((_ workspaceID: String, _ card: TaskPreviewCard) -> Void)?
     var lastInfos: [WorkspaceInfo] = []
     var lastProfiles: [ProfileInfo] = []
     /// The workspace each row of the last build stands for, by the index
@@ -329,12 +333,23 @@ final class SidebarView: NSView {
         updateScrollerVisibility()
         addSubview(contentScrollView)
         wireIconRail()
+        NotificationCenter.default.addObserver(self, selector: #selector(taskPreviewWindowResigned(_:)),
+                                               name: NSWindow.didResignKeyNotification, object: nil)
         observeScrollingForApprovalArming()
         contentScrollView.onScrollWheel = { [weak self] in self?.notePointer(.scroll) }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func taskPreviewWindowResigned(_ note: Notification) {
+        if note.object as? NSWindow === window { taskPreview.dismiss() }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        taskPreview.dismiss()
+        super.viewWillMove(toWindow: newWindow)
+    }
 
     override func layout() {
         super.layout()
@@ -385,6 +400,7 @@ final class SidebarView: NSView {
         let spacesChanged = profiles != lastProfiles
         // Before the rows change: what happened to them, in the same space.
         if spaceChanged {
+            taskPreview.dismiss()
             // Another space's rows: what played for the last one stops.
             forgetRowMoments()
         } else if !lastProfiles.isEmpty || !lastInfos.isEmpty {
@@ -650,6 +666,8 @@ final class SidebarView: NSView {
     override func mouseMoved(with event: NSEvent) {
         notePointer(.move)
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
+
+        trackTaskPreview(at: point)
 
         // The checklist's buttons track their own hover and cursor.
         if isShown(point), let card = onboardingCardView, card.superview != nil, card.frame.contains(point) {
@@ -981,6 +999,7 @@ final class SidebarView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
+        if isExpanded, let id = taskPreview.workspaceID { taskPreview.leave(id) }
         clearHover()
         setHoverTarget(nil)
     }

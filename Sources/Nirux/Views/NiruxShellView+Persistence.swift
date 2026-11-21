@@ -136,7 +136,8 @@ extension NiruxShellView {
         restoreMergeWaits(now: Date().timeIntervalSince1970)
     }
 
-    private func restoreSidebarState(_ settings: PersistedSettings?) {
+    func restoreSidebarState(_ settings: PersistedSettings?) {
+        sidebarFold.chooseWidth(settings?.sidebarWidth ?? SidebarFold.defaultWidth)
         if let expanded = settings?.sidebarExpanded {
             sidebarFold.chosenExpanded = expanded
             sidebar.isExpanded = isSidebarExpanded
@@ -354,6 +355,7 @@ extension NiruxShellView {
             Persistence.load()?.settings ?? PersistedSettings(), recording: onboardingState
         )
         // The shell is the source of truth for sidebar state and the Board's order — carry the rest.
+        settings.sidebarWidth = sidebarFold.preferredWidth
         settings.sidebarExpanded = sidebarFold.chosenExpanded
         settings.boardOrder = boardOrder
         return PersistedState(
