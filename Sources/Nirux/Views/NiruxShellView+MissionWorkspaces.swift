@@ -294,6 +294,8 @@ extension NiruxShellView {
         for delivery in MissionStore.shared.pendingPromptDeliveries(now: now)
         where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
             let mission = delivery.mission
+            let recipientID = Self.goesToParent(delivery.event) ? mission.parentWorkspaceID : mission.childWorkspaceID
+            guard !resumingTasks.contains(recipientID) else { continue }
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
             if Self.goesToCodex(delivery) {

@@ -277,6 +277,14 @@ extension NiruxShellView {
             isMission: workspace.missionID != nil
         )
 
+        let cmd = freshAgentCommand(agent, in: workspace, column: col, worktreeBranch: worktreeBranch, handoverPrompt: handoverPrompt)
+        sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
+    }
+
+    func freshAgentCommand(
+        _ agent: NiruxApp.WorkspaceAgent, in workspace: WorkspaceState, column col: ColumnState,
+        worktreeBranch: String?, handoverPrompt: String? = nil
+    ) -> String {
         let cmd: String
         switch agent {
         case .claude:
@@ -284,15 +292,14 @@ extension NiruxShellView {
         case .codex:
             cmd = NiruxShellView.codexCommand(
                 mode: NiruxShellView.codexLaunchMode(for: workspace),
-                briefFile: NiruxShellView.codexBriefFile(from: spaceBriefInjection(for: workspace), launchDirectory: workspace.cwd),
+                briefFile: NiruxShellView.codexBriefFile(from: spaceBriefInjection(for: workspace), launchDirectory: col.launchDirectory ?? workspace.cwd),
                 handoverPrompt: handoverPrompt
             )
         case .agy:
             AgentHookInstaller.installAgyHooksIfInstalling()
             cmd = NiruxShellView.agyCommand(handoverPrompt: handoverPrompt)
         }
-
-        sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
+        return cmd
     }
 
     /// A new Claude's launch line in `workspace`: its space's mode, brief
@@ -475,6 +482,9 @@ extension NiruxShellView {
             return
         case .reviewBranch:
             openBranchReview(in: workspaces[workspaceIndex])
+            return
+        case .resumeWith:
+            showResumeTask(workspaces[workspaceIndex])
             return
         case .newSubtask:
             showNewSubtaskPanel(under: workspaces[workspaceIndex])

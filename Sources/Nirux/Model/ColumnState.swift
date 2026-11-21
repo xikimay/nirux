@@ -122,6 +122,7 @@ final class ColumnState {
     /// Nirux ends the shell to start it again (`restartTerminal`): its exit
     /// shows no "Session ended", and nothing else starts it meanwhile.
     private(set) var isRestartingShell = false
+    private(set) var shellGeneration = 0
     // A hung-up shell can exit before its jobs. Keep their identities
     // across retries, when a fresh process tree can no longer find them.
     private var restartProcesses: [ProcessInstance: String] = [:]
@@ -823,6 +824,7 @@ final class ColumnState {
     /// shell and jobs to exit before the caller can authorize the new launch.
     func restartTerminal(running command: String, starts: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Bool) {
         guard !isRestartingShell, let spec = terminalSpec else { return }
+        shellGeneration += 1
         restoredColumn = nil
         defer { terminalSpec = (spec.cwd, Self.plainShellArgs, spec.environment) }
         if takeDeferredAgent() != nil {

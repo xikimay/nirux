@@ -165,6 +165,7 @@ final class NiruxShellView: NSView {
     /// over), typed once that prompt is free (`typeMissionMessages`).
     var pendingLeadNotices: [LeadNotice] = []
     /// Mission messages that wait too long for a prompt (`waitingMissionMessages`).
+    var resumingTasks: Set<String> = []
     var missionWaits = MissionWaitState()
     /// A Lead's tasks waiting to be proposed in the New sheet, one sheet at
     /// a time, and the timer that shows the next once no sheet is up.
@@ -365,6 +366,10 @@ final class NiruxShellView: NSView {
         sidebar.workspaceIDForIndex = { [weak self] index in self?.workspaces[safe: index].flatMap { $0.isClosing ? nil : $0.id } }
         sidebar.columnIndexForID = { [weak self] workspaceID, columnID in
             self?.workspaces.first { $0.id == workspaceID && !$0.isClosing }?.columns.firstIndex { $0.id == columnID && !$0.isClosing }
+        }
+        sidebar.offersTaskResume = { [weak self] index in
+            guard let task = self?.workspaces[safe: index] else { return false }
+            return !task.isInactive && Self.isTask(task)
         }
         sidebar.offersSubtask = { [weak self] index in
             guard let self, let workspace = self.workspaces[safe: index], !workspace.isClosing else { return false }

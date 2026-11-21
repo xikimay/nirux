@@ -67,10 +67,7 @@ extension NiruxShellView {
         if let niruxExecutable {
             parts.append(contentsOf: NiruxMCPServer.claudeArguments(executable: niruxExecutable).map(Self.shellQuotedArgument))
         }
-        if let prompt = handoverPrompt {
-            parts.append(Self.shellQuotedArgument(prompt))
-        }
-        return parts.joined(separator: " ")
+        return TaskAgentChoice(agent: .claude, model: nil).command(parts, prompt: handoverPrompt)
     }
 
     /// This app's binary, which serves the agents' tools (see
@@ -118,10 +115,7 @@ extension NiruxShellView {
         if let briefFile, let override = Self.codexDeveloperInstructionsOverride(briefFile: briefFile, shell: shell) {
             parts.append(contentsOf: ["-c", override])
         }
-        if let prompt = handoverPrompt {
-            parts.append(Self.shellQuotedArgument(prompt))
-        }
-        return parts.joined(separator: " ")
+        return TaskAgentChoice(agent: .codex, model: nil).command(parts, prompt: handoverPrompt)
     }
 
     /// Build an `agy …` shell command: Antigravity CLI with its own mode,
@@ -134,10 +128,7 @@ extension NiruxShellView {
         if case .session(let sessionID)? = resume {
             parts.append(contentsOf: ["--conversation", Self.shellQuotedArgument(sessionID)])
         }
-        if let prompt = handoverPrompt {
-            parts.append(contentsOf: ["-i", Self.shellQuotedArgument(prompt)])
-        }
-        return parts.joined(separator: " ")
+        return TaskAgentChoice(agent: .agy, model: nil).command(parts, prompt: handoverPrompt)
     }
 
     static func currentCodexLaunchMode() -> CodexLaunchMode {

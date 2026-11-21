@@ -15,8 +15,10 @@ struct ShellSideEffects {
         // After the column's shell has started (0.5 s, see ColumnState).
         // Weak: a column closed meanwhile neither starts a shell nor gets
         // the command.
+        let generation = column.shellGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak column] in
-            column?.pty?.sendRaw("\(command)\n")
+            guard let column, column.shellGeneration == generation else { return }
+            column.pty?.sendRaw("\(command)\n")
         }
     }
 

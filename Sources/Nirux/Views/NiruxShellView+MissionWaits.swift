@@ -193,6 +193,7 @@ extension NiruxShellView {
         lazy var handoffsEnabled = missionWaits.handoffsEnabled?.enabled ?? Self.currentMissionHandoffsEnabled()
         for delivery in store.untypedInstructions() where !missionWaits.typing.contains(delivery.event.id) {
             let (mission, event) = (delivery.mission, delivery.event)
+            guard !resumingTasks.contains(mission.childWorkspaceID) else { continue }
             let child = missionEnd(mission, parent: false)
             let sent = ProjectBoard.clockTime(Date(timeIntervalSince1970: event.timestamp), now: Date(timeIntervalSince1970: now))
             let yours = "Your message to “\(MissionPromptText.quoted(child?.workspace.title ?? mission.branch))” (sent \(sent))"

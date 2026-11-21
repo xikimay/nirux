@@ -76,6 +76,7 @@ final class SidebarView: NSView {
     var worktreeCleanupOffer: ((Int) -> WorktreeCleanupMenuOffer?)?
     /// Whether the workspace's menu offers "New Sub-task…". Asked on each
     /// menu.
+    var offersTaskResume: ((Int) -> Bool)?
     var offersSubtask: ((Int) -> Bool)?
     /// The store index of the open workspace with this id, nil once it is
     /// gone: a menu's items act on the workspace it was built for.
@@ -877,6 +878,9 @@ final class SidebarView: NSView {
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.
         if workspace?.isLead != true {
+            if offersTaskResume?(workspaceIndex) == true {
+                menu.addClosureItem(title: "Resume with…") { act(.resumeWith) }
+            }
             if offersSubtask?(workspaceIndex) == true {
                 menu.addClosureItem(title: Self.newSubtaskTitle) { act(.newSubtask) }
             }
