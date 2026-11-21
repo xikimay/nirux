@@ -9,27 +9,42 @@ trap 'rm -rf "$scratch"' EXIT
 # below so a scoped, attributed or multiline import cannot hide an active dependency.
 frameworks='AppKit|Cocoa|SwiftUI|WebKit|QuartzCore|Metal[[:alnum:]_]*|IOSurface|GhosttyKit|GhosttyTerminal|Sparkle'
 imports="^[[:space:]]*([@[:alnum:]_()]+[[:space:]]+)*import[[:space:]]+((typealias|struct|class|enum|protocol|let|var|func)[[:space:]]+)?($frameworks)([^[:alnum:]_]|$)"
-find Sources/Nirux/{Model,Util,GitHub} -name '*.swift' -type f -print0 > "$scratch/files"
+find NiruxCore/Sources Sources/Nirux/{Model,Util,GitHub,NiruxCore+Export.swift} -name '*.swift' -type f -print0 > "$scratch/files"
 sources=()
+core_sources=()
 touch "$scratch/observed"
 while IFS= read -r -d '' file; do
     if grep -Eq "$imports" "$file"; then
+        if [[ $file == NiruxCore/* ]]; then
+            echo "Unexpected UI import in $file" >&2
+            exit 1
+        fi
         echo "import $file" >> "$scratch/observed"
+    elif [[ $file == NiruxCore/* ]]; then
+        core_sources+=("$file")
     else
         sources+=("$file")
     fi
 done < "$scratch/files"
 
-swiftc -frontend -swift-version 6 -emit-imported-modules -module-name CoreBoundary "${sources[@]}" > "$scratch/modules"
-if grep -Ex "$frameworks" "$scratch/modules"; then
-    echo 'Unexpected UI import in the files selected for the core typecheck.' >&2
-    exit 1
-fi
+check_imports() {
+    swiftc -frontend -swift-version 6 -emit-imported-modules -module-name CoreBoundary "$@" > "$scratch/modules"
+    if grep -Ex "$frameworks" "$scratch/modules"; then
+        echo 'Unexpected UI import in the files selected for the core typecheck.' >&2
+        exit 1
+    fi
+}
+check_imports "${core_sources[@]}"
+check_imports "${sources[@]}"
+
+swift build --package-path NiruxCore --target NiruxCore
+core_bin=$(swift build --package-path NiruxCore --show-bin-path)
 
 # Known blocked files still provide types used by the rest of the model.
 # Check them in the same invocation and allow errors only at their paths.
 status=0
 swiftc -typecheck -wmo -swift-version 6 -target "$(uname -m)-apple-macosx14.0" \
+    -I "$core_bin/Modules" -I "$core_bin" \
     -module-name CoreBoundary -diagnostic-style llvm -suppress-warnings "${sources[@]}" \
     2> "$scratch/diagnostics" || status=$?
 awk '
@@ -54,4 +69,4 @@ if ! diff -u scripts/core-boundary-exceptions.txt "$scratch/observed"; then
     echo 'Fix new boundary violations and remove obsolete exceptions.' >&2
     exit 1
 fi
-echo "Checked ${#sources[@]} files without UI imports ($(awk 'END {print NR}' "$scratch/blocked") blocked)."
+echo "Checked ${#core_sources[@]} NiruxCore files and ${#sources[@]} app files without UI imports ($(awk 'END {print NR}' "$scratch/blocked") blocked)."
