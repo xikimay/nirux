@@ -29,13 +29,21 @@ final class LeadRestartFlowTests: XCTestCase {
     func testRestartLeadStartsAFreshClaudeInItsColumn() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
-            let lead = try harness.makeLead()
-            shell.changeSpaceDefaults(spaceID: lead.space) { $0.claudeLaunchMode = .manual }
+            let target = "RESTART_FLOW_TARGET"
+            let removed = "RESTART_FLOW_OBSOLETE"
+            let lead = try harness.makeLead(environment: [.init(name: target, value: "old"), .init(name: removed, value: "old")])
             let column = try XCTUnwrap(lead.workspace.leadTerminal)
             let pty = try XCTUnwrap(column.pty)
             let old = AgentStandIn()
             defer { old.remove() }
             let oldClaude = try run(old.command(), in: column, harness: harness)
+            let before = ProcessSnapshot.environment(of: oldClaude.pid)
+            XCTAssertEqual(before[target], "old")
+            XCTAssertEqual(before[removed], "old")
+            shell.changeSpaceDefaults(spaceID: lead.space) {
+                $0.environment = [.init(name: target, value: "new")]
+                $0.claudeLaunchMode = .manual
+            }
             let shellBefore = pty.shellPID
 
             shell.requestRestartLead(spaceID: lead.space)
@@ -68,6 +76,12 @@ final class LeadRestartFlowTests: XCTestCase {
             harness.waitUntil("a fresh claude in its column") {
                 pty.foregroundProcess(snapshot: ProcessSnapshot()).map { $0.name == "claude" && $0.instance != oldClaude } == true
             }
+            let restarted = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+            let after = ProcessSnapshot.environment(of: restarted.instance.pid)
+            XCTAssertEqual(after[target], "new")
+            XCTAssertNil(after[removed])
+            XCTAssertEqual(after["NIRUX_LEAD"], "1")
+            XCTAssertEqual(after["NIRUX_AGENT_UUID"], lead.agentUUID)
             shell.typeMissionMessages()
             XCTAssertTrue(MissionStore.shared.pendingPromptDeliveries().contains { $0.event.id == question.id })
             XCTAssertFalse(fresh.input.contains(question.message))

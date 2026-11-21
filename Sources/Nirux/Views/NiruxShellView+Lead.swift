@@ -141,11 +141,10 @@ extension NiruxShellView {
             relayout(animated: false)
             return sideEffects.launchAgent(column, command)
         }
-        if column.isAwaitingResume {
-            refreshLaunch(of: column, in: lead)
-        } else if let pty = column.pty, pty.shellPID == nil, !pty.hasExited {
+        if !column.isAwaitingResume, let pty = column.pty, pty.shellPID == nil, !pty.hasExited {
             return showToast("The Lead is starting: restart it in a moment.")
         }
+        refreshLaunch(of: column, in: lead)
         sideEffects.restartTerminal(column, command) { [weak self, weak lead] stillRunning in
             // Turned off meanwhile: nothing starts in its column.
             guard let self, lead?.isClosing == false else { return false }

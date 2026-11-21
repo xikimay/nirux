@@ -38,11 +38,8 @@ extension NiruxShellView {
         return true
     }
 
-    /// Where and with what a restored agent's column starts its shell: its
-    /// folder may be gone since the restore (a removed worktree), the
-    /// workspace's then, as at restore; its environment is the one a new
-    /// terminal gets now (the workspace may have moved to another space,
-    /// Settings may have changed).
+    /// Use the space's current environment for a resume or restart. If the
+    /// column's directory has disappeared, launch in the workspace directory.
     func refreshLaunch(of column: ColumnState, in workspace: WorkspaceState) {
         guard let agentUUID = column.agentUUID else { return }
         column.setLaunch(
