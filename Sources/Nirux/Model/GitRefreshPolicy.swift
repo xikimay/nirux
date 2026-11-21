@@ -84,14 +84,16 @@ enum PullRequestRefreshPolicy {
     /// Right after a push GitHub may still report the previous head.
     static let pushSettleDelay: TimeInterval = 10
 
+    /// `awaited`: a merge wait follows the pull request.
     static func interval(
         for tier: GitRefreshTier,
         pullRequest: PRInfo?,
-        recentlyPushed: Bool = false
+        recentlyPushed: Bool = false,
+        awaited: Bool = false
     ) -> TimeInterval? {
         let checksPending = pullRequest?.ciStatus == "PENDING"
             && pullRequest?.state == .open
-        let isHot = checksPending || recentlyPushed
+        let isHot = checksPending || recentlyPushed || awaited
         switch tier {
         case .focused: return isHot ? 30 : 120
         case .background: return isHot ? 120 : 600
@@ -103,10 +105,11 @@ enum PullRequestRefreshPolicy {
         tier: GitRefreshTier,
         pullRequest: PRInfo?,
         recentlyPushed: Bool = false,
+        awaited: Bool = false,
         lastRefresh: TimeInterval?,
         now: TimeInterval
     ) -> Bool {
-        guard let interval = interval(for: tier, pullRequest: pullRequest, recentlyPushed: recentlyPushed)
+        guard let interval = interval(for: tier, pullRequest: pullRequest, recentlyPushed: recentlyPushed, awaited: awaited)
         else { return false }
         guard let lastRefresh else { return true }
         return now - lastRefresh >= interval

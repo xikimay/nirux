@@ -404,6 +404,17 @@ final class BoardStagesFactsTests: XCTestCase {
 
     // MARK: - Queue
 
+    func testAutoQueueNamesOnlyPendingRequiredChecksOnTheWatchedHead() throws {
+        let pr = pullRequest(708, checks: [check("macOS checks", .pending), check("lint", .pending)])
+        func phrase(watched: String) throws -> String {
+            let active = queue(.running(isStopping: false), [entry(708, step: .waitingForChecks(watched))])
+            let section = facts([row(workspaces: ["task"], pullRequest: pr)], required: ["macOS checks"], queue: active)
+            return BoardStages.line(try XCTUnwrap(section.lines.first)).phrase.text
+        }
+        XCTAssertEqual(try phrase(watched: head), "Auto · macOS checks")
+        XCTAssertEqual(try phrase(watched: moved), "Auto · Waiting for checks")
+    }
+
     func testARunningQueueSaysEachPullRequestsPlaceAndStep() {
         let steps: [(MergeQueue.Step, BoardStages.QueueStep?)] = [
             (.preflight, .checks("Checking")), (.updating(from: head), .checks("Updating branch")),
@@ -424,7 +435,7 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual(BoardStages.queue(of: 12, head: nil, in: merged),
                        BoardStages.Queue(list: whileRunning, order: 2, step: .merge("Waiting for nightly")))
         XCTAssertEqual(BoardStages.queue(of: 7, head: nil, in: merged), BoardStages.Queue(list: whileRunning), "the queue is through with it")
-        XCTAssertEqual(BoardStages.queue(of: 13, head: head, in: merged), BoardStages.Queue(list: whileRunning, order: 3))
+        XCTAssertEqual(BoardStages.queue(of: 13, head: head, in: merged), BoardStages.Queue(list: whileRunning, awaitsTurn: true, order: 3))
         XCTAssertEqual(BoardStages.queue(of: 99, head: head, in: merged), BoardStages.Queue(list: whileRunning), "not in the queue that runs")
         XCTAssertEqual(BoardStages.queue(of: 12, head: head, in: nil), BoardStages.Queue(), "a section without a queue has no list")
         // Run by another Nirux: its saved entries, read the same; no list for a next Start here.
@@ -734,7 +745,7 @@ final class BoardStagesFactsTests: XCTestCase {
         var running = queue(.running(isStopping: false), [entry(12, step: .merging(head))])
         running.status = "#12 merging, 1 of 1"
         let busy = start(running, 0)
-        XCTAssertEqual([busy.status, busy.start?.title], ["#12 merging, 1 of 1", nil])
+        XCTAssertEqual([busy.status, busy.start?.title], ["Auto · #12 merging, 1 of 1", nil])
         XCTAssertEqual(busy.tone, .working)
         XCTAssertEqual(busy.stop?.title, "Stop")
         XCTAssertEqual(busy.stop?.isEnabled, true)
@@ -760,7 +771,7 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual([stopping?.tone, start(running, 0).tone], [.working, .working])
         running.run = .running(isStopping: false)
         XCTAssertEqual(BoardStagesView.runningQueue(id: "widgets", title: "widgets", state: running),
-                       BoardStagesView.RunningQueue(id: "widgets", title: "widgets", status: "#12 merging, 1 of 1", stop: busy.stop))
+                       BoardStagesView.RunningQueue(id: "widgets", title: "widgets", status: "Auto · #12 merging, 1 of 1", stop: busy.stop))
         let orphan = "old isn’t one of this board’s repositories now"
         XCTAssertEqual(BoardStagesView.runningQueue(id: "old", title: "old", tooltip: orphan, state: other),
                        BoardStagesView.RunningQueue(id: "old", title: "old", tooltip: orphan, status: "Running in another Nirux · #12 merging"))

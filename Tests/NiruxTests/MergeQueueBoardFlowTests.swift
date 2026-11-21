@@ -141,7 +141,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
                 if case .waitingForChecks? = queue.engine?.currentEntry?.step { return true }
                 return false
             }
-            waitUntil("the line says so") { (BoardStagesClicks.shownLine("login", in: board)?.line.phrase.text) == "Waiting for checks" }
+            waitUntil("the line says so") { (BoardStagesClicks.shownLine("login", in: board)?.line.phrase.text) == "Auto · Waiting for checks" }
             BoardStagesClicks.layOut(header)
             XCTAssertTrue(header.startButton.isHidden)
             XCTAssertFalse(header.stopButton.isHidden, "Stop is in reach while it runs")
@@ -277,11 +277,21 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertTrue(header.queueLabel.stringValue.contains("#708 queue timed out"))
             XCTAssertTrue(header.queueLabel.stringValue.hasSuffix("test passed on 8c757e0"))
             XCTAssertEqual(header.startButton.title, "Retry #708…")
-            XCTAssertFalse(try line("login", in: board).line.phrase.text.contains("Queue stopped"))
-            let inputs = try XCTUnwrap(board.builtStages.last?.key.inputs)
-            let stale = board.keptStagesContent(inputs, now: Date().addingTimeInterval(3600)).sections.first?.queue
-            XCTAssertTrue(stale?.status?.hasSuffix("Current checks unknown") == true)
-            XCTAssertEqual(stale?.start?.title, "Start… · 1")
+            let login = try line("login", in: board).line
+            XCTAssertEqual(login.phrase.text, "Queued · awaiting Start")
+            var inputs = try XCTUnwrap(board.builtStages.last?.key.inputs)
+            let aged = board.keptStagesContent(inputs, now: Date().addingTimeInterval(3600))
+            let stale = try XCTUnwrap(aged.sections.first)
+            XCTAssertTrue(stale.queue?.status?.hasSuffix("Current checks unknown") == true)
+            XCTAssertEqual(stale.queue?.start?.title, "Start… · 1")
+            XCTAssertEqual(stale.lines.units.flatMap(\.lines).first { $0.id == login.id }?.phrase.text, "GitHub status outdated")
+
+            inputs.readings[login.id, default: .init()].activity = .needsYou("Ship this version?", action: .decide)
+            let asking = board.stagesContent(inputs).content
+            XCTAssertEqual(asking.inputStatus, "1 needs you · login")
+            let current = try XCTUnwrap(asking.sections.first)
+            XCTAssertEqual(current.lines.units.flatMap(\.lines).first { $0.id == login.id }?.phrase.text, "Decide · Ship this version?")
+            XCTAssertEqual(current.queue?.start?.title, "Retry #708…")
             XCTAssertEqual(world.callCount, 0)
             try BoardStagesClicks.click(header.startButton)
             let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)

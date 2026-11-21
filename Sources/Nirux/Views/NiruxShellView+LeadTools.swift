@@ -28,6 +28,7 @@ extension NiruxShellView {
         let parent = NewTask.MissionParent(workspaceID: lead.id, agentUUID: request.agentUUID)
         switch request.tool {
         case LeadTools.startTask: leadStartTask(arguments, in: space, parent: parent, answer: answer)
+        case LeadTools.setTaskAfter: changeWaitingTask(arguments, in: space, answer: answer)
         case LeadTools.listTasks: answer(leadTaskList(in: space, lead: lead.id), false)
         case LeadTools.tell: leadTell(arguments, in: space, lead: parent, answer: answer)
         case LeadTools.reply: leadReply(arguments, in: space, lead: lead.id, answer: answer)
@@ -71,17 +72,32 @@ extension NiruxShellView {
             repository = repositories.first { $0.key == space.anchors.defaultAnchor?.key } ?? repositories.first
         }
         let templateName = LeadTools.string(arguments, "template")
+        let after = LeadTools.string(arguments, "after")
         guard leadStartsTasksWithoutAsking(spaceID: space.id) else {
+            if after != nil { return answer("Waiting tasks require Starts tasks without asking in Space Settings.", true) }
             return leadProposeTask(
                 description, repository: repository, withoutRepository: asksNoRepository, templateName: templateName,
                 in: space, parent: parent, answer: answer
             )
         }
         let agent = defaultTaskAgent(forSpace: space.id)
+        // A queued start needs only the template and anchor. A folder anchor must still be checked for a repository.
+        let folderToRead = after != nil && repository?.isFolder == false ? nil : repository?.folder
         Self.readNewTaskInfo(
-            spaceID: space.id, folder: repository?.folder, anchors: space.anchors, stateDirectory: Persistence.stateDirectory
+            spaceID: space.id, folder: folderToRead, anchors: space.anchors, stateDirectory: Persistence.stateDirectory
         ) { [weak self] info in
             guard let self else { return }
+            if let after {
+                guard self.leadWorkspace(inSpace: space.id)?.id == parent.workspaceID else {
+                    return answer("The space’s Lead changed before the task could be queued.", true)
+                }
+                guard let repository, !repository.isFolder || info.target != nil else { return answer("A waiting task needs a repository.", true) }
+                let template = info.templates.first { $0.name.caseInsensitiveCompare(templateName ?? "") == .orderedSame }
+                if let templateName, template == nil { return answer("No template named “\(templateName)”.", true) }
+                let pending = MergeWait.PendingStart(description: description, repositoryKey: repository.key,
+                                                     repository: repository.name, template: template)
+                return self.queueWaitingTask(pending, after: after, in: space, answer: answer)
+            }
             var folder: NewTask.Place?
             if repository == nil || info.target == nil {
                 // No repository, or a folder of the space surely outside
@@ -306,7 +322,11 @@ extension NiruxShellView {
         )
         var lines: [String] = []
         for task in tasks {
-            var line = taskListHead(task, in: space, parentTitle: parentTitles[task.id], snapshot: snapshot)
+            if let wait = task.waitingStart, let state = wait.waitingState {
+                lines.append("- “\(MissionPromptText.quoted(task.title))” · \(state.line) · \(wait.pendingStart?.repository ?? "") · \(task.leadTaskReference)")
+                continue
+            }
+            var line = taskListHead(task, in: space, parentTitle: parentTitles[task.id], reference: task.leadTaskReference, snapshot: snapshot)
             // Only what its own tasks sent it: another agent's Mission
             // isn't its to answer, and its tells don't make a task its own.
             let missions = store.missions.filter { $0.childWorkspaceID == task.id && $0.parentWorkspaceID == leadID && $0.oneWay != true }
@@ -320,6 +340,13 @@ extension NiruxShellView {
                 let name = field == .nextStep ? "next step" : "blocker"
                 let owner = task.contextIsFromLead(field) ? "" : " (the user wrote it)"
                 line += "\n  \(name)\(owner): “\(text)”"
+            }
+            for wait in task.mergeWaits {
+                guard case .tell(let message) = wait.action else { continue }
+                line += wait.mergedAt == nil
+                    ? "\n  held until \(wait.awaitedLongName) merges: your message “\(Self.heldQuote(message))”"
+                    : "\n  \(wait.awaitedLongName) merged, but your message “\(Self.heldQuote(message))” couldn't go yet: "
+                        + "Nirux tries again every \(Int(MergeWait.lookUpInterval / 60)) minutes for a day"
             }
             line += taskListStatusLine(task)
             lines.append(line)
@@ -342,7 +369,9 @@ extension NiruxShellView {
 
     /// A task's line in list_tasks, up to its pull request: what it is,
     /// where it works, and what its agents do.
-    func taskListHead(_ task: WorkspaceState, in space: WorkspaceProfile, parentTitle: String?, snapshot: ProcessSnapshot) -> String {
+    func taskListHead(
+        _ task: WorkspaceState, in space: WorkspaceProfile, parentTitle: String?, reference: String? = nil, snapshot: ProcessSnapshot
+    ) -> String {
         var line = "- “\(MissionPromptText.quoted(task.title))”"
         if let parentTitle { line += " · sub-task of “\(MissionPromptText.quoted(parentTitle))”" }
         if let branch = task.gitBranch { line += " · branch \(MissionPromptText.quoted(branch))" }
@@ -351,6 +380,7 @@ extension NiruxShellView {
         } else if let repository = repositoryAnchor(of: task, in: space)?.name {
             line += " · \(repository)"
         }
+        if let reference { line += " · \(reference)" }
         if task.isInactive { line += " · inactive" }
         line += " · " + leadAgentState(of: task, snapshot: snapshot)
         if let pr = task.prInfo {
@@ -561,17 +591,26 @@ extension NiruxShellView {
             + "A task the user started without you doesn't report to you."
     }
 
-    /// Any task of the space. One with a live Mission of its own (its
-    /// agent's column and its parent's terminal open) gets it as an
-    /// instruction on that Mission from the Lead, as its parent's tell would
-    /// come; any other through the Lead's one-way Mission, to the Claude
-    /// Code running in it.
+    /// Any task of the space, now, or once another task's pull request
+    /// merges (`after`, see NiruxShellView+MergeWaits).
     private func leadTell(
         _ arguments: [String: Any], in space: WorkspaceProfile, lead: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
         let name = LeadTools.string(arguments, "task") ?? ""
         let message = LeadTools.string(arguments, "message") ?? ""
         guard let workspace = spaceTask(name, in: space) else { return answer(noSpaceTask(name, in: space), true) }
+        if let after = LeadTools.string(arguments, "after") {
+            return holdTell(message, to: workspace, after: after, in: space, lead: lead, now: Date().timeIntervalSince1970, answer: answer)
+        }
+        tellTask(message, to: workspace, lead: lead, answer: answer)
+    }
+
+    /// The Lead's tell to `workspace`. One with a live Mission of its own
+    /// (its agent's column and its parent's terminal open) gets it as an
+    /// instruction on that Mission from the Lead, as its parent's tell would
+    /// come; any other through the Lead's one-way Mission, to the Claude
+    /// Code running in it.
+    func tellTask(_ message: String, to workspace: WorkspaceState, lead: NewTask.MissionParent, answer: @escaping LeadAnswer) {
         if let mission = leadMission(of: workspace, lead: lead.workspaceID) {
             return sendInstruction(message, to: workspace, in: mission, answer: answer)
         }
@@ -608,6 +647,7 @@ extension NiruxShellView {
     /// a link from outside Nirux opened it (its agent acts for whoever sent
     /// the link), or it isn't a task.
     func leadRefusal(for workspace: WorkspaceState, title: String) -> String? {
+        if workspace.isWaitingTask { return "“\(title)” hasn’t started yet." }
         if workspace.startedOutsideNirux { return "“\(title)” was opened by a link from outside Nirux: leave it to the user." }
         guard Self.isTask(workspace) else {
             return "“\(title)” isn't a task (a worktree of one of the space's repositories, or a task's folder): ask the user instead."

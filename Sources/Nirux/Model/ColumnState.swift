@@ -23,6 +23,8 @@ final class ColumnState {
     private(set) var projectBoard: ProjectBoardController?
     /// The branch this column reviews.
     private(set) var branchReview: BranchReviewController?
+    /// A waiting task's only column, until it starts: what it waits for.
+    private(set) var waitingTask: WaitingTaskView?
     /// Column width as a fraction of the columns viewport (0.15…2.0).
     /// Freeform (drag the resize handles); the ColumnWidth presets are just
     /// named stops the width cycler snaps to.
@@ -536,6 +538,17 @@ final class ColumnState {
         board.autoresizingMask = [.width, .height]
         view.addSubview(board)
         self.projectBoard = projectBoard
+    }
+
+    /// A waiting task's column: no terminal, what it waits for.
+    init(waitingTask: WaitingTaskView) {
+        agentUUID = nil
+        view = Self.filled(NSView())
+
+        waitingTask.frame = view.bounds
+        waitingTask.autoresizingMask = [.width, .height]
+        view.addSubview(waitingTask)
+        self.waitingTask = waitingTask
     }
 
     /// Branch Review column: one branch, read-only.
