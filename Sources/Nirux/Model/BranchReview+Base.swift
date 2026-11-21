@@ -3,40 +3,6 @@ import Foundation
 // MARK: - Base branch and pull request (section 7)
 
 extension BranchReview {
-    /// Runs the GitHub CLI. Injected so tests answer from fixtures: CI has
-    /// no gh login.
-    struct GitHubCLI: Sendable {
-        struct Output: Sendable {
-            let status: Int32
-            let standardOutput: Data
-            let standardError: String
-        }
-
-        /// Runs gh with these arguments in this folder; nil when it can't
-        /// start or doesn't finish in time.
-        let run: @Sendable (_ arguments: [String], _ directory: String) -> Output?
-
-        /// The gh `PRDetect` finds; nil when it isn't installed.
-        static func installed(timeout: TimeInterval = 30) -> GitHubCLI? {
-            guard let path = PRDetect.installedGHPath() else { return nil }
-            return GitHubCLI { arguments, directory in
-                BoundedProcess.run(
-                    executableURL: URL(fileURLWithPath: path),
-                    arguments: arguments,
-                    currentDirectoryURL: URL(fileURLWithPath: directory),
-                    timeout: timeout,
-                    captureStandardError: true
-                ).map {
-                    Output(
-                        status: $0.terminationStatus,
-                        standardOutput: $0.standardOutput,
-                        standardError: String(decoding: $0.standardError, as: UTF8.self)
-                    )
-                }
-            }
-        }
-    }
-
     /// The branch the review is based on; the merge base is read with HEAD.
     struct BaseBranch: Equatable, Sendable {
         /// "main".
@@ -106,7 +72,7 @@ extension BranchReview {
             in: root, options: options, environment: ["GIT_TERMINAL_PROMPT": "0"], timeout: options.fetchTimeout
         ) else { return "git fetch of \(name) didn't finish in \(Int(options.fetchTimeout)) s." }
         guard result.status == 0 else {
-            return "git fetch of \(name) failed: \(firstLine(result.stderr) ?? "exit status \(result.status)")"
+            return "git fetch of \(name) failed: \(result.stderr.firstLine ?? "exit status \(result.status)")"
         }
         return nil
     }
@@ -161,29 +127,27 @@ extension BranchReview {
     static func openPullRequests(
         branch: String, root: String, options: Options
     ) -> Result<[PullRequest], LookupFailure> {
-        guard let gitHub = options.gitHub else {
-            return .failure(LookupFailure(message: "The GitHub CLI (gh) isn't installed."))
+        guard options.gitHub != nil else {
+            return .failure(LookupFailure(message: "\(GitHub.CLI.missing)."))
         }
         guard let repository = headRepository(branch: branch, root: root, options: options) else {
             return .failure(LookupFailure(message: "\(branch) isn't pushed to GitHub."))
         }
         let fields = "number,title,body,url,baseRefName,headRefOid,isDraft,headRepository,headRepositoryOwner"
-        guard let output = gitHub.run(
-            ["pr", "list", "--head", branch, "--state", "open", "--json", fields, "--limit", "100"], root
-        ) else {
-            return .failure(LookupFailure(message: "gh didn't answer."))
+        let arguments = ["pr", "list", "--head", branch, "--state", "open", "--json", fields, "--limit", "100"]
+        return gh(arguments, root: root, options: options) { $0 as? [[String: Any]] }
+            .map { json in json.compactMap { pullRequest(from: $0, headRepository: repository) }.sorted { $0.number > $1.number } }
+            .mapError { LookupFailure(message: $0 == .ghMissing ? "\(GitHub.CLI.missing)." : "gh couldn't list the pull requests: \($0.message)") }
+    }
+
+    /// gh's JSON from the checkout, as `parse` reads it.
+    private static func gh<Value>(
+        _ arguments: [String], root: String, options: Options, _ parse: (Any) -> Value?
+    ) -> Result<Value, GitHub.CLI.Failure> {
+        let run = options.gitHub.map { $0(.init(arguments, in: URL(fileURLWithPath: root))) } ?? .failure(.ghMissing)
+        return run.flatMap(\.result).flatMap { data in
+            (try? JSONSerialization.jsonObject(with: data)).flatMap(parse).map(Result.success) ?? .failure(.unreadable(output: data))
         }
-        guard output.status == 0 else {
-            let reason = firstLine(output.standardError).map { ": \($0)" } ?? "."
-            return .failure(LookupFailure(message: "gh couldn't list the pull requests\(reason)"))
-        }
-        guard let json = try? JSONSerialization.jsonObject(with: output.standardOutput) as? [[String: Any]] else {
-            return .failure(LookupFailure(message: "gh printed pull requests Nirux can't read."))
-        }
-        return .success(
-            json.compactMap { pullRequest(from: $0, headRepository: repository) }
-                .sorted { $0.number > $1.number }
-        )
     }
 
     static func pullRequest(from json: [String: Any], headRepository: GitHubRepository) -> PullRequest? {
@@ -218,15 +182,11 @@ extension BranchReview {
         if reflog(of: branch, contains: pullRequest.headRefOid, root: root, options: options) == true {
             return .success(true)
         }
-        guard let gitHub = options.gitHub,
-              let output = gitHub.run(["pr", "view", pullRequest.url, "--json", "commits"], root)
-        else { return .failure(LookupFailure(message: "gh didn't answer.")) }
-        guard output.status == 0,
-              let json = (try? JSONSerialization.jsonObject(with: output.standardOutput)) as? [String: Any],
-              let commits = json["commits"] as? [[String: Any]]
-        else {
-            let reason = firstLine(output.standardError).map { ": \($0)" } ?? "."
-            return .failure(LookupFailure(message: "gh couldn't read the commits of #\(pullRequest.number)\(reason)"))
+        let commits: [[String: Any]]
+        switch gh(["pr", "view", pullRequest.url, "--json", "commits"], root: root, options: options, { GitHub.dig($0, "commits") as? [[String: Any]] }) {
+        case .success(let read): commits = read
+        case .failure(let failure):
+            return .failure(LookupFailure(message: "gh couldn't read the commits of #\(pullRequest.number): \(failure.message)"))
         }
         let oids = Set(commits.compactMap { ($0["oid"] as? String)?.lowercased() })
         let baseRef = remoteRef(pullRequest.baseRefName)

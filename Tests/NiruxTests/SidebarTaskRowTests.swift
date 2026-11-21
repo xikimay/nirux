@@ -18,11 +18,11 @@ final class SidebarTaskRowTests: XCTestCase {
     }
 
     private func pullRequest(
-        _ state: String = "OPEN", ci: String? = nil, review: String? = nil, mergeable: String? = nil, draft: Bool = false
+        _ state: GitHub.PullRequestState = .open, ci: String? = nil, review: String? = nil, mergeable: String? = nil, draft: Bool = false
     ) -> PRInfo {
         PRInfo(
             number: 39, state: state, isDraft: draft, ciStatus: ci,
-            checks: [ProjectBoard.Check(name: "test", workflowName: "Tests", result: .failure, startedAt: nil, url: "https://ci.test/8")],
+            checks: [GitHub.Check(name: "test", workflowName: "Tests", result: .failure, startedAt: nil, url: "https://ci.test/8")],
             reviewDecision: review, mergeable: mergeable, url: "https://example.test/pull/39",
             additions: nil, deletions: nil, changedFiles: nil
         )
@@ -189,14 +189,14 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(ready.trailing, .pullRequest(39), "the number the line doesn't say")
         XCTAssertEqual(line(pullRequest(ci: "SUCCESS", mergeable: "UNKNOWN")).status.text, "Ready to merge", "no flicker while GitHub recomputes")
         var commented = workspace([column()], pr: pullRequest(ci: "SUCCESS", review: "APPROVED", mergeable: "MERGEABLE"))
-        commented.prFeedback = SidebarPRFeedback(humans: 1, bots: 0)
+        commented.prFeedback = PRFeedback.Counts(humans: 1, bots: 0)
         XCTAssertEqual(commented.rowSummary.status.text, "#39 · checks passed", "feedback nobody dealt with")
 
-        let merged = line(pullRequest("MERGED"), cleanup: .available)
+        let merged = line(pullRequest(.merged), cleanup: .available)
         XCTAssertEqual(merged.status, SidebarStatusLine(text: "Merged · Clean up", tone: .neutral, action: .cleanUp, linkText: "Clean up"))
         XCTAssertEqual(merged.mark, .merged)
-        XCTAssertEqual(line(pullRequest("MERGED"), cleanup: .inProgress).status.action, nil, "a second click does nothing")
-        XCTAssertEqual(line(pullRequest("CLOSED")).status.text, "fix/login")
+        XCTAssertEqual(line(pullRequest(.merged), cleanup: .inProgress).status.action, nil, "a second click does nothing")
+        XCTAssertEqual(line(pullRequest(.closed)).status.text, "fix/login")
     }
 
     /// Only the selected row lists its columns and its links; every row
@@ -240,7 +240,7 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(lines(workspace([column()], nextStep: sentence)), 2)
         XCTAssertEqual(lines(workspace([column()], isActive: true, nextStep: sentence)), 4, "the selected row")
         XCTAssertEqual(lines(workspace([column()], branch: "feat/" + String(repeating: "a-very-long-name-", count: 6))), 1)
-        XCTAssertEqual(workspace([column()], pr: pullRequest("MERGED"), cleanup: .available).rowSummary.statusLineLimit(isSelected: true), 1)
+        XCTAssertEqual(workspace([column()], pr: pullRequest(.merged), cleanup: .available).rowSummary.statusLineLimit(isSelected: true), 1)
         let broken = SidebarRowSummary(mark: .error, status: SidebarStatusLine(text: sentence, tone: .error), trailing: nil)
         XCTAssertEqual(broken.statusLineLimit(isSelected: false), 4, "what broke stops the task too")
         // Its own line breaks would spend those lines on blanks.
@@ -404,7 +404,7 @@ final class SidebarTaskRowTests: XCTestCase {
     /// beside the line selects the row. An agent's state on the line keeps
     /// Clean up in a line of its own.
     func testCleanUpLinksOnlyItsWords() throws {
-        let merged = workspace([column()], pr: pullRequest("MERGED"), cleanup: .available)
+        let merged = workspace([column()], pr: pullRequest(.merged), cleanup: .available)
         let result = SidebarWorkspaceCardRenderer(workspace: merged, sidebarWidth: 260, yOffset: 500).render()
         let link = try XCTUnwrap(result.hitAreas.first { if case .link = $0.region { true } else { false } })
         guard case .link(let url, let label) = link.region else { return XCTFail("no link") }
@@ -414,7 +414,7 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertGreaterThan(link.frame.minX, label.frame.minX + prefixWidth - 4)
         XCTAssertLessThan(link.frame.maxX, label.frame.maxX)
 
-        let working = workspace([column(0, .working)], pr: pullRequest("MERGED"), cleanup: .available)
+        let working = workspace([column(0, .working)], pr: pullRequest(.merged), cleanup: .available)
         XCTAssertEqual(working.rowSummary.status.text, "Working")
         XCTAssertEqual(working.cardActions, [.cleanup(.available, pullRequest: 39)])
     }

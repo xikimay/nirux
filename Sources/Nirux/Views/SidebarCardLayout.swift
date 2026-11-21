@@ -271,7 +271,7 @@ struct SidebarCardLayout {
         let (_, color) = SidebarRenderer.prStateDisplay(pullRequest)
         let font = Theme.Font.mono
         let number = NSMutableAttributedString()
-        let symbol = pullRequest.state == "MERGED" ? Theme.Symbol.merged : Theme.Symbol.pullRequest
+        let symbol = pullRequest.state == .merged ? Theme.Symbol.merged : Theme.Symbol.pullRequest
         if let icon = SidebarRenderer.symbol(symbol, color: color) {
             number.append(SidebarColumnChip.attachment(icon, side: 12, font: font))
             number.append(SidebarColumnChip.spacer())
@@ -284,7 +284,7 @@ struct SidebarCardLayout {
             url: SidebarView.openActionURL(workspaceIndex: workspace.index, url: pullRequest.url),
             toolTip: SidebarRenderer.pullRequestToolTip(pullRequest)
         ))
-        if let ciStatus = pullRequest.ciStatus, pullRequest.state == "OPEN" {
+        if let ciStatus = pullRequest.ciStatus, pullRequest.state == .open {
             let display = SidebarRenderer.ciStatusDisplay(ciStatus)
             if let name = display.symbol, let icon = SidebarRenderer.symbol(name, color: display.color) {
                 // The failed check, else the PR's Checks tab, which lists
@@ -300,7 +300,7 @@ struct SidebarCardLayout {
         return links
     }
 
-    private static func feedbackText(_ feedback: SidebarPRFeedback) -> NSAttributedString {
+    private static func feedbackText(_ feedback: PRFeedback.Counts) -> NSAttributedString {
         let font = Theme.Font.caption
         let text = NSMutableAttributedString()
         for (symbol, count) in [(Theme.Symbol.prFeedback, feedback.humans), (Theme.Symbol.botFeedback, feedback.bots)] where count > 0 {

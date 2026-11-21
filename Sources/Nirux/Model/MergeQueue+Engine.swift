@@ -107,7 +107,7 @@ extension MergeQueue {
             case .running, .paused, .stopping:
                 var text = current.map { current in
                     let step = isWaitingOnBaseRun
-                        ? "#\(entries[current].number) waiting for the \(MergeQueue.workflowLabel(settings.postMergeWorkflow)) "
+                        ? "#\(entries[current].number) waiting for the \(GitHub.workflowLabel(settings.postMergeWorkflow)) "
                             + "on \(settings.baseBranch) before merging"
                         : entries[current].stepDescription(workflow: settings.postMergeWorkflow)
                     return "\(step), \(current + 1) of \(entries.count)"
@@ -179,7 +179,7 @@ extension MergeQueue {
             case merge(head: String, baseTip: String)
             case mergeConfirm(head: String, baseTip: String, result: MutationResult)
             case postMerge(commit: String)
-            case postMergeOutcome(commit: String, run: Run)
+            case postMergeOutcome(commit: String, run: GitHub.WorkflowRun)
         }
 
         /// When each wait began (`systemUptime`), and what the current
@@ -300,9 +300,9 @@ extension MergeQueue {
         private mutating func readFailed(_ failure: ReadFailure, reads: [Read], purpose: Purpose, now: TimeInterval) {
             switch failure {
             case .ghMissing:
-                stop(StopReason(kind: .setup, message: "gh isn’t installed: the queue can’t read GitHub."))
+                stop(StopReason(kind: .setup, message: "\(GitHub.CLI.missing): the queue can’t read GitHub."))
             case .notSignedIn(let message):
-                stop(StopReason(kind: .setup, message: "gh isn’t signed in to github.com (run gh auth login): \(message)"))
+                stop(StopReason(kind: .setup, message: "\(GitHub.CLI.signedOut) (run gh auth login)" + (message.map { ": \($0)" } ?? "")))
             case .refused(let message):
                 stop(StopReason(kind: .github, message: "GitHub refused a read: \(message)"))
             case .rateLimited(let resumeAt):
@@ -438,7 +438,7 @@ extension MergeQueue {
             }
             if settings.postMergeWorkflow != nil {
                 guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
-                baseRunsFailedAtStart = Set(runs.filter(MergeQueue.runFailed).map(\.attemptKey))
+                baseRunsFailedAtStart = Set(runs.filter { GitHub.isFailedRun($0.conclusion) }.map(\.attemptKey))
             }
             guard !mergeQueue else {
                 return stop(StopReason(kind: .setup, message: "\(settings.baseBranch) requires GitHub’s merge queue: gh pr merge "
@@ -456,7 +456,7 @@ extension MergeQueue {
             let number = "#\(pullRequest.number)"
             let url = pullRequest.url
             if !pullRequest.isOpen {
-                return StopReason(kind: .notMergeable, message: "\(number) is \(pullRequest.state.lowercased()), no longer open.", url: url)
+                return StopReason(kind: .notMergeable, message: "\(number) is \(pullRequest.state.word), no longer open.", url: url)
             }
             if pullRequest.isDraft {
                 return StopReason(kind: .notMergeable, message: "\(number) is a draft.", url: url)
@@ -682,7 +682,7 @@ extension MergeQueue {
         private mutating func checksFailed(
             _ verdict: ChecksVerdict, checks: CommitChecks, head: String, index: Int, now: TimeInterval
         ) {
-            let names = (verdict.failed.map { run in run.workflow.map { "\($0) / \(run.name)" } ?? run.name }
+            let names = (verdict.failed.map { run in GitHub.qualifiedName(name: run.name, workflow: run.workflow) ?? run.name }
                 + verdict.failedStatuses).joined(separator: ", ")
             guard !entries[index].hasRerun else {
                 return stop(StopReason(kind: .checks, message: "Required check \(names) failed again on \(Self.short(head)) "
@@ -788,11 +788,11 @@ extension MergeQueue {
         /// whatever its event, is waited for; once it ends, a failure
         /// stops the queue and anything else checks step 4 again. Returns
         /// whether the merge waits.
-        private mutating func waitForBaseRuns(_ runs: [Run], head: String, index: Int, now: TimeInterval) -> Bool {
-            let label = MergeQueue.workflowLabel(settings.postMergeWorkflow)
+        private mutating func waitForBaseRuns(_ runs: [GitHub.WorkflowRun], head: String, index: Int, now: TimeInterval) -> Bool {
+            let label = GitHub.workflowLabel(settings.postMergeWorkflow)
             // One that failed between two looks is caught too.
             if let failed = runs.first(where: {
-                MergeQueue.runFailed($0)
+                GitHub.isFailedRun($0.conclusion)
                     && (!baseRunsFailedAtStart.contains($0.attemptKey) || clocks.awaitedBaseRuns.contains($0.id))
             }) {
                 stop(StopReason(kind: .postMerge, message: "The \(label) of \(Self.short(failed.headSha)) on "
@@ -840,7 +840,7 @@ extension MergeQueue {
                 engine.read([.pullRequest(number)], after: Limits.mergeConfirmInterval,
                             for: .mergeConfirm(head: head, baseTip: baseTip, result: result))
             }
-            if pullRequest.state == "MERGED" {
+            if pullRequest.state == .merged {
                 entries[index].mergeCommit = pullRequest.mergeCommit
                 guard pullRequest.headOid == head else {
                     return stop(StopReason(kind: .merge, message: "#\(number) was merged at \(Self.short(pullRequest.headOid)), "
@@ -902,8 +902,8 @@ extension MergeQueue {
             advance()
         }
 
-        private mutating func postMergeRead(_ runs: [Run], commit: String, index: Int, now: TimeInterval) {
-            let label = MergeQueue.workflowLabel(settings.postMergeWorkflow)
+        private mutating func postMergeRead(_ runs: [GitHub.WorkflowRun], commit: String, index: Int, now: TimeInterval) {
+            let label = GitHub.workflowLabel(settings.postMergeWorkflow)
             let number = entries[index].number
             let again = { (engine: inout Engine) in
                 engine.read([.pushRuns(commit: commit)], after: Limits.runPollInterval, for: .postMerge(commit: commit))
@@ -922,7 +922,7 @@ extension MergeQueue {
                 }
                 return again(&self)
             }
-            if run.conclusion?.lowercased() == "success" {
+            if GitHub.isSucceededRun(run.conclusion) {
                 note("The \(label) of #\(number) succeeded")
                 return finishEntry(index)
             }
@@ -934,9 +934,9 @@ extension MergeQueue {
         /// merge tells a push from outside from the pull request's own
         /// failure (section 3.4).
         private mutating func postMergeFailed(
-            _ run: Run, commit: String, baseRuns: [Run], comparison: Comparison?, index: Int
+            _ run: GitHub.WorkflowRun, commit: String, baseRuns: [GitHub.WorkflowRun], comparison: Comparison?, index: Int
         ) {
-            let label = MergeQueue.workflowLabel(settings.postMergeWorkflow)
+            let label = GitHub.workflowLabel(settings.postMergeWorkflow)
             let number = entries[index].number
             let base = settings.baseBranch
             // GitHub not knowing the merge commit on the base any more: moved too.
@@ -1078,7 +1078,7 @@ extension Dictionary where Key == MergeQueue.Read, Value == MergeQueue.ReadResul
         return nil
     }
 
-    func runs(_ read: MergeQueue.Read) -> [MergeQueue.Run]? {
+    func runs(_ read: MergeQueue.Read) -> [GitHub.WorkflowRun]? {
         if case .runs(let value)? = self[read] { return value }
         return nil
     }

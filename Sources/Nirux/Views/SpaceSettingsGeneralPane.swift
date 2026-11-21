@@ -176,7 +176,7 @@ final class SpaceSettingsGeneralPane: NSObject, NSTableViewDataSource, NSTableVi
             button.setAccessibilityLabel("\(item.hasScript ? "Edit" : "Add") the setup script of \(item.anchor.name)")
             return Self.cell(button)
         case "github":
-            let label = Self.secondaryLabel(item.gitHub ?? "—", tooltip: item.gitHub.map { "github.com/\($0)" })
+            let label = Self.secondaryLabel(item.gitHub ?? "—", tooltip: item.gitHub.map { "\(GitHub.host)/\($0)" })
             label.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             return Self.cell(label)
         default:

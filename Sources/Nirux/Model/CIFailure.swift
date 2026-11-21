@@ -14,8 +14,8 @@ enum CIFailure {
 
     /// The red checks of an open pull request, once their run is over: a
     /// run with a job still going can be neither rerun nor read.
-    static func redChecks(_ pullRequest: PRInfo) -> [ProjectBoard.Check] {
-        guard pullRequest.state.uppercased() == "OPEN" else { return [] }
+    static func redChecks(_ pullRequest: PRInfo) -> [GitHub.Check] {
+        guard pullRequest.state == .open else { return [] }
         let running = Set(pullRequest.checks.filter { $0.result == .pending }.compactMap(run(of:)).map(\.id))
         return pullRequest.checks.filter { check in
             check.result == .failure && !(run(of: check).map { running.contains($0.id) } ?? false)
@@ -30,7 +30,7 @@ enum CIFailure {
 
     /// The Actions runs of `checks` in the pull request's repository, each
     /// once, in order.
-    static func runs(of checks: [ProjectBoard.Check], in pullRequest: PRInfo) -> [Run] {
+    static func runs(of checks: [GitHub.Check], in pullRequest: PRInfo) -> [Run] {
         guard let own = parse(pullRequest.url), own.rest.first == "pull" else { return [] }
         var runs: [Run] = []
         for run in checks.compactMap(run(of:))
@@ -44,9 +44,9 @@ enum CIFailure {
     /// runs in order. Nil when a red check is anything else (a commit
     /// status, another repository's run) or the pull request has none:
     /// what can't be read can't be called flaky (see `CITriage`).
-    static func redChecksByRun(_ pullRequest: PRInfo) -> [(run: Run, checks: [ProjectBoard.Check])]? {
+    static func redChecksByRun(_ pullRequest: PRInfo) -> [(run: Run, checks: [GitHub.Check])]? {
         guard let own = parse(pullRequest.url), own.rest.first == "pull" else { return nil }
-        var byRun: [(run: Run, checks: [ProjectBoard.Check])] = []
+        var byRun: [(run: Run, checks: [GitHub.Check])] = []
         for check in redChecks(pullRequest) {
             guard let run = run(of: check), run.repository.lowercased() == own.repository.lowercased() else { return nil }
             if let index = byRun.firstIndex(where: { $0.run == run }) {
@@ -61,7 +61,7 @@ enum CIFailure {
     /// Every check of the pull request that is an Actions run of its
     /// repository, with its name and result: what tells a run that passes
     /// now.
-    static func ownRunResults(_ pullRequest: PRInfo) -> [(run: Run, name: String, result: ProjectBoard.CheckResult)] {
+    static func ownRunResults(_ pullRequest: PRInfo) -> [(run: Run, name: String, result: GitHub.CheckResult)] {
         guard let own = parse(pullRequest.url), own.rest.first == "pull" else { return [] }
         return pullRequest.checks.compactMap { check in
             guard let run = run(of: check), run.repository.lowercased() == own.repository.lowercased() else { return nil }
@@ -70,7 +70,7 @@ enum CIFailure {
     }
 
     /// A red check is reported once: a rerun or a new status starts again.
-    static func reportKey(_ check: ProjectBoard.Check) -> String {
+    static func reportKey(_ check: GitHub.Check) -> String {
         [check.workflowName ?? "", check.name, check.startedAt ?? "", check.url ?? ""].joined(separator: "\u{0}")
     }
 
@@ -103,16 +103,15 @@ enum CIFailure {
 
     /// `gh run rerun --failed`: nil once GitHub accepted it, else why not.
     /// Runs gh: off the main thread.
-    static func rerun(_ run: Run) -> String? {
-        guard let ghPath = PRDetect.installedGHPath() else { return ProjectBoard.FetchError.ghMissing.message }
-        guard let result = GitHubCLIBoardClient.runGH(ghPath, arguments: rerunArguments(run), timeout: 30)
-        else { return "Run \(run.id): gh couldn’t start, or took longer than 30 s." }
-        guard result.terminationStatus != 0 else { return nil }
-        let stderr = String(data: result.standardError, encoding: .utf8) ?? ""
-        return "Run \(run.id): " + (WorktreeCleanup.firstLine(stderr) ?? "exit status \(result.terminationStatus)")
+    static func rerun(_ run: Run, gh: GitHub.CLI.Runner = GitHub.CLI.installed) -> String? {
+        switch gh(.init(rerunArguments(run))).flatMap(\.result) {
+        case .success: return nil
+        case .failure(.ghMissing): return "\(GitHub.CLI.missing): run \(run.id) can’t be rerun."
+        case .failure(let failure): return "Run \(run.id): \(failure.message)"
+        }
     }
 
-    private static func run(of check: ProjectBoard.Check) -> Run? {
+    private static func run(of check: GitHub.Check) -> Run? {
         check.url.flatMap(run(checkURL:))
     }
 
