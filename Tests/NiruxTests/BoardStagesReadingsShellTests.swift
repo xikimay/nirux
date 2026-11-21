@@ -143,7 +143,7 @@ final class BoardStagesReadingsShellTests: XCTestCase {
                 let board = shell.boardReadings(
                     ofSpace: task.profileID, sidebarInfos: [info], foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:],
                     snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970
-                )[task.id]?.lastActivityAt
+                ).tasks[task.id]?.lastActivityAt
                 shell.showWorkspaceContextPanel(workspaceIndex: index)
                 defer { shell.workspaceContextPanel?.purposeEditor?.window?.orderOut(nil) }
                 return (info.rowSummary.trailing, board, shell.workspaceContextPanel?.liveContextLabel?.stringValue ?? "")
