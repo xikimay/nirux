@@ -417,7 +417,7 @@ extension NiruxShellView {
         let agents = agentReadings(of: workspace, snapshot: snapshot)
         guard let first = agents.first else { return "no agent running" }
         if let waiting = agents.first(where: \.needsUser) {
-            return "\(waiting.name) needs the user" + (waiting.dialog.map { ": \($0)" } ?? "")
+            return "\(waiting.name) · Needs you" + (waiting.dialog.map { " · \($0)" } ?? "")
         }
         if let failed = agents.first(where: { $0.failure != nil }), let failure = failed.failure {
             return "\(failed.name) \(failure)"
@@ -467,7 +467,8 @@ extension NiruxShellView {
             if let name = stuck?.agentName { return AgentReading(name: name, status: .idle, dialog: nil, failure: failure) }
             guard let foreground, AgentStatusMachine.isRecognizedAgentProcess(foreground.name) else { return nil }
             // A question its last turn ended on waits on the user too.
-            let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
+            let activity = pty.taskActivity(foreground: foreground, status: pty.cachedAgentState)
+            let dialog: String? = activity.codexChoice?.detailLine ?? (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
                 ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
                 // What agy reported it waits on (OSC 7501); a failure is
@@ -481,7 +482,7 @@ extension NiruxShellView {
             let quiet = AgentStatusMachine.activityOnlyAgentProcesses.contains(foreground.name)
                 && pty.cachedAgentState == .needsAttention && pty.agentAttentionReason == nil
             let finished = pty.agentAttentionReason == .turnFinished
-            let status = pty.isQuietTurnEnd || quiet || finished ? AgentStatus.idle : pty.cachedAgentState
+            let status = pty.isQuietTurnEnd || quiet || (finished && activity.status != .working) ? AgentStatus.idle : activity.status
             return AgentReading(name: foreground.name, status: status, dialog: dialog, failure: failure, isQuiet: quiet)
         }
     }

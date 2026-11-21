@@ -39,7 +39,7 @@ struct DeferredAgentLaunch: Equatable {
         /// Nil `resume`: a fresh `claude`, the column's last session was
         /// never prompted.
         case claude(resume: NiruxShellView.AgentResumeTarget?, mode: ClaudeLaunchMode)
-        case codex(resume: NiruxShellView.AgentResumeTarget, mode: CodexLaunchMode)
+        case codex(resume: NiruxShellView.AgentResumeTarget, mode: CodexLaunchMode?)
         case agy(resume: NiruxShellView.AgentResumeTarget)
 
         /// The launch, through the picker when another column already runs

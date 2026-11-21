@@ -164,7 +164,7 @@ struct GitRepositoryLayout: Equatable, Sendable {
     }
 
     private static func referencedPath(in file: String, prefix: String?, relativeTo base: String) -> String? {
-        guard let contents = try? String(contentsOfFile: file, encoding: .utf8) else { return nil }
+        guard let contents = ProjectMemory.readText(file, limit: 64 * 1024) else { return nil }
         let line = contents.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         let value: Substring
         if let prefix {

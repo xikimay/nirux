@@ -186,8 +186,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// It must not link the new agent to a live parent agent's Mission
     /// mailbox (that would give an outside caller a channel to it), and it
     /// opens in the space its folder belongs to, else the default space
-    /// (docs/design/spaces.md, "Routing"), never one the caller picked. None of
-    /// that is shown on the sheet.
+    /// (docs/design/spaces.md, "Routing"), never one the caller picked.
     func restrictedForConfirmation() -> NiruxURLRequest {
         var restricted = self
         restricted.profileID = nil
@@ -224,7 +223,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// launch ID. Everything the action will do is spelled out, including
     /// the agent's permission mode: a request from a web page would inherit
     /// it. Call it on a request that went through `resolvingPaths()`.
-    func confirmation(claudeMode: ClaudeLaunchMode, codexMode: CodexLaunchMode) -> Confirmation {
+    func confirmation(claudeMode: ClaudeLaunchMode, codexMode: CodexLaunchMode, spaceName: String? = nil) -> Confirmation {
         // One wording whether the launch ID is missing or stale: a caller
         // could add a fake `launch=` to pick a more reassuring text.
         let intro = "This request didn’t come from a current Nirux terminal. That happens with an agent "
@@ -237,7 +236,7 @@ struct NiruxURLRequest: Equatable, Sendable {
         func agentLine(_ agent: NiruxApp.WorkspaceAgent?) -> String {
             switch agent {
             case .claude: return "Agent: Claude Code — \(claudeMode.displayName)"
-            case .codex: return "Agent: Codex — \(codexMode.displayName)"
+            case .codex: return "Agent: Codex — \(codexMode.displayName)" + (spaceName.map { "\nSpace: \(Self.displaySafe($0))" } ?? "")
             case .agy: return "Agent: Antigravity — its own permission settings (Nirux sets none)"
             case nil: return "Agent: none (plain shell)"
             }

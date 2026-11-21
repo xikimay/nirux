@@ -167,7 +167,7 @@ extension NiruxShellView {
                 claimedSessionIDs: &claimedSessionIDs.codex
             )
             addDeferredAgentColumn(
-                .codex(resume: resumeTarget, mode: persistedColumn.codexLaunchMode ?? .default),
+                .codex(resume: resumeTarget, mode: persistedColumn.codexLaunchMode),
                 restoring: persistedColumn, in: workspace
             )
         case .agy:
@@ -452,7 +452,7 @@ extension NiruxShellView {
                 claudeRestore = col.persistedClaudeRestore(foregroundProcess: foregroundProcess)
             case "codex":
                 kind = .codex; webURL = nil
-                codexMode = detectCodexLaunchMode(process: foregroundProcess)
+                codexMode = CodexLaunchMode.detect(arguments: foregroundProcess.arguments) ?? .default
             case AgentProgramStatus.agy where !AgentHookCenter.isHeadlessAgy(foregroundProcess):
                 kind = .agy; webURL = nil
             default: kind = .terminal; webURL = nil
@@ -504,10 +504,6 @@ extension NiruxShellView {
     /// was started with, so restore reproduces the column faithfully.
     private func detectClaudeLaunchMode(process: ForegroundProcess) -> ClaudeLaunchMode? {
         ClaudeLaunchMode.detect(arguments: process.arguments)
-    }
-
-    private func detectCodexLaunchMode(process: ForegroundProcess) -> CodexLaunchMode? {
-        CodexLaunchMode.detect(arguments: process.arguments)
     }
 }
 

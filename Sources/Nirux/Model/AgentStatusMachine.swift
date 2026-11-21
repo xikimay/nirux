@@ -341,9 +341,8 @@ struct AgentStatusMachine {
     /// Nirux types prompts (PR Feedback's Address, "Ask Agent Why CI
     /// Failed") only into integrated agents. Claude's hooks report the
     /// dialogs such a prompt must not answer; an activity-only agent
-    /// reports nothing, so its permission prompt looks like any silence and
-    /// a prompt could land on it. (Codex's notify reports turn ends only —
-    /// the same blind spot, accepted before this tier existed.)
+    /// reports nothing, so its permission prompt looks like any silence.
+    /// Codex reports a blocking choice separately through OSC 7501.
     static func acceptsTypedPrompts(processName name: String) -> Bool {
         integratedAgentProcesses.contains(name)
     }

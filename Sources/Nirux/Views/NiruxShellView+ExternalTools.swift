@@ -187,7 +187,11 @@ extension NiruxShellView {
 
     static func codexLaunchMode(for workspace: WorkspaceState) -> CodexLaunchMode {
         guard !workspace.startedOutsideNirux else { return currentCodexLaunchMode() }
-        return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).codexMode(settings: currentCodexLaunchMode())
+        return codexLaunchMode(inSpace: workspace.profileID)
+    }
+
+    static func codexLaunchMode(inSpace id: String) -> CodexLaunchMode {
+        SpaceDefaultsStore.defaults(forSpace: id).codexMode(settings: currentCodexLaunchMode())
     }
 
     func openClaudeCode() {

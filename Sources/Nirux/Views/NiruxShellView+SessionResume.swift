@@ -305,7 +305,7 @@ extension NiruxShellView {
             return Self.codexCommand(
                 resume: resume,
                 workingDirectory: workingDirectory,
-                mode: mode,
+                mode: mode ?? Self.codexLaunchMode(for: workspace),
                 briefFile: Self.codexBriefFile(
                     from: brief, launchDirectory: workingDirectory ?? column.launchDirectory ?? workspace.cwd
                 )

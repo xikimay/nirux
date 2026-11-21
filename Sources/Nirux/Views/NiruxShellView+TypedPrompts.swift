@@ -55,13 +55,14 @@ extension NiruxShellView {
               let pty = column.pty,
               pty.acceptsTypedPrompts(snapshot: snapshot)
         else { return nil }
+        let activity = pty.taskActivity(foreground: pty.foregroundProcess(snapshot: snapshot), status: pty.cachedAgentState)
         return TypedPromptTarget(
             id: agentUUID,
             workspaceID: workspace.id,
             columnIndex: columnIndex,
             cwd: pty.childCwd ?? workspace.cwd,
-            status: pty.cachedAgentState,
-            pendingDialog: pty.pendingAgentDialog?.reason
+            status: activity.status,
+            pendingDialog: activity.codexChoice ?? pty.pendingAgentDialog?.reason
         )
     }
 }

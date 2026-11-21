@@ -24,6 +24,7 @@ extension NiruxShellView {
         deliveredHandover: Bool = false,
         worktreeBranch: String? = nil,
         startedOutsideNirux: Bool = false,
+        codexMode: CodexLaunchMode? = nil,
         startedByAgent: Bool = false,
         setupScript: URL? = nil,
         isLead: Bool = false,
@@ -75,7 +76,7 @@ extension NiruxShellView {
         if let agent {
             launchAgent(
                 agent, in: workspace, deliveredHandover: deliveredHandover,
-                worktreeBranch: worktreeBranch, setupScript: setupScript
+                worktreeBranch: worktreeBranch, setupScript: setupScript, codexMode: codexMode
             )
         } else if let setupScript, let column = workspace.columns.first {
             sideEffects.launchAgent(column, setupCommand(setupScript, in: workspace, then: nil))
@@ -268,7 +269,8 @@ extension NiruxShellView {
         in workspace: WorkspaceState,
         deliveredHandover: Bool,
         worktreeBranch: String?,
-        setupScript: URL?
+        setupScript: URL?,
+        codexMode: CodexLaunchMode?
     ) {
         guard let col = workspace.columns[safe: workspace.focusedIndex] else { return }
         let handoverPrompt = Self.agentStartupPrompt(
@@ -294,7 +296,7 @@ extension NiruxShellView {
             )
         case .codex:
             cmd = NiruxShellView.codexCommand(
-                mode: NiruxShellView.codexLaunchMode(for: workspace),
+                mode: codexMode ?? NiruxShellView.codexLaunchMode(for: workspace),
                 briefFile: NiruxShellView.codexBriefFile(from: brief, launchDirectory: workspace.cwd),
                 handoverPrompt: handoverPrompt
             )

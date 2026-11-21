@@ -2,7 +2,43 @@ import AppKit
 
 // MARK: - Routing new workspaces (docs/design/spaces.md, "Routing")
 
+struct ConfirmedCodexLaunch: Equatable, Sendable {
+    let spaceID: String
+    let spaceName: String
+    let mode: CodexLaunchMode
+}
+
 extension NiruxShellView {
+    func codexLaunchForConfirmation(in spaceID: String) -> ConfirmedCodexLaunch {
+        ConfirmedCodexLaunch(spaceID: spaceID, spaceName: profiles.first { $0.id == spaceID }?.name ?? spaceID,
+                             mode: Self.codexLaunchMode(inSpace: spaceID))
+    }
+
+    /// A worktree may already exist in another space, or routing may have changed while the sheet was open.
+    func withConfirmedCodexLaunch(
+        _ confirmed: ConfirmedCodexLaunch?, in spaceID: String, folder: String,
+        ifDeclined: @escaping @MainActor () -> Void = {}, open: @escaping @MainActor (CodexLaunchMode?) -> Void
+    ) {
+        guard let confirmed else { return open(nil) }
+        guard confirmed.spaceID != spaceID else { return open(confirmed.mode) }
+        let destination = codexLaunchForConfirmation(in: spaceID)
+        RunLoop.main.perform(inModes: [.default]) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard self.confirmCodexLaunch(destination, in: folder),
+                      self.profiles.contains(where: { $0.id == spaceID }) else { return ifDeclined() }
+                open(destination.mode)
+            }
+        }
+    }
+
+    func confirmCodexLaunch(_ destination: ConfirmedCodexLaunch, in folder: String) -> Bool {
+        confirmDestructiveClose(
+            message: "Start Codex in \(NiruxURLRequest.displaySafe(destination.spaceName))?",
+            details: [NiruxURLRequest.displaySafe(folder), destination.mode.displayName], confirmTitle: "Start Codex"
+        )
+    }
+
     /// Where a plain new workspace of a space opens: its default anchor's
     /// folder (a repository's main checkout), else the first of its other
     /// anchors' folders still there (the default one moved), else the home
@@ -87,19 +123,22 @@ extension NiruxShellView {
     /// the user confirmed, names none and goes where its folder belongs,
     /// else to the default space, with the banner that says so.
     func openRequestedWorkspace(
-        title: String?, cwd: String?, agent: NiruxApp.WorkspaceAgent?, requestedSpaceID: String?, startedOutsideNirux: Bool = false
+        title: String?, cwd: String?, agent: NiruxApp.WorkspaceAgent?, requestedSpaceID: String?, startedOutsideNirux: Bool = false,
+        confirmedCodexLaunch: ConfirmedCodexLaunch? = nil
     ) {
         let folder = cwd ?? defaultFolder(forSpace: requestedSpaceID ?? WorkspaceProfile.defaultID)
         routeWorkspace(folder: folder, startedFromSpaceID: requestedSpaceID) { [weak self] decision in
             guard let self else { return }
             let workspaceID = UUID().uuidString
             // From a Nirux terminal: an agent asked for it.
-            self.addWorkspace(
-                title: title, cwd: folder, agent: agent, profileID: decision.spaceID, workspaceID: workspaceID,
-                startedOutsideNirux: startedOutsideNirux, startedByAgent: !startedOutsideNirux
-            )
-            self.saveState()
-            if decision.reason == .general { self.presentSpaceArrival(workspaceID: workspaceID) }
+            self.withConfirmedCodexLaunch(confirmedCodexLaunch, in: decision.spaceID, folder: folder) { mode in
+                self.addWorkspace(
+                    title: title, cwd: folder, agent: agent, profileID: decision.spaceID, workspaceID: workspaceID,
+                    startedOutsideNirux: startedOutsideNirux, codexMode: mode, startedByAgent: !startedOutsideNirux
+                )
+                self.saveState()
+                if decision.reason == .general { self.presentSpaceArrival(workspaceID: workspaceID) }
+            }
         }
     }
 

@@ -354,7 +354,7 @@ enum CodexLaunchMode: String, Codable, CaseIterable {
     }
 
     /// Recover a preset only when argv identifies its sandbox and approval
-    /// semantics; nil leaves restore on the backward-compatible default path.
+    /// semantics. A running column with no matching flags records the CLI default.
     static func detect(arguments: [String]) -> CodexLaunchMode? {
         if arguments.contains("--dangerously-bypass-approvals-and-sandbox") {
             return .bypass
