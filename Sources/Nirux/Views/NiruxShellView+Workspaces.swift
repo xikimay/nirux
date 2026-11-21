@@ -456,6 +456,9 @@ extension NiruxShellView {
         case .close:
             requestCloseWorkspace(at: workspaceIndex)
             return
+        case .turnOffLead:
+            showSpaceSettings(profileID: workspaces[workspaceIndex].profileID, tab: .lead)
+            return
         case .editContext:
             showWorkspaceContextPanel(workspaceIndex: workspaceIndex)
             return

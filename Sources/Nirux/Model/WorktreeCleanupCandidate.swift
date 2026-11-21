@@ -24,6 +24,9 @@ struct WorktreeCleanupCandidate: Equatable {
     /// Agents of other workspaces running inside the folder, e.g.
     /// "Claude in “main”": deleting the folder would pull it from under them.
     var foreignAgents: [String] = []
+    /// The spaces whose Lead is open in `workspaces`: a Lead closes only
+    /// when turned off.
+    var leads: [String] = []
     /// Titles of the workspaces with an editor holding unsaved changes in
     /// `workspaces`, or to a file in the folder.
     var unsavedEditors: [String]
@@ -53,6 +56,9 @@ struct WorktreeCleanupCandidate: Equatable {
         }
         if !foreignAgents.isEmpty {
             problems.append("Running in this folder from another workspace: \(foreignAgents.joined(separator: ", ")).")
+        }
+        for space in leads {
+            problems.append("The Lead of “\(space)” works in this folder: only turning it off in Space Settings › Lead closes it.")
         }
         return problems
     }
