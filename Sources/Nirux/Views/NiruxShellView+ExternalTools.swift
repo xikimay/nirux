@@ -214,7 +214,8 @@ extension NiruxShellView {
 
     /// Starts `agent` in a new terminal column of the active workspace, focused.
     func openAgent(_ agent: CodingAgent) {
-        guard let workspace = activeWorkspace, let launch = Self.launch(of: agent, resume: nil, in: workspace) else { return }
+        guard let workspace = activeWorkspace, !workspace.isWaitingTask,
+              let launch = Self.launch(of: agent, resume: nil, in: workspace) else { return }
         // A new agy says which conversation it runs through Nirux's hook.
         if agent == .agy { AgentHookInstaller.installAgyHooksIfInstalling() }
         let command = agentCommand(launch, in: workspace, launchDirectory: workspace.focusedWorkingDirectory)
