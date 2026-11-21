@@ -59,14 +59,22 @@ extension NiruxShellView {
     }
 
     /// Turning the Lead off closes its workspace, asking first when Claude
-    /// runs there, as Close Workspace does. The tasks it followed stay;
-    /// their questions come to the user once their parent is gone.
+    /// runs there, as Close Workspace does: nothing else closes it. The
+    /// tasks it followed stay; their questions come to the user once their
+    /// parent is gone.
     func stopLead(spaceID: String) {
         guard let lead = leadWorkspace(inSpace: spaceID),
               let index = workspaces.firstIndex(where: { $0 === lead })
         else { return }
-        requestCloseWorkspace(at: index, replacingLast: true)
+        requestCloseWorkspace(at: index, turningLeadOff: true)
         refreshSpaceSettingsLead()
+    }
+
+    static let leadStaysText = "The Lead stays open. Turn it off in Space Settings › Lead."
+
+    /// A close aimed at the Lead or its Claude column: it stays.
+    func refuseClosingLead() {
+        showToast(Self.leadStaysText)
     }
 
     /// ⌃⌘L: the active space's Lead, its Claude focused; a space without
@@ -80,9 +88,9 @@ extension NiruxShellView {
         }
     }
 
-    /// The Lead's workspace, on its first terminal (where Claude runs).
+    /// The Lead's workspace, on its Claude column.
     func focusLead(_ lead: WorkspaceState) {
-        let column = lead.columns.firstIndex { $0.pty != nil && !$0.isClosing }
+        let column = lead.columns.firstIndex { $0 === lead.leadTerminal }
         focusWorkspace(id: lead.id, column: column)
     }
 
@@ -167,5 +175,13 @@ extension NiruxShellView {
         guard let settings = spaceSettings, let space = profiles.first(where: { $0.id == settings.spaceID }) else { return }
         let model = spaceSettingsLeadModel(for: space)
         if model != settings.lead.model { settings.lead.update(model) }
+    }
+}
+
+extension WorkspaceState {
+    /// A Lead's Claude column, by its agent UUID.
+    var leadTerminal: ColumnState? {
+        guard isLead, let leadAgentUUID else { return nil }
+        return columns.first { $0.agentUUID == leadAgentUUID && !$0.isClosing }
     }
 }

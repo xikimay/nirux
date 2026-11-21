@@ -27,6 +27,7 @@ extension NiruxShellView {
         let built = visibleIndices.map { index in
             let workspace = workspaces[index]
             let isActive = index == activeWSIndex
+            let leadTerminal = workspace.leadTerminal
             let colInfos = workspace.columns.enumerated().map { colIndex, col in
                 let isUserFocused = colIndex == workspace.focusedIndex && isActive
                 // Its question read on screen: its column in front, the
@@ -47,7 +48,7 @@ extension NiruxShellView {
                 if let reason = col.pty?.takeLateSignInAlert(isUserFocused: isUserFocused && appIsActive) {
                     col.notifyAgentAttention(reason: reason)
                 }
-                return sidebarColumnInfo(
+                var info = sidebarColumnInfo(
                     col, at: colIndex, isUserFocused: isUserFocused, agentStatus: agentStatus, foregroundProcess: foregroundProcess,
                     approvalHold: approvalHolds[ObjectIdentifier(col)], missionQuestion: missionQuestions[ObjectIdentifier(col)],
                     // The dialog the user is looking at needs no copy on
@@ -55,6 +56,8 @@ extension NiruxShellView {
                     showsDialog: !(isUserFocused && appIsActive), snapshot: snapshot, now: now,
                     waitingMessages: missionWaits.shown[col.id]
                 )
+                info.isLeadTerminal = col === leadTerminal
+                return info
             }
             return sidebarWorkspaceInfo(
                 at: index, columns: colInfos, isActive: isActive, parentTitle: parents[index].map { workspaces[$0].title }
