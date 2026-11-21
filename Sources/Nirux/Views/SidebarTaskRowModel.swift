@@ -119,6 +119,10 @@ extension WorkspaceInfo {
             SidebarRowSummary(mark: mark, status: SidebarStatusLine(text: text, tone: tone, action: action), trailing: trailing ?? age)
         }
 
+        if let waitingTask {
+            if case .needsYou = waitingTask { return row(.needsYou, waitingTask.line, .needsYou) }
+            return row(.blocked, waitingTask.line, .neutral)
+        }
         let step = agentStep
         if case .needsYou(let waiting, let words, let isHandedOff)? = step {
             var summary: SidebarRowSummary
