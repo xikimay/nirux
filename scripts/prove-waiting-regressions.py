@@ -9,6 +9,7 @@ recover = "testInterruptedStartAndMissingRepositoryStayActionableAfterRestore"
 retry = "testFailedDependencyCanBeRepointedOrStartedManually"
 views = Path("Sources/Nirux/Views")
 mutations = [
+    ("offline repository at queue time", "NiruxShellView+LeadTools.swift", "guard let repository, !repository.isFolder || info.target != nil else", "guard let repository, info.target != nil else", recover),
     ("fresh base", "NiruxShellView+WaitingTasks.swift", "branch: branch), fetchesFirst: true", "branch: branch), fetchesFirst: false", merge),
     ("saved template", "NiruxShellView+WaitingTasks.swift", "start.description + note, template: start.template", "start.description + note, template: nil", merge),
     ("bulk cleanup", "NiruxShellView+WorktreeCleanup.swift", "&& !workspace.isWaitingTask && !covered", "&& !covered", merge),

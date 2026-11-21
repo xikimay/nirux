@@ -52,10 +52,12 @@ jobs:
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
       - name: Build
+        id: build
         run: swift build --build-tests
 
       - name: Run tests
         run: scripts/run-tests.sh
 
       - name: Prove waiting-task regressions with XCTest
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: python3 scripts/prove-waiting-regressions.py
