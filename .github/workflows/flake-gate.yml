@@ -1,41 +1,38 @@
 name: Flake gate
-
-# The flake gate of a new or reworked test class, in one job on one macOS
-# runner: each class runs N times, each run its own xctest process, beside
-# the six heaviest classes (scripts/run-tests.sh --repeat). Started by hand
-# on a branch, so it needs no throwaway pull request:
-#   gh workflow run flake-gate.yml --ref <branch> -f classes="NiruxTests.FooTests" [-f runs=10]
+run-name: Shadow CI on ${{ inputs.target }}
 on:
   workflow_dispatch:
     inputs:
-      classes:
-        description: Test classes (Module.Class), separated by spaces
+      target:
+        description: Exact commit for the observation
+        type: string
         required: true
-        type: string
-      runs:
-        description: Runs of each class
-        default: "10"
-        type: string
-
 permissions:
   contents: read
-
 jobs:
-  gate:
+  observe:
     runs-on: macos-15
+    timeout-minutes: 45
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-    timeout-minutes: 45
+      TARGET: ${{ inputs.target }}
+      FIXTURE_SHA: 98373c7f19d67333de3f5ed8dd9289c1027cdd7c
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-
+          persist-credentials: false
+      - name: Pin candidate and copy observer
+        run: |
+          mkdir -p "$RUNNER_TEMP/shadow"
+          cp probe/* "$RUNNER_TEMP/shadow/"
+          [[ "$TARGET" =~ ^[0-9a-f]{40}$ ]]
+          git checkout --detach "$TARGET"
+          test "$(git rev-parse HEAD)" = "$TARGET"
       - name: Toolchain
         id: toolchain
         run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
-      # The cache tests.yml and the nightly use.
       - uses: actions/cache/restore@v6
         with:
           path: |
@@ -45,13 +42,66 @@ jobs:
             .build/workspace-state.json
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
+      # The dependencies' build products, which the nightly saves on main for
+      # this toolchain and Package.resolved, so they don't compile again
+      # (45 s of the build). This package's modules aren't in it and always
+      # build from scratch: a stale object of ours once crashed tests. A
+      # dependency left out here only builds, it can't go stale.
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/arm64-apple-macosx/debug/GhosttyKit.build
+            .build/arm64-apple-macosx/debug/DisplayLink.build
+            .build/arm64-apple-macosx/debug/GhosttyTerminal.build
+            .build/arm64-apple-macosx/debug/Modules/GhosttyKit.*
+            .build/arm64-apple-macosx/debug/Modules/DisplayLink.*
+            .build/arm64-apple-macosx/debug/Modules/GhosttyTerminal.*
+          key: deps-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+
       - name: Build
+        id: build
         run: swift build --build-tests
 
-      - name: Repeat the classes
-        env:
-          CLASSES: ${{ inputs.classes }}
-          RUNS: ${{ inputs.runs }}
+      - name: Prepare independent negative control
+        run: bash "$RUNNER_TEMP/shadow/fixture.sh"
+      - name: Start the unmodified full suite
+        id: launch
         run: |
-          read -ra classes <<< "${CLASSES//$'\n'/ }"
-          scripts/run-tests.sh --repeat "$RUNS" "${classes[@]}"
+          git diff --exit-code HEAD
+          nohup bash "$RUNNER_TEMP/shadow/suite.sh" > "$RUNNER_TEMP/suite.log" 2>&1 < /dev/null &
+      - name: Observe the known XCTest failure
+        run: python3 "$RUNNER_TEMP/shadow/emit.py"
+      - name: Publish the early diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/diagnostic.json
+          if-no-files-found: error
+      - name: Verify full-suite verdict
+        if: ${{ !cancelled() && steps.build.conclusion == 'success' && steps.launch.conclusion == 'success' }}
+        timeout-minutes: 30
+        run: |
+          while [[ ! -f "$RUNNER_TEMP/suite.exit" ]]; do sleep 2; done
+          cat "$RUNNER_TEMP/suite.log"
+          echo "SUITE_SECONDS=$(( $(cat "$RUNNER_TEMP/suite.end") - $(cat "$RUNNER_TEMP/suite.start") ))"
+          test "$(cat "$RUNNER_TEMP/suite.exit")" = 0
+      - name: Profile WaitingTaskFlowTests on a separate build
+        if: ${{ !cancelled() && steps.build.conclusion == 'success' }}
+        run: |
+          set -eo pipefail
+          git apply "$RUNNER_TEMP/shadow/profile.patch"
+          swift build --build-tests
+          for n in 1 2 3; do
+            swift test --skip-build --filter WaitingTaskFlowTests | tee "$RUNNER_TEMP/profile-$n.log"
+            grep -E 'Executed [1-9][0-9]* tests?, with 0 failures' "$RUNNER_TEMP/profile-$n.log"
+          done
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: measurements-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/profile-*.log
+            ${{ runner.temp }}/suite.log
+            ${{ runner.temp }}/suite.start
+            ${{ runner.temp }}/suite.end
+            ${{ runner.temp }}/suite.exit

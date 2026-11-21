@@ -1,0 +1,56 @@
+diff --git a/Tests/NiruxTests/UIFlowHarness.swift b/Tests/NiruxTests/UIFlowHarness.swift
+index a10138d0..d0b2f96e 100644
+--- a/Tests/NiruxTests/UIFlowHarness.swift
++++ b/Tests/NiruxTests/UIFlowHarness.swift
+@@ -99,11 +99,15 @@ final class UIFlowHarness {
+     static func run(
+         file: StaticString = #filePath, line: UInt = #line, _ body: @MainActor (UIFlowHarness) throws -> Void
+     ) throws {
++        let begin = ProcessInfo.processInfo.systemUptime
++        defer { print("PROBE total", ProcessInfo.processInfo.systemUptime - begin) }
+         let environment = IsolatedEnvironment()
+         defer { environment.restore() }
+         weak var released: NiruxShellView?
+         // Before the restore, even when `body` throws.
+         defer {
++            let drain = ProcessInfo.processInfo.systemUptime
++            defer { print("PROBE release_and_children", ProcessInfo.processInfo.systemUptime - drain) }
+             let deadline = Date().addingTimeInterval(10)
+             while released != nil, Date() < deadline {
+                 RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+@@ -112,9 +116,13 @@ final class UIFlowHarness {
+             waitForChildProcesses()
+         }
+         try autoreleasepool {
++            let setup = ProcessInfo.processInfo.systemUptime
+             let harness = try UIFlowHarness(root: environment.root)
++            print("PROBE setup", ProcessInfo.processInfo.systemUptime - setup)
+             released = harness.shell
+             defer { harness.closeWindows() }
++            let bodyStart = ProcessInfo.processInfo.systemUptime
++            defer { print("PROBE body", ProcessInfo.processInfo.systemUptime - bodyStart) }
+             try body(harness)
+         }
+     }
+@@ -606,6 +614,8 @@ final class UIFlowHarness {
+         let process = Process()
+         process.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("GIT_") }.merging(environment) { $1 }
+         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
++        let gitStart = ProcessInfo.processInfo.systemUptime
++        defer { print("PROBE fixture_git", ProcessInfo.processInfo.systemUptime - gitStart) }
+         process.arguments = ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false"] + arguments
+         process.currentDirectoryURL = URL(fileURLWithPath: directory)
+         let output = Pipe()
+diff --git a/Tests/NiruxTests/WaitUntil.swift b/Tests/NiruxTests/WaitUntil.swift
+index a526995b..e1dad1a3 100644
+--- a/Tests/NiruxTests/WaitUntil.swift
++++ b/Tests/NiruxTests/WaitUntil.swift
+@@ -16,6 +16,8 @@ func waitUntil(
+     line: UInt = #line,
+     _ condition: () throws -> Bool
+ ) rethrows -> Bool {
++    let waitStart = ProcessInfo.processInfo.systemUptime
++    defer { print("PROBE wait", ProcessInfo.processInfo.systemUptime - waitStart, file, line) }
+     let deadline = Date().addingTimeInterval(timeout)
+     while (try? condition()) != true {
+         guard Date() < deadline else {
