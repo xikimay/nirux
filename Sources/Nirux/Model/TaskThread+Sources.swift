@@ -12,9 +12,9 @@ extension TaskThread {
 
     /// What a closing task appends: what the files say of it, then the
     /// close, which names its pull requests (their history comes after).
-    static func frozen(_ sources: Sources, closedAt: TimeInterval, pullRequests: Set<String>) -> [Event] {
+    static func frozen(_ sources: Sources, closedAt: TimeInterval, pullRequests: Set<String>, origin: String? = nil) -> [Event] {
         let named = pullRequests.isEmpty ? nil : pullRequests.sorted().joined(separator: "\n")
-        return events(from: sources) + [Event(time: closedAt, kind: .closed, text: named)]
+        return events(from: sources) + [Event(time: closedAt, kind: .closed, text: named, detail: origin)]
     }
 
     /// What the files Nirux keeps already say of one task (`load`).
@@ -67,7 +67,7 @@ extension TaskThread {
             case .question:
                 let asked = Event(
                     time: event.timestamp, kind: .question, by: .agent, text: event.message, note: event.recommendation,
-                    detail: event.questionKind?.rawValue, ref: event.id
+                    detail: event.questionKind?.rawValue, ref: event.id, recipient: parent, missionID: mission.id
                 )
                 guard let handedAt = event.handedToUserAt else { return [asked] }
                 return [asked, Event(time: handedAt, kind: .handedToUser, by: parent, text: event.handedToUserBecause, ref: event.id)]
@@ -80,7 +80,7 @@ extension TaskThread {
                 let expired = event.expiredAt != nil ? "expired" : nil
                 return [Event(time: event.timestamp, kind: .tell, by: by, text: event.message, detail: expired, ref: event.id)]
             case .completed:
-                return [Event(time: event.timestamp, kind: .result, by: .agent, text: event.message, ref: event.id)]
+                return [Event(time: event.timestamp, kind: .result, by: .agent, text: event.message, ref: event.id, missionID: mission.id)]
             case .acknowledged:
                 return []
             }

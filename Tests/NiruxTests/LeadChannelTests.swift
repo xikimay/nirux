@@ -159,6 +159,8 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(try names(context(lead: false, inWorkspace: false)), [HistorySearchTool.name])
         // A workspace opened by a link from outside Nirux has no launch id.
         XCTAssertEqual(try names(context(lead: false, launchID: "")), [HistorySearchTool.name])
+        XCTAssertNotNil(try call(LeadTools.readThread, ["task": "sample"], context: context(lead: false))["error"])
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.readThread, arguments: [:]))
         // Both roles expose the same start options.
         for lead in [true, false] {
             let tools = (try send(list, context: context(lead: lead))["result"] as? [String: Any])?["tools"] as? [[String: Any]]
