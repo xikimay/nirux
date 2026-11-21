@@ -52,7 +52,7 @@ extension NiruxShellView {
                 settledTurn: { column in
                     guard let terminal = workspace.columns.first(where: { $0.id == column.id }) else { return false }
                     if column.attentionReason == nil, column.openDialog == nil, column.questionAskedAt == nil,
-                       column.processName == AgentProgramStatus.codex, let pty = terminal.pty,
+                       column.processName == CodingAgent.codex.rawValue, let pty = terminal.pty,
                        pty.codexQueueRefusal(runningSince: now, snapshot: snapshot) == nil { return true }
                     guard let agent = terminal.agentUUID, let ended = column.questionAskedAt ?? terminal.pty?.agentLastTurnEndedAt,
                           ended > 0 else { return false }
