@@ -46,6 +46,7 @@ extension BoardStages {
         var requiredChecks: [String] = []
         var baseBranch: String?
         var queue: ProjectBoard.QueueState?
+        var checkTimeout: CheckTimeout?
         /// The merged pull requests read, with their title and merge date.
         var merged: [ProjectBoard.PullRequest] = []
         /// Each worktree's HEAD as last listed, by its path.
@@ -465,6 +466,11 @@ extension BoardStages {
         of row: ProjectBoard.Row, _ pullRequest: ProjectBoard.PullRequest, in repository: RepositoryReading, merged: Set<Int>
     ) -> Queue {
         var queue = queue(of: pullRequest.number, head: pullRequest.headOid, in: repository.queue, merged: merged)
+        if let timeout = repository.checkTimeout, timeout.number == pullRequest.number {
+            // The row's normal checks own its current state. The header keeps the history.
+            if timeout.hasCurrentReading { queue.stop = nil }
+            else if queue.stop != nil { queue.stop?.message = timeout.status }
+        }
         queue.refusal = pullRequest.isOpen ? ProjectBoard.queueRefusal(row, baseBranch: repository.baseBranch) : nil
         return queue
     }

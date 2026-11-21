@@ -42,6 +42,7 @@ extension ProjectBoardController {
     /// `extraIDs`). The same key builds the same stages.
     struct StagesKey: Equatable {
         var inputs: StagesInputs
+        var freshSections: Set<String>
         var midnight: TimeInterval
         var loaded: BoardConfigStore.Loaded?
         var context: BoardSections.Context
@@ -117,8 +118,8 @@ extension ProjectBoardController {
 
     private func stagesKey(_ inputs: StagesInputs, now: Date) -> StagesKey {
         StagesKey(
-            inputs: inputs, midnight: BoardStages.midnight(of: now.timeIntervalSince1970), loaded: loaded, context: context,
-            sections: sections, extraIDs: extraIDs, isReadingRemotes: isReadingRemotes, local: local, reads: reads
+            inputs: inputs, freshSections: freshSections(now: now), midnight: BoardStages.midnight(of: now.timeIntervalSince1970),
+            loaded: loaded, context: context, sections: sections, extraIDs: extraIDs, isReadingRemotes: isReadingRemotes, local: local, reads: reads
         )
     }
 
@@ -217,12 +218,16 @@ extension ProjectBoardController {
         let readOnly = isExtra(section)
         let rows = readOnly ? rows.filter { !$0.workspaces.isEmpty } : rows
         let reads = reads[section.id]
-        let reading = BoardStages.RepositoryReading(
+        var reading = BoardStages.RepositoryReading(
             id: section.id, rows: rows, readsPullRequests: reads?.openPullRequests != nil,
             requiredChecks: section.config?.requiredChecks ?? [], baseBranch: reads?.baseBranch ?? section.config?.baseBranch,
             queue: inputs.queues[section.id], merged: reads?.mergedPullRequests ?? [], heads: heads, cleaningUp: inputs.cleaningUp,
             gitHub: reads?.gitHub
         )
+        if let state = reading.queue {
+            let currentRead = reads.flatMap { $0.errors[.openPullRequests] == nil && $0.pullRequestsAreFresh(now: now) ? $0.pullRequestsReadAt : nil }
+            reading.checkTimeout = BoardStages.checkTimeout(in: state, repository: reading, currentRead: currentRead, now: now)
+        }
         let facts = BoardStages.sectionFacts(reading, tasks: inputs.tasks, readings: inputs.readings, parents: inputs.parents, lead: inputs.lead)
         Self.noteFolders(of: facts, in: &targets)
         var shown = BoardStagesView.Section(
@@ -245,7 +250,7 @@ extension ProjectBoardController {
             // The next Start's list, a merged one for none (as the queue, GitHub's lists or a task's line knows it),
             // whether or not the Board lists it (not read yet, closed, beyond the open pull requests read).
             let proposed = state.isLocked ? 0 : BoardStages.nextStartList(state, knownMerged: facts.knownMerged).count
-            shown.queue = BoardStagesView.sectionQueue(state, proposed: proposed)
+            shown.queue = BoardStagesView.sectionQueue(state, proposed: proposed, timeout: reading.checkTimeout)
         }
         // Board Settings… where it can set the repository up and save it, as the table offered it.
         let offersSettings = !isReadOnly && canBeSetUp(section)
