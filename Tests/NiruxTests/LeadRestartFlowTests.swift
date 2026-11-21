@@ -95,7 +95,7 @@ final class LeadRestartFlowTests: XCTestCase {
     func testTheConfirmationSaysWhatStops() {
         func details(_ status: AgentStatus?) -> [String] {
             NiruxShellView.leadRestartDetails(
-                mode: .auto, agent: status.map { WorkspaceClosePolicy.LiveAgent(processName: "claude", status: $0) }
+                mode: .auto, agent: status.map { WorkspaceClosePolicy.LiveAgent(agent: .claude, status: $0) }
             )
         }
         XCTAssertTrue(details(nil)[0].contains("launch mode (Auto)"), details(nil)[0])
