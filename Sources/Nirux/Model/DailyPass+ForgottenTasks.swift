@@ -16,34 +16,57 @@ extension DailyPass {
 
     /// What the pass reads of an open task, from what Nirux already keeps.
     struct TaskActivity: Equatable, Sendable {
+        struct Question: Equatable, Sendable {
+            var id: String
+            var handedToUser = false
+        }
+
+        /// Its workspace: what a later pass knows it by.
+        var id: String
         var title: String
         var branch: String?
+        /// list_tasks' "sub-task of": the task that started it.
+        var parentTitle: String?
         /// list_tasks' words for a task that isn't the Lead's.
         var notYours: String?
+        /// No repository: closing it moves its folder to the Trash.
+        var isFolderTask = false
         /// What its agent waits on the user for.
         var waitsOnUser: String?
-        /// The sidebar's.
+        /// The question to the Lead it waits on.
+        var question: Question?
+        /// The sidebar's, as last read.
         var pullRequest: PRInfo?
+        /// When Nirux last read its pull request (or that it has none).
+        var pullRequestReadAt: TimeInterval?
+        /// The window's merged list has its pull request: newer than the
+        /// sidebar's, which stops reading while Nirux is in the background.
+        var mergedInWindow = false
         /// Its repository's base branch (`<remote>/HEAD`), when read.
         var repositoryBase: String?
         /// Its last agent hook event (`WorkspaceState.lastActivityAt`).
         var lastTurnAt: TimeInterval?
-        /// Its HEAD's committer date.
+        /// The committer date of its newest commit not on its repository's
+        /// base branch (of HEAD when that branch isn't known).
         var lastCommitAt: TimeInterval?
         /// Its result, when nothing came after it (`resultAt`).
         var resultAt: TimeInterval?
 
-        /// The newest start of its pull request's checks: a push starts them.
-        var lastPushAt: TimeInterval? {
+        /// The newest start of its pull request's checks: a push, or a rerun.
+        var lastCheckRunAt: TimeInterval? {
             pullRequest?.checks.compactMap { $0.startedAt.flatMap(time(fromISO:)) }.max()
         }
 
-        /// Its latest turn, commit or push, and which.
+        /// Its latest turn, commit or check run, and which.
         var lastActivity: (time: TimeInterval, what: String)? {
-            [(lastTurnAt, "a turn"), (lastCommitAt, "a commit"), (lastPushAt, "a push")]
+            [(lastTurnAt, "a turn"), (lastCommitAt, "a commit"), (lastCheckRunAt, "a check run")]
                 .compactMap { time, what in time.map { ($0, what) } }
                 .max { $0.0 < $1.0 }
         }
+
+        /// No pull request, as read: a task whose branch was never read may
+        /// have one.
+        var hasNoPullRequest: Bool { pullRequest == nil && (isFolderTask || pullRequestReadAt != nil) }
     }
 
     struct ForgottenTask: Equatable, Sendable {
@@ -54,28 +77,29 @@ extension DailyPass {
         }
 
         let kind: Kind
-        /// When it became forgotten: news in a window that holds it. Nil for
-        /// a merged or closed pull request: a merge is news when GitHub
-        /// lists it in the window.
-        let since: TimeInterval?
+        /// Its task, kind and last activity: a key the last read listed is
+        /// no news.
+        let key: String
         let lastActivity: TimeInterval?
         let line: String
     }
 
     /// The time of the result a task's Missions (as their child) last
-    /// sent, when no question followed it, nor a tell typed or still on its
-    /// way. `Mission.status` doesn't say: a held tell typed after the
-    /// result makes it active again.
+    /// sent, when no question followed it, nor a tell typed after it or
+    /// still on its way (a Lead's one-way tell too). `Mission.status`
+    /// doesn't say: a held tell typed after the result makes it active again.
     static func resultAt(_ missions: [Mission]) -> TimeInterval? {
-        let events = missions.flatMap(\.events).filter { event in
+        let times = missions.flatMap(\.events).compactMap { event -> (TimeInterval, Bool)? in
             switch event.kind {
-            case .completed, .question: true
-            case .instruction: event.expiredAt == nil || event.childConsumedAt != nil
-            case .response, .acknowledged: false
+            case .completed: (event.timestamp, true)
+            case .question: (event.timestamp, false)
+            // When it was typed; one still on its way comes after anything.
+            case .instruction: event.childConsumedAt.map { ($0, false) } ?? (event.expiredAt == nil ? (.infinity, false) : nil)
+            case .response, .acknowledged: nil
             }
         }
-        guard let last = events.max(by: { $0.timestamp < $1.timestamp }), last.kind == .completed else { return nil }
-        return last.timestamp
+        guard let last = times.max(by: { $0.0 < $1.0 }), last.1 else { return nil }
+        return last.0
     }
 
     /// The tasks the Lead may have forgotten at `now`: closable, then
@@ -87,42 +111,61 @@ extension DailyPass {
 
     private static func forgotten(_ task: TaskActivity, now: TimeInterval, timeZone: TimeZone) -> ForgottenTask? {
         let last = task.lastActivity
-        func entry(_ kind: ForgottenTask.Kind, after delay: TimeInterval?, _ reason: String, _ move: String) -> ForgottenTask {
+        func entry(_ kind: ForgottenTask.Kind, _ reason: String, _ move: String) -> ForgottenTask {
             var line = "- “\(MissionPromptText.quoted(task.title))”"
+            if let parent = task.parentTitle { line += " · sub-task of “\(MissionPromptText.quoted(parent))”" }
             if let branch = task.branch { line += " · branch \(MissionPromptText.quoted(branch))" }
             if let notYours = task.notYours { line += " · \(notYours)" }
             let activity = last.map { "last activity \(clock($0.time, timeZone: timeZone)) (\($0.what)), \(duration(now - $0.time)) ago" }
             line += " · \(reason) · \(kind == .quiet ? "quiet: " : "")\(activity ?? "no activity recorded") → \(move)"
-            let since = delay.flatMap { delay in last.map { $0.time + delay } }
-            return ForgottenTask(kind: kind, since: since, lastActivity: last?.time, line: line)
+            let key = "\(task.id) \(kind.rawValue) \(Int(last?.time ?? 0))"
+            return ForgottenTask(kind: kind, key: key, lastActivity: last?.time, line: line)
         }
+        // Not its own to close: its parent's, else the user's.
+        let owner = task.notYours.map { _ in task.parentTitle.map { "tell “\(MissionPromptText.quoted($0))”, the task that started it" } ?? "ask the user" }
         let pull = task.pullRequest
-        if let pull, ["MERGED", "CLOSED"].contains(pull.state) {
-            return entry(.closable, after: nil, "PR #\(pull.number) " + (pull.state == "MERGED" ? "merged" : "closed unmerged"), "close_task")
+        if let pull, task.mergedInWindow || pull.state == "MERGED" {
+            return entry(.closable, "PR #\(pull.number) merged", "close_task")
+        }
+        if let pull, pull.state == "CLOSED" {
+            return entry(.closable, "PR #\(pull.number) closed unmerged", "ask the user whether it was dropped, then close_task")
         }
         guard let last else { return nil }
-        let idle = now - last.time
-        if pull == nil, let result = task.resultAt, last.time <= result + resultTurn {
-            guard idle >= unattendedAfter else { return nil }
-            let reason = "result sent \(clock(result, timeZone: timeZone)), nothing since, no pull request"
-            return entry(.closable, after: unattendedAfter, reason, "close_task")
+        if task.hasNoPullRequest, let result = task.resultAt, last.time <= result + resultTurn {
+            // A day since the result, whatever came just before it.
+            guard now - max(last.time, result) >= unattendedAfter else { return nil }
+            let close = task.isFolderTask ? "close_task once the user has its result (its folder goes to the Trash)" : "close_task"
+            return entry(.closable, "result sent \(clock(result, timeZone: timeZone)), nothing since, no pull request", owner ?? close)
         }
+        let idle = now - last.time
         if let pull, isWaiting(pull, repositoryBase: task.repositoryBase) {
             guard idle >= unattendedAfter else { return nil }
-            return entry(.waiting, after: unattendedAfter, "PR #\(pull.number) green and mergeable, unmerged", "ask the user to merge it")
+            return entry(.waiting, "PR #\(pull.number) green and mergeable, unmerged", "ask the user to merge it")
         }
         guard idle >= quietAfter else { return nil }
-        let move = task.waitsOnUser.map { "ask the user: it waits on them (\($0))" }
-            ?? (task.notYours == nil ? "tell it what comes next, or close_task if it was dropped" : "ask the user")
-        return entry(.quiet, after: quietAfter, pull.map { openPullRequest($0, repositoryBase: task.repositoryBase) } ?? "no pull request", move)
+        let reason = pull.map { openPullRequest($0, repositoryBase: task.repositoryBase) }
+            ?? (task.hasNoPullRequest ? "no pull request" : "its pull request not read yet")
+        return entry(.quiet, reason, quietMove(task, owner: owner))
     }
 
-    /// Open, green, mergeable, no draft, and on its repository's base
-    /// branch as the Board reads it: a stacked one waits for its parent, a
-    /// base gh or git didn't name holds nothing back.
+    /// What it waits on first: the user, through the Lead or in its
+    /// terminal; then the Lead's answer; then its owner.
+    private static func quietMove(_ task: TaskActivity, owner: String?) -> String {
+        if let question = task.question {
+            return question.handedToUser ? "ask the user: it waits on their answer to question \(question.id)" : "reply to its question \(question.id)"
+        }
+        if let wait = task.waitsOnUser { return "ask the user: it waits on them (\(wait))" }
+        return owner ?? "tell it what comes next, or close_task if it was dropped"
+    }
+
+    /// Open, green (or with no check at all), mergeable, no draft, no
+    /// change asked by a review, not set to merge by itself, and on its
+    /// repository's base branch: a stacked one waits for its parent, a base
+    /// gh or git didn't name holds nothing back.
     private static func isWaiting(_ pull: PRInfo, repositoryBase: String?) -> Bool {
-        pull.state == "OPEN" && !pull.isDraft && pull.ciStatus == "SUCCESS" && pull.mergeable == "MERGEABLE"
-            && isOnBase(pull, repositoryBase: repositoryBase)
+        let green = pull.ciStatus == "SUCCESS" || (pull.ciStatus == nil && pull.checks.isEmpty)
+        return pull.state == "OPEN" && !pull.isDraft && green && pull.mergeable == "MERGEABLE"
+            && pull.reviewDecision != "CHANGES_REQUESTED" && !pull.autoMerges && isOnBase(pull, repositoryBase: repositoryBase)
     }
 
     private static func isOnBase(_ pull: PRInfo, repositoryBase: String?) -> Bool {
@@ -134,43 +177,60 @@ extension DailyPass {
         let checks = ["FAILURE": "checks failing", "PENDING": "checks running", "SUCCESS": "checks green"]
         let details = [
             pull.ciStatus.flatMap { checks[$0] }, pull.mergeable == "CONFLICTING" ? "conflicting" : nil,
+            pull.reviewDecision == "CHANGES_REQUESTED" ? "changes requested" : nil, pull.autoMerges ? "set to merge by itself" : nil,
             isOnBase(pull, repositoryBase: repositoryBase) ? nil : pull.baseRefName.map { "on \(MissionPromptText.quoted($0))" }
         ].compactMap { $0 }
         return "PR #\(pull.number) \(pull.isDraft ? "draft" : "open")" + details.map { ", " + $0 }.joined()
     }
 
-    /// Each folder's HEAD committer date, the folders read at once; nil
-    /// where git can't say. Never on the main thread.
-    static func commitTimes(_ folders: [String]) -> [TimeInterval?] {
+    /// A repository's base branch: `<remote>/HEAD` of its GitHub base remote.
+    struct Base: Equatable, Sendable {
+        var remote: String
+        var branch: String
+
+        var ref: String { "refs/remotes/\(remote)/\(branch)" }
+    }
+
+    /// Each folder's base branch; a folder git can't tell is left out.
+    /// Never on the main thread.
+    static func baseBranches(_ remotes: [(folder: String, read: GitHubBaseRemote.Read)]) -> [String: Base] {
+        var bases: [String: Base] = [:]
+        for (folder, read) in remotes {
+            guard case .gitHub(_, let remote) = read, let branch = BoardConfigSuggestions.defaultBranch(of: remote, at: folder) else { continue }
+            bases[folder] = Base(remote: remote, branch: branch)
+        }
+        return bases
+    }
+
+    /// Each folder's newest commit not on `base` (a full ref), by its
+    /// committer date; of HEAD without a base. The folders are read at once;
+    /// nil where git can't say, or for a branch with no commit of its own.
+    /// Never on the main thread.
+    static func commitTimes(_ folders: [(folder: String, base: String?)]) -> [TimeInterval?] {
         let times = OSAllocatedUnfairLock(initialState: [Int: TimeInterval]())
         DispatchQueue.concurrentPerform(iterations: folders.count) { index in
-            let output = GitCommand.output(["log", "-1", "--format=%ct", "HEAD"], cwd: folders[index], timeout: 10)
+            let (folder, base) = folders[index]
+            let output = GitCommand.output(["log", "-1", "--format=%ct", "HEAD"] + (base.map { ["--not", $0] } ?? []), cwd: folder, timeout: 10)
             guard let time = output.flatMap({ TimeInterval($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) else { return }
             times.withLock { $0[index] = time }
         }
         return times.withLock { found in folders.indices.map { found[$0] } }
     }
 
-    /// Each folder's base branch (`<remote>/HEAD` of its GitHub base
-    /// remote, as the Board reads it); a folder git can't tell is left out.
-    /// Never on the main thread.
-    static func baseBranches(_ remotes: [(folder: String, read: GitHubBaseRemote.Read)]) -> [String: String] {
-        var bases: [String: String] = [:]
-        for (folder, read) in remotes {
-            guard case .gitHub(_, let remote) = read, let base = BoardConfigSuggestions.defaultBranch(of: remote, at: folder) else { continue }
-            bases[folder] = base
-        }
-        return bases
-    }
-
     /// The tasks read on the main thread, with what was read of them off
-    /// it: each one's last commit (`Reads.commits`, in order) and its
-    /// repository's base branch.
+    /// it: each one's last commit (`Reads.commits`, in order), its
+    /// repository's base branch, and whether the window's merged list has
+    /// its pull request.
     static func tasks(_ tasks: [(activity: TaskActivity, repository: String?)], with reads: Reads) -> [TaskActivity] {
         zip(tasks, reads.commits).map { task, commit in
             var activity = task.activity
             activity.lastCommitAt = commit
-            activity.repositoryBase = task.repository.flatMap { reads.bases[$0] }
+            activity.repositoryBase = task.repository.flatMap { reads.bases[$0]?.branch }
+            if let pull = activity.pullRequest, let repository = BoardStages.TaskReading.repository(ofPullRequestAt: pull.url) {
+                activity.mergedInWindow = reads.repositories.contains { report in
+                    report.name.lowercased() == "\(repository.owner)/\(repository.name)" && report.merged.contains { $0.number == pull.number }
+                }
+            }
             return activity
         }
     }
@@ -179,9 +239,9 @@ extension DailyPass {
     struct Reads: Sendable {
         var repositories: [RepositoryReport]
         var findings: [ReviewFindings.Entry]
-        /// Each task folder's HEAD committer date, in order.
+        /// Each task folder's last commit, in order.
         var commits: [TimeInterval?]
         /// Each repository folder's base branch.
-        var bases: [String: String]
+        var bases: [String: Base]
     }
 }

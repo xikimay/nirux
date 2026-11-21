@@ -460,6 +460,8 @@ enum DailyPass {
         var briefRules: [String]
         /// The space's open tasks, as they stand at the window's end.
         var tasks: [TaskActivity] = []
+        /// The forgotten tasks the last read listed (`ForgottenTask.key`).
+        var reported: Set<String> = []
 
         /// Anything for the pass to read. What GitHub didn't say isn't: a
         /// signed-out gh would make every day one.
@@ -468,7 +470,7 @@ enum DailyPass {
                 || repositories.contains { !$0.merged.isEmpty || !$0.reruns.isEmpty }
                 || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }
-                || forgottenTasks(tasks, now: window.end).contains { window.contains($0.since) }
+                || forgottenTasks(tasks, now: window.end).contains { !reported.contains($0.key) }
         }
 
         /// GitHub may answer next time: the window isn't marked read.
@@ -488,6 +490,8 @@ enum DailyPass {
     struct Digest: Equatable, Sendable {
         let text: String
         let readUntil: TimeInterval
+        /// The forgotten tasks it lists (`ForgottenTask.key`).
+        var listed: [String] = []
     }
 
     /// How much a section lists, lowered until the digest fits
@@ -508,18 +512,22 @@ enum DailyPass {
         var text: String?
         var leftOut: [TimeInterval] = []
         var times: [TimeInterval] = []
+        /// The forgotten tasks it lists.
+        var listed: [String] = []
     }
 
     static func digest(_ facts: Facts, timeZone: TimeZone = .current) -> Digest {
         let window = facts.window
         let since = clock(window.start, timeZone: timeZone)
         let header = "# Daily pass · \(facts.spaceName) · since \(since)"
+        let forgotten = forgottenTasks(facts.tasks, now: window.end, timeZone: timeZone)
         guard facts.hasNews else {
             let merged = facts.repositories.contains { !$0.problems.isEmpty } ? "" : "no pull request merged, "
+            let tasks = forgottenSection(forgotten, reported: facts.reported, limits[0])
             let quiet = header + "\n\nNothing happened since \(since): no review recorded, \(merged)no CI failure, "
-                + "no Mission message held, no rule decided. Nothing to propose: say so in one line."
-            let sections = [gitHubSection(facts), forgottenSection(facts, limits[0], timeZone: timeZone)].compactMap { $0 }
-            return Digest(text: ([quiet] + sections).joined(separator: "\n\n"), readUntil: window.end)
+                + "no Mission message held, no rule decided. Nothing to propose" + (tasks.text == nil ? ": say so in one line." : ".")
+            let sections = [gitHubSection(facts), tasks.text].compactMap { $0 }
+            return Digest(text: ([quiet] + sections).joined(separator: "\n\n"), readUntil: window.end, listed: tasks.listed)
         }
         // The rules before the facts; each section lists its facts in time
         // order, so what it leaves out comes after what it shows.
@@ -527,7 +535,7 @@ enum DailyPass {
         for limit in limits {
             parts = [
                 Part(text: instructions(facts)), Part(text: gitHubSection(facts)), rulesSection(facts, limit),
-                Part(text: forgottenSection(facts, limit, timeZone: timeZone)), findingsSection(facts, limit),
+                forgottenSection(forgotten, reported: facts.reported, limit), findingsSection(facts, limit),
                 pullRequestsSection(facts, limit), ciSection(facts, limit, timeZone: timeZone), missionsSection(facts, limit, timeZone: timeZone)
             ]
             if joined(header, parts).count <= maxCharacters { break }
@@ -545,7 +553,7 @@ enum DailyPass {
             text += "\n\nLeft out: what came after \(clock(readUntil, timeZone: timeZone)). The window is read up to there only: "
                 + "call daily_pass again for the rest once you have proposed."
         }
-        return Digest(text: text, readUntil: readUntil)
+        return Digest(text: text, readUntil: readUntil, listed: parts.flatMap(\.listed))
     }
 
     private static func joined(_ header: String, _ parts: [Part]) -> String {
@@ -582,13 +590,18 @@ enum DailyPass {
         return section("What GitHub didn’t say", lines + [after], total: lines.count + 1)
     }
 
-    /// The tasks forgotten at the window's end: a snapshot of now, not a
-    /// fact of the window, outside the cut.
-    private static func forgottenSection(_ facts: Facts, _ limit: Limits, timeZone: TimeZone) -> String? {
-        let forgotten = forgottenTasks(facts.tasks, now: facts.window.end, timeZone: timeZone)
-        guard !forgotten.isEmpty else { return nil }
-        let lead = "Nirux only lists them: nothing was closed or told. Make each move, or tell the user why not."
-        return section("Tasks you may have forgotten", [lead] + forgotten.prefix(limit.items).map(\.line), total: forgotten.count + 1)
+    /// The tasks forgotten at the window's end, those the last read didn't
+    /// list first: a snapshot of now, not a fact of the window.
+    private static func forgottenSection(_ forgotten: [ForgottenTask], reported: Set<String>, _ limit: Limits) -> Part {
+        guard !forgotten.isEmpty else { return Part() }
+        let isNew = { (task: ForgottenTask) in !reported.contains(task.key) }
+        let shown = (forgotten.filter(isNew) + forgotten.filter { !isNew($0) }).prefix(limit.items)
+        var lines = ["Nirux only lists them: nothing was closed or told. Make each move, or tell the user why not."]
+        lines += shown.filter(isNew).map(\.line)
+        let again = shown.filter { !isNew($0) }.map(\.line)
+        if !again.isEmpty { lines += ["Listed last time too, nothing changed since:"] + again }
+        let text = section("Tasks you may have forgotten", lines, total: lines.count + forgotten.count - shown.count)
+        return Part(text: text, listed: shown.map(\.key))
     }
 
     /// The kinds seen in the window, with where else they showed up in
@@ -858,6 +871,9 @@ struct DailyPassState: Codable, Equatable, Sendable {
     var readAt: TimeInterval?
     /// When Nirux last typed the daily line into the Lead.
     var typedAt: TimeInterval?
+    /// The forgotten tasks the last read listed (`ForgottenTask.key`): no
+    /// news until their kind or last activity changes.
+    var listedTasks: [String]?
     /// When a due pass last found nothing to read.
     var checkedAt: TimeInterval?
     /// The last pass's counts, for the Lead row.
