@@ -30,6 +30,47 @@ extension TaskThread {
         var rules: [RuleProposal] = []
     }
 
+    /// The inputs to the pinned timeline. Shared PR files only contribute to a task with a recorded PR.
+    struct TimelineInputs: Equatable, Sendable {
+        let workspaceID: String
+        let spaceID: String
+        let urls: Set<String>
+        let pullRequestEvents: [Event]
+        let status: String?
+        let next: String?
+        let blocker: String?
+        let missions: [Mission]?
+        let reviews: [ReviewPass: ReviewRun]
+        let singleRepository: Bool
+        let files: Files
+
+        struct Files: Equatable, Sendable {
+            var records: [URL: FileStamp] = [:]
+            var pullRequests: [FileStamp?] = []
+        }
+
+        static func fileStamps(workspaceID: String, spaceID: String, spaces: [String], directory: URL) -> Files {
+            var files = Files()
+            func check(_ url: URL?) {
+                if let url { files.records[url] = FileStamp(url) }
+            }
+            let file = Store.fileURL(workspaceID: workspaceID, spaceID: spaceID, stateDirectory: directory)
+            check(file)
+            if file.flatMap({ files.records[$0] }) == nil {
+                check(Store.locate(workspaceID: workspaceID, stateDirectory: directory))
+            }
+            for space in spaces {
+                check(ReviewFindings.lines.fileURL(spaceID: space, stateDirectory: directory))
+            }
+            files.pullRequests = [
+                FileStamp(directory.appendingPathComponent(CITriageStore.fileName)),
+                FileStamp(directory.appendingPathComponent(PRFollowUpStore.fileName)),
+                RuleProposalStore(spaceID: spaceID, stateDirectory: directory).flatMap { FileStamp($0.fileURL) }
+            ]
+            return files
+        }
+    }
+
     static func events(from sources: Sources) -> [Event] {
         let reviews = sources.reviewRuns.map { pass, run in
             Event(time: run.at, kind: .review, detail: pass.rawValue, ref: run.head)

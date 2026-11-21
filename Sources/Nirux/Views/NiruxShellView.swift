@@ -106,6 +106,11 @@ final class NiruxShellView: NSView {
     }
 
     // Heartbeat
+    lazy var pinnedThreadReader: TaskThreadContentView.Read = { [weak self] id, space, done in
+        guard let self else { return done(nil) }
+        readThreadTimeline(workspaceID: id, spaceID: space, completion: done)
+    }
+
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
     /// Event-driven git/PR refresh scheduling (FSEvents + throttles).
@@ -470,6 +475,7 @@ final class NiruxShellView: NSView {
                 self.refreshGitAndPullRequests()
                 self.checkMissionWaits(snapshot: snapshot, now: Date().timeIntervalSince1970)
                 self.refreshMetadata(snapshot: snapshot)
+                self.refreshPinnedTaskThread()
                 // Save state every ~10s (every 5th tick)
                 if self.heartbeatTick % 5 == 0 {
                     self.saveState(snapshot: snapshot)

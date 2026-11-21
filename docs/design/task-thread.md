@@ -100,7 +100,7 @@ The daily pass reports task activity within its existing window. It counts quest
 
 ## 6. The pinned thread
 
-Open task thread pins the displayed card to the workspace it previewed. Moving the pointer away leaves the thread open. Sidebar updates refresh its history and preserve expanded sections. Escape or Close thread dismisses it.
+Open task thread pins the displayed card to the workspace it previewed. Moving the pointer away leaves the thread open. While the card is pinned, the two-second heartbeat checks its inputs. Changes to the task’s live data or source files refresh its history and preserve expanded sections. Escape or Close thread dismisses it.
 
 ## 7. Not yet
 

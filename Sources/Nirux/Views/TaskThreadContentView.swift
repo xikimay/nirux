@@ -24,6 +24,7 @@ final class TaskThreadContentView: NSView, NSOutlineViewDataSource, NSOutlineVie
     private var workspaceID: String?
     private var spaceID: String?
     private var request: UUID?
+    private var lastInputs: TaskThread.TimelineInputs?
     private var displayed: TaskThread.Timeline?
     var isReading: Bool { request != nil }
 
@@ -64,6 +65,22 @@ final class TaskThreadContentView: NSView, NSOutlineViewDataSource, NSOutlineVie
             }
         }
         super.viewWillMove(toWindow: newWindow)
+    }
+
+    func refresh(
+        fileStamps: @escaping @Sendable () -> TaskThread.TimelineInputs.Files,
+        inputs: @escaping (TaskThread.TimelineInputs.Files) -> TaskThread.TimelineInputs?, read: @escaping Read
+    ) {
+        guard !isReading else { return }
+        let token = UUID()
+        request = token
+        NiruxShellView.offMain(fileStamps) { [weak self] stamps in
+            guard let self, request == token else { return }
+            request = nil
+            guard window != nil, let current = inputs(stamps), current != lastInputs else { return }
+            lastInputs = current
+            show(workspaceID: current.workspaceID, spaceID: current.spaceID, read: read)
+        }
     }
 
     func show(workspaceID: String, spaceID: String, read: Read) {
@@ -167,7 +184,26 @@ extension NiruxShellView {
     func refreshPinnedTaskThread() {
         guard let body = sidebar.taskPreview.pinnedBody, !body.isReading,
               let id = sidebar.taskPreview.workspaceID else { return }
-        body.show(workspaceID: id, spaceID: activeProfileID, read: readThreadTimeline)
+        let space = activeProfileID
+        let directory = Persistence.stateDirectory
+        let spaces = profiles.map(\.id)
+        body.refresh(fileStamps: {
+            TaskThread.TimelineInputs.fileStamps(workspaceID: id, spaceID: space, spaces: spaces, directory: directory)
+        }, inputs: { [weak self] stamps in
+            guard let self, activeProfileID == space,
+                  let task = workspaces.first(where: { $0.id == id && $0.profileID == space && !$0.isClosing }) else { return nil }
+            let context = threadContext(of: task)
+            let ledger = MissionStore.shared
+            var files = stamps
+            if context.urls.isEmpty { files.pullRequests = [] }
+            return TaskThread.TimelineInputs(
+                workspaceID: id, spaceID: space, urls: context.urls, pullRequestEvents: context.pullRequestEvents,
+                status: context.status, next: context.next, blocker: context.blocker,
+                missions: ledger.ensureLoaded() ? ledger.missions.filter { $0.childWorkspaceID == id } : nil,
+                reviews: task.reviewRuns, singleRepository: (profiles.first { $0.id == space }?.anchors.count ?? 0) <= 1,
+                files: files
+            )
+        }, read: pinnedThreadReader)
     }
 
     func readThreadTimeline(workspaceID: String, spaceID: String, completion: @escaping @MainActor (TaskThread.Timeline?) -> Void) {

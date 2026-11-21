@@ -84,6 +84,12 @@ final class TaskThreadContentTests: XCTestCase {
             harness.window.orderOut(nil)
             let space = shell.activeProfileID
             let tasks = [UUID().uuidString, UUID().uuidString]
+            let reader = shell.pinnedThreadReader
+            var reads: [String: Int] = [:]
+            shell.pinnedThreadReader = { id, space, done in
+                reads[id, default: 0] += 1
+                reader(id, space, done)
+            }
             for (index, id) in tasks.enumerated() {
                 shell.addWorkspace(title: "Thread task", cwd: harness.worktree, workspaceID: id, activate: false)
                 TaskThread.Store.append([.init(time: 1, kind: .request, text: "Request for task \(index)")],
@@ -123,6 +129,16 @@ final class TaskThreadContentTests: XCTestCase {
                 harness.waitUntil("the pinned workspace's recorded request") {
                     self.labels(body).contains { $0.contains("Request for task \(index)") }
                 }
+                XCTAssertEqual(reads[id], 1)
+                let other = try XCTUnwrap(shell.workspaces.first { $0.id == tasks[1 - index] })
+                for change in 1...3 {
+                    other.lastSummary = "Unrelated metadata \(change)"
+                    shell.updateSidebar()
+                    XCTAssertFalse(body.isReading, "sidebar updates do not start a thread check")
+                    shell.refreshPinnedTaskThread()
+                    harness.waitUntil("the pinned input check completes") { !body.isReading }
+                    XCTAssertEqual(reads[id], 1)
+                }
                 preview.mouseExited(with: NSEvent())
                 sidebar.taskPreview.enter(tasks[1 - index])
                 XCTAssertNil(sidebar.taskPreview.pending)
@@ -130,9 +146,18 @@ final class TaskThreadContentTests: XCTestCase {
                                         spaceID: space, stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
                 sidebar.rebuildContent()
                 shell.updateSidebar()
+                shell.refreshPinnedTaskThread()
                 harness.waitUntil("the same card shows the new entry") {
                     self.labels(body).contains { $0.contains("Updated task \(index)") }
                 }
+                XCTAssertEqual(reads[id], 2)
+                let task = try XCTUnwrap(shell.workspaces.first { $0.id == id })
+                task.reviewRuns[.adversarial] = ReviewRun(head: "abc1234", at: 3, branch: "thread")
+                shell.refreshPinnedTaskThread()
+                harness.waitUntil("the in-memory review appears without a thread file write") {
+                    self.labels(body).contains { $0.contains("abc1234") }
+                }
+                XCTAssertEqual(reads[id], 3)
                 XCTAssertTrue(sidebar.taskPreview.card === preview)
                 XCTAssertEqual(sidebar.taskPreview.workspaceID, id)
                 XCTAssertTrue(preview.window === harness.window)
