@@ -1,14 +1,5 @@
 import AppKit
 
-extension MergeWait {
-    var waitingState: WaitingTaskView.Facts.State? {
-        guard pendingStart != nil else { return nil }
-        if let failure { return .needsYou(failure) }
-        if startingBranch != nil || mergedAt != nil { return .starting }
-        return .waits(awaitedLongName)
-    }
-}
-
 extension NiruxShellView {
 
     func queueWaitingTask(_ start: MergeWait.PendingStart, after name: String, in space: WorkspaceProfile, answer: @escaping LeadAnswer) {

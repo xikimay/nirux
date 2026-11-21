@@ -192,3 +192,28 @@ struct MergeWait: Codable, Equatable, Sendable {
     /// for a free prompt.
     static let deliveryLifetime = MissionEventCLI.instructionLifetime
 }
+
+extension MergeWait {
+    enum WaitingState: Hashable, Sendable {
+        /// For "#657 (“Fix login”)" to merge.
+        case waits(String)
+        case starting
+        /// Why it didn't start: the row reads Needs you.
+        case needsYou(String)
+
+        var line: String {
+            switch self {
+            case .waits(let name): "Waits for \(name) to merge"
+            case .starting: "Starting"
+            case .needsYou(let reason): "Needs you · \(reason)"
+            }
+        }
+    }
+
+    var waitingState: WaitingState? {
+        guard pendingStart != nil else { return nil }
+        if let failure { return .needsYou(failure) }
+        if startingBranch != nil || mergedAt != nil { return .starting }
+        return .waits(awaitedLongName)
+    }
+}

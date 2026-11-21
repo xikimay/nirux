@@ -348,7 +348,7 @@ struct WorkspaceInfo: Hashable {
     var followUp: SidebarFollowUp?
     /// The Lead's messages it holds until other tasks' pull requests merge.
     var heldMessages: SidebarHeldMessages?
-    var waitingTask: WaitingTaskView.Facts.State?
+    var waitingTask: MergeWait.WaitingState?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
