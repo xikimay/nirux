@@ -76,6 +76,39 @@ final class TaskThreadContentTests: XCTestCase {
         }
     }
 
+    private func pinThread(_ id: String, expanded: Bool, in harness: UIFlowHarness) throws -> TaskPreviewCard {
+        let shell = harness.shell
+        let sidebar = shell.sidebar
+        shell.isSidebarExpanded = expanded
+        sidebar.isExpanded = expanded
+        shell.relayout(animated: false)
+        harness.window.contentView?.layoutSubtreeIfNeeded()
+        if expanded {
+            let document = sidebar.contentDocumentView
+            let row = try XCTUnwrap(sidebar.rowFrame(workspaceID: id))
+            document.scrollToVisible(document.convert(row, from: sidebar))
+            let frame = try XCTUnwrap(sidebar.rowFrame(workspaceID: id)).intersection(sidebar.visibleRect)
+            XCTAssertFalse(frame.isEmpty)
+            let point = sidebar.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
+            let event = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [],
+                timestamp: 0, windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+            sidebar.mouseMoved(with: event)
+        } else {
+            try XCTUnwrap(sidebar.iconRail.itemViews[id]).mouseEntered(with: NSEvent())
+        }
+        XCTAssertEqual(sidebar.taskPreview.workspaceID, id)
+        waitUntil("the preview for \(expanded ? "row" : "rail") \(id), tracking \(sidebar.taskPreview.workspaceID ?? "none")") {
+            sidebar.taskPreview.workspaceID == id && sidebar.taskPreview.card != nil
+        }
+        let preview = try XCTUnwrap(sidebar.taskPreview.card)
+        let open = try XCTUnwrap(preview.subviews.compactMap { $0 as? NSButton }.first { $0.title == "Open task thread" })
+        preview.mouseExited(with: NSEvent())
+        XCTAssertNotNil(sidebar.taskPreview.pending)
+        open.performClick(nil)
+        XCTAssertNil(sidebar.taskPreview.pending)
+        return preview
+    }
+
     func testRowAndRailPinTheirOwnThreadThroughRefreshUntilEscape() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -98,33 +131,7 @@ final class TaskThreadContentTests: XCTestCase {
             shell.updateSidebar()
             for (index, id) in tasks.enumerated() {
                 let expanded = index == 0
-                shell.isSidebarExpanded = expanded
-                sidebar.isExpanded = expanded
-                shell.relayout(animated: false)
-                harness.window.contentView?.layoutSubtreeIfNeeded()
-                if expanded {
-                    let document = sidebar.contentDocumentView
-                    let row = try XCTUnwrap(sidebar.rowFrame(workspaceID: id))
-                    document.scrollToVisible(document.convert(row, from: sidebar))
-                    let frame = try XCTUnwrap(sidebar.rowFrame(workspaceID: id)).intersection(sidebar.visibleRect)
-                    XCTAssertFalse(frame.isEmpty)
-                    let point = sidebar.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
-                    let event = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [],
-                        timestamp: 0, windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
-                    sidebar.mouseMoved(with: event)
-                } else {
-                    try XCTUnwrap(sidebar.iconRail.itemViews[id]).mouseEntered(with: NSEvent())
-                }
-                XCTAssertEqual(sidebar.taskPreview.workspaceID, id)
-                waitUntil("the preview for \(expanded ? "row" : "rail") \(id), tracking \(sidebar.taskPreview.workspaceID ?? "none")") {
-                    sidebar.taskPreview.workspaceID == id && sidebar.taskPreview.card != nil
-                }
-                let preview = try XCTUnwrap(sidebar.taskPreview.card)
-                let open = try XCTUnwrap(preview.subviews.compactMap { $0 as? NSButton }.first { $0.title == "Open task thread" })
-                preview.mouseExited(with: NSEvent())
-                XCTAssertNotNil(sidebar.taskPreview.pending)
-                open.performClick(nil)
-                XCTAssertNil(sidebar.taskPreview.pending)
+                let preview = try pinThread(id, expanded: expanded, in: harness)
                 let body = try XCTUnwrap(preview.subviews.compactMap { $0 as? TaskThreadContentView }.first)
                 harness.waitUntil("the pinned workspace's recorded request") {
                     self.labels(body).contains { $0.contains("Request for task \(index)") }
@@ -200,16 +207,17 @@ final class TaskThreadContentTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let store = MissionStore.shared
-            let lead = try harness.makeLead()
+            harness.window.orderOut(nil)
+            let parent = try XCTUnwrap(shell.activeWorkspace)
             let id = UUID().uuidString
             let mission = try XCTUnwrap(store.create(MissionCreationRequest(
-                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                id: UUID().uuidString, parentWorkspaceID: parent.id, parentAgentUUID: UUID().uuidString,
                 childWorkspaceID: id, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
-                branch: "feat/reply", reportsToLead: true
+                branch: "feat/reply", reportsToTask: true
             ), enabled: true))
-            shell.addWorkspace(title: "Reply task", cwd: harness.worktree, profileID: lead.space, workspaceID: id,
+            shell.addWorkspace(title: "Reply task", cwd: harness.worktree, profileID: parent.profileID, workspaceID: id,
                                initialAgentUUID: mission.childAgentUUID, missionID: mission.id,
-                               reportsToLead: true, activate: false)
+                               reportsToTask: true, activate: false)
             let activeID = shell.activeWorkspace?.id
             XCTAssertNotEqual(activeID, id)
 
@@ -217,27 +225,20 @@ final class TaskThreadContentTests: XCTestCase {
                 let question = MissionEvent(id: UUID().uuidString, missionID: mission.id, childWorkspaceID: id,
                     childAgentUUID: mission.childAgentUUID, kind: .question, message: text, timestamp: Date().timeIntervalSince1970)
                 guard case .accepted = store.process(question, enabled: false) else {
-                    XCTFail("the child asks its Lead")
+                    XCTFail("the child asks its parent")
                     return question
                 }
                 _ = try XCTUnwrap(store.handToUser(questionID: question.id, because: "User decision"))
                 return question
             }
 
+            shell.updateSidebar()
+            let card = try pinThread(id, expanded: true, in: harness)
+            let body = try XCTUnwrap(shell.sidebar.taskPreview.pinnedBody)
+            harness.waitUntil("the initial pinned read") { !body.isReading }
             let first = try ask("Which format?")
             let second = try ask("Which timezone?")
-            shell.isSidebarExpanded = false
-            shell.sidebar.isExpanded = false
-            shell.updateSidebar()
-            shell.relayout(animated: false)
-            harness.window.contentView?.layoutSubtreeIfNeeded()
-            let rail = try XCTUnwrap(shell.sidebar.iconRail.itemViews[id])
-            harness.window.orderOut(nil)
-            rail.mouseEntered(with: NSEvent())
-            harness.waitUntil("the task preview") { shell.sidebar.taskPreview.card != nil }
-            let card = try XCTUnwrap(shell.sidebar.taskPreview.card)
-            try XCTUnwrap(UIFlowHarness.button(titled: "Open task thread", in: card)).performClick(nil)
-            let body = try XCTUnwrap(shell.sidebar.taskPreview.pinnedBody)
+            shell.refreshPinnedTaskThread()
 
             @MainActor func openReply(_ question: MissionEvent) throws -> TaskThreadReplyView {
                 harness.waitUntil("the open question") {
