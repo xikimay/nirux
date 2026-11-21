@@ -3,16 +3,16 @@ import AppKit
 // MARK: - Mission questions: the child's card, the hand-off to the user, the reply popover
 
 extension NiruxShellView {
-    /// How long a parent may show no Claude, a Claude that took no prompt
+    /// How long a parent may be absent, have taken no prompt
     /// yet, or sit idle after it took the question, before the question
-    /// comes to the user: a `claude` restarted, its first prompt on its way,
+    /// comes to the user: an agent restarted, its first prompt on its way,
     /// a `reply` Nirux hasn't drained yet. In the background the stuck watch
     /// samples every 30 s, so it takes up to a minute there.
     nonisolated static let missionParentGrace: TimeInterval = 20
 
     /// What Nirux saw of a question's parent across refreshes.
     struct MissionParentWatch: Equatable {
-        /// Since when its column can't take the question: no Claude, one
+        /// Since when its column can't take the question: no agent, one
         /// that took no prompt, or one restarted since it took it.
         var absentSince: TimeInterval?
         /// Since when it sits idle after it took the question.
@@ -36,13 +36,13 @@ extension NiruxShellView {
         mutating func settle(
             _ observed: SidebarMissionQuestion.Parent, foregroundKnown: Bool, now: TimeInterval
         ) -> SidebarMissionQuestion.Parent {
-            guard foregroundKnown else { return settled ?? .claude }
+            guard foregroundKnown else { return settled ?? .available }
             var state = observed
             switch observed {
-            case .notClaude, .notAtPrompt, .restartedSinceTyped:
+            case .unavailable, .notAtPrompt, .restartedSinceTyped:
                 absentSince = absentSince ?? now
-                if now - (absentSince ?? now) < NiruxShellView.missionParentGrace { state = .claude }
-            case .claude, .stoppedWithoutAnswer:
+                if now - (absentSince ?? now) < NiruxShellView.missionParentGrace { state = .available }
+            case .available, .stoppedWithoutAnswer:
                 absentSince = nil
             case .closed:
                 break
@@ -50,11 +50,11 @@ extension NiruxShellView {
             if state == .stoppedWithoutAnswer, !skipped {
                 stoppedSince = stoppedSince ?? now
                 skipped = now - (stoppedSince ?? now) >= NiruxShellView.missionParentGrace
-            } else if state == .claude, !skipped {
+            } else if state == .available, !skipped {
                 stoppedSince = nil
             }
-            if skipped, state == .claude || state == .stoppedWithoutAnswer { state = .stoppedWithoutAnswer }
-            else if state == .stoppedWithoutAnswer { state = .claude }
+            if skipped, state == .available || state == .stoppedWithoutAnswer { state = .stoppedWithoutAnswer }
+            else if state == .stoppedWithoutAnswer { state = .available }
             settled = state
             return state
         }
@@ -123,13 +123,24 @@ extension NiruxShellView {
                     }
                     parentState = Self.missionParent(
                         foreground: process, typedAt: typedAt,
-                        finishedTurnAfterTyping: pty.finishedTurn(afterTypingAt:),
+                        finishedTurnAfterTyping: { pty.finishedMissionTurn(in: $0, after: $1) },
                         tookPrompt: { process in
-                            pty.agentTookPrompt(since: process).map { $0 || pty.sitsAtFirstPrompt(process, now: now, record: sessionRecord(of:)) }
+                            switch process.interactiveAgent {
+                            case .codex:
+                                guard let status = pty.codexStatus(of: process.instance) else { return false }
+                                // The first turn proves its thread when Codex reports its end.
+                                if [.working, .blocked].contains(status.state) { return CodexLaunch.canProve(process) }
+                                return parent.provenCodexSessionID(of: process) != nil
+                            case .agy: return pty.hasAgyTurn(in: process.instance)
+                            default:
+                                return pty.agentTookPrompt(since: process).map {
+                                    $0 || pty.sitsAtFirstPrompt(process, now: now, record: sessionRecord(of:))
+                                }
+                            }
                         }
                     )
                 } else {
-                    parentState = .notClaude
+                    parentState = .unavailable
                 }
             } else {
                 parentState = .closed
@@ -203,26 +214,17 @@ extension NiruxShellView {
         return true
     }
 
-    /// What a parent whose terminal runs can do with a question, from its
-    /// foreground process (nil: a process-table miss, which `settle` reads
-    /// as nothing new) and when Nirux typed the question into it, if it
-    /// did. Typed already, it went to a `claude` that could take it: one
-    /// started since never gets it (a question is typed once). Not typed
-    /// yet, a `claude` that took no prompt since it started can't take it,
-    /// unless it says it sits at its prompt (`tookPrompt` says either,
-    /// see `PtySession.sitsAtFirstPrompt`). `tookPrompt` is nil while its
-    /// hooks never reported: nothing tells, and it may take it.
     static func missionParent(
         foreground: ForegroundProcess?, typedAt: TimeInterval?,
-        finishedTurnAfterTyping: (TimeInterval) -> Bool, tookPrompt: (ForegroundProcess) -> Bool?
+        finishedTurnAfterTyping: (ForegroundProcess, TimeInterval) -> Bool, tookPrompt: (ForegroundProcess) -> Bool?
     ) -> SidebarMissionQuestion.Parent {
-        guard let foreground else { return .claude }
-        guard foreground.interactiveAgent == .claude else { return .notClaude }
+        guard let foreground else { return .available }
+        guard foreground.interactiveAgent?.isLaunchable == true else { return .unavailable }
         if let typedAt {
             if foreground.instance.startedAt > typedAt { return .restartedSinceTyped }
-            return finishedTurnAfterTyping(typedAt) ? .stoppedWithoutAnswer : .claude
+            return finishedTurnAfterTyping(foreground, typedAt) ? .stoppedWithoutAnswer : .available
         }
-        return tookPrompt(foreground) == false ? .notAtPrompt : .claude
+        return tookPrompt(foreground) == false ? .notAtPrompt : .available
     }
 
     /// A question that just came to the user lights its workspace (the
@@ -394,7 +396,7 @@ extension NiruxShellView {
             return false
         }
         // The parent that saw the question, a Lead or a task's agent, hears
-        // the answer too: the `claude` that last took it into its prompt or
+        // the answer too: the agent that last took it into its prompt or
         // handed it over, not one started since, unless Restart Lead started
         // it. One that never saw it hears nothing.
         if let question = response.mission.events.first(where: { $0.id == questionID }),
@@ -405,7 +407,7 @@ extension NiruxShellView {
                 text: "\(MissionPromptText.prefix) The user answered “\(childTitle)”: \(reply)"
                     + (accepted ? " (its recommendation)" : ""),
                 queuedAt: Date().timeIntervalSince1970,
-                forClaudeStartedBy: seenAt
+                forAgentStartedBy: seenAt
             ))
         }
         // Before the sidebar refresh, which would read it as answered by

@@ -12,6 +12,9 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Preselected for a task (New Task…, ⌘N). Nil: Claude Code. A plain
     /// workspace stays a shell whatever it says.
     var agent: CodingAgent?
+    var leadAgent: CodingAgent?
+    var preferredLeadAgent: CodingAgent { leadAgent ?? .claude }
+
     /// Nil: Settings' mode.
     var claudeLaunchMode: ClaudeLaunchMode?
     var codexLaunchMode: CodexLaunchMode?
@@ -189,7 +192,7 @@ struct SpaceDefaults: Equatable, Sendable {
 /// errors.
 extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case schemaVersion, agent, claudeLaunchMode, codexLaunchMode, environment, leadStartsTasks, leadDailyPass, leadDailyPassHour
+        case schemaVersion, agent, leadAgent, claudeLaunchMode, codexLaunchMode, environment, leadStartsTasks, leadDailyPass, leadDailyPassHour
         case prFollowUp
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
@@ -202,6 +205,7 @@ extension SpaceDefaults: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         agent = (try? container.decodeIfPresent(String.self, forKey: .agent)).flatMap(CodingAgent.init(launchable:))
+        leadAgent = (try? container.decodeIfPresent(String.self, forKey: .leadAgent)).flatMap(CodingAgent.init(launchable:))
         claudeLaunchMode = (try? container.decodeIfPresent(String.self, forKey: .claudeLaunchMode))
             .flatMap(ClaudeLaunchMode.init(rawValue:))
         codexLaunchMode = (try? container.decodeIfPresent(String.self, forKey: .codexLaunchMode))
@@ -223,6 +227,7 @@ extension SpaceDefaults: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(SpaceDefaultsStore.schemaVersion, forKey: .schemaVersion)
         try container.encodeIfPresent(agent?.rawValue, forKey: .agent)
+        try container.encodeIfPresent(leadAgent?.rawValue, forKey: .leadAgent)
         try container.encodeIfPresent(claudeLaunchMode?.rawValue, forKey: .claudeLaunchMode)
         try container.encodeIfPresent(codexLaunchMode?.rawValue, forKey: .codexLaunchMode)
         if !environment.isEmpty {

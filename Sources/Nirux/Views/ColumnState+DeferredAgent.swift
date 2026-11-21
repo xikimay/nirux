@@ -12,10 +12,8 @@ extension ColumnState {
 
     var isAwaitingResume: Bool { deferredAgent != nil }
 
-    /// Claude Code is in front, or will be once its restored column resumes.
-    func runsClaude(snapshot: ProcessSnapshot) -> Bool {
-        if deferredAgent?.launch.agent == .claude { return true }
-        return pty?.foregroundProcess(snapshot: snapshot)?.interactiveAgent == .claude
+    func runningOrDeferredAgent(snapshot: ProcessSnapshot) -> CodingAgent? {
+        deferredAgent?.launch.agent ?? pty?.foregroundProcess(snapshot: snapshot)?.interactiveAgent
     }
 
     /// Where the agent will resume, while it waits to.

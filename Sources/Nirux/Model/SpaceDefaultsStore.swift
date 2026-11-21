@@ -164,6 +164,7 @@ struct SpaceDefaultsStore: Sendable {
         let known = Set(SpaceDefaults.CodingKeys.allCases.map(\.rawValue))
         var unknown = Set(top.keys).subtracting(known)
         if top["agent"].map({ !($0 is NSNull) }) == true, decoded.agent == nil { unknown.insert("agent") }
+        if top["leadAgent"].map({ !($0 is NSNull) }) == true, decoded.leadAgent == nil { unknown.insert("leadAgent") }
         if top["claudeLaunchMode"].map({ !($0 is NSNull) }) == true, decoded.claudeLaunchMode == nil {
             unknown.insert("claudeLaunchMode")
         }

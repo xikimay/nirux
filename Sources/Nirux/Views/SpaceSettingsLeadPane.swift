@@ -16,6 +16,7 @@ final class SpaceSettingsLeadPane: NSObject {
         var place: Place
         /// "Starts tasks without asking" (`SpaceDefaults.leadStartsTasks`).
         var startsTasks = true
+        var agent = CodingAgent.claude
         /// "Daily pass" (`SpaceDefaults.leadDailyPass`) and the hour it is
         /// due after.
         var dailyPass = true
@@ -44,6 +45,7 @@ final class SpaceSettingsLeadPane: NSObject {
 
     struct Actions {
         var setLead: @MainActor (Bool) -> Void = { _ in }
+        var setAgent: @MainActor (CodingAgent) -> Void = { _ in }
         var restartLead: @MainActor () -> Void = {}
         var setStartsTasks: @MainActor (Bool) -> Void = { _ in }
         var setDailyPass: @MainActor (Bool) -> Void = { _ in }
@@ -65,6 +67,8 @@ final class SpaceSettingsLeadPane: NSObject {
     let titleLabel = NSTextField(labelWithString: "Lead workspace")
     let descriptionLabel = NSTextField(wrappingLabelWithString: "")
     let restartButton = NSButton(title: NiruxShellView.restartLeadTitle, target: nil, action: nil)
+    let agentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let agentRow = NSStackView()
     let startsTasksSwitch = NSSwitch()
     private let startsTasksRow = NSStackView()
     let dailyPassSwitch = NSSwitch()
@@ -90,6 +94,9 @@ final class SpaceSettingsLeadPane: NSObject {
         descriptionLabel.stringValue = model.isGeneral ? Self.generalDescription
             : Self.description(place: model.place, spaceName: model.spaceName)
         leadSwitch.setAccessibilityHelp(descriptionLabel.stringValue)
+        agentPopup.selectItem(withTitle: model.agent.productName)
+        agentRow.isHidden = model.isGeneral
+        agentPopup.isEnabled = model.canChangeDefaults
         restartButton.isHidden = !model.hasLead
         startsTasksSwitch.state = model.startsTasks ? .on : .off
         startsTasksSwitch.isEnabled = model.canChangeDefaults
@@ -128,11 +135,18 @@ final class SpaceSettingsLeadPane: NSObject {
             advice = repository.map { "That is none of this space’s repositories: turn it off and on again to move it to \($0)." }
                 ?? addOne
         }
-        var text = "A workspace pinned at the top, \(at), with Claude and the Board. You talk to it; it starts "
+        var text = "A workspace pinned at the top, \(at), with the Lead agent and the Board. You talk to it; it starts "
             + "tasks and follows them."
         if let spaceName { text += " It works on \(spaceName) only." }
         if let advice { text += " " + advice }
         return text
+    }
+
+    @objc func agentChanged(_ sender: NSPopUpButton) {
+        let agent = CodingAgent.launchable[safe: sender.indexOfSelectedItem]
+        sender.selectItem(withTitle: model.agent.productName)
+        guard !model.isGeneral, model.canChangeDefaults, let agent, agent != model.agent else { return }
+        actions.setAgent(agent)
     }
 
     @objc func startsTasksChanged(_ sender: NSSwitch) {
@@ -192,7 +206,7 @@ final class SpaceSettingsLeadPane: NSObject {
         restartButton.controlSize = .small
         restartButton.target = self
         restartButton.action = #selector(restartClicked(_:))
-        restartButton.toolTip = "End the Lead’s Claude and start a fresh conversation with the space’s launch options"
+        restartButton.toolTip = "End the Lead’s current session and start a fresh conversation with the space’s launch options"
         let texts = NSStackView(views: [titleLabel, descriptionLabel, restartButton])
         texts.orientation = .vertical
         texts.alignment = .leading
@@ -223,7 +237,13 @@ final class SpaceSettingsLeadPane: NSObject {
         startsTasksRow.alignment = .top
         startsTasksRow.spacing = 12
         buildDailyPassRow()
-        let switches = NSStackView(views: [switchRow, startsTasksRow, dailyPassRow])
+        agentPopup.addItems(withTitles: CodingAgent.launchable.map(\.productName))
+        agentPopup.target = self
+        agentPopup.action = #selector(agentChanged(_:))
+        agentPopup.setAccessibilityLabel("Lead agent")
+        agentPopup.toolTip = "Applies when you start or restart the Lead"
+        agentRow.setViews([NSTextField(labelWithString: "Agent"), agentPopup], in: .leading)
+        let switches = NSStackView(views: [switchRow, agentRow, startsTasksRow, dailyPassRow])
         switches.orientation = .vertical
         switches.alignment = .leading
         switches.spacing = 16
@@ -238,7 +258,7 @@ final class SpaceSettingsLeadPane: NSObject {
             alwaysSection.addArrangedSubview(Self.alwaysRow(item.what, item.how))
         }
         let hint = NSTextField(wrappingLabelWithString: "The Lead is told to leave these to you. Its own commands "
-            + "follow the space’s Claude permission mode (Defaults tab).")
+            + "follow the selected agent’s permissions.")
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         hint.textColor = .secondaryLabelColor
         hint.isSelectable = false

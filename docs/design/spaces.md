@@ -141,7 +141,7 @@ A sheet titled "New in <space>":
   repository, the folder's name, editable, "new folder in ~/Nirux Tasks, no
   repository".
 - **Report to the Lead** checkbox, shown when the space has a Lead, checked by
-  default: the task's Mission reports to the Lead's Claude (shipped with
+  default: the task's Mission reports to the Lead's agent (shipped with
   S11c). A Lead's proposal comes with it checked.
 - **Sub-task of “<task>”** checkbox, shown when the sheet comes from a task's
   "New Sub-task…" (its card menu, or Workspaces in the menu bar), checked: the
@@ -230,16 +230,24 @@ New flow, built on the guarded typing `tell` already uses
 
 - **Opt-in per space:** "Start a Lead" in New Space… (off unless switched on)
   and Space Settings › Lead. A workspace pinned at the top of the sidebar, in
-  the default anchor's main checkout, with Claude and the Board column (unless
+  the default anchor's main checkout, with the selected agent and the Board column (unless
   another workspace of the space shows the Board). One per space, never in
   General; it can't be moved, dragged, parked or sent to another space.
   ⌃⌘L (Space › Lead) focuses it, or starts it when the space has none: ⌘0
   stays the editor's font-size reset. Turning it off, or closing its
-  workspace, closes it (asking first while Claude runs); the tasks it started
+  workspace, closes it (asking first while an agent runs); the tasks it started
   then ask the user, as for any parent gone, and a new Lead doesn't take them
   over. Deleting its space makes it a plain workspace in General (its running
   shells keep `NIRUX_LEAD=1` until they restart).
-- **Its role** reaches its Claude through the Nirux MCP server's instructions:
+- **Agent choice** in Space Settings › Lead applies the next time the Lead starts or restarts.
+  Claude Code is the default. Nirux launches Codex with a per-session MCP configuration and
+  an initial prompt so it can establish which thread receives Mission messages. A manual
+  Codex session can receive queued messages once its launch prompt or resume ID proves the
+  thread. A bare Codex can collect a pending child event with `"$NIRUX_CLI_PATH" --mission receive`.
+  Antigravity reports turn state through OSC 7501. Its CLI rejects `mcpServers` in
+  `--settings` and exposes server configuration through the persistent `agy mcp` commands.
+  A Lead without MCP can answer with `"$NIRUX_CLI_PATH" --mission reply --event <id> --message "<answer>"`.
+- **Its role** reaches Claude Code and Codex through the Nirux MCP server's instructions:
   its shells carry `NIRUX_LEAD=1` (blank in every other shell). It starts
   tasks only with its tools, reads `list_tasks` before starting one, and
   ends its turn after starting or telling tasks: Nirux types their messages
@@ -247,7 +255,7 @@ New flow, built on the guarded typing `tell` already uses
   Its folder is fixed when it starts: Space Settings › Lead says when it is
   none of the space's repositories any more, and turning it off and on moves
   it.
-- **Tools** (Nirux MCP server, given to the Lead's Claude only), limited to its
+- **Tools** (Nirux MCP server, available in the Lead workspace), limited to its
   space and its anchors (shipped with S11b):
   - `start_task(description, repo?, template?, title?, branch?, goal?)`: the
     ⌘N path (origin's base fetched, else as last fetched; the space's agent;

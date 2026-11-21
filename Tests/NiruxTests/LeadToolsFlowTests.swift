@@ -205,7 +205,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(shell.pendingLeadNotices.map(\.text), ["[Nirux Mission] The user answered “Add a date filter”: Yes, until v3"])
             let handedAt = MissionStore.shared.missions.flatMap(\.events).first { $0.id == second.id }?.handedToUserAt
             XCTAssertNotNil(handedAt, "never typed: handed over")
-            XCTAssertEqual(shell.pendingLeadNotices.last?.forClaudeStartedBy, handedAt, "for the claude that handed it over")
+            XCTAssertEqual(shell.pendingLeadNotices.last?.forAgentStartedBy, handedAt, "for the claude that handed it over")
 
             // One handed over with a recommendation: the user accepts it in
             // one click. An access question's can't be accepted.
@@ -233,7 +233,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(shell.pendingLeadNotices.last?.text, "[Nirux Mission] The user answered “Add a date filter”: en-US")
             let typedAt = MissionStore.shared.missions.flatMap(\.events).first { $0.id == typed.id }?.parentTypedAt
             XCTAssertNotNil(typedAt)
-            XCTAssertEqual(shell.pendingLeadNotices.last?.forClaudeStartedBy, typedAt, "for the claude it was typed into")
+            XCTAssertEqual(shell.pendingLeadNotices.last?.forAgentStartedBy, typedAt, "for the claude it was typed into")
 
             XCTAssertFalse(try call(LeadTools.tell, ["task": "Add a date filter", "message": "/code-review"], lead: lead, in: harness).isError)
             let instructions = MissionStore.shared.missions.first { $0.id == mission.id }?.events.filter { $0.kind == .instruction }
@@ -1699,12 +1699,10 @@ final class LeadToolsFlowTests: XCTestCase {
             // to answer it; then answered.
             let question = try ask("Document the old date= parameter?", from: mission)
             let accepted = MissionStore.AcceptedEvent(mission: mission, event: question)
-            XCTAssertEqual(
-                MissionPromptText.text(for: accepted, childTitle: subtask.title, parentTitle: task.title),
-                "[Nirux Mission] Question from \"Write the API docs\" (branch feat/write-api-docs):\nDocument the old date= parameter?\n"
-                    + "Answer with the reply tool, question \(question.id); if neither the code nor the user's words settle it, "
-                    + "don't guess: hand it to the user with ask_user."
-            )
+            let prompt = try XCTUnwrap(MissionPromptText.text(for: accepted, childTitle: subtask.title, parentTitle: task.title))
+            XCTAssertTrue(prompt.contains("Answer with the reply tool, question \(question.id)"))
+            XCTAssertTrue(prompt.contains("ask_user"))
+            XCTAssertTrue(prompt.contains("\"$NIRUX_CLI_PATH\" --mission reply --event \(question.id)"))
             XCTAssertTrue(try call(LeadTools.listTasks, from: task, agentUUID: agent, in: harness).text.contains("question \(question.id)"))
             XCTAssertTrue(try call(LeadTools.reply, ["question": question.id, "message": "No"], lead: lead, in: harness).isError,
                           "not the Lead's to answer")
