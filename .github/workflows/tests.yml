@@ -54,8 +54,15 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        # A warning past it, not a failure: runners vary up to 4x.
-        env:
-          NIRUX_TESTS_BUDGET: 500
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: proof of the flake gate (#689). A probe failing one run
+      # in three must be seen; a class gated before must pass 10 of 10.
+      - name: Flake gate proof
+        run: |
+          status=0
+          if scripts/run-tests.sh --repeat 10 NiruxTests.ZZFlakeGateProbeTests; then
+            echo "=== PROOF the probe passed 10 of 10: the gate missed it"; status=1
+          else
+            echo "=== PROOF the gate saw the probe fail"
+          fi
+          scripts/run-tests.sh --repeat 10 NiruxTests.SpacePlanTests || status=1
+          exit $status
