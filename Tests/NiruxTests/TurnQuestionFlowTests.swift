@@ -82,6 +82,56 @@ final class TurnQuestionFlowTests: UIFlowTestCase {
         }
     }
 
+    func testOnlyRequiredActionsReachTheRequestInbox() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let (task, index, _, _) = try askingTask(in: harness)
+            let column = task.columns[index]
+            let center = AgentHookCenter()
+            center.questionVerdictDelay = 0
+            let resolution = AgentHookCenter.Resolution(
+                workspace: task, column: column, columnIndex: index, isUserFocused: false, approvalHold: .never
+            )
+            center.resolver = { _ in resolution }
+            column.onAgentAttention = { _ in }
+            let uuid = try XCTUnwrap(column.agentUUID)
+            let cases: [(message: String, question: TurnEndQuestion?)] = [
+                ("Fixed. Let me know if you'd like any changes.", nil),
+                ("Tests pass. Want me to look at anything else?", nil),
+                ("C’est corrigé. Si tu veux, je peux aussi vérifier les exemples.", nil),
+                ("Terminé. Dis-moi si tu as besoin d'autre chose.", nil),
+                ("Why did it fail? The cache was stale. I cleared it.", nil),
+                ("Which migration strategy should I implement: A or B?",
+                 TurnEndQuestion(text: "Which migration strategy should I implement: A or B?", isYesNo: false)),
+                ("Tests pass. Ready to merge PR #42?", TurnEndQuestion(text: "Ready to merge PR #42?", isYesNo: true)),
+                ("Please log in to gh and tell me when done.", TurnEndQuestion(text: "Please log in to gh and tell me when done.", isYesNo: false)),
+            ]
+            for (message, question) in cases {
+                center.turnEndClassifier = ReplyClassifier(answer: question.map {
+                    "ASK\nQ: \($0.text)\nA: \($0.isYesNo ? "YESNO" : "OPEN")"
+                } ?? "DONE")
+                var settled = false
+                center.onTurnEndSettled = { settled = true }
+                let now = Date().timeIntervalSince1970
+                center.apply(AgentHookEvent(kind: .claude, name: .userPromptSubmit, agentUUID: uuid, timestamp: now), to: resolution)
+                center.apply(AgentHookEvent(kind: .claude, name: .stop, agentUUID: uuid, finalMessage: message, timestamp: now + 0.001), to: resolution)
+                harness.waitUntil("the verdict for \(message)") { settled }
+                shell.updateSidebar()
+                let row = try XCTUnwrap(shell.sidebar.displayedWorkspaceInfos.first { $0.id == task.id })
+                let requests = shell.requestsState.requests.filter { $0.columnID == column.id }
+                XCTAssertEqual(row.rowSummary.mark == .needsYou, question != nil, message)
+                if let question {
+                    let shown = try XCTUnwrap(row.columns[index].turnQuestion, message)
+                    XCTAssertEqual(shown.text, question.text)
+                    XCTAssertEqual(shown.isYesNo, question.isYesNo)
+                    XCTAssertEqual(requests.map(\.kind), [.question(shown)])
+                } else {
+                    XCTAssertTrue(requests.isEmpty, message)
+                }
+            }
+        }
+    }
+
     func testAClickKeepsTheQuestionUntilItIsDismissed() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -184,5 +234,13 @@ final class TurnQuestionFlowTests: UIFlowTestCase {
             XCTAssertNil(pty.agentQuestion(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot())))
             XCTAssertNil(task.notification)
         }
+    }
+}
+
+private struct ReplyClassifier: TurnEndClassifier {
+    let answer: String
+
+    func classify(_ message: String) async -> TurnEndVerdict {
+        ClaudeTurnEndClassifier.verdict(fromAnswer: answer, message: message) ?? .unknown
     }
 }

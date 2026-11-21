@@ -1,18 +1,6 @@
 import Foundation
 
-/// Classifies a Claude turn's final message with Claude Sonnet through a
-/// headless `claude -p`, on the account `claude` is logged in with. Turns
-/// that end on a question never get here (`TurnEndText.endsOnQuestion`).
-/// Chosen over Haiku after repeated runs on 240 real turn ends and a
-/// hand-labeled set (worst run of each): Haiku missed some real questions
-/// in some runs whatever the prompt or effort, Sonnet with the question
-/// floor missed none. About $0.002 a classified turn at API prices, 2.5 s
-/// at the median. A local heuristic, Apple's on-device model and Create ML
-/// classifiers all missed more questions.
-///
-/// The runs are `ClaudeOneShotRunner`'s: on a Claude subscription only,
-/// the message and nothing else in front of the model. Any failure is
-/// `.unknown`.
+/// Reads the final message through a headless Claude on the user's subscription.
 final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     static let shared = ClaudeTurnEndClassifier(account: .shared)
 
@@ -29,21 +17,17 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     /// ending their turns in the same seconds is rare.
     static let maxConcurrentRuns = 4
 
-    /// The prompt measured, word for word: "when unsure, answer ASK" keeps
-    /// recall up, which matters more than precision here. After ASK, the
-    /// sentence that asks, quoted (found in the message 170 times in 171),
-    /// and whether a yes or no answers it.
     static let systemPrompt = """
-        You read the final message an AI coding agent wrote at the end of its turn, and decide whether the user must \
-        answer before the work can go on.
+        Read the final message of a coding agent. Answer ASK only if the requested work needs a response from the user: \
+        a required decision, missing information, access or action only they can provide, or approval before a \
+        consequential step. "Which migration strategy should I implement: A or B?", "Ready to merge PR #42?" and \
+        "Please log in to gh and tell me when done." are ASK. A required action can be phrased politely.
 
-        Answer ASK when the message hands something back to the user: a question to them, a choice between options, \
-        a request for confirmation or approval, an action only the user can do (log in, test, run a command, check \
-        something), or an offer to do more ("want me to…?", "should I…?", "let me know if…", "si tu veux, je \
-        peux…", "dis-moi si…", "je merge ?").
-        Answer DONE when the message only reports results or answers a question, and asks nothing. A rhetorical \
-        question the message answers itself is DONE. Quoted text, code and headings are not questions to the user.
-        When unsure, answer ASK.
+        Answer DONE for completed work, a report, or an answer, including a rhetorical question answered in the message. \
+        Optional offers of further work after completion ("Want me to look at anything else?", "Let me know if you'd \
+        like changes", "Si tu veux, je peux aussi…", "Dis-moi si tu as besoin d'autre chose") are DONE. Read the whole \
+        message: a courtesy at the end does not cancel a required action earlier. Quoted text, code, headings and \
+        punctuation alone do not require a reply. If no required user action is evident, answer DONE.
 
         Reply with one word on the first line: ASK or DONE.
         After ASK only, add two lines:

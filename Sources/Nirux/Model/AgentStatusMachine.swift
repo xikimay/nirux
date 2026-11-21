@@ -32,8 +32,12 @@ struct AgentStatusMachine {
     /// column, and none of these means the user read the message.
     private(set) var quietTurnEnd: QuietTurnEnd?
 
+    enum TurnEndAttention {
+        case notify, alreadySeen, dialogOpen
+    }
+
     enum QuietTurnEnd: Equatable {
-        case pending(turnEndedAt: TimeInterval)
+        case pending(turnEndedAt: TimeInterval, attention: TurnEndAttention)
         case done
         /// Claude went on by itself (a tool call) before the verdict: no
         /// verdict applies to an agent at work, and the next turn end, or a
@@ -102,16 +106,13 @@ struct AgentStatusMachine {
     private var stopHooksKeepGoing = false
     /// That turn end is known to be the turn's last Stop.
     private var mainTurnEndIsLast = true
-    /// Its final message ends on a question: read where there is one to
-    /// read (Claude's, with the turn-end classifier on), or its verdict
-    /// said it asks. Whoever looks at the column reads it there and gets
-    /// no alert, but the turn isn't done.
+    /// The verdict on the last main-thread Stop requires user action.
     private var mainTurnEndAsks = false
     /// What the last turn end asked, if anything, is behind: Claude's main
     /// thread did something since (a tool call: a Stop hook's
     /// continuation, a wakeup), the user's click typed a prompt or
-    /// archived the task, or `claude` left the front. A question read as
-    /// it came is not noted after that (`noteQuestion`).
+    /// archived the task, or `claude` left the front. Its parent may no longer
+    /// take the question after that.
     private var turnEndQuestionIsBehind = false
     /// The last new conversation in this process, or its end: a quick
     /// answer never crosses one (`acceptsQuickAnswer`).
@@ -694,7 +695,7 @@ struct AgentStatusMachine {
         mainTurnEndedAt = now
         turnEndQuestionIsBehind = false
         mainTurnEndIsLast = event.stopHookActive == true || !stopHooksKeepGoing
-        mainTurnEndAsks = event.finalMessage.map(TurnEndText.endsOnQuestion) ?? false
+        mainTurnEndAsks = false
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
                 kind: event.errorKind, detail: event.detail, failedAt: now, emitter: event.emitterProcess
@@ -702,21 +703,20 @@ struct AgentStatusMachine {
             : nil
         let reason = turnFailure?.reason ?? .turnFinished
         outcome.attention = reason
-        // Its final message may ask something or not: the alert waits for
-        // the verdict (`applyTurnEndVerdict`). Nobody needs one while the
-        // user looks at the column, and a dialog still open (a subagent's)
-        // waits on the user whatever the message says.
-        if turnFailure == nil, openDialogs.isEmpty, event.kind == .claude, let message = event.finalMessage,
-           !isUserFocused {
-            _ = block(for: reason, isUserFocused: false, alert: false)
-            // The earlier turn end just alerted (`settleQuietTurnEnd`): that
-            // was this episode's alert, the verdict only says why.
-            if outcome.firedAttention { attentionAlerted = true }
-            quietTurnEnd = .pending(turnEndedAt: now)
-            outcome.turnEnd = TurnEndRequest(message: message, turnEndedAt: now)
+        guard turnFailure == nil, event.kind == .claude, let message = event.finalMessage else {
+            outcome.firedAttention = block(for: reason, isUserFocused: isUserFocused)
             return
         }
-        outcome.firedAttention = block(for: reason, isUserFocused: isUserFocused)
+        let attention: TurnEndAttention
+        if isUserFocused { attention = .alreadySeen }
+        else if openDialogs.isEmpty { attention = .notify }
+        else { attention = .dialogOpen }
+        if block(for: reason, isUserFocused: isUserFocused, alert: attention == .dialogOpen) {
+            outcome.firedAttention = true
+        }
+        if outcome.firedAttention { attentionAlerted = true }
+        quietTurnEnd = .pending(turnEndedAt: now, attention: attention)
+        outcome.turnEnd = TurnEndRequest(message: message, turnEndedAt: now)
     }
 
     /// The last turn end is behind: a prompt went in, the conversation
@@ -734,7 +734,8 @@ struct AgentStatusMachine {
 
     /// The turn end `request` asked about still waits for its verdict.
     func awaitsVerdict(_ request: TurnEndRequest) -> Bool {
-        quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt)
+        guard case .pending(request.turnEndedAt, _) = quietTurnEnd else { return false }
+        return true
     }
 
     /// The column shows a turn end that hasn't alerted (`attentionReason`
@@ -758,7 +759,7 @@ struct AgentStatusMachine {
         for request: TurnEndRequest,
         isUserFocused: Bool
     ) -> AgentAttentionReason? {
-        guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt) else { return nil }
+        guard case .pending(request.turnEndedAt, let attention) = quietTurnEnd else { return nil }
         // Settled, whichever way: nothing is left to alert for later.
         quietTurnEnd = nil
         let reason: AgentAttentionReason
@@ -774,40 +775,17 @@ struct AgentStatusMachine {
             mainTurnEndAsks = true
             // It stands until it is answered, whoever looks at the column
             // meanwhile: only its alert is theirs to miss.
-            ask(line, isYesNo: question?.isYesNo == true, endingTurnAt: request.turnEndedAt, in: request.message, seen: isUserFocused)
+            ask(line, isYesNo: question?.isYesNo == true, endingTurnAt: request.turnEndedAt,
+                in: request.message, seen: isUserFocused || attention == .alreadySeen)
+            guard attention == .notify else { return nil }
             // A question always alerts, even after this episode's "finished
             // its turn": missing one is what this is all about.
             attentionAlerted = false
         case .unknown:
+            guard attention == .notify else { return nil }
             reason = .turnFinished
         }
         return block(for: reason, isUserFocused: isUserFocused) ? reason : nil
-    }
-
-    /// The turn that ended at `turnEndedAt` got no verdict: nobody to
-    /// alert (the user looked at its column, `seen`), or a dialog still
-    /// open waits on the user first. Its final message ends on `question`,
-    /// the message's own line: the agent waits on an answer all the same,
-    /// and its column says so. Nothing alerts, and the status stays as it
-    /// is. False, and nothing
-    /// kept, when that turn end is behind (a prompt, a later end, another
-    /// conversation, Claude going on by itself, the task archived,
-    /// `claude` gone from the front), failed, or has its verdict coming.
-    /// As a verdict's, it stands behind a subagent's dialog, which shows
-    /// first, and where a Stop hook may still keep the turn going: the
-    /// continuation's first tool call takes it back.
-    @discardableResult
-    mutating func noteQuestion(
-        _ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval, seen: Bool
-    ) -> Bool {
-        guard mayNoteQuestion(endingTurnAt: turnEndedAt) else { return false }
-        ask(question.text, isYesNo: question.isYesNo, endingTurnAt: turnEndedAt, in: message, seen: seen)
-        return true
-    }
-
-    /// Whether the turn end of `turnEndedAt` may still ask (`noteQuestion`).
-    func mayNoteQuestion(endingTurnAt turnEndedAt: TimeInterval) -> Bool {
-        isCurrentTurnEnd(turnEndedAt) && !turnEndQuestionIsBehind && turnFailure == nil && quietTurnEnd == nil && askedQuestion == nil
     }
 
     /// Who typed the last prompt typed by a person or by Nirux.
@@ -938,8 +916,8 @@ struct AgentStatusMachine {
         // task, a wakeup): a verdict would land on an agent at work, and
         // the question is behind it. A turn end not read yet stays owed.
         switch quietTurnEnd {
-        case .pending?: quietTurnEnd = .superseded
-        case .done?: quietTurnEnd = nil
+        case .pending(_, .notify)?: quietTurnEnd = .superseded
+        case .pending?, .done?: quietTurnEnd = nil
         case .superseded?, nil: break
         }
         askedQuestion = nil
@@ -1612,7 +1590,7 @@ struct AgentStatusMachine {
         // Stop would have: a `claude -p` or a crash leaves before its
         // SessionEnd is applied.
         if agent != .claude {
-            if quietTurnEnd == .done { quietTurnEnd = nil }
+            if quietTurnEnd?.isUnread == false { quietTurnEnd = nil }
             askedQuestion = nil
             turnEndQuestionIsBehind = true
         }
@@ -1896,8 +1874,8 @@ extension AgentStatusMachine.QuietTurnEnd {
     /// Not read yet: a verdict on its way, or superseded by Claude going on.
     var isUnread: Bool {
         switch self {
-        case .pending, .superseded: return true
-        case .done: return false
+        case .pending(_, .notify), .superseded: return true
+        case .pending, .done: return false
         }
     }
 }
