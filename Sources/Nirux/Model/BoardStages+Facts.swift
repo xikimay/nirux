@@ -55,6 +55,7 @@ extension BoardStages {
         /// The GitHub repository its pull requests are read from; nil
         /// without one.
         var gitHub: GitHubRepository?
+        var checkTimeout: CheckTimeout?
     }
 
     /// The facts of a section's lines.
@@ -465,6 +466,11 @@ extension BoardStages {
         of row: ProjectBoard.Row, _ pullRequest: ProjectBoard.PullRequest, in repository: RepositoryReading, merged: Set<Int>
     ) -> Queue {
         var queue = queue(of: pullRequest.number, head: pullRequest.headOid, in: repository.queue, merged: merged)
+        if let timeout = repository.checkTimeout, timeout.number == pullRequest.number {
+            // The row's normal checks own its current state. The header keeps the history.
+            if timeout.hasCurrentReading { queue.stop = nil }
+            else if queue.stop != nil { queue.stop?.message = timeout.status }
+        }
         queue.refusal = pullRequest.isOpen ? ProjectBoard.queueRefusal(row, baseBranch: repository.baseBranch) : nil
         return queue
     }

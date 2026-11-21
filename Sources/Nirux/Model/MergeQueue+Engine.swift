@@ -667,9 +667,9 @@ extension MergeQueue {
                     let advice = verdict.pending.contains { $0.hasSuffix("(not started)") }
                         ? "A check that never starts may be misspelled: check the names in Board Settings."
                         : "If runners are busy, raise the checks timeout in Board Settings."
-                    return stop(StopReason(kind: .checks, message: "After \(settings.checksTimeoutMinutes) minutes, required "
-                        + "checks are still missing or running on \(Self.short(head)): "
-                        + "\(verdict.pending.joined(separator: ", ")). \(advice)"))
+                    return stop(StopReason(kind: .checks, message: "#\(entries[index].number) timed out after \(settings.checksTimeoutMinutes) minutes. "
+                        + "Required checks were missing or running on \(Self.short(head)): "
+                        + "\(verdict.pending.joined(separator: ", ")). \(advice)", checksTimedOut: true))
                 }
                 return read([.pullRequest(entries[index].number), .checks(head)], after: Limits.pollInterval,
                             for: .checks(head: head))

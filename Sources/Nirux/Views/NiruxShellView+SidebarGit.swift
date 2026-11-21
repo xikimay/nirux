@@ -238,7 +238,7 @@ extension NiruxShellView {
                 }
                 // A task's new folder is where an agent asks for trust; agy
                 // trusts exact paths, so a new worktree asks again.
-                if workspace.isFolderTask || foregroundProcess?.name == "agy" {
+                if workspace.isFolderTask || foregroundProcess?.agent?.folderTrust == .everyFolder {
                     watchTrustPrompt(of: column, foreground: foregroundProcess, now: now)
                 }
                 refreshStuckAgent(
@@ -476,7 +476,7 @@ extension NiruxShellView {
         // After this drain: a turn that ended may have freed a Mission
         // agent's prompt for a message waiting to be typed.
         // Codex's turn end too: it may prove the thread its OSC `done` came before.
-        if events.contains(where: { $0.event.kind != .agy && [.stop, .stopFailure, .turnComplete].contains($0.event.name) }) {
+        if events.contains(where: { $0.event.kind.statusSource == .hooks && [.stop, .stopFailure, .turnComplete].contains($0.event.name) }) {
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
     }
@@ -737,18 +737,16 @@ extension NiruxShellView {
 
     // MARK: - Terminal Redraw
 
-    private static let shells: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
-    /// Recognized agents redraw correctly from SIGWINCH alone — Ctrl+L clears their session/screen.
-    /// Claude Code rebinds Ctrl+L to `/clear` and Gemini CLI's clears its history, so
-    /// broadcasting it on every layout change (e.g. Cmd+E width cycle)
-    /// wiped active sessions.
-    private static func redrawsFromSigwinchAlone(_ name: String) -> Bool {
-        AgentStatusMachine.isRecognizedAgentProcess(name)
+    /// Ctrl+L repaints a TUI in front (vim, htop). Not a shell, nor an
+    /// agent: it redraws from SIGWINCH alone, and Ctrl+L clears its
+    /// session (Claude Code rebinds it to `/clear`, Gemini CLI clears its
+    /// history), so a layout change (⌘E's width cycle) wiped active ones.
+    nonisolated static func repaintsWithCtrlL(_ processName: String) -> Bool {
+        !Shell.isShell(processName) && CodingAgent(rawValue: processName) == nil
     }
 
-    /// Heavy redraw: refresh every terminal surface and additionally send
-    /// Ctrl+L (0x0C) to any foreground process that isn't a plain shell or
-    /// a recognized agent (vim, htop, etc.) so TUI apps repaint their buffer.
+    /// Heavy redraw: refresh every terminal surface, and Ctrl+L to the
+    /// programs that need it to repaint their buffer.
     func redrawAllTerminals() {
         let snap = ProcessSnapshot()
         for workspace in workspaces {
@@ -756,11 +754,7 @@ extension NiruxShellView {
                 col.terminalView?.fitToSize()
                 col.pty?.forceRedraw()
                 col.terminalView?.needsDisplay = true
-                // Ctrl+L to any non-shell TUI (vim, htop, etc.)
-                // Skip processes that handle SIGWINCH correctly on their own.
-                if let name = col.pty?.foregroundProcessName(snapshot: snap),
-                   !Self.shells.contains(name),
-                   !Self.redrawsFromSigwinchAlone(name) {
+                if let name = col.pty?.foregroundProcessName(snapshot: snap), Self.repaintsWithCtrlL(name) {
                     col.pty?.sendRaw(Data([0x0C]))
                 }
             }

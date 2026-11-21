@@ -71,7 +71,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertEqual(
             SidebarRenderer.attentionTooltip(for: stopped), "Stopped on an API error — rate_limit: API Error: 429"
         )
-        let exited = column(.exitedMidTurn(processName: "claude"), process: "zsh")
+        let exited = column(.exitedMidTurn(agent: .claude), process: "zsh")
         XCTAssertEqual(chipText(exited), "exited")
         XCTAssertTrue(
             SidebarColumnChip(exited).toolTip.hasPrefix("claude · exited"),

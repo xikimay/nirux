@@ -626,6 +626,59 @@ final class BoardStagesFactsTests: XCTestCase {
 
     // MARK: - A repository's queue, as its header says it
 
+    func testTimeoutComparesTheLastQueuedHeadWithNewerCheckReadings() throws {
+        let then = Date(timeIntervalSince1970: 1_795_266_909)
+        let now = then.addingTimeInterval(600)
+        var state = queue(.ended, [
+            entry(660, step: .done, isMerged: true),
+            entry(708, step: .stopped(.init(kind: .checks, message: "Checks timed out", checksTimedOut: true)), isUpdated: true)
+        ], selection: [708])
+        state.stoppedAt = then
+        var green = check("test", .success)
+        green.conclusion = "SUCCESS"
+        func report(_ pr: ProjectBoard.PullRequest?, read: Date? = nil) throws -> BoardStages.CheckTimeout {
+            try XCTUnwrap(BoardStages.checkTimeout(
+                in: state, rows: [row(pullRequest: pr)], required: ["test"], baseBranch: "main", currentRead: read, now: now
+            ))
+        }
+        let pr = pullRequest(708, checks: [green], oid: updated)
+        let passed = try report(pr, read: now)
+        XCTAssertEqual(passed.reading, .passed)
+        XCTAssertTrue(passed.status.contains("#708 queue timed out"))
+        XCTAssertTrue(passed.status.hasSuffix("test passed on bbbbbbb"))
+        XCTAssertEqual(BoardStagesView.sectionQueue(state, proposed: 1, timeout: passed).start?.title, "Retry #708…")
+        state.selection.append(709)
+        XCTAssertEqual(BoardStagesView.sectionQueue(state, proposed: 2, timeout: passed).start?.title, "Start… · 2")
+        for early in [nil, then.addingTimeInterval(-1)] {
+            XCTAssertEqual(try report(pr, read: early).reading, .unavailable)
+        }
+        for (result, expected) in [(GitHub.CheckResult.failure, BoardStages.CheckTimeout.Reading.failed),
+                                   (.pending, .pending), (.skipped, .failed), (.neutral, .failed)] {
+            let current = try report(pullRequest(708, checks: [check("test", result)], oid: updated), read: now)
+            XCTAssertEqual(current.reading, expected)
+            XCTAssertFalse(current.canRetry)
+        }
+        for oid in [head, moved] {
+            XCTAssertEqual(try report(pullRequest(708, checks: [green], oid: oid), read: now).reading, .changed)
+        }
+        for unknown in [nil, pullRequest(709, checks: [green]), pullRequest(708, oid: updated),
+                        pullRequest(708, checks: [check("test", .success)], oid: updated)] {
+            XCTAssertEqual(try report(unknown, read: now).reading, .unavailable)
+        }
+        XCTAssertFalse(try report(pullRequest(708, draft: true, checks: [green], oid: updated), read: now).canRetry)
+        var blocked = pr
+        blocked.mergeIsBlocked = true
+        var automatic = pr
+        automatic.autoMerges = true
+        var needsReview = pr
+        needsReview.reviewDecision = "REVIEW_REQUIRED"
+        for held in [blocked, automatic, needsReview] {
+            let current = try report(held, read: now)
+            XCTAssertEqual(current.reading, .passed)
+            XCTAssertFalse(current.canRetry)
+        }
+    }
+
     func testARepositorysHeaderSaysItsQueueByTheTablesRules() {
         let start = { (state: ProjectBoard.QueueState, proposed: Int) in BoardStagesView.sectionQueue(state, proposed: proposed) }
         var rest = queue(.none, selection: [12, 13])

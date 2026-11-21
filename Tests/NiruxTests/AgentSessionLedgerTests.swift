@@ -56,7 +56,7 @@ final class AgentSessionLedgerTests: XCTestCase {
         column: String = "column-1",
         fromColumnAgent: Bool = true,
         checkout: AgentSessionRecord.Checkout? = nil,
-        agent: AgentHookEvent.Kind = .claude
+        agent: CodingAgent = .claude
     ) -> AgentSessionObservation {
         AgentSessionObservation(
             agent: agent, sessionID: session, event: event, source: source, timestamp: timestamp,
