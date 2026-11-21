@@ -176,7 +176,7 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertEqual(MergeQueue.busyLabel(state), "waiting (permission · Bash)")
         XCTAssertEqual(MergeQueue.busyLabel(.working(duration: "3m")), "working")
         XCTAssertNil(MergeQueue.busyLabel(.idle))
-        XCTAssertNil(MergeQueue.busyLabel(.exitedMidTurn(processName: "claude")))
+        XCTAssertNil(MergeQueue.busyLabel(.exitedMidTurn(agent: .claude)))
     }
 
     func testAnAgentBackAtWorkBeforeTheMergeIsWaitedForAgain() {

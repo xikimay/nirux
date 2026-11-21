@@ -116,7 +116,7 @@ extension NiruxShellView {
             )
             return .stoppedOnError(kind: failure.kind, detail: failure.detail, failedAt: failure.failedAt, resume: resume)
         case .exitedMidTurn(let exit)?:
-            return .exitedMidTurn(processName: exit.processName)
+            return .exitedMidTurn(agent: exit.agent)
         case .silent(let silence)?:
             return .silent(
                 duration: SidebarRenderer.shortDuration(now - silence.startedAt), since: silence.since,
@@ -293,22 +293,16 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
         guard let pty = column.pty, !pty.hasExited else { return showToast("That terminal has closed") }
-        guard let exit = pty.agentMidTurnExit, exit.processName == "claude" else {
+        guard let exit = pty.agentMidTurnExit, exit.agent == .claude else {
             return showToast("There’s no Claude session to resume there")
         }
         guard let shellPID = pty.shellPID, pty.foregroundInstance(snapshot: snapshot)?.pid == shellPID else {
             return showToast("Something else runs in that terminal now")
         }
-        let command = Self.claudeCommand(
-            resume: exit.sessionID.map { .session($0) } ?? .picker,
-            mode: ClaudeLaunchMode.detect(arguments: exit.arguments) ?? .default,
-            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
-            settingsFile: claudeSpaceSettingsFile(for: workspace)
+        let command = resumeLaunchCommand(
+            .claude(resume: exit.sessionID.map { .session($0) } ?? .picker, mode: ClaudeLaunchMode.detect(arguments: exit.arguments) ?? .default),
+            in: workspace, column: column
         )
-        if let sessionID = exit.sessionID {
-            column.prepareClaudeResume(sessionID: sessionID)
-            sessionResume.noteLaunch(of: sessionID, in: column, now: ProcessInfo.processInfo.systemUptime)
-        }
         column.dismissAgentExit()
         pty.sendRaw("\(command)\n")
     }

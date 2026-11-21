@@ -52,7 +52,7 @@ struct AgentSessionRecord: Codable, Equatable, Sendable {
 
     /// Line format version (see `AgentSessionLedger.schemaVersion`).
     var schemaVersion: Int
-    var agent: AgentHookEvent.Kind
+    var agent: CodingAgent
     /// Claude `session_id` / Codex thread id.
     var sessionID: String
     /// The name the session was launched with (`claude --name`). Renames
@@ -103,7 +103,7 @@ struct AgentSessionRecord: Codable, Equatable, Sendable {
 /// What one hook event says about its session, with the context the shell
 /// read for it (workspace, git checkout, pull request).
 struct AgentSessionObservation: Sendable {
-    let agent: AgentHookEvent.Kind
+    let agent: CodingAgent
     let sessionID: String
     let event: AgentHookEvent.Name
     /// Claude SessionStart `source`.

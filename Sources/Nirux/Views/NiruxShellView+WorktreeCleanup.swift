@@ -115,7 +115,7 @@ extension NiruxShellView {
             // A restored agent not resumed yet resumes in its folder.
             for column in workspace.openColumns where isInside(column.pty?.childCwd ?? column.awaitingResumeDirectory) {
                 if let agent = column.liveAgent(snapshot: snapshot) {
-                    let name = agent.isPaused ? "\(agent.displayName) (paused)" : agent.displayName
+                    let name = agent.isPaused ? "\(agent.agent.name) (paused)" : agent.agent.name
                     foreignAgents.append("\(name) in “\(workspace.title)”")
                 }
             }

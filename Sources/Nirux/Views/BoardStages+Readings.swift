@@ -98,7 +98,7 @@ extension BoardStages.TaskReading {
             }
         }
         for column in columns {
-            if case .exitedMidTurn(let process)? = column.stuck, process == "claude", let id = column.id {
+            if case .exitedMidTurn(.claude)? = column.stuck, let id = column.id {
                 return BoardStages.Resume(kind: .afterExit, column: id)
             }
         }

@@ -87,6 +87,59 @@ final class WaitingTaskFlowTests: XCTestCase {
         }
     }
 
+    func testImmediateAndReleasedStartsDeliverTheSelectedAgentsHandover() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let store = try XCTUnwrap(SpaceDefaultsStore(spaceID: lead.space))
+            _ = try UIFlowHarness.git(["remote", "add", "origin", harness.repo], at: harness.repo)
+            _ = try UIFlowHarness.git(["fetch", "origin", "main:refs/remotes/origin/main"], at: harness.repo)
+            let upstream = try upstreamTask("Prepare release", lead: lead, in: harness)
+            shell.refreshGitContextNow(for: upstream)
+            harness.waitUntil("the dependency’s branch") { upstream.gitBranch != nil }
+            let agents: [(CodingAgent, String)] = [(.claude, ".claude-handover.md"), (.codex, ".codex-handover.md"), (.agy, ".agy-handover.md")]
+
+            for (agent, filename) in agents {
+                upstream.prInfo = pullRequest(.open)
+                let before = harness.agentLaunches.count
+                let queued = try start("Queue \(agent.rawValue) notes", after: upstream.title, lead: lead, in: harness)
+                shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === queued }))
+                for (requested, _) in agents { shell.openAgent(requested) }
+                XCTAssertEqual(harness.agentLaunches.count, before)
+                XCTAssertEqual(queued.columns.count, 1)
+                XCTAssertNil(queued.columns.first?.pty)
+                XCTAssertFalse(FileManager.default.fileExists(atPath: queued.cwd))
+
+                var defaults = store.load().defaults
+                defaults.agent = agent
+                _ = try store.save(defaults).get()
+
+                @MainActor func verify(_ task: WorkspaceState, afterMerge: Bool) throws {
+                    let command = try XCTUnwrap(harness.agentLaunches.last)
+                    XCTAssertTrue(command.hasPrefix("command \(agent.rawValue) "), command)
+                    XCTAssertTrue(command.contains("Read \(filename)"), command)
+                    let handovers = try FileManager.default.contentsOfDirectory(atPath: task.cwd).filter { $0.hasSuffix("-handover.md") }
+                    XCTAssertEqual(handovers, [filename])
+                    let contents = try String(contentsOfFile: task.cwd + "/" + filename, encoding: .utf8)
+                    XCTAssertTrue(contents.contains(task.title), contents)
+                    XCTAssertEqual(contents.contains("Started after #42"), afterMerge)
+                    XCTAssertEqual(MissionStore.shared.missions.first { $0.id == task.missionID }?.childAgentKind, agent.rawValue)
+                }
+
+                let title = "Start \(agent.rawValue) notes"
+                let started = try harness.callLeadTool(LeadTools.startTask, ["description": title], lead: lead)
+                XCTAssertFalse(started.isError, started.text)
+                XCTAssertEqual(harness.agentLaunches.count, before + 1)
+                try verify(try XCTUnwrap(shell.workspaces.first { $0.title == title }), afterMerge: false)
+
+                shell.followMergeWaits(awaiting: upstream, read: pullRequest(.merged), now: 42)
+                harness.waitUntil("the \(agent.rawValue) waiting task starts", timeout: 30) { !queued.isWaitingTask }
+                XCTAssertEqual(harness.agentLaunches.count, before + 2)
+                try verify(queued, afterMerge: true)
+            }
+        }
+    }
+
     func testSharedWaitingTitleCannotCloseTheLeadsOtherTask() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
