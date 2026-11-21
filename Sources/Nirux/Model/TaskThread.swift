@@ -70,6 +70,7 @@ enum TaskThread {
         static let tell = Kind("tell")
         static let result = Kind("result")
         static let handedToUser = Kind("handedToUser")
+        static let questionRetired = Kind("questionRetired")
         static let review = Kind("review")
         static let findings = Kind("findings")
         static let rule = Kind("rule")

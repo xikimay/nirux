@@ -1,6 +1,6 @@
 # Task Thread
 
-> **Design record:** The foundation records and freezes each task’s thread. The Lead can read it, and the daily pass reports measured waits. The sidebar panel follows separately.
+> **Design record:** The foundation records and freezes each task’s thread. The Lead can read it, and the daily pass reports measured waits. The sidebar can pin the same task preview opened from a row or its rail icon.
 
 Status: study approved by the user on 2026-11-21, direction B (the panel from
 the row). Study page: https://claude.ai/artifact/R4mJgibGcXiPzqsFjRA1e8
@@ -96,11 +96,15 @@ no sources): the files it was joined from drop the task in time.
 
 The Lead’s `read_thread(task)` accepts the same name as `list_tasks`, a workspace ID, or an archived title or branch still in the space’s session history. It returns up to 6,000 characters with the request, current goal, next step, blocker, recent status lines, known PRs and checks, pending questions and recent decisions with their authors. Secret-looking lines and answers to access questions are withheld. A thread opened through an external link stays private. For older archives, a recorded New Task request establishes local origin.
 
-The daily pass reports task activity within its existing window. It counts questions, recorded review rounds and PR follow-up rounds. A handoff splits a question’s wait between its parent and the user. A linked answer, a result from the same Mission or the workspace close ends the wait. Legacy events without a Mission ID can establish a link through the question ID on an answer. The time to the first recorded PR needs both its creation time and the task’s request time. CI time covers observed check runs with timestamps, counting simultaneous jobs once. A pending run counts up to the last observation. Historical checks without a measured interval contribute no duration. Neither read starts a GitHub request.
+The daily pass reports task activity within its existing window. It counts questions, recorded review rounds and PR follow-up rounds. A handoff splits a question’s wait between its parent and the user. A linked answer, a recorded retirement on a later prompt, a result from the same Mission or the workspace close ends the wait at the earliest of those times. Legacy events without a Mission ID can establish a link through the question ID on an answer. The time to the first recorded PR needs both its creation time and the task’s request time. CI time covers observed check runs with timestamps, counting simultaneous jobs once. A pending run counts up to the last observation. Historical checks without a measured interval contribute no duration. Neither read starts a GitHub request.
 
-## 6. Not yet
+## 6. The pinned thread
 
-- The panel from the task's row, where the user answers (two PRs).
+Open task thread pins the displayed card to the workspace it previewed. Moving the pointer away leaves the thread open. While the card is pinned, the two-second heartbeat checks its inputs. Changes to the task’s live data or source files refresh its history and preserve expanded sections. Escape or Close thread dismisses it.
+
+## 7. Not yet
+
+- Replying to an open question in the pinned thread.
 - The Thread button in the browser column (after the panel).
 - Removing completed Missions older than 30 days from `missions.json`: approved
   only after their text is frozen, in a separate PR; open Missions stay.
