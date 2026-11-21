@@ -83,7 +83,6 @@ final class ColumnState {
     }
 
     // MARK: - Header (pushes the terminal down)
-    static let boringTitles: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
     /// A terminal column's header; the other types own theirs.
     private(set) var terminalHeader: ColumnHeaderView?
     /// The column's header, whatever its type (see `ColumnHeaderView`).
@@ -188,8 +187,8 @@ final class ColumnState {
     func updateHeaderTitle(snapshot: @autoclosure () -> ProcessSnapshot) {
         guard let header = terminalHeader else { return }
         if let deferredAgent {
-            header.title = deferredAgent.processName
-        } else if let termTitle = terminalTitle, !termTitle.isEmpty, !Self.boringTitles.contains(termTitle) {
+            header.title = deferredAgent.launch.agent.rawValue
+        } else if let termTitle = terminalTitle, !termTitle.isEmpty, !Shell.isShell(termTitle) {
             header.title = termTitle
         } else {
             header.title = pty?.foregroundProcessName(snapshot: snapshot()) ?? "shell"
@@ -205,7 +204,7 @@ final class ColumnState {
     /// task's station.
     func updateHeaderAgentState(_ column: ColumnInfo, wait: AgentWait?, now: TimeInterval, station: BoardStages.Station?) {
         guard let header = terminalHeader else { return }
-        header.icon = .terminal(processName: column.deferredAgent?.processName ?? column.processName)
+        header.icon = .terminal(processName: column.deferredAgent?.agent.rawValue ?? column.processName)
         header.status = .agent(column, wait: wait, now: now, station: station)
     }
 
@@ -435,12 +434,12 @@ final class ColumnState {
         // Only the agent's own, in front: any program can print the sequence.
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
             guard let self, let ptySession else { return }
-            guard status.process != AgentProgramStatus.codex else { return noteCodexStatus(status, in: ptySession) }
+            guard status.agent != .codex else { return noteCodexStatus(status, in: ptySession) }
             // One read on an empty process table goes to the agy last seen in front.
             let snapshot = readsProcesses()
             guard ptySession.isNewProgramStatus(status),
                   let agy = snapshot.isEmpty ? lastForegroundAgent : ptySession.foregroundProcess(snapshot: snapshot),
-                  agy.name == status.process
+                  agy.agent == status.agent
             else { return }
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
@@ -601,7 +600,7 @@ final class ColumnState {
     /// own, not a nested agy's that its shell tool started in its job.
     func captureAgySession(sessionID: String?, emitterProcess: ProcessInstance?, snapshot: ProcessSnapshot) -> Bool {
         guard let place = hookEmitterPlace(emitterProcess, snapshot: snapshot),
-              !AgentHookCenter.isHeadlessAgy(place.foreground) else { return false }
+              place.foreground?.headlessAgent != .agy else { return false }
         return agySessionTracker.capture(
             sessionID: sessionID, emitterBelongsToForegroundJob: emitterProcess == place.foreground?.instance,
             foregroundProcess: place.foreground
@@ -646,7 +645,7 @@ final class ColumnState {
     private func noteCodexStatus(_ status: AgentProgramStatus, in pty: PtySession) {
         let snapshot = ProcessSnapshot()
         let front = pty.foregroundProcess(snapshot: snapshot)
-        guard snapshot.isEmpty || front?.name == status.process else { return }
+        guard snapshot.isEmpty || front?.agent == status.agent else { return }
         pty.noteCodexStatus(status, from: snapshot.isEmpty ? nil : front?.instance)
         if [.done, .idle].contains(status.state) { onProgramTurnOver?() }
     }
@@ -664,8 +663,7 @@ final class ColumnState {
     /// Whether this column's `codex` will never prove a thread: one started
     /// without a prompt, and not resumed (`CodexLaunch.canProve`).
     func runsUnprovableCodex(snapshot: ProcessSnapshot) -> Bool {
-        guard let codex = pty?.foregroundProcess(snapshot: snapshot), codex.name == AgentProgramStatus.codex,
-              !AgentHookCenter.isHeadlessCodex(codex) else { return false }
+        guard let codex = pty?.foregroundProcess(snapshot: snapshot), codex.interactiveAgent == .codex else { return false }
         return provenCodexSessionID(of: codex) == nil && !CodexLaunch.canProve(codex)
     }
 
