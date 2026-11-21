@@ -85,7 +85,7 @@ final class SessionHistoryFlowTests: XCTestCase {
                 hoursAgo: 2
             )
             var codex = Self.session(Self.codexID, title: "codex-task", folder: harness.worktree, agent: .codex, workspaceID: workspace.id)
-            codex.model = "chosen-model"
+            codex.agentModel = "chosen-model"
             let restored = Self.session(Self.restoredID, title: "restored-task", folder: harness.repo)
             var unprompted = Self.session(Self.emptyID, title: "empty-task", folder: harness.repo)
             unprompted.hasConversation = false

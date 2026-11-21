@@ -37,7 +37,7 @@ final class AgentSessionRecordTests: XCTestCase {
         var start = observation(.sessionStart, at: 10, source: "startup", name: "feat/x · nirux")
         start.model = "sonnet"
         let record = try XCTUnwrap(AgentSessionRecord.applying(start, to: nil))
-        XCTAssertEqual(record.model, "sonnet")
+        XCTAssertEqual(record.agentModel, "sonnet")
         XCTAssertEqual(record.key, "claude:s1")
         XCTAssertEqual(record.name, "feat/x · nirux")
         XCTAssertEqual(record.startedAt, 10)
