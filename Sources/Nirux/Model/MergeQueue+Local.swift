@@ -35,7 +35,7 @@ extension MergeQueue {
         // checked, so it fails closed rather than passing unseen.
         let listed = snapshot.repositories.flatMap { $0.worktrees.map(\.path) }
         for folder in folders where !snapshot.missingFolders.contains(folder) {
-            let comparable = snapshot.folders[folder] ?? NiruxShellView.comparablePath(folder)
+            let comparable = snapshot.folders[folder] ?? folder.comparablePath
             guard !listed.contains(where: { ProjectBoard.contains($0, comparable) }) else { continue }
             // A bare repository's folder answers `false`; a checkout git
             // refuses (dubious ownership, say) fails otherwise than "not a

@@ -349,7 +349,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(workspace.title, "Why is the cache cold?")
             XCTAssertEqual(workspace.profileID, space.id)
             let worktree = harness.root + "/repo.feat-why-cache-cold"
-            XCTAssertEqual(NiruxShellView.comparablePath(workspace.cwd), NiruxShellView.comparablePath(worktree + "/docs"))
+            XCTAssertEqual(workspace.cwd.comparablePath, (worktree + "/docs").comparablePath)
             // Where the agent starts, which its prompt names it from.
             let handover = try String(contentsOfFile: worktree + "/docs/.codex-handover.md", encoding: .utf8)
             XCTAssertTrue(handover.contains("(template “Investigation (no code)”)"), handover)
@@ -469,7 +469,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let task = try XCTUnwrap(shell.activeWorkspace)
             let folder = tasks + "/Compare- two parsers"
             XCTAssertEqual(task.title, "Compare: two parsers")
-            XCTAssertEqual(NiruxShellView.comparablePath(task.cwd), NiruxShellView.comparablePath(folder))
+            XCTAssertEqual(task.cwd.comparablePath, folder.comparablePath)
             XCTAssertEqual(task.profileID, WorkspaceProfile.defaultID)
             XCTAssertTrue(task.isFolderTask)
             let handover = try String(contentsOfFile: folder + "/.claude-handover.md", encoding: .utf8)
@@ -504,7 +504,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             sheet.branchField.stringValue = "Compare- two parsers"
             sheet.startButton.performClick(nil)
             harness.waitUntil("the second task") { shell.workspaces.filter { $0.title == "Compare: two parsers" }.count == 2 }
-            XCTAssertEqual(shell.activeWorkspace.map { NiruxShellView.comparablePath($0.cwd) }, NiruxShellView.comparablePath(folder + " 2"))
+            XCTAssertEqual(shell.activeWorkspace.map(\.cwd.comparablePath), (folder + " 2").comparablePath)
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder + " 2"), [".agy-handover.md"])
             let agyLaunch = try XCTUnwrap(harness.agentLaunches.last)
             XCTAssertTrue(agyLaunch.hasPrefix("command agy -i 'Read .agy-handover.md for full context"), agyLaunch)
@@ -609,7 +609,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             sheet.startButton.performClick(nil)
             harness.waitUntil("the task") { shell.workspaces.contains { $0.title == "Draft the release notes" } }
             let task = try XCTUnwrap(shell.activeWorkspace)
-            XCTAssertEqual(NiruxShellView.comparablePath(task.cwd), NiruxShellView.comparablePath(harness.home + "/Nirux Tasks/Draft the release notes"))
+            XCTAssertEqual(task.cwd.comparablePath, (harness.home + "/Nirux Tasks/Draft the release notes").comparablePath)
             XCTAssertEqual(task.profileID, space.id, "the space it was started from")
             XCTAssertTrue(task.isFolderTask)
             XCTAssertFalse(try UIFlowHarness.git(["branch", "--list"], at: harness.repo).contains("release-notes"))
@@ -626,7 +626,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             sheet.startButton.performClick(nil)
             harness.waitUntil("the sub-task") { shell.workspaces.contains { $0.title == "Collect the merged PRs" } }
             let child = try XCTUnwrap(shell.workspaces.first { $0.title == "Collect the merged PRs" })
-            XCTAssertEqual(NiruxShellView.comparablePath(child.cwd), NiruxShellView.comparablePath(task.cwd + "/Collect the merged PRs"))
+            XCTAssertEqual(child.cwd.comparablePath, (task.cwd + "/Collect the merged PRs").comparablePath)
             XCTAssertEqual(child.parentWorkspaceID, task.id)
             XCTAssertTrue(child.isFolderTask)
 
@@ -824,7 +824,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             harness.press(.returnKey, in: palette.panel)
             harness.waitUntil("the branch's worktree") { shell.workspaces.contains { $0.title == "feat/remote" } }
             let opened = try XCTUnwrap(shell.activeWorkspace)
-            XCTAssertEqual(NiruxShellView.comparablePath(opened.cwd), NiruxShellView.comparablePath(harness.root + "/repo.feat-remote"))
+            XCTAssertEqual(opened.cwd.comparablePath, (harness.root + "/repo.feat-remote").comparablePath)
             XCTAssertEqual(
                 try UIFlowHarness.git(["rev-parse", "--abbrev-ref", "feat/remote@{upstream}"], at: harness.repo)
                     .trimmingCharacters(in: .whitespacesAndNewlines),

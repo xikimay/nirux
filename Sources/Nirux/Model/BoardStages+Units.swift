@@ -33,7 +33,7 @@ extension BoardStages {
         /// An agent of its task waits for the user: amber is never hidden.
         var needsYou = false
         /// Why, from the same line: its icon's glyph.
-        var reason: StateIcon.Reason = .question
+        var reason: AgentInputReason = .question
         /// Its worktree is still there.
         var cleanUp: CleanUp?
     }
