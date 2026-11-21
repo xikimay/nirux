@@ -57,6 +57,6 @@ extension NiruxShellView {
             pty.cachedAgentState, lastActivityAt: pty.lastAgentActivityAt, now: now.timeIntervalSince1970
         )
             || pty.pendingAgentDialog != nil
-            || (pty.lastSeenRunningAgent && pty.agentHookKind != "claude")
+            || (pty.lastSeenRunningAgent && pty.hookAgent != .claude)
     }
 }

@@ -44,7 +44,7 @@ enum NewTask {
     struct Request: Sendable {
         let description: String
         let template: TaskTemplates.Template?
-        let agent: NiruxApp.WorkspaceAgent
+        let agent: CodingAgent
         let projectID: String
         let place: Place
         /// False once the user chose to start without fetching, after a

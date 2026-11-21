@@ -42,6 +42,30 @@ final class LeadToolsFlowTests: XCTestCase {
         return question
     }
 
+    /// A task's Mission parent is the column the Lead's Claude talks in:
+    /// a `claude -p` run in front of an earlier terminal isn't it.
+    func testTheLeadsMissionParentSkipsAHeadlessClaude() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try makeLead(harness)
+            harness.shell.focusWorkspace(id: lead.workspace.id, column: 0)
+            let headless = UUID().uuidString, interactive = UUID().uuidString
+            lead.workspace.addColumn(command: "exec -a claude /bin/zsh -f -c 'sleep 600; :' -p", agentUUID: headless, cwd: lead.workspace.cwd)
+            lead.workspace.addColumn(command: "exec -a claude /bin/cat", agentUUID: interactive, cwd: lead.workspace.cwd)
+            let claudes = try [headless, interactive].map { uuid in
+                try XCTUnwrap(lead.workspace.columns.first { $0.agentUUID == uuid }?.pty)
+            }
+            harness.waitUntil("both claudes in front") {
+                claudes.map { $0.foregroundProcess(snapshot: ProcessSnapshot())?.agent } == [.claude, .claude]
+            }
+            XCTAssertLessThan(
+                try XCTUnwrap(lead.workspace.columns.firstIndex { $0.agentUUID == headless }),
+                try XCTUnwrap(lead.workspace.columns.firstIndex { $0.agentUUID == interactive }),
+                "the headless claude comes first"
+            )
+            XCTAssertEqual(harness.shell.leadMissionParent(inSpace: lead.space)?.agentUUID, interactive)
+        }
+    }
+
     /// start_task opens a worktree task that reports to the Lead; the
     /// Lead lists it, answers it, tells it more, and hands a question to
     /// the user, whose answer also comes back to the Lead. Nobody else

@@ -6,28 +6,15 @@ import Foundation
 /// or idle at its prompt — is never killed without confirmation; a bare
 /// shell closes without ceremony.
 enum WorkspaceClosePolicy {
-    /// A recognized agent process (`AgentStatusMachine.isRecognizedAgentProcess`)
-    /// that closing would kill.
+    /// An agent that closing would kill.
     struct LiveAgent: Equatable {
-        /// Process name, e.g. "claude".
-        var processName: String
+        var agent: CodingAgent
         /// nil when the status can't be trusted — the alert then only says
         /// the agent is running.
         var status: AgentStatus?
         /// A restored agent that hasn't resumed yet: nothing runs, closing
         /// drops the session from the layout.
         var isPaused = false
-
-        var displayName: String {
-            switch processName {
-            case "claude": return "Claude"
-            case "codex": return "Codex"
-            case "gemini": return "Gemini"
-            case "opencode": return "OpenCode"
-            case "agy": return "Antigravity"
-            default: return processName
-            }
-        }
 
         var statusDescription: String {
             if isPaused { return "paused" }
@@ -90,9 +77,9 @@ enum WorkspaceClosePolicy {
     static func agentDetail(_ agents: [LiveAgent], closing target: String) -> String {
         if agents.count == 1 {
             let agent = agents[0]
-            return "\(agent.displayName) is \(agent.statusDescription) — closing the \(target) ends its session."
+            return "\(agent.agent.name) is \(agent.statusDescription) — closing the \(target) ends its session."
         }
-        let list = agents.map { "\($0.displayName) \($0.statusDescription)" }.joined(separator: ", ")
+        let list = agents.map { "\($0.agent.name) \($0.statusDescription)" }.joined(separator: ", ")
         return "\(agents.count) agents are running (\(list)) — closing the \(target) ends their sessions."
     }
 }
@@ -103,8 +90,8 @@ extension WorkspaceClosePolicy.LiveAgent {
     /// hook-less Claude, Gemini, OpenCode) reads idle until the first
     /// keystroke — an agent launched with a handover prompt works while
     /// showing idle — and through silent tool calls.
-    init(processName: String, machineStatus: AgentStatus, hookKind: String?) {
-        let hookDriven = processName == "claude" && hookKind == "claude"
-        self.init(processName: processName, status: machineStatus == .idle && !hookDriven ? nil : machineStatus)
+    init(agent: CodingAgent, machineStatus: AgentStatus, hookAgent: CodingAgent?) {
+        let hookDriven = agent == .claude && hookAgent == .claude
+        self.init(agent: agent, status: machineStatus == .idle && !hookDriven ? nil : machineStatus)
     }
 }
