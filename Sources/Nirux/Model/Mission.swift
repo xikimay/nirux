@@ -117,6 +117,9 @@ struct MissionEvent: Codable, Equatable {
     var handedToUserBecause: String?
     /// When, epoch seconds; nil on one an older build handed over.
     var handedToUserAt: TimeInterval?
+    /// On a question: when it stopped waiting because its child took a
+    /// prompt after it, unanswered (`MissionStore.retireQuestions`).
+    var retiredAt: TimeInterval?
     /// On an instruction: Nirux types it at the child's next free prompt
     /// until then (`MissionEventCLI.instructionLifetime` after it was sent).
     /// Nil on one an older build recorded, which had an hour.

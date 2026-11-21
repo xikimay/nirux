@@ -38,29 +38,49 @@ extension NiruxShellView {
         if task == nil, workspaces.contains(where: { $0.id == id && !$0.isClosing }) {
             return answer(noSpaceTask(name, in: space), true)
         }
-        guard let file = TaskThread.Store.fileURL(workspaceID: id, spaceID: space.id, stateDirectory: directory) else {
-            return answer(noSpaceTask(name, in: space), true)
+        let title = task?.title ?? name
+        readTaskThread(workspaceID: id, spaceID: space.id, render: { events, context in
+            TaskThread.summary(events, title: title, context: context)
+        }) { text in
+            guard let text else { return answer("No readable thread for this task in this space.", true) }
+            answer(text, false)
+        }
+    }
+
+    /// Resolve by identity before starting I/O and verify the space again at delivery.
+    func readTaskThread<Value: Sendable>(
+        workspaceID id: String, spaceID: String,
+        render: @escaping @Sendable ([TaskThread.Event], TaskThread.Context) -> Value,
+        completion: @escaping @MainActor (Value?) -> Void
+    ) {
+        let directory = Persistence.stateDirectory
+        let task = workspaces.first { $0.id == id && !$0.isClosing }
+        if let task, task.profileID != spaceID || task.startedOutsideNirux || !keepsThread(task) {
+            return completion(nil)
+        }
+        guard let file = TaskThread.Store.fileURL(workspaceID: id, spaceID: spaceID, stateDirectory: directory) else {
+            return completion(nil)
         }
         let context = task.map(threadContext) ?? TaskThread.Context(urls: sessionLedger.pullRequestURLs(workspaceID: id))
-        let title = task?.title ?? name
         let loaded = MissionStore.shared.ensureLoaded()
-        let sources = threadSources(workspaceID: id, spaceID: space.id, urls: context.urls, reviews: task?.reviewRuns ?? [:], directory: directory)
+        let sources = threadSources(workspaceID: id, spaceID: spaceID, urls: context.urls, reviews: task?.reviewRuns ?? [:], directory: directory)
         let active = task != nil
         Self.offMain({
             let recorded = TaskThread.Store.queue.sync {
                 active ? TaskThread.Store.load(workspaceID: id, stateDirectory: directory) : TaskThread.Store.load(from: file)
             }
-            guard active || TaskThread.canReadArchive(recorded) else { return nil as String? }
+            guard active || TaskThread.canReadArchive(recorded) else { return nil as Value? }
             if recorded.contains(where: { $0.kind == .closed }) {
-                return TaskThread.summary(TaskThread.ordered(recorded), title: title, context: .init())
+                return render(TaskThread.ordered(recorded), .init())
             }
             guard loaded else { return nil }
             let events = TaskThread.thread(recorded: recorded + context.pullRequestEvents, joining: sources())
-            return TaskThread.summary(events, title: title, context: context)
-        }) { [weak self] text in
-            guard let self, !self.workspaces.contains(where: { $0.id == id && $0.profileID != space.id }),
-                  let text else { return answer("No readable thread for this task in this space.", true) }
-            answer(text, false)
+            return render(events, context)
+        }) { [weak self] result in
+            guard let self, !workspaces.contains(where: { $0.id == id && $0.profileID != spaceID }) else {
+                return completion(nil)
+            }
+            completion(result)
         }
     }
 }
