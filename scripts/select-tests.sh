@@ -7,7 +7,7 @@
 # more than test classes or whose class others inherit, or any other file
 # but documentation.
 #
-# Usage: scripts/select-tests.sh <coverage index> < <changed files>
+# Usage: git diff --no-renames --name-only -z <indexed commit> HEAD | scripts/select-tests.sh <index>
 set -euo pipefail
 
 index="$1"
@@ -20,24 +20,28 @@ whole() {
 
 selected="$(mktemp)"
 trap 'rm -f "$selected"' EXIT
-while IFS= read -r path; do
+while IFS= read -r -d '' path; do
     case "$path" in
-        docs/* | *.md) ;;
+        docs/* | README.md | LICENSE) ;;
         Sources/*.swift)
             awk -v path="$path" '$1 == path { print $2; found = 1 } END { exit !found }' "$index" >> "$selected" ||
                 whole "no class runs $path"
             ;;
         Tests/NiruxTests/*.swift)
-            # A deleted test file's classes are gone with it.
-            [[ -f $path ]] || continue
-            declared=$(grep -E '^(@[A-Za-z]+ )*((public|internal|open|final) )*(class|struct|enum|extension|func|protocol|typealias|let|var|actor) ' "$path" || true)
-            classes=$(sed -nE 's/^(@[A-Za-z]+ )*(final )?class ([A-Za-z0-9_]+) *: *[A-Za-z0-9_.]*TestCase.*/\3/p' <<< "$declared")
-            if [[ -z $classes || $(wc -l <<< "$declared") -ne $(wc -l <<< "$classes") ]]; then
-                whole "$path declares more than test classes"
-            fi
-            while read -r class; do
-                if grep -rqE ": *$class([^A-Za-z0-9_]|$)" Tests/NiruxTests; then
-                    whole "test classes inherit $class"
+            [[ -f $path ]] || whole "removed test or helper: $path"
+            # Only imports and classes may appear at file scope. The runner
+            # checks every class name against XCTest discovery.
+            classes=$(swiftc -frontend -dump-parse "$path" | awk '
+                /^  \(import_decl / { next }
+                /^  \(class_decl / && match($0, /] "[A-Za-z_][A-Za-z0-9_]*"/) {
+                    print substr($0, RSTART + 3, RLENGTH - 4)
+                    next
+                }
+                /^  \(/ { exit 1 }') || whole "$path contains shared test code"
+            [[ -n $classes ]] || whole "$path declares no test class"
+            while IFS= read -r class; do
+                if git grep -lwF -e "$class" -- Tests | grep -vxF "$path" > /dev/null; then
+                    whole "other files reference $class"
                 fi
                 echo "NiruxTests.$class" >> "$selected"
             done <<< "$classes"
@@ -45,4 +49,5 @@ while IFS= read -r path; do
         *) whole "$path" ;;
     esac
 done
+[[ -s $selected ]] || whole "no test class selected"
 sort -u "$selected"

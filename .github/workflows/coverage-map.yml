@@ -59,18 +59,21 @@ jobs:
         run: |
           bin="$(swift build --show-bin-path)"
           export BUNDLE="$bin/NiruxPackageTests.xctest/Contents/MacOS/NiruxPackageTests" APP="$bin/Nirux"
-          ls "$NIRUX_TESTS_PROFILES" | sed -E 's/\.[0-9]+\.profraw$//' | sort -u |
-            xargs -P 3 -n 1 bash -c '
+          swift test list --skip-build | cut -d/ -f1 | sort -u > "$RUNNER_TEMP/index-classes"
+          mkdir "$RUNNER_TEMP/index-parts"
+          xargs -P 3 -n 1 bash -c '
               set -euo pipefail
               class="$1"
               xcrun llvm-profdata merge -sparse "$NIRUX_TESTS_PROFILES/$class".*.profraw -o "$RUNNER_TEMP/$class.profdata"
               xcrun llvm-cov export -format=lcov -skip-functions -instr-profile "$RUNNER_TEMP/$class.profdata" "$BUNDLE" -object "$APP" \
                 -ignore-filename-regex "/\.build/|/Tests/" |
-                awk -v class="$class" -F"[:,]" "/^SF:/ { f = \$2; sub(/.*\/Sources\//, \"Sources/\", f) } /^DA:/ && \$3 > 0 && !seen[f]++ { print f, class }"
-            ' _ | sort > .build/coverage-index.txt
+                awk -v class="$class" -F"[:,]" "/^SF:/ { f = \$2; sub(/.*\/Sources\//, \"Sources/\", f) } /^DA:/ && \$3 > 0 && !seen[f]++ { print f, class }" > "$RUNNER_TEMP/index-parts/$class"
+            ' _ < "$RUNNER_TEMP/index-classes"
+          sort -u "$RUNNER_TEMP"/index-parts/* > .build/coverage-index.txt
+          test -s .build/coverage-index.txt
           echo "$(cut -d' ' -f2 .build/coverage-index.txt | sort -u | wc -l | tr -d ' ') classes, $(cut -d' ' -f1 .build/coverage-index.txt | sort -u | wc -l | tr -d ' ') source files"
 
       - uses: actions/cache/save@v6
         with:
           path: .build/coverage-index.txt
-          key: coverage-index-${{ github.run_id }}
+          key: coverage-index-v2-${{ github.sha }}

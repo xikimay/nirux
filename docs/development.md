@@ -16,7 +16,7 @@ CI runs the tests one process per test class, several at a time:
 swift build --build-tests && scripts/run-tests.sh
 ```
 
-A draft pull request runs only the test classes its changes reach, as the `test (selected)` check. The full suite, the `test` check, runs once the pull request is marked ready, and on every push after. `scripts/select-tests.sh` picks the classes from the coverage index that the Coverage map workflow saves on main each day: the classes that run a changed source file, and those a changed test file declares. These run the whole suite instead: a source file no class runs (a new one, say), a test file that declares more than test classes (a helper) or a class others inherit, and any file but Swift sources, test files and documentation (`Package.swift`, `Package.resolved`, workflows, scripts, resources, `EditorAssets`).
+Draft pull requests run `test (selected)`. The daily Coverage map workflow records which XCTest classes executed each Swift source file on main. The selector examines all changes since the indexed commit, including changes that landed on main after the map was recorded. It also includes classes declared by changed test files. Shared test helpers, removed test files, uncovered sources, build inputs, and missing or empty selections trigger the full suite. Marking the PR ready and each subsequent push run the full suite under the separate `test` check.
 
 ## Development builds and your real workspaces
 
