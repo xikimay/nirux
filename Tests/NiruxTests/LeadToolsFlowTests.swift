@@ -158,7 +158,7 @@ final class LeadToolsFlowTests: XCTestCase {
                 $0.pullRequests[url] = PRFollowUp.Entry(rounds: [PRFollowUp.Round(kind: .ci, head: "abc", typedAt: 5)])
             }
             task.prInfo = PRInfo(
-                number: 7, state: "MERGED", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil, url: url,
+                number: 7, state: .merged, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil, url: url,
                 additions: nil, deletions: nil, changedFiles: nil
             )
             shell.followUpPullRequest(of: task)

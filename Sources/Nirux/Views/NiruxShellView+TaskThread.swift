@@ -61,11 +61,11 @@ extension NiruxShellView {
             TaskThread.Store.append(frozen, workspaceID: id, spaceID: space, stateDirectory: directory)
             TaskThread.Store.pruneAll(keeping: open, now: now, stateDirectory: directory)
         }
-        guard !urls.isEmpty, let gh = PRDetect.installedGHPath() else { return }
+        guard !urls.isEmpty else { return }
         DispatchQueue.global(qos: .utility).async {
             let history = urls.sorted().flatMap { url in
-                GitHubCLIBoardClient.runGH(gh, arguments: ["pr", "view", url, "--json", TaskThread.pullRequestFields], timeout: 30)
-                    .flatMap { $0.terminationStatus == 0 ? TaskThread.pullRequestHistory($0.standardOutput) : nil } ?? []
+                let result = GitHub.CLI.run(.init(["pr", "view", url, "--json", TaskThread.pullRequestFields])).flatMap(\.result)
+                return (try? result.get()).flatMap(TaskThread.pullRequestHistory) ?? []
             }
             TaskThread.Store.queue.async {
                 TaskThread.Store.append(history, workspaceID: id, spaceID: space, stateDirectory: directory)

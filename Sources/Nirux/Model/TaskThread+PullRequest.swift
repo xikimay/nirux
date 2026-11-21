@@ -29,9 +29,9 @@ extension TaskThread {
                 )
             }
         }
-        let checks = ProjectBoard.latest((json["statusCheckRollup"] as? [[String: Any]] ?? []).compactMap(ProjectBoard.check(from:)))
+        let checks = GitHub.latest((json["statusCheckRollup"] as? [[String: Any]] ?? []).compactMap(GitHub.check(from:)))
         // gh writes a queued run's start as year 1.
-        if let last = checks.compactMap({ $0.startedAt?.hasPrefix("0001-") == false ? time($0.startedAt) : nil }).max() {
+        if let last = checks.compactMap({ time(GitHub.startTime($0.startedAt)) }).max() {
             let failed = checks.filter { $0.result == .failure }.map(\.name)
             let pending = checks.contains { $0.result == .pending }
             let text = failed.isEmpty ? "\(checks.count) checks" : "\(failed.count) of \(checks.count) failed: \(failed.joined(separator: ", "))"
@@ -40,7 +40,7 @@ extension TaskThread {
         if let merged = time(json["mergedAt"]) {
             let commit = ((json["mergeCommit"] as? [String: Any])?["oid"] as? String)?.lowercased()
             events.append(Event(time: merged, kind: .merged, number: number, ref: commit))
-        } else if (json["state"] as? String)?.uppercased() == "CLOSED", let closed = time(json["closedAt"]) {
+        } else if GitHub.PullRequestState(json["state"] as? String) == .closed, let closed = time(json["closedAt"]) {
             events.append(Event(time: closed, kind: .prClosed, number: number))
         }
         return events
