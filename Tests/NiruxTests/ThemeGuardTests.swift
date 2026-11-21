@@ -41,7 +41,8 @@ final class ThemeGuardTests: XCTestCase {
         "Views/BoardStagesLineView.swift", "Views/BoardStagesMergedView.swift", "Views/ColumnHeaderView.swift",
         "Views/CountBadge.swift", "Views/IconRail.swift", "Views/SidebarApprovalBlockRenderer.swift",
         "Views/SidebarCardLayout.swift", "Views/SidebarCatchUp.swift", "Views/SidebarRenderer.swift",
-        "Views/SidebarView+Rendering.swift", "Views/SidebarWorkspaceCardRenderer.swift", "Views/StateIcon.swift"
+        "Views/SidebarView+Rendering.swift", "Views/SidebarWorkspaceCardRenderer.swift", "Views/StateIcon.swift",
+        "Views/WaitingTaskView.swift"
     ]
 
     func testOnlyWaitsOnTheUserPaintAmber() throws {

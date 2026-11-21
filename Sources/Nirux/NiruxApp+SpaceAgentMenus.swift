@@ -80,16 +80,9 @@ extension NiruxApp {
 
     // MARK: Agent
 
-    @objc func newClaudeCode(_ sender: Any?) {
-        shell?.openClaudeCode()
-    }
-
-    @objc func newCodex(_ sender: Any?) {
-        shell?.openCodex()
-    }
-
-    @objc func newAgy(_ sender: Any?) {
-        shell?.openAgy()
+    @objc func newAgent(_ sender: Any?) {
+        guard let agent = (sender as? NSMenuItem)?.representedObject as? CodingAgent else { return }
+        shell?.openAgent(agent)
     }
 
     @objc func reviewBranch(_ sender: Any?) {
@@ -171,9 +164,10 @@ extension NiruxApp {
     @MainActor
     func agentMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: "Agent")
-        menu.addItem(withTitle: "New Claude Code", action: #selector(newClaudeCode(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "New Codex", action: #selector(newCodex(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "New Antigravity", action: #selector(newAgy(_:)), keyEquivalent: "")
+        for agent in CodingAgent.launchable {
+            menu.addItem(withTitle: "New \(agent.productName)", action: #selector(newAgent(_:)), keyEquivalent: "")
+                .representedObject = agent
+        }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Next Waiting Agent", action: #selector(jumpToNextWaitingAgent(_:)), shortcut: .nextWaitingAgent)
         menu.addItem(withTitle: "Resume All Agents", action: #selector(resumeAllAgents(_:)), keyEquivalent: "")

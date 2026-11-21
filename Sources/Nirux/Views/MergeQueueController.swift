@@ -300,7 +300,7 @@ final class MergeQueueController {
         guard Set(entries.map(\.number)).count == entries.count else { return "A pull request is in the list twice." }
         for entry in entries {
             guard entry.number > 0 else { return "#\(entry.number) isn’t a pull request number." }
-            guard MergeQueue.objectID(entry.head) != nil else { return "#\(entry.number) has no confirmed head commit." }
+            guard GitHub.objectID(entry.head) != nil else { return "#\(entry.number) has no confirmed head commit." }
             guard BoardConfig.isValidBranchName(entry.branch) else {
                 return "#\(entry.number)’s branch “\(entry.branch)” isn’t a branch name Nirux reads."
             }

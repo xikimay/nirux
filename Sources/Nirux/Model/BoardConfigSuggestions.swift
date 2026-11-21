@@ -142,39 +142,6 @@ struct BoardConfigSuggestions: Equatable, Sendable {
         return Folder(repository: repository, remote: remote, checkout: checkout, gitHubRemotes: survey.gitHubRemotes)
     }
 
-    /// `owner/name` of a github.com remote URL, spelled as in the URL
-    /// (`GitHubRepository` lowercases it).
-    static func repositoryName(remoteURL: String) -> String? {
-        guard GitHubRepository(remoteURL: remoteURL)?.host == "github.com" else { return nil }
-        return spelledOwnerAndName(remoteURL: remoteURL)
-    }
-
-    /// `owner/name` of a remote URL on any host, spelled as in the URL.
-    static func spelledOwnerAndName(remoteURL: String) -> String? {
-        guard let parsed = GitHubRepository(remoteURL: remoteURL) else { return nil }
-        let components = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(whereSeparator: { $0 == "/" || $0 == ":" })
-        guard components.count >= 2 else { return nil }
-        let owner = String(components[components.count - 2])
-        var name = String(components[components.count - 1])
-        if name.lowercased().hasSuffix(".git") { name.removeLast(4) }
-        guard owner.lowercased() == parsed.owner, name.lowercased() == parsed.name else {
-            return "\(parsed.owner)/\(parsed.name)"
-        }
-        return "\(owner)/\(name)"
-    }
-
-    /// `ssh://…`, or scp-like `user@host:path`, which ssh resolves through
-    /// its config; not `https://`.
-    static func isSSH(_ remoteURL: String) -> Bool {
-        let trimmed = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let scheme = URL(string: trimmed)?.scheme?.lowercased(), trimmed.contains("://") {
-            return scheme == "ssh" || scheme == "git+ssh" || scheme == "ssh+git"
-        }
-        guard let colon = trimmed.firstIndex(of: ":") else { return false }
-        return !trimmed[..<colon].contains("/")
-    }
-
     /// The first entry of `git worktree list --porcelain -z`, unless it is
     /// a bare repository, which has no files.
     static func mainWorkingTree(inListing listing: String) -> String? {

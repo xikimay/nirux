@@ -31,8 +31,7 @@ final class GitWorktreeValidationTests: XCTestCase {
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
+        try process.runToEnd()
         guard process.terminationStatus == 0 else {
             throw NSError(domain: "GitWorktreeValidationTests.git", code: Int(process.terminationStatus))
         }
@@ -46,9 +45,7 @@ final class GitWorktreeValidationTests: XCTestCase {
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        let data = try process.runToEnd(reading: output)
         guard process.terminationStatus == 0 else {
             throw NSError(domain: "GitWorktreeValidationTests.gitOutput", code: Int(process.terminationStatus))
         }
@@ -421,8 +418,8 @@ final class GitWorktreeValidationTests: XCTestCase {
         try "# mine\n.claude-handover.md".write(toFile: exclude, atomically: true, encoding: .utf8)
         let linked = try XCTUnwrap(GitWorktree.create(branch: "feat/x", repoRoot: repo).path)
 
-        XCTAssertTrue(GitWorktree.ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: linked))
-        XCTAssertTrue(GitWorktree.ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repo))
+        XCTAssertTrue(GitWorktree.ensureExcluded(HandoverFile.filenames, repoRoot: linked))
+        XCTAssertTrue(GitWorktree.ensureExcluded(HandoverFile.filenames, repoRoot: repo))
         XCTAssertEqual(
             try String(contentsOfFile: exclude, encoding: .utf8),
             "# mine\n.claude-handover.md\n# Nirux handovers\n.codex-handover.md\n.agy-handover.md\n"
@@ -439,7 +436,7 @@ final class GitWorktreeValidationTests: XCTestCase {
         // Never written through a link.
         try FileManager.default.removeItem(atPath: exclude)
         try FileManager.default.createSymbolicLink(atPath: exclude, withDestinationPath: root + "/elsewhere")
-        XCTAssertFalse(GitWorktree.ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repo))
+        XCTAssertFalse(GitWorktree.ensureExcluded(HandoverFile.filenames, repoRoot: repo))
         XCTAssertFalse(FileManager.default.fileExists(atPath: root + "/elsewhere"))
     }
 

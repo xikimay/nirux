@@ -30,7 +30,7 @@ extension NiruxShellView {
               let deferred = column.takeDeferredAgent() else { return false }
         refreshLaunch(of: column, in: workspace)
         let command = resumeLaunchCommand(
-            deferred.agent.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)), in: workspace, column: column,
+            deferred.launch.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)), in: workspace, column: column,
             settingsFiles: settingsFiles
         )
         sideEffects.startRestoredAgent(column, command)
@@ -147,7 +147,7 @@ extension NiruxShellView {
     /// What a column row shows of an agent that hasn't resumed.
     static func sidebarDeferredAgent(of column: ColumnState) -> SidebarDeferredAgent? {
         column.deferredAgent.map {
-            SidebarDeferredAgent(processName: $0.processName, summary: $0.summary, columnID: column.id)
+            SidebarDeferredAgent(agent: $0.launch.agent, summary: $0.summary, columnID: column.id)
         }
     }
 }

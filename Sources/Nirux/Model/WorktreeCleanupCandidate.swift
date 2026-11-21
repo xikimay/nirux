@@ -115,7 +115,7 @@ struct WorktreeCleanupCandidate: Equatable {
         case .blocked(let problems):
             let first = problems.first ?? ""
             if let pullRequest = report?.pullRequest, !first.contains("#\(pullRequest.number) ") {
-                parts.append("PR #\(pullRequest.number) \(pullRequest.state.lowercased())")
+                parts.append("PR #\(pullRequest.number) \(pullRequest.state.word)")
             }
             parts.append(problems.count > 1 ? "\(first) (+\(problems.count - 1) more)" : first)
         case .ready(let plan, _):
@@ -128,7 +128,7 @@ struct WorktreeCleanupCandidate: Equatable {
             if workspaces.isEmpty { parts.append("not open in Nirux") }
         }
         if !agents.isEmpty {
-            parts.append(agents.map { "\($0.displayName) \($0.statusDescription)" }.joined(separator: ", "))
+            parts.append(agents.map { "\($0.agent.name) \($0.statusDescription)" }.joined(separator: ", "))
         }
         return parts.joined(separator: " · ")
     }
@@ -200,7 +200,7 @@ struct WorktreeCleanupCandidate: Equatable {
                 continue
             }
             if !candidate.agents.isEmpty {
-                let agents = candidate.agents.map { "\($0.displayName) \($0.statusDescription)" }
+                let agents = candidate.agents.map { "\($0.agent.name) \($0.statusDescription)" }
                 agentLines.append("• \(agents.joined(separator: ", ")) in \(quotedList(candidate.workspaces.map(\.title)))")
             }
         }

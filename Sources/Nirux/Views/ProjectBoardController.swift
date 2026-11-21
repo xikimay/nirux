@@ -31,8 +31,8 @@ final class ProjectBoardController {
         var openPullRequests: [ProjectBoard.PullRequest]?
         var mergedPullRequests: [ProjectBoard.PullRequest]?
         /// The last post-merge run; `.some(nil)` when there is none yet.
-        var postMergeRun: ProjectBoard.WorkflowRun??
-        var errors: [ProjectBoard.Source: ProjectBoard.FetchError] = [:]
+        var postMergeRun: GitHub.WorkflowRun??
+        var errors: [ProjectBoard.Source: GitHub.CLI.Failure] = [:]
         /// Why the last Retarget failed: shown until Refresh.
         var retargetFailure: String?
         var pullRequestsReadAt: Date?
@@ -66,6 +66,12 @@ final class ProjectBoardController {
                 pullRequest.isFromConfiguredRepository
                     && ProjectBoard.checkSummary(pullRequest.checks, required: []).hasPending
             }
+        }
+
+        func pullRequestsAreFresh(now: Date) -> Bool {
+            let age = pullRequestsReadAt.map { now.timeIntervalSince($0) }
+            let interval = ProjectBoard.RefreshSchedule.interval(of: .openPullRequests, hasPendingChecks: hasPendingChecks)
+            return ProjectBoardController.stands(age: age, interval: interval)
         }
 
         var availableSources: Set<ProjectBoard.Source> {
@@ -452,14 +458,13 @@ final class ProjectBoardController {
         let ids = sections.map(\.id) + Array(reads.keys) + [Self.noRepositoryID]
         return Set(ids.filter { id in
             guard let read = reads[id] else { return worktrees }
-            let age = read.pullRequestsReadAt.map { now.timeIntervalSince($0) }
-            return Self.stands(age: age, interval: interval(.openPullRequests, read.hasPendingChecks))
+            return read.pullRequestsAreFresh(now: now)
         })
     }
 
     /// A reading made `age` seconds ago, of a source read every `interval`:
     /// it stands for two intervals. Never made, it doesn't.
-    static func stands(age: TimeInterval?, interval: TimeInterval) -> Bool {
+    nonisolated static func stands(age: TimeInterval?, interval: TimeInterval) -> Bool {
         age.map { $0 <= 2 * interval } ?? false
     }
 
@@ -539,7 +544,7 @@ final class ProjectBoardController {
             let list: ProjectBoard.PullRequestList = source == .openPullRequests ? .open : .merged
             Self.readOffMain({
                 client.pullRequests(repository: name, state: list).flatMap { data in
-                    ProjectBoard.parsePullRequests(data, repository: gitHub).map(Result.success) ?? .failure(.unreadable)
+                    ProjectBoard.parsePullRequests(data, repository: gitHub).map(Result.success) ?? .failure(.unreadable(output: data))
                 }
             }, then: { [weak self] result in
                 self?.finish(source, section: id, reads: repository, generation: current) { reads in
@@ -566,7 +571,7 @@ final class ProjectBoardController {
             }
             Self.readOffMain({
                 client.postMergeRuns(repository: name, workflow: workflow, branch: branch).flatMap { data in
-                    ProjectBoard.parseRuns(data).map { .success($0.first) } ?? .failure(.unreadable)
+                    GitHub.parseWorkflowRuns(data).map { .success($0.first) } ?? .failure(.unreadable(output: data))
                 }
             }, then: { [weak self] result in
                 self?.finish(source, section: id, reads: repository, generation: current) { reads in
@@ -588,7 +593,7 @@ final class ProjectBoardController {
         let current = generation
         Self.readOffMain({ client.retarget(repository: name, number: number, base: base) }, then: { [weak self] result in
             guard let self, current == self.generation, self.reads[id]?.generation == repository.generation else { return }
-            self.reads[id]?.retargetFailure = result.failureValue.map { "Retarget #\(number): \($0.message)" }
+            self.reads[id]?.retargetFailure = result.failureValue.map { "Retarget #\(number): \(ProjectBoard.message($0))" }
             self.reads[id]?.schedule.expire(.openPullRequests)
             self.onRead?()
             self.tick(onScreen: self.isShown())
@@ -715,7 +720,7 @@ final class ProjectBoardController {
             reads[section.id]?.gitHub ?? section.commonDir.flatMap(remote).flatMap(RepositoryReads.init(baseRemote:))?.gitHub
         }
         let isTaken = { (remotes: [GitHubRepository]) in
-            remotes.contains { remote in taken.contains { $0.owner == remote.owner && $0.name == remote.name } }
+            remotes.contains { remote in taken.contains { $0.hasOwnerAndName(of: remote) } }
         }
         var listed = anchored
         // By their main checkout's path: the same clone names the section whatever the sidebar's order.
@@ -738,7 +743,7 @@ final class ProjectBoardController {
             guard let read = listedRemotes[commonDir] else { continue }
             // Its section reads its base remote: a clone whose own base remote is that repository joins it.
             if let gitHub = RepositoryReads(baseRemote: read)?.gitHub {
-                guard !placedRepositories.contains(where: { $0.owner == gitHub.owner && $0.name == gitHub.name }) else { continue }
+                guard !placedRepositories.contains(where: { $0.hasOwnerAndName(of: gitHub) }) else { continue }
                 placedRepositories.append(gitHub)
             }
             remotes[commonDir] = read
@@ -917,7 +922,7 @@ final class ProjectBoardController {
         switch reads.postMergeRun {
         case .some(let run): return .postMergeRun(run, workflow: workflow, now: now)
         case nil:
-            let label = (workflow as NSString).deletingPathExtension
+            let label = GitHub.workflowLabel(workflow)
             return reads.errors[.postMergeRun] == nil
                 ? ColumnHeaderView.Status("\(label) …", tone: .neutral, toolTip: "Reading the last \(label) run…") : nil
         }

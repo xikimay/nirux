@@ -95,10 +95,6 @@ final class RequestFlowTests: XCTestCase {
                 let expected = CommandPalette.unfoldStart(from: PanelGrowth.origin(of: source, in: panel.frame), scale: PanelGrowth.scale)
                 return CATransform3DEqualToTransform(try XCTUnwrap(grow.fromValue as? NSValue).caTransform3DValue, CATransform3DMakeAffineTransform(expected))
             }
-            @MainActor func wait(_ seconds: TimeInterval) {
-                let end = Date().addingTimeInterval(seconds)
-                harness.waitUntil("\(seconds) s") { Date() >= end }
-            }
 
             // xctest shows no toolbar: the badge has no window, and the inbox
             // fades in where it hangs (`testAPanelGrowsFromTheEdgeNearestItsControl`
@@ -117,7 +113,7 @@ final class RequestFlowTests: XCTestCase {
             XCTAssertFalse(inbox.isKeyWindow)
             shell.openInbox()
             XCTAssertTrue(inbox.canBecomeKey)
-            wait(PanelGrowth.openDuration + 0.1)
+            harness.waitUntil("the reopened inbox is whole") { inbox.hasShadow && inbox.alphaValue == 1 }
             XCTAssertTrue(inbox.isVisible, "shown again while it went, it stays")
             XCTAssertTrue(inbox.alphaValue == 1 && inbox.hasShadow)
 
@@ -125,27 +121,28 @@ final class RequestFlowTests: XCTestCase {
             shell.closeInbox()
             shell.openInbox()
             shell.closeInbox()
-            wait(PanelGrowth.openDuration + 0.1)
-            XCTAssertFalse(inbox.isVisible)
-            XCTAssertFalse(inbox.hasShadow, "no shadow came while it went")
-
             let rail = shell.sidebar.iconRail
             let icon = try XCTUnwrap(rail.itemViews[there.id])
+            harness.waitUntil("the request icon is on screen") { NiruxShellView.screenRect(of: icon) != nil }
             rail.onRequest?(there.id, icon)
             let callout = try XCTUnwrap(shell.requestsState.calloutPanel?.panel)
             XCTAssertTrue(try start(of: callout, from: icon), "out of its icon")
-            shell.closeCallout()
-            harness.waitUntil("the callout gone") { !callout.isVisible }
+            // This growth was scheduled after the inbox's last growth.
+            harness.waitUntil("the callout is whole") { callout.hasShadow && callout.alphaValue == 1 }
+            XCTAssertFalse(inbox.isVisible)
+            XCTAssertFalse(inbox.hasShadow, "no shadow came while it went")
 
-            // Going, then shown with Reduce motion: whole at once, and it
-            // stays.
+            // The callout closes after the inbox starts closing. Once it is
+            // gone, the old close of the reopened inbox has also fallen due.
             shell.openInbox()
-            shell.closeInbox()
+            rail.onRequest?(there.id, icon)
+            XCTAssertFalse(shell.requestsState.isInboxOpen)
+            shell.closeCallout()
             shell.sideEffects.reducesMotion = { true }
             shell.openInbox()
             XCTAssertNil(inbox.contentView?.layer?.animation(forKey: PanelGrowth.key))
             XCTAssertTrue(inbox.alphaValue == 1 && inbox.hasShadow, "its shadow at once")
-            wait(PanelGrowth.closeDuration + 0.1)
+            harness.waitUntil("the callout gone") { !callout.isVisible }
             XCTAssertTrue(inbox.isVisible)
             shell.closeInbox()
             XCTAssertFalse(inbox.isVisible, "at once")
