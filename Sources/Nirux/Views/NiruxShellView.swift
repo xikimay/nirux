@@ -109,6 +109,11 @@ final class NiruxShellView: NSView {
     }
 
     // Heartbeat
+    lazy var pinnedThreadReader: TaskThreadContentView.Read = { [weak self] id, space, done in
+        guard let self else { return done(nil) }
+        readThreadTimeline(workspaceID: id, spaceID: space, completion: done)
+    }
+
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
     /// Event-driven git/PR refresh scheduling (FSEvents + throttles).
@@ -373,6 +378,11 @@ final class NiruxShellView: NSView {
         wireWorkspace(workspace)
         workspaces.append(workspace)
         verticalStrip.addSubview(workspace.containerView)
+        sidebar.onOpenTaskThread = { [weak self] id, card in
+            guard let self else { return }
+            sidebar.taskPreview.pin(workspaceID: id, card: card)
+            refreshPinnedTaskThread()
+        }
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
         sidebar.worktreeCleanupOffer = { [weak self] index in self?.worktreeCleanupOffer(workspaceIndex: index) }
@@ -486,6 +496,7 @@ final class NiruxShellView: NSView {
                 self.sweepMergeWaits(now: now)
                 self.checkMissionWaits(snapshot: snapshot, now: now)
                 self.refreshMetadata(snapshot: snapshot)
+                self.refreshPinnedTaskThread()
                 // Save state every ~10s (every 5th tick)
                 if self.heartbeatTick % 5 == 0 {
                     self.saveState(snapshot: snapshot)

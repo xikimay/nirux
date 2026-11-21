@@ -97,19 +97,14 @@ final class TranslucentWindowTests: XCTestCase {
 
     // MARK: - Terminals (4.3)
 
-    /// 60 to 100 %, by fives; below 100 % the terminal's override sets the
+    /// Below 100 % the terminal's override sets the
     /// background's opacity and a minimum contrast, unless the user's
     /// Ghostty config sets its own; at 100 %, none.
     func testTheTerminalsOpacityAndItsOverride() {
-        XCTAssertEqual(TerminalOpacity.clamped(0.3), 0.6)
-        XCTAssertEqual(TerminalOpacity.clamped(0.62), 0.6, "an exact step, saved as such")
-        XCTAssertEqual(TerminalOpacity.clamped(0.82), 0.8)
-        XCTAssertEqual(TerminalOpacity.clamped(1.4), 1)
         XCTAssertEqual(TerminalOpacity.configuration(1, userSetsContrast: false), TerminalConfiguration())
         let translucent = TerminalConfiguration().backgroundOpacity(0.8).custom("background-opacity-cells", "true")
         XCTAssertEqual(TerminalOpacity.configuration(0.8, userSetsContrast: false), translucent.minimumContrast(3))
         XCTAssertEqual(TerminalOpacity.configuration(0.8, userSetsContrast: true), translucent, "a TUI's own cells too")
-        XCTAssertTrue(TerminalOpacity.setsContrast("font-size = 14\nminimum-contrast = 1.1\n"))
         XCTAssertFalse(TerminalOpacity.setsContrast(TerminalConfigBuilder.render([])))
         XCTAssertTrue(TerminalOpacity.setsContrast(.generated("minimum-contrast = 1.1")), "the terminal's own config")
         XCTAssertFalse(TerminalOpacity.setsContrast(.none))

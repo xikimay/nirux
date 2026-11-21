@@ -111,7 +111,8 @@ extension NiruxShellView {
             self.saveState()
             let note = wait.mergedAt == nil ? "" : "\n\nStarted after \(wait.awaitedLongName) merged."
             var request = NewTask.Request(description: start.description + note, template: start.template,
-                                          agent: self.defaultTaskAgent(forSpace: space.id), projectID: space.id,
+                                          agent: start.selection?.agent ?? self.defaultTaskAgent(forSpace: space.id),
+                                          model: start.selection?.model, projectID: space.id,
                                           place: .worktree(target, branch: branch), fetchesFirst: true)
             request.title = task.title
             request.goal = task.purpose
@@ -163,7 +164,7 @@ extension NiruxShellView {
         task.closeColumn(at: 0)
         relayout(animated: false)
         saveState()
-        launchAgent(request.agent, in: task, deliveredHandover: true, worktreeBranch: created.checkedOutBranch,
+        launchAgent(request.agent, model: request.model, in: task, deliveredHandover: true, worktreeBranch: created.checkedOutBranch,
                     setupScript: decision.spaceID == task.profileID ? setupScript(for: decision) : nil)
         updateSidebar()
         if task === activeWorkspace { focusActiveTerminal(in: window) }

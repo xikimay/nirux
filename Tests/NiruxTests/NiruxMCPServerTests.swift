@@ -46,6 +46,17 @@ final class NiruxMCPServerTests: XCTestCase {
 
     // MARK: - Protocol
 
+    func testTaskAndSubtaskAdvertiseTheSameLaunchChoices() throws {
+        for tools in [LeadTools.definitions, TaskTools.definitions] {
+            let tool = try XCTUnwrap(tools.first { $0["name"] as? String == LeadTools.startTask })
+            let schema = try XCTUnwrap(tool["inputSchema"] as? [String: Any])
+            let fields = try XCTUnwrap(schema["properties"] as? [String: [String: Any]])
+            XCTAssertEqual(fields["agent"]?["enum"] as? [String], CodingAgent.launchable.map(\.rawValue))
+            XCTAssertEqual(fields["model"]?["type"] as? String, "string")
+            XCTAssertEqual(schema["required"] as? [String], ["description"])
+        }
+    }
+
     /// The Lead's Claude learns its role from the server, from its
     /// workspace's `NIRUX_LEAD=1`; any other agent doesn't.
     func testOnlyTheLeadGetsTheLeadsRole() throws {

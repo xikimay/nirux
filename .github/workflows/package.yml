@@ -11,6 +11,7 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - NiruxCore/Package.swift
       - Package.swift
       - Package.resolved
       - scripts/bundle.sh
