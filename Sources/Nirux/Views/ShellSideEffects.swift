@@ -23,9 +23,9 @@ struct ShellSideEffects {
     /// Ends a terminal's shell and starts it again running an agent's
     /// launch command (Restart Lead, see `ColumnState.restartTerminal`).
     var restartTerminal: @MainActor (
-        _ column: ColumnState, _ command: String, _ done: @escaping @MainActor @Sendable ([String]) -> Void
-    ) -> Void = { column, command, done in
-        column.restartTerminal(running: command, done: done)
+        _ column: ColumnState, _ command: String, _ starts: @escaping @MainActor @Sendable ([String]) -> Bool
+    ) -> Void = { column, command, starts in
+        column.restartTerminal(running: command, starts: starts)
     }
 
     /// Starts a restored agent column's shell with the agent's launch

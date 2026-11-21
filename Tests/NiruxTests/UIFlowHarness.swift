@@ -208,10 +208,10 @@ final class UIFlowHarness {
         shell.sideEffects.startRestoredAgent = { [weak self] _, command in
             self?.restoredAgentLaunches.append(command)
         }
-        shell.sideEffects.restartTerminal = { [weak self] column, command, done in
+        shell.sideEffects.restartTerminal = { [weak self] column, command, starts in
             guard let self else { return }
             terminalRestarts.append(command)
-            column.restartTerminal(running: restartedAgent, done: done)
+            column.restartTerminal(running: restartedAgent, starts: starts)
         }
         shell.sideEffects.homeDirectory = { [home] in home }
         // Never UNUserNotificationCenter in xctest.

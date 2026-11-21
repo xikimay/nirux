@@ -120,8 +120,8 @@ final class ColumnState {
     private(set) var isShellStartScheduled = false
     private var shellExitedOverlay: ShellExitedOverlay?
     /// Nirux ends the shell to start it again (`restartTerminal`): its exit
-    /// shows no "Session ended".
-    private var isRestartingShell = false
+    /// shows no "Session ended", and nothing else starts it meanwhile.
+    private(set) var isRestartingShell = false
     var isShowingShellExit: Bool { shellExitedOverlay?.isHidden == false }
     /// When Restart Lead started a new Claude here: a question typed into
     /// the one before stays with the Lead, which reads it in list_tasks.
@@ -270,8 +270,10 @@ final class ColumnState {
     }
 
     convenience init(cwd: String, environment: [String: String] = [:]) {
-        self.init(cwd: cwd, shellArgs: ["-l"], environment: environment)
+        self.init(cwd: cwd, shellArgs: Self.plainShellArgs, environment: environment)
     }
+
+    private static let plainShellArgs = ["-l"]
 
     /// Init for a terminal that runs a command immediately (e.g. claude --resume <id>).
     /// When the command exits, drops into an interactive shell.
@@ -805,7 +807,7 @@ final class ColumnState {
     /// starts at the last known grid size and the terminal surface keeps its
     /// scrollback.
     func restartShell(running command: String? = nil) {
-        guard pty?.hasExited == true, let spec = terminalSpec else { return }
+        guard !isRestartingShell, pty?.hasExited == true, let spec = terminalSpec else { return }
         shellExitedOverlay?.isHidden = true
         let size = pty?.lastSize ?? (cols: 80, rows: 24)
         pty?.start(
@@ -818,24 +820,33 @@ final class ColumnState {
         )
     }
 
-    /// Ends the shell and what runs in it (SIGHUP, on which Claude Code shuts
-    /// down cleanly), then starts the shell again running `command` once all
-    /// of it ended within `NiruxShellView.exitTimeout`. `done` gets the
-    /// names of those still running, which leave the terminal ended. A
-    /// restored agent's column, whose shell never started, starts it.
-    func restartTerminal(running command: String, done: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Void) {
+    /// A restored column starts directly. A live terminal waits for its
+    /// shell and jobs to exit before the caller can authorize the new launch.
+    func restartTerminal(running command: String, starts: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Bool) {
+        guard !isRestartingShell, let spec = terminalSpec else { return }
+        restoredColumn = nil
+        defer { terminalSpec = (spec.cwd, Self.plainShellArgs, spec.environment) }
         if takeDeferredAgent() != nil {
-            startShell(command: command)
-            return done([])
+            if starts([]) { startShell(command: command) }
+            return
         }
-        let processes = pty?.shellPID.map { ProcessSnapshot().tree(of: $0) } ?? []
+        let shellName = (PtySession.defaultShell as NSString).lastPathComponent
+        var processes = pty?.shellPID.map { ProcessSnapshot().tree(of: $0) } ?? []
+        if let pid = pty?.shellPID, !processes.contains(where: { $0.process.pid == pid }),
+           let shell = ProcessInstance.running(pid: pid) {
+            processes.append((shell, shellName))
+        }
         isRestartingShell = true
         pty?.hangUp()
         NiruxShellView.waitForExit(processes) { [weak self] stillRunning in
             guard let self else { return }
             self.isRestartingShell = false
-            if stillRunning.isEmpty { self.restartShell(running: command) } else { self.showShellExitedOverlay() }
-            done(stillRunning)
+            let remaining = stillRunning.isEmpty && self.pty?.hasExited != true ? [shellName] : stillRunning
+            guard starts(remaining), remaining.isEmpty else {
+                if self.pty?.hasExited == true { self.showShellExitedOverlay() }
+                return
+            }
+            self.restartShell(running: command)
         }
     }
 }

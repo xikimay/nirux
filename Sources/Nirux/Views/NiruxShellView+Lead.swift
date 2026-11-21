@@ -89,18 +89,24 @@ extension NiruxShellView {
     /// Mission parent.
     func requestRestartLead(spaceID: String) {
         guard let lead = leadWorkspace(inSpace: spaceID) else { return }
+        guard lead.leadTerminal?.isRestartingShell != true else { return showToast("The Lead is restarting.") }
         let space = profiles.first { $0.id == spaceID }?.name ?? spaceID
+        let snapshot = ProcessSnapshot()
+        let pty = lead.leadTerminal?.pty
+        let program = pty?.foregroundProcess(snapshot: snapshot).flatMap { $0.instance.pid == pty?.shellPID ? nil : $0.name }
         guard confirmDestructiveClose(
             message: "Restart the Lead of “\(space)”?",
             details: Self.leadRestartDetails(
-                mode: Self.claudeLaunchMode(for: lead), agent: lead.leadTerminal?.liveAgent(snapshot: ProcessSnapshot())
+                mode: Self.claudeLaunchMode(for: lead), agent: lead.leadTerminal?.liveAgent(snapshot: snapshot),
+                otherProgram: program == "claude" ? nil : program
             ),
             confirmTitle: "Restart Lead"
         ), leadWorkspace(inSpace: spaceID) === lead else { return }
         restartLead(lead)
     }
 
-    static func leadRestartDetails(mode: ClaudeLaunchMode, agent: WorkspaceClosePolicy.LiveAgent?) -> [String] {
+    /// `otherProgram`: what runs in its terminal in place of Claude.
+    static func leadRestartDetails(mode: ClaudeLaunchMode, agent: WorkspaceClosePolicy.LiveAgent?, otherProgram: String? = nil) -> [String] {
         let modeName = mode.displayName.components(separatedBy: " (").first ?? mode.displayName
         var details = [
             "Claude Code ends this conversation and starts a new one with the space’s launch mode (\(modeName)), "
@@ -113,6 +119,7 @@ extension NiruxShellView {
         case .needsAttention?: details.append("Claude is waiting for you: that goes unanswered.")
         default: break
         }
+        if let otherProgram { details.append("\(otherProgram) runs in its terminal: it ends too.") }
         return details
     }
 
@@ -121,23 +128,38 @@ extension NiruxShellView {
         defer {
             focusLead(lead)
             updateSidebar()
+            scheduleMetadataRefresh()
         }
         guard let column = lead.leadTerminal else {
-            // Its Claude column closed before a Lead kept it: a new one.
-            lead.addColumn()
+            // Its Claude column closed before a Lead kept it: a new one, with
+            // the agent UUID its tasks report to.
+            let reportedTo = MissionStore.shared.missions.filter { $0.parentWorkspaceID == lead.id && $0.status == .active }
+                .max { $0.createdAt < $1.createdAt }?.parentAgentUUID
+            lead.addColumn(agentUUID: lead.leadAgentUUID ?? reportedTo ?? UUID().uuidString)
             guard let column = lead.columns[safe: lead.focusedIndex] else { return }
             lead.leadAgentUUID = column.agentUUID
             column.leadRestartedAt = Date().timeIntervalSince1970
             relayout(animated: false)
             return sideEffects.launchAgent(column, command)
         }
-        column.leadRestartedAt = Date().timeIntervalSince1970
-        sideEffects.restartTerminal(column, command) { [weak self] stillRunning in
-            guard let self, !stillRunning.isEmpty else { return }
-            self.showToast(
-                "The Lead’s Claude didn’t stop within \(Int(Self.exitTimeout)) s (\(stillRunning.joined(separator: ", "))): nothing was launched.",
-                tone: .error
-            )
+        if column.isAwaitingResume {
+            refreshLaunch(of: column, in: lead)
+        } else if let pty = column.pty, pty.shellPID == nil, !pty.hasExited {
+            return showToast("The Lead is starting: restart it in a moment.")
+        }
+        sideEffects.restartTerminal(column, command) { [weak self, weak lead, weak column] stillRunning in
+            // Turned off meanwhile: nothing starts in its column.
+            guard let self, lead?.isClosing == false else { return false }
+            guard stillRunning.isEmpty else {
+                self.showToast(
+                    "The Lead’s Claude didn’t stop within \(Int(Self.exitTimeout)) s (\(stillRunning.joined(separator: ", "))): "
+                        + "nothing was launched. Restart Lead again to start it anyway.",
+                    tone: .error
+                )
+                return false
+            }
+            column?.leadRestartedAt = Date().timeIntervalSince1970
+            return true
         }
     }
 

@@ -162,10 +162,14 @@ extension NiruxShellView {
         guard let lead = leadWorkspace(inSpace: spaceID) else { return nil }
         let snapshot = ProcessSnapshot()
         let terminals = lead.columns.filter { !$0.isClosing && $0.agentUUID != nil && ($0.pty != nil || $0.deferredAgent != nil) }
-        let claude = terminals.first { column in
-            column.deferredAgent?.processName == "claude" || column.pty?.foregroundProcessName(snapshot: snapshot) == "claude"
+        func runsClaude(_ column: ColumnState) -> Bool {
+            column.isRestartingShell || column.deferredAgent?.processName == "claude"
+                || column.pty?.foregroundProcessName(snapshot: snapshot) == "claude"
         }
-        guard let agentUUID = (claude ?? lead.leadTerminal ?? terminals.first)?.agentUUID else { return nil }
+        let designated = lead.leadTerminal
+        let parent = designated.flatMap { runsClaude($0) ? $0 : nil } ?? terminals.first(where: runsClaude)
+            ?? designated ?? terminals.first
+        guard let agentUUID = parent?.agentUUID else { return nil }
         return NewTask.MissionParent(workspaceID: lead.id, agentUUID: agentUUID)
     }
 

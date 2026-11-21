@@ -325,8 +325,8 @@ extension NiruxShellView {
         }
         // The parent that saw the question, a Lead or a task's agent, hears
         // the answer too: the `claude` that last took it into its prompt or
-        // handed it over, not one started since. One that never saw it hears
-        // nothing.
+        // handed it over, not one started since, unless Restart Lead started
+        // it. One that never saw it hears nothing.
         if let question = response.mission.events.first(where: { $0.id == questionID }),
            let seenAt = [question.parentTypedAt, question.handedToUserAt].compactMap({ $0 }).max() {
             let childTitle = workspaces.first { $0.id == response.mission.childWorkspaceID }?.title ?? response.mission.branch

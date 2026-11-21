@@ -16,6 +16,16 @@ final class LeadRestartFlowTests: XCTestCase {
         return try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
     }
 
+    private func reportFirstTurnEnded(in pty: PtySession, agentUUID: String) throws {
+        let process = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
+        for event in [AgentHookEvent.Name.userPromptSubmit, .stop] {
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: event, agentUUID: agentUUID, sessionID: "fresh", emitterProcess: process,
+                timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+        }
+    }
+
     func testRestartLeadStartsAFreshClaudeInItsColumn() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -33,6 +43,17 @@ final class LeadRestartFlowTests: XCTestCase {
             XCTAssertTrue(harness.alertDetails.last?.contains("launch mode (Manual)") == true, harness.alertDetails.last ?? "")
             XCTAssertEqual(harness.terminalRestarts, [], "cancelled")
 
+            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: UUID().uuidString, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+                branch: "feat/export", reportsToLead: true
+            ), enabled: true))
+            let question = MissionEvent(
+                id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID,
+                childAgentUUID: mission.childAgentUUID, kind: .question, message: "Which date format?",
+                timestamp: Date().timeIntervalSince1970
+            )
+            guard case .accepted = MissionStore.shared.process(question, enabled: false) else { return XCTFail("not asked") }
             let fresh = AgentStandIn()
             defer { fresh.remove() }
             harness.restartedAgent = fresh.command()
@@ -47,6 +68,11 @@ final class LeadRestartFlowTests: XCTestCase {
             harness.waitUntil("a fresh claude in its column") {
                 pty.foregroundProcess(snapshot: ProcessSnapshot()).map { $0.name == "claude" && $0.instance != oldClaude } == true
             }
+            shell.typeMissionMessages()
+            XCTAssertFalse(fresh.input.contains(question.message))
+            try reportFirstTurnEnded(in: pty, agentUUID: lead.agentUUID)
+            shell.typeMissionMessages()
+            harness.waitUntil("the waiting question in the fresh Lead's prompt") { fresh.input.contains(question.message) }
             XCTAssertNotEqual(ProcessInstance.running(pid: oldClaude.pid), oldClaude, "the one before ended")
             XCTAssertNotEqual(pty.shellPID, shellBefore)
             XCTAssertIdentical(lead.workspace.leadTerminal, column)
@@ -66,6 +92,9 @@ final class LeadRestartFlowTests: XCTestCase {
         XCTAssertEqual(details(.idle).count, 2)
         XCTAssertEqual(details(.working).last, "Claude is working: its turn stops.")
         XCTAssertEqual(details(.needsAttention).last, "Claude is waiting for you: that goes unanswered.")
+        XCTAssertEqual(
+            NiruxShellView.leadRestartDetails(mode: .auto, agent: nil, otherProgram: "vim").last, "vim runs in its terminal: it ends too."
+        )
     }
 
     /// A question typed into the Lead before it restarted stays with it (the
@@ -112,6 +141,14 @@ final class LeadRestartFlowTests: XCTestCase {
             let later = shell.missionQuestions(foreground: foreground, now: now + NiruxShellView.missionParentGrace + 5)
             XCTAssertNotNil(later[ObjectIdentifier(task)], "it still waits")
             XCTAssertNil(later[ObjectIdentifier(task)]?.handOff, "with the Lead, not the user")
+            XCTAssertEqual(shell.runningSince(of: question, in: column, snapshot: ProcessSnapshot(), now: now), now, "what waits goes to the new one")
+            // The user answers it: the restarted Lead hears it.
+            XCTAssertTrue(shell.answerMissionQuestion(question.id, text: "Keep it"))
+            let notice = try XCTUnwrap(shell.pendingLeadNotices.last)
+            XCTAssertTrue(notice.text.hasSuffix(": Keep it"), notice.text)
+            try reportFirstTurnEnded(in: pty, agentUUID: lead.agentUUID)
+            shell.typeLeadNotices()
+            harness.waitUntil("the answer in the fresh Lead's prompt") { fresh.input.contains(notice.text) }
         }
     }
 
@@ -129,11 +166,14 @@ final class LeadRestartFlowTests: XCTestCase {
             let claudeColumn = try XCTUnwrap(state.workspaces[saved].columns.firstIndex { $0.agentUUID == lead.agentUUID })
             state.workspaces[saved].columns[claudeColumn].columnType = .claudeCode
             state.workspaces[saved].columns[claudeColumn].claudeSessionID = UUID().uuidString
+            // Its folder is gone since: it starts in the Lead's.
+            state.workspaces[saved].columns[claudeColumn].cwd = harness.root + "/gone"
             XCTAssertTrue(Persistence.save(state))
             shell.restoreState()
             let restored = try XCTUnwrap(shell.leadWorkspace(inSpace: lead.space))
             let column = try XCTUnwrap(restored.leadTerminal)
             XCTAssertTrue(column.isAwaitingResume)
+            XCTAssertNotNil(column.restoredColumn)
 
             let fresh = AgentStandIn()
             defer { fresh.remove() }
@@ -143,22 +183,33 @@ final class LeadRestartFlowTests: XCTestCase {
             XCTAssertFalse(column.isAwaitingResume)
             XCTAssertEqual(harness.terminalRestarts.count, 1)
             XCTAssertEqual(harness.restoredAgentLaunches, [], "not the conversation before")
+            XCTAssertNil(column.restoredColumn, "a save keeps the fresh conversation")
+            XCTAssertEqual(column.launchDirectory, restored.cwd)
             let pty = try XCTUnwrap(column.pty)
             harness.waitUntil("the fresh claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            // Its terminal ends: Restart Shell starts a plain shell.
+            let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+            kill(claude.instance.pid, SIGKILL)
+            harness.waitUntil("its terminal to end") { pty.hasExited }
+            column.restartShell()
+            harness.waitUntil("a shell") { pty.foregroundProcess(snapshot: ProcessSnapshot()) != nil }
+            XCTAssertNotEqual(pty.foregroundProcess(snapshot: ProcessSnapshot())?.name, "claude")
         }
     }
 
-    /// A Lead whose Claude column closed before a Lead kept it gets a new one.
+    /// A Lead whose Claude column closed before a Lead kept it gets a new
+    /// one, with the agent UUID its tasks report to.
     func testALeadWithoutItsClaudeColumnGetsOne() throws {
         try UIFlowHarness.run { harness in
             let lead = try harness.makeLead()
-            lead.workspace.leadAgentUUID = nil
+            lead.workspace.closeColumn(at: try XCTUnwrap(lead.workspace.columns.firstIndex { $0 === lead.workspace.leadTerminal }))
+            XCTAssertNil(lead.workspace.leadTerminal)
             let launches = harness.agentLaunches.count
             harness.alertResponses = [.alertSecondButtonReturn]
             harness.shell.requestRestartLead(spaceID: lead.space)
             let column = try XCTUnwrap(lead.workspace.leadTerminal)
-            XCTAssertNotEqual(column.agentUUID, lead.agentUUID)
-            XCTAssertEqual(lead.workspace.columns.count, 3)
+            XCTAssertEqual(column.agentUUID, lead.agentUUID)
+            XCTAssertEqual(lead.workspace.columns.count, 2)
             XCTAssertEqual(harness.agentLaunches.count, launches + 1)
             XCTAssertTrue(harness.agentLaunches.last?.contains(NiruxShellView.shellQuotedArgument(NiruxShellView.leadRestartPrompt)) == true)
             XCTAssertEqual(harness.terminalRestarts, [])
@@ -182,13 +233,121 @@ final class LeadRestartFlowTests: XCTestCase {
             let pty = try XCTUnwrap(column.pty)
             harness.waitUntil("its shell to end") { pty.hasExited }
             XCTAssertFalse(column.isShowingShellExit, "no Restart Shell while Nirux restarts it")
+            column.restartShell()
+            XCTAssertTrue(pty.hasExited, "nor does Enter start one")
+            harness.shell.requestRestartLead(spaceID: lead.space)
+            XCTAssertEqual(harness.shell.toast?.message, "The Lead is restarting.")
+            XCTAssertEqual(harness.alerts.count, 1, "nothing to confirm twice")
             harness.waitUntil("the toast", timeout: NiruxShellView.exitTimeout + 20) {
                 harness.shell.toast?.message.hasPrefix("The Lead’s Claude didn’t stop") == true
             }
             XCTAssertTrue(harness.shell.toast?.message.contains("(sleep)") == true, harness.shell.toast?.message ?? "")
+            XCTAssertTrue(harness.shell.toast?.message.hasSuffix("Restart Lead again to start it anyway.") == true)
             XCTAssertEqual(column.pty?.hasExited, true, "its terminal stays ended")
             XCTAssertTrue(column.isShowingShellExit)
+            XCTAssertNil(column.leadRestartedAt, "the one before may still run")
+            XCTAssertEqual(harness.terminalRestarts.count, 1)
             XCTAssertEqual(fresh.input, "", "no Claude started")
+        }
+    }
+
+    /// Saved with neither its Claude column nor its agent UUID: the new
+    /// column takes the one its tasks report to.
+    func testALeadSavedWithoutItsClaudeColumnTakesItsTasksParent() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let parent = UUID().uuidString
+            _ = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: parent,
+                childWorkspaceID: UUID().uuidString, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+                branch: "feat/export", reportsToLead: true
+            ), enabled: true))
+            lead.workspace.closeColumn(at: try XCTUnwrap(lead.workspace.columns.firstIndex { $0 === lead.workspace.leadTerminal }))
+            lead.workspace.leadAgentUUID = nil
+            harness.alertResponses = [.alertSecondButtonReturn]
+            harness.shell.requestRestartLead(spaceID: lead.space)
+            XCTAssertEqual(lead.workspace.leadTerminal?.agentUUID, parent)
+        }
+    }
+
+    /// Its shell not started yet (a Lead just turned on): nothing to end.
+    func testALeadStillStartingIsNotRestarted() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            XCTAssertNil(lead.workspace.leadTerminal?.pty?.shellPID)
+            harness.alertResponses = [.alertSecondButtonReturn]
+            harness.shell.requestRestartLead(spaceID: lead.space)
+            XCTAssertEqual(harness.shell.toast?.message, "The Lead is starting: restart it in a moment.")
+            XCTAssertEqual(harness.terminalRestarts, [])
+        }
+    }
+
+    /// A shell that ignores the hang-up keeps its terminal, with no "Session
+    /// ended" over it.
+    func testAShellThatIgnoresTheHangUpKeepsItsTerminal() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let column = try XCTUnwrap(lead.workspace.leadTerminal)
+            let pty = try XCTUnwrap(column.pty)
+            harness.waitUntil("its shell") { pty.shellPID != nil }
+            let marker = harness.root + "/trapped"
+            pty.sendRaw("trap '' HUP; touch '\(marker)'\n")
+            harness.waitUntil("the trap") { FileManager.default.fileExists(atPath: marker) }
+            harness.alertResponses = [.alertSecondButtonReturn]
+            harness.shell.requestRestartLead(spaceID: lead.space)
+            harness.waitUntil("the toast", timeout: NiruxShellView.exitTimeout + 20) {
+                harness.shell.toast?.message.hasPrefix("The Lead’s Claude didn’t stop") == true
+            }
+            let shellName = (PtySession.defaultShell as NSString).lastPathComponent
+            XCTAssertTrue(harness.shell.toast?.message.contains("(\(shellName))") == true, harness.shell.toast?.message ?? "")
+            XCTAssertFalse(pty.hasExited)
+            XCTAssertFalse(column.isShowingShellExit)
+        }
+    }
+
+    /// Turned off while its restart waits for its programs: nothing starts.
+    func testTurningTheLeadOffDuringARestartStartsNothing() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let column = try XCTUnwrap(lead.workspace.leadTerminal)
+            let stuck = try run("nohup /bin/sleep 600 > /dev/null 2>&1", named: "sleep", in: column, harness: harness)
+            defer { kill(stuck.pid, SIGKILL) }
+            harness.alertResponses = [.alertSecondButtonReturn]
+            shell.requestRestartLead(spaceID: lead.space)
+            let pty = try XCTUnwrap(column.pty)
+            harness.waitUntil("its shell to end") { pty.hasExited }
+            harness.alertResponses = [.alertSecondButtonReturn]
+            shell.stopLead(spaceID: lead.space)
+            harness.waitUntil("the Lead to close") { !shell.workspaces.contains { $0 === lead.workspace } }
+            kill(stuck.pid, SIGKILL)
+            harness.waitUntil("the restart's wait to end") { !column.isRestartingShell }
+            XCTAssertTrue(pty.hasExited, "no Claude started in a closed column")
+        }
+    }
+
+    /// Its tasks report to its Claude column when another column runs Claude too.
+    func testItsTasksReportToItsClaudeColumnFirst() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let other = AgentStandIn()
+            defer { other.remove() }
+            let otherUUID = UUID().uuidString
+            lead.workspace.addColumn(command: other.command(), agentUUID: otherUUID, cwd: harness.repo)
+            while lead.workspace.focusedIndex > 0 { lead.workspace.moveColumn(.left) }
+            let otherPty = try XCTUnwrap(lead.workspace.columns.first { $0.agentUUID == otherUUID }?.pty)
+            harness.waitUntil("the other claude") { otherPty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            XCTAssertEqual(shell.leadMissionParent(inSpace: lead.space)?.agentUUID, otherUUID, "its own runs no Claude")
+            let own = AgentStandIn()
+            defer { own.remove() }
+            _ = try run(own.command(), in: try XCTUnwrap(lead.workspace.leadTerminal), harness: harness)
+            XCTAssertEqual(shell.leadMissionParent(inSpace: lead.space)?.agentUUID, lead.agentUUID)
+            harness.alertResponses = [.alertSecondButtonReturn]
+            shell.requestRestartLead(spaceID: lead.space)
+            XCTAssertTrue(lead.workspace.leadTerminal?.isRestartingShell == true)
+            XCTAssertEqual(shell.leadMissionParent(inSpace: lead.space)?.agentUUID, lead.agentUUID)
+            harness.waitUntil("the restart to finish") { lead.workspace.leadTerminal?.isRestartingShell == false }
         }
     }
 
