@@ -304,8 +304,12 @@ final class IconRailSidebarTests: XCTestCase {
         let handle = shell.sidebarResizeHandle
         let start = try XCTUnwrap(handle.onDragStart?())
         XCTAssertEqual(start, 260)
-        handle.onDrag?(start, 100)
+        handle.onDrag?(start, -100)
+        XCTAssertEqual(shell.sidebar.frame.width, 240)
+        handle.onDrag?(start, 200)
         XCTAssertEqual(shell.sidebar.frame.width, 360)
+        handle.onDrag?(start, 60)
+        XCTAssertEqual(shell.sidebar.frame.width, 320)
         XCTAssertEqual(handle.frame.midX, shell.divider.frame.midX)
 
         shell.isSidebarExpanded = false
@@ -314,22 +318,26 @@ final class IconRailSidebarTests: XCTestCase {
         XCTAssertEqual(shell.sidebar.frame.width, SidebarView.foldedWidth)
         let saved = shell.persistedState()
         let settings = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(try XCTUnwrap(saved.settings)))
-        XCTAssertEqual(settings.sidebarWidth, 360)
+        XCTAssertEqual(settings.sidebarWidth, 320)
         XCTAssertEqual(settings.sidebarExpanded, false)
         let restored = NiruxShellView(frame: shell.frame)
         restored.stopHeartbeat()
         restored.restoreSidebarState(settings)
         restored.isSidebarExpanded = true
         restored.relayout(animated: false)
-        XCTAssertEqual(restored.sidebar.frame.width, 360)
-        var fold = restored.sidebarFold
-        fold.chooseWidth(1000)
-        XCTAssertEqual(fold.expandedWidth(in: 1200), 480)
-        XCTAssertEqual(fold.expandedWidth(in: 600), 300)
-        XCTAssertEqual(fold.expandedWidth(in: 1200), 480)
-        fold.chooseWidth(0)
-        XCTAssertEqual(fold.expandedWidth(in: 1200), 220)
-        XCTAssertNil(try JSONDecoder().decode(PersistedSettings.self, from: Data("{}".utf8)).sidebarWidth)
+        XCTAssertEqual(restored.sidebar.frame.width, 320)
+        XCTAssertEqual(restored.sidebarFold.expandedWidth(in: 600), 300)
+        XCTAssertEqual(restored.sidebarFold.preferredWidth, 320)
+
+        var oldSettings = settings
+        for (previousWidth, expectedWidth) in [(220.0, 240.0), (480.0, 360.0)] {
+            oldSettings.sidebarWidth = previousWidth
+            restored.restoreSidebarState(oldSettings)
+            XCTAssertEqual(restored.sidebarFold.preferredWidth, expectedWidth)
+        }
+        let withoutWidth = try JSONDecoder().decode(PersistedSettings.self, from: Data("{}".utf8))
+        restored.restoreSidebarState(withoutWidth)
+        XCTAssertEqual(restored.sidebarFold.preferredWidth, 260)
     }
 
     func testInitialsDropTheBranchTypeAndNumberRepeats() {
