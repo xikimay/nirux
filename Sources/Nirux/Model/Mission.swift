@@ -250,7 +250,7 @@ final class MissionStore {
     static let shared = MissionStore()
 
     private(set) var missions: [Mission] = []
-    private let fileURL: URL
+    let fileURL: URL
     private let persistsToDisk: Bool
     private enum LedgerState: Equatable {
         case notLoaded

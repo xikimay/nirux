@@ -263,6 +263,21 @@ extension NiruxShellView {
         controller.focusReplyField()
     }
 
+    func replyToThreadQuestion(_ id: String, in workspaceID: String, text: String) -> TaskThreadContentView.ReplyResult {
+        let store = MissionStore.shared
+        guard store.ensureLoaded() else {
+            showToast("Couldn’t read the Mission. Try again.", tone: .error)
+            return .retry
+        }
+        guard store.missions.contains(where: { mission in
+            mission.childWorkspaceID == workspaceID && mission.status == .active
+                && mission.events.contains { $0.kind == .question && $0.id == id && $0.retiredAt == nil && $0.parentConsumedAt == nil }
+        }), store.response(to: id) == nil else { return .noLongerOpen }
+        guard answerMissionQuestion(id, text: text) else { return .retry }
+        refreshPinnedTaskThread()
+        return .sent
+    }
+
     /// The user's answer from the popover, as if the parent had sent it:
     /// Nirux types it into the child's prompt. False keeps the popover
     /// open (the toast says why).

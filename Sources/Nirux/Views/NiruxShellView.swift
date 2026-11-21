@@ -365,7 +365,14 @@ final class NiruxShellView: NSView {
         verticalStrip.addSubview(workspace.containerView)
         sidebar.onOpenTaskThread = { [weak self] id, card in
             guard let self else { return }
-            sidebar.taskPreview.pin(workspaceID: id, card: card)
+            let space = activeProfileID
+            sidebar.taskPreview.pin(workspaceID: id, card: card) { [weak self, weak card] questionID, text in
+                guard let self, let card, sidebar.taskPreview.card === card,
+                      sidebar.taskPreview.workspaceID == id, activeProfileID == space,
+                      workspaces.contains(where: { $0.id == id && $0.profileID == space && !$0.isClosing })
+                else { return .noLongerOpen }
+                return replyToThreadQuestion(questionID, in: id, text: text)
+            }
             refreshPinnedTaskThread()
         }
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
@@ -1206,6 +1213,8 @@ extension NiruxShellView {
         // leaves them to the workspace it goes to, which shows under it.
         if let spacePlan, !spacePlan.isDiving { return true }
         if NSApp.keyWindow is NSPanel { return true }
+        if let body = sidebar.taskPreview.pinnedBody, let responder = window?.firstResponder as? NSView,
+           responder.isDescendant(of: body) { return true }
         // A popover hanging from the window has the keyboard (the Mission
         // reply's field): AppKit keeps the window key, gives it the
         // popover's first responder and hands it the keys. Not once that
