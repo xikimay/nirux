@@ -321,6 +321,13 @@ extension NiruxShellView {
                 let owner = task.contextIsFromLead(field) ? "" : " (the user wrote it)"
                 line += "\n  \(name)\(owner): “\(text)”"
             }
+            for wait in task.mergeWaits {
+                guard case .tell(let message) = wait.action else { continue }
+                line += wait.mergedAt == nil
+                    ? "\n  held until \(wait.awaitedLongName) merges: your message “\(Self.heldQuote(message))”"
+                    : "\n  \(wait.awaitedLongName) merged, but your message “\(Self.heldQuote(message))” couldn't go yet: "
+                        + "Nirux tries again every \(Int(MergeWait.lookUpInterval / 60)) minutes for a day"
+            }
             line += taskListStatusLine(task)
             lines.append(line)
         }
@@ -556,17 +563,26 @@ extension NiruxShellView {
             + "A task the user started without you doesn't report to you."
     }
 
-    /// Any task of the space. One with a live Mission of its own (its
-    /// agent's column and its parent's terminal open) gets it as an
-    /// instruction on that Mission from the Lead, as its parent's tell would
-    /// come; any other through the Lead's one-way Mission, to the Claude
-    /// Code running in it.
+    /// Any task of the space, now, or once another task's pull request
+    /// merges (`after`, see NiruxShellView+MergeWaits).
     private func leadTell(
         _ arguments: [String: Any], in space: WorkspaceProfile, lead: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
         let name = LeadTools.string(arguments, "task") ?? ""
         let message = LeadTools.string(arguments, "message") ?? ""
         guard let workspace = spaceTask(name, in: space) else { return answer(noSpaceTask(name, in: space), true) }
+        if let after = LeadTools.string(arguments, "after") {
+            return holdTell(message, to: workspace, after: after, in: space, lead: lead, now: Date().timeIntervalSince1970, answer: answer)
+        }
+        tellTask(message, to: workspace, lead: lead, answer: answer)
+    }
+
+    /// The Lead's tell to `workspace`. One with a live Mission of its own
+    /// (its agent's column and its parent's terminal open) gets it as an
+    /// instruction on that Mission from the Lead, as its parent's tell would
+    /// come; any other through the Lead's one-way Mission, to the Claude
+    /// Code running in it.
+    func tellTask(_ message: String, to workspace: WorkspaceState, lead: NewTask.MissionParent, answer: @escaping LeadAnswer) {
         if let mission = leadMission(of: workspace, lead: lead.workspaceID) {
             return sendInstruction(message, to: workspace, in: mission, answer: answer)
         }
