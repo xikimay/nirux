@@ -1,4 +1,4 @@
-name: Tests
+name: Pinned thread reply validation
 
 # Runs the suite on every PR into main so mergeStateStatus reflects it before
 # merge: an actor-isolation error in a test file once reached main red
@@ -10,14 +10,15 @@ on:
     branches: [main]
 
 concurrency:
-  group: tests-${{ github.ref }}
+  group: task-thread-gate-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  gate:
+    if: startsWith(github.head_ref, 'test/task-thread-panel-gate')
     runs-on: macos-15
     # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift
     # 6.1): libghostty-spm 2.2 needs Swift tools 6.2.
@@ -25,7 +26,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     # A serial run took 13 minutes: a hung test fails the job instead of
     # holding the runner for GitHub's six hours.
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
         with:
@@ -54,5 +55,59 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
+      - name: Repeat the thread body and row/rail interaction tests ten times under contention
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GATE_WORK="$RUNNER_TEMP/task-thread-gate"
+          mkdir -p "$GATE_WORK"
+          swift test list --skip-build > "$GATE_WORK/listed"
+          platform="$(xcrun --sdk macosx --show-sdk-platform-path)/Developer"
+          export NIRUX_TESTS_FRAMEWORK_PATH="$platform/Library/Frameworks"
+          export NIRUX_TESTS_LIBRARY_PATH="$platform/usr/lib"
+          export NIRUX_TESTS_XCTEST="$(xcrun --sdk macosx --find xctest)"
+          export NIRUX_TESTS_BUNDLE="$(swift build --show-bin-path)/NiruxPackageTests.xctest"
+          export NIRUX_TESTS_CLASS_TIMEOUT=600
+          export NO_COLOR=1 SWIFT_TESTING_ENABLED=0
+          for attempt in $(seq 1 10); do
+            echo "$attempt NiruxTests.TaskThreadContentTests"
+            echo "$attempt NiruxTests.IconRailSidebarTests"
+            case $((attempt % 3)) in
+              0) echo "$attempt NiruxTests.SettingsWindowTests" ;;
+              1) echo "$attempt NiruxTests.MenuBarFlowTests" ;;
+              2) echo "$attempt NiruxTests.LeadTaskToolsFlowTests" ;;
+            esac
+          done > "$GATE_WORK/jobs"
+          xargs -P 3 -n 2 bash -c '
+            set -euo pipefail
+            attempt="$1"
+            class="$2"
+            export NIRUX_TESTS_WORK="$GATE_WORK/$attempt-$class"
+            mkdir -p "$NIRUX_TESTS_WORK"
+            touch "$NIRUX_TESTS_WORK/failed" "$NIRUX_TESTS_WORK/times"
+            bash scripts/run-tests.sh --class "$class"
+            log="$NIRUX_TESTS_WORK/$class.log"
+            expected=$(grep -cF "$class/" "$GATE_WORK/listed")
+            executed=$(sed -nE "s/.*Executed ([0-9]+) tests?.*/\1/p" "$log" | tail -1)
+            if [[ -s "$NIRUX_TESTS_WORK/failed" || "$expected" -eq 0 || "${executed:-0}" -ne "$expected" ]]; then
+              cat "$log"
+              exit 1
+            fi
+            if [[ "$class" == NiruxTests.TaskThreadContentTests ]]; then
+              grep -F "testPinnedReplyKeepsItsQuestionAcrossAnswersRetirementAndReplacement]" "$log" | grep -F " passed " >/dev/null
+              grep -F "testRowAndRailPinTheirOwnThreadThroughRefreshUntilEscape]" "$log" | grep -F " passed " >/dev/null
+            fi
+            echo "Run $attempt: $class passed $executed/$expected tests"
+          ' _ < "$GATE_WORK/jobs"
+
+      - name: Run full test suite
         run: scripts/run-tests.sh
+
+      - name: Release build
+        run: swift build -c release
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: task-thread-gate-logs
+          path: ${{ runner.temp }}/task-thread-gate
