@@ -591,15 +591,16 @@ final class MissionStore {
             updated[missionIndex].updatedAt = timestamp
             let mission = updated[missionIndex]
             return commit(Self.retiringQuestions(
-                in: updated, childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID, before: timestamp
+                in: updated, childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID, before: timestamp,
+                seenIn: mission.id
             ))
         }
         return false
     }
 
-    /// The child took a prompt typed at `promptedAt` (the user's, or one
-    /// Nirux typed): the questions it asked before stop waiting. False when
-    /// none waited, or the ledger isn't written.
+    /// The user typed a prompt to the child at `promptedAt`: the questions it
+    /// asked before stop waiting. False when none waited, or the ledger
+    /// isn't written.
     @discardableResult
     func retireQuestions(childWorkspaceID: String, childAgentUUID: String, before promptedAt: TimeInterval) -> Bool {
         guard ensureLoaded() else { return false }
@@ -611,17 +612,24 @@ final class MissionStore {
 
     /// `missions` with the questions the child asked before `promptedAt`
     /// and nobody answered retired, as its completion retires them: the
-    /// prompt it took since answered them or moved it on. Asked again, a
-    /// question starts a new exchange.
+    /// prompt it took since answered them or moved it on. `seenIn`: only
+    /// that Mission's questions its parent or the user saw (typed into the
+    /// parent's prompt, handed to the user), for a parent's tell, which says
+    /// nothing of one it never saw. Asked again, a question starts a new
+    /// exchange.
     private static func retiringQuestions(
-        in missions: [Mission], childWorkspaceID: String, childAgentUUID: String, before promptedAt: TimeInterval
+        in missions: [Mission], childWorkspaceID: String, childAgentUUID: String, before promptedAt: TimeInterval,
+        seenIn missionID: String? = nil
     ) -> [Mission] {
         missions.map { mission in
-            guard mission.childWorkspaceID == childWorkspaceID, mission.childAgentUUID == childAgentUUID else { return mission }
+            guard mission.childWorkspaceID == childWorkspaceID, mission.childAgentUUID == childAgentUUID,
+                  missionID.map({ $0 == mission.id }) ?? true
+            else { return mission }
             var mission = mission
             // An answered one was consumed with its answer.
             for index in mission.events.indices where mission.events[index].kind == .question
-                && mission.events[index].parentConsumedAt == nil && mission.events[index].timestamp < promptedAt {
+                && mission.events[index].parentConsumedAt == nil && mission.events[index].timestamp < promptedAt
+                && (missionID == nil || mission.events[index].parentTypedAt != nil || mission.events[index].handedToUserAt != nil) {
                 mission.events[index].parentConsumedAt = promptedAt
                 mission.events[index].retiredAt = promptedAt
             }
@@ -705,10 +713,6 @@ final class MissionStore {
         case .response:
             guard updated[missionIndex].events[eventIndex].childConsumedAt == nil else { return false }
             updated[missionIndex].events[eventIndex].childConsumedAt = timestamp
-            updated = Self.retiringQuestions(
-                in: updated, childWorkspaceID: delivery.mission.childWorkspaceID, childAgentUUID: delivery.mission.childAgentUUID,
-                before: timestamp
-            )
         case .question, .completed:
             guard updated[missionIndex].events[eventIndex].parentTypedAt == nil else { return false }
             updated[missionIndex].events[eventIndex].parentTypedAt = timestamp

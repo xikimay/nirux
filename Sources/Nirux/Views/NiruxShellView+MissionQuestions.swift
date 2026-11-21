@@ -147,9 +147,9 @@ extension NiruxShellView {
         return result
     }
 
-    /// A column's agent took a prompt typed at its box, the user's or one
-    /// Nirux typed (a tell, an answer): the Mission questions it asked
-    /// before are behind it, and stop waiting on its parent or the user.
+    /// The user typed a prompt to a column's agent: the Mission questions it
+    /// asked before are behind it, and stop waiting on its parent or the
+    /// user.
     func retireMissionQuestions(
         of column: ColumnState, in workspace: WorkspaceState, promptedAt: TimeInterval, store: MissionStore = .shared
     ) {
@@ -262,7 +262,7 @@ extension NiruxShellView {
         popover.close()
         missionReplyPopover = nil
         missionReplyQuestionID = nil
-        showToast("That question was answered")
+        showToast("That question was answered, or its task moved on")
     }
 
     /// The card's question row was clicked: the whole question and a reply

@@ -719,10 +719,11 @@ final class MissionTellTests: XCTestCase {
         XCTAssertFalse(pty.reviewSendHasDraft)
     }
 
-    /// A column says when its agent took a prompt typed at its box, with
-    /// that prompt's time: at its hook without a transcript, once its line
-    /// is read with one. Never for a prompt Claude took in by itself.
-    func testTheColumnSaysWhenItsAgentTookATypedPrompt() throws {
+    /// A column says when the user typed a prompt to its agent, with that
+    /// prompt's time: at its hook without a transcript, once its line is
+    /// read with one. Never for one Nirux typed, nor one Claude took in by
+    /// itself.
+    func testTheColumnSaysWhenTheUserTypedAPrompt() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-typed-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -730,7 +731,7 @@ final class MissionTellTests: XCTestCase {
         try Data().write(to: transcript)
         let pty = PtySession()
         var typed: [TimeInterval] = []
-        pty.onPromptTyped = { typed.append($0) }
+        pty.onUserPrompt = { typed.append($0) }
         func submit(_ id: String? = nil, transcript: URL? = nil) -> TimeInterval {
             let at = Date().timeIntervalSince1970
             _ = pty.applyAgentHook(AgentHookEvent(
@@ -748,6 +749,9 @@ final class MissionTellTests: XCTestCase {
         }
         _ = submit()
         XCTAssertEqual(typed, [], "no Enter sent it")
+        pty.sendRaw(": tell\r", typedByNirux: true)
+        _ = submit()
+        XCTAssertEqual(typed, [], "Nirux typed it")
         pty.sendRaw(": go\r")
         let first = submit()
         XCTAssertEqual(typed, [first])

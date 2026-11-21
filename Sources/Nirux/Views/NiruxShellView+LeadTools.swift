@@ -756,14 +756,20 @@ extension NiruxShellView {
         handQuestionToUser(of: workspace, in: mission, because: why, answer: answer)
     }
 
+    /// The question `mission`'s child waits on, its own Mission's only: the
+    /// oldest nobody answered, and no later prompt retired.
+    static func questionToHand(in mission: Mission) -> MissionEvent? {
+        guard mission.status == .active else { return nil }
+        return mission.events.filter { question in
+            question.kind == .question && question.retiredAt == nil
+                && !mission.events.contains { $0.kind == .response && $0.inReplyTo == question.id }
+        }.min { $0.timestamp < $1.timestamp }
+    }
+
     /// Hands the question `mission`'s child, `workspace`, waits on to the
     /// user, for its parent: a Lead's `ask_user`, or a task's.
     func handQuestionToUser(of workspace: WorkspaceState, in mission: Mission, because why: String, answer: @escaping LeadAnswer) {
-        // Its own Mission's question only.
-        guard let question = mission.events.filter({ question in
-            question.kind == .question && !mission.events.contains { $0.kind == .response && $0.inReplyTo == question.id }
-                && mission.status == .active
-        }).min(by: { $0.timestamp < $1.timestamp }) else {
+        guard let question = Self.questionToHand(in: mission) else {
             return answer("“\(workspace.title)” has no question waiting: ask the user here, in this conversation.", true)
         }
         guard MissionStore.shared.handToUser(questionID: question.id, because: why) != nil else {

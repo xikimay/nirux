@@ -52,10 +52,10 @@ enum MissionPromptText {
             let from = event.answeredByUser == true ? "the user"
                 : parentTitle.map { "\"\(String(String.UnicodeScalarView(quoted($0).unicodeScalars.prefix(maxNameScalars))))\"" }
                 ?? "the parent agent"
-            let retired = delivery.mission.events.contains { $0.id == event.inReplyTo && $0.retiredAt != nil }
+            let retired = delivery.mission.events.first { $0.id == event.inReplyTo && $0.retiredAt != nil }
             return "\(prefix) Answer from \(from): \(event.message)"
                 + (event.acceptedRecommendation == true ? "\n" + acceptedNote : "")
-                + (retired ? "\n" + lateNote : "")
+                + (retired.map { "\n" + lateNote(to: $0) } ?? "")
         case .completed:
             return "\(prefix) \(child) completed: \(quoted(event.message))"
                 + neverTypedNote(questionsNeverTyped(retiredBy: event, in: delivery.mission))
@@ -66,8 +66,14 @@ enum MissionPromptText {
 
     /// Under an answer that is the child's own recommendation.
     static let acceptedNote = "It is the answer you recommended."
-    /// Under an answer to a question the child moved past (`MissionEvent.retiredAt`).
-    static let lateNote = "It answers a question you asked before your last prompt: weigh it against what came since."
+    /// Under an answer to `question`, which the child moved past
+    /// (`MissionEvent.retiredAt`).
+    static func lateNote(to question: MissionEvent) -> String {
+        "It answers your question “\(AgentText.clean(quoted(question.message), maxLength: lateNoteExcerpt) ?? "")”, asked before your "
+            + "last prompt: weigh it against what came since."
+    }
+
+    static let lateNoteExcerpt = 120
 
     /// A question as Nirux types it: who asks, its words, its kind and
     /// recommendation, then how to answer, which names the question and
@@ -112,9 +118,11 @@ enum MissionPromptText {
     /// them in the child's terminal, and the parent never saw them.
     static func questionsNeverTyped(retiredBy completed: MissionEvent, in mission: Mission) -> [MissionEvent] {
         let answered = Set(mission.events.compactMap { $0.kind == .response ? $0.inReplyTo : nil })
+        // And those a prompt retired since its last completion, listed once.
+        let since = mission.events.filter { $0.kind == .completed && $0.timestamp < completed.timestamp }.map(\.timestamp).max() ?? 0
         return mission.events.filter {
-            $0.kind == .question && $0.parentTypedAt == nil && $0.handedToUserBecause == nil
-                && $0.parentConsumedAt == completed.timestamp && !answered.contains($0.id)
+            $0.kind == .question && $0.parentTypedAt == nil && $0.handedToUserBecause == nil && !answered.contains($0.id)
+                && ($0.parentConsumedAt == completed.timestamp || ($0.retiredAt ?? 0) > since)
         }
     }
 
