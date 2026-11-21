@@ -68,6 +68,12 @@ extension SidebarView {
         return nil
     }
 
+    func trackTaskPreview(at point: NSPoint) {
+        guard isExpanded else { return }
+        if let index = cardIndex(at: point), let id = builtRowIDs[index] { taskPreview.enter(id) }
+        else if let id = taskPreview.workspaceID { taskPreview.leave(id) }
+    }
+
     /// Re-derive the hover highlight from the live mouse position. Called
     /// after every rebuild — the registered backing views are new, and rows
     /// may have shifted under a stationary pointer.
@@ -75,6 +81,7 @@ extension SidebarView {
         guard let window else { return }
         let windowPoint = window.mouseLocationOutsideOfEventStream
         let point = contentDocumentView.convert(windowPoint, from: nil)
+        if window.isKeyWindow, taskPreview.workspaceID != nil { trackTaskPreview(at: point) }
         let area = hitArea(at: point)
         // What the pointing hand was over went (a link, a row that can't be
         // pressed any more): the pointer is an arrow again. The checklist's

@@ -339,14 +339,8 @@ final class ShellExitedOverlay: NSView {
     @objc private func dismissClicked() { onDismiss?() }
 }
 
-/// Draggable divider at a column's right edge — freeform width resize.
-/// Lives in the workspace strip (columns clip their own subviews to their
-/// bounds), positioned over the inter-column boundary by layoutAndScroll.
-/// The owner turns the pointer's way into a width.
-final class ColumnResizeHandle: NSView {
-    /// What a drag starts from: the columns' widths, the strip's, where the
-    /// camera was, the focused column, and whether it lay in the middle.
-    typealias Start = (widths: [CGFloat], strip: CGFloat, camera: CGFloat, focus: Int, centred: Bool)
+class HorizontalResizeHandle<Origin>: NSView {
+    typealias Start = Origin
     /// Drag start → where it starts from; nil: no drag.
     var onDragStart: (() -> Start?)?
     /// Dragging → its start and the pointer's way since, in points
@@ -360,29 +354,12 @@ final class ColumnResizeHandle: NSView {
 
     /// How far the pointer goes before a press on the edge drags it: less is
     /// a click's jitter, which leaves a double-click its chance.
-    private static let dragThreshold: CGFloat = 3
+    private static var dragThreshold: CGFloat { 3 }
     private var dragStartX: CGFloat = 0
     private var dragStart: Start?
     private var moved = false
-    private let line = NSView()
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        line.wantsLayer = true
-        line.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.09).cgColor
-        addSubview(line)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func layout() {
-        super.layout()
-        line.frame = NSRect(x: bounds.midX - 1, y: 0, width: 2, height: bounds.height)
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
+    override func resetCursorRects() {
+        super.resetCursorRects()
         addCursorRect(bounds, cursor: .resizeLeftRight)
     }
 
@@ -408,5 +385,25 @@ final class ColumnResizeHandle: NSView {
         guard dragStart != nil else { return }
         dragStart = nil
         if moved { onDragEnd?() }
+    }
+}
+
+
+final class ColumnResizeHandle: HorizontalResizeHandle<(widths: [CGFloat], strip: CGFloat, camera: CGFloat, focus: Int, centred: Bool)> {
+    private let line = NSView()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        line.wantsLayer = true
+        line.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.09).cgColor
+        addSubview(line)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        line.frame = NSRect(x: bounds.midX - 1, y: 0, width: 2, height: bounds.height)
     }
 }

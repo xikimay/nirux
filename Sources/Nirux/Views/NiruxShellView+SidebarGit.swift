@@ -82,7 +82,7 @@ extension NiruxShellView {
         ))
         let infos = built.map { info in
             var info = info
-            info.station = taskStations[info.id]
+            info.boardProgress = taskStations[info.id]
             return info
         }
         updateColumnHeaders(infos: infos, blockedWaits: blockedWaits, now: now)
@@ -166,6 +166,7 @@ extension NiruxShellView {
             agentStatus: agentStatus,
             isEditor: col.isEditor,
             editorFileName: editorFile,
+            isPlanning: col.isPlanning(in: foregroundProcess),
             isProjectBoard: col.isProjectBoard,
             isBranchReview: col.isBranchReview,
             editorIsDirty: col.editorColumn?.isDirty ?? false,
@@ -207,7 +208,7 @@ extension NiruxShellView {
                       lastSummary: turnStatusEnabled || !workspace.lastSummaryIsStatus ? workspace.lastSummary : nil,
                       lastActivityAt: workspace.lastActivityAt,
                       reviewBadges: workspace.reviewBadges,
-                      station: taskStations[workspace.id],
+                      boardProgress: taskStations[workspace.id],
                       mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
                       isLead: workspace.isLead,
                       parentTitle: parentTitle,
@@ -674,7 +675,6 @@ extension NiruxShellView {
             guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
             gitRefresh.notePullRequestRefresh(workspace)
             if !workspace.isInactive { startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext) }
-            let readStartedAt = Date().timeIntervalSince1970
             fetchPullRequest(branch, cwd, workspace.cwd) { [weak self, weak workspace] result in
                 guard let workspace else { return }
                 guard self?.followsPullRequest(workspace) == true else {
@@ -692,7 +692,7 @@ extension NiruxShellView {
                     guard let workspace else { return }
                     guard self?.followsPullRequest(workspace) == true,
                           case .observed(let currentContext) = result,
-                          currentContext == queriedContext else {
+                          workspace.isCurrentPullRequestObservation(observation, for: currentContext) else {
                         workspace.finishPullRequestObservation(observation)
                         return
                     }
@@ -701,7 +701,7 @@ extension NiruxShellView {
                         for: queriedContext,
                         observation: observation
                     )
-                    self?.followMergeWaits(awaiting: workspace, read: info, now: readStartedAt)
+                    self?.followMergeWaits(awaiting: workspace, read: info, now: observation.startedAt)
                     // An archived task is read for the waits on it only.
                     guard !workspace.isInactive else {
                         if changed { self?.scheduleMetadataRefresh() }
@@ -716,7 +716,6 @@ extension NiruxShellView {
                     if workspace.prInfo == info { self?.refreshPRFeedback(for: workspace) }
                     self?.reportNewRedChecks(in: workspace)
                     if workspace.prInfo == info {
-                        self?.prFollowUpCenter.readAt[workspace.id] = readStartedAt
                         self?.followUpPullRequest(of: workspace)
                     }
                     guard changed else { return }
