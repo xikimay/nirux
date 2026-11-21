@@ -7,7 +7,7 @@ name: Tests
 # macOS runner on every merge.
 on:
   pull_request:
-    branches: [main, feat/niruxcore-package]
+    branches: [main]
 
 concurrency:
   group: tests-${{ github.ref }}
