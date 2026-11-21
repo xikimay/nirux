@@ -34,9 +34,10 @@ final class AgentSessionRecordTests: XCTestCase {
         // A straggling end never creates one either.
         XCTAssertNil(AgentSessionRecord.applying(observation(.sessionEnd, at: 10), to: nil))
 
-        let record = try XCTUnwrap(AgentSessionRecord.applying(
-            observation(.sessionStart, at: 10, source: "startup", name: "feat/x · nirux"), to: nil
-        ))
+        var start = observation(.sessionStart, at: 10, source: "startup", name: "feat/x · nirux")
+        start.model = "sonnet"
+        let record = try XCTUnwrap(AgentSessionRecord.applying(start, to: nil))
+        XCTAssertEqual(record.agentModel, "sonnet")
         XCTAssertEqual(record.key, "claude:s1")
         XCTAssertEqual(record.name, "feat/x · nirux")
         XCTAssertEqual(record.startedAt, 10)

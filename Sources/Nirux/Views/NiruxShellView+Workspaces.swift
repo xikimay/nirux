@@ -15,6 +15,7 @@ extension NiruxShellView {
         purpose: String? = nil,
         cwd: String? = nil,
         agent: CodingAgent? = nil,
+        agentModel: String? = nil,
         profileID requestedProfileID: String? = nil,
         workspaceID: String = UUID().uuidString,
         initialAgentUUID: String = UUID().uuidString,
@@ -81,7 +82,7 @@ extension NiruxShellView {
         let setupScript = startedOutsideNirux ? nil : setupScript
         if let agent {
             launchAgent(
-                agent, in: workspace, deliveredHandover: deliveredHandover,
+                agent, model: agentModel, in: workspace, deliveredHandover: deliveredHandover,
                 worktreeBranch: worktreeBranch, setupScript: setupScript, codexMode: codexMode
             )
         } else if let setupScript, let column = workspace.columns.first {
@@ -274,7 +275,7 @@ extension NiruxShellView {
     /// opened; nil when unreadable, detached, or not a worktree workspace. It
     /// names the Claude session (see `SessionName`).
     func launchAgent(
-        _ agent: CodingAgent,
+        _ agent: CodingAgent, model: String?,
         in workspace: WorkspaceState,
         deliveredHandover: Bool,
         worktreeBranch: String?,
@@ -282,7 +283,7 @@ extension NiruxShellView {
         codexMode: CodexLaunchMode? = nil
     ) {
         guard let col = workspace.columns[safe: workspace.focusedIndex],
-              let launch = Self.launch(of: agent, resume: nil, in: workspace, codexMode: codexMode) else { return }
+              let launch = Self.launch(of: agent, resume: nil, model: model, in: workspace, codexMode: codexMode) else { return }
         let cmd = freshAgentCommand(
             launch, in: workspace, column: col, launchDirectory: workspace.cwd, worktreeBranch: worktreeBranch,
             handoverPrompt: Self.agentStartupPrompt(agent: agent, deliveredHandover: deliveredHandover, isMission: workspace.missionID != nil)

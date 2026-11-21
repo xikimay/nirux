@@ -300,7 +300,8 @@ extension NiruxShellView {
             return showToast("Something else runs in that terminal now")
         }
         let command = resumeLaunchCommand(
-            .claude(resume: exit.sessionID.map { .session($0) } ?? .picker, mode: ClaudeLaunchMode.detect(arguments: exit.arguments) ?? .default),
+            .claude(resume: exit.sessionID.map { .session($0) } ?? .picker, mode: ClaudeLaunchMode.detect(arguments: exit.arguments) ?? .default,
+                   model: AgentModels.launchModel(arguments: exit.arguments)),
             in: workspace, column: column
         )
         column.dismissAgentExit()

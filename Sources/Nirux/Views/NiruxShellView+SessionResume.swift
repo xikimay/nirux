@@ -268,7 +268,7 @@ extension NiruxShellView {
     private func launchResumedSession(
         _ record: AgentSessionRecord, in workspace: WorkspaceState, column: ColumnState, directory: String
     ) {
-        guard let launch = Self.launch(of: record.agent, resume: .session(record.sessionID), in: workspace) else { return }
+        guard let launch = Self.launch(of: record.agent, resume: .session(record.sessionID), model: record.agentModel, in: workspace) else { return }
         sideEffects.launchAgent(column, resumeLaunchCommand(launch, workingDirectory: directory, in: workspace, column: column))
         updateSidebar()
         focusActiveTerminal(in: window)

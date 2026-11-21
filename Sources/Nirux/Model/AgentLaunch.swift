@@ -13,20 +13,20 @@ enum AgentResumeTarget: Equatable {
 /// One start of a launchable agent: the session it resumes (nil: a fresh
 /// one) and its flags.
 enum AgentLaunch: Equatable {
-    case claude(resume: AgentResumeTarget?, mode: ClaudeLaunchMode)
-    case codex(resume: AgentResumeTarget?, mode: CodexLaunchMode?)
-    case agy(resume: AgentResumeTarget?)
+    case claude(resume: AgentResumeTarget?, mode: ClaudeLaunchMode, model: String? = nil)
+    case codex(resume: AgentResumeTarget?, mode: CodexLaunchMode?, model: String? = nil)
+    case agy(resume: AgentResumeTarget?, model: String? = nil)
 
     /// `agent`'s, with the mode of its kind; nil for an agent Nirux doesn't
     /// start.
     init?(
-        _ agent: CodingAgent, resume: AgentResumeTarget?,
+        _ agent: CodingAgent, resume: AgentResumeTarget?, model: String? = nil,
         claudeMode: @autoclosure () -> ClaudeLaunchMode, codexMode: @autoclosure () -> CodexLaunchMode
     ) {
         switch agent {
-        case .claude: self = .claude(resume: resume, mode: claudeMode())
-        case .codex: self = .codex(resume: resume, mode: codexMode())
-        case .agy: self = .agy(resume: resume)
+        case .claude: self = .claude(resume: resume, mode: claudeMode(), model: model)
+        case .codex: self = .codex(resume: resume, mode: codexMode(), model: model)
+        case .agy: self = .agy(resume: resume, model: model)
         case .gemini, .opencode: return nil
         }
     }
@@ -39,10 +39,16 @@ enum AgentLaunch: Equatable {
         }
     }
 
+    var model: String? {
+        switch self {
+        case .claude(_, _, let model), .codex(_, _, let model), .agy(_, let model): model
+        }
+    }
+
     /// The session it will resume; nil for a fresh agent or the picker.
     var sessionID: String? {
         switch self {
-        case .claude(.session(let sessionID)?, _), .codex(.session(let sessionID)?, _), .agy(.session(let sessionID)?):
+        case .claude(.session(let sessionID)?, _, _), .codex(.session(let sessionID)?, _, _), .agy(.session(let sessionID)?, _):
             return sessionID
         default:
             return nil
@@ -56,9 +62,9 @@ enum AgentLaunch: Equatable {
     func openingElsewhere(_ liveText: [String]) -> AgentLaunch {
         guard let sessionID, AgentSessionHolder.mentions(sessionID, in: liveText) else { return self }
         switch self {
-        case .claude(_, let mode): return .claude(resume: .picker, mode: mode)
-        case .codex(_, let mode): return .codex(resume: .picker, mode: mode)
-        case .agy: return .agy(resume: .picker)
+        case .claude(_, let mode, let model): return .claude(resume: .picker, mode: mode, model: model)
+        case .codex(_, let mode, let model): return .codex(resume: .picker, mode: mode, model: model)
+        case .agy(_, let model): return .agy(resume: .picker, model: model)
         }
     }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-extension TimeInterval {
+public extension TimeInterval {
     /// Compact duration for sidebar chips: 42s, 12m, 1h05m.
     var shortDuration: String {
         let total = max(0, Int(self))

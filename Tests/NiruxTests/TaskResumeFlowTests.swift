@@ -5,13 +5,21 @@ import XCTest
 @MainActor
 final class TaskResumeFlowTests: XCTestCase {
     func testModelChoiceAndCLIArguments() throws {
+        func command(_ choice: TaskAgentChoice, prompt: String) throws -> String {
+            switch choice.agent {
+            case .claude: return NiruxShellView.claudeCommand(mode: .default, model: choice.model, handoverPrompt: prompt)
+            case .codex: return NiruxShellView.codexCommand(mode: .default, model: choice.model, handoverPrompt: prompt)
+            case .agy: return NiruxShellView.agyCommand(model: choice.model, handoverPrompt: prompt)
+            default: throw XCTSkip("This CLI cannot launch a task")
+            }
+        }
         for agent in CodingAgent.launchable {
             let omitted = try TaskAgentChoice.parse(["agent": agent.rawValue]).get()
             let blank = try TaskAgentChoice.parse(["agent": agent.rawValue, "model": " "]).get()
             XCTAssertEqual(omitted, blank)
-            XCTAssertFalse(omitted.command([agent.rawValue], prompt: "continue").contains("--model"))
+            XCTAssertFalse(try command(omitted, prompt: "continue").contains("--model"))
             let chosen = try TaskAgentChoice.parse(["agent": agent.rawValue, "model": "vendor/model's-v2"]).get()
-            let args = chosen.command([agent.rawValue], prompt: "continue")
+            let args = try command(chosen, prompt: "continue")
             XCTAssertTrue(args.contains("--model " + NiruxShellView.shellQuotedArgument("vendor/model's-v2")))
             XCTAssertTrue(args.hasSuffix(agent == .agy ? "-i 'continue'" : "'continue'"))
         }
