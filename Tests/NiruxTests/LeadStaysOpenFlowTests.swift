@@ -58,6 +58,7 @@ final class LeadStaysOpenFlowTests: XCTestCase {
             let terminal = try XCTUnwrap(lead.workspace.columns.first)
             XCTAssertFalse(terminal === claude, "a shell moved before its Claude")
             XCTAssertIdentical(lead.workspace.leadTerminal, claude)
+            XCTAssertEqual(shell.leadMissionParent(inSpace: lead.space)?.agentUUID, lead.agentUUID, "no Claude runs: its Claude column")
             lead.workspace.focusedIndex = 1
             shell.closeActiveColumn()
             XCTAssertEqual(shell.toast?.message, NiruxShellView.leadStaysText)
@@ -69,6 +70,7 @@ final class LeadStaysOpenFlowTests: XCTestCase {
             XCTAssertEqual(restored.leadTerminal?.agentUUID, lead.agentUUID)
             XCTAssertEqual(restored.columns.first?.agentUUID, terminal.agentUUID)
 
+            // Saved by a build before: the column its Claude resumes in, else its first terminal.
             var state = try XCTUnwrap(Persistence.load())
             let saved = try XCTUnwrap(state.workspaces.firstIndex { $0.id == lead.workspace.id })
             XCTAssertEqual(state.workspaces[saved].leadAgentUUID, lead.agentUUID)
@@ -77,6 +79,13 @@ final class LeadStaysOpenFlowTests: XCTestCase {
             shell.restoreState()
             restored = try XCTUnwrap(shell.leadWorkspace(inSpace: lead.space))
             XCTAssertEqual(restored.leadTerminal?.agentUUID, terminal.agentUUID)
+            let claudeColumn = try XCTUnwrap(state.workspaces[saved].columns.firstIndex { $0.agentUUID == lead.agentUUID })
+            state.workspaces[saved].columns[claudeColumn].columnType = .claudeCode
+            state.workspaces[saved].columns[claudeColumn].claudeSessionID = UUID().uuidString
+            XCTAssertTrue(Persistence.save(state))
+            shell.restoreState()
+            restored = try XCTUnwrap(shell.leadWorkspace(inSpace: lead.space))
+            XCTAssertEqual(restored.leadTerminal?.agentUUID, lead.agentUUID)
         }
     }
 

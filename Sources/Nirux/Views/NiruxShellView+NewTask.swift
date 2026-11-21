@@ -157,7 +157,7 @@ extension NiruxShellView {
 
     /// The space's Lead as a Mission parent: its workspace and the column
     /// its Claude runs in (or will, once a restored one resumes), else its
-    /// first terminal.
+    /// Claude column.
     func leadMissionParent(inSpace spaceID: String) -> NewTask.MissionParent? {
         guard let lead = leadWorkspace(inSpace: spaceID) else { return nil }
         let snapshot = ProcessSnapshot()
@@ -165,7 +165,7 @@ extension NiruxShellView {
         let claude = terminals.first { column in
             column.deferredAgent?.processName == "claude" || column.pty?.foregroundProcessName(snapshot: snapshot) == "claude"
         }
-        guard let agentUUID = (claude ?? terminals.first)?.agentUUID else { return nil }
+        guard let agentUUID = (claude ?? lead.leadTerminal ?? terminals.first)?.agentUUID else { return nil }
         return NewTask.MissionParent(workspaceID: lead.id, agentUUID: agentUUID)
     }
 

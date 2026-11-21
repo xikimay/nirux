@@ -93,8 +93,8 @@ final class WorkspaceState {
     /// Lead's instructions (NiruxMCPServer). Cleared when its space is
     /// deleted and it moves to General.
     var isLead: Bool
-    /// The agent UUID of a Lead's Claude column (`leadTerminal`), its
-    /// tasks' Mission parent: moving columns doesn't pass the role on.
+    /// The agent UUID of a Lead's Claude column (`leadTerminal`): moving
+    /// columns doesn't pass the role on.
     var leadAgentUUID: String?
     /// The folder Nirux made for a task without a repository
     /// (NewTask+Folder), kept across launches whatever folder its shells
