@@ -79,6 +79,125 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertTrue(store.pendingPromptDeliveries(now: 42).isEmpty)
     }
 
+    /// A question stops waiting once its child took a later prompt: the
+    /// user's (`retireQuestions`), or its parent's tell, for a question of
+    /// that Mission the parent or the user saw. Not one asked after that
+    /// prompt, one the parent never saw when it told, nor one an answer to
+    /// another leaves; another child's waits. A retired question isn't
+    /// typed to the parent any more, a late answer to it names it, and the
+    /// completion lists the retired ones that never reached the parent.
+    func testAQuestionRetiresOnceItsChildTakesALaterPrompt() throws {
+        let store = makeStore()
+        let otherChild = "77777777-7777-4777-8777-777777777777"
+        XCTAssertNotNil(store.create(MissionCreationRequest(
+            id: "66666666-6666-4666-8666-666666666666", parentWorkspaceID: parentWorkspaceID, parentAgentUUID: parentAgentUUID,
+            childWorkspaceID: otherChild, childAgentUUID: otherChild, childAgentKind: "claude", branch: "feat/other"
+        ), enabled: true, now: 10))
+        let others = try XCTUnwrap(store.accept(MissionEvent(
+            id: UUID().uuidString, missionID: "66666666-6666-4666-8666-666666666666", childWorkspaceID: otherChild,
+            childAgentUUID: otherChild, kind: .question, message: "Which API?", timestamp: 20
+        ), enabled: true))
+        let tellsID = "88888888-8888-4888-8888-888888888888"
+        var tells = MissionCreationRequest(
+            id: tellsID, parentWorkspaceID: parentWorkspaceID, parentAgentUUID: "99999999-9999-4999-8999-999999999999",
+            childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, childAgentKind: "claude", branch: "feat/date-filter"
+        )
+        tells.oneWay = true
+        XCTAssertNotNil(store.create(tells, enabled: true, now: 10))
+        func waiting() -> [String] {
+            let events: [MissionEvent] = store.missions.first { $0.id == missionID }?.events ?? []
+            let answered = Set(events.compactMap { $0.kind == .response ? $0.inReplyTo : nil })
+            return events.filter { $0.kind == .question && $0.parentConsumedAt == nil && !answered.contains($0.id) }.map(\.message)
+        }
+
+        let report = try XCTUnwrap(store.accept(childEvent(.question, "P5 is built, waiting on #654.", at: 20), enabled: true))
+        XCTAssertTrue(store.markTyped(try XCTUnwrap(store.pendingPromptDeliveries(now: 21).first { $0.event.id == report.event.id }), at: 21))
+        _ = try XCTUnwrap(store.accept(childEvent(.question, "Bench it too?", at: 22), enabled: true))
+        let lead = try XCTUnwrap(store.accept(MissionEvent(
+            id: UUID().uuidString, missionID: tellsID, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
+            parentWorkspaceID: parentWorkspaceID, parentAgentUUID: "99999999-9999-4999-8999-999999999999",
+            kind: .instruction, message: "Mind the CI.", timestamp: 24
+        ), enabled: true))
+        XCTAssertTrue(store.markInstructionTyped(eventID: lead.event.id, at: 25))
+        XCTAssertEqual(waiting(), ["P5 is built, waiting on #654.", "Bench it too?"], "another Mission's tell")
+        let tell = try XCTUnwrap(store.accept(parentEvent(.instruction, "Open PR 2.", at: 30), enabled: true))
+        XCTAssertTrue(store.markInstructionTyped(eventID: tell.event.id, at: 31))
+        XCTAssertEqual(waiting(), ["Bench it too?"], "its parent saw the report, not the question queued for it")
+        XCTAssertTrue(store.pendingPromptDeliveries(now: 32).contains { $0.event.message == "Bench it too?" }, "still on its way")
+
+        let bench = try XCTUnwrap(store.missions.flatMap(\.events).first { $0.message == "Bench it too?" })
+        _ = try XCTUnwrap(store.accept(childEvent(.question, "Which port?", at: 40), enabled: true))
+        XCTAssertFalse(store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 22))
+        XCTAssertTrue(store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 41))
+        XCTAssertEqual(waiting(), [], "behind the user's prompt")
+        XCTAssertFalse(
+            store.pendingPromptDeliveries(now: 42).contains { $0.event.kind == .question && $0.event.childAgentUUID == childAgentUUID },
+            "not typed to the parent any more"
+        )
+        XCTAssertNotNil(store.accept(parentEvent(.response, "Yes, bench it.", at: 45, inReplyTo: bench.id), enabled: true))
+        let late = try XCTUnwrap(store.pendingPromptDeliveries(now: 46).first { $0.event.inReplyTo == bench.id })
+        XCTAssertEqual(
+            MissionPromptText.text(for: late, childTitle: nil, parentTitle: "Lead"),
+            "[Nirux Mission] Answer from \"Lead\": Yes, bench it.\n" + MissionPromptText.lateNote(to: bench)
+        )
+        XCTAssertTrue(MissionPromptText.lateNote(to: bench).contains("“Bench it too?”"))
+        XCTAssertTrue(store.markTyped(late, at: 46))
+
+        _ = try XCTUnwrap(store.accept(childEvent(.question, "Rebase or merge?", at: 50), enabled: true))
+        let squash = try XCTUnwrap(store.accept(childEvent(.question, "Squash?", at: 51), enabled: true))
+        XCTAssertNotNil(store.accept(parentEvent(.response, "No", at: 52, inReplyTo: squash.event.id), enabled: true))
+        XCTAssertTrue(store.markTyped(try XCTUnwrap(store.pendingPromptDeliveries(now: 53).first { $0.event.kind == .response }), at: 53))
+        XCTAssertEqual(waiting(), ["Rebase or merge?"], "an answer to the other one")
+        XCTAssertEqual(
+            store.waitingQuestion(childWorkspaceID: otherChild, childAgentUUID: otherChild)?.event.id, others.event.id,
+            "another child's waits"
+        )
+
+        XCTAssertNotNil(store.accept(childEvent(.completed, "Done.", at: 60), enabled: true))
+        let done = try XCTUnwrap(store.pendingPromptDeliveries(now: 61).first { $0.event.kind == .completed })
+        let note = try XCTUnwrap(MissionPromptText.text(for: done, childTitle: nil, parentTitle: nil))
+        XCTAssertTrue(note.contains("2 questions that never reached your prompt"), note)
+        XCTAssertTrue(note.contains("- Which port?") && note.contains("- Rebase or merge?"), note)
+        XCTAssertTrue(store.markTyped(done, at: 61))
+        // More work, done again: those were listed already.
+        let more = try XCTUnwrap(store.accept(parentEvent(.instruction, "Now the docs.", at: 70), enabled: true))
+        XCTAssertTrue(store.markInstructionTyped(eventID: more.event.id, at: 71))
+        XCTAssertNotNil(store.accept(childEvent(.completed, "Docs done.", at: 80), enabled: true))
+        let again = try XCTUnwrap(store.pendingPromptDeliveries(now: 81).first { $0.event.kind == .completed })
+        XCTAssertEqual(MissionPromptText.text(for: again, childTitle: nil, parentTitle: nil), "[Nirux Mission] \"feat/date-filter\" completed: Docs done.")
+    }
+
+    /// The question `ask_user` hands over: the oldest one waiting, never
+    /// one a later prompt retired.
+    func testAskUserHandsOverTheQuestionThatWaits() throws {
+        let store = makeStore()
+        let old = try XCTUnwrap(store.accept(childEvent(.question, "P5 is built.", at: 20), enabled: true))
+        XCTAssertTrue(store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 21))
+        let asked = try XCTUnwrap(store.accept(childEvent(.question, "Token for the bench?", at: 30), enabled: true))
+        XCTAssertNotEqual(old.event.id, asked.event.id)
+        XCTAssertEqual(store.missions.first?.waitingQuestion?.id, asked.event.id)
+
+        _ = try XCTUnwrap(store.accept(childEvent(.completed, "Done", at: 40), enabled: true))
+        let followUp = try XCTUnwrap(store.accept(parentEvent(.instruction, "Check the docs", at: 50), enabled: true))
+        XCTAssertTrue(store.markInstructionTyped(eventID: followUp.event.id, at: 51))
+        XCTAssertNil(store.missions.first?.waitingQuestion, "reopening the task must not reopen its completed question")
+    }
+
+    func testDeliveryRefreshesAQuestionRetiredAfterTheQueueWasRead() throws {
+        let store = makeStore()
+        let question = try XCTUnwrap(store.accept(childEvent(.question, "Which API?", at: 20), enabled: true))
+        let queued = try XCTUnwrap(store.pendingPromptDeliveries(now: 21).first)
+        XCTAssertEqual(store.pendingPromptDelivery(queued, now: 21)?.event.id, question.event.id)
+        XCTAssertTrue(store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 22))
+        XCTAssertNil(store.pendingPromptDelivery(queued, now: 23))
+
+        let answered = makeStore()
+        let other = try XCTUnwrap(answered.accept(childEvent(.question, "Which API?", at: 20), enabled: true))
+        let response = try XCTUnwrap(answered.respond(to: other.event.id, message: "Use v2", enabled: true, now: 22))
+        XCTAssertNil(answered.pendingPromptDelivery(other, now: 23))
+        XCTAssertEqual(answered.pendingPromptDelivery(response, now: 23)?.event.message, "Use v2")
+    }
+
     /// A Codex child's `ask` waits and prints the answer itself: nothing is
     /// typed for it, whatever its queued event claims.
     func testAnAnswerToAWaitingAskIsNotTyped() throws {
@@ -437,6 +556,173 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertNil(watch.hold(nil, typedAt: 300), "typed into its prompt")
         XCTAssertEqual(watch.hold(.parentDidNotAnswer, typedAt: 300), .parentDidNotAnswer)
         XCTAssertEqual(watch.hold(nil, typedAt: 300), .parentDidNotAnswer)
+    }
+
+    /// A prompt the user typed into a child's terminal reaches the shell,
+    /// which retires the questions it asked before; one Nirux typed doesn't.
+    func testAPromptTypedIntoTheChildRetiresItsQuestions() throws {
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 600))
+        shell.stopHeartbeat()
+        let workspace = try XCTUnwrap(shell.activeWorkspace)
+        let column = try XCTUnwrap(workspace.columns.first)
+        let pty = try XCTUnwrap(column.pty)
+        let agentUUID = try XCTUnwrap(column.agentUUID)
+        let store = MissionStore(persistsToDisk: false)
+        XCTAssertNotNil(store.create(MissionCreationRequest(
+            id: missionID, parentWorkspaceID: parentWorkspaceID, parentAgentUUID: parentAgentUUID,
+            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: "claude", branch: "feat/date-filter"
+        ), enabled: true))
+        XCTAssertNotNil(store.accept(MissionEvent(
+            id: UUID().uuidString, missionID: missionID, childWorkspaceID: workspace.id, childAgentUUID: agentUUID,
+            kind: .question, message: "P5 is built.", timestamp: Date().timeIntervalSince1970 - 60
+        ), enabled: true))
+        XCTAssertNotNil(workspace.onUserPrompt, "the shell listens")
+        // The shell's own handler, on the test's ledger.
+        workspace.onUserPrompt = { column, typedAt in
+            shell.retireMissionQuestions(of: column, in: workspace, promptedAt: typedAt, store: store)
+        }
+        func takePrompt() {
+            _ = pty.applyAgentHook(
+                AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "s", timestamp: Date().timeIntervalSince1970),
+                isUserFocused: false
+            )
+        }
+        shell.typeMissionPrompt("\u{1B}[200~:\u{1B}[201~", into: pty, keepingInFront: nil) { _ in }
+        takePrompt()
+        XCTAssertNotNil(store.waitingQuestion(childWorkspaceID: workspace.id, childAgentUUID: agentUUID), "Nirux typed it")
+        pty.sendRaw(": go on\r")
+        takePrompt()
+        XCTAssertNil(store.waitingQuestion(childWorkspaceID: workspace.id, childAgentUUID: agentUUID))
+    }
+
+    /// A Mission child's turn ended on a question: its parent's when the
+    /// parent sent its last prompt (one Nirux typed, or none typed and the
+    /// parent started it), sent as the child's question: what it asks, its
+    /// end when long. Once per wait: it waits on its parent already. The
+    /// user's when they typed that prompt or started the task, have a draft
+    /// at its prompt, when a Stop hook may keep the turn going, after it
+    /// completed, or when it reports to nobody (a Lead's tells only).
+    func testATurnEndQuestionGoesToThePromptsSender() throws {
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 600))
+        shell.stopHeartbeat()
+        let parent = try XCTUnwrap(shell.activeWorkspace)
+        let parentAgentUUID = try XCTUnwrap(parent.columns.first?.agentUUID)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-ask-parent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        /// A task, its ledger holding its Missions, oldest first: a Lead's
+        /// tells (`oneWay`) or one it reports on.
+        struct Task {
+            let workspace: WorkspaceState
+            let column: ColumnState
+            let pty: PtySession
+            let agentUUID: String
+            let store: MissionStore
+            let transcript: URL
+        }
+        func task(_ title: String, oneWay: [Bool] = [false], startedByParent: Bool = true) throws -> Task {
+            shell.addWorkspace(title: title, cwd: NSTemporaryDirectory())
+            let workspace = try XCTUnwrap(shell.workspaces.last)
+            let column = try XCTUnwrap(workspace.columns.first)
+            let agentUUID = try XCTUnwrap(column.agentUUID)
+            let store = MissionStore(persistsToDisk: false)
+            for oneWay in oneWay {
+                var request = MissionCreationRequest(
+                    id: UUID().uuidString, parentWorkspaceID: parent.id, parentAgentUUID: parentAgentUUID,
+                    childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: "claude", branch: "feat/\(title)"
+                )
+                request.reportsToLead = !oneWay
+                request.oneWay = oneWay
+                request.startedByParent = !oneWay && startedByParent
+                XCTAssertNotNil(store.create(request, enabled: false))
+            }
+            let transcript = directory.appendingPathComponent("\(title).jsonl")
+            try Data().write(to: transcript)
+            return Task(workspace: workspace, column: column, pty: try XCTUnwrap(column.pty), agentUUID: agentUUID, store: store, transcript: transcript)
+        }
+        /// A prompt goes in; its transcript line says a person typed it, read
+        /// once the turn ends at the latest.
+        func takePrompt(_ id: String, typedByNirux: Bool, in task: Task) throws {
+            if typedByNirux {
+                shell.typeMissionPrompt("\u{1B}[200~:\u{1B}[201~", into: task.pty, keepingInFront: nil) { _ in }
+            } else {
+                task.pty.sendRaw(": which one\r")
+            }
+            _ = task.pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .userPromptSubmit, sessionID: "s", promptID: id, transcriptPath: task.transcript.path,
+                timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+            let time = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+            let handle = try FileHandle(forWritingTo: task.transcript)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((#"{"type":"user","origin":{"kind":"human"},"promptId":""# + id
+                + #"","timestamp":""# + time + #"","message":{"role":"user","content":"…"}}"# + "\n").utf8))
+        }
+        /// Its turn ends on `message`, which asks.
+        func ask(_ message: String, in task: Task) -> Bool {
+            let end = AgentHookEvent(
+                kind: .claude, name: .stop, sessionID: "s", finalMessage: message, timestamp: Date().timeIntervalSince1970
+            )
+            _ = task.pty.applyAgentHook(end, isUserFocused: false)
+            let resolution = AgentHookCenter.Resolution(
+                workspace: task.workspace, column: task.column, columnIndex: 0, isUserFocused: false, approvalHold: .never
+            )
+            return shell.askParent(
+                for: resolution, TurnEndRequest(message: message, turnEndedAt: end.timestamp), asking: nil, store: task.store
+            )
+        }
+        func questions(_ task: Task) -> [String] {
+            task.store.missions.flatMap(\.events).filter { $0.kind == .question }.map(\.message)
+        }
+
+        // Started by the Lead, which told it something since on a Mission
+        // of its own.
+        let lead = try task("lead", oneWay: [false, true])
+        XCTAssertTrue(ask("PR #12 is green.\n\nShall I open it?", in: lead), "its first prompt was its handover")
+        XCTAssertEqual(questions(lead), ["Shall I open it?"])
+        let first = try XCTUnwrap(lead.store.waitingQuestion(childWorkspaceID: lead.workspace.id, childAgentUUID: lead.agentUUID))
+        try takePrompt("busy", typedByNirux: true, in: lead)
+        XCTAssertTrue(ask("Also bench it?", in: lead), "it waits on its parent already")
+        XCTAssertEqual(questions(lead).count, 1)
+        XCTAssertNotNil(lead.store.accept(MissionEvent(
+            id: UUID().uuidString, missionID: first.mission.id, childWorkspaceID: lead.workspace.id, childAgentUUID: lead.agentUUID,
+            parentWorkspaceID: parent.id, parentAgentUUID: parentAgentUUID, kind: .response, message: "Yes.", inReplyTo: first.event.id,
+            timestamp: Date().timeIntervalSince1970
+        ), enabled: false))
+        try takePrompt("answer", typedByNirux: true, in: lead)
+        XCTAssertTrue(ask(String(repeating: "Checked. ", count: 80) + "Shall I merge?", in: lead), "a prompt Nirux typed")
+        let long = try XCTUnwrap(questions(lead).last)
+        XCTAssertTrue(long.hasPrefix("…") && long.hasSuffix("Shall I merge?"), long)
+        XCTAssertLessThanOrEqual(long.count, MissionEventCLI.maxMessageLength)
+
+        let typed = try task("typed")
+        try takePrompt("user", typedByNirux: false, in: typed)
+        XCTAssertFalse(ask("Rebase or merge?", in: typed), "the user typed its prompt")
+        let drafted = try task("drafted")
+        drafted.pty.sendRaw(": half a reply")
+        XCTAssertFalse(ask("Rebase or merge?", in: drafted), "the user is at its prompt")
+        let gated = try task("gated")
+        _ = gated.pty.applyAgentHook(AgentHookEvent(
+            kind: .claude, name: .stop, sessionID: "s", finalMessage: "Done.", stopHookActive: true, timestamp: Date().timeIntervalSince1970
+        ), isUserFocused: false)
+        try takePrompt("again", typedByNirux: true, in: gated)
+        XCTAssertFalse(ask("Rebase or merge?", in: gated), "a Stop hook may keep the turn going")
+        let mine = try task("mine", startedByParent: false)
+        XCTAssertFalse(ask("Rebase or merge?", in: mine), "the user started it")
+        try takePrompt("told", typedByNirux: true, in: mine)
+        XCTAssertTrue(ask("Rebase or merge?", in: mine), "its parent told it something")
+        let done = try task("done")
+        let reporting = try XCTUnwrap(done.store.missions.first)
+        XCTAssertNotNil(done.store.accept(MissionEvent(
+            id: UUID().uuidString, missionID: reporting.id, childWorkspaceID: done.workspace.id, childAgentUUID: done.agentUUID,
+            kind: .completed, message: "PR #12 is green.", timestamp: Date().timeIntervalSince1970
+        ), enabled: false))
+        XCTAssertFalse(ask("Shall I start the docs too?", in: done), "it completed")
+        let tells = try task("tells", oneWay: [true])
+        XCTAssertFalse(ask("Rebase or merge?", in: tells), "a Lead's tells take no question")
+        for each in [typed, drafted, gated, done, tells] { XCTAssertEqual(questions(each), [], each.workspace.title) }
     }
 
     // MARK: - Card row

@@ -98,6 +98,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// shows this one: picking a repository again brings it back.
     private var otherEditedName: String?
     private var proposal: LeadProposal?
+    private var namingAttempt: (description: String, titleLimit: Int, task: Task<TaskNameSuggestion?, Never>)?
     /// Edit was clicked: the branch shows in a field.
     private(set) var isEditingBranch = false
     private(set) var isStarting = false
@@ -295,6 +296,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         panel.sheetParent?.endSheet(panel)
         panel.orderOut(nil)
         self.panel = nil
+        namingAttempt?.task.cancel()
+        namingAttempt = nil
         isHidden = false
         onDismiss?()
     }
@@ -621,6 +624,23 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             request.goal = proposal.options.goal
         }
         return request
+    }
+
+    func nameSuggestion(for request: NewTask.Request, using generate: TaskNameSuggestion.Generator?) -> Task<TaskNameSuggestion?, Never>? {
+        guard proposal == nil, !branchIsEdited, let generate else {
+            namingAttempt?.task.cancel()
+            namingAttempt = nil
+            return nil
+        }
+        let description = request.description
+        let limit = request.parentWorkspaceID == nil ? LeadTools.maxTaskTitleLength : LeadTools.maxSubtaskTitleLength
+        if let namingAttempt, namingAttempt.description == description, namingAttempt.titleLimit == limit {
+            return namingAttempt.task
+        }
+        namingAttempt?.task.cancel()
+        let task = Task { await generate(description, limit) }
+        namingAttempt = (description, limit, task)
+        return task
     }
 
     private func beginEditingBranch() {
