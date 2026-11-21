@@ -1,0 +1,11 @@
+Sources/Nirux/Util/FuzzyMatch.swift NiruxTests.CatchUpTests
+Sources/Nirux/Util/FuzzyMatch.swift NiruxTests.IconRailFlowTests
+Sources/Nirux/Util/LaunchArguments.swift NiruxTests.LaunchArgumentsTests
+Sources/Nirux/Util/FuzzyMatch.swift NiruxTests.LeadToolsFlowTests
+Sources/Nirux/Util/FuzzyMatch.swift NiruxTests.NewTaskFlowTests
+Sources/Nirux/Util/FuzzyMatch.swift NiruxTests.PaletteCommandFlowTests
+Sources/Nirux/Util/FuzzyMatch.swift NiruxTests.QuickSwitcherFlowTests
+Sources/Nirux/Util/FuzzyMatch.swift NiruxTests.QuickSwitchTests
+Sources/Nirux/Util/FuzzyMatch.swift NiruxTests.SessionHistoryFlowTests
+Sources/Nirux/Util/FuzzyMatch.swift NiruxTests.SessionHistoryPanelModelTests
+Sources/Nirux/Util/FuzzyMatch.swift NiruxTests.TaskBirthTests

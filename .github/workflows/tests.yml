@@ -12,7 +12,7 @@ name: Tests
 # a "test" check, passed or skipped, that a merge could read.
 on:
   pull_request:
-    branches: [main]
+    branches: [ci/fast-ci-selection-proof-base]
     types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
@@ -60,6 +60,19 @@ jobs:
 
       - name: Build
         run: swift build --build-tests
+
+      # Validation fixture from #682, with just the fuzzy matcher unit class omitted.
+      - name: Seed the deliberately incomplete coverage index
+        if: github.event.pull_request.draft
+        run: cp scripts/ci-selection-proof-index.txt .build/coverage-index.txt
+      - uses: actions/cache/save@v6
+        if: github.event.pull_request.draft
+        with:
+          path: .build/coverage-index.txt
+          key: coverage-index-v2-${{ github.event.pull_request.base.sha }}
+      - name: Clear the fixture before exercising the normal restore
+        if: github.event.pull_request.draft
+        run: rm .build/coverage-index.txt
 
       # The latest index the Coverage map workflow saved on main.
       - name: Coverage index
