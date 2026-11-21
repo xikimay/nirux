@@ -502,6 +502,7 @@ Mockups were validated in the design session. What changes:
   the selected row prints its next step below its columns. INACTIVE becomes an
   "Archived" row at the bottom, unfolding its list above it. The bottom dot switcher and Activity go. This
   replaces the three-line cards of the October visual system.
+  Hovering a task row or its folded-rail icon opens the same preview beside the sidebar, with the full title, optional goal, status and next action. The preview keeps keyboard focus in the workspace. Its button opens the task, or its thread when a thread presenter is connected.
 - **Title bar:** three buttons: New, Board, Search. Since replaced by the
   glass interface's command bar (step 3.1, [glass-interface.md](glass-interface.md)).
 - **Popovers, not alerts,** for anything the user must read and answer.
