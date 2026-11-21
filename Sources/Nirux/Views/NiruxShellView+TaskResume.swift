@@ -41,13 +41,13 @@ extension NiruxShellView {
         switch TaskAgentChoice.parse(["agent": agent.rawValue, "model": model.stringValue]) {
         case .failure(let problem): showToast(problem.localizedDescription, tone: .error)
         case .success(let choice):
-            resumeTask(task, with: choice) { [weak self] message, failed in
+            resumeTask(task, with: choice, interactive: true) { [weak self] message, failed in
                 self?.showToast(message, tone: failed ? .error : .info)
             }
         }
     }
 
-    func resumeTask(_ task: WorkspaceState, with choice: TaskAgentChoice, answer: @escaping LeadAnswer) {
+    func resumeTask(_ task: WorkspaceState, with choice: TaskAgentChoice, interactive: Bool = false, answer: @escaping LeadAnswer) {
         guard !task.isClosing, !task.isInactive, workspaces.contains(where: { $0 === task }), Self.isTask(task),
               Self.existingDirectory(task.cwd) != nil else { return answer("The task or its folder is no longer open.", true) }
         guard !resumingTasks.contains(task.id) else { return answer("This task is already switching CLI.", true) }
@@ -81,6 +81,16 @@ extension NiruxShellView {
         guard hooksReadBeforeTyping(), MissionEventCenter.shared.drain() else {
             return finish("Nirux is reading the latest Mission events. Try again.", true)
         }
+        let draftRefusal = "“\(task.title)” has an unsent draft. The user can send it from the terminal before you retry, "
+            + "or choose Resume with… on the task to discard it explicitly."
+        let approvedDraft = pty.taskResumeDraft(foreground: foreground?.instance)
+        if approvedDraft != nil {
+            guard interactive else { return finish(draftRefusal, true) }
+            guard confirmDestructiveClose(message: "Discard the draft in “\(task.title)”?",
+                                          details: ["Its unsent text will be lost when the CLI switches."],
+                                          confirmTitle: "Discard Draft and Resume")
+            else { return finish("Kept the draft and the current worker.", false) }
+        }
         let previous = profiles.flatMap { sessionLedger.sessions(inSpace: $0.id) }
             .filter { $0.workspaceID == id && $0.agentUUID == uuid }.max { $0.lastActivityAt < $1.lastActivityAt }
         Self.offMain({
@@ -88,14 +98,20 @@ extension NiruxShellView {
         }) { [self] context in
             let latest = ProcessSnapshot()
             guard !task.isClosing, !task.isInactive, task.profileID == spaceID, workspaces.contains(where: { $0 === task }),
-                  taskWorker(task, snapshot: latest) === column,
+                  taskWorker(task, snapshot: latest) === column, column.pty === pty, !column.isRestartingShell,
                   pty.foregroundProcess(snapshot: latest)?.instance == foreground?.instance,
                   Self.existingDirectory(task.cwd) != nil else { return finish("The task changed before the switch. Try again.", true) }
             let prompt = TaskResumeHandover.prompt(task: task, previous: previous, agent: choice.agent, missions: store.missions, thread: context)
-            column.setLaunch(directory: task.cwd, environment: task.terminalEnvironment(agentUUID: uuid))
-            let launch = freshAgentCommand(choice.agent, in: task, column: column, worktreeBranch: task.gitBranch)
+            let launch = freshAgentCommand(choice.agent, in: task, directory: task.cwd, worktreeBranch: task.gitBranch)
             let command = choice.command([launch], prompt: prompt)
-            sideEffects.restartTerminal(column, command + " || exit 1") { [self] remaining in
+            sideEffects.restartTerminal(column, command + " || exit 1", {
+                if let draft = pty.taskResumeDraft(foreground: foreground?.instance), draft != approvedDraft {
+                    finish(draftRefusal, true)
+                    return false
+                }
+                column.setLaunch(directory: task.cwd, environment: task.terminalEnvironment(agentUUID: uuid))
+                return true
+            }) { [self] remaining in
                 guard remaining.isEmpty else {
                     finish("The previous worker still has running processes (\(remaining.joined(separator: ", "))). Retry after they exit.", true)
                     return false

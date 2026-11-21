@@ -35,7 +35,7 @@ Answers stay with the task. When its Claude Code agent starts a new conversation
 
 ## Resume with another CLI
 
-When a worker pauses or runs out of credits, open **Resume with…** in its task card menu. Choose Claude Code, Codex or Antigravity. Enter a model ID such as `gpt-6.2-astra`, or leave the field blank to use the CLI’s configured default. The task’s Lead can make the same switch with `resume_task`, passing `task`, `agent` and an optional `model`.
+When a worker pauses or runs out of credits, open **Resume with…** in its task card menu. Choose Claude Code, Codex or Antigravity. Enter a model ID such as `gpt-6.2-astra`, or leave the field blank to use the CLI’s configured default. The task’s Lead can make the same switch with `resume_task`, passing `task`, `agent` and an optional `model`. A draft in the terminal holds the Lead’s switch. Send the draft and retry, or choose **Discard Draft and Resume** in the task’s **Resume with…** dialog.
 
 Nirux waits for the previous worker and its terminal jobs to exit, then starts a fresh conversation in the same terminal and worktree. The handover uses the task’s recorded progress, decisions and outstanding questions. Recorded conversations stay in Session History. The original Lead receives subsequent questions and the result on the same task. If the old jobs are still exiting or the chosen CLI fails to start, the terminal shows what happened and the switch can be retried.
 

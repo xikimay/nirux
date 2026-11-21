@@ -178,7 +178,7 @@ extension NiruxShellView {
                     workspaceID: workspace.id, columnID: column.id,
                     label: "\(workspace.title) — \(name), column \(index + 1) · \((folder as NSString).abbreviatingWithTildeInPath)",
                     refusal: refusal,
-                    hasDraft: pty.reviewSendHasDraft, process: inFront ? foreground?.instance : nil
+                    hasDraft: pty.hasPromptDraft, process: inFront ? foreground?.instance : nil
                 ))
             }
         }

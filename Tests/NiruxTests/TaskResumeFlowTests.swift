@@ -46,6 +46,123 @@ final class TaskResumeFlowTests: XCTestCase {
         XCTAssertTrue(NiruxShellView.goesToCodex(delivery))
     }
 
+    private func startWorker(
+        _ worker: AgentStandIn, named agent: String, harness: UIFlowHarness, lead: UIFlowHarness.Lead
+    ) throws -> (WorkspaceState, PtySession, ProcessInstance) {
+        let title = "Review invoices"
+        let started = try harness.callLeadTool(LeadTools.startTask, ["description": title], lead: lead)
+        XCTAssertFalse(started.isError, started.text)
+        let task = try XCTUnwrap(harness.shell.workspaces.first { $0.title == title })
+        let pty = try XCTUnwrap(task.columns.first?.pty)
+        harness.waitUntil("task shell") { pty.shellPID != nil }
+        pty.sendShellLaunchCommand("(\(worker.command(named: agent)))")
+        harness.waitUntil("original worker") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == agent }
+        let process = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
+        return (task, pty, process)
+    }
+
+    func testLeadPreservesDraftTypedDuringHandoverAndRetriesAfterSubmission() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let old = AgentStandIn(), replacement = AgentStandIn()
+            defer {
+                old.remove()
+                replacement.remove()
+            }
+            let (task, pty, process) = try startWorker(old, named: "claude", harness: harness, lead: lead)
+            let sessionID = UUID().uuidString
+            let workerID = try XCTUnwrap(task.columns.first?.agentUUID)
+            harness.shell.sessionLedger.record(AgentSessionObservation(
+                agent: .claude, sessionID: sessionID, event: .userPromptSubmit, source: nil, timestamp: Date().timeIntervalSince1970,
+                agentProcess: process, name: nil, cwd: task.cwd, transcriptPath: nil, checkout: nil, pullRequest: nil,
+                workspaceID: task.id, workspaceTitle: task.title, agentUUID: workerID, columnIndex: 0
+            ), spaceID: lead.space)
+            let arguments = ["task": task.title, "agent": "codex"]
+            harness.restartedAgent = replacement.command(named: "codex")
+            let request = LeadChannel.Request(
+                id: UUID().uuidString, tool: LeadTools.resumeTask,
+                arguments: String(decoding: try JSONEncoder().encode(arguments), as: UTF8.self),
+                workspaceID: lead.workspace.id, agentUUID: lead.agentUUID, createdAt: Date().timeIntervalSince1970
+            )
+            var refusal: String?
+            harness.shell.handleLeadRequest(request) { message, failed in
+                XCTAssertTrue(failed, message)
+                refusal = message
+            }
+            XCTAssertNil(refusal)
+            let draft = "Keep the original invoice dates."
+            // Keep the main queue occupied until the bytes have reached the old PTY.
+            let wrote = DispatchSemaphore(value: 0)
+            let terminal = pty.terminalSession
+            DispatchQueue.global().async {
+                terminal.sendInput(Data(draft.utf8))
+                wrote.signal()
+            }
+            XCTAssertEqual(wrote.wait(timeout: .now() + 5), .success)
+            harness.waitUntil("draft reached the original worker and held the switch") { old.input == draft && refusal != nil }
+            let existing = try harness.callLeadTool(LeadTools.resumeTask, arguments, lead: lead)
+            XCTAssertTrue(existing.isError, existing.text)
+            XCTAssertEqual(refusal, existing.text)
+            XCTAssertTrue(existing.text.contains("unsent draft"), existing.text)
+            XCTAssertTrue(existing.text.contains("retry"), existing.text)
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            XCTAssertEqual(pty.foregroundProcess(snapshot: ProcessSnapshot())?.instance, process)
+            XCTAssertEqual(harness.shell.sessionLedger.session(agent: .claude, sessionID: sessionID)?.isActive, true)
+            XCTAssertEqual(old.input, draft)
+
+            pty.sendRaw("\r")
+            for name in [AgentHookEvent.Name.userPromptSubmit, .stopFailure] {
+                _ = pty.applyAgentHook(AgentHookEvent(
+                    kind: .claude, name: name, agentUUID: workerID, sessionID: sessionID, emitterProcess: process,
+                    errorKind: name == .stopFailure ? "rate_limit" : nil, timestamp: Date().timeIntervalSince1970
+                ), isUserFocused: false)
+            }
+            XCTAssertEqual(pty.agentTurnFailure?.kind, "rate_limit")
+            let resumed = try harness.callLeadTool(LeadTools.resumeTask, arguments, lead: lead)
+            XCTAssertFalse(resumed.isError, resumed.text)
+            XCTAssertEqual(harness.terminalRestarts.count, 1)
+            XCTAssertEqual(harness.shell.sessionLedger.session(agent: .claude, sessionID: sessionID)?.isActive, false)
+            XCTAssertEqual(pty.foregroundProcess(snapshot: ProcessSnapshot())?.name, "codex")
+        }
+    }
+
+    func testCodexDraftDiscardOnlyAppliesToTheConfirmedDraft() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let old = AgentStandIn(), replacement = AgentStandIn()
+            defer {
+                old.remove()
+                replacement.remove()
+            }
+            let (task, pty, process) = try startWorker(old, named: "codex", harness: harness, lead: lead)
+            pty.sendRaw("Keep this")
+            let refused = try harness.callLeadTool(LeadTools.resumeTask, ["task": task.title, "agent": "claude"], lead: lead)
+            XCTAssertTrue(refused.isError, refused.text)
+            XCTAssertTrue(refused.text.contains("draft"), refused.text)
+
+            harness.alertResponses = [.alertSecondButtonReturn, .alertFirstButtonReturn]
+            harness.shell.showResumeTask(task)
+            XCTAssertEqual(harness.alerts.last, "Discard the draft in “\(task.title)”?")
+            XCTAssertEqual(harness.alertDefaultButtons.last, "Cancel")
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            harness.alertResponses = [.alertSecondButtonReturn, .alertSecondButtonReturn]
+            harness.shell.showResumeTask(task)
+            pty.sendRaw(" amendment")
+            harness.waitUntil("the edited draft held the switch") { !harness.shell.resumingTasks.contains(task.id) }
+            XCTAssertEqual(pty.foregroundProcess(snapshot: ProcessSnapshot())?.instance, process)
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            harness.waitUntil("the draft reached the original Codex") { old.input == "Keep this amendment" }
+
+            harness.restartedAgent = replacement.command()
+            harness.alertResponses = [.alertSecondButtonReturn, .alertSecondButtonReturn]
+            harness.shell.showResumeTask(task)
+            harness.waitUntil("explicit discard switched CLI") {
+                !harness.shell.resumingTasks.contains(task.id) && pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude"
+            }
+            XCTAssertEqual(harness.terminalRestarts.count, 1)
+        }
+    }
+
     func testFailedSwitchRetriesOnceAndReportsToOriginalLead() throws {
         let executable = try niruxExecutable()
         try UIFlowHarness.run { harness in
@@ -65,7 +182,7 @@ final class TaskResumeFlowTests: XCTestCase {
             let old = AgentStandIn()
             defer { old.remove() }
             harness.waitUntil("task shell") { pty.shellPID != nil }
-            pty.sendRaw("(\(old.command()))\n")
+            pty.sendShellLaunchCommand("(\(old.command()))")
             harness.waitUntil("old Claude worker") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
             let original = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
             let pullRequest = SidebarPanelFlowTests.redPullRequest
