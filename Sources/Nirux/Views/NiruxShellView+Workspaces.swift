@@ -277,13 +277,13 @@ extension NiruxShellView {
             isMission: workspace.missionID != nil
         )
 
-        let cmd = freshAgentCommand(agent, in: workspace, directory: col.launchDirectory ?? workspace.cwd,
+        let cmd = freshAgentCommand(agent, in: workspace, column: col,
                                     worktreeBranch: worktreeBranch, handoverPrompt: handoverPrompt)
         sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
     }
 
     func freshAgentCommand(
-        _ agent: NiruxApp.WorkspaceAgent, in workspace: WorkspaceState, directory: String,
+        _ agent: NiruxApp.WorkspaceAgent, in workspace: WorkspaceState, column col: ColumnState, launchDirectory: String? = nil,
         worktreeBranch: String?, handoverPrompt: String? = nil
     ) -> String {
         let cmd: String
@@ -293,7 +293,7 @@ extension NiruxShellView {
         case .codex:
             cmd = NiruxShellView.codexCommand(
                 mode: NiruxShellView.codexLaunchMode(for: workspace),
-                briefFile: NiruxShellView.codexBriefFile(from: spaceBriefInjection(for: workspace), launchDirectory: directory),
+                briefFile: NiruxShellView.codexBriefFile(from: spaceBriefInjection(for: workspace), launchDirectory: launchDirectory ?? col.launchDirectory ?? workspace.cwd),
                 handoverPrompt: handoverPrompt
             )
         case .agy:

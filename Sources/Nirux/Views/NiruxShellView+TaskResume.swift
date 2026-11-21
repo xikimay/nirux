@@ -102,7 +102,7 @@ extension NiruxShellView {
                   pty.foregroundProcess(snapshot: latest)?.instance == foreground?.instance,
                   Self.existingDirectory(task.cwd) != nil else { return finish("The task changed before the switch. Try again.", true) }
             let prompt = TaskResumeHandover.prompt(task: task, previous: previous, agent: choice.agent, missions: store.missions, thread: context)
-            let launch = freshAgentCommand(choice.agent, in: task, directory: task.cwd, worktreeBranch: task.gitBranch)
+            let launch = freshAgentCommand(choice.agent, in: task, column: column, launchDirectory: task.cwd, worktreeBranch: task.gitBranch)
             let command = choice.command([launch], prompt: prompt)
             sideEffects.restartTaskTerminal(column, command + " || exit 1", {
                 if let draft = pty.taskResumeDraft(foreground: foreground?.instance), draft != approvedDraft {
