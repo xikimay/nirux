@@ -44,6 +44,7 @@ final class SpaceSettingsLeadPane: NSObject {
 
     struct Actions {
         var setLead: @MainActor (Bool) -> Void = { _ in }
+        var restartLead: @MainActor () -> Void = {}
         var setStartsTasks: @MainActor (Bool) -> Void = { _ in }
         var setDailyPass: @MainActor (Bool) -> Void = { _ in }
         var setDailyPassHour: @MainActor (Int) -> Void = { _ in }
@@ -63,6 +64,7 @@ final class SpaceSettingsLeadPane: NSObject {
     let leadSwitch = NSSwitch()
     let titleLabel = NSTextField(labelWithString: "Lead workspace")
     let descriptionLabel = NSTextField(wrappingLabelWithString: "")
+    let restartButton = NSButton(title: NiruxShellView.restartLeadTitle, target: nil, action: nil)
     let startsTasksSwitch = NSSwitch()
     private let startsTasksRow = NSStackView()
     let dailyPassSwitch = NSSwitch()
@@ -88,6 +90,7 @@ final class SpaceSettingsLeadPane: NSObject {
         descriptionLabel.stringValue = model.isGeneral ? Self.generalDescription
             : Self.description(place: model.place, spaceName: model.spaceName)
         leadSwitch.setAccessibilityHelp(descriptionLabel.stringValue)
+        restartButton.isHidden = !model.hasLead
         startsTasksSwitch.state = model.startsTasks ? .on : .off
         startsTasksSwitch.isEnabled = model.canChangeDefaults
         startsTasksRow.isHidden = model.isGeneral
@@ -155,6 +158,10 @@ final class SpaceSettingsLeadPane: NSObject {
         actions.setDailyPassHour(hour)
     }
 
+    @objc func restartClicked(_ sender: NSButton) {
+        actions.restartLead()
+    }
+
     @objc func switchChanged(_ sender: NSSwitch) {
         let wanted = sender.state == .on
         // Back to what holds until the shell says otherwise: closing the
@@ -181,7 +188,12 @@ final class SpaceSettingsLeadPane: NSObject {
         let textWidth = Self.contentWidth - 60
         descriptionLabel.preferredMaxLayoutWidth = textWidth
 
-        let texts = NSStackView(views: [titleLabel, descriptionLabel])
+        restartButton.bezelStyle = .rounded
+        restartButton.controlSize = .small
+        restartButton.target = self
+        restartButton.action = #selector(restartClicked(_:))
+        restartButton.toolTip = "End the Lead’s Claude and start a fresh conversation with the space’s launch options"
+        let texts = NSStackView(views: [titleLabel, descriptionLabel, restartButton])
         texts.orientation = .vertical
         texts.alignment = .leading
         texts.spacing = 3

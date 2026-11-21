@@ -136,6 +136,10 @@ final class AgentSessionLedger {
         }
     }
 
+    func closeSessions(ofWorker agentUUID: String, at time: TimeInterval) {
+        closeOpenSessions(at: time) { $0.agentUUID == agentUUID }
+    }
+
     /// Nirux quits: every agent goes with its terminal.
     func closeAllSessions(at time: TimeInterval) {
         closeOpenSessions(at: time) { _ in true }

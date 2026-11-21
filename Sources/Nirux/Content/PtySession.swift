@@ -790,13 +790,6 @@ final class PtySession: @unchecked Sendable {
         return state.machine.reviewSendRefusal(foreground: foregroundProcess(snapshot: snapshot))
     }
 
-    /// Keys reached the prompt since it last emptied (see
-    /// `AgentStatusMachine.hasDraft`).
-    var reviewSendHasDraft: Bool {
-        readTranscriptPrompts()
-        return state.machine.hasDraft
-    }
-
     /// The folder the agent here works in: the process in front's (where
     /// `claude --worktree` moved it), or else the shell's.
     func agentCwd(snapshot: ProcessSnapshot) -> String? {
@@ -1320,6 +1313,31 @@ final class PtySession: @unchecked Sendable {
         )
     }
 
+    /// Keys reached the prompt since it last emptied (see
+    /// `AgentStatusMachine.hasDraft`).
+    var hasPromptDraft: Bool {
+        state.recordPendingTerminalInput()
+        readTranscriptPrompts()
+        return state.machine.hasDraft
+    }
+
+    private var shellLaunchInputAt: TimeInterval?
+
+    func sendShellLaunchCommand(_ command: String) {
+        let hadDraft = hasPromptDraft
+        sendRaw("\(command)\n")
+        shellLaunchInputAt = hadDraft ? nil : state.machine.lastDraftInputAt
+    }
+
+    /// A launch line Nirux sent to an empty shell before the worker started
+    /// belongs to the shell. Any later draft belongs to the terminal.
+    func taskResumeDraft(foreground: ProcessInstance?) -> TimeInterval? {
+        guard !hasExited, hasPromptDraft else { return nil }
+        let draft = state.machine.lastDraftInputAt
+        if draft == shellLaunchInputAt, let foreground, draft < foreground.startedAt { return nil }
+        return draft
+    }
+
     /// Send raw bytes directly to the PTY, bypassing ghostty.
     /// Used for keys that ghostty's inMemory backend doesn't route correctly
     /// (e.g. Enter when Claude Code enables kitty keyboard protocol).
@@ -1595,6 +1613,8 @@ private final class PtyState: @unchecked Sendable {
 
     private static let redrawNudge = Data([0x0C])
 
+    private let pendingTerminalInput = OSAllocatedUnfairLock(initialState: [Data]())
+
     /// Ghostty writes to the PTY for text the user enters through it — a
     /// paste (any way: ⌘V, the Edit menu, a right-click), dictation, the
     /// emoji picker — and for its own replies to terminal queries, which
@@ -1602,12 +1622,26 @@ private final class PtyState: @unchecked Sendable {
     /// noted on the main queue like every other; arrows from a wheel scroll
     /// count as what may be at the prompt.
     func noteTerminalWrite(_ data: Data) {
-        if PtySession.isUserText(data) {
-            DispatchQueue.main.async { [self] in
+        guard PtySession.isUserText(data) || AgentStatusMachine.isUpDownArrows(data) else { return }
+        pendingTerminalInput.withLock { $0.append(data) }
+        if Thread.isMainThread {
+            recordPendingTerminalInput()
+        } else {
+            DispatchQueue.main.async { [self] in recordPendingTerminalInput() }
+        }
+    }
+
+    /// A handover can reach the main queue before the callback for bytes already written to the PTY.
+    func recordPendingTerminalInput() {
+        let writes = pendingTerminalInput.withLock {
+            let writes = $0
+            $0 = []
+            return writes
+        }
+        for data in writes {
+            if PtySession.isUserText(data) {
                 machine.noteKeystroke(now: Date(), keys: data)
-            }
-        } else if AgentStatusMachine.isUpDownArrows(data) {
-            DispatchQueue.main.async { [self] in
+            } else {
                 machine.notePromptRecall(now: Date())
             }
         }

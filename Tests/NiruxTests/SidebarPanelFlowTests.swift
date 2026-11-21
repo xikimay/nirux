@@ -21,11 +21,12 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Rename Workspace"
             ],
             "testOrganizeMenuItems": ["Organize"],
+            "testResumeTaskMenuItem": ["Resume with…"],
             "testNewSubtaskMenuItem": [SidebarView.newSubtaskTitle],
             "testAddRuleMenuItem": [SidebarView.addRuleTitle],
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
             "testReviewBranchMenuItem": ["Review Branch"],
-            "testLeadMenuItems": [SidebarView.turnOffLeadTitle],
+            "testLeadMenuItems": [NiruxShellView.restartLeadTitle, SidebarView.turnOffLeadTitle],
             "testSpaceMenuItems": ["New Space…", "Space Settings…", "Delete Space…"]
         ],
         exemptions: [:]
@@ -86,7 +87,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(menus[0].items.map(\.title), [
                 "Focus Column", "Close Column", "",
                 "Review Branch", "Ask Agent Why CI Failed", "Rerun Failed CI Jobs…", "",
-                "New Sub-task…", "Organize", "",
+                "Resume with…", "New Sub-task…", "Organize", "",
                 "Rename Workspace", "View/Edit Context…", SidebarView.addRuleTitle, "",
                 "Clean Up Worktree…", "Close Workspace"
             ])
@@ -96,9 +97,21 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
         }
     }
 
-    /// The Lead's row closes nothing: Turn Off Lead… opens Space Settings ›
-    /// Lead, where its switch is, and its Claude column's Close Column is
-    /// off; its Board's isn't.
+    func testResumeTaskMenuItem() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.addWorkspace(title: "Switch me", cwd: harness.worktree)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            let menu = shell.sidebar.workspaceActionMenu(workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), columnIndex: nil)
+            harness.perform(["Resume with…"], in: menu)
+            XCTAssertEqual(harness.alerts.last, "Resume “Switch me” with another CLI?")
+            XCTAssertTrue(harness.terminalRestarts.isEmpty, "Cancel preserves the current session")
+        }
+    }
+
+    /// The Lead's row closes nothing: Restart Lead… asks first, Turn Off
+    /// Lead… opens Space Settings › Lead, where its switch is, and its Claude
+    /// column's Close Column is off; its Board's isn't.
     func testLeadMenuItems() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -114,6 +127,10 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertFalse(try closeColumn(0).isEnabled)
             XCTAssertEqual(try closeColumn(0).toolTip, NiruxShellView.leadStaysText)
             XCTAssertTrue(try closeColumn(1).isEnabled, "its Board's")
+
+            harness.perform([NiruxShellView.restartLeadTitle], in: menu)
+            XCTAssertEqual(harness.alerts.last, "Restart the Lead of “Tools”?")
+            XCTAssertEqual(harness.terminalRestarts, [], "cancelled")
 
             harness.perform([SidebarView.turnOffLeadTitle], in: menu)
             let settings = try XCTUnwrap(shell.spaceSettings)

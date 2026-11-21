@@ -76,6 +76,7 @@ final class SidebarView: NSView {
     var worktreeCleanupOffer: ((Int) -> WorktreeCleanupMenuOffer?)?
     /// Whether the workspace's menu offers "New Sub-task…". Asked on each
     /// menu.
+    var offersTaskResume: ((Int) -> Bool)?
     var offersSubtask: ((Int) -> Bool)?
     /// The store index of the open workspace with this id, nil once it is
     /// gone: a menu's items act on the workspace it was built for.
@@ -767,7 +768,10 @@ final class SidebarView: NSView {
             lastButtonActionAt = event.timestamp
             onCatchUpAction?(action)
         case .link(let url, let label):
-            if let target = Self.missionQuestionTarget(url) {
+            if let issue = LeadLaunchIssue.allCases.first(where: { url.hasPrefix(Self.leadRecoveryURL($0, workspaceID: "")) }) {
+                let id = String(url.dropFirst(Self.leadRecoveryURL(issue, workspaceID: "").count))
+                if let index = currentIndex(ofWorkspace: id) { onWorkspaceAction?(.recoverLead(issue), index) }
+            } else if let target = Self.missionQuestionTarget(url) {
                 onMissionQuestionClicked?(target.workspaceIndex, target.columnIndex, label)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.diffActionPrefix) {
                 onDiffStatsClicked?(workspaceIndex)
@@ -900,6 +904,9 @@ final class SidebarView: NSView {
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.
         if workspace?.isLead != true {
+            if offersTaskResume?(workspaceIndex) == true {
+                menu.addClosureItem(title: "Resume with…") { act(.resumeWith) }
+            }
             if offersSubtask?(workspaceIndex) == true {
                 menu.addClosureItem(title: Self.newSubtaskTitle) { act(.newSubtask) }
             }
@@ -913,6 +920,10 @@ final class SidebarView: NSView {
         menu.addItem(.separator())
         if cleanup == .available { addWorktreeCleanupItem(to: menu, act: act) }
         if workspace?.isLead == true {
+            if workspace?.leadLaunchIssue == .olderOptions {
+                menu.addClosureItem(title: "Relaunch with New Options…") { act(.recoverLead(.olderOptions)) }
+            }
+            menu.addClosureItem(title: NiruxShellView.restartLeadTitle) { act(.restartLead) }
             menu.addClosureItem(title: Self.turnOffLeadTitle) { act(.turnOffLead) }
         } else {
             menu.addClosureItem(title: "Close Workspace") { act(.close) }
@@ -1032,6 +1043,10 @@ final class SidebarView: NSView {
         label.attributedStringValue = attr
         hoveredLabel = nil
         NSCursor.arrow.set()
+    }
+
+    static func leadRecoveryURL(_ issue: LeadLaunchIssue, workspaceID: String) -> String {
+        "action:lead-\(issue.rawValue):\(workspaceID)"
     }
 
     private static let diffActionPrefix = "action:diff:"

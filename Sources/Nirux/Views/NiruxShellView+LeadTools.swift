@@ -41,6 +41,13 @@ extension NiruxShellView {
         case LeadTools.renameTask: leadRenameTask(arguments, in: space, answer: answer)
         case LeadTools.setTaskParent: leadSetTaskParent(arguments, in: space, answer: answer)
         case LeadTools.readTask: leadReadTask(arguments, in: space, answer: answer)
+        case LeadTools.resumeTask:
+            let name = LeadTools.string(arguments, "task") ?? ""
+            guard let task = leadTask(name, in: space, lead: lead.id) else { return answer(noLeadTask(name), true) }
+            switch TaskAgentChoice.parse(arguments) {
+            case .success(let choice): resumeTask(task.workspace, with: choice, answer: answer)
+            case .failure(let problem): answer(problem.localizedDescription, true)
+            }
         case LeadTools.interruptTask: leadInterruptTask(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.recordReview: leadRecordReview(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.dailyPass: leadDailyPass(in: space, lead: lead, answer: answer)
@@ -974,7 +981,7 @@ struct LeadProposal: Equatable {
 
 }
 
-private extension ColumnState {
+extension ColumnState {
     /// The agent Nirux delivers Mission messages to that this column runs,
     /// or will once restored.
     func missionAgent(snapshot: ProcessSnapshot) -> CodingAgent? {

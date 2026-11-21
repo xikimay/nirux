@@ -293,6 +293,8 @@ extension NiruxShellView {
         for delivery in MissionStore.shared.pendingPromptDeliveries(now: now)
         where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
             let mission = delivery.mission
+            let recipientID = Self.goesToParent(delivery.event) ? mission.parentWorkspaceID : mission.childWorkspaceID
+            guard !resumingTasks.contains(recipientID) else { continue }
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
             guard let agent = Self.recipientAgent(of: delivery) else { continue }
@@ -635,7 +637,8 @@ extension NiruxShellView {
                   let column = workspace.columns.first(where: { $0.agentUUID == notice.agentUUID })
             else { return false }
             guard let pty = column.pty else { return true }
-            guard notice.isFor(claudeStartedAt: pty.foregroundProcess(snapshot: snapshot)?.instance.startedAt) else { return false }
+            if let process = pty.foregroundProcess(snapshot: snapshot), process.interactiveAgent == .claude,
+               !notice.isFor(claudeStartedAt: process.instance.startedAt), !workspace.runsRestartedLead(process) { return false }
             let refusal = pty.missionPromptRefusal(runningSince: now, snapshot: snapshot, seenByUser: column.id == seenAtPrompt)
             if column.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
             guard refusal == nil, let paste = TypedPromptSanitizer.bracketedPaste(for: notice.text) else { return true }

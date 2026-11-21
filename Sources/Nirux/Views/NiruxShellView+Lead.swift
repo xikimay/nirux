@@ -70,11 +70,118 @@ extension NiruxShellView {
         refreshSpaceSettingsLead()
     }
 
-    static let leadStaysText = "The Lead stays open. Turn it off in Space Settings › Lead."
+    static let leadStaysText = "The Lead stays open. Restart it from the Space menu, or turn it off in Space Settings › Lead."
 
     /// A close aimed at the Lead or its Claude column: it stays.
     func refuseClosingLead() {
         showToast(Self.leadStaysText)
+    }
+
+    static let restartLeadTitle = "Restart Lead…"
+
+    /// The first prompt of a restarted Lead.
+    nonisolated static let leadRestartPrompt = "[Nirux] You were restarted in a fresh conversation. Call list_tasks: "
+        + "Nirux kept the tasks, their questions to you and their results."
+
+    /// Restart Lead, once the user confirms: its Claude ends, and a new
+    /// conversation starts in its column as a new Lead's does, with the
+    /// space's launch options now. The same agent UUID keeps it its tasks'
+    /// Mission parent.
+    func requestRestartLead(spaceID: String, stillApplies: () -> Bool = { true }) {
+        guard let lead = leadWorkspace(inSpace: spaceID) else { return }
+        guard lead.leadTerminal?.isRestartingShell != true else { return showToast("The Lead is restarting.") }
+        let space = profiles.first { $0.id == spaceID }?.name ?? spaceID
+        let snapshot = ProcessSnapshot()
+        let pty = lead.leadTerminal?.pty
+        let program = pty?.foregroundProcess(snapshot: snapshot).flatMap { $0.instance.pid == pty?.shellPID ? nil : $0.name }
+        guard confirmDestructiveClose(
+            message: "Restart the Lead of “\(space)”?",
+            details: Self.leadRestartDetails(
+                mode: Self.claudeLaunchMode(for: lead), agent: lead.leadTerminal?.liveAgent(snapshot: snapshot),
+                otherProgram: program == "claude" ? nil : program
+            ),
+            confirmTitle: "Restart Lead"
+        ), leadWorkspace(inSpace: spaceID) === lead, stillApplies() else { return }
+        restartLead(lead)
+    }
+
+    /// `otherProgram`: what runs in its terminal in place of Claude.
+    static func leadRestartDetails(mode: ClaudeLaunchMode, agent: WorkspaceClosePolicy.LiveAgent?, otherProgram: String? = nil) -> [String] {
+        let modeName = mode.displayName.components(separatedBy: " (").first ?? mode.displayName
+        var details = [
+            "Claude Code ends this conversation and starts a new one with the space’s launch mode (\(modeName)), "
+                + "its safety settings and Nirux’s tools.",
+            "Nirux keeps the tasks, their questions, the rules and the brief: the new Lead reads them with list_tasks. "
+                + "This conversation stays in Session History."
+        ]
+        if let warning = leadTurnWarning(agent?.status) { details.append(warning) }
+        if let otherProgram { details.append("\(otherProgram) runs in its terminal: it ends too.") }
+        return details
+    }
+
+    static func leadTurnWarning(_ status: AgentStatus?) -> String? {
+        switch status {
+        case .working: "Claude is working: its turn stops."
+        case .needsAttention: "Claude is waiting for you: that goes unanswered."
+        default: nil
+        }
+    }
+
+    func restartLead(_ lead: WorkspaceState, resuming sessionID: String? = nil) {
+        let file = claudeSpaceSettingsFile(for: lead)
+        if sessionID != nil, file == nil, currentLeadOptions(in: lead).safety != nil {
+            return showToast("Couldn’t prepare the space’s safety settings. The Lead is still running.", tone: .error)
+        }
+        let command = claudeLaunchCommand(
+            in: lead, worktreeBranch: Self.leadTitle, handoverPrompt: sessionID == nil ? Self.leadRestartPrompt : Self.leadRelaunchPrompt,
+            settingsFile: file, resume: sessionID.map(AgentResumeTarget.session)
+        )
+        defer {
+            focusLead(lead)
+            updateSidebar()
+            scheduleMetadataRefresh()
+        }
+        guard let column = lead.leadTerminal else {
+            // Its Claude column closed before a Lead kept it: a new one, with
+            // the agent UUID its tasks report to.
+            let reportedTo = MissionStore.shared.missions.filter { $0.parentWorkspaceID == lead.id && $0.status == .active }
+                .max { $0.createdAt < $1.createdAt }?.parentAgentUUID
+            lead.addColumn(agentUUID: lead.leadAgentUUID ?? reportedTo ?? UUID().uuidString)
+            guard let column = lead.columns[safe: lead.focusedIndex] else { return }
+            lead.leadAgentUUID = column.agentUUID
+            relayout(animated: false)
+            column.recordLeadSafety(file: file)
+            return sideEffects.launchAgent(column, command)
+        }
+        if !column.isAwaitingResume, let pty = column.pty, pty.shellPID == nil, !pty.hasExited {
+            return showToast("The Lead is starting: restart it in a moment.")
+        }
+        if let sessionID {
+            guard !column.isRestartingShell, column.relaunchingLeadSessionID == nil, column.launchDirectory != nil,
+                  canRelaunchLeadSession(sessionID, in: column) else { return }
+            column.relaunchingLeadSessionID = sessionID
+        }
+        refreshLaunch(of: column, in: lead)
+        sideEffects.restartTerminal(column, command) { [weak self, weak lead, weak column] stillRunning in
+            defer { column?.relaunchingLeadSessionID = nil }
+            // Turned off meanwhile: nothing starts in its column.
+            guard let self, let lead, let column, self.leadWorkspace(inSpace: lead.profileID) === lead, column === lead.leadTerminal else { return false }
+            guard stillRunning.isEmpty else {
+                self.showToast(
+                    "The Lead’s Claude didn’t stop within \(Int(Self.exitTimeout)) s (\(stillRunning.joined(separator: ", "))): "
+                        + "nothing was launched. Once it stops, choose Restart Lead again.",
+                    tone: .error
+                )
+                return false
+            }
+            if let sessionID {
+                guard self.canRelaunchLeadSession(sessionID, in: column) else { return false }
+                column.prepareClaudeResume(sessionID: sessionID)
+                self.sessionResume.noteLaunch(of: sessionID, in: column, now: ProcessInfo.processInfo.systemUptime)
+            }
+            column.recordLeadSafety(file: file)
+            return true
+        }
     }
 
     /// ⌃⌘L: the active space's Lead, its Claude focused; a space without
@@ -131,6 +238,7 @@ extension NiruxShellView {
            case .failure(let error) = store.save(defaults, replacing: loaded) {
             showToast(error.message, tone: .error)
         }
+        leadWorkspace(inSpace: spaceID)?.leadOptionsCache = nil
         // The Defaults tab shows the file as it is now, under the variables
         // being typed.
         if let settings = spaceSettings, settings.spaceID == spaceID {
@@ -179,6 +287,13 @@ extension NiruxShellView {
 }
 
 extension WorkspaceState {
+    /// The restart prompt belongs to the launched Claude. A later Claude
+    /// started by hand in the same terminal has its own conversation.
+    func runsRestartedLead(_ process: ForegroundProcess) -> Bool {
+        isLead && process.interactiveAgent == .claude
+            && (process.arguments.last == NiruxShellView.leadRestartPrompt || process.arguments.last == NiruxShellView.leadRelaunchPrompt)
+    }
+
     /// A Lead's Claude column, by its agent UUID.
     var leadTerminal: ColumnState? {
         guard isLead, let leadAgentUUID else { return nil }
