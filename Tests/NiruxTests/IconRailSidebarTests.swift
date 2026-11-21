@@ -16,12 +16,12 @@ final class IconRailSidebarTests: XCTestCase {
 
     private func row(
         _ id: String, index: Int, archived: Bool = false, active: Bool = false, lead: Bool = false,
-        columns: [ColumnInfo] = [], notification: AttentionSignal? = nil
+        columns: [ColumnInfo] = [], notification: AttentionSignal? = nil, purpose: String? = nil, nextStep: String? = nil
     ) -> WorkspaceInfo {
         var info = WorkspaceInfo(
             id: id, index: index, title: id.capitalized, profileID: WorkspaceProfile.defaultID, isInactive: archived,
             columnCount: max(1, columns.count), focusedColumn: 0, gitBranch: "feat/\(id)", notification: notification,
-            isActive: active, columns: columns, prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+            isActive: active, columns: columns, prInfo: nil, diffStats: nil, purpose: purpose, nextStep: nextStep, blocker: nil,
             phase: archived ? .parked : .active, lastSummary: nil, lastActivityAt: nil
         )
         info.isLead = lead
@@ -326,4 +326,96 @@ final class IconRailSidebarTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(rail.itemViews["checkout"]).iconView.shownLabel, "CH")
         XCTAssertNil(try XCTUnwrap(rail.itemViews["export"]).iconView.shownLabel, "its amber glyph instead")
     }
+
+    func testTaskPreviewOpensFromTheRowAndRailWithTheSameWorkspaceID() throws {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
+        let window = NSWindow(contentRect: host.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = host
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 500))
+        host.addSubview(sidebar)
+        sidebar.isExpanded = true
+        let task = row("fix login", index: 4, purpose: "Keep users signed in", nextStep: "Run the login tests")
+        sidebar.update(profiles: [], workspaces: [task])
+        host.layoutSubtreeIfNeeded()
+        let responder = window.firstResponder
+        var selected: Int?
+        var opened: [String] = []
+        func card() throws -> TaskPreviewCard {
+            waitUntil("the task preview appears", timeout: 3) { sidebar.taskPreview.card != nil }
+            return try XCTUnwrap(sidebar.taskPreview.card)
+        }
+        func press(_ title: String, in preview: TaskPreviewCard) throws {
+            let button = try XCTUnwrap(preview.subviews.compactMap { $0 as? NSButton }.first { $0.title == title })
+            XCTAssertTrue(button.sendAction(try XCTUnwrap(button.action), to: button.target))
+        }
+
+        func moveOverRow() throws {
+            let frame = try XCTUnwrap(sidebar.rowFrame(workspaceID: task.id))
+            let point = sidebar.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
+            let event = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [],
+                timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+            sidebar.mouseMoved(with: event)
+        }
+
+        try moveOverRow()
+        let expanded = try card()
+        let lines = expanded.subviews.compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertEqual(lines, ["Fix Login", "Keep users signed in", "Active", "Next · Run the login tests"])
+        XCTAssertTrue(window.firstResponder === responder)
+        XCTAssertGreaterThanOrEqual(expanded.frame.minX, sidebar.frame.maxX)
+        sidebar.onWorkspaceClicked = { [unowned sidebar, unowned expanded] index in
+            XCTAssertNil(sidebar.taskPreview.card)
+            XCTAssertNil(sidebar.taskPreview.workspaceID)
+            XCTAssertNil(expanded.superview)
+            selected = index
+        }
+        try press("Open task", in: expanded)
+        XCTAssertEqual(selected, task.index)
+        XCTAssertNil(sidebar.taskPreview.card)
+
+        var expectedCard: TaskPreviewCard?
+        var scheduledClose: DispatchWorkItem?
+        sidebar.onOpenTaskThread = { [unowned sidebar, unowned window] id, displayed in
+            XCTAssertEqual(scheduledClose?.isCancelled, true)
+            XCTAssertTrue(displayed === expectedCard)
+            XCTAssertTrue(sidebar.taskPreview.card === displayed)
+            XCTAssertEqual(sidebar.taskPreview.workspaceID, id)
+            XCTAssertTrue(displayed.window === window)
+            opened.append(id)
+        }
+        func openThread(in preview: TaskPreviewCard) throws {
+            expectedCard = preview
+            sidebar.taskPreview.leave(task.id)
+            scheduledClose = try XCTUnwrap(sidebar.taskPreview.pending)
+            XCTAssertEqual(scheduledClose?.isCancelled, false)
+            try press("Open task thread", in: preview)
+        }
+        try moveOverRow()
+        try openThread(in: card())
+        sidebar.isExpanded = false
+        sidebar.frame.size.width = SidebarView.foldedWidth
+        host.layoutSubtreeIfNeeded()
+        let icon = try XCTUnwrap(sidebar.iconRail.itemViews[task.id])
+        icon.mouseEntered(with: NSEvent())
+        let rail = try card()
+        XCTAssertLessThan(rail.frame.minX, expanded.frame.minX)
+        try openThread(in: rail)
+        XCTAssertEqual(opened, [task.id, task.id])
+
+        icon.mouseExited(with: NSEvent())
+        icon.mouseEntered(with: NSEvent())
+        let refreshed = try card()
+        let fullHeight = refreshed.frame.height
+        sidebar.update(profiles: [], workspaces: [row(task.id, index: task.index)])
+        let visible = refreshed.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }
+        XCTAssertEqual(visible.map(\.stringValue), ["Fix Login", "Active"])
+        XCTAssertLessThan(refreshed.frame.height, fullHeight)
+        sidebar.update(profiles: [], workspaces: [row("replacement", index: task.index)])
+        XCTAssertNil(sidebar.taskPreview.card)
+        refreshed.onOpen?()
+        XCTAssertEqual(opened.count, 2)
+    }
+
 }
