@@ -68,7 +68,7 @@ extension NiruxShellView {
     /// What "Clean Up Worktree…" would clean up for this workspace. Never
     /// a task without a repository: its folder is the user's, gone or not.
     private func worktreeCleanupPath(workspaceIndex: Int) -> String? {
-        guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing, !workspace.isFolderTask else { return nil }
+        guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing, !workspace.isFolderTask, !workspace.isWaitingTask else { return nil }
         return Self.worktreeCleanupPath(forCwd: workspace.cwd)
     }
 
@@ -115,7 +115,7 @@ extension NiruxShellView {
             // A restored agent not resumed yet resumes in its folder.
             for column in workspace.openColumns where isInside(column.pty?.childCwd ?? column.awaitingResumeDirectory) {
                 if let agent = column.liveAgent(snapshot: snapshot) {
-                    let name = agent.isPaused ? "\(agent.displayName) (paused)" : agent.displayName
+                    let name = agent.isPaused ? "\(agent.agent.name) (paused)" : agent.agent.name
                     foreignAgents.append("\(name) in “\(workspace.title)”")
                 }
             }
@@ -137,7 +137,7 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         var candidates: [WorktreeCleanupCandidate] = []
         var covered: Set<String> = []
-        for workspace in workspaces where !workspace.isClosing && !workspace.isFolderTask && !covered.contains(workspace.id) {
+        for workspace in workspaces where !workspace.isClosing && !workspace.isFolderTask && !workspace.isWaitingTask && !covered.contains(workspace.id) {
             guard let path = Self.worktreeCleanupPath(forCwd: workspace.cwd) else { continue }
             let candidate = worktreeCleanupCandidate(path: path, snapshot: snapshot)
             covered.formUnion(candidate.workspaceIDs)
@@ -171,7 +171,7 @@ extension NiruxShellView {
     /// The workspaces open at `path` or below it.
     func worktreeMembers(_ path: String) -> [WorkspaceState] {
         let isInside = Self.containment(in: path)
-        return workspaces.filter { !$0.isClosing && isInside($0.cwd) }
+        return workspaces.filter { !$0.isClosing && !$0.isWaitingTask && isInside($0.cwd) }
     }
 
     // MARK: Single workspace

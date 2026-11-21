@@ -85,7 +85,7 @@ extension NiruxShellView {
         let resolvedRoot = Self.comparablePath(root)
         let sessions = typedPromptTargets(in: [workspace], snapshot: snapshot).filter {
             $0.workspaceID == workspace.id
-                && workspace.columns[$0.columnIndex].pty?.foregroundProcessName(snapshot: snapshot) == "claude"
+                && workspace.columns[$0.columnIndex].pty?.foregroundProcess(snapshot: snapshot)?.agent == .claude
                 && ProjectBoard.contains(resolvedRoot, Self.comparablePath($0.cwd))
         }
         return sessions.first { $0.columnIndex == workspace.focusedIndex } ?? sessions.first

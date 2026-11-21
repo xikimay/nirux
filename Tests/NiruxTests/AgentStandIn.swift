@@ -7,18 +7,22 @@ import Foundation
 struct AgentStandIn {
     let received = FileManager.default.temporaryDirectory
         .appendingPathComponent("nirux-agent-stand-in-\(UUID().uuidString).txt")
+    private let held = FileManager.default.temporaryDirectory
+        .appendingPathComponent("nirux-agent-stand-in-\(UUID().uuidString).held")
 
-    /// The shell command that becomes it. `slowly`: it takes 128 bytes a
-    /// quarter of a second, as an agent busy drawing. `launchPrompt` (no
-    /// single quote in it): its last argument, as an agent launched with a
-    /// prompt has.
+    /// The shell command that becomes it. `holdable`: it takes 128 bytes at
+    /// a time; after `hold()`, one more read, then none until `release()`
+    /// (20 s at most: an app that waited on it fails rather than hangs), as
+    /// an agent busy drawing. `launchPrompt` (no single quote in it): its last argument,
+    /// as an agent launched with a prompt has.
     /// `arguments` (no single quote in them) come before it.
-    func command(named name: String = "claude", slowly: Bool = false, arguments: [String] = [], launchPrompt: String? = nil) -> String {
-        guard slowly || launchPrompt != nil || !arguments.isEmpty else {
+    func command(named name: String = "claude", holdable: Bool = false, arguments: [String] = [], launchPrompt: String? = nil) -> String {
+        guard holdable || launchPrompt != nil || !arguments.isEmpty else {
             return "stty -icanon min 1 time 0; exec -a \(name) /bin/cat > '\(received.path)'"
         }
+        let wait = holdable ? #" select(undef, undef, undef, 0.02) while -e "\#(held.path)" && time - (stat _)[9] < 20;"# : ""
         let reader = #"open(my $o, ">", $ARGV[0]); $o->autoflush(1); "#
-            + #"while (sysread(STDIN, my $b, 128)) { print $o $b;"# + (slowly ? " select(undef, undef, undef, 0.25)" : "") + " }"
+            + #"while (sysread(STDIN, my $b, 128)) { print $o $b;"# + wait + " }"
         let prompt = (arguments + (launchPrompt.map { [$0] } ?? [])).map { " '\($0)'" }.joined()
         return "stty -icanon min 1 time 0; exec -a \(name) /usr/bin/perl -e '\(reader)' '\(received.path)'\(prompt)"
     }
@@ -28,7 +32,18 @@ struct AgentStandIn {
         (try? String(contentsOf: received, encoding: .utf8)) ?? ""
     }
 
+    /// What is sent meanwhile, past its next read, waits in the terminal's
+    /// input queue.
+    func hold() {
+        FileManager.default.createFile(atPath: held.path, contents: nil)
+    }
+
+    func release() {
+        try? FileManager.default.removeItem(at: held)
+    }
+
     func remove() {
         try? FileManager.default.removeItem(at: received)
+        release()
     }
 }

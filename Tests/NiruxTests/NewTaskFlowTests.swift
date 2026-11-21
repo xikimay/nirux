@@ -666,7 +666,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             AgentHookCenter.shared.resolver = { [weak shell] in shell?.resolveAgentColumn(uuid: $0) }
             defer { AgentHookCenter.shared.resolver = nil }
             let applied = try XCTUnwrap(AgentHookCenter.shared.dispatch(event))
-            XCTAssertNil(pty.agentHookKind, "no hook drives agy's status")
+            XCTAssertNil(pty.hookAgent, "no hook drives agy's status")
             shell.applyAgentHookEvents([applied])
             let saved = try XCTUnwrap(shell.persistedState().workspaces.first { $0.id == workspace.id }?.columns.last)
             XCTAssertEqual(saved.columnType, .agy)
@@ -674,7 +674,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             shell.saveState()
             shell.restoreState()
             let restored = try XCTUnwrap(shell.workspaces.first { $0.id == workspace.id }?.columns.last)
-            XCTAssertEqual(restored.deferredAgent?.agent, .agy(resume: .session(conversation)))
+            XCTAssertEqual(restored.deferredAgent?.launch, .agy(resume: .session(conversation)))
         }
     }
 

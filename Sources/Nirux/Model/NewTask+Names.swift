@@ -54,7 +54,7 @@ extension NewTask {
 
     /// What start_task gave beside its description; nil fields come from
     /// the description (the branch from the title, when there is one).
-    struct StartOptions: Equatable, Sendable {
+    struct StartOptions: Codable, Equatable, Sendable {
         var title: String?
         var branch: String?
         /// What the task delivers: its workspace's purpose.

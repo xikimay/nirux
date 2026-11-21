@@ -131,7 +131,8 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
         pullRequestLabel.stringValue = line.pullRequest
         setAccessibilityLabel(Self.accessibilityLabel(of: line, link: link))
         // What the Merge station says where it refuses: VoiceOver has no pointer to put on it.
-        setAccessibilityHelp(line.offer?.blocked)
+        let help = [line.phrase.detail, line.offer?.blocked].compactMap { $0 }.joined(separator: "\n")
+        setAccessibilityHelp(help.isEmpty ? nil : help)
     }
 
     /// The link drawn apart: the phrase's, when the phrase ends with it,
@@ -169,7 +170,7 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
         switch state {
         case .needsYou: return Theme.Color.waiting
         case .failed: return Theme.Color.error
-        case .working, .blocked, .waiting, .ready, .merged, .idle: return Theme.Color.textTertiary
+        case .working, .blocked, .waiting, .ready, .merged, .idle: return Theme.Color.textSecondary
         }
     }
 
@@ -314,7 +315,7 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
         // its link, which may be all that is left of it.
         let phrase = whole(phraseLabel, line.phrase.text) ?? (shownLink == nil ? nil : whole(linkLabel, line.phrase.text))
         if !phraseLabel.isHidden { add(phraseLabel.frame, [phrase, line.phrase.detail]) }
-        if let link = shownLink { add(linkRect, [phrase, link.hint]) }
+        if let link = shownLink { add(linkRect, [phrase, line.phrase.detail, link.hint]) }
         if !pullRequestLabel.isHidden {
             add(pullRequestLabel.frame, [whole(pullRequestLabel, line.pullRequest), line.tooltips.pullRequest])
         }
