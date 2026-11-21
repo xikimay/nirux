@@ -43,7 +43,7 @@ jobs:
 
       - name: Layout
         run: |
-          ls .build/arm64-apple-macosx/debug | head -80
+          ls .build/arm64-apple-macosx/debug
           ls .build/arm64-apple-macosx/debug/Modules
           du -sh .build/arm64-apple-macosx/debug/*.build | sort -h
 
@@ -66,7 +66,7 @@ jobs:
     timeout-minutes: 50
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 1
       matrix:
         rep: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
