@@ -349,15 +349,30 @@ extension NiruxShellView {
         if task.isInactive { line += " · inactive" }
         line += " · " + leadAgentState(of: task, snapshot: snapshot)
         if let pr = task.prInfo {
-            line += " · PR #\(pr.number) \(pr.isDraft ? "draft" : pr.state.lowercased())"
+            line += " · PR #\(pr.number) \(pr.isDraft ? "draft" : pr.state.word)"
             if let ci = pr.ciStatus { line += ", checks \(ci.lowercased())" }
         }
         return line
     }
 
+    /// The questions `mission`'s child got answered, the last
+    /// `listedAnswers`, then what it waits on or sent, each on a line of
+    /// its own.
+    func taskListMissionLine(_ mission: Mission, of task: WorkspaceState, store: MissionStore) -> String {
+        // An access answer may hold what only the user could give: not repeated.
+        let answers = MissionAnswerContext.answered(in: mission).suffix(Self.listedAnswers).map { pair in
+            "\n  answered: “\(MissionAnswerContext.clipped(pair.question.message, Self.listedAnswerLength))” → "
+                + (pair.question.questionKind == .access
+                    ? "(an access answer, not repeated)"
+                    : "“\(MissionAnswerContext.clipped(pair.answer.message, Self.listedAnswerLength))”")
+                + MissionAnswerContext.notes(of: pair.answer, owner: "its")
+        }.joined()
+        return answers + taskListOpenLine(mission, of: task, store: store)
+    }
+
     /// The question `mission`'s child waits on, or the result it sent, on
     /// a line of its own; "" for neither.
-    func taskListMissionLine(_ mission: Mission, of task: WorkspaceState, store: MissionStore) -> String {
+    private func taskListOpenLine(_ mission: Mission, of task: WorkspaceState, store: MissionStore) -> String {
         if let question = store.waitingQuestion(childWorkspaceID: task.id, childAgentUUID: mission.childAgentUUID)?.event {
             let holder = question.handedToUserBecause == nil ? "asks you" : "asks the user (you handed it over)"
             return "\n  \(holder), question \(question.id): \(MissionPromptText.quoted(question.message))"
@@ -368,6 +383,10 @@ extension NiruxShellView {
         }
         return ""
     }
+
+    /// A task's answered questions list_tasks shows, and how long each side.
+    static let listedAnswers = 3
+    static let listedAnswerLength = 120
 
     /// Where a task stands, as its row says it: a model's reading of its
     /// last turn's message, or the user's own summary; "" for neither.
@@ -555,7 +574,7 @@ extension NiruxShellView {
         if let refusal = leadRefusal(for: workspace, title: title) { return answer(refusal, true) }
         let handoffsEnabled = Self.currentMissionHandoffsEnabled()
         if let own = ownMission(of: workspace), workspace.columns.contains(where: { $0.agentUUID == own.childAgentUUID }) {
-            guard own.deliveryAgent != nil else { return answer(Self.deliversOnlyToClaudeOrCodex(title, runs: own.childAgentKind), true) }
+            guard own.deliveryAgent != nil else { return answer(Self.deliversOnlyToKnownAgents(title, runs: own.childAgentKind), true) }
             if own.isCarried(handoffsEnabled: handoffsEnabled),
                let parent = requestingTerminal(workspaceID: own.parentWorkspaceID, agentUUID: own.parentAgentUUID)?.workspace {
                 // Typed, it reopens a finished sub-task, which counts against its task's limit again.
@@ -573,7 +592,7 @@ extension NiruxShellView {
         guard let (agentUUID, kind) = workspace.columns.lazy.compactMap({ column in
             column.agentUUID.flatMap { uuid in column.missionAgent(snapshot: snapshot).map { (uuid, $0) } }
         }).first
-        else { return answer("Nirux delivers messages only to Claude Code or Codex, and “\(title)” runs neither.", true) }
+        else { return answer("Nirux delivers messages only to Claude Code, Codex or Antigravity, and “\(title)” runs none.", true) }
         guard let mission = oneWayMission(to: workspace, agentUUID: agentUUID, kind: kind, from: lead) else {
             return answer("Nirux couldn’t record the message: try again.", true)
         }
@@ -591,8 +610,8 @@ extension NiruxShellView {
         return nil
     }
 
-    static func deliversOnlyToClaudeOrCodex(_ title: String, runs kind: String) -> String {
-        "Nirux delivers messages only to a Claude Code or Codex task; “\(title)” runs \(kind)."
+    static func deliversOnlyToKnownAgents(_ title: String, runs kind: String) -> String {
+        "Nirux delivers messages only to a Claude Code, Codex or Antigravity task; “\(title)” runs \(kind)."
     }
 
     /// The Lead's one-way Mission to `workspace`'s agent, made at its first tell.
@@ -631,7 +650,12 @@ extension NiruxShellView {
         handoffsEnabled: Bool = NiruxShellView.currentMissionHandoffsEnabled(), answer: @escaping LeadAnswer
     ) {
         guard let agent = mission.deliveryAgent else {
-            return answer(Self.deliversOnlyToClaudeOrCodex(workspace.title, runs: mission.childAgentKind), true)
+            return answer(Self.deliversOnlyToKnownAgents(workspace.title, runs: mission.childAgentKind), true)
+        }
+        // Typed as it is: a Lead's line heads one to a task that isn't its.
+        if agent == .agy, mission.oneWay != true, lead == nil, MissionPromptText.startsWithSlashCommand(message) {
+            return answer("Antigravity runs a slash command itself, with no turn to end, which would hold the messages after it: "
+                + "ask “\(workspace.title)” in words instead.", true)
         }
         if agent == .codex, missionEnd(mission, parent: false)?.column?.runsUnprovableCodex(snapshot: ProcessSnapshot()) == true {
             return answer("“\(workspace.title)”’s Codex was started without a prompt, so Nirux can't tell which of its conversations "
@@ -892,10 +916,14 @@ struct LeadProposal: Equatable {
 
 private extension ColumnState {
     /// The agent Nirux delivers Mission messages to that this column runs,
-    /// or will once restored: an interactive Claude Code, or Codex.
+    /// or will once restored.
     func missionAgent(snapshot: ProcessSnapshot) -> CodingAgent? {
-        if runsClaude(snapshot: snapshot) { return .claude }
-        if deferredAgent?.launch.agent == .codex { return .codex }
-        return pty?.foregroundProcess(snapshot: snapshot)?.interactiveAgent == .codex ? .codex : nil
+        let foreground = pty?.foregroundProcess(snapshot: snapshot)?.interactiveAgent
+        if foreground == .claude { return .claude }
+        if let launch = deferredAgent?.launch { return launch.agent }
+        switch foreground {
+        case .codex?, .agy?: return foreground
+        default: return nil
+        }
     }
 }

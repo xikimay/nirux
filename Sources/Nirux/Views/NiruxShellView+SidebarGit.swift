@@ -195,7 +195,7 @@ extension NiruxShellView {
                       columnCount: workspace.columns.count,
                       focusedColumn: workspace.focusedIndex,
                       gitBranch: workspace.gitBranch, notification: workspace.notification, isActive: isActive,
-                      columns: columns, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback?.sidebarCounts,
+                      columns: columns, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback?.counts,
                       ciFlakyReason: workspace.ciFlakyReason,
                       diffStats: workspace.diffStats,
                       purpose: workspace.purpose, nextStep: workspace.nextStep,
@@ -211,7 +211,8 @@ extension NiruxShellView {
                       statusLine: turnStatusEnabled ? workspace.statusLine : nil,
                       turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil,
                       ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0,
-                      dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil)
+                      dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil,
+                      followUp: followUpRow(of: workspace))
     }
 
     /// Every column's foreground process, shown or not, and what follows
@@ -556,7 +557,7 @@ extension NiruxShellView {
 
     func wireMetadataAndGitRefresh(_ workspace: WorkspaceState) {
         workspace.onMetadataChanged = { [weak self] in self?.scheduleMetadataRefresh() }
-        workspace.onCodexTurnOver = { [weak self] in
+        workspace.onProgramTurnOver = { [weak self] in
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
         // The header follows its title immediately (no "· path" flicker);
@@ -665,6 +666,7 @@ extension NiruxShellView {
             guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
             gitRefresh.notePullRequestRefresh(workspace)
             startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext)
+            let readStartedAt = Date().timeIntervalSince1970
             PRDetect.fetchAsync(branch: branch, cwd: cwd, startFolder: workspace.cwd) { [weak self, weak workspace] result in
                 guard let workspace else { return }
                 guard !workspace.isInactive else {
@@ -699,6 +701,10 @@ extension NiruxShellView {
                     // moves without the PR's own fields moving.
                     if workspace.prInfo == info { self?.refreshPRFeedback(for: workspace) }
                     self?.reportNewRedChecks(in: workspace)
+                    if workspace.prInfo == info {
+                        self?.prFollowUpCenter.readAt[workspace.id] = readStartedAt
+                        self?.followUpPullRequest(of: workspace)
+                    }
                     guard changed else { return }
                     self?.scheduleMetadataRefresh()
                 }

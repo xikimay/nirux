@@ -26,7 +26,7 @@ final class SidebarGlassRowsTests: XCTestCase {
         )
     }
 
-    private func pullRequest(state: String = "OPEN", ci: String?) -> PRInfo {
+    private func pullRequest(state: GitHub.PullRequestState = .open, ci: String?) -> PRInfo {
         PRInfo(
             number: 39, state: state, isDraft: false, ciStatus: ci, checks: [], reviewDecision: nil, mergeable: nil,
             url: "https://example.test/pull/39", additions: nil, deletions: nil, changedFiles: nil
@@ -62,7 +62,7 @@ final class SidebarGlassRowsTests: XCTestCase {
             ("a finished turn", finished, .finished, StateIcon(.finished)),
             ("failed checks", row([column()], pullRequest: pullRequest(ci: "FAILURE")), .error, StateIcon(.error)),
             ("a blocker", row([column()], blocker: "waiting for the staging key"), .blocked, StateIcon(.blocked)),
-            ("merged", row([column()], pullRequest: pullRequest(state: "MERGED", ci: "SUCCESS")), .merged, StateIcon(.merged)),
+            ("merged", row([column()], pullRequest: pullRequest(state: .merged, ci: "SUCCESS")), .merged, StateIcon(.merged)),
         ]
         for (name, info, mark, icon) in cases {
             XCTAssertEqual(info.rowSummary.mark, mark, name)

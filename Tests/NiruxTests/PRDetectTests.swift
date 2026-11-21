@@ -93,19 +93,25 @@ final class PRDetectTests: XCTestCase {
 
         XCTAssertFalse(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
 
+        XCTAssertEqual(GitDetect.hasTrackedChanges(at: directory.path), false)
+
         let untrackedFile = directory.appendingPathComponent("untracked.txt")
         try "new\n".write(to: untrackedFile, atomically: true, encoding: .utf8)
         XCTAssertTrue(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
+        XCTAssertEqual(GitDetect.hasTrackedChanges(at: directory.path), false)
         try FileManager.default.removeItem(at: untrackedFile)
 
         try "modified\n".write(to: trackedFile, atomically: true, encoding: .utf8)
         XCTAssertTrue(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
+        XCTAssertEqual(GitDetect.hasTrackedChanges(at: directory.path), true)
         try runGit(["restore", "tracked.txt"], at: directory)
         XCTAssertFalse(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
 
         try "staged\n".write(to: trackedFile, atomically: true, encoding: .utf8)
         try runGit(["add", "tracked.txt"], at: directory)
         XCTAssertTrue(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
+        XCTAssertEqual(GitDetect.hasTrackedChanges(at: directory.path), true)
+        XCTAssertNil(GitDetect.hasTrackedChanges(at: directory.appendingPathComponent("missing").path))
     }
 
     func testNiruxHandoversDoNotMakeTheWorktreeDirty() throws {
@@ -187,7 +193,7 @@ final class PRDetectTests: XCTestCase {
         XCTAssertEqual(context.identity.head, "current-head")
         XCTAssertEqual(context.branch, "feature/task")
         XCTAssertEqual(pullRequest.number, 41)
-        XCTAssertEqual(pullRequest.state, "OPEN")
+        XCTAssertEqual(pullRequest.state, .open)
         XCTAssertEqual(
             WorkspacePhase.derived(
                 isInactive: false,
@@ -390,7 +396,7 @@ final class PRDetectTests: XCTestCase {
         let pullRequest = try XCTUnwrap(fetched)
 
         XCTAssertEqual(pullRequest.number, 57)
-        XCTAssertEqual(pullRequest.state, "CLOSED")
+        XCTAssertEqual(pullRequest.state, .closed)
         XCTAssertEqual(
             WorkspacePhase.derived(
                 isInactive: false,
@@ -425,7 +431,7 @@ final class PRDetectTests: XCTestCase {
         }
         let pullRequest = try XCTUnwrap(fetched)
         XCTAssertEqual(pullRequest.number, 80)
-        XCTAssertEqual(pullRequest.state, "MERGED")
+        XCTAssertEqual(pullRequest.state, .merged)
     }
 
     func testUnclassifiableTerminalPullRequestPreservesCachedResult() throws {
@@ -457,7 +463,7 @@ final class PRDetectTests: XCTestCase {
         guard case .success(_, let openInfo) = openResult else {
             return XCTFail("Expected successful open PR lookup")
         }
-        XCTAssertEqual(try XCTUnwrap(openInfo).state, "OPEN")
+        XCTAssertEqual(try XCTUnwrap(openInfo).state, .open)
 
         let terminalResult = try fetchUsingFakeGitHubCLI(
             terminalJSON: #"""
@@ -589,6 +595,26 @@ final class PRDetectTests: XCTestCase {
             return XCTFail("Expected later PR lookup to proceed")
         }
         XCTAssertNil(pullRequest)
+    }
+
+    /// gh runs with Nirux's environment for it: no colour or TTY forced.
+    func testGhRunsWithoutForcedColour() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let gh = directory.appendingPathComponent("gh")
+        let environment = directory.appendingPathComponent("environment")
+        try "#!/bin/sh\nprintf '%s\\n' \"NO_COLOR=$NO_COLOR CLICOLOR_FORCE=$CLICOLOR_FORCE\" > '\(environment.path)'\necho '[]'\n"
+            .write(to: gh, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gh.path)
+        _ = PRDetect.fetch(
+            branch: "feature/task", ghPath: gh.path,
+            context: GitContext(
+                branch: "feature/task", identity: GitIdentity(repositoryRoot: directory.path, head: "head", isDirty: false),
+                upstreamRepository: GitHubRepository(host: "example.test", owner: "xikimay", name: "nirux")
+            )
+        )
+        XCTAssertEqual(try String(contentsOf: environment, encoding: .utf8), "NO_COLOR=1 CLICOLOR_FORCE=0\n")
     }
 }
 

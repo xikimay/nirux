@@ -123,10 +123,10 @@ final class WorkspaceState {
     var hasNotification: Bool { notification != nil }
     var prInfo: PRInfo? {
         didSet {
-            if prInfo?.url != oldValue?.url || prInfo?.state != "OPEN" { prFeedback = nil }
+            if prInfo?.url != oldValue?.url || prInfo?.state != .open { prFeedback = nil }
             // Merged (or first seen merged): what the Lead wrote is over, and
             // nothing tells it. The user's stays.
-            if prInfo?.state == "MERGED", oldValue?.state != "MERGED" { clearLeadContext() }
+            if prInfo?.state == .merged, oldValue?.state != .merged { clearLeadContext() }
         }
     }
     /// The open PR's feedback (docs/design/pr-feedback-inbox.md), read after each
@@ -202,8 +202,8 @@ final class WorkspaceState {
 
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
-    /// A column's Codex reported its turn over (`ColumnState.onCodexTurnOver`).
-    var onCodexTurnOver: (() -> Void)?
+    /// A column's agent reported its turn over (`ColumnState.onProgramTurnOver`).
+    var onProgramTurnOver: (() -> Void)?
     /// A column's terminal title changed (fires before onMetadataChanged).
     var onColumnTitleChanged: ((ColumnState) -> Void)?
     var onFocusedColumnChanged: (() -> Void)?
@@ -262,7 +262,7 @@ final class WorkspaceState {
 
         containerView = NSView()
         containerView.wantsLayer = true
-        containerView.layer?.masksToBounds = true
+        containerView.clipsToBounds = true
 
         stripView = NSView()
         stripView.wantsLayer = true
@@ -445,7 +445,7 @@ extension WorkspaceState {
 
     /// The red checks of `prInfo` not reported yet, each once
     /// (docs/design/ci-failure-actions.md).
-    func takeNewRedChecks() -> [ProjectBoard.Check] {
+    func takeNewRedChecks() -> [GitHub.Check] {
         let red = prInfo.map(CIFailure.redChecks) ?? []
         let keys = red.map(CIFailure.reportKey)
         let branch = gitContext?.branch
@@ -546,8 +546,8 @@ extension WorkspaceState {
     }
 
     private static func isTerminalPullRequest(_ info: PRInfo?) -> Bool {
-        guard let state = info?.state.uppercased() else { return false }
-        return state == "MERGED" || state == "CLOSED"
+        guard let state = info?.state else { return false }
+        return state == .merged || state == .closed
     }
 
     /// Record meaningful agent activity without overwriting a user-edited
@@ -693,7 +693,7 @@ extension WorkspaceState {
     }
 
     private func setupAgentAttentionTracking(for col: ColumnState) {
-        col.onCodexTurnOver = { [weak self] in self?.onCodexTurnOver?() }
+        col.onProgramTurnOver = { [weak self] in self?.onProgramTurnOver?() }
         col.onAgentAttention = { [weak self, weak col] reason in
             guard let self else { return }
             // A Mission child ends its turn after asking (even in prose).
@@ -1176,6 +1176,17 @@ extension WorkspaceState {
     private static let slideKey = "colSlide"
     /// The strip's slide to a card.
     static let slideDuration: CFTimeInterval = 0.3
+
+    /// Every column as it shows, whatever the camera shows, frozen at
+    /// `scale` (depth study P5's plan); nil before a layout.
+    func frozenColumns(scale: CGFloat) -> FrozenView? {
+        FrozenView.freeze(stripView, scale: scale)
+    }
+
+    /// The strip that holds the columns: its size, and each column's frame
+    /// in it.
+    var stripSize: NSSize { stripView.frame.size }
+    var columnFrames: [NSRect] { columns.map(\.view.frame) }
 
     /// What a width fraction of 1 spans, its gap included: the viewport
     /// less the air at its edges, plus one gap. Two halves then fill the

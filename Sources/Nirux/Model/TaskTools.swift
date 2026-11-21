@@ -45,7 +45,8 @@ enum TaskTools {
                 LeadTools.listTasks, title: "List your sub-tasks",
                 description: """
                     Your task's sub-tasks: each one's title, branch or folder, agent state (working, needs the user, \
-                    idle), pull request and checks, and the question or result it sent you. Read it again after a \
+                    idle), pull request and checks, the last questions it got answered, and the question or result \
+                    it sent you. Read it again after a \
                     /clear: Nirux keeps the state, your conversation doesn't.
                     """,
                 properties: [:], required: [], readOnly: true
@@ -54,8 +55,8 @@ enum TaskTools {
                 LeadTools.tell, title: "Tell a sub-task",
                 description: """
                     Type a message into one of your sub-tasks' prompt once its agent's turn is over (more work, an \
-                    answer it didn't ask for, a slash command such as /code-review). Claude Code and Codex \
-                    sub-tasks only: Codex gets it through its own queue, as text (no slash command).
+                    answer it didn't ask for, a slash command such as /code-review). Claude Code, Codex and \
+                    Antigravity sub-tasks only; slash commands are Claude Code's (Codex gets the text through its queue).
                     """,
                 properties: [
                     "task": ["type": "string", "description": subtaskDescription],

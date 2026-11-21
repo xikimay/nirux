@@ -95,6 +95,12 @@ extension NiruxShellView {
     func applyAgentLights(sweeping ended: Set<UUID> = []) {
         let plan = agentLights.plan
         let moves = agentLightsMayMove
+        // Stillness wins over a pass under the rail or a crossing on its way.
+        if !moves {
+            stillUnderGlass()
+            stillSpaceCrossing()
+            stillSpacePlan()
+        }
         for workspace in workspaces {
             let isOnScreen = workspace === activeWorkspace
             for (index, column) in workspace.columns.enumerated() {
@@ -130,6 +136,7 @@ extension NiruxShellView {
     /// of one that asks.
     func turnEndSettled() {
         typeMissionMessages()
+        followUpPullRequests()
         scheduleMetadataRefresh()
     }
 

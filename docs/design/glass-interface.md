@@ -506,8 +506,43 @@ the text stays flat and sharp.
   shade. 0.44 s, translations only, so no text scales; N1's name card
   stays. A switch while one plays ends it at once; Reduce motion, another
   space, or a workspace on screen that left the list show it at once.
-- **Frozen pictures (study P4, first part):** a slide over the viewport
-  (⌥⌘← ⌥⌘→, a new workspace) moves a picture of what it showed, frozen in
+- **The crossing (study P4):** ⌥⌘← ⌥⌘→ pass through depth. The space left
+  recedes to 92 % as it fades; the one chosen comes from 106 % and lands,
+  0.56 s, both frozen pictures, every live view hidden under them until it
+  lands, so no live terminal scales. The space chosen is frozen 0.05 s in,
+  once its terminals (resting while hidden) drew. A switch while one plays
+  ends it at once, and so does a move or another workspace on screen (⌘N,
+  a close, a ⌘P jump); Reduce motion, or a pick from the menu, shows the
+  space at once.
+- **The plan (study P5, first part):** ⌥⌘↑ (Space › Space Overview)
+  shows the space as a plan over the viewport: a row per workspace, in the
+  order they're listed, every column of it frozen at the plan's scale
+  (`FrozenView`, terminals copied that small on the GPU), its state icon,
+  name and status line at their own size beside it. The card on screen
+  wears a ring; the arrows move it, Return or a click goes there at once,
+  Escape or ⌥⌘↑ goes back; it holds the keys, none reaches a terminal.
+  Under it the live views hide and no terminal draws; a change to what it
+  shows (a workspace, its columns, the card in focus), another space or a
+  new size closes it at once, and the keyboard goes back to the column on
+  screen. A new name doesn't. However many workspaces, every row shows: the
+  gaps shrink. A pinch does the same: fingers closing over the work past a
+  quarter of their span, within one pinch, show the plan, and opening them
+  in it goes to the card under them, else to the chosen one; each pinch
+  acts once, whichever view its events reach. A column that zooms itself
+  keeps its own pinch: Branch Review's page does; whether the editor's
+  WebKit, which doesn't zoom, passes it on wasn't checked in the app. While
+  the interface may move, the work recedes into the plan (0.56 s): the
+  rows' world comes from where the workspace showed, filling the plan, the
+  work's picture at its size over it fading into its row, the names after.
+  Going to a card, that workspace shows under the plan at once, its column
+  taking the keyboard, and the plan dives into it (0.52 s), its picture
+  fading in over the zoom; going back dives into the workspace on screen.
+  Diving, the plan leaves keys and clicks to that workspace; ⌥⌘↑ or a pinch
+  meanwhile lands the dive and opens the plan anew. The rows move through their view's
+  `sublayerTransform`; ends come on time, and Reduce motion, Animate the
+  interface off or movement turning off mid-way show the end at once.
+- **Frozen pictures (study P4):** a crossing, or a new workspace's slide,
+  moves pictures of what the viewport showed, frozen in
   about 6 ms (`FrozenView`): a clone of its layers, each sharing its
   contents, without what is hidden or clipped out of sight, each
   terminal's last image copied on the GPU (Ghostty draws over the one it
@@ -547,15 +582,17 @@ the text stays flat and sharp.
 - **Under the glass (study P6):** folded, the rail is an island of glass
   over the work. While the columns travel to a card (the strip's 0.3 s
   slide, the workspace on screen the same, the sidebar's width too: not a
-  switch, a fold or an unfold) they pass under it: the viewport's layer reaches under the
-  sidebar, what it holds where it lay, and the workspace on screen leaves
-  its cards unclipped; then the work's edge sweeps back to the rail's over
+  switch, a fold or an unfold) they pass under it: the viewport reaches
+  under the sidebar (its frame, and its bounds' origin so that what it
+  holds stays) and the workspace on screen stops clipping its cards
+  (`clipsToBounds`); then the work's edge sweeps back to the rail's over
   0.22 s. A pass goes on through a layout while the rail floats. At rest
   nothing lies under the glass, and no line marks the rail's edge (the
-  divider fades with the fold); a pass ends where the rail stops floating. Only the
-  layer reaches: the view, its frame and its clicks stay. Only in macOS's own glass (26 and
-  later, which refracts what passes under it; the rim of 14 and 15 would
-  show the cards plainly), above Opaque, while the interface may move.
+  divider fades with the fold); a pass ends where the rail stops floating.
+  The sidebar lies over the viewport and keeps its clicks. Only in macOS's
+  own glass (26 and later, which refracts what passes under it; the rim of
+  14 and 15 would show the cards plainly), above Opaque, while the
+  interface may move.
 
 ## Plan
 

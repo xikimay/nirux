@@ -74,7 +74,7 @@ extension NiruxShellView {
     }
 
     static func sessionPullRequest(_ info: PRInfo) -> AgentSessionRecord.PullRequest {
-        AgentSessionRecord.PullRequest(number: info.number, url: info.url, state: info.state.uppercased())
+        AgentSessionRecord.PullRequest(number: info.number, url: info.url, state: info.state.rawValue)
     }
 
     /// The pull request of the workspace's checkout, for every session that

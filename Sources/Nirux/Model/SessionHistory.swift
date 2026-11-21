@@ -75,6 +75,12 @@ enum SessionHistory {
         "#\(pullRequest.number) \(pullRequest.state.lowercased())"
     }
 
+    /// The pull request's label when it merged, whatever case the record
+    /// spells its state in: drawn in the done colour.
+    static func mergedPullRequestLabel(of record: AgentSessionRecord) -> String? {
+        record.pullRequest.flatMap { GitHub.PullRequestState($0.state) == .merged ? pullRequestLabel($0) : nil }
+    }
+
     /// "just now", "12 min ago", "3 h ago", "yesterday", "5 days ago".
     static func ago(_ seconds: TimeInterval) -> String {
         let seconds = max(0, Int(seconds))

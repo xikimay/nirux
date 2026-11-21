@@ -48,12 +48,11 @@ struct Mission: Codable, Equatable {
     }
 
     /// The agent its child runs, when Nirux delivers its parent's messages:
-    /// typed into Claude Code's prompt, or handed to Codex's queue. Nil for
-    /// one that takes none (agy).
+    /// typed into Claude Code or Antigravity, or handed to Codex's queue.
     var deliveryAgent: CodingAgent? {
         switch childAgent {
-        case .claude?, .codex?: childAgent
-        case .agy?, .gemini?, .opencode?, nil: nil
+        case .claude?, .codex?, .agy?: childAgent
+        case .gemini?, .opencode?, nil: nil
         }
     }
 }
@@ -607,7 +606,8 @@ final class MissionStore {
             .first
     }
 
-    private static func isPendingDelivery(_ event: MissionEvent, in mission: Mission, now: TimeInterval) -> Bool {
+    /// Whether Nirux will type `event` into its recipient's prompt.
+    nonisolated static func isPendingDelivery(_ event: MissionEvent, in mission: Mission, now: TimeInterval) -> Bool {
         switch event.kind {
         case .instruction:
             return event.childConsumedAt == nil && event.expiredAt == nil && now < event.instructionDeadline

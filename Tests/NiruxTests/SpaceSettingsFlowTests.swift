@@ -262,6 +262,14 @@ final class SpaceSettingsFlowTests: XCTestCase {
             XCTAssertEqual(store.load().defaults.agent, .codex)
             pick(SpaceSettingsDefaultsPane.settingsChoice, in: pane.claudePopup)
             XCTAssertNil(store.load().defaults.claudeLaunchMode)
+            XCTAssertEqual(pane.followUpSwitch.state, .on, "on by default")
+            XCTAssertTrue(shell.followsUpPullRequests(inSpace: space.id))
+            for on in [false, true] {
+                pane.followUpSwitch.state = on ? .on : .off
+                pane.followUpSwitch.sendAction(pane.followUpSwitch.action, to: pane.followUpSwitch.target)
+                XCTAssertEqual(store.load().defaults.prFollowUp, on ? nil : false, "on writes nothing")
+                XCTAssertEqual(shell.followsUpPullRequests(inSpace: space.id), on)
+            }
             XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: store.fileURL.path)[.posixPermissions] as? Int, 0o600)
 
             // Typed in the cell's field, then the field left, as AppKit does

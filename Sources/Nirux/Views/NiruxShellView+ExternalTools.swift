@@ -383,8 +383,9 @@ extension NiruxShellView {
         on, tell the user that the new task may not report back to you.
 
         With a Mission, Nirux starts the child with Mission instructions. Nirux types the
-        messages between the two agents into their Claude Code prompts, once the agent's turn is
-        over and nobody is typing there:
+        messages between the two agents into their prompts, once the agent's turn is over and
+        nobody is typing there: Claude Code's, and an Antigravity child's for more work; a Codex
+        child's go into Codex's own queue:
 
         - The child asks with the command below and ends its turn; Nirux types the answer into
           its prompt. A Codex child's `ask` waits for the answer instead.
@@ -410,15 +411,17 @@ extension NiruxShellView {
           ```bash
           "$NIRUX_CLI_PATH" --mission completed --message "<concise result>"
           ```
-        - Nirux types only into Claude Code. A Codex parent waits for the child's question or
-          result instead, then answers a question with `reply` as above:
+        - Nirux types questions and results only into Claude Code. A Codex or Antigravity parent
+          waits for the child's question or result instead, then answers a question with `reply`
+          as above:
           ```bash
           "$NIRUX_CLI_PATH" --mission receive
           ```
 
-        To give a Claude Code or Codex child more work (a follow-up, `/code-review`), even after
-        it completed, name it by branch. Nirux types the message and Enter into a Claude Code
-        child's prompt, or hands it to a Codex child's own queue, and the Mission is active again:
+        To give a Claude Code, Codex or Antigravity child more work (a follow-up, or for Claude Code
+        a slash command such as `/code-review`), even after it completed, name it by branch. Nirux
+        types the message and Enter into a Claude Code or Antigravity child's prompt, or hands it to a
+        Codex child's own queue, and the Mission is active again:
 
         ```bash
         "$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "<instruction or /command>"
@@ -445,7 +448,7 @@ extension NiruxShellView {
           terminal is not part of it, (for `reply`) the question no longer waits for an answer,
           for example because the user answered it in Nirux, (for `reply --accept`) it has no
           recommendation to accept, or (for `tell`) no Mission on that branch came from this
-          terminal, or its child runs neither Claude Code nor Codex.
+          terminal, or its child runs none of Claude Code, Codex and Antigravity.
         - 2: invalid usage, or not a Mission terminal; the error message says which.
         - 1: Nirux's state could not be read or written. If a sandbox blocks it, run the command
           outside the sandbox.

@@ -9,17 +9,22 @@ extension NiruxShellView {
     /// After each read of an open PR. A failed read keeps the last value;
     /// a read started before another one is dropped.
     func refreshPRFeedback(for workspace: WorkspaceState) {
-        guard let pullRequest = workspace.prInfo, pullRequest.state == "OPEN" else { return }
+        guard let pullRequest = workspace.prInfo, pullRequest.state == .open else { return }
         workspace.prFeedbackGeneration &+= 1
         let generation = workspace.prFeedbackGeneration
+        let readStartedAt = Date().timeIntervalSince1970
         PRFeedbackReader.fetchAsync(pullRequestURL: pullRequest.url) { [weak self, weak workspace] feedback in
-            guard let workspace, let feedback,
+            guard let self, let workspace, let feedback,
                   workspace.prFeedbackGeneration == generation,
-                  workspace.prInfo?.url == pullRequest.url, workspace.prInfo?.state == "OPEN",
-                  workspace.prFeedback != feedback
+                  workspace.prInfo?.url == pullRequest.url, workspace.prInfo?.state == .open
             else { return }
-            workspace.prFeedback = feedback
-            self?.scheduleMetadataRefresh()
+            prFollowUpCenter.feedbackReadAt[workspace.id] = readStartedAt
+            if workspace.prFeedback != feedback {
+                workspace.prFeedback = feedback
+                scheduleMetadataRefresh()
+            }
+            // A round waits for a read after it, changed or not.
+            followUpPullRequest(of: workspace)
         }
     }
 
@@ -42,17 +47,18 @@ extension NiruxShellView {
             }
         }
         menu.addItem(.separator())
-        let refusal = Self.prFeedbackAddressRefusal(prFeedbackAgent(in: workspace))
+        let refusal = Self.prFeedbackAddressRefusal(pullRequestAgent(in: workspace))
         var scopes = [(title: "Address", items: feedback.items)]
         if feedback.humanCount > 0, feedback.botCount > 0 {
             scopes.append(("Address Bot Feedback", feedback.items.filter(\.isBot)))
         }
         for scope in scopes {
             let title = refusal.map { "\(scope.title) (\($0))" } ?? scope.title
-            let prompt = Self.prFeedbackAddressPrompt(for: pullRequest, items: scope.items)
+            let prompt = PRFeedback.addressPrompt(for: pullRequest, items: scope.items)
+            let items = scope.items.map(\.url)
             menu.addClosureItem(title: title) { [weak self, weak workspace] in
                 guard let self, let workspace else { return }
-                self.addressPRFeedback(in: workspace, prompt: prompt)
+                self.addressPRFeedback(in: workspace, prompt: prompt, items: items)
             }.isEnabled = refusal == nil
         }
         return menu
@@ -61,13 +67,6 @@ extension NiruxShellView {
     private static func prFeedbackMenuTitle(_ item: PRFeedback.Item) -> String {
         let outdated = item.isOutdated ? " (outdated)" : ""
         return "\(item.isBot ? "🤖" : "💬") \(item.author) · \(item.location)\(outdated) · \(item.excerpt)"
-    }
-
-    /// Names the items the user saw, so the agent addresses those and not
-    /// whatever else the PR holds.
-    static func prFeedbackAddressPrompt(for pullRequest: PRInfo, items: [PRFeedback.Item]) -> String {
-        "/receiving-code-review Address this feedback on PR #\(pullRequest.number) (\(pullRequest.url)): "
-            + items.map(\.url).joined(separator: " ")
     }
 
     /// Why Address can't type into the agent now; nil when it can.
@@ -81,11 +80,10 @@ extension NiruxShellView {
     /// The workspace's focused Claude agent, else its first one, in the
     /// PR's checkout: the skill is Claude's. `typedPromptTargets` decides
     /// what is live.
-    private func prFeedbackAgent(in workspace: WorkspaceState) -> TypedPromptTarget? {
+    func pullRequestAgent(in workspace: WorkspaceState, snapshot: ProcessSnapshot = ProcessSnapshot()) -> TypedPromptTarget? {
         guard let root = workspace.gitContext?.identity.repositoryRoot else { return nil }
         let resolvedRoot = Self.comparablePath(root)
-        let snapshot = ProcessSnapshot()
-        let sessions = typedPromptTargets().filter {
+        let sessions = typedPromptTargets(in: [workspace], snapshot: snapshot).filter {
             $0.workspaceID == workspace.id
                 && workspace.columns[$0.columnIndex].pty?.foregroundProcess(snapshot: snapshot)?.agent == .claude
                 && ProjectBoard.contains(resolvedRoot, Self.comparablePath($0.cwd))
@@ -95,10 +93,11 @@ extension NiruxShellView {
 
     /// Checks again at the click: the menu may have stayed open a while.
     /// Hooks still in the queue may say the agent started working.
-    private func addressPRFeedback(in workspace: WorkspaceState, prompt: String) {
+    private func addressPRFeedback(in workspace: WorkspaceState, prompt: String, items: [String]) {
         AgentHookCenter.shared.drain()
-        if let session = prFeedbackAgent(in: workspace), Self.prFeedbackAddressRefusal(session) == nil,
+        if let session = pullRequestAgent(in: workspace), Self.prFeedbackAddressRefusal(session) == nil,
            case .sent = sendTypedPrompt(agentUUID: session.id, prompt: prompt) {
+            noteFollowUpTakenByUser(in: workspace, feedback: items)
             return
         }
         NSSound.beep()

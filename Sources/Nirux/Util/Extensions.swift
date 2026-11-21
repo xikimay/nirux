@@ -51,4 +51,11 @@ extension String {
         defer { free(resolved) }
         return String(cString: resolved)
     }
+
+    /// The first line holding more than whitespace, trimmed.
+    var firstLine: String? {
+        split(whereSeparator: \.isNewline).lazy
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty }
+    }
 }

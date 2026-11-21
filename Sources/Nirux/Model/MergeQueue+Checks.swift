@@ -3,12 +3,6 @@ import Foundation
 // MARK: - Checks (section 3.2)
 
 extension MergeQueue {
-    /// Check run conclusions that make a check red. NEUTRAL and SKIPPED
-    /// are neither green nor red: CodeQL adds a NEUTRAL check to every PR.
-    static let redConclusions: Set<String> = [
-        "FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"
-    ]
-
     /// The checks of one head, judged by section 3.2's rules.
     struct ChecksVerdict: Equatable, Sendable {
         /// Required check runs that concluded red.
@@ -48,7 +42,7 @@ extension MergeQueue {
 
     /// `name`, or `Workflow / name` as board.json may spell it.
     static func matches(_ run: CommitChecks.CheckRun, required: String) -> Bool {
-        run.name == required || run.workflow.map { "\($0) / \(run.name)" } == required
+        run.name == required || GitHub.qualifiedName(name: run.name, workflow: run.workflow) == required
     }
 
     /// Each required name must have a check run, and every run matching it
@@ -74,7 +68,7 @@ extension MergeQueue {
                     if ["QUEUED", "WAITING", "PENDING", "REQUESTED"].contains(run.status.uppercased()) { queued = true }
                 } else if conclusion == "SUCCESS" {
                     continue
-                } else if redConclusions.contains(conclusion) {
+                } else if GitHub.isRedCheck(conclusion) {
                     failed.append(run)
                 } else {
                     notGreen = conclusion.isEmpty ? "no conclusion" : conclusion.lowercased()
@@ -99,10 +93,10 @@ extension MergeQueue {
             }
         }
         for run in latest where !required.contains(where: { matches(run, required: $0) }) {
-            let name = run.workflow.map { "\($0) / \(run.name)" } ?? run.name
+            let name = GitHub.qualifiedName(name: run.name, workflow: run.workflow) ?? run.name
             if replaced.contains(run.id) {
                 verdict.pending.append("\(name) (rerun not started)")
-            } else if run.status.uppercased() == "COMPLETED", redConclusions.contains(run.conclusion?.uppercased() ?? "") {
+            } else if run.status.uppercased() == "COMPLETED", GitHub.isRedCheck(run.conclusion) {
                 verdict.otherFailures.append(name)
             }
         }
@@ -117,7 +111,7 @@ extension MergeQueue {
     /// 900); still running, not required: CodeQL / Analyze (swift)".
     static func checksSummary(_ checks: CommitChecks, required: [String]) -> String {
         let latest = latestRuns(checks.runs)
-        let name = { (run: CommitChecks.CheckRun) in run.workflow.map { "\($0) / \(run.name)" } ?? run.name }
+        let name = { (run: CommitChecks.CheckRun) in GitHub.qualifiedName(name: run.name, workflow: run.workflow) ?? run.name }
         var parts = required.map { requiredName in
             let runs = latest.filter { matches($0, required: requiredName) }.map { run in
                 "\(requiredName) ✓" + (run.workflowRunID.map { " (run \($0))" } ?? "")
@@ -141,13 +135,7 @@ extension MergeQueue {
             guard run.workflowRunID == runID, run.status.uppercased() == "COMPLETED", conclusion != "SUCCESS" else {
                 return false
             }
-            return redConclusions.contains(conclusion) || required.contains { matches(run, required: $0) }
+            return GitHub.isRedCheck(conclusion) || required.contains { matches(run, required: $0) }
         }.map(\.id))
-    }
-
-    /// Whether the post-merge workflow's run failed: a cancelled, skipped
-    /// or neutral one didn't.
-    static func runFailed(_ run: Run) -> Bool {
-        ["failure", "timed_out", "startup_failure", "action_required"].contains(run.conclusion?.lowercased() ?? "")
     }
 }

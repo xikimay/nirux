@@ -585,17 +585,25 @@ final class ColumnCardsTests: XCTestCase {
             workspace.focusedIndex = 0
             shell.relayout(animated: false)
             let strip = try strip(of: workspace), start = strip.frame.minX
+            let layer = try XCTUnwrap(strip.layer)
             workspace.focusedIndex = 1
             shell.relayout(animated: true)
             let target = strip.frame.minX
-            func shown() -> CGFloat {
-                strip.frame.minX + CGFloat((strip.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber)?.doubleValue ?? 0)
-            }
-            waitUntil("on its way", timeout: 2) { abs(shown() - start) > 20 && abs(shown() - target) > 20 }
-            let midway = shown()
+            // Held in flight on purpose: the strip's clock stops a quarter of
+            // the way, which a loaded runner could slide past between two
+            // looks. The slide begins, and its presentation follows the
+            // clock, at a commit.
+            layer.timeOffset = layer.convertTime(CACurrentMediaTime(), from: nil)
+            layer.speed = 0
+            CATransaction.flush()
+            let slide = try XCTUnwrap(layer.animation(forKey: "colSlide"), "it slides")
+            layer.timeOffset = slide.beginTime + slide.duration / 4
+            CATransaction.flush()
+            let midway = strip.frame.minX + CGFloat((layer.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber)?.doubleValue ?? 0)
+            XCTAssertTrue(abs(midway - start) > 20 && abs(midway - target) > 20, "on its way: \(start) → \(midway) → \(target)")
             workspace.holdCamera(for: 1)
             XCTAssertEqual(strip.frame.minX, midway, accuracy: 3)
-            XCTAssertNil(strip.layer?.animation(forKey: "colSlide"))
+            XCTAssertNil(layer.animation(forKey: "colSlide"))
         }
     }
 

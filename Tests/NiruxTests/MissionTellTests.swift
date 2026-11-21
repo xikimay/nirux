@@ -223,9 +223,17 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(tell("/code-review", in: fixture, agentUUID: otherAgentUUID), 4)
         XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
 
+        let other = try makeFixture(childAgentKind: "gemini")
+        XCTAssertEqual(tell("/code-review", in: other), 4, "Nirux delivers nothing to an agent it doesn't know")
+        XCTAssertTrue(try queuedEvents(in: other).isEmpty)
         let agy = try makeFixture(childAgentKind: "agy")
-        XCTAssertEqual(tell("/code-review", in: agy), 4, "Nirux delivers nothing to agy")
-        XCTAssertTrue(try queuedEvents(in: agy).isEmpty)
+        XCTAssertEqual(tell("/code-review", in: agy), 2, "agy runs a slash command itself, with no turn to end")
+        XCTAssertEqual(tell("Review the diff.", in: agy), 3, "typed into Antigravity's prompt")
+        XCTAssertEqual(tell("/Users/me/review.md: apply it.", in: agy), 3, "a path is no slash command")
+        XCTAssertEqual(try queuedEvents(in: agy).map(\.kind), [.instruction, .instruction])
+        XCTAssertEqual(NiruxShellView.resumedConversation(ofAgy: ["agy", "--conversation", "c1"]), "c1")
+        XCTAssertEqual(NiruxShellView.resumedConversation(ofAgy: ["agy", "--conversation=c2"]), "c2")
+        XCTAssertNil(NiruxShellView.resumedConversation(ofAgy: ["agy", "-i", "Go"]))
         let codex = try makeFixture(childAgentKind: "codex")
         XCTAssertEqual(tell("/code-review", in: codex), 3, "Codex takes it through its own queue")
         XCTAssertEqual(try queuedEvents(in: codex).map(\.kind), [.instruction])
@@ -435,6 +443,121 @@ final class MissionTellTests: XCTestCase {
         XCTAssertNil(refusal(), "one already running")
         XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 12, startedAt: t0 + 80), name: "codex", arguments: ["codex"])),
                        .noPromptYet, "not one started since")
+    }
+
+    /// An Antigravity child's prompt is free once its `agy` said its turn is
+    /// done (OSC 7501) and no key reached the terminal since that turn began:
+    /// agy 1.5.12 says idle at a key after done, but keeps one typed while it
+    /// worked in its box, and still says done.
+    func testAntigravityPromptIsFreeOnceItsTurnIsDoneWithNoKeySince() {
+        let agy = ForegroundProcess(instance: claudeProcess, name: "agy", arguments: ["agy", "-i", "Go"])
+        var machine = AgentStatusMachine()
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0))
+        func refusal(_ foreground: ForegroundProcess? = agy, since: TimeInterval = t0 + 100) -> AgentPromptRefusal? {
+            machine.promptRefusal(foreground: foreground, runningSince: since, agent: .agy)
+        }
+        func report(_ state: AgentProgramStatus.State, kind: String? = nil, at offset: TimeInterval, from process: ProcessInstance? = nil) {
+            _ = machine.noteProgramStatus(
+                AgentProgramStatus(state: state, kind: kind, message: nil, agent: .agy), from: process ?? claudeProcess,
+                isUserFocused: true, now: Date(timeIntervalSince1970: t0 + offset)
+            )
+        }
+        XCTAssertEqual(refusal(ForegroundProcess(instance: claudeProcess, name: "agy", arguments: ["agy", "-p", "Go"])), .noClaude,
+                       "a one-shot run")
+        report(.idle, at: 1)
+        XCTAssertEqual(refusal(), .noPromptYet, "ready, but no turn ended since it started")
+        report(.working, at: 2)
+        XCTAssertEqual(refusal(), .working)
+        report(.blocked, kind: "permission", at: 3)
+        XCTAssertEqual(refusal(), .dialog)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 3.5), keys: Data("1".utf8))
+        report(.working, at: 4)
+        report(.done, at: 5)
+        XCTAssertNil(refusal(), "the key that answered its dialog is no draft")
+        XCTAssertEqual(refusal(since: claudeProcess.startedAt - 1), .restarted)
+        XCTAssertEqual(machine.promptRefusal(foreground: agy, runningSince: t0 + 100), .noClaude, "text for Claude Code never goes into agy")
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 5.5), keys: Data("\u{1B}[5~".utf8))
+        report(.idle, at: 5.5)
+        XCTAssertNil(refusal(), "a key after its turn that leaves no text (Page Up)")
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 6))
+        report(.idle, at: 6)
+        XCTAssertEqual(refusal(), .draft, "a key after its turn")
+        report(.working, at: 7)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8))
+        report(.done, at: 9)
+        XCTAssertEqual(refusal(), .draft, "a key typed while it worked stays in its box")
+        report(.working, at: 10)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 10.5))
+        report(.blocked, kind: "permission", at: 10.6)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 10.7), keys: Data("1".utf8))
+        report(.working, at: 10.8)
+        report(.done, at: 10.9)
+        XCTAssertEqual(refusal(), .draft, "a key typed before a dialog stays: its turn began before it")
+        report(.working, at: 11)
+        report(.idle, at: 11.5)
+        XCTAssertEqual(refusal(), .draft, "stopped with Esc: its box may hold its prompt again")
+        report(.working, at: 11.6)
+        report(.done, at: 11.7)
+        XCTAssertNil(refusal())
+        // A dialog answered with several keys: the heartbeat drops its status at the first.
+        report(.working, at: 11.8)
+        report(.blocked, kind: "question", at: 11.85)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 11.86), keys: Data("\u{1B}[B".utf8))
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 11.87))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 11.88), keys: Data("\r".utf8))
+        report(.working, at: 11.9)
+        report(.done, at: 11.95)
+        XCTAssertNil(refusal(), "every key that answered its dialog")
+        // ^Z then fg drops its status, not its turn.
+        _ = machine.tick(fgName: "zsh", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 11.96))
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 11.97))
+        XCTAssertNil(refusal(), "its turn ended done")
+        report(.error, at: 12)
+        XCTAssertEqual(refusal(), .failedTurn)
+        report(.done, at: 13, from: ProcessInstance(pid: 9, startedAt: t0))
+        XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: t0), name: "agy", arguments: ["agy"])),
+                       .noPromptYet, "its own turn, not another agy's")
+
+        func at(_ offset: TimeInterval) -> Date { Date(timeIntervalSince1970: t0 + offset) }
+        // Keys typed after the Enter that sent its prompt, before its working is read, stay in its box.
+        machine.noteKeystroke(now: at(20), keys: Data("go".utf8))
+        machine.noteKeystroke(now: at(20.1), keys: Data("\r".utf8))
+        machine.noteKeystroke(now: at(20.12), keys: Data("x".utf8))
+        report(.working, at: 20.2)
+        report(.done, at: 21)
+        XCTAssertEqual(refusal(), .draft, "a key after the Enter that sent its prompt")
+        // Its dialog answered, text typed before it says it works again.
+        report(.working, at: 22)
+        report(.blocked, kind: "permission", at: 22.1)
+        machine.noteKeystroke(now: at(22.2), keys: Data("\r".utf8))
+        machine.noteKeystroke(now: at(22.3), keys: Data("y".utf8))
+        report(.working, at: 22.4)
+        report(.done, at: 23)
+        XCTAssertEqual(refusal(), .draft, "text typed once its dialog was answered")
+        // A turn whose end was missed (a silence dropped its status): the next prompt starts a new one.
+        report(.working, at: 24)
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: at(24 + AgentProgramStatus.workingSilence + 1))
+        machine.noteKeystroke(now: at(86), keys: Data("next".utf8))
+        machine.noteKeystroke(now: at(86.1), keys: Data("\r".utf8))
+        report(.working, at: 86.2)
+        report(.done, at: 87)
+        XCTAssertNil(refusal(), "its prompt's own keys aren't a draft")
+        report(.working, at: 88)
+        report(.error, at: 89)
+        machine.noteKeystroke(now: at(89.5), keys: Data("z".utf8))
+        report(.idle, at: 89.6)
+        XCTAssertEqual(refusal(), .failedTurn, "a failed turn says so, a key after it notwithstanding")
+
+        // An agy that left with its dialog open: the keys of what runs next are drafts.
+        var after = AgentStatusMachine()
+        _ = after.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0))
+        _ = after.noteProgramStatus(AgentProgramStatus(state: .working, kind: nil, message: nil, agent: .agy), from: claudeProcess,
+                                    isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 1))
+        _ = after.noteProgramStatus(AgentProgramStatus(state: .blocked, kind: "permission", message: nil, agent: .agy), from: claudeProcess,
+                                    isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 2))
+        _ = after.tick(fgName: "claude", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 3))
+        after.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 4), keys: Data("x".utf8))
+        XCTAssertTrue(after.hasDraft, "Claude Code's draft")
     }
 
     func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {

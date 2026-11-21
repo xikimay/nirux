@@ -1,62 +1,5 @@
 import Foundation
 
-struct GitHubRepository: Hashable, Sendable {
-    let host: String
-    let owner: String
-    let name: String
-
-    init(host: String = "github.com", owner: String, name: String) {
-        self.host = Self.normalizedHost(host)
-        self.owner = owner.lowercased()
-        self.name = name.lowercased()
-    }
-
-    init?(remoteURL: String) {
-        let trimmed = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let host: String
-        let path: String
-        if let url = URL(string: trimmed), url.scheme != nil,
-           let parsedHost = url.host, !parsedHost.isEmpty {
-            host = parsedHost
-            path = url.path
-        } else if let colon = trimmed.firstIndex(of: ":"),
-                  !trimmed[..<colon].contains("/") {
-            let authority = trimmed[..<colon]
-            guard let parsedHost = authority.split(separator: "@").last,
-                  !parsedHost.isEmpty
-            else { return nil }
-            host = String(parsedHost)
-            path = String(trimmed[trimmed.index(after: colon)...])
-        } else {
-            return nil
-        }
-
-        let components = path.split(separator: "/")
-        guard components.count >= 2 else { return nil }
-        let owner = String(components[components.count - 2])
-        var name = String(components[components.count - 1])
-        if name.lowercased().hasSuffix(".git") {
-            name.removeLast(4)
-        }
-        guard !owner.isEmpty, !name.isEmpty else { return nil }
-        self.init(host: host, owner: owner, name: name)
-    }
-
-    init?(repositoryURL: String, owner: String, name: String) {
-        guard let url = URL(string: repositoryURL),
-              let host = url.host, !host.isEmpty,
-              !owner.isEmpty, !name.isEmpty
-        else { return nil }
-        self.init(host: host, owner: owner, name: name)
-    }
-
-    private static func normalizedHost(_ host: String) -> String {
-        let normalized = host.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-            .lowercased()
-        return normalized == "ssh.github.com" ? "github.com" : normalized
-    }
-}
-
 struct GitIdentity: Hashable, Sendable {
     let repositoryRoot: String
     /// The root with every link resolved, as `git worktree list` gives a
@@ -161,6 +104,31 @@ enum GitDetect {
             return !isDirty
         }
         return isDirty
+    }
+
+    /// Whether the checkout at `path` changes tracked files, read now: a
+    /// workspace's context may be seconds old. Untracked files don't count,
+    /// in a submodule neither, nor Nirux's handover at the top. Nil when git
+    /// can't say.
+    static func hasTrackedChanges(at path: String, gitPath: String = "/usr/bin/git", timeout: TimeInterval = 30) -> Bool? {
+        guard let status = BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: gitPath),
+            arguments: ["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=no", "--ignore-submodules=untracked"],
+            currentDirectoryURL: URL(fileURLWithPath: path),
+            environment: readOnlyEnvironment,
+            timeout: timeout
+        ), status.terminationStatus == 0 else { return nil }
+        return isDirty(status: status.standardOutput)
+    }
+
+    /// The checkout's HEAD commit, lowercased, read now; nil when git can't
+    /// say.
+    static func head(at path: String, gitPath: String = "/usr/bin/git", timeout: TimeInterval = 30) -> String? {
+        guard let result = gitOutput(arguments: ["rev-parse", "--verify", "HEAD"], at: path, gitPath: gitPath, timeout: timeout),
+              result.terminationStatus == 0
+        else { return nil }
+        let head = result.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        return head.isEmpty ? nil : head.lowercased()
     }
 
     /// `startFolder`: the folder the workspace started in (its `cwd`), the
