@@ -883,10 +883,18 @@ final class ColumnCardsTests: XCTestCase {
             let moved = workspace.columns[0], twice = workspace.columns[2]
 
             shell.moveColumn(.right)
-            waitUntil("on its way up", timeout: 2) { (moved.view.layer?.presentation()?.transform.m42 ?? 0) > 1 }
+            // Hold the first lift mid-flight so a busy run loop cannot skip the whole animation.
+            let layer = try XCTUnwrap(moved.view.layer)
+            let firstLift = try XCTUnwrap(layer.animation(forKey: ColumnState.liftKey)?.copy() as? CAKeyframeAnimation)
+            firstLift.speed = 0
+            firstLift.timeOffset = firstLift.duration / 2
+            layer.add(firstLift, forKey: ColumnState.liftKey)
+            CATransaction.flush()
+            waitUntil("the card shows its held lift", timeout: 2) { (layer.presentation()?.transform.m42 ?? 0) > 1 }
+            let height = try XCTUnwrap(layer.presentation()).transform.m42
             shell.moveColumn(.right)
             let rise = try XCTUnwrap(moved.view.layer?.animation(forKey: ColumnState.liftKey) as? CAKeyframeAnimation)
-            XCTAssertGreaterThan(try XCTUnwrap((rise.values as? [CGFloat])?.first), 0.5, "on from the height it shows")
+            XCTAssertEqual(try XCTUnwrap((rise.values as? [CGFloat])?.first), height, accuracy: 0.1, "on from the height it shows")
 
             shell.moveColumn(.left)
             XCTAssertEqual(twice.view.subviews.filter { $0 is PassShadeView }.count, 1, "passed twice, one shade")
