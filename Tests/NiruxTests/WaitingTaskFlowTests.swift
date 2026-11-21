@@ -9,14 +9,19 @@ final class WaitingTaskFlowTests: XCTestCase {
                mergeable: nil, url: "https://github.com/o/r/pull/42", additions: nil, deletions: nil, changedFiles: nil)
     }
 
+    private func upstreamTask(_ title: String, lead: UIFlowHarness.Lead, in harness: UIFlowHarness) throws -> WorkspaceState {
+        harness.shell.addWorkspace(title: title, cwd: harness.worktree, profileID: lead.space, activate: false)
+        return try XCTUnwrap(harness.shell.workspaces.first { $0.title == title })
+    }
+
     private func start(
-        _ title: String, after: String? = nil, template: String? = nil, lead: UIFlowHarness.Lead, in harness: UIFlowHarness
+        _ title: String, after: String, template: String? = nil, lead: UIFlowHarness.Lead, in harness: UIFlowHarness
     ) throws -> WorkspaceState {
         var arguments = ["description": title]
         arguments["after"] = after
         arguments["template"] = template
         let result = try harness.callLeadTool(LeadTools.startTask, arguments, lead: lead)
-        XCTAssertFalse(result.isError, result.text)
+        XCTAssertFalse(result.isError, "\(title): \(result.text)")
         return try XCTUnwrap(harness.shell.workspaces.first { $0.title == title })
     }
 
@@ -27,7 +32,7 @@ final class WaitingTaskFlowTests: XCTestCase {
             let git = { (arguments: [String]) in try UIFlowHarness.git(arguments, at: harness.repo) }
             _ = try git(["remote", "add", "origin", harness.repo])
             _ = try git(["fetch", "origin", "main:refs/remotes/origin/main"])
-            let upstream = try start("Prepare catalog", lead: lead, in: harness)
+            let upstream = try upstreamTask("Prepare catalog", lead: lead, in: harness)
             shell.refreshGitContextNow(for: upstream)
             harness.waitUntil("the upstream branch") { upstream.gitBranch != nil }
             upstream.prInfo = pullRequest("OPEN")
@@ -85,7 +90,7 @@ final class WaitingTaskFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try harness.makeLead()
-            let upstream = try start("Add accounts", lead: lead, in: harness)
+            let upstream = try upstreamTask("Add accounts", lead: lead, in: harness)
             let task = try start("List accounts", after: upstream.title, lead: lead, in: harness)
             var state = try XCTUnwrap(Persistence.load())
             let index = try XCTUnwrap(state.workspaces.firstIndex { $0.id == task.id })
@@ -114,7 +119,7 @@ final class WaitingTaskFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try harness.makeLead()
-            let upstream = try start("Prepare schema", lead: lead, in: harness)
+            let upstream = try upstreamTask("Prepare schema", lead: lead, in: harness)
             let task = try start("Update schema", after: upstream.title, lead: lead, in: harness)
             let downstream = try start("Ship schema", after: task.title, lead: lead, in: harness)
             let change = { (args: [String: Any]) in try harness.callLeadTool(LeadTools.setTaskAfter, args, lead: lead) }
@@ -128,7 +133,7 @@ final class WaitingTaskFlowTests: XCTestCase {
             XCTAssertTrue(failed.rowSummary.status.text.contains("#42"))
             XCTAssertFalse(shell.awaitedWorkspaceIDs.contains(upstream.id))
             XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("#42") && $0.text.contains(task.title) })
-            let other = try start("Prepare API", lead: lead, in: harness)
+            let other = try start("Prepare API", after: upstream.title, lead: lead, in: harness)
             XCTAssertFalse(try change(["task": task.title, "after": other.title]).isError)
             XCTAssertNil(task.waitingStart?.failure)
             XCTAssertEqual(task.waitingStart?.awaited.workspaceID, other.id)
