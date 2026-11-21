@@ -398,7 +398,10 @@ struct WorkspaceInfo: Hashable {
     /// icon's ring fills up to it.
     var boardProgress: SidebarBoardProgress?
     var currentBoardProgress: SidebarBoardProgress? {
-        if let number = boardProgress?.number, let prInfo, prInfo.number != number || prInfo.state == .closed { return nil }
+        guard let boardProgress, let prInfo else { return boardProgress }
+        guard boardProgress.number == prInfo.number, prInfo.state != .closed else { return nil }
+        if (boardProgress.mergeStep == .merged) != (prInfo.state == .merged) { return nil }
+        if boardProgress.mergeStep == .ready, prInfo.blocksMerge(hasFeedback: prFeedback != nil) { return nil }
         return boardProgress
     }
     var station: BoardStages.Station? { currentBoardProgress?.station }

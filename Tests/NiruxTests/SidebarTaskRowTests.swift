@@ -223,15 +223,15 @@ final class SidebarTaskRowTests: XCTestCase {
                 .compactMap { $0 as? SidebarBadgeView }.first { $0.accessibilityRole() == .staticText }?.accessibilityLabel()
         }
         XCTAssertEqual(chip(task), "Ready #39")
-        task.boardProgress = SidebarBoardProgress(station: .reviews)
+        task.boardProgress = SidebarBoardProgress(station: .reviews, number: 39)
         XCTAssertEqual(chip(task), "Review #39")
         XCTAssertEqual(task.rowSummary.mark, .idle, "the state icon follows the Board too")
-        task.boardProgress = SidebarBoardProgress(station: .checks)
+        task.boardProgress = SidebarBoardProgress(station: .checks, number: 39)
         XCTAssertEqual(chip(task), "Checks #39")
         XCTAssertEqual(chip(workspace([column()], pr: pullRequest(.merged))), "Merged #39")
         XCTAssertEqual(chip(workspace([column()], pr: pullRequest(.closed))), "Code")
         var changes = workspace([column()], pr: pullRequest(ci: "SUCCESS", review: "CHANGES_REQUESTED"))
-        changes.boardProgress = SidebarBoardProgress(station: .merge)
+        changes.boardProgress = SidebarBoardProgress(station: .merge, number: 39)
         XCTAssertEqual(chip(changes), "Review #39")
         var planning = column(0, .working)
         planning.isPlanning = true
@@ -242,6 +242,28 @@ final class SidebarTaskRowTests: XCTestCase {
         var boardOnly = workspace([column()])
         boardOnly.boardProgress = SidebarBoardProgress(station: .merge, number: 41, mergeStep: .merged)
         XCTAssertEqual(chip(boardOnly), "Merged #41")
+    }
+
+    func testChipAndStatusFollowTheCurrentPullRequestWhenBoardReadingsAge() throws {
+        let ready = SidebarBoardProgress(station: .merge, number: 39, mergeStep: .ready)
+        let beforePR = SidebarBoardProgress(station: .code)
+        func shown(_ board: SidebarBoardProgress, _ pr: PRInfo?) throws -> [String] {
+            var task = workspace([column()], pr: pr)
+            task.boardProgress = board
+            let views = SidebarWorkspaceCardRenderer(workspace: task, sidebarWidth: 260, yOffset: 400).render().views
+            let chip = try XCTUnwrap(views.compactMap { $0 as? SidebarBadgeView }.first { $0.accessibilityRole() == .staticText })
+            let status = views.compactMap { $0 as? NSTextField }.first { $0.frame.midY == chip.frame.midY }
+            return [try XCTUnwrap(chip.accessibilityLabel()), status?.stringValue ?? ""]
+        }
+        XCTAssertEqual(try shown(ready, pullRequest(ci: "SUCCESS")), ["Ready #39", "Checks passed"])
+        XCTAssertEqual(try shown(ready, pullRequest(ci: "FAILURE")), ["Checks #39", "checks failed"])
+        XCTAssertEqual(try shown(ready, pullRequest(ci: "PENDING")), ["Checks #39", "checks running"])
+        XCTAssertEqual(try shown(ready, pullRequest(ci: "SUCCESS", draft: true)), ["Code #39", "draft"])
+        XCTAssertEqual(try shown(ready, pullRequest(ci: "SUCCESS", review: "CHANGES_REQUESTED")), ["Review #39", "checks passed"])
+        XCTAssertEqual(try shown(beforePR, nil), ["Code", ""])
+        XCTAssertEqual(try shown(beforePR, pullRequest(ci: "SUCCESS")), ["Ready #39", "Checks passed"])
+        XCTAssertEqual(try shown(.init(station: .reviews, number: 39), pullRequest(ci: "SUCCESS")), ["Review #39", "checks passed"])
+        XCTAssertEqual(try shown(ready, nil), ["Ready #39", ""])
     }
 
     func testOnlyTheSelectedRowShowsItsColumns() throws {

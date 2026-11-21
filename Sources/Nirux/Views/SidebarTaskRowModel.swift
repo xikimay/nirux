@@ -330,9 +330,12 @@ extension WorkspaceInfo {
 extension PRInfo {
     var requiresReview: Bool { ["REVIEW_REQUIRED", "CHANGES_REQUESTED"].contains(reviewDecision ?? "") }
 
+    func blocksMerge(hasFeedback: Bool) -> Bool {
+        isDraft || ["FAILURE", "PENDING"].contains(ciStatus) || mergeable == "CONFLICTING" || requiresReview || hasFeedback
+    }
+
     func isReadyToMerge(hasFeedback: Bool) -> Bool {
-        state == .open && !isDraft && ciStatus == "SUCCESS" && mergeable != "CONFLICTING"
-            && !requiresReview && !hasFeedback
+        state == .open && ciStatus == "SUCCESS" && !blocksMerge(hasFeedback: hasFeedback)
     }
 }
 
