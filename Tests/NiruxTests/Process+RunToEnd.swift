@@ -8,6 +8,8 @@ extension Process {
         let ended = DispatchSemaphore(value: 0)
         terminationHandler = { _ in ended.signal() }
         try run()
+        // Only the process holds a write end now: the read ends with it.
+        try? pipe?.fileHandleForWriting.close()
         let data = pipe?.fileHandleForReading.readDataToEndOfFile() ?? Data()
         ended.wait()
         return data
