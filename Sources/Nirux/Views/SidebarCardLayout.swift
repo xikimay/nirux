@@ -161,6 +161,7 @@ struct SidebarCardLayout {
     let stepTitle: String
     let stepWidth: CGFloat
     let statusText: NSAttributedString
+    let statusBelowStep: Bool
     let statusLineLimit: Int
     let statusLineCount: Int
     let height: CGFloat
@@ -198,10 +199,14 @@ struct SidebarCardLayout {
         else if summary.status.tone == .branch || (step == .merged && phrase == "Merged") { phrase = "" }
         else if let prefix, phrase.hasPrefix(prefix) { phrase = String(phrase.dropFirst(prefix.count)) }
         statusText = SidebarWorkspaceCardRenderer.statusText(summary, shown: phrase)
+        let besideStep = rowWidth - stepWidth - Theme.Space.xs
+        statusBelowStep = summary.mark == .working && SidebarWrappedText.lineCount(
+            statusText, width: max(1, besideStep), lineHeight: Metrics.statusRowHeight, maxLines: 2
+        ) > 1
         statusLineLimit = [.needsYou, .error, .blocked, .asking].contains(summary.mark)
             ? summary.statusLineLimit(isSelected: workspace.isActive) : 1
         statusLineCount = isCompact || workspace.isLead || statusLineLimit == 1 ? 1 : SidebarWrappedText.lineCount(
-            statusText, width: max(1, rowWidth - stepWidth - Theme.Space.xs),
+            statusText, width: max(1, statusBelowStep ? rowWidth : besideStep),
             lineHeight: Metrics.statusRowHeight, maxLines: statusLineLimit
         )
 
@@ -237,7 +242,7 @@ struct SidebarCardLayout {
             height = Metrics.leadRowHeight + blockHeight + (actions.isEmpty ? 0 : Metrics.rowPaddingY)
         } else {
             var height = Metrics.rowPaddingY * 2 + Metrics.titleRowHeight + Metrics.statusGap
-                + CGFloat(statusLineCount + (goal == nil ? 0 : 1)) * Metrics.statusRowHeight
+                + CGFloat(statusLineCount + (goal == nil ? 0 : 1) + (statusBelowStep ? 1 : 0)) * Metrics.statusRowHeight
             let lineCount = CGFloat(max(rows.count, links.isEmpty ? 0 : 1))
             if lineCount > 0 {
                 height += Metrics.columnsGap + lineCount * Metrics.chipHeight + (lineCount - 1) * Metrics.chipGap

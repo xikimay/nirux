@@ -108,6 +108,7 @@ final class SidebarWorkspaceCardRenderer {
             top -= Metrics.statusRowHeight
         }
         buildStep(top: top)
+        if layout.statusBelowStep { top -= Metrics.statusRowHeight }
         let statusLink = buildStatusLine(top: top)
         top -= CGFloat(layout.statusLineCount) * Metrics.statusRowHeight
         let lineCount = max(layout.chipRows.count, layout.links.isEmpty ? 0 : 1)
@@ -500,7 +501,7 @@ final class SidebarWorkspaceCardRenderer {
         let label = layout.statusLineLimit > 1
             ? SidebarWrappedText.label(text, lineHeight: Metrics.statusRowHeight, maxLines: layout.statusLineLimit)
             : NSTextField.sidebarLine(text)
-        let x = layout.indentX + layout.stepWidth + Theme.Space.xs
+        let x = layout.indentX + (layout.statusBelowStep ? 0 : layout.stepWidth + Theme.Space.xs)
         let height = CGFloat(layout.statusLineCount) * Metrics.statusRowHeight
         label.frame = NSRect(x: x, y: top - height, width: max(0, layout.contentMaxX - x), height: height)
         label.toolTip = statusToolTip(status)
