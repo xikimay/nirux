@@ -913,6 +913,7 @@ final class SidebarView: NSView {
         menu.addItem(.separator())
         if cleanup == .available { addWorktreeCleanupItem(to: menu, act: act) }
         if workspace?.isLead == true {
+            menu.addClosureItem(title: NiruxShellView.restartLeadTitle) { act(.restartLead) }
             menu.addClosureItem(title: Self.turnOffLeadTitle) { act(.turnOffLead) }
         } else {
             menu.addClosureItem(title: "Close Workspace") { act(.close) }

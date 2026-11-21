@@ -297,6 +297,22 @@ extension NiruxShellView {
         sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
     }
 
+    /// A new Claude's launch line in `workspace`: its space's mode, brief
+    /// and safety settings, and Nirux's tools.
+    func claudeLaunchCommand(in workspace: WorkspaceState, worktreeBranch: String?, handoverPrompt: String?) -> String {
+        NiruxShellView.claudeCommand(
+            mode: NiruxShellView.claudeLaunchMode(for: workspace),
+            sessionName: SessionName.make(
+                worktreeBranch: worktreeBranch,
+                spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
+                isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
+            ),
+            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
+            settingsFile: claudeSpaceSettingsFile(for: workspace),
+            handoverPrompt: handoverPrompt
+        )
+    }
+
     /// The setup script's line (see SpaceSetupScript), then `agentCommand`.
     private func setupCommand(_ script: URL, in workspace: WorkspaceState, then agentCommand: String?) -> String {
         SpaceSetupScript.command(
@@ -450,6 +466,9 @@ extension NiruxShellView {
             return
         case .turnOffLead:
             showSpaceSettings(profileID: workspaces[workspaceIndex].profileID, tab: .lead)
+            return
+        case .restartLead:
+            requestRestartLead(spaceID: workspaces[workspaceIndex].profileID)
             return
         case .editContext:
             showWorkspaceContextPanel(workspaceIndex: workspaceIndex)
