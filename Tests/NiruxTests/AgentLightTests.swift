@@ -542,7 +542,7 @@ final class AgentLightShellTests: XCTestCase {
     /// the centre settles the turn end it may be.
     @discardableResult
     private func hook(
-        _ name: AgentHookEvent.Name, kind: AgentHookEvent.Kind = .claude, finalMessage: String? = nil,
+        _ name: AgentHookEvent.Name, kind: CodingAgent = .claude, finalMessage: String? = nil,
         on column: ColumnState, of shell: NiruxShellView, through center: AgentHookCenter
     ) throws -> AgentHookOutcome {
         let uuid = try XCTUnwrap(column.agentUUID)

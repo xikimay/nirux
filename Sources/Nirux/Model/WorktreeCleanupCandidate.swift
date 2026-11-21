@@ -122,7 +122,7 @@ struct WorktreeCleanupCandidate: Equatable {
             if workspaces.isEmpty { parts.append("not open in Nirux") }
         }
         if !agents.isEmpty {
-            parts.append(agents.map { "\($0.displayName) \($0.statusDescription)" }.joined(separator: ", "))
+            parts.append(agents.map { "\($0.agent.name) \($0.statusDescription)" }.joined(separator: ", "))
         }
         return parts.joined(separator: " · ")
     }
@@ -194,7 +194,7 @@ struct WorktreeCleanupCandidate: Equatable {
                 continue
             }
             if !candidate.agents.isEmpty {
-                let agents = candidate.agents.map { "\($0.displayName) \($0.statusDescription)" }
+                let agents = candidate.agents.map { "\($0.agent.name) \($0.statusDescription)" }
                 agentLines.append("• \(agents.joined(separator: ", ")) in \(quotedList(candidate.workspaces.map(\.title)))")
             }
         }
