@@ -240,6 +240,45 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(instructions?.map(\.message), ["/code-review"])
             XCTAssertTrue(try call(LeadTools.tell, ["task": "nope", "message": "hi"], lead: lead, in: harness).isError)
 
+            // Its thread: the request, the Lead's next step, and what the Lead
+            // and the user said, frozen when it closes.
+            XCTAssertFalse(try call(
+                LeadTools.setTaskContext, ["task": "Add a date filter", "next_step": "ship the filter"], lead: lead, in: harness
+            ).isError)
+            // Merged: its follow-up rounds stay in its thread, and the Lead's
+            // next step goes.
+            let url = "https://github.com/acme/repo/pull/7"
+            shell.prFollowUpCenter.file.update {
+                $0.pullRequests[url] = PRFollowUp.Entry(rounds: [PRFollowUp.Round(kind: .ci, head: "abc", typedAt: 5)])
+            }
+            task.prInfo = PRInfo(
+                number: 7, state: .merged, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil, url: url,
+                additions: nil, deletions: nil, changedFiles: nil
+            )
+            shell.followUpPullRequest(of: task)
+            XCTAssertNil(shell.prFollowUpCenter.file.value.pullRequests[url])
+            // Its worktree removed under it: it is still a task with a thread.
+            try FileManager.default.removeItem(atPath: task.cwd)
+            shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), refocusing: false)
+            let saved = shell.persistedState()
+            XCTAssertFalse(saved.workspaces.contains { $0.id == task.id }, "quitting during the exit must not restore the closed task")
+            XCTAssertEqual(saved.workspaces[saved.activeWorkspaceIndex].id, lead.workspace.id)
+            var thread: [TaskThread.Event] = []
+            harness.waitUntil("its thread frozen") {
+                thread = TaskThread.Store.load(workspaceID: task.id, stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
+                return thread.contains { $0.kind == .closed }
+            }
+            let request = try XCTUnwrap(thread.first)
+            XCTAssertEqual([request.kind.rawValue, request.by?.rawValue, request.text], ["request", "lead", "Add a date filter\nGET /orders?from=&to="])
+            XCTAssertTrue(thread.contains { $0.kind == .nextStep && $0.by == .lead && $0.text == "ship the filter" })
+            XCTAssertTrue(thread.contains { $0.kind == .nextStep && $0.by == .nirux && $0.text == nil })
+            XCTAssertTrue(thread.contains { $0.kind == .followUp && $0.time == 5 && $0.detail == "ci" && $0.ref == url })
+            XCTAssertNil(thread.last { $0.kind == .closed }?.text, "the live pull request may be another checkout's: only the ledger's count")
+            XCTAssertTrue(thread.contains { $0.kind == .answer && $0.by == .lead && $0.text == "UTC" && $0.detail == "accepted" })
+            XCTAssertTrue(thread.contains { $0.kind == .handedToUser && $0.text == why })
+            XCTAssertTrue(thread.contains { $0.kind == .answer && $0.by == .user && $0.text == "Yes, until v3" })
+            XCTAssertTrue(thread.contains { $0.kind == .tell && $0.by == .lead && $0.text == "/code-review" })
+
             // A title and a branch of its own: its row, its handover and its
             // branch take them. A title alone names the branch too.
             let named = try call(
