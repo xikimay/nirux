@@ -63,6 +63,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(shell.activeWorkspace === lead.workspace, "it opens behind what the user is doing")
             let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childWorkspaceID == task.id })
             XCTAssertEqual(mission.reportsToLead, true)
+            XCTAssertEqual(mission.startedByParent, true, "its first prompt is the Lead's")
             XCTAssertEqual(mission.parentWorkspaceID, lead.workspace.id)
             XCTAssertEqual(task.terminalEnvironment(agentUUID: mission.childAgentUUID)["NIRUX_MISSION_HANDOFFS"], "1")
             XCTAssertEqual(harness.agentLaunches.last.map { $0.contains("This is a Nirux mission workspace") }, true)
