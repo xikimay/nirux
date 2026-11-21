@@ -147,6 +147,45 @@ extension NiruxShellView {
         return result
     }
 
+    /// A Mission child's turn ended on a question its parent sent the prompt
+    /// for: the last prompt typed to it was Nirux's (a Mission message, a
+    /// notice), or none was and the parent started it. The question goes to
+    /// the parent as the child's question, which the parent answers or hands
+    /// to the user, and the row says "Asking …". False, and the user is
+    /// asked, when the user typed that prompt or started the task, is at its
+    /// prompt, or the turn may go on (a Stop hook), or when the ledger takes
+    /// no question (the Mission completed, handoffs are off).
+    func askParent(
+        for resolution: AgentHookCenter.Resolution, _ request: TurnEndRequest, asking question: TurnEndQuestion?,
+        store: MissionStore = .shared
+    ) -> Bool {
+        guard let pty = resolution.column.pty, let agentUUID = resolution.column.agentUUID, store.ensureLoaded(),
+              let mission = store.missions.last(where: {
+                  $0.oneWay != true && $0.childWorkspaceID == resolution.workspace.id && $0.childAgentUUID == agentUUID
+              })
+        else { return false }
+        let handoffs = Self.currentMissionHandoffsEnabled()
+        guard mission.isCarried(handoffsEnabled: handoffs) else { return false }
+        // Who sent the turn's prompt: its transcript line may be unread yet.
+        pty.readTranscriptPrompts()
+        switch pty.agentLastPromptTyper {
+        case .user: return false
+        case .nobody where mission.startedByParent != true: return false
+        case .nobody, .nirux: break
+        }
+        guard pty.mayAskParent(endingTurnAt: request.turnEndedAt) else { return false }
+        // It asked with `--mission ask` meanwhile: it waits on that one.
+        if store.waitingQuestion(childWorkspaceID: mission.childWorkspaceID, childAgentUUID: agentUUID) != nil { return true }
+        guard let message = TurnEndText.questionForParent(request.message, asking: question),
+              let asked = store.accept(MissionEvent(
+                  id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID,
+                  childAgentUUID: agentUUID, kind: .question, message: message, timestamp: request.turnEndedAt
+              ), enabled: handoffs)
+        else { return false }
+        if handleMissionEvent(asked.mission, event: asked.event) { store.markDelivered(eventID: asked.event.id) }
+        return true
+    }
+
     /// What a parent whose terminal runs can do with a question, from its
     /// foreground process (nil: a process-table miss, which `settle` reads
     /// as nothing new) and when Nirux typed the question into it, if it

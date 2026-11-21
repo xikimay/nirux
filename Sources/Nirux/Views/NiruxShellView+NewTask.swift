@@ -270,7 +270,8 @@ extension NiruxShellView {
         let mission = request.reportsTo.flatMap { parent in
             createMission(
                 parent: parent, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
-                agent: request.agent, branch: created.folderName == nil ? label : title, reportsToTask: request.reportsToTask
+                agent: request.agent, branch: created.folderName == nil ? label : title, reportsToTask: request.reportsToTask,
+                startedByParent: request.startedByLead || request.startedByTaskAgent
             )
         }
         addWorkspace(
