@@ -167,6 +167,9 @@ enum WorktreeCleanup {
         /// Its pull request is open or closed, or it has none: "PR #12
         /// open", "no pull request". Not a failure: nothing to clean up yet.
         var notMerged: String?
+        /// `pullRequest` merged with the branch's tip in it: the branch's
+        /// work is in, whatever else keeps the clean-up from going.
+        var mergedHoldsTip = false
 
         var plan: Plan? {
             guard problems.isEmpty, let branch = worktree.branch, let tip = worktree.tip,
@@ -244,7 +247,8 @@ enum WorktreeCleanup {
         let lookup = pullRequestLookup(branch: branch, tip: tip, worktree: worktree, tools: tools)
         problems += lookup.problems
         return .inspected(Report(
-            worktree: worktree, pullRequest: lookup.pullRequest, problems: problems, notMerged: lookup.notMerged
+            worktree: worktree, pullRequest: lookup.pullRequest, problems: problems, notMerged: lookup.notMerged,
+            mergedHoldsTip: lookup.pullRequest?.state == .merged && lookup.problems.isEmpty
         ))
     }
 

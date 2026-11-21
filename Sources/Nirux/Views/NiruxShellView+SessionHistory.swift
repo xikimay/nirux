@@ -16,15 +16,15 @@ extension NiruxShellView {
         switch event.kind {
         case .claude:
             agentProcess = appliedEvent.claudeSessionAgent
-        case .agy:
-            // Antigravity's conversations aren't in the session history.
-            return
         case .codex:
             let foreground = resolution.column.pty?.foregroundProcess(snapshot: snapshot)
             agentProcess = foreground.flatMap {
-                !AgentHookCenter.isHeadlessCodex($0) && resolution.column.boundCodexSessionID(of: $0.instance) == sessionID
+                $0.headlessAgent != .codex && resolution.column.boundCodexSessionID(of: $0.instance) == sessionID
                     ? $0 : nil
             }
+        case .agy, .gemini, .opencode:
+            // Not in `SessionHistory.agents`.
+            return
         }
         // A permission dialog and its answer only move the status: no disk
         // reads for them.

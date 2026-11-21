@@ -123,40 +123,6 @@ enum SidebarRenderer {
 
     // MARK: - Column icons
 
-    private static let claudeAppIcon: NSImage? = {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop") {
-            return NSWorkspace.shared.icon(forFile: url.path)
-        }
-        return nil
-    }()
-
-    private static let codexAppIcon: NSImage? = {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") {
-            return NSWorkspace.shared.icon(forFile: url.path)
-        }
-        return nil
-    }()
-
-    /// The desktop app's icon for an agent that has one installed (the
-    /// palette's agent rows show it too).
-    static func agentAppIcon(processName: String) -> NSImage? {
-        switch processName {
-        case "claude": claudeAppIcon
-        case "codex": codexAppIcon
-        default: nil
-        }
-    }
-
-    /// The symbol an agent's chip shows without its app icon.
-    static func agentSymbol(processName: String) -> String? {
-        switch processName {
-        case "claude": "sparkles"
-        case "codex": "brain.head.profile"
-        case "agy": "atom"
-        default: nil
-        }
-    }
-
     /// An SF Symbol in one color.
     static func symbol(_ name: String, color: NSColor, pointSize: CGFloat = 10) -> NSImage? {
         guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil) else { return nil }
@@ -180,17 +146,13 @@ enum SidebarRenderer {
         if column.isWebView {
             return symbol(Theme.Symbol.browser, color: color)
         }
-        guard let processName = (column.deferredAgent?.processName ?? column.processName)?.lowercased() else {
+        guard let processName = (column.deferredAgent?.agent.rawValue ?? column.processName)?.lowercased() else {
             return symbol(Theme.Symbol.terminal, color: color)
         }
+        if let agent = CodingAgent(rawValue: processName) {
+            return agent.appIcon ?? symbol(agent.symbolName, color: color)
+        }
         switch processName {
-        case "claude", "codex", "agy":
-            return agentAppIcon(processName: processName)
-                ?? agentSymbol(processName: processName).flatMap { symbol($0, color: color) }
-        case "gemini":
-            return symbol("sparkle", color: color)
-        case "opencode":
-            return symbol("curlybraces", color: color)
         case "vim", "nvim", "vi", "helix", "hx", "nano", "emacs":
             return symbol("pencil.line", color: color)
         case "ssh", "mosh":
@@ -209,7 +171,7 @@ enum SidebarRenderer {
         if column.isProjectBoard { return "Board" }
         if column.isBranchReview { return "Branch Review" }
         if column.isWebView { return column.webTitle?.isEmpty == false ? column.webTitle! : "web" }
-        return column.deferredAgent?.processName ?? column.stuck?.agentName ?? column.processName ?? "shell"
+        return column.deferredAgent?.agent.rawValue ?? column.stuck?.agentName ?? column.processName ?? "shell"
     }
 
     /// Chip tooltip: what exactly the agent waits on ("Bash: git push").

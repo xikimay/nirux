@@ -189,7 +189,7 @@ final class WaitingAgentTests: XCTestCase {
     func testExitMidTurnBlocksOnceConfirmed() {
         startTurn()
         machine.noteAgentExited(AgentMidTurnExit(
-            processName: "claude", exitedAt: t0 + 10, lastSeenAt: t0 + 9,
+            agent: .claude, exitedAt: t0 + 10, lastSeenAt: t0 + 9,
             sessionID: nil, arguments: ["claude"], firedHooks: true
         ))
 

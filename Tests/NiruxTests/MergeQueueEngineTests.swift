@@ -176,7 +176,7 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertEqual(MergeQueue.busyLabel(state), "waiting (permission · Bash)")
         XCTAssertEqual(MergeQueue.busyLabel(.working(duration: "3m")), "working")
         XCTAssertNil(MergeQueue.busyLabel(.idle))
-        XCTAssertNil(MergeQueue.busyLabel(.exitedMidTurn(processName: "claude")))
+        XCTAssertNil(MergeQueue.busyLabel(.exitedMidTurn(agent: .claude)))
     }
 
     func testAnAgentBackAtWorkBeforeTheMergeIsWaitedForAgain() {
@@ -448,6 +448,7 @@ final class MergeQueueEngineTests: XCTestCase {
         var queue = started(world)
         queue.run(world)
         let message = queue.stopReason?.message ?? ""
+        XCTAssertEqual(queue.stopReason?.isChecksTimeout, true)
         XCTAssertTrue(message.contains("test (queued)"), message)
         XCTAssertTrue(message.contains("raise the checks timeout"), message)
         XCTAssertFalse(message.contains("misspelled"), message)

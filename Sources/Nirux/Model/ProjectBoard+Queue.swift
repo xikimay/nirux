@@ -26,6 +26,7 @@ extension ProjectBoard {
         var status: String?
         /// Stopped by a problem, not by the user.
         var statusIsFailure = false
+        var stoppedAt: Date?
         /// The queue shown: running, ended or saved.
         var entries: [MergeQueue.Entry] = []
         var workflow: String?

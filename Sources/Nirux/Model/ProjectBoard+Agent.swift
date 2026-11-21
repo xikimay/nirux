@@ -20,7 +20,7 @@ extension ProjectBoard {
         /// A turn waits on the model with no sign of life, for how long.
         case silent(duration: String)
         /// The agent died in the middle of a turn.
-        case exitedMidTurn(processName: String)
+        case exitedMidTurn(agent: CodingAgent)
         /// The turn ended on an API error; `resume` says whether Resume may
         /// type `continue`.
         case stoppedOnError(kind: String?, resume: SidebarStuckState.Resume)
@@ -89,8 +89,8 @@ extension ProjectBoard {
             return .waitingLong(reason, duration: duration)
         case .stoppedOnError(let kind, _, _, let resume)?:
             return .stoppedOnError(kind: kind, resume: resume)
-        case .exitedMidTurn(let processName)?:
-            return .exitedMidTurn(processName: processName)
+        case .exitedMidTurn(let agent)?:
+            return .exitedMidTurn(agent: agent)
         case .silent(let duration, _, _)?:
             return .silent(duration: duration)
         case nil:

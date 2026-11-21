@@ -55,7 +55,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         let availability = try SymbolAvailability()
         try UIFlowHarness.run { harness in
             harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
-            var names = ["circle.fill", "command"] + ["claude", "codex"].compactMap(SidebarRenderer.agentSymbol(processName:))
+            var names = ["circle.fill", "command"] + CodingAgent.allCases.map(\.symbolName)
             for action in harness.paletteCommands() {
                 if case .symbol(let name) = action.icon { names.append(name) }
             }
@@ -202,7 +202,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
                 reviewed
             ], in: harness)
             workspace.addColumn(
-                deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session(restoredID), mode: .default), title: nil, lastStatus: nil),
+                deferredAgent: DeferredAgentLaunch(launch: .claude(resume: .session(restoredID), mode: .default), title: nil, lastStatus: nil),
                 agentUUID: UUID().uuidString, cwd: harness.repo
             )
             let restoredColumn = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
@@ -488,7 +488,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             let session = "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11"
             restored.addColumn(
                 deferredAgent: DeferredAgentLaunch(
-                    agent: .claude(resume: .session(session), mode: .default), title: nil, lastStatus: nil
+                    launch: .claude(resume: .session(session), mode: .default), title: nil, lastStatus: nil
                 ),
                 agentUUID: UUID().uuidString,
                 cwd: harness.repo

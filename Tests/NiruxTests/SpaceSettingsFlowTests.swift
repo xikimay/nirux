@@ -43,7 +43,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             XCTAssertTrue(harness.agentLaunches.last?.contains("'--settings=") == true, harness.agentLaunches.last ?? "")
             let claude = try XCTUnwrap(workspace(harness, "claude"))
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === claude }))
-            shell.openCodex()
+            shell.openAgent(.codex)
             let codexFlags = CodexLaunchMode.readOnly.cliArgs.joined(separator: " ")
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command codex " + codexFlags) == true, harness.agentLaunches.last ?? "")
 
@@ -258,7 +258,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             }
             pick(ClaudeLaunchMode.plan.rawValue, in: pane.claudePopup)
             XCTAssertEqual(store.load().defaults.claudeLaunchMode, .plan)
-            pick(NiruxApp.WorkspaceAgent.codex.rawValue, in: pane.agentPopup)
+            pick(CodingAgent.codex.rawValue, in: pane.agentPopup)
             XCTAssertEqual(store.load().defaults.agent, .codex)
             pick(SpaceSettingsDefaultsPane.settingsChoice, in: pane.claudePopup)
             XCTAssertNil(store.load().defaults.claudeLaunchMode)
