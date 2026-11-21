@@ -326,7 +326,7 @@ extension NiruxShellView {
                 lines.append("- “\(MissionPromptText.quoted(task.title))” · \(state.line) · \(wait.pendingStart?.repository ?? "") · \(task.leadTaskReference)")
                 continue
             }
-            var line = taskListHead(task, in: space, parentTitle: parentTitles[task.id], snapshot: snapshot) + " · \(task.leadTaskReference)"
+            var line = taskListHead(task, in: space, parentTitle: parentTitles[task.id], reference: task.leadTaskReference, snapshot: snapshot)
             // Only what its own tasks sent it: another agent's Mission
             // isn't its to answer, and its tells don't make a task its own.
             let missions = store.missions.filter { $0.childWorkspaceID == task.id && $0.parentWorkspaceID == leadID && $0.oneWay != true }
@@ -364,7 +364,9 @@ extension NiruxShellView {
 
     /// A task's line in list_tasks, up to its pull request: what it is,
     /// where it works, and what its agents do.
-    func taskListHead(_ task: WorkspaceState, in space: WorkspaceProfile, parentTitle: String?, snapshot: ProcessSnapshot) -> String {
+    func taskListHead(
+        _ task: WorkspaceState, in space: WorkspaceProfile, parentTitle: String?, reference: String? = nil, snapshot: ProcessSnapshot
+    ) -> String {
         var line = "- “\(MissionPromptText.quoted(task.title))”"
         if let parentTitle { line += " · sub-task of “\(MissionPromptText.quoted(parentTitle))”" }
         if let branch = task.gitBranch { line += " · branch \(MissionPromptText.quoted(branch))" }
@@ -373,6 +375,7 @@ extension NiruxShellView {
         } else if let repository = repositoryAnchor(of: task, in: space)?.name {
             line += " · \(repository)"
         }
+        if let reference { line += " · \(reference)" }
         if task.isInactive { line += " · inactive" }
         line += " · " + leadAgentState(of: task, snapshot: snapshot)
         if let pr = task.prInfo {
