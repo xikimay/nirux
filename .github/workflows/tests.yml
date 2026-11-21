@@ -72,6 +72,7 @@ jobs:
           restore-keys: coverage-index-v2-
 
       - name: Select tests
+        shell: bash
         id: select
         env:
           INDEX_KEY: ${{ steps.coverage.outputs.cache-matched-key }}
