@@ -570,6 +570,10 @@ final class UIFlowHarness {
     /// pull request holding its tip.
     func mergedWorktree(_ branch: String, in folder: String, number: Int) throws {
         try UIFlowHarness.git(["worktree", "add", "-q", "-b", branch, folder], at: repo)
+        try markBranchMerged(branch, in: folder, number: number)
+    }
+
+    func markBranchMerged(_ branch: String, in folder: String, number: Int) throws {
         try UIFlowHarness.git(
             ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "work"], at: folder
         )

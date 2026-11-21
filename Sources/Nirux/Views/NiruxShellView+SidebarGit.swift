@@ -82,7 +82,7 @@ extension NiruxShellView {
         ))
         let infos = built.map { info in
             var info = info
-            info.station = taskStations[info.id]
+            info.boardProgress = taskStations[info.id]
             return info
         }
         updateColumnHeaders(infos: infos, blockedWaits: blockedWaits, now: now)
@@ -167,6 +167,7 @@ extension NiruxShellView {
             agentStatus: agentStatus,
             isEditor: col.isEditor,
             editorFileName: editorFile,
+            isPlanning: col.isPlanning(in: foregroundProcess),
             isProjectBoard: col.isProjectBoard,
             isBranchReview: col.isBranchReview,
             editorIsDirty: col.editorColumn?.isDirty ?? false,
@@ -191,6 +192,9 @@ extension NiruxShellView {
     /// A task's row, from its columns' facts.
     func sidebarWorkspaceInfo(at index: Int, columns: [ColumnInfo], isActive: Bool, parentTitle: String?) -> WorkspaceInfo {
         let workspace = workspaces[index]
+        if let wait = workspace.waitingStart, let start = wait.pendingStart, let state = wait.waitingState {
+            workspace.columns.first?.waitingTask?.configure(.init(state: state, repository: start.repository, description: start.description))
+        }
         return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
                       profileID: workspace.profileID, isInactive: workspace.isInactive,
                       columnCount: workspace.columns.count,
@@ -205,7 +209,7 @@ extension NiruxShellView {
                       lastSummary: turnStatusEnabled || !workspace.lastSummaryIsStatus ? workspace.lastSummary : nil,
                       lastActivityAt: workspace.lastActivityAt,
                       reviewBadges: workspace.reviewBadges,
-                      station: taskStations[workspace.id],
+                      boardProgress: taskStations[workspace.id],
                       mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
                       isLead: workspace.isLead,
                       parentTitle: parentTitle,
@@ -213,7 +217,8 @@ extension NiruxShellView {
                       turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil,
                       ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0,
                       dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil,
-                      followUp: followUpRow(of: workspace))
+                      followUp: followUpRow(of: workspace),
+                      heldMessages: SidebarHeldMessages(workspace.mergeWaits), waitingTask: workspace.waitingStart?.waitingState)
     }
 
     /// Every column's foreground process, shown or not, and what follows
@@ -622,21 +627,23 @@ extension NiruxShellView {
     // MARK: - Git & PR Refresh
 
     /// The workspace on screen is followed closely even when archived (its
-    /// PR still is not: PRDetect.shouldRefresh keeps archived ones offline).
-    func gitRefreshTier(for workspace: WorkspaceState) -> GitRefreshTier {
+    /// PR still is not: PRDetect.shouldRefresh keeps archived ones offline),
+    /// and an archived one a merge wait follows as any other (`awaited`).
+    func gitRefreshTier(for workspace: WorkspaceState, awaited: Set<String>? = nil) -> GitRefreshTier {
         if workspace === activeWorkspace { return .focused }
-        if workspace.isInactive { return .archived }
+        if workspace.isInactive, !(awaited ?? awaitedWorkspaceIDs).contains(workspace.id) { return .archived }
         return .background
     }
 
     var gitRefreshTiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] {
-        workspaces.map { ($0, gitRefreshTier(for: $0)) }
+        let awaited = awaitedWorkspaceIDs
+        return workspaces.filter { !$0.isWaitingTask }.map { ($0, gitRefreshTier(for: $0, awaited: awaited)) }
     }
 
     func refreshGitAndPullRequests() {
         let tiers = gitRefreshTiers
         gitRefresh.tick(tiers)
-        refreshPRInfo(for: gitRefresh.pullRequestsDue(tiers))
+        refreshPRInfo(for: gitRefresh.pullRequestsDue(tiers, awaited: awaitedWorkspaceIDs))
         // After the PR pass, which recomputes diff stats for what it touched.
         refreshDiffStats(for: gitRefresh.diffStatsDue(tiers))
     }
@@ -644,6 +651,7 @@ extension NiruxShellView {
     /// Focus, a focused-column switch or an unarchive: read now instead of
     /// waiting for the throttles.
     func refreshGitContextNow(for workspace: WorkspaceState) {
+        guard !workspace.isWaitingTask else { return }
         gitRefresh.refreshNow(workspace, tier: gitRefreshTier(for: workspace))
     }
 
@@ -659,18 +667,18 @@ extension NiruxShellView {
     func refreshPRInfo(for candidates: [WorkspaceState]) {
         for workspace in candidates {
             guard PRDetect.shouldRefresh(
-                isInactive: workspace.isInactive,
+                isInactive: !followsPullRequest(workspace),
                 branch: workspace.gitBranch
             ), let requestedContext = workspace.gitContext else { continue }
             let branch = requestedContext.branch
             let cwd = workspace.focusedWorkingDirectory
             guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
             gitRefresh.notePullRequestRefresh(workspace)
-            startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext)
+            if !workspace.isInactive { startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext) }
             let readStartedAt = Date().timeIntervalSince1970
-            PRDetect.fetchAsync(branch: branch, cwd: cwd, startFolder: workspace.cwd) { [weak self, weak workspace] result in
+            fetchPullRequest(branch, cwd, workspace.cwd) { [weak self, weak workspace] result in
                 guard let workspace else { return }
-                guard !workspace.isInactive else {
+                guard self?.followsPullRequest(workspace) == true else {
                     workspace.finishPullRequestObservation(observation)
                     return
                 }
@@ -683,7 +691,7 @@ extension NiruxShellView {
                 let currentCwd = workspace.focusedWorkingDirectory
                 GitDetect.contextAsync(at: currentCwd, startFolder: workspace.cwd) { [weak self, weak workspace] result in
                     guard let workspace else { return }
-                    guard !workspace.isInactive,
+                    guard self?.followsPullRequest(workspace) == true,
                           case .observed(let currentContext) = result,
                           currentContext == queriedContext else {
                         workspace.finishPullRequestObservation(observation)
@@ -694,6 +702,12 @@ extension NiruxShellView {
                         for: queriedContext,
                         observation: observation
                     )
+                    self?.followMergeWaits(awaiting: workspace, read: info, now: readStartedAt)
+                    // An archived task is read for the waits on it only.
+                    guard !workspace.isInactive else {
+                        if changed { self?.scheduleMetadataRefresh() }
+                        return
+                    }
                     // Even unchanged: the history may have loaded since,
                     // and the first read after launch records what is
                     // already red.

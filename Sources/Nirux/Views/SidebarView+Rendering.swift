@@ -13,6 +13,7 @@ extension SidebarView {
             rebuildSkippedDuringDrag = true
             return
         }
+        defer { taskPreview.refresh() }
         rebuildSkippedDuringDrag = false
         // Before the rows go: what the list hangs by.
         let anchor = scrollAnchor()

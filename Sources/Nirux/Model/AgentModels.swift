@@ -1,6 +1,6 @@
 import Foundation
 
-struct TaskAgentSelection: Equatable, Sendable {
+struct TaskAgentSelection: Codable, Equatable, Sendable {
     let agent: CodingAgent
     var model: String?
 

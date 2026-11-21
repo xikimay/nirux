@@ -58,6 +58,8 @@ extension NiruxShellView {
                 : WorkspaceProfile.defaultID
             let isLead = persistedWS.isLead && profileID != WorkspaceProfile.defaultID
                 && spacesWithALead.insert(profileID).inserted
+            let waits = persistedWS.mergeWaits ?? []
+            let waiting = waits.contains { $0.pendingStart != nil }
             let workspace = WorkspaceState(
                 id: persistedWS.id ?? UUID().uuidString,
                 title: persistedWS.title,
@@ -73,7 +75,8 @@ extension NiruxShellView {
                 isLead: isLead,
                 reportsToLead: persistedWS.reportsToLead,
                 reportsToTask: persistedWS.reportsToTask,
-                taskFolder: isLead ? nil : persistedWS.taskFolder
+                taskFolder: isLead ? nil : persistedWS.taskFolder,
+                firstColumn: waiting ? ColumnState(waitingTask: WaitingTaskView()) : nil
             )
             // A Lead is never parked.
             workspace.isInactive = persistedWS.isInactive && !isLead
@@ -91,9 +94,10 @@ extension NiruxShellView {
             for (rawValue, run) in persistedWS.reviewRuns ?? [:] {
                 if let pass = ReviewPass(rawValue: rawValue) { workspace.reviewRuns[pass] = run }
             }
+            workspace.mergeWaits = waits
             // Remove the default column created by WorkspaceState.init
-            if let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
-            for persistedColumn in persistedWS.columns {
+            if !waiting, let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
+            for persistedColumn in persistedWS.columns where !waiting {
                 restoreColumn(
                     persistedColumn,
                     in: workspace,
@@ -124,9 +128,11 @@ extension NiruxShellView {
             resumeAllDeferredAgents()
         }
         updateSidebar()
+        restoreMergeWaits(now: Date().timeIntervalSince1970)
     }
 
-    private func restoreSidebarState(_ settings: PersistedSettings?) {
+    func restoreSidebarState(_ settings: PersistedSettings?) {
+        sidebarFold.chooseWidth(settings?.sidebarWidth ?? SidebarFold.defaultWidth)
         if let expanded = settings?.sidebarExpanded {
             sidebarFold.chosenExpanded = expanded
             sidebar.isExpanded = isSidebarExpanded
@@ -344,14 +350,15 @@ extension NiruxShellView {
             Persistence.load()?.settings ?? PersistedSettings(), recording: onboardingState
         )
         // The shell is the source of truth for sidebar state and the Board's order — carry the rest.
+        settings.sidebarWidth = sidebarFold.preferredWidth
         settings.sidebarExpanded = sidebarFold.chosenExpanded
         settings.boardOrder = boardOrder
         return PersistedState(
-            workspaces: workspaces.map { workspace in
+            workspaces: workspaces.filter { !$0.isClosing || $0.columns.first?.waitingTask == nil }.map { workspace in
                 PersistedWorkspace(
                     id: workspace.id, title: workspace.title,
                     cwd: Self.persistedWorkspaceCwd(for: workspace),
-                    columns: workspace.columns.map { persistedColumn($0, in: workspace, snapshot: snapshot) },
+                    columns: workspace.columns.filter { $0.waitingTask == nil }.map { persistedColumn($0, in: workspace, snapshot: snapshot) },
                     focusedColumnIndex: workspace.focusedIndex,
                     profileID: workspace.profileID,
                     isInactive: workspace.isInactive,
@@ -380,7 +387,8 @@ extension NiruxShellView {
                     isLead: workspace.isLead && !workspace.isClosing,
                     reportsToLead: workspace.reportsToLead,
                     reportsToTask: workspace.reportsToTask,
-                    taskFolder: workspace.taskFolder)
+                    taskFolder: workspace.taskFolder,
+                    mergeWaits: workspace.mergeWaits.isEmpty ? nil : workspace.mergeWaits)
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,

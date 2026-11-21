@@ -324,8 +324,10 @@ New flow, built on the guarded typing `tell` already uses
     too (the call stands in for the alert's click); a task without a
     repository has its folder moved to the Trash (for this tool only: Close
     and Archive keep it). Otherwise they stay and the answer says why: not
-    merged, uncommitted changes, another workspace open in it, a folder named
-    for another branch (a base reused across branches)… The task closes and
+    merged, uncommitted changes, another workspace open in it, or a reused
+    base folder. After a branch switch, the exact worktree path for the
+    starting branch recorded in this workspace’s Mission also qualifies.
+    The merged PR and the local branch removed are the current branch’s. The task closes and
     its shells hang up first; git runs, or the folder goes to the Trash,
     once all their processes ended (10 s at most, else the folder stays and
     the answer names them). A folder task's folder holding a git repository
@@ -485,11 +487,10 @@ New flow, built on the guarded typing `tell` already uses
 Mockups were validated in the design session. What changes:
 
 - **Sidebar:** a space picker at the top (name, task count, amber when an agent
-  waits; ⌥⌘1…⌥⌘9, since ⌘1…⌘9 focus columns), the Lead row, then task rows on two lines: title and time,
-  then one status line ("Needs you · npm run migrate", "Asking the Lead",
-  "Working", "#39 · checks passed"). The status wraps instead of being cut:
-  up to four lines when the task waits on the user, broke or is blocked, and
-  on the selected row; two on any other row; then "…" and the tooltip. A
+  waits; ⌥⌘1…⌥⌘9, since ⌘1…⌘9 focus columns), the Lead row, then each task's title and time,
+  its goal when supplied, and a step chip beside its status. The chip follows
+  the Board (Plan, Code, Review, Checks, Ready, Merged) and carries the PR
+  number. A question, blocker or error can wrap to four lines. A
   working Claude that may be going in
   circles says so in the same grey, in place of "Working" ("Stuck? · 3
   timeouts", "Stuck? · swift build failed 5×"): 3 commands past their
@@ -497,13 +498,13 @@ Mockups were validated in the design session. What changes:
   from its hooks over the turn. A command that only waits (a `sleep`, a poll
   loop, `gh pr checks`) counts as neither, nor does an exit 1 that answers
   (grep found nothing, a test is false). It never alerts or interrupts the
-  agent; Settings › Agents turns it off. No chips on every row. A blocker says
+  agent; Settings › Agents turns it off. A blocker says
   "Blocked · …" in grey after needs you, broken (failed checks too), asking,
   working and "Paused · Resume", before a finished turn and the pull request;
-  the next step ("Next · …") takes the branch's place, and the selected row
-  prints it under a status line that says something else (S13). INACTIVE becomes an
+  the selected row prints its next step below its columns. INACTIVE becomes an
   "Archived" row at the bottom, unfolding its list above it. The bottom dot switcher and Activity go. This
   replaces the three-line cards of the October visual system.
+  Hovering a task row or its folded-rail icon opens the same preview beside the sidebar, with the full title, optional goal, status and next action. The preview keeps keyboard focus in the workspace. Its button opens the task, or its thread when a thread presenter is connected.
 - **Title bar:** three buttons: New, Board, Search. Since replaced by the
   glass interface's command bar (step 3.1, [glass-interface.md](glass-interface.md)).
 - **Popovers, not alerts,** for anything the user must read and answer.

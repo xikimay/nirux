@@ -29,16 +29,18 @@ extension NiruxShellView {
         setupScript: URL? = nil,
         isLead: Bool = false,
         taskFolder: String? = nil,
+        waitingStart: MergeWait? = nil,
         activate: Bool = true,
         fadesBackdrop: Bool = false
     ) {
         // In the background (a task its Lead started): no selection, no
         // focus, no slide; the user stays where they type.
         // Its picture slides away while the interface may move only, of what
-        // shows: a crossing on its way ends.
+        // shows at rest: a crossing on its way ends, and a pass under the bar.
         if activate {
             closeSpacePlan(going: nil, animated: false)
             endSpaceCrossing()
+            endUnderBar()
         }
         let snapshot = activate && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
 
@@ -61,8 +63,10 @@ extension NiruxShellView {
             reportsToLead: reportsToLead,
             reportsToTask: reportsToTask,
             taskFolder: taskFolder,
-            initialAgentUUID: initialAgentUUID
+            initialAgentUUID: initialAgentUUID,
+            firstColumn: waitingStart.map { _ in ColumnState(waitingTask: WaitingTaskView()) }
         )
+        workspace.mergeWaits = waitingStart.map { [$0] } ?? []
         wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace, activate: activate)
         verticalStrip.addSubview(workspace.containerView)
@@ -122,6 +126,7 @@ extension NiruxShellView {
     /// worktree removed is no task, one re-added or repaired may be another
     /// repository's.
     static func taskLocation(of workspace: WorkspaceState) -> FolderIdentity? {
+        guard !workspace.isWaitingTask else { return nil }
         if let cached = workspace.taskLocationCache, FileManager.default.fileExists(atPath: workspace.cwd),
            modificationDate(of: cached.gitFile) == cached.gitFileDate {
             return cached.location
@@ -264,7 +269,7 @@ extension NiruxShellView {
     /// (`GitWorktree.currentBranch(at:)`) of a worktree workspace Nirux just
     /// opened; nil when unreadable, detached, or not a worktree workspace. It
     /// names the Claude session (see `SessionName`).
-    private func launchAgent(
+    func launchAgent(
         _ agent: CodingAgent, model: String?,
         in workspace: WorkspaceState,
         deliveredHandover: Bool,
@@ -397,10 +402,11 @@ extension NiruxShellView {
     private func activateProfile(_ profileID: String, crosses: Bool, profileAlreadySelected: Bool = false) {
         let previousProfileID = activeProfileID
         // The plan goes, a crossing on its way ends, and a pass under the
-        // rail: what shows now, at rest, is what leaves.
+        // rail or the bar: what shows now, at rest, is what leaves.
         closeSpacePlan(going: nil, animated: false)
         endSpaceCrossing()
         endUnderGlass()
+        endUnderBar()
         let leaving = crosses && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }
@@ -447,6 +453,9 @@ extension NiruxShellView {
             return
         case .reviewBranch:
             openBranchReview(in: workspaces[workspaceIndex])
+            return
+        case .startWaitingTask:
+            startWaitingTask(workspaces[workspaceIndex])
             return
         case .newSubtask:
             showNewSubtaskPanel(under: workspaces[workspaceIndex])
@@ -560,6 +569,8 @@ extension NiruxShellView {
             edgeGlowBottom.frame = frames.glowBottom
             columnIndicator.frame = frames.indicator
         }
+        sidebarResizeHandle.isHidden = !isSidebarExpanded
+        sidebarResizeHandle.frame = frames.divider.insetBy(dx: -3, dy: 0)
         statusBar.frame = frames.statusBar
     }
 

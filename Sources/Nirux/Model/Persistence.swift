@@ -271,6 +271,7 @@ struct PersistedSettings: Codable {
     var claudeNoFlicker: Bool? = true
     var codexLaunchMode: CodexLaunchMode?
     var sidebarExpanded: Bool?
+    var sidebarWidth: Double?
     /// Parent/child messages between worktree agents (Missions). On for a
     /// new install; a state file keeps what it holds (before the Lead it
     /// was an opt-in Experimental setting, always written). A space's Lead
@@ -367,6 +368,7 @@ struct PersistedSettings: Codable {
         case claudeNoFlicker
         case codexLaunchMode
         case sidebarExpanded
+        case sidebarWidth
         case missionHandoffsEnabled
         case sidebarApprovalsEnabled
         case keepMacAwakeWhileAgentsWork
@@ -411,6 +413,7 @@ struct PersistedSettings: Codable {
         claudeNoFlicker = try container.decodeIfPresent(Bool.self, forKey: .claudeNoFlicker) ?? true
         codexLaunchMode = (try? container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)) ?? nil
         sidebarExpanded = try container.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
+        sidebarWidth = try? container.decode(Double.self, forKey: .sidebarWidth)
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? true
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? true
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
@@ -466,6 +469,7 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(claudeNoFlicker, forKey: .claudeNoFlicker)
         try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
         try container.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)
+        try container.encodeIfPresent(sidebarWidth, forKey: .sidebarWidth)
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
@@ -550,6 +554,9 @@ struct PersistedWorkspace: Codable {
     /// See `WorkspaceState.taskFolder`. A build before it restores the
     /// task as a plain workspace.
     var taskFolder: String?
+    /// See `WorkspaceState.mergeWaits`. One this build can't read is
+    /// dropped, never the workspace.
+    var mergeWaits: [MergeWait]?
 
     init(
         id: String? = nil,
@@ -579,7 +586,8 @@ struct PersistedWorkspace: Codable {
         isLead: Bool = false,
         reportsToLead: Bool = false,
         reportsToTask: Bool = false,
-        taskFolder: String? = nil
+        taskFolder: String? = nil,
+        mergeWaits: [MergeWait]? = nil
     ) {
         self.id = id
         self.title = title
@@ -609,6 +617,7 @@ struct PersistedWorkspace: Codable {
         self.reportsToLead = reportsToLead
         self.reportsToTask = reportsToTask
         self.taskFolder = taskFolder
+        self.mergeWaits = mergeWaits
     }
 
     enum CodingKeys: String, CodingKey {
@@ -616,7 +625,7 @@ struct PersistedWorkspace: Codable {
         case purpose, phase, lastSummary, lastSummaryIsManual, lastSummaryIsStatus, lastActivityAt
         case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
         case reportsToLead, reportsToTask
-        case taskFolder
+        case taskFolder, mergeWaits
     }
 
     init(from decoder: Decoder) throws {
@@ -656,6 +665,8 @@ struct PersistedWorkspace: Codable {
         taskFolder = (try? container.decodeIfPresent(String.self, forKey: .taskFolder)).flatMap { $0 }.flatMap {
             $0.hasPrefix("/") ? $0 : nil
         }
+        let waits = Lossy<MergeWait>.array(container, .mergeWaits)
+        mergeWaits = waits.isEmpty ? nil : waits
     }
 
     func encode(to encoder: Encoder) throws {
@@ -690,6 +701,7 @@ struct PersistedWorkspace: Codable {
         if reportsToLead { try container.encode(true, forKey: .reportsToLead) }
         if reportsToTask { try container.encode(true, forKey: .reportsToTask) }
         try container.encodeIfPresent(taskFolder, forKey: .taskFolder)
+        try container.encodeIfPresent(mergeWaits, forKey: .mergeWaits)
     }
 }
 
