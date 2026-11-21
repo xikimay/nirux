@@ -693,10 +693,9 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                     .map { $0.childConsumedAt != nil }
             }
             task.agent.hold()
-            let start = Date()
             let told = try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead)
             XCTAssertFalse(told.isError, told.text)
-            XCTAssertLessThan(Date().timeIntervalSince(start), 2, "the app isn't held while the agent reads")
+            XCTAssertLessThanOrEqual(task.agent.input.utf8.count, PtySession.inputQueueBytes, "tell answered before the reader drained the paste")
             XCTAssertTrue(told.text.contains("is typing it"), told.text)
             XCTAssertEqual(typed(), [false], "typed only once its Enter went in")
             task.agent.release()
