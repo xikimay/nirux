@@ -8,7 +8,7 @@ name: Package
 # runner for it.
 on:
   pull_request:
-    branches: [main, feat/niruxcore-appkit-free-core]
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - NiruxCore/Package.swift
