@@ -728,6 +728,7 @@ struct PersistedColumn: Codable {
     var editorActiveFile: String?
     var claudeLaunchMode: ClaudeLaunchMode?
     var codexLaunchMode: CodexLaunchMode?
+    var agentModel: String?
     /// Exact Codex thread formerly attached to this column. Older state files
     /// omit it and restore through Codex's interactive session picker.
     var codexSessionID: String?
@@ -763,6 +764,7 @@ struct PersistedColumn: Codable {
         editorActiveFile: String? = nil,
         claudeLaunchMode: ClaudeLaunchMode?,
         codexLaunchMode: CodexLaunchMode?,
+        agentModel: String? = nil,
         codexSessionID: String? = nil,
         claudeSessionID: String? = nil,
         claudeSessionIsUnprompted: Bool? = nil,
@@ -781,6 +783,7 @@ struct PersistedColumn: Codable {
         self.editorActiveFile = editorActiveFile
         self.claudeLaunchMode = claudeLaunchMode
         self.codexLaunchMode = codexLaunchMode
+        self.agentModel = agentModel
         self.codexSessionID = codexSessionID
         self.claudeSessionID = claudeSessionID
         self.claudeSessionIsUnprompted = claudeSessionIsUnprompted
@@ -797,7 +800,7 @@ struct PersistedColumn: Codable {
         case editorOpenFiles, editorActiveFile
         case editorOpenFile // legacy single-file editor state
         case claudeLaunchMode
-        case codexLaunchMode
+        case codexLaunchMode, agentModel
         case codexSessionID
         case claudeSessionID
         case claudeSessionIsUnprompted
@@ -842,6 +845,7 @@ struct PersistedColumn: Codable {
             claudeLaunchMode = nil
         }
         codexLaunchMode = try? container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
+        agentModel = try? container.decodeIfPresent(String.self, forKey: .agentModel)
         codexSessionID = try? container.decodeIfPresent(String.self, forKey: .codexSessionID)
         claudeSessionID = try? container.decodeIfPresent(String.self, forKey: .claudeSessionID)
         claudeSessionIsUnprompted = try? container.decodeIfPresent(Bool.self, forKey: .claudeSessionIsUnprompted)
@@ -866,6 +870,7 @@ struct PersistedColumn: Codable {
         try container.encodeIfPresent(editorActiveFile, forKey: .editorActiveFile)
         try container.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
         try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
+        try container.encodeIfPresent(agentModel, forKey: .agentModel)
         try container.encodeIfPresent(codexSessionID, forKey: .codexSessionID)
         try container.encodeIfPresent(claudeSessionID, forKey: .claudeSessionID)
         try container.encodeIfPresent(claudeSessionIsUnprompted, forKey: .claudeSessionIsUnprompted)

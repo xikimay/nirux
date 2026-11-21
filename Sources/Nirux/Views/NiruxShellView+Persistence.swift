@@ -171,7 +171,7 @@ extension NiruxShellView {
                 claimedSessionIDs: &claimedSessionIDs.claude
             )
             addDeferredAgentColumn(
-                .claude(resume: resumeTarget, mode: persistedColumn.claudeLaunchMode ?? .default),
+                .claude(resume: resumeTarget, mode: persistedColumn.claudeLaunchMode ?? .default, model: persistedColumn.agentModel),
                 restoring: persistedColumn, in: workspace
             )
         case .codex:
@@ -180,14 +180,14 @@ extension NiruxShellView {
                 claimedSessionIDs: &claimedSessionIDs.codex
             )
             addDeferredAgentColumn(
-                .codex(resume: resumeTarget, mode: persistedColumn.codexLaunchMode ?? .default),
+                .codex(resume: resumeTarget, mode: persistedColumn.codexLaunchMode ?? .default, model: persistedColumn.agentModel),
                 restoring: persistedColumn, in: workspace
             )
         case .agy:
             let resumeTarget = Self.agentRestoreTarget(
                 sessionID: persistedColumn.agySessionID, claimedSessionIDs: &claimedSessionIDs.agy
             )
-            addDeferredAgentColumn(.agy(resume: resumeTarget), restoring: persistedColumn, in: workspace)
+            addDeferredAgentColumn(.agy(resume: resumeTarget, model: persistedColumn.agentModel), restoring: persistedColumn, in: workspace)
         case .editor:
             let openFiles = persistedColumn.editorOpenFiles ?? []
             // Non-interactive: a binary or huge file in the persisted tab set
@@ -486,6 +486,7 @@ extension NiruxShellView {
             editorActiveFile: editorActiveFile,
             claudeLaunchMode: claudeMode,
             codexLaunchMode: codexMode,
+            agentModel: isAgent ? foregroundProcess.flatMap { AgentModels.launchModel(arguments: $0.arguments) } : nil,
             codexSessionID: kind == .codex
                 ? col.persistedCodexSessionID(foregroundProcess: foregroundProcess)
                 : nil,

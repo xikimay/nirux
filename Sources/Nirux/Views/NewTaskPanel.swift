@@ -217,6 +217,11 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     let placeholderLabel = PassThroughLabel(labelWithString: "Describe a task for an agent. ⇧Return adds a line.")
     let repositoryPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let agentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    let modelPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let listModels: (CodingAgent) async throws -> [AgentModels.Choice]
+    private var modelLoad: Task<Void, Never>?
+    var selectedModel: String? { modelPopup.selectedItem?.representedObject as? String }
+
     let templatePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     /// The branch and where it starts from, where a shell opens, or why no
     /// task can start.
@@ -247,9 +252,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     private static let width: CGFloat = 620
     private static let margin: CGFloat = 22
 
-    // Explicit, so the controls' default values are made on the main actor
-    // with every toolchain.
-    override init() {
+    init(listModels: @escaping (CodingAgent) async throws -> [AgentModels.Choice]) {
+        self.listModels = listModels
         super.init()
     }
 
@@ -271,6 +275,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         let panel = buildPanel()
         self.panel = panel
         agentPopup.selectItem(at: CodingAgent.launchable.firstIndex(of: agent) ?? 0)
+        reloadModels()
         updateForSubtask()
         rebuildRepositoryPopup()
         // Laid out first: the sheet comes down at its size.
@@ -293,6 +298,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     func dismiss() {
         guard let panel else { return }
+        modelLoad?.cancel()
         panel.sheetParent?.endSheet(panel)
         panel.orderOut(nil)
         self.panel = nil
@@ -382,6 +388,13 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         guard panel != nil else { return }
         self.proposal = proposal
         descriptionView.string = proposal.sheetDescription
+        if let selection = proposal.selection, let index = CodingAgent.launchable.firstIndex(of: selection.agent) {
+            if selectedAgent != selection.agent {
+                agentPopup.selectItem(at: index)
+                reloadModels()
+            }
+            selectModel(selection.model)
+        }
         pickedTemplateName = proposal.templateName
         let branch = proposal.options.branch
         if let branch, namesFolder {
@@ -543,7 +556,58 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// The trust hint is Claude Code's.
     @objc func agentChanged(_ sender: Any?) {
         restoreReturnKey()
+        reloadModels()
         refresh()
+    }
+
+    @objc private func modelChanged(_ sender: Any?) { restoreReturnKey() }
+
+    private func selectModel(_ model: String?) {
+        guard let model else { return modelPopup.selectItem(at: 0) }
+        if let item = modelPopup.itemArray.first(where: { $0.representedObject as? String == model }) {
+            modelPopup.select(item)
+        } else {
+            // A proposal can name an unlisted Codex model or a full Claude ID.
+            modelPopup.select(addModelItem(title: model, slug: model))
+        }
+    }
+
+    @discardableResult
+    private func addModelItem(title: String, slug: String? = nil) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.representedObject = slug
+        modelPopup.menu?.addItem(item)
+        return item
+    }
+
+    private func reloadModels() {
+        modelLoad?.cancel()
+        modelPopup.removeAllItems()
+        modelPopup.addItem(withTitle: "Default")
+        let agent = selectedAgent
+        modelPopup.toolTip = "Loading models for \(agent.productName)…"
+        let status = addModelItem(title: "Loading models…")
+        status.isEnabled = false
+        modelLoad = Task { [weak self, listModels] in
+            guard !Task.isCancelled else { return }
+            do {
+                let choices = try await listModels(agent)
+                guard !Task.isCancelled, let self else { return }
+                let selected = selectedModel
+                modelPopup.removeAllItems()
+                modelPopup.addItem(withTitle: "Default")
+                for choice in choices {
+                    addModelItem(title: choice.label, slug: choice.slug)
+                }
+                selectModel(selected)
+                modelPopup.toolTip = "Model for \(agent.productName)"
+            } catch {
+                guard !Task.isCancelled else { return }
+                status.title = "Models unavailable"
+                status.toolTip = error.localizedDescription
+                self?.modelPopup.toolTip = error.localizedDescription
+            }
+        }
     }
 
     private func repositoryChanged() {
@@ -612,7 +676,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         // A task's agent proposed it: it reports there, as a sub-task only.
         let agentParent = subtaskParentID == nil ? nil : reportsToTaskAgent
         var request = NewTask.Request(
-            description: taskText, template: selectedTemplate, agent: selectedAgent,
+            description: taskText, template: selectedTemplate, agent: selectedAgent, model: selectedModel,
             projectID: space.id, place: place, fetchesFirst: !startsWithoutFetch,
             reportsTo: agentParent ?? (lead != nil && reportCheckbox.state == .on ? (reportsTo ?? lead) : nil),
             parentWorkspaceID: subtaskParentID
@@ -836,7 +900,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         descriptionView.isEditable = enabled
         descriptionView.textColor = enabled ? Theme.Color.textPrimary : Theme.Color.textTertiary
         let controls: [NSControl] = [
-            repositoryPopup, agentPopup, templatePopup, branchField, existingBranchButton, subtaskCheckbox, reportCheckbox
+            repositoryPopup, agentPopup, modelPopup, templatePopup, branchField, existingBranchButton, subtaskCheckbox, reportCheckbox
         ]
         for control in controls {
             control.isEnabled = enabled
@@ -942,15 +1006,18 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         placeholderLabel.frame = NSRect(x: 14, y: 10, width: inner - 28, height: 20)
         y += 108 + 14
 
-        var x = margin
-        let popups = [repositoryPopup, agentPopup, templatePopup].filter { !$0.isHidden }
-        let widest = floor((inner - 6 * CGFloat(popups.count - 1)) / CGFloat(max(popups.count, 1)))
-        for popup in popups {
-            let width = min(max(ceil(popup.fittingSize.width), 120), 240, widest)
-            popup.frame = NSRect(x: x - 2, y: y, width: width, height: 26)
-            x += width + 6
+        for row in [[repositoryPopup, templatePopup], [agentPopup, modelPopup]] {
+            let popups = row.filter { !$0.isHidden }
+            guard !popups.isEmpty else { continue }
+            var x = margin
+            for popup in popups {
+                let width = popup === modelPopup ? margin + inner - x : min(max(ceil(popup.fittingSize.width), 120), inner / 2 - 6)
+                popup.frame = NSRect(x: x - 2, y: y, width: width, height: 26)
+                x += width + 6
+            }
+            y += 26 + 6
         }
-        y += 26 + 12
+        y += 6
 
         let editWidth = ceil(editBranchButton.fittingSize.width)
         let trailing = !editBranchButton.isHidden ? editWidth + 8 : 0
@@ -1057,6 +1124,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         agentPopup.setAccessibilityLabel("Agent")
         agentPopup.target = self
         agentPopup.action = #selector(agentChanged(_:))
+        modelPopup.autoenablesItems = false
+        modelPopup.setAccessibilityLabel("Model")
+        modelPopup.target = self
+        modelPopup.action = #selector(modelChanged(_:))
         templatePopup.target = self
         templatePopup.action = #selector(templateChanged(_:))
         templatePopup.removeAllItems()
@@ -1108,7 +1179,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
         content.subviews.forEach { $0.removeFromSuperview() }
         let views: [NSView] = [
-            headingLabel, descriptionBox, repositoryPopup, agentPopup, templatePopup, lineLabel, editBranchButton,
+            headingLabel, descriptionBox, repositoryPopup, agentPopup, modelPopup, templatePopup, lineLabel, editBranchButton,
             branchField, fromLabel, trustHint, subtaskCheckbox, reportCheckbox, reportHint, errorLabel, existingBranchButton,
             cancelButton, startButton
         ]
