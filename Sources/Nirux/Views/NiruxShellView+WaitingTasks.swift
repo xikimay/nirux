@@ -12,8 +12,8 @@ extension MergeWait {
 extension NiruxShellView {
 
     func queueWaitingTask(_ start: MergeWait.PendingStart, after name: String, in space: WorkspaceProfile, answer: @escaping LeadAnswer) {
-        guard let title = NewTask.workspaceTitle(description: start.description),
-              !NewTask.suggestedBranch(description: start.description, templateName: start.template?.name).isEmpty
+        guard let title = start.options?.title ?? NewTask.workspaceTitle(description: start.description),
+              !start.suggestedBranch.isEmpty
         else { return answer("Start the description with a few words that name the task and its branch.", true) }
         setDependency(of: nil, start: start, after: name, in: space, title: title, answer: answer)
     }
@@ -67,7 +67,7 @@ extension NiruxShellView {
         } else {
             // A stable, uncreated path keeps a placeholder distinct from every real checkout.
             let placeholder = Persistence.stateDirectory.appendingPathComponent("waiting/\(id)").path
-            addWorkspace(title: title, cwd: placeholder, profileID: current.id, workspaceID: id,
+            addWorkspace(title: title, purpose: start.options?.goal, cwd: placeholder, profileID: current.id, workspaceID: id,
                          waitingStart: wait, activate: false)
             guard let created = workspaces.first(where: { $0.id == id }) else { return answer("The task couldn't be added.", true) }
             holder = created
@@ -102,7 +102,7 @@ extension NiruxShellView {
         guard leadMissionParent(inSpace: space.id) != nil else {
             return failWaitingTask(task, reason: "The space needs a Lead to receive this task’s questions and result")
         }
-        let suggested = NewTask.suggestedBranch(description: start.description, templateName: start.template?.name)
+        let suggested = start.suggestedBranch
         task.mergeWaits[index].failure = nil
         task.mergeWaits[index].startingBranch = suggested
         saveState()
@@ -119,9 +119,11 @@ extension NiruxShellView {
             task.mergeWaits[index].startingBranch = branch
             self.saveState()
             let note = wait.mergedAt == nil ? "" : "\n\nStarted after \(wait.awaitedLongName) merged."
-            let request = NewTask.Request(description: start.description + note, template: start.template,
+            var request = NewTask.Request(description: start.description + note, template: start.template,
                                           agent: self.defaultTaskAgent(forSpace: space.id), projectID: space.id,
                                           place: .worktree(target, branch: branch), fetchesFirst: true)
+            request.title = task.title
+            request.goal = task.purpose
             self.createTask(request) { [weak self] result in
                 guard let self, self.workspaces.contains(where: { $0 === task }), task.waitingStart?.id == wait.id else { return }
                 switch result {

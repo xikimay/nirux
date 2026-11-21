@@ -6,7 +6,7 @@ extension NiruxShellView {
         return TaskThread.Context(
             goal: task.purpose, next: task.nextStep, blocker: task.blocker,
             status: task.lastSummaryIsManual || task.lastSummaryIsStatus ? task.lastSummary : nil,
-            urls: urls, pullRequest: task.prInfo, observedAt: prFollowUpCenter.readAt[task.id]
+            urls: urls, pullRequest: task.prInfo, observedAt: task.pullRequestReadAt
         )
     }
 

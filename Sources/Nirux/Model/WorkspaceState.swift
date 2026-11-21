@@ -6,6 +6,7 @@ struct GitContextObservation: Sendable {
 }
 
 struct PullRequestObservation: Sendable {
+    let startedAt = Date().timeIntervalSince1970
     fileprivate let generation: UInt64
     fileprivate let context: GitContext
 }
@@ -123,6 +124,8 @@ final class WorkspaceState {
     /// The most urgent of what happened while the user looked elsewhere.
     var notification: AttentionSignal?
     var hasNotification: Bool { notification != nil }
+    /// Start of the last successful PR read for this revision, including an empty result.
+    private(set) var pullRequestReadAt: TimeInterval?
     var prInfo: PRInfo? {
         didSet {
             if prInfo?.url != oldValue?.url || prInfo?.state != .open { prFeedback = nil }
@@ -462,6 +465,7 @@ extension WorkspaceState {
                 == context?.upstreamRepositoryObservation
         if !sameRevision || (context?.identity.isDirty == true && Self.isTerminalPullRequest(prInfo)) {
             prInfo = nil
+            pullRequestReadAt = nil
         }
         diffStats = nil
         if !titleIsManual, let branch = context?.branch, !branch.isEmpty {
@@ -486,11 +490,14 @@ extension WorkspaceState {
     }
 
     @discardableResult
-    func applyPullRequestInfo(_ info: PRInfo?, for context: GitContext) -> Bool {
+    func applyPullRequestInfo(
+        _ info: PRInfo?, for context: GitContext, readStartedAt: TimeInterval = Date().timeIntervalSince1970
+    ) -> Bool {
         guard gitContext == context,
-              !(context.identity.isDirty && Self.isTerminalPullRequest(info)),
-              prInfo != info
+              !(context.identity.isDirty && Self.isTerminalPullRequest(info))
         else { return false }
+        pullRequestReadAt = readStartedAt
+        guard prInfo != info else { return false }
         prInfo = info
         return true
     }
@@ -549,7 +556,7 @@ extension WorkspaceState {
     ) -> Bool {
         guard isCurrentPullRequestObservation(observation, for: context) else { return false }
         pullRequestObservation = nil
-        return applyPullRequestInfo(info, for: context)
+        return applyPullRequestInfo(info, for: context, readStartedAt: observation.startedAt)
     }
 
     func beginDiffStatsObservation(
@@ -693,16 +700,18 @@ extension WorkspaceState {
     @discardableResult
     func recordAgentHookActivity(_ event: AgentHookEvent) -> Bool {
         switch event.name {
-        // Claude's reminder of a turn already over, and its compactions
-        // (mostly its own, while idle): the card's age stays the agent's
-        // last real work.
+        // Claude's reminder of a turn already over, its compactions (mostly
+        // its own, while idle), a session resumed (as Nirux restores them
+        // at launch) or ended: the card's age stays the agent's last real
+        // work. A new session's start is work beginning.
         case .notification where event.notificationType == "idle_prompt",
-             .sessionStart where event.source == "compact":
+             .sessionStart where event.source == "compact" || event.source == "resume",
+             .sessionEnd:
             return false
         case .stop, .turnComplete:
             onThreadEvent?(TaskThread.Event(time: event.timestamp, kind: .turnEnd, detail: event.kind.rawValue))
             return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
-        case .notification, .permissionRequest, .sessionStart, .sessionEnd, .userPromptSubmit, .stopFailure:
+        case .notification, .permissionRequest, .sessionStart, .userPromptSubmit, .stopFailure:
             return recordAgentActivity(at: event.timestamp, automaticSummary: nil)
         case .preToolUse, .postToolUse, .permissionDenied, .subagentStop, .approvalResolved:
             return false

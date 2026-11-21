@@ -45,6 +45,11 @@ struct MergeWait: Codable, Equatable, Sendable {
         let repository: String
         /// The template's name and text as they were.
         let template: TaskTemplates.Template?
+        var options: NewTask.StartOptions? = nil
+
+        var suggestedBranch: String {
+            options?.branch ?? NewTask.suggestedBranch(description: description, title: options?.title, templateName: template?.name)
+        }
     }
 
     /// The waiting task's start, when this is one.

@@ -678,6 +678,13 @@ final class ColumnState {
         claudeSessionTracker.prepareResume(sessionID: sessionID)
     }
 
+    private var planningSession: (process: ProcessInstance, id: String)?
+
+    func isPlanning(in foreground: ForegroundProcess?) -> Bool {
+        guard let planningSession, let foreground, foreground.instance == planningSession.process else { return false }
+        return claudeSessionTracker.boundSessionID(for: foreground.instance) == planningSession.id
+    }
+
     /// Whether a Claude hook event comes from this column's own `claude`
     /// (see ClaudeSessionTracker) — and bind the session it reports.
     func admitClaudeHook(
@@ -701,11 +708,15 @@ final class ColumnState {
         // Follow the transcript of the session now bound to the foreground
         // `claude` — never one a subagent, teammate or nested run reports.
         if admission != .rejected, event.agentID == nil,
-           let transcriptPath = event.transcriptPath.flatMap(AgentHookEvent.validTranscriptPath),
            let sessionID = event.sessionID,
            let foregroundProcess,
            claudeSessionTracker.boundSessionID(for: foregroundProcess.instance) == sessionID {
-            followClaudeTranscript(at: transcriptPath, sessionID: sessionID, process: foregroundProcess.instance)
+            if event.name == .sessionEnd || event.name == .sessionStart || event.permissionMode != nil {
+                planningSession = event.name != .sessionEnd && event.permissionMode == "plan" ? (foregroundProcess.instance, sessionID) : nil
+            }
+            if let path = event.transcriptPath.flatMap(AgentHookEvent.validTranscriptPath) {
+                followClaudeTranscript(at: path, sessionID: sessionID, process: foregroundProcess.instance)
+            }
         }
         return admission
     }

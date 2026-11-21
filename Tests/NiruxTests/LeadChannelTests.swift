@@ -161,6 +161,13 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(try names(context(lead: false, launchID: "")), [HistorySearchTool.name])
         XCTAssertNotNil(try call(LeadTools.readThread, ["task": "sample"], context: context(lead: false))["error"])
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.readThread, arguments: [:]))
+        // Both roles expose the same start options.
+        for lead in [true, false] {
+            let tools = (try send(list, context: context(lead: lead))["result"] as? [String: Any])?["tools"] as? [[String: Any]]
+            let start = tools?.first { $0["name"] as? String == LeadTools.startTask }
+            let properties = (start?["inputSchema"] as? [String: Any])?["properties"] as? [String: Any]
+            XCTAssertEqual(properties.map { Set($0.keys).isSuperset(of: ["description", "title", "branch", "goal"]) }, true, "lead: \(lead)")
+        }
         XCTAssertNotNil(try call(LeadTools.queueMerge, ["prs": [1]], context: context(lead: false))["error"], "the Lead's only")
         XCTAssertNotNil(try call(LeadTools.listTasks, [:], context: context(lead: false, inWorkspace: false))["error"], "unknown outside")
         let allowed = NiruxMCPServer.claudeArguments(executable: "/x/Nirux").first { $0.hasPrefix("--allowedTools=") }
@@ -192,6 +199,35 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertNotNil(problem(["task": "a", "next_step": 3]))
         XCTAssertNotNil(problem(["next_step": "x"]))
         XCTAssertEqual(LeadTools.contextText(["next_step": " write\n\tthe import\u{202E} side "], "next_step"), .some("write the import side"))
+    }
+
+    /// start_task needs a description; a title its row shows whole (a
+    /// sub-task's is shorter), a goal of one short line and a valid branch
+    /// name when given, null being left out.
+    func testStartTaskArgumentsAreCheckedBeforeTheApp() {
+        let problem = { (arguments: [String: Any]) in LeadTools.problem(tool: LeadTools.startTask, arguments: arguments) }
+        let longest = String(repeating: "t", count: LeadTools.maxTaskTitleLength)
+        let subtaskLongest = ["description": "x", "title": String(repeating: "t", count: LeadTools.maxSubtaskTitleLength)]
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.startTask, arguments: subtaskLongest, subtask: true))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.startTask, arguments: ["description": "x", "title": longest], subtask: true))
+        let goal = String(repeating: "g", count: LeadTools.maxGoalLength)
+        XCTAssertNil(problem(["description": "x", "goal": goal]))
+        XCTAssertNotNil(problem(["description": "x", "goal": goal + "g"]))
+        XCTAssertNotNil(problem(["description": "x", "goal": 3]))
+        XCTAssertNotNil(problem(["description": "x", "goal": " \n\t "]))
+        XCTAssertNil(problem(["description": "x", "goal": NSNull()]))
+        XCTAssertNil(problem(["description": "x", "title": longest, "branch": "fix/stale-labels"]))
+        XCTAssertNil(problem(["description": "x", "title": NSNull(), "branch": NSNull()]))
+        XCTAssertNotNil(problem(["title": "CSV export"]))
+        XCTAssertNotNil(problem(["description": "x", "title": longest + "t"]))
+        XCTAssertNotNil(problem(["description": "x", "title": " \n "]))
+        XCTAssertNotNil(problem(["description": "x", "branch": "feat/a..b"]))
+        XCTAssertNotNil(problem(["description": "x", "branch": "origin/main"]), "it would hide origin's")
+        XCTAssertNotNil(problem(["description": "x", "branch": 3]))
+        XCTAssertEqual(
+            LeadTools.startOptions(["title": " CSV\n export ", "branch": "fix/x", "goal": "Export\n orders"]),
+            NewTask.StartOptions(title: "CSV export", branch: "fix/x", goal: "Export orders")
+        )
     }
 
     /// reply takes a message, or accept: true (a JSON boolean) in its place.
