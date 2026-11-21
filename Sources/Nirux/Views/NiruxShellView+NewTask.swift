@@ -50,7 +50,9 @@ extension NiruxShellView {
         }
         panel.onStart = { [weak self, weak panel] request in
             guard let self, let panel else { return }
-            self.startTask(request) { [weak self, weak panel] outcome in
+            let settings = PersistedSettings.effective(Persistence.load()?.settings)
+            let generate = panel.proposal == nil && !panel.branchIsEdited && settings.generateTaskNames ? self.sideEffects.generateTaskNames : nil
+            self.startTask(request, generateNames: generate) { [weak self, weak panel] outcome in
                 // Its picture, before it closes: it folds toward the
                 // task's row.
                 if case .opened = outcome, let panel { self?.takeTaskSheetPicture(of: panel) }
@@ -224,24 +226,39 @@ extension NiruxShellView {
     /// it comes back to show a failure. `opened` follows `.opened`, once the
     /// workspace is there, with its id and what was made.
     func startTask(
-        _ request: NewTask.Request,
+        _ request: NewTask.Request, generateNames: TaskNameSuggestion.Generator? = nil,
         completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void,
         opened: (@MainActor (_ workspaceID: String, _ created: CreatedTask) -> Void)? = nil
     ) {
-        Self.createTask(
-            request, handoverFilename: Self.handoverFilename(for: request.agent), routesByAnchor: routesByAnchor
-        ) { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .failed(let message):
-                completion(.failed(message))
-            case .fetchFailed(let message):
-                completion(.fetchFailed(message))
-            case .created(let created):
-                // The sheet goes first: the new terminal then takes the focus.
-                completion(.opened)
-                let workspaceID = self.openTaskWorkspace(request, created)
-                opened?(workspaceID, created)
+        let handoverFilename = Self.handoverFilename(for: request.agent)
+        let routes = routesByAnchor
+        Task { [weak self] in
+            let titleLimit = request.parentWorkspaceID == nil ? LeadTools.maxTaskTitleLength : LeadTools.maxSubtaskTitleLength
+            async let names = generateNames?(request.description, titleLimit)
+            if request.fetchesFirst, let target = request.target, let remote = target.remoteBranch {
+                let error = await withCheckedContinuation { continuation in
+                    Self.offMain({ GitWorktree.fetch(branch: remote, repoRoot: target.repository) }) {
+                        continuation.resume(returning: $0)
+                    }
+                }
+                if let error {
+                    completion(.fetchFailed(error))
+                    return
+                }
+            }
+            let named = request.applying(await names)
+            Self.offMain({
+                Self.createTask(named, handoverFilename: handoverFilename, routesByAnchor: routes)
+            }) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .failed(let message):
+                    completion(.failed(message))
+                case .created(let created):
+                    completion(.opened)
+                    let workspaceID = self.openTaskWorkspace(named, created)
+                    opened?(workspaceID, created)
+                }
             }
         }
     }
@@ -360,7 +377,6 @@ extension NiruxShellView {
     enum TaskResult: Sendable {
         case created(CreatedTask)
         case failed(String)
-        case fetchFailed(String)
     }
 
     /// Handover files never belong in a commit: the repository ignores them
@@ -396,24 +412,13 @@ extension NiruxShellView {
     }
 
     nonisolated private static func createTask(
-        _ request: NewTask.Request,
-        handoverFilename: String,
-        routesByAnchor: Bool,
-        completion: @escaping @MainActor @Sendable (TaskResult) -> Void
-    ) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result: TaskResult
-            switch request.place {
-            case .worktree(let target, let branch):
-                result = makeTaskWorktree(
-                    request, target: target, branch: branch, handoverFilename: handoverFilename, routesByAnchor: routesByAnchor
-                )
-            case .folder(let parent, let name, let makesParent):
-                result = makeTaskFolder(request, parent: parent, name: name, makesParent: makesParent, handoverFilename: handoverFilename)
-            }
-            DispatchQueue.main.async { @MainActor in
-                completion(result)
-            }
+        _ request: NewTask.Request, handoverFilename: String, routesByAnchor: Bool
+    ) -> TaskResult {
+        switch request.place {
+        case .worktree(let target, let branch):
+            makeTaskWorktree(request, target: target, branch: branch, handoverFilename: handoverFilename, routesByAnchor: routesByAnchor)
+        case .folder(let parent, let name, let makesParent):
+            makeTaskFolder(request, parent: parent, name: name, makesParent: makesParent, handoverFilename: handoverFilename)
         }
     }
 
@@ -467,9 +472,6 @@ extension NiruxShellView {
         let start: NewTask.Start
         if let remoteBranch = target.remoteBranch, let name = target.remoteBranchName {
             if request.fetchesFirst {
-                if let error = GitWorktree.fetch(branch: remoteBranch, repoRoot: target.repository) {
-                    return .fetchFailed(error)
-                }
                 start = .fetched(name)
             } else {
                 start = .lastFetched(name)

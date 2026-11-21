@@ -410,6 +410,7 @@ struct PersistedSettings: Codable {
     /// `alertOnlyWhenClaudeAsks`: whoever turned that off kept final
     /// messages away from a model.
     var showTurnStatus: Bool = true
+    var generateTaskNames: Bool = true
     /// After an absence, a card lists the tasks whose turn ended meanwhile
     /// (see `SidebarCatchUp`). On by default: missing decodes to true.
     var showCatchUp: Bool = true
@@ -486,6 +487,7 @@ struct PersistedSettings: Codable {
         case showClaudeUsageLimits
         case alertOnlyWhenClaudeAsks
         case showTurnStatus
+        case generateTaskNames
         case showCatchUp
         case triageCIFailures
         case stuckAgentMinutes
@@ -530,6 +532,7 @@ struct PersistedSettings: Codable {
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
         showTurnStatus = (try? container.decodeIfPresent(Bool.self, forKey: .showTurnStatus)) ?? alertOnlyWhenClaudeAsks
+        generateTaskNames = (try? container.decodeIfPresent(Bool.self, forKey: .generateTaskNames)) ?? true
         showCatchUp = (try? container.decodeIfPresent(Bool.self, forKey: .showCatchUp)) ?? true
         triageCIFailures = try container.decodeIfPresent(Bool.self, forKey: .triageCIFailures) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
@@ -584,6 +587,7 @@ struct PersistedSettings: Codable {
         try container.encode(animatesInterface, forKey: .animatesInterface)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
+        try container.encode(generateTaskNames, forKey: .generateTaskNames)
         try container.encode(showTurnStatus, forKey: .showTurnStatus)
         try container.encode(showCatchUp, forKey: .showCatchUp)
         try container.encode(triageCIFailures, forKey: .triageCIFailures)

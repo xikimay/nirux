@@ -97,7 +97,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// The name the user typed for the other kind, kept while the field
     /// shows this one: picking a repository again brings it back.
     private var otherEditedName: String?
-    private var proposal: LeadProposal?
+    private(set) var proposal: LeadProposal?
     /// Edit was clicked: the branch shows in a field.
     private(set) var isEditingBranch = false
     private(set) var isStarting = false

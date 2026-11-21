@@ -102,6 +102,55 @@ final class NewTaskFlowTests: UIFlowTestCase {
         }
     }
 
+    func testGeneratedNamesReachTheBranchHandoverAndWorkspace() throws {
+        try UIFlowHarness.run { harness in
+            _ = try Self.anchoredSpace(harness)
+            let prompt = "Corrige le cache qui reste périmé"
+            harness.shell.sideEffects.generateTaskNames = { description, limit in
+                XCTAssertEqual(description, prompt)
+                XCTAssertEqual(limit, 22)
+                return TaskNameSuggestion(title: "Cache expiry", goal: "Refresh stale entries")
+            }
+            let sheet = try openSheet(harness)
+            describe(prompt, in: sheet)
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the named workspace") { harness.shell.activeWorkspace?.title == "Cache expiry" }
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            XCTAssertEqual(workspace.purpose, "Refresh stale entries")
+            XCTAssertEqual(try UIFlowHarness.git(["branch", "--show-current"], at: workspace.cwd), "fix/cache-expiry")
+            let handover = try String(contentsOfFile: workspace.cwd + "/.claude-handover.md", encoding: .utf8)
+            XCTAssertTrue(handover.hasPrefix("# Task: Cache expiry"))
+            XCTAssertTrue(handover.contains(prompt))
+        }
+    }
+
+    func testFolderNamingReadsTheSettingWhenStartIsClicked() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            var sheet = try openSheet(harness)
+            describe("Comparer les deux versions", in: sheet)
+            shell.sideEffects.generateTaskNames = { _, _ in
+                TaskNameSuggestion(title: "Version comparison", goal: "Compare parser versions")
+            }
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the named folder") { shell.activeWorkspace?.title == "Version comparison" }
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual((task.cwd as NSString).lastPathComponent, "Version comparison")
+            XCTAssertEqual(task.purpose, "Compare parser versions")
+
+            sheet = try openSheet(harness)
+            describe("Compare builds", in: sheet)
+            XCTAssertTrue(Persistence.updateSettings(liveLayout: shell.persistedState()) { $0.generateTaskNames = false })
+            shell.sideEffects.generateTaskNames = { _, _ in
+                XCTFail("The setting disables model calls")
+                return nil
+            }
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the deterministic folder") { shell.activeWorkspace?.title == "Compare builds" }
+            XCTAssertNil(shell.activeWorkspace?.purpose)
+        }
+    }
+
     func testAnExistingBranchKeepsTheSheetOpenWithTheError() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -109,6 +158,10 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let workspaceCount = shell.workspaces.count
             let sheet = try openSheet(harness)
 
+            shell.sideEffects.generateTaskNames = { _, _ in
+                XCTFail("A hand-edited branch skips the model")
+                return nil
+            }
             // A branch typed by hand no longer follows the description.
             describe("Flow work", in: sheet)
             XCTAssertEqual(sheet.branch, "feat/flow-work")
@@ -132,6 +185,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             // Typing goes on in the branch field.
             XCTAssertNotNil(sheet.branchField.currentEditor())
 
+            shell.sideEffects.generateTaskNames = { _, _ in nil }
             // Cleared, it follows the description again; ⌘Return starts.
             harness.type("", into: sheet.branchField)
             XCTAssertEqual(sheet.branch, "feat/other-work")
