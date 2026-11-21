@@ -302,23 +302,35 @@ final class WaitingTaskFlowTests: XCTestCase {
             XCTAssertFalse(close.isError, close.text)
             XCTAssertTrue(task.waitingStart?.failure?.contains("without a merged pull request") == true)
 
-            // A cached remote branch exists, but fetching its new tip fails.
-            _ = try UIFlowHarness.git(["remote", "add", "origin", harness.root + "/missing-remote"], at: harness.repo)
+            // A cached branch exists. Have the local remote record and refuse
+            // the actual fetch, then allow the same remote to serve the retry.
+            let transport = ".git/refuse-fetch"
+            let transportPath = harness.repo + "/" + transport
+            let refusal = "test remote refused the fetch"
+            try """
+            #!/bin/sh
+            touch "$0.started"
+            echo "fatal: \(refusal)" >&2
+            exit 1
+            """.write(toFile: transportPath, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: transportPath)
+            _ = try UIFlowHarness.git(["remote", "add", "origin", harness.repo], at: harness.repo)
+            _ = try UIFlowHarness.git(["config", "remote.origin.uploadpack", transport], at: harness.repo)
             _ = try UIFlowHarness.git(["update-ref", "refs/remotes/origin/main", "HEAD"], at: harness.repo)
             let launches = harness.agentLaunches.count
             let retry = try change(["task": task.title])
             XCTAssertFalse(retry.isError, retry.text)
-            // Report whether the manual start reached the fetch if it times out.
-            var reachedWorktreeCreation = false
-            guard UIFlowHarness.waitUntil("manual start to finish (reached worktree creation: \(reachedWorktreeCreation))", {
-                if !shell.taskWorktreesBeingCreated.isEmpty { reachedWorktreeCreation = true }
-                return !task.isStarting
+            let marker = transportPath + ".started"
+            guard harness.waitUntil("the manual start to reach the remote", timeout: GitCommand.defaultTimeout, {
+                FileManager.default.fileExists(atPath: marker) || !task.isStarting
             }) else { return }
-            let failure = try XCTUnwrap(task.waitingStart?.failure, "the unavailable remote must leave the task waiting")
-            XCTAssertTrue(failure.contains("fetch"), failure)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: marker), task.waitingStart?.failure ?? "fetch never started")
+            guard harness.waitUntil("the task to report the refused fetch", { !task.isStarting }) else { return }
+            let failure = try XCTUnwrap(task.waitingStart?.failure)
+            XCTAssertTrue(failure.contains(refusal), failure)
             XCTAssertEqual(launches, harness.agentLaunches.count)
             XCTAssertEqual(try UIFlowHarness.git(["branch", "--list", "feat/update-schema"], at: harness.repo), "")
-            _ = try UIFlowHarness.git(["remote", "set-url", "origin", harness.repo], at: harness.repo)
+            _ = try UIFlowHarness.git(["config", "--unset", "remote.origin.uploadpack"], at: harness.repo)
             let column = try XCTUnwrap(task.columns.first?.waitingTask)
             let occupied = harness.repo + ".feat-update-schema"
             try FileManager.default.createDirectory(atPath: occupied, withIntermediateDirectories: true)
