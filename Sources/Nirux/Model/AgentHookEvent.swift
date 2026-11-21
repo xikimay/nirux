@@ -144,12 +144,10 @@ struct AgentHookEvent: Codable, Equatable {
     /// The call's exact text, as the receiver checked it.
     var approvalText: String?
     var approvalOutcome: PermissionApproval.Outcome?
-    /// On a PermissionRequest, what it is about, whether a line naming that
-    /// covers exactly what prompted (`promptTarget(toolName:input:cwd:)`),
-    /// and the session's mode (`permission_mode`), for the space's recap
-    /// (LoopLog). Nil from older receivers.
+    /// The permission target and whether its label covers the whole prompt (LoopLog).
     var promptTarget: String?
     var promptExact: Bool?
+    /// The session mode reported by a Claude hook.
     var permissionMode: String?
     /// On the PermissionRequest of a question dialog (AskUserQuestion):
     /// its questions and the options each offers, bounded, for the row of
@@ -186,6 +184,7 @@ struct AgentHookEvent: Codable, Equatable {
             self.cwd = cwd
             source = [.sessionStart, .userPromptSubmit].contains(name) ? payload["source"] as? String : nil
             agentID = (payload["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            permissionMode = (payload["permission_mode"] as? String).flatMap { AgentText.clean($0, maxLength: 40) }
             let toolName = [.preToolUse, .permissionRequest, .postToolUse].contains(name)
                 ? payload["tool_name"] as? String
                 : nil
@@ -201,7 +200,6 @@ struct AgentHookEvent: Codable, Equatable {
                 }
                 if name == .permissionRequest {
                     (promptTarget, promptExact) = Self.promptTarget(toolName: toolName, input: input, cwd: cwd)
-                    permissionMode = (payload["permission_mode"] as? String).flatMap { AgentText.clean($0, maxLength: 40) }
                 }
             } else {
                 toolSummary = nil

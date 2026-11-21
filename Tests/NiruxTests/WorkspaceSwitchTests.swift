@@ -525,7 +525,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             let shown = try XCTUnwrap(shell.sidebar.lastInfos.first { $0.id == workspace.id })
             XCTAssertEqual(card.state, shown.stateIcon, "a real switch")
             var permission = info([.working, .needsAttention], reason: .permission(tool: "Bash", summary: "x"), id: workspace.id)
-            permission.station = .checks
+            permission.boardProgress = SidebarBoardProgress(station: .checks)
             let rows: [(WorkspaceInfo, StateIcon)] = [
                 (info([.idle], ci: "FAILURE", id: workspace.id), StateIcon(.error)),
                 (info([.idle], ci: "SUCCESS", id: workspace.id), StateIcon(.readyToMerge)),

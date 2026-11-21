@@ -46,7 +46,7 @@ enum SidebarRowMark: Hashable, CaseIterable {
     case checksRunning
 }
 
-/// A task row's two lines, before any view exists.
+/// The state, status and trailing detail shared by task summaries.
 struct SidebarRowSummary: Hashable {
     /// What the time at the end of the title line counts.
     enum Trailing: Hashable {
@@ -112,7 +112,9 @@ extension WorkspaceInfo {
     /// then the blocker (grey: it doesn't ask the user), then a finished
     /// turn, then the pull request, then the next step, then where the
     /// task stands, else the branch.
-    var rowSummary: SidebarRowSummary {
+    var rowSummary: SidebarRowSummary { rowSummary(includesNextStep: true) }
+
+    func rowSummary(includesNextStep: Bool) -> SidebarRowSummary {
         let age = lastActivityAt.map { SidebarRowSummary.Trailing.age(SidebarView.cardAge(since: $0)) }
         func row(_ mark: SidebarRowMark, _ text: String, _ tone: SidebarStatusLine.Tone,
                  _ action: SidebarStatusLine.Action? = nil, trailing: SidebarRowSummary.Trailing? = nil) -> SidebarRowSummary {
@@ -197,10 +199,10 @@ extension WorkspaceInfo {
             return turnStatusLine.map { row(.finished, $0, .neutral) } ?? row(.idle, "Done", .neutral)
         }
         if let pullRequest = prInfo,
-           let summary = Self.pullRequestRow(pullRequest, cleanup: mergedCleanup, hasFeedback: prFeedback != nil, age: age) {
+           let summary = pullRequestRow(pullRequest, age: age) {
             return summary
         }
-        if let next = nextStepText {
+        if includesNextStep, let next = nextStepText {
             return row(.idle, Self.nextStepLine(next), .neutral)
         }
         if let statusLine {
@@ -290,9 +292,7 @@ extension WorkspaceInfo {
     /// recomputes after a push doesn't count, or the line would flicker), no
     /// review asked for or asking for changes, and no feedback waiting to
     /// be dealt with.
-    private static func pullRequestRow(
-        _ pullRequest: PRInfo, cleanup: MergedCleanupOffer?, hasFeedback: Bool, age: SidebarRowSummary.Trailing?
-    ) -> SidebarRowSummary? {
+    private func pullRequestRow(_ pullRequest: PRInfo, age: SidebarRowSummary.Trailing?) -> SidebarRowSummary? {
         let number = SidebarRowSummary.Trailing.pullRequest(pullRequest.number)
         func row(_ mark: SidebarRowMark, _ text: String, _ action: SidebarStatusLine.Action?,
                  trailing: SidebarRowSummary.Trailing?, linkText: String? = nil) -> SidebarRowSummary {
@@ -303,7 +303,7 @@ extension WorkspaceInfo {
         }
         switch pullRequest.state {
         case .merged:
-            switch cleanup {
+            switch mergedCleanup {
             case .available?: return row(.merged, "Merged · Clean up", .cleanUp, trailing: number, linkText: "Clean up")
             case .inProgress?: return row(.merged, "Merged · cleaning up…", nil, trailing: number)
             case nil: return row(.merged, "Merged", nil, trailing: number)
@@ -313,8 +313,8 @@ extension WorkspaceInfo {
             switch pullRequest.ciStatus {
             case "PENDING"?: return row(.checksRunning, "#\(pullRequest.number) · checks running", nil, trailing: age)
             case "SUCCESS"?:
-                let reviewBlocks = ["REVIEW_REQUIRED", "CHANGES_REQUESTED"].contains(pullRequest.reviewDecision ?? "")
-                guard pullRequest.mergeable != "CONFLICTING", !reviewBlocks, !hasFeedback else {
+                let ready = currentBoardProgress.map { $0.mergeStep == .ready } ?? pullRequest.isReadyToMerge(hasFeedback: prFeedback != nil)
+                guard ready else {
                     return row(.idle, "#\(pullRequest.number) · checks passed", nil, trailing: age)
                 }
                 return row(.readyToMerge, "Ready to merge", nil, trailing: number)
@@ -323,6 +323,58 @@ extension WorkspaceInfo {
             }
         default:
             return nil
+        }
+    }
+}
+
+extension PRInfo {
+    var requiresReview: Bool { ["REVIEW_REQUIRED", "CHANGES_REQUESTED"].contains(reviewDecision ?? "") }
+
+    func isReadyToMerge(hasFeedback: Bool) -> Bool {
+        state == .open && !isDraft && ciStatus == "SUCCESS" && mergeable != "CONFLICTING"
+            && !requiresReview && !hasFeedback
+    }
+}
+
+struct SidebarBoardProgress: Hashable {
+    let station: BoardStages.Station
+    var number: Int?
+    var mergeStep: SidebarTaskStep?
+}
+
+enum SidebarTaskStep: String {
+    case plan = "Plan", code = "Code", review = "Review", checks = "Checks", ready = "Ready", merged = "Merged"
+
+    @MainActor init(_ workspace: WorkspaceInfo) {
+        let pr = workspace.prInfo
+        let board = workspace.currentBoardProgress
+        let working = workspace.columns.filter { $0.agentStatus == .working }
+        let planning = working.isEmpty
+            ? workspace.columns.first { $0.index == workspace.focusedColumn }?.isPlanning == true
+            : working.allSatisfy(\.isPlanning)
+        let coding: Self = planning ? .plan : .code
+        if pr?.state == .merged {
+            self = .merged
+            return
+        }
+        switch board?.station {
+        case .code: self = coding
+        case .reviews: self = .review
+        case .checks: self = .checks
+        case .merge:
+            if let mergeStep = board?.mergeStep { self = mergeStep }
+            else if pr?.isDraft == true { self = coding }
+            else if pr?.requiresReview == true || workspace.prFeedback != nil { self = .review }
+            else { self = .checks }
+        case nil:
+            if let pr, pr.state == .open {
+                if pr.isReadyToMerge(hasFeedback: workspace.prFeedback != nil) { self = .ready }
+                else if pr.isDraft { self = coding }
+                else if ["PENDING", "FAILURE"].contains(pr.ciStatus) { self = .checks }
+                else { self = .review }
+            } else {
+                self = workspace.phase == .review || workspace.reviewBadges?.counted.isEmpty == false ? .review : coding
+            }
         }
     }
 }
