@@ -160,3 +160,28 @@ extension NiruxShellView {
         }
     }
 }
+
+extension TaskResumeHandover {
+    @MainActor static func prompt(
+        task: WorkspaceState, previous: AgentSessionRecord?, agent: CodingAgent, missions: [Mission], thread: [String]
+    ) -> String {
+        var lines = ["Continue the existing Nirux task “\(MissionAnswerContext.clipped(task.title, 160))” in this checkout. Preserve work in progress."]
+        lines += thread
+        for (label, value) in [("Goal", task.purpose), ("Last update", task.lastSummary), ("Next step", task.nextStep), ("Blocker", task.blocker)] {
+            if let value, let text = AgentText.clean(value, maxLength: 600) { lines.append("\(label): \(text)") }
+        }
+        if let pr = task.prInfo { lines.append("Pull request #\(pr.number)") }
+        if let previous { lines.append("Previous conversation in Session History: \(previous.agent.rawValue) \(previous.sessionID).") }
+        if let mission = missions.first(where: { $0.id == task.missionID }) {
+            if let answers = MissionAnswerContext.text(for: mission, among: missions) { lines.append(answers) }
+            for event in mission.events.filter({ ($0.kind == .instruction && $0.childConsumedAt != nil) || $0.kind == .completed }).suffix(3) {
+                lines.append("\(event.kind == .completed ? "Last result" : "Parent instruction"): \(MissionAnswerContext.clipped(event.message, 400))")
+            }
+            lines.append(agent == .claude ? NiruxShellView.typedAnswerMission : NiruxShellView.waitingMission)
+        }
+        if task.nextStep == nil {
+            lines.append("Check the current changes and the latest instructions before continuing. Ask about any missing decision.")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
