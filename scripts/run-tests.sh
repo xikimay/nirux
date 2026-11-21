@@ -66,7 +66,7 @@ fi
 sed -E 's#/.*##' "$work/list" | sort -u > "$work/classes"
 gated="NiruxTests.WaitingTaskFlowTests"
 gated_count=$(grep -c "^$gated/" "$work/list")
-[[ $gated_count -eq 3 ]] || exit 1
+[[ $gated_count -eq 4 ]] || exit 1
 for run in {2..10}; do echo "$gated#$run" >> "$work/classes"; done
 expected=$((expected + 9 * gated_count))
 awk 'BEGIN{srand()}{print rand()"\t"$0}' "$work/classes" | sort -n | cut -f2- > "$work/order"

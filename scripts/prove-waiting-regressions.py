@@ -7,8 +7,11 @@ suite = "WaitingTaskFlowTests"
 merge = "testMergeStartsTheRestoredRowFromTheNewRemoteTipOnce"
 recover = "testInterruptedStartAndMissingRepositoryStayActionableAfterRestore"
 retry = "testFailedDependencyCanBeRepointedOrStartedManually"
+collision = "testSharedWaitingTitleCannotCloseTheLeadsOtherTask"
 views = Path("Sources/Nirux/Views")
 mutations = [
+    ("ambiguous close", "NiruxShellView+LeadTaskTools.swift", "candidates.first(where: { $0.isWaitingTask && Self.answers($0, to: name) })", "candidates.first(where: { _ in false })", collision),
+    ("stale task ID", "NiruxShellView+LeadTaskTools.swift", "return matches.count == 1 ? matches.first : nil", "if matches.count == 1 { return matches.first }", collision),
     ("offline repository at queue time", "NiruxShellView+LeadTools.swift", "guard let repository, !repository.isFolder || info.target != nil else", "guard let repository, info.target != nil else", recover),
     ("fresh base", "NiruxShellView+WaitingTasks.swift", "branch: branch), fetchesFirst: true", "branch: branch), fetchesFirst: false", merge),
     ("saved template", "NiruxShellView+WaitingTasks.swift", "start.description + note, template: start.template", "start.description + note, template: nil", merge),
