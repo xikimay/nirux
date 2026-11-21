@@ -32,6 +32,7 @@ extension GitHub {
         /// A finished check run's conclusion, uppercased (CANCELLED,
         /// TIMED_OUT…); nil for a commit status.
         var conclusion: String?
+        var completedAt: String?
 
         /// `Workflow / job`, as board.json may name it.
         var qualifiedName: String? { GitHub.qualifiedName(name: name, workflow: workflowName) }
@@ -72,7 +73,7 @@ extension GitHub {
         }
         return Check(
             name: name, workflowName: json["workflowName"] as? String, result: result, startedAt: startedAt, url: url,
-            conclusion: result == .pending || conclusion.isEmpty ? nil : conclusion
+            conclusion: result == .pending || conclusion.isEmpty ? nil : conclusion, completedAt: json["completedAt"] as? String
         )
     }
 

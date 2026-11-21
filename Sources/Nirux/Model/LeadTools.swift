@@ -19,6 +19,7 @@ enum LeadTools {
     static let moveTask = "move_task"
     static let renameTask = "rename_task"
     static let setTaskParent = "set_task_parent"
+    static let readThread = "read_thread"
     static let readTask = "read_task"
     static let resumeTask = "resume_task"
     static let interruptTask = "interrupt_task"
@@ -26,7 +27,7 @@ enum LeadTools {
     static let dailyPass = "daily_pass"
     static let names = [
         startTask, setTaskAfter, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule, recordReview, dailyPass,
-        closeTask, moveTask, renameTask, setTaskParent, readTask, resumeTask, interruptTask
+        closeTask, moveTask, renameTask, setTaskParent, readThread, readTask, resumeTask, interruptTask
     ]
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
@@ -288,7 +289,7 @@ enum LeadTools {
                 description: """
                     What happened in this space since the last daily pass (the last day, for the first): your recorded \
                     findings by kind, the pull requests merged with their review rounds, CI failures, flaky tests and \
-                    reruns, Mission messages held, given up or crossed, the questions the user answered, the rules \
+                    reruns, task wait times, Mission messages held, given up or crossed, the questions the user answered, the rules \
                     decided, waiting or in the brief, and the tasks you may have forgotten. Nirux asks for it once a \
                     day; the user may ask too. Its text says what to propose.
                     """,
@@ -343,6 +344,12 @@ enum LeadTools {
                     "parent": ["type": "string", "description": "The task to list it under, named the same way; left out, the top level."]
                 ],
                 required: ["task"]
+            ),
+            definition(
+                readThread, title: "Read a task’s thread",
+                description: "Read a task’s request, decisions, open questions, latest status, PRs and next step in up to 6,000 characters. Use after restarting the Lead.",
+                properties: ["task": ["type": "string", "description": taskDescription + " A retained thread also accepts its workspace ID."]],
+                required: ["task"], readOnly: true
             ),
             definition(
                 readTask, title: "Read a task's last message",
@@ -510,7 +517,7 @@ enum LeadTools {
             guard string(arguments, "task") != nil else { return "task is missing." }
             if case .failure(let problem) = TaskAgentChoice.parse(arguments) { return problem.localizedDescription }
             return nil
-        case setTaskAfter, setTaskParent, readTask, interruptTask:
+        case setTaskAfter, setTaskParent, readThread, readTask, interruptTask:
             return string(arguments, "task") == nil ? "task is missing." : nil
         case recordReview:
             guard string(arguments, "task") != nil else { return "task is missing." }

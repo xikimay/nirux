@@ -40,6 +40,7 @@ extension NiruxShellView {
         case LeadTools.moveTask: leadMoveTask(arguments, in: space, answer: answer)
         case LeadTools.renameTask: leadRenameTask(arguments, in: space, answer: answer)
         case LeadTools.setTaskParent: leadSetTaskParent(arguments, in: space, answer: answer)
+        case LeadTools.readThread: leadReadThread(arguments, in: space, answer: answer)
         case LeadTools.readTask: leadReadTask(arguments, in: space, answer: answer)
         case LeadTools.resumeTask:
             let name = LeadTools.string(arguments, "task") ?? ""
@@ -985,11 +986,15 @@ extension ColumnState {
     /// The agent Nirux delivers Mission messages to that this column runs,
     /// or will once restored.
     func missionAgent(snapshot: ProcessSnapshot) -> CodingAgent? {
-        let foreground = pty?.foregroundProcess(snapshot: snapshot)?.interactiveAgent
-        if foreground == .claude { return .claude }
+        missionAgent(foreground: pty?.foregroundProcess(snapshot: snapshot))
+    }
+
+    func missionAgent(foreground: ForegroundProcess?) -> CodingAgent? {
+        let agent = foreground?.interactiveAgent
+        if agent == .claude { return .claude }
         if let launch = deferredAgent?.launch { return launch.agent }
-        switch foreground {
-        case .codex?, .agy?: return foreground
+        switch agent {
+        case .codex?, .agy?: return agent
         default: return nil
         }
     }
