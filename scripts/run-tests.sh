@@ -17,13 +17,14 @@ set -euo pipefail
 # class that hangs fails with its log instead of the job at its timeout.
 if [[ "${1:-}" == --class ]]; then
     class="$2"
+    filter="${class%%#*}"
     log="$NIRUX_TESTS_WORK/$class.log"
     start=$SECONDS
     status=0
     perl -e '$ENV{DYLD_FRAMEWORK_PATH} = $ENV{NIRUX_TESTS_FRAMEWORK_PATH};
         $ENV{DYLD_LIBRARY_PATH} = $ENV{NIRUX_TESTS_LIBRARY_PATH};
         alarm shift; exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!\n"' \
-        "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$class" "$NIRUX_TESTS_BUNDLE" \
+        "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$filter" "$NIRUX_TESTS_BUNDLE" \
         > "$log" 2>&1 || status=$?
     # 128 + SIGALRM.
     if [[ $status -eq 142 ]]; then
@@ -63,6 +64,16 @@ if [[ $expected -eq 0 ]]; then
     exit 1
 fi
 sed -E 's#/.*##' "$work/list" | sort -u > "$work/classes"
+for class in NiruxTests.LeadRestartFlowTests NiruxTests.SidebarPanelFlowTests NiruxTests.PaletteCommandFlowTests; do
+    count=$(awk -F/ -v c="$class" '$1 == c { n++ } END { print n+0 }' "$work/list")
+    [[ "$count" -gt 0 ]]
+    for run in {2..10}; do
+        echo "$class#$run" >> "$work/classes"
+    done
+    expected=$((expected + 9 * count))
+done
+awk 'BEGIN { srand() } { print rand() "\t" $0 }' "$work/classes" | sort -n | cut -f2- > "$work/shuffled"
+mv "$work/shuffled" "$work/classes"
 echo "$expected tests in $(wc -l < "$work/classes" | tr -d ' ') classes, $workers at a time"
 
 # What `swift test` sets for xctest on macOS.
@@ -91,11 +102,6 @@ while read -r class; do
     # The last summary is the whole run's: "Executed 12 tests, with …".
     count=$({ grep -E 'Executed [0-9]+ tests?' "$log" 2>/dev/null || true; } | tail -1 | sed -E 's/.*Executed ([0-9]+) tests?.*/\1/')
     executed=$((executed + ${count:-0}))
-    if ! grep -qxF "$class" "$work/failed"; then
-        echo "::group::$class"
-        cat "$log" 2>/dev/null || echo "(no log)"
-        echo "::endgroup::"
-    fi
 done < "$work/classes"
 
 echo "Slowest classes:"
