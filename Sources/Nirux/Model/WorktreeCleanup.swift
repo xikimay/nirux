@@ -50,22 +50,24 @@ enum WorktreeCleanup {
             return (trashed as URL?) ?? url
         }
 
-        /// The system git and the GitHub CLI where PRDetect looks for it,
-        /// and Nirux's state directory.
+        /// The system git, the installed GitHub CLI and Nirux's state directory.
         static var installed: Tools {
             Tools(
-                ghPath: ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"].first {
-                    FileManager.default.isExecutableFile(atPath: $0)
-                },
+                ghPath: GitHub.CLI.installedPath(),
                 reviewStateDirectory: Persistence.stateDirectory
             )
+        }
+
+        /// Reads never take optional locks (`git status` would rewrite the
+        /// index, and gh runs git to find the repository).
+        var runEnvironment: [String: String] {
+            GitDetect.readOnlyEnvironment.merging(environment) { _, override in override }
         }
     }
 
     struct PullRequest: Equatable, Sendable {
         let number: Int
-        /// OPEN, CLOSED or MERGED.
-        let state: String
+        let state: GitHub.PullRequestState
         let headOid: String
         let url: String
     }
@@ -171,7 +173,7 @@ enum WorktreeCleanup {
 
         var plan: Plan? {
             guard problems.isEmpty, let branch = worktree.branch, let tip = worktree.tip,
-                  let pullRequest, pullRequest.state == "MERGED"
+                  let pullRequest, pullRequest.state == .merged
             else { return nil }
             return Plan(worktree: worktree, branch: branch, tip: tip, pullRequest: pullRequest)
         }
@@ -246,7 +248,7 @@ enum WorktreeCleanup {
         problems += lookup.problems
         return .inspected(Report(
             worktree: worktree, pullRequest: lookup.pullRequest, problems: problems, notMerged: lookup.notMerged,
-            mergedHoldsTip: lookup.pullRequest?.state == "MERGED" && lookup.problems.isEmpty
+            mergedHoldsTip: lookup.pullRequest?.state == .merged && lookup.problems.isEmpty
         ))
     }
 
@@ -301,7 +303,7 @@ enum WorktreeCleanup {
         } else if head.status == 1 {
             branch = nil
         } else {
-            return .unavailable(firstLine(head.stderr) ?? "git couldn't read HEAD in \(path).")
+            return .unavailable(head.stderr.firstLine ?? "git couldn't read HEAD in \(path).")
         }
         let tipRead = git(["rev-parse", "-q", "--verify", "HEAD"], in: resolved, tools: tools)
         let tip = tipRead.status == 0 ? tipRead.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : ""
@@ -357,7 +359,7 @@ enum WorktreeCleanup {
                 return .failure(ReadFailure(message:
                     "git no longer tracks \(resolved): its worktree entry is gone. Delete the folder yourself."))
             }
-            return .failure(ReadFailure(message: firstLine(paths.stderr) ?? "\(resolved) is not in a git repository."))
+            return .failure(ReadFailure(message: paths.stderr.firstLine ?? "\(resolved) is not in a git repository."))
         }
         let lines = paths.stdout.split(separator: "\n").map(String.init)
         guard lines.count == 3, lines[0].realPath == resolved else {
@@ -434,7 +436,7 @@ enum WorktreeCleanup {
         )
         let flagged = git(["ls-files", "-z", "-v"], in: path, tools: tools)
         for result in [status, ignored, flagged] where result.status != 0 {
-            return .failure(ReadFailure(message: firstLine(result.stderr) ?? "git couldn't list the files of \(path)."))
+            return .failure(ReadFailure(message: result.stderr.firstLine ?? "git couldn't list the files of \(path)."))
         }
         var files = FileState()
         for entry in statusEntries(status.stdout) {
@@ -467,7 +469,7 @@ enum WorktreeCleanup {
                 in: path, tools: tools
             )
             guard matching.status == 0 else {
-                return .failure(ReadFailure(message: firstLine(matching.stderr) ?? "git couldn't list the files of \(path)."))
+                return .failure(ReadFailure(message: matching.stderr.firstLine ?? "git couldn't list the files of \(path)."))
             }
             let isInside = { (entry: String) in roots.contains { entry.hasPrefix($0 + "/") } }
             let listed = statusEntries(matching.stdout).filter { isInside($0.path) }
@@ -482,7 +484,7 @@ enum WorktreeCleanup {
                 ["check-ignore", "--stdin", "-z"], in: path, tools: tools, input: Data(named.map { $0 + "\0" }.joined().utf8)
             )
             guard [0, 1].contains(matched.status) else {
-                return .failure(ReadFailure(message: firstLine(matched.stderr) ?? "git check-ignore failed in \(path)."))
+                return .failure(ReadFailure(message: matched.stderr.firstLine ?? "git check-ignore failed in \(path)."))
             }
             let patterned = Set(matched.stdout.split(separator: "\0").map(String.init))
             files.buildOutput = named.filter { patterned.contains($0) }.sorted()
@@ -662,12 +664,6 @@ enum WorktreeCleanup {
 
     static func short(_ objectID: String) -> String { String(objectID.prefix(7)) }
 
-    static func firstLine(_ text: String) -> String? {
-        text.split(separator: "\n").lazy
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { !$0.isEmpty }
-    }
-
     static func output(of result: GitResult) -> String {
         let text = [result.stderr, result.stdout]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -694,7 +690,7 @@ enum WorktreeCleanup {
             executableURL: URL(fileURLWithPath: executable),
             arguments: arguments,
             currentDirectoryURL: URL(fileURLWithPath: directory),
-            environment: GitDetect.readOnlyEnvironment.merging(tools.environment) { _, override in override },
+            environment: tools.runEnvironment,
             standardInput: input,
             timeout: timeout ?? tools.timeout,
             captureStandardError: true

@@ -35,7 +35,7 @@ struct MergeWait: Codable, Equatable, Sendable {
     /// A pull request as GitHub gives it.
     struct LookedUp: Equatable, Sendable {
         let number: Int
-        let state: String
+        let state: GitHub.PullRequestState?
         let url: String
     }
 
@@ -88,16 +88,16 @@ struct MergeWait: Codable, Equatable, Sendable {
     }
 
     private mutating func step(found: LookedUp, awaitedGone: Bool) -> Step {
-        switch found.state.uppercased() {
-        case "OPEN":
+        switch found.state {
+        case .open:
             awaited.pullRequest = PullRequest(number: found.number, url: found.url)
             return awaitedGone ? .fail(.closedFirst(number: found.number)) : .keep
-        case "MERGED":
+        case .merged:
             awaited.pullRequest = PullRequest(number: found.number, url: found.url)
             return .release
-        case "CLOSED":
+        case .closed:
             return .fail(.closedUnmerged(number: found.number))
-        default:
+        case nil:
             return awaited.pullRequest == nil ? .keep : .lookUp
         }
     }
@@ -113,25 +113,18 @@ struct MergeWait: Codable, Equatable, Sendable {
     /// The pull request at `url`, nil when GitHub has none there, or why it
     /// couldn't say. Runs gh: call it off the main thread.
     static func lookUp(_ url: String) -> Result<LookedUp?, LookUpFailure> {
-        guard let ghPath = PRDetect.installedGHPath() else {
-            return .failure(LookUpFailure(reason: "the GitHub CLI (gh) isn't installed"))
+        let call = GitHub.CLI.Call(["pr", "view", url, "--json", "number,state,url"])
+        let data: Data
+        switch GitHub.CLI.run(call).flatMap(\.result) {
+        case .success(let output): data = output
+        case .failure(let failure):
+            if failure.message.lowercased().contains("could not resolve to a pullrequest") { return .success(nil) }
+            return .failure(LookUpFailure(reason: failure.message))
         }
-        guard let result = BoundedProcess.run(
-            executableURL: URL(fileURLWithPath: ghPath),
-            arguments: ["pr", "view", url, "--json", "number,state,url"],
-            currentDirectoryURL: URL(fileURLWithPath: NSHomeDirectory()),
-            timeout: 30
-        ) else { return .failure(LookUpFailure(reason: "gh didn't answer")) }
-        let errors = String(decoding: result.standardError, as: UTF8.self)
-        if result.terminationStatus != 0 {
-            if errors.lowercased().contains("could not resolve to a pullrequest") { return .success(nil) }
-            let line = errors.split(whereSeparator: \.isNewline).first.map(String.init) ?? "exit \(result.terminationStatus)"
-            return .failure(LookUpFailure(reason: "gh: \(line)"))
-        }
-        guard let json = try? JSONSerialization.jsonObject(with: result.standardOutput) as? [String: Any],
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let number = json["number"] as? Int, let state = json["state"] as? String, let url = json["url"] as? String
         else { return .failure(LookUpFailure(reason: "gh gave an answer Nirux couldn't read")) }
-        return .success(LookedUp(number: number, state: state, url: url))
+        return .success(LookedUp(number: number, state: GitHub.PullRequestState(state), url: url))
     }
 
     struct LookUpFailure: Error, Equatable, Sendable {

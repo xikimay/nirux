@@ -51,7 +51,7 @@ enum CITriage {
         let failedSteps: [String]
 
         var isRed: Bool {
-            CITriage.redConclusions.contains(conclusion)
+            GitHub.isRedCheck(conclusion)
         }
     }
 
@@ -81,17 +81,12 @@ enum CITriage {
                 conclusion: (job["conclusion"] as? String ?? "").lowercased(),
                 stepCount: steps.count,
                 failedSteps: steps.compactMap { step in
-                    redConclusions.contains((step["conclusion"] as? String ?? "").lowercased())
+                    GitHub.isRedCheck(step["conclusion"] as? String)
                         ? step["name"] as? String : nil
                 }
             )
         })
     }
-
-    /// The conclusions that make a job red: those of a red check
-    /// (`ProjectBoard.CheckResult.failure`), lowercased as the jobs give
-    /// them. One list: a job and its check must agree on what is red.
-    static let redConclusions: Set<String> = ["failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale"]
 
     static func isCommitName(_ text: String) -> Bool {
         (40...64).contains(text.count) && text.allSatisfy { $0.isASCII && $0.isHexDigit }
@@ -237,7 +232,7 @@ enum CITriage {
     /// What tells one failure of a pull request from the next: its red
     /// checks, each as `CIFailure.reportKey` (a rerun that fails again has
     /// new ones).
-    static func signature(of checks: [ProjectBoard.Check]) -> String {
+    static func signature(of checks: [GitHub.Check]) -> String {
         checks.map(CIFailure.reportKey).sorted().joined(separator: "\u{1}")
     }
 }

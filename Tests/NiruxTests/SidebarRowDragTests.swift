@@ -308,7 +308,7 @@ final class SidebarRowDragTests: XCTestCase {
     /// meanwhile brings the same rows; and nothing stays owed.
     func testARebuildSkippedDuringADragIsMadeAtItsEnd() throws {
         let checksRunning = PRInfo(
-            number: 39, state: "OPEN", isDraft: false, ciStatus: "PENDING", checks: [], reviewDecision: nil, mergeable: nil,
+            number: 39, state: .open, isDraft: false, ciStatus: "PENDING", checks: [], reviewDecision: nil, mergeable: nil,
             url: "https://example.test/pull/39", additions: nil, deletions: nil, changedFiles: nil
         )
         let (sidebar, window) = sidebar([row("a", index: 0, active: true), row("pr", index: 1, pr: checksRunning)])

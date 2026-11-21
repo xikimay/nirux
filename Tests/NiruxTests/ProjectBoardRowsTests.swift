@@ -28,7 +28,7 @@ final class ProjectBoardRowsTests: XCTestCase {
     }
 
     private func pullRequest(
-        _ number: Int, _ branch: String, state: String = "OPEN", fork: Bool = false, draft: Bool = false
+        _ number: Int, _ branch: String, state: GitHub.PullRequestState = .open, fork: Bool = false, draft: Bool = false
     ) -> ProjectBoard.PullRequest {
         ProjectBoard.PullRequest(
             number: number, state: state, headRefName: branch,
@@ -206,12 +206,12 @@ final class ProjectBoardRowsTests: XCTestCase {
         let result = rows(
             local: [repository],
             open: [pullRequest(40, "fix"), pullRequest(44, "fix")],
-            merged: [pullRequest(20, "fix", state: "MERGED"), pullRequest(21, "done", state: "MERGED"),
-                     pullRequest(22, "reused", state: "MERGED")]
+            merged: [pullRequest(20, "fix", state: .merged), pullRequest(21, "done", state: .merged),
+                     pullRequest(22, "reused", state: .merged)]
         )
         XCTAssertEqual(summary(result), ["main main", "active fix #44", "otherWorktree done #21", "otherWorktree reused"],
                        "a branch name reused since its merge has new work")
-        XCTAssertEqual(result[2].pullRequest?.state, "MERGED", "merged, ready to clean up")
+        XCTAssertEqual(result[2].pullRequest?.state, .merged, "merged, ready to clean up")
     }
 
     func testAWorktreeStillAtAnOlderMergesHeadReadsMerged() {
@@ -220,7 +220,7 @@ final class ProjectBoardRowsTests: XCTestCase {
             worktree("/p/widgets", branch: "main"),
             worktree("/p/widgets.old", branch: "old", head: String(repeating: "a", count: 40))
         ], remotes: [widgets])
-        let merged = [pullRequest(1, "old", state: "MERGED")] + (2...100).map { pullRequest($0, "done/\($0)", state: "MERGED") }
+        let merged = [pullRequest(1, "old", state: .merged)] + (2...100).map { pullRequest($0, "done/\($0)", state: .merged) }
         XCTAssertEqual(summary(rows(local: [repository], merged: merged)), ["main main", "otherWorktree old #1"])
     }
 

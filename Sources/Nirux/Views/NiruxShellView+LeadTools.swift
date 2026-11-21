@@ -356,7 +356,7 @@ extension NiruxShellView {
         if task.isInactive { line += " · inactive" }
         line += " · " + leadAgentState(of: task, snapshot: snapshot)
         if let pr = task.prInfo {
-            line += " · PR #\(pr.number) \(pr.isDraft ? "draft" : pr.state.lowercased())"
+            line += " · PR #\(pr.number) \(pr.isDraft ? "draft" : pr.state.word)"
             if let ci = pr.ciStatus { line += ", checks \(ci.lowercased())" }
         }
         return line

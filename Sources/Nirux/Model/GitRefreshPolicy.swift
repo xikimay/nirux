@@ -92,7 +92,7 @@ enum PullRequestRefreshPolicy {
         awaited: Bool = false
     ) -> TimeInterval? {
         let checksPending = pullRequest?.ciStatus == "PENDING"
-            && pullRequest?.state.uppercased() == "OPEN"
+            && pullRequest?.state == .open
         let isHot = checksPending || recentlyPushed || awaited
         switch tier {
         case .focused: return isHot ? 30 : 120

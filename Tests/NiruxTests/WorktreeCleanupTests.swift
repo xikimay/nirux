@@ -41,6 +41,8 @@ final class WorktreeCleanupTests: XCTestCase {
         #!/bin/sh
         dir="$(dirname "$0")"
         printf '%s\\n' "$*" >> "$dir/gh-args"
+        printf '%s\\n' "NO_COLOR=$NO_COLOR CLICOLOR_FORCE=$CLICOLOR_FORCE GIT_OPTIONAL_LOCKS=$GIT_OPTIONAL_LOCKS HOME=$HOME" >> "$dir/gh-env"
+        pwd -P >> "$dir/gh-folder"
         if [ -f "$dir/gh-error" ]; then cat "$dir/gh-error" >&2; exit 1; fi
         cat "$dir/gh-prs.json"
         """.write(toFile: gh, atomically: true, encoding: .utf8)
@@ -185,6 +187,11 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertEqual(plan.worktree.buildOutput, ["build/"])
         XCTAssertTrue(plan.worktree.folderMatchesBranch)
         XCTAssertTrue(try String(contentsOfFile: root + "/gh-args", encoding: .utf8).contains("--head=feat/x"))
+        XCTAssertEqual(
+            try String(contentsOfFile: root + "/gh-env", encoding: .utf8),
+            "NO_COLOR=1 CLICOLOR_FORCE=0 GIT_OPTIONAL_LOCKS=0 HOME=\(root!)/home\n", "no colour forced; git's read-only and the tools' environment"
+        )
+        XCTAssertEqual(try String(contentsOfFile: root + "/gh-folder", encoding: .utf8), worktree + "\n", "gh finds the repository from the worktree")
 
         // The squash left feat/x unmerged as far as git knows: -D after -d.
         XCTAssertEqual(
@@ -477,13 +484,16 @@ final class WorktreeCleanupTests: XCTestCase {
             .write(toFile: root + "/gh-error", atomically: true, encoding: .utf8)
         XCTAssertEqual(
             try report().problems,
-            ["gh couldn't list the pull requests of feat/x: gh: To get started with GitHub CLI, please run: gh auth login"]
+            ["gh couldn't list the pull requests of feat/x: gh isn’t signed in to github.com"]
         )
+
+        tools.ghPath = root + "/no-gh"
+        XCTAssertEqual(try report().problems, ["gh couldn't list the pull requests of feat/x: gh couldn’t start, or took longer than 30 s"])
 
         tools.ghPath = nil
         XCTAssertEqual(
             try report().problems,
-            ["The GitHub CLI (gh) isn't installed: the pull request can't be checked."]
+            ["The GitHub CLI (gh) isn’t installed: the pull request can’t be checked."]
         )
     }
 
@@ -896,7 +906,7 @@ final class WorktreeCleanupVerdictTests: XCTestCase {
     private let other = String(repeating: "b", count: 40)
 
     private func pullRequest(_ number: Int, _ state: String, head: String) -> WorktreeCleanup.PullRequest {
-        WorktreeCleanup.PullRequest(number: number, state: state, headOid: head, url: "https://github.com/acme/w/pull/\(number)")
+        WorktreeCleanup.PullRequest(number: number, state: GitHub.PullRequestState(state)!, headOid: head, url: "https://github.com/acme/w/pull/\(number)")
     }
 
     func testStatusEntriesSkipTheOriginalPathOfARename() {
@@ -992,7 +1002,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
             buildOutput: ignored.filter(WorktreeCleanup.isRegenerable)
         )
         let pullRequest = WorktreeCleanup.PullRequest(
-            number: 12, state: "MERGED", headOid: String(repeating: "a", count: 40), url: "https://github.com/acme/widgets/pull/12"
+            number: 12, state: .merged, headOid: String(repeating: "a", count: 40), url: "https://github.com/acme/widgets/pull/12"
         )
         return WorktreeCleanup.Plan(worktree: worktree, branch: "feat/x", tip: worktree.tip ?? "", pullRequest: pullRequest)
     }

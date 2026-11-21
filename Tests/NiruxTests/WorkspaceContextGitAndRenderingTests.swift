@@ -112,7 +112,7 @@ extension WorkspaceContextTests {
         let workspace = WorkspaceState(title: "context", cwd: committedRepository.path)
         let pullRequest = PRInfo(
             number: 42,
-            state: "OPEN",
+            state: .open,
             isDraft: false,
             ciStatus: nil,
             checks: [],
@@ -163,7 +163,7 @@ extension WorkspaceContextTests {
         let workspace = WorkspaceState(title: "context", cwd: directory.path)
         let pullRequest = PRInfo(
             number: 42,
-            state: "OPEN",
+            state: .open,
             isDraft: false,
             ciStatus: nil,
             checks: [],
@@ -399,7 +399,7 @@ extension WorkspaceContextTests {
         )
         let pullRequest = PRInfo(
             number: 42,
-            state: "OPEN",
+            state: .open,
             isDraft: false,
             ciStatus: nil,
             checks: [],
