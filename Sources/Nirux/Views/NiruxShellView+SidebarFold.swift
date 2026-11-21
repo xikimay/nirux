@@ -18,7 +18,7 @@ struct SidebarFold: Equatable {
 
     mutating func chooseWidth(_ width: CGFloat) {
         guard width.isFinite else { return }
-        preferredWidth = min(480, max(220, width.rounded()))
+        preferredWidth = min(360, max(240, width.rounded()))
     }
 
     func expandedWidth(in windowWidth: CGFloat) -> CGFloat {
