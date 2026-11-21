@@ -79,6 +79,9 @@ final class MergeQueueController {
     /// After every step: the board draws the queue again.
     var onChange: (() -> Void)?
 
+    private(set) var hasJournalFile = false
+    private var journalCheckedAt: TimeInterval?
+
     var isDryRun: Bool { client.isDryRun }
     /// Why this build's queue is a dry run ("not the notarized release
     /// (…)"), when its client says.
@@ -107,6 +110,22 @@ final class MergeQueueController {
         takeLeftOver(saved)
         // Just read: the first look again waits its interval.
         savedReadAt = clock.now()
+    }
+
+    /// A journal may outlive its saved state or appear while another Nirux runs.
+    func refreshJournalAvailabilityIfStale() {
+        guard engine == nil, saved == nil, let files else { return }
+        let now = clock.now()
+        if let journalCheckedAt, now - journalCheckedAt < 30 { return }
+        journalCheckedAt = now
+        Self.fileQueue.async { [weak self] in
+            let exists = files.hasJournal
+            Task { @MainActor [weak self] in
+                guard let self, exists != hasJournalFile else { return }
+                hasJournalFile = exists
+                onChange?()
+            }
+        }
     }
 
     /// Reads the saved queue again, when none runs here: the board asks
@@ -346,6 +365,18 @@ final class MergeQueueController {
 
     /// The journal and the state are written in order, off the main thread.
     nonisolated private static let fileQueue = DispatchQueue(label: "MergeQueue.files", qos: .utility)
+
+    func journalSnapshot() async -> MergeQueue.JournalSnapshot {
+        let engine = runsElsewhere ? nil : self.engine
+        let saved = self.saved
+        return await withCheckedContinuation { continuation in
+            Self.fileQueue.async { [files, queueRepository, isDryRun] in
+                continuation.resume(returning: MergeQueue.JournalSnapshot(
+                    repository: queueRepository, dryRun: isDryRun, engine: engine, saved: saved, entries: files?.recentEntries() ?? []
+                ))
+            }
+        }
+    }
 
     private func write(lines: [MergeQueue.Journal.Line], saved: MergeQueue.SavedQueue?) {
         guard let files, !lines.isEmpty || saved != nil else { return }

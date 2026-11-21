@@ -79,6 +79,7 @@ final class BoardStagesView: NSView {
         /// with nothing queued.
         var status: String?
         var detail: String?
+        var showsJournal = false
         var tone = QueueTone.normal
         /// Why this build can't change GitHub, for the DRY RUN badge's
         /// tooltip; nil for a real queue.
@@ -144,6 +145,7 @@ final class BoardStagesView: NSView {
     var onOrder: ((BoardStages.Order) -> Void)?
     /// A repository's Start… was pressed: its section's id.
     var onStart: ((String) -> Void)?
+    var onJournal: ((String) -> Void)?
     /// Stop was pressed, in a repository's header or on its running
     /// queue's line: its id.
     var onStop: ((String) -> Void)?
@@ -646,6 +648,7 @@ final class BoardStagesView: NSView {
             if !isOtherWorkspaces {
                 let header = keptHeaders.removeValue(forKey: id) ?? BoardStagesSectionHeaderView()
                 header.show(title: section.title, detail: section.detail, status: section.status, queue: section.queue, menu: section.menu)
+                header.onJournal = { [weak self] in self?.onJournal?(id) }
                 header.onStart = { [weak self] in self?.onStart?(id) }
                 header.onStop = { [weak self] in self?.onStop?(id) }
                 header.onMenu = { [weak self] item in self?.onSectionMenu?(id, item) }
@@ -719,7 +722,7 @@ final class BoardStagesView: NSView {
         var views: [NSView] = [orderSwitch, leadButton]
         for item in items {
             switch item {
-            case .sectionHeader(let header): views += [header.startButton, header.stopButton, header.moreButton]
+            case .sectionHeader(let header): views += [header.journalButton, header.startButton, header.stopButton, header.moreButton]
             case .line(let line): views.append(line)
             case .fold(let button), .sectionFold(let button): views.append(button)
             case .worktree(let worktree): views += [worktree.openButton, worktree.cleanUpButton]
@@ -1113,7 +1116,7 @@ final class BoardStagesView: NSView {
         }
         // A header's words change as its queue goes: only its button counts.
         if let (id, header) = sectionHeaders.first(where: { under($0.value) != nil }), let local = under(header) {
-            let button = [header.startButton, header.stopButton].first { !$0.isHidden && $0.frame.contains(local) }
+            let button = [header.journalButton, header.startButton, header.stopButton].first { !$0.isHidden && $0.frame.contains(local) }
             return "header \(id) \(button.map { "\($0.title) \($0.isEnabled)" } ?? "")"
         }
         // A message's Board Settings…, shown (`under` passes over a hidden view).
@@ -1384,14 +1387,16 @@ final class BoardStagesSectionHeaderView: NSView {
     let queueLabel = NSTextField(labelWithString: "")
     /// This build can't change GitHub: every queue is a dry run.
     let dryRunBadge = NSTextField(labelWithString: "DRY RUN")
+    let journalButton = BoardStagesButton(title: "Journal…", target: nil, action: nil)
     let startButton = BoardStagesButton(title: "Start…", target: nil, action: nil)
     let stopButton = BoardStagesButton(title: "Stop", target: nil, action: nil)
     /// Start and Stop act only where the pointer aimed. (The Board says.)
     var aim = BoardStagesAim() {
-        didSet { [startButton, stopButton].forEach { $0.aim = aim } }
+        didSet { [startButton, stopButton, journalButton].forEach { $0.aim = aim } }
     }
     /// "⋯": the repository's menu.
     let moreButton = BoardStagesKeyButton(title: "", target: nil, action: nil)
+    var onJournal: (() -> Void)?
     var onStart: (() -> Void)?
     var onStop: (() -> Void)?
     var onMenu: ((BoardStagesView.SectionMenuItem) -> Void)?
@@ -1423,12 +1428,13 @@ final class BoardStagesSectionHeaderView: NSView {
         dryRunBadge.layer?.borderWidth = 1
         dryRunBadge.layer?.borderColor = Theme.Color.textTertiary.cgColor
         dryRunBadge.layer?.cornerRadius = Theme.Radius.chip
-        for button in [startButton, stopButton] {
+        for button in [startButton, stopButton, journalButton] {
             button.bezelStyle = .rounded
             button.controlSize = .small
             button.font = Theme.Font.caption
             button.target = self
         }
+        journalButton.action = #selector(journalClicked)
         startButton.action = #selector(startClicked)
         stopButton.action = #selector(stopClicked)
         moreButton.isBordered = false
@@ -1439,7 +1445,7 @@ final class BoardStagesSectionHeaderView: NSView {
         moreButton.toolTip = "Repository menu"
         // The Board's text stays still: no breathing dot here.
         pill.animates = false
-        [titleLabel, detailLabel, pill, queueLabel, dryRunBadge, startButton, stopButton, moreButton].forEach(addSubview)
+        [titleLabel, detailLabel, pill, queueLabel, dryRunBadge, journalButton, startButton, stopButton, moreButton].forEach(addSubview)
     }
 
     @available(*, unavailable)
@@ -1458,6 +1464,8 @@ final class BoardStagesSectionHeaderView: NSView {
         moreButton.setAccessibilityLabel("\(title) menu")
         queueLabel.stringValue = queue?.status ?? ""
         queueLabel.textColor = Self.color(of: queue?.tone ?? .normal)
+        journalButton.isHidden = queue?.showsJournal != true
+        journalButton.setAccessibilityLabel("Merge queue journal for \(title)")
         dryRunBadge.toolTip = queue?.dryRun
         // The one that shows first: Start that had the keyboard hands it to Stop before going off, and back.
         let shown = queue?.stop != nil ? stopButton : startButton
@@ -1503,6 +1511,11 @@ final class BoardStagesSectionHeaderView: NSView {
             button.frame = NSRect(x: right - width, y: baseline - 3, width: width, height: 22)
             // Start and Stop take one place, the wider's: what is left of them doesn't move when one becomes the other.
             right -= max(ceil(startButton.fittingSize.width), ceil(stopButton.fittingSize.width)) + 8
+        }
+        if !journalButton.isHidden {
+            let width = ceil(journalButton.fittingSize.width)
+            journalButton.frame = NSRect(x: right - width, y: baseline - 3, width: width, height: 22)
+            right = journalButton.frame.minX - 8
         }
         // Then the name, 80 pt of it at least; then, while there is room, in
         // this order: DRY RUN, the queue's words (whole, or cut down to
@@ -1556,6 +1569,7 @@ final class BoardStagesSectionHeaderView: NSView {
 
     // MARK: Clicks
 
+    @objc private func journalClicked() { onJournal?() }
     @objc private func startClicked() { onStart?() }
     @objc private func stopClicked() { onStop?() }
     @objc private func moreClicked() {
