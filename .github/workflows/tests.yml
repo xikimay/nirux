@@ -5,9 +5,15 @@ name: Tests
 # (2026-07-19, ActivityStoreTests). Not on push to main: the nightly
 # (nightly.yml) already runs the tests there, and a second run held another
 # macOS runner on every merge.
+#
+# A draft runs only the test classes its changes reach, under its own check
+# name, "test (selected)". The full suite, the "test" check, runs once the
+# pull request is marked ready and on every push after: a draft never shows
+# a "test" check, passed or skipped, that a merge could read.
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -18,6 +24,7 @@ permissions:
 
 jobs:
   test:
+    name: ${{ github.event.pull_request.draft && 'test (selected)' || 'test' }}
     runs-on: macos-15
     # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift
     # 6.1): libghostty-spm 2.2 needs Swift tools 6.2.
@@ -54,5 +61,42 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
+      # The latest index the Coverage map workflow saved on main.
+      - name: Coverage index
+        if: github.event.pull_request.draft
+        uses: actions/cache/restore@v6
+        with:
+          path: .build/coverage-index.txt
+          key: coverage-index-
+          restore-keys: coverage-index-
+
+      # The merge commit's first parent is main's tip: the diff is the
+      # pull request's changes.
+      - name: Select tests
+        id: select
+        if: github.event.pull_request.draft
+        run: |
+          if [[ ! -s .build/coverage-index.txt ]]; then
+            echo "No coverage index yet: the whole suite."
+            exit 0
+          fi
+          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed"
+          status=0
+          scripts/select-tests.sh .build/coverage-index.txt < "$RUNNER_TEMP/changed" > "$RUNNER_TEMP/selected" || status=$?
+          if [[ $status -eq 0 ]]; then
+            echo "$(wc -l < "$RUNNER_TEMP/selected" | tr -d ' ') classes selected:"
+            cat "$RUNNER_TEMP/selected"
+            echo "only=$RUNNER_TEMP/selected" >> "$GITHUB_OUTPUT"
+          elif [[ $status -ne 3 ]]; then
+            exit "$status"
+          fi
+
       - name: Run tests
-        run: scripts/run-tests.sh
+        env:
+          ONLY: ${{ steps.select.outputs.only }}
+        run: |
+          if [[ -n $ONLY ]]; then
+            scripts/run-tests.sh --only "$ONLY"
+          else
+            scripts/run-tests.sh
+          fi

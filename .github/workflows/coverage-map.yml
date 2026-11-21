@@ -1,0 +1,76 @@
+name: Coverage map
+
+# Which source files each test class runs, for the test selection of draft
+# pull requests (scripts/select-tests.sh): the suite once with coverage, one
+# profile per class. Daily on main, and by hand; a pull request reads the
+# latest index saved.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: coverage-map
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  map:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Toolchain
+        id: toolchain
+        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+
+      - name: Build with coverage
+        run: swift build --build-tests --enable-code-coverage
+
+      # A red class would leave its profile short: no index then, and pull
+      # requests keep reading the previous one.
+      - name: Run tests, one profile per class
+        env:
+          NIRUX_TESTS_PROFILES: ${{ runner.temp }}/profiles
+        run: |
+          mkdir -p "$NIRUX_TESTS_PROFILES"
+          scripts/run-tests.sh
+
+      - name: Index the source files each class runs
+        env:
+          NIRUX_TESTS_PROFILES: ${{ runner.temp }}/profiles
+        run: |
+          bin="$(swift build --show-bin-path)"
+          export BUNDLE="$bin/NiruxPackageTests.xctest/Contents/MacOS/NiruxPackageTests" APP="$bin/Nirux"
+          ls "$NIRUX_TESTS_PROFILES" | sed -E 's/\.[0-9]+\.profraw$//' | sort -u |
+            xargs -P 3 -n 1 bash -c '
+              set -euo pipefail
+              class="$1"
+              xcrun llvm-profdata merge -sparse "$NIRUX_TESTS_PROFILES/$class".*.profraw -o "$RUNNER_TEMP/$class.profdata"
+              xcrun llvm-cov export -format=lcov -skip-functions -instr-profile "$RUNNER_TEMP/$class.profdata" "$BUNDLE" -object "$APP" \
+                -ignore-filename-regex "/\.build/|/Tests/" |
+                awk -v class="$class" -F"[:,]" "/^SF:/ { f = \$2; sub(/.*\/Sources\//, \"Sources/\", f) } /^DA:/ && \$3 > 0 && !seen[f]++ { print f, class }"
+            ' _ | sort > .build/coverage-index.txt
+          echo "$(cut -d' ' -f2 .build/coverage-index.txt | sort -u | wc -l | tr -d ' ') classes, $(cut -d' ' -f1 .build/coverage-index.txt | sort -u | wc -l | tr -d ' ') source files"
+
+      - uses: actions/cache/save@v6
+        with:
+          path: .build/coverage-index.txt
+          key: coverage-index-${{ github.run_id }}

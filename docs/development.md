@@ -16,6 +16,8 @@ CI runs the tests one process per test class, several at a time:
 swift build --build-tests && scripts/run-tests.sh
 ```
 
+A draft pull request runs only the test classes its changes reach, as the `test (selected)` check. The full suite, the `test` check, runs once the pull request is marked ready, and on every push after. `scripts/select-tests.sh` picks the classes from the coverage index that the Coverage map workflow saves on main each day: the classes that run a changed source file, and those a changed test file declares. These run the whole suite instead: a source file no class runs (a new one, say), a test file that declares more than test classes (a helper) or a class others inherit, and any file but Swift sources, test files and documentation (`Package.swift`, `Package.resolved`, workflows, scripts, resources, `EditorAssets`).
+
 ## Development builds and your real workspaces
 
 Only the installed app opens your workspaces: `/Applications/Nirux.app`, or `~/Applications/Nirux.app` when `/Applications` has none. Any other copy (`swift run`, `.build/debug/Nirux`, a `bundle.sh` bundle, a download run from elsewhere) quits unless `NIRUX_STATE_DIR` is set. It says why on stderr, and in an alert when Finder, the Dock, `open` or a `nirux://` link started it.
