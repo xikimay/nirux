@@ -87,6 +87,61 @@ final class WaitingTaskFlowTests: XCTestCase {
         }
     }
 
+    func testSharedWaitingTitleCannotCloseTheLeadsOtherTask() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            _ = try harness.stubCleanupTools()
+            let upstream = try upstreamTask("Prepare accounts", lead: lead, in: harness)
+            let title = "Publish accounts"
+            let started = try harness.callLeadTool(LeadTools.startTask, ["description": title, "repo": "none"], lead: lead)
+            XCTAssertFalse(started.isError, started.text)
+            let active = try XCTUnwrap(shell.workspaces.first { $0.title == title })
+            XCTAssertNotNil(shell.leadMission(of: active, lead: lead.workspace.id))
+
+            @MainActor func queue(_ detail: String) throws -> WorkspaceState {
+                let description = title + "\n" + detail
+                let queued = try harness.callLeadTool(LeadTools.startTask, ["description": description, "after": upstream.title], lead: lead)
+                XCTAssertFalse(queued.isError, queued.text)
+                let task = try XCTUnwrap(shell.workspaces.first { $0.waitingStart?.pendingStart?.description == description })
+                XCTAssertEqual(task.title, title)
+                XCTAssertTrue(queued.text.contains("task:\(task.id)"), queued.text)
+                return task
+            }
+            let first = try queue("Publish the guide.")
+            let second = try queue("Publish the schemas.")
+            let firstID = "task:\(first.id)"
+            let secondID = "task:\(second.id)"
+            XCTAssertNotEqual(firstID, secondID)
+            let list = try harness.callLeadTool(LeadTools.listTasks, lead: lead).text
+            for id in [firstID, secondID, "task:\(active.id)"] {
+                XCTAssertTrue(list.split(separator: "\n").contains { $0.contains(title) && $0.contains(id) }, list)
+            }
+
+            @MainActor func close(_ name: String) throws -> (text: String, isError: Bool) {
+                try harness.callLeadTool(LeadTools.closeTask, ["task": name], lead: lead)
+            }
+            let ambiguous = try close(title.lowercased())
+            XCTAssertTrue(ambiguous.isError && ambiguous.text.contains("task:<id>"), ambiguous.text)
+            XCTAssertFalse(active.isClosing || first.isClosing || second.isClosing)
+
+            let changed = try harness.callLeadTool(LeadTools.setTaskAfter, ["task": secondID, "after": firstID], lead: lead)
+            XCTAssertFalse(changed.isError, changed.text)
+            XCTAssertEqual(second.waitingStart?.awaited.workspaceID, first.id)
+            XCTAssertEqual(first.waitingStart?.awaited.workspaceID, upstream.id)
+            XCTAssertFalse(try close(secondID).isError)
+            harness.waitUntil("only the addressed task closes") { !shell.workspaces.contains { $0 === second } }
+            XCTAssertTrue(shell.workspaces.contains { $0 === first && !$0.isClosing })
+            XCTAssertTrue(shell.workspaces.contains { $0 === active && !$0.isClosing })
+            XCTAssertTrue(FileManager.default.fileExists(atPath: active.cwd))
+
+            active.title = secondID
+            let stale = try close(secondID.lowercased())
+            XCTAssertTrue(stale.isError && stale.text.contains("task:<id>"), stale.text)
+            XCTAssertFalse(active.isClosing)
+        }
+    }
+
     func testInterruptedStartAndMissingRepositoryStayActionableAfterRestore() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

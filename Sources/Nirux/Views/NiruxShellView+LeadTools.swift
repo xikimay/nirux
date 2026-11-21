@@ -323,10 +323,10 @@ extension NiruxShellView {
         var lines: [String] = []
         for task in tasks {
             if let wait = task.waitingStart, let state = wait.waitingState {
-                lines.append("“\(MissionPromptText.quoted(task.title))” · \(state.line) · \(wait.pendingStart?.repository ?? "")")
+                lines.append("- “\(MissionPromptText.quoted(task.title))” · \(state.line) · \(wait.pendingStart?.repository ?? "") · \(task.leadTaskReference)")
                 continue
             }
-            var line = taskListHead(task, in: space, parentTitle: parentTitles[task.id], snapshot: snapshot)
+            var line = taskListHead(task, in: space, parentTitle: parentTitles[task.id], snapshot: snapshot) + " · \(task.leadTaskReference)"
             // Only what its own tasks sent it: another agent's Mission
             // isn't its to answer, and its tells don't make a task its own.
             let missions = store.missions.filter { $0.childWorkspaceID == task.id && $0.parentWorkspaceID == leadID && $0.oneWay != true }

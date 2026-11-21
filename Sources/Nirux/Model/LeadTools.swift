@@ -32,10 +32,11 @@ enum LeadTools {
     /// of its own (unless a repository of the space has that name).
     static let noRepository = "none"
 
+    static let taskIDPrefix = "task:"
+
     /// How a tool names one of the Lead's tasks.
-    static let taskDescription = "The task's branch (its folder, as list_tasks shows it, or the folder's name, "
-        + "for a task without a repository), or its title. A name several tasks answer goes to the one of yours, "
-        + "if only one is; otherwise it is refused."
+    static let taskDescription = "The stable task:<id> from list_tasks, the task’s branch, its folder or folder name, or its title. "
+        + "Use the ID when a waiting task shares a name. For other shared names, a single task reporting to you takes precedence."
 
     /// tell's `after`.
     static let afterDescription = "Another task of this space, named the same way: the message is held until that task's "
