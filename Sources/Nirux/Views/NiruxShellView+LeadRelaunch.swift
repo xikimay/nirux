@@ -48,7 +48,7 @@ extension NiruxShellView {
     func leadLaunchIssue(in lead: WorkspaceState, foreground: ForegroundProcess?, snapshot: ProcessSnapshot) -> LeadLaunchIssue? {
         guard lead.isLead, !lead.isClosing else { return nil }
         guard let column = lead.leadTerminal else { return .stopped }
-        guard !column.isAwaitingResume, !column.isRestartingShell, let pty = column.pty else { return nil }
+        guard !column.isAwaitingResume, !column.isRestartingShell, column.relaunchingLeadSessionID == nil, let pty = column.pty else { return nil }
         if pty.hasExited { return .stopped }
         guard let process = foreground, !process.arguments.isEmpty else { return nil }
         guard AgentHookCenter.isInteractiveClaude(process) else {
@@ -64,7 +64,7 @@ extension NiruxShellView {
         let passedSafety = process.arguments.filter { $0.hasPrefix("--settings=") }
         let expectedSafety = current.safety.flatMap { _ in ClaudeSpaceSettings.fileURL(spaceID: lead.profileID) }
             .map { ["--settings=" + $0.path] } ?? []
-        return !sameMode || passedSafety != expectedSafety || column.leadSafetyAtLaunch != current.safety
+        return !sameMode || passedSafety != expectedSafety || (!passedSafety.isEmpty && column.leadSafetyAtLaunch != current.safety)
             ? .olderOptions : nil
     }
 
@@ -82,6 +82,22 @@ extension NiruxShellView {
         return false
     }
 
+    func canRelaunchLeadSession(_ id: String, in column: ColumnState) -> Bool {
+        let record = sessionLedger.session(agent: .claude, sessionID: id)
+        if let record, !AgentSessionResume.hasTranscript(for: record) {
+            showToast(SessionHistory.message(.transcriptGone, agent: .claude), tone: .error)
+            return false
+        }
+        let others = agentSessionHolders(snapshot: ProcessSnapshot()).filter { $0.columnID != column.id }
+        let recorded = record.flatMap(recordedColumn)
+        guard !sessionResume.inFlight.contains(AgentSessionRecord.key(agent: "claude", sessionID: id)),
+              HeldAgentSession.find(id, in: others) == nil, recorded == nil || recorded?.columnID == column.id else {
+            showToast("Another column is holding or resuming this conversation.")
+            return false
+        }
+        return true
+    }
+
     func requestLeadRecovery(_ issue: LeadLaunchIssue, in lead: WorkspaceState) {
         guard leadWorkspace(inSpace: lead.profileID) === lead else { return }
         lead.leadOptionsCache = nil
@@ -97,7 +113,8 @@ extension NiruxShellView {
                 && leadLaunchIssue(in: lead, foreground: foreground, snapshot: latest) == issue
         }
         guard issue == .olderOptions else { return requestRestartLead(spaceID: lead.profileID, stillApplies: stillApplies) }
-        guard let column, let process, case .resume(let sessionID)? = column.persistedClaudeRestore(foregroundProcess: process) else {
+        guard let column, let process, case .resume(let sessionID)? = column.persistedClaudeRestore(foregroundProcess: process),
+              UUID(uuidString: sessionID) != nil else {
             return showToast("Claude hasn’t recorded a conversation to resume yet.")
         }
         let space = profiles.first { $0.id == lead.profileID }?.name ?? lead.profileID
