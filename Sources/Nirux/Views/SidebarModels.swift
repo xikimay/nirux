@@ -488,7 +488,7 @@ enum WorktreeCleanupMenuOffer {
 enum WorkspaceSidebarAction {
     case startWaitingTask
     case moveUp, moveDown, markActive, markInactive
-    case close, rename, editContext, reviewBranch, newSubtask, moveOutOfParent
+    case close, rename, editContext, reviewBranch, resumeWith, newSubtask, moveOutOfParent
     /// "Turn Off Lead…": Space Settings › Lead, where the Lead closes.
     case turnOffLead
     case restartLead

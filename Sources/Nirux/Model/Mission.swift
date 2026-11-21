@@ -15,7 +15,7 @@ struct Mission: Codable, Equatable {
     let childWorkspaceID: String
     let childAgentUUID: String
     /// `CodingAgent`'s raw value, or "agent" when the child started none.
-    let childAgentKind: String
+    var childAgentKind: String
     let branch: String
     var status: Status
     let createdAt: TimeInterval
@@ -346,6 +346,31 @@ final class MissionStore {
         var updated = missions
         updated.append(mission)
         return commit(updated) ? mission : nil
+    }
+
+    /// Switch all routes into this terminal together, including a Lead's one-way tells.
+    func resumeWorker(workspaceID: String, agentUUID: String, missionID: String?, as agent: CodingAgent) -> Bool {
+        guard ensureLoaded() else { return false }
+        var updated = missions
+        let routes = updated.indices.filter { updated[$0].childWorkspaceID == workspaceID && updated[$0].childAgentUUID == agentUUID }
+        guard missionID == nil || routes.contains(where: { updated[$0].id == missionID }) else { return false }
+        for index in routes {
+            updated[index].childAgentKind = agent.rawValue
+            if updated[index].id == missionID { updated[index].status = .active }
+            let events = updated[index].events
+            let round = events.lastIndex { $0.kind == .completed }.map { $0 + 1 } ?? 0
+            let received = Set(events.compactMap { $0.kind == .response && $0.childConsumedAt != nil ? $0.inReplyTo : nil })
+            for event in events.indices {
+                // The previous CLI's blocking ask exited with it. Deliver its answer to the new prompt.
+                if event >= round, events[event].kind == .question, !received.contains(events[event].id) {
+                    updated[index].events[event].expectsTypedAnswer = true
+                }
+                if events[event].kind == .instruction, events[event].childConsumedAt == nil, events[event].expiredAt == nil {
+                    updated[index].events[event].childSessionID = nil
+                }
+            }
+        }
+        return updated == missions || commit(updated)
     }
 
     struct AcceptedEvent {

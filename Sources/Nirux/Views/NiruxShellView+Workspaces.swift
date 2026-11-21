@@ -282,20 +282,27 @@ extension NiruxShellView {
     ) {
         guard let col = workspace.columns[safe: workspace.focusedIndex],
               let launch = Self.launch(of: agent, resume: nil, model: model, in: workspace) else { return }
-        // A new agy says which conversation it runs through Nirux's hook.
-        if agent == .agy { AgentHookInstaller.installAgyHooksIfInstalling() }
-        let cmd = agentCommand(
-            launch, in: workspace, column: col, launchDirectory: workspace.cwd,
+        let cmd = freshAgentCommand(
+            launch, in: workspace, column: col, launchDirectory: workspace.cwd, worktreeBranch: worktreeBranch,
+            handoverPrompt: Self.agentStartupPrompt(agent: agent, deliveredHandover: deliveredHandover, isMission: workspace.missionID != nil)
+        )
+        sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
+    }
+
+    func freshAgentCommand(
+        _ launch: AgentLaunch, in workspace: WorkspaceState, column: ColumnState, launchDirectory: String,
+        worktreeBranch: String?, handoverPrompt: String? = nil
+    ) -> String {
+        if launch.agent == .agy { AgentHookInstaller.installAgyHooksIfInstalling() }
+        return agentCommand(
+            launch, in: workspace, column: column, launchDirectory: launchDirectory,
             sessionName: SessionName.make(
                 worktreeBranch: worktreeBranch,
                 spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
                 isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
             ),
-            handoverPrompt: Self.agentStartupPrompt(
-                agent: agent, deliveredHandover: deliveredHandover, isMission: workspace.missionID != nil
-            )
+            handoverPrompt: handoverPrompt
         )
-        sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
     }
 
     /// A new Claude's launch line in `workspace`: its space's mode, brief
@@ -484,6 +491,9 @@ extension NiruxShellView {
             return
         case .reviewBranch:
             openBranchReview(in: workspaces[workspaceIndex])
+            return
+        case .resumeWith:
+            showResumeTask(workspaces[workspaceIndex])
             return
         case .startWaitingTask:
             startWaitingTask(workspaces[workspaceIndex])

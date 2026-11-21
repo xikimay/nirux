@@ -21,6 +21,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Rename Workspace"
             ],
             "testOrganizeMenuItems": ["Organize"],
+            "testResumeTaskMenuItem": ["Resume with…"],
             "testNewSubtaskMenuItem": [SidebarView.newSubtaskTitle],
             "testAddRuleMenuItem": [SidebarView.addRuleTitle],
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
@@ -86,13 +87,25 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(menus[0].items.map(\.title), [
                 "Focus Column", "Close Column", "",
                 "Review Branch", "Ask Agent Why CI Failed", "Rerun Failed CI Jobs…", "",
-                "New Sub-task…", "Organize", "",
+                "Resume with…", "New Sub-task…", "Organize", "",
                 "Rename Workspace", "View/Edit Context…", SidebarView.addRuleTitle, "",
                 "Clean Up Worktree…", "Close Workspace"
             ])
             // The folder is gone: Clean Up comes up among the state actions,
             // and it is no task to start a sub-task of.
             XCTAssertEqual(menus[2].items.prefix(4).map(\.title), ["Review Branch", "Clean Up Worktree…", "", "Organize"])
+        }
+    }
+
+    func testResumeTaskMenuItem() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.addWorkspace(title: "Switch me", cwd: harness.worktree)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            let menu = shell.sidebar.workspaceActionMenu(workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), columnIndex: nil)
+            harness.perform(["Resume with…"], in: menu)
+            XCTAssertEqual(harness.alerts.last, "Resume “Switch me” with another CLI?")
+            XCTAssertTrue(harness.terminalRestarts.isEmpty, "Cancel preserves the current session")
         }
     }
 

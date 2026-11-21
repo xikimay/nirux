@@ -712,11 +712,11 @@ final class MissionTellTests: XCTestCase {
         pty.sendRaw("\r")
         submit("peer")
         try record("peer", origin: "peer")
-        XCTAssertTrue(pty.reviewSendHasDraft)
+        XCTAssertTrue(pty.hasPromptDraft)
         pty.sendRaw("\r")
         submit("typed")
         try record("typed", origin: "human")
-        XCTAssertFalse(pty.reviewSendHasDraft)
+        XCTAssertFalse(pty.hasPromptDraft)
     }
 
     /// A column says when the user typed a prompt to its agent, with that

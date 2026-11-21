@@ -21,12 +21,13 @@ enum LeadTools {
     static let setTaskParent = "set_task_parent"
     static let readThread = "read_thread"
     static let readTask = "read_task"
+    static let resumeTask = "resume_task"
     static let interruptTask = "interrupt_task"
     static let recordReview = "record_review"
     static let dailyPass = "daily_pass"
     static let names = [
         startTask, setTaskAfter, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule, recordReview, dailyPass,
-        closeTask, moveTask, renameTask, setTaskParent, readThread, readTask, interruptTask
+        closeTask, moveTask, renameTask, setTaskParent, readThread, readTask, resumeTask, interruptTask
     ]
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
@@ -368,6 +369,16 @@ enum LeadTools {
                 required: ["task"], readOnly: true
             ),
             definition(
+                resumeTask, title: "Resume a task with another CLI",
+                description: "End the worker of one of your tasks and start a fresh session with the selected CLI in its existing terminal and worktree.",
+                properties: [
+                    "task": ["type": "string", "description": taskDescription],
+                    "agent": ["type": "string", "enum": CodingAgent.launchable.map(\.rawValue)],
+                    "model": ["type": "string", "description": "The provider’s model ID. Omit to use the CLI’s configured default."]
+                ],
+                required: ["task", "agent"], destructive: true
+            ),
+            definition(
                 interruptTask, title: "Interrupt a task's turn",
                 description: """
                     Stop the turn a task's Claude Code agent is working on, as Esc does, without closing anything; \
@@ -513,6 +524,10 @@ enum LeadTools {
             guard let title = title(arguments), title.count <= maxTitleLength else {
                 return "title must hold 1 to \(maxTitleLength) characters."
             }
+            return nil
+        case resumeTask:
+            guard string(arguments, "task") != nil else { return "task is missing." }
+            if case .failure(let problem) = TaskAgentChoice.parse(arguments) { return problem.localizedDescription }
             return nil
         case setTaskAfter, setTaskParent, readThread, readTask, interruptTask:
             return string(arguments, "task") == nil ? "task is missing." : nil

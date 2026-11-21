@@ -128,6 +128,7 @@ final class ColumnState {
     /// Nirux ends the shell to start it again (`restartTerminal`): its exit
     /// shows no "Session ended", and nothing else starts it meanwhile.
     private(set) var isRestartingShell = false
+    private(set) var shellGeneration = 0
     // A hung-up shell can exit before its jobs. Keep their identities
     // across retries, when a fresh process tree can no longer find them.
     private var restartProcesses: [ProcessInstance: String] = [:]
@@ -851,19 +852,23 @@ final class ColumnState {
 
     /// A restored column starts directly. A live terminal waits for its
     /// shell and jobs to exit before the caller can authorize the new launch.
-    func restartTerminal(running command: String, starts: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Bool) {
-        guard !isRestartingShell, let spec = terminalSpec else { return }
-        restoredColumn = nil
-        defer { terminalSpec = (spec.cwd, Self.plainShellArgs, spec.environment) }
-        if takeDeferredAgent() != nil {
-            if starts([]) { startShell(command: command) }
-            return
-        }
+    func restartTerminal(
+        running command: String, canStop: @MainActor () -> Bool = { true }, starts: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Bool
+    ) {
+        guard !isRestartingShell, terminalSpec != nil else { return }
         let shellName = (PtySession.defaultShell as NSString).lastPathComponent
         var processes = pty?.shellPID.map { ProcessSnapshot().tree(of: $0) } ?? []
         if let pid = pty?.shellPID, !processes.contains(where: { $0.process.pid == pid }),
            let shell = ProcessInstance.running(pid: pid) {
             processes.append((shell, shellName))
+        }
+        guard canStop(), let spec = terminalSpec else { return }
+        shellGeneration += 1
+        restoredColumn = nil
+        defer { terminalSpec = (spec.cwd, Self.plainShellArgs, spec.environment) }
+        if takeDeferredAgent() != nil {
+            if starts([]) { startShell(command: command) }
+            return
         }
         for (process, name) in processes { restartProcesses[process] = name }
         isRestartingShell = true
