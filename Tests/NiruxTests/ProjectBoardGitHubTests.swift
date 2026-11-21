@@ -259,7 +259,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
             GitHubCLIBoardClient.pullRequestArguments(repository: "acme/widgets", state: .open),
             ["pr", "list", "--repo", "github.com/acme/widgets", "--state", "open", "--limit", "100", "--json",
              "number,state,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,"
-                + "mergeable,reviewDecision,autoMergeRequest,statusCheckRollup,url,title"]
+                + "mergeable,mergeStateStatus,reviewDecision,autoMergeRequest,statusCheckRollup,url,title"]
         )
         // The merged ones in one GraphQL query: those opened last, as `gh pr list` lists them, and
         // those updated last, which it can't ask for; the fields under the names it gives them.

@@ -86,6 +86,7 @@ extension ProjectBoard {
         var mergedAt: Date?
         var reviewDecision: String?
         var autoMerges = false
+        var mergeIsBlocked = false
 
         var isOpen: Bool { state == "OPEN" }
         var isConflicting: Bool { mergeable == "CONFLICTING" }

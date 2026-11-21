@@ -339,7 +339,7 @@ extension BoardStages {
         }
         return PullRequest(
             number: pullRequest.number, isMerged: isMerged, isDraft: pullRequest.isDraft,
-            autoMerges: pullRequest.autoMerges,
+            autoMerges: pullRequest.autoMerges, mergeIsBlocked: pullRequest.mergeIsBlocked,
             mergeabilityUnknown: !isMerged && !pullRequest.isConflicting && pullRequest.mergeable != "MERGEABLE",
             isConflicting: pullRequest.isConflicting,
             base: pullRequest.baseRefName ?? repository.baseBranch ?? "", isOnBaseBranch: isOnBaseBranch,

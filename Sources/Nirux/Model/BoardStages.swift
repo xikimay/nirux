@@ -340,6 +340,7 @@ extension BoardStages {
         var isMerged = false
         var isDraft = false
         var autoMerges = false
+        var mergeIsBlocked = false
         var mergeabilityUnknown = false
         var isConflicting = false
         /// The branch it targets.
@@ -736,7 +737,8 @@ extension BoardStages {
             return Reading(.idle, facts.isParked ? "Parked" : "Paused · Resume", since: last)
         }
         if let notice = facts.gitHubStatus.notice, pullRequest?.isMerged != true {
-            return Reading(.idle, notice, detail: text(facts.blocker))
+            if let blocker = text(facts.blocker) { return Reading(.blocked, blocker, detail: notice) }
+            return Reading(.idle, notice)
         }
         if let pullRequest {
             if !pullRequest.isMerged, let problem = problem(of: pullRequest, flakyReason: text(facts.flakyReason)) {
@@ -787,6 +789,7 @@ extension BoardStages {
                 let with = { (word: String) in passed.isEmpty ? word : "\(word) · \(passed)" }
                 if pullRequest.isDraft { return Reading(.idle, with("Draft"), since: last) }
                 if !pullRequest.isOnBaseBranch { return Reading(.idle, "Targets \(branch(pullRequest.base))", since: last) }
+                if pullRequest.mergeIsBlocked { return Reading(.blocked, "Merge blocked by GitHub") }
                 if pullRequest.mergeabilityUnknown { return Reading(.waiting, "GitHub checking mergeability") }
                 if pullRequest.autoMerges { return Reading(.waiting, with("GitHub auto-merge")) }
                 return Reading(.ready, with("Merge manually"))

@@ -24,7 +24,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
     [
       {"number": 12, "state": "OPEN", "headRefName": "feat/login", "headRefOid": "\(String(repeating: "a", count: 40))",
        "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",
-       "isDraft": false, "mergeable": "MERGEABLE", "url": "https://github.com/acme/widgets/pull/12", "title": "Sign in",
+       "isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED", "url": "https://github.com/acme/widgets/pull/12", "title": "Sign in",
        "statusCheckRollup": [{"__typename": "CheckRun", "name": "test", "workflowName": "Tests",
                               "status": "COMPLETED", "conclusion": "SUCCESS", "startedAt": "2026-09-27T23:05:04Z"}]},
       {"number": 13, "state": "OPEN", "headRefName": "fix/remote", "headRefOid": "\(String(repeating: "b", count: 40))",
@@ -80,6 +80,8 @@ final class BoardStagesContentFlowTests: XCTestCase {
                     && board.reads.values.contains { $0.name == "acme/gadgets" && $0.openPullRequests != nil }
             }
             let ids = { (title: String) in shell.workspaces.first { $0.title == title }?.id ?? "" }
+            let loginTask = try XCTUnwrap(shell.workspaces.first { $0.id == ids("login") })
+            loginTask.reviewRuns[.codeReview] = ReviewRun(head: String(repeating: "a", count: 40), at: 1, branch: "feat/login")
             let content = try stages(of: board, in: shell)
 
             // A click on a task's line focuses its workspace, at its most urgent agent column when one works there: as the
@@ -119,6 +121,10 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // Its tasks in the sidebar's order, the pull request without a task folded, its other worktrees with the Lead's first.
             XCTAssertEqual(widgets.lines.units.flatMap(\.lines).map(\.id), [ids("widgets"), ids("login"), ids("old")])
             XCTAssertEqual(widgets.lines.units.flatMap(\.lines).map(\.pullRequest), ["no PR yet", "#12", "no PR yet"])
+            let loginPR = try XCTUnwrap(widgets.lines.units.flatMap(\.lines).first { $0.id == loginTask.id })
+            XCTAssertEqual(loginPR.station, .merge)
+            XCTAssertEqual(loginPR.state, .blocked)
+            XCTAssertEqual(loginPR.phrase.text, "Merge blocked by GitHub")
             XCTAssertEqual(widgets.lines.withoutTask.flatMap(\.lines).map(\.title), ["Remote fix"])
             XCTAssertEqual(widgets.lines.otherWorktrees.map(\.title), ["Lead · lead/notes", "scratch"])
             XCTAssertEqual(widgets.lines.otherWorktrees.first?.menu.first, .focus(workspaceID: ids("Lead"), columnID: nil))
@@ -268,7 +274,14 @@ final class BoardStagesContentFlowTests: XCTestCase {
                 board.reads.values.first?.errors.isEmpty == false && board.local != nil
             }
             XCTAssertEqual(try stages(of: board, in: shell).sections.map(\.id), ["legacy"], "no No repository, no Other workspaces: none")
-            let failed = try XCTUnwrap(try stages(of: board, in: shell).sections.first?.status)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "widgets" })
+            task.blocker = "Wait for the design review"
+            let section = try XCTUnwrap(try stages(of: board, in: shell).sections.first)
+            let line = try XCTUnwrap(section.lines.units.flatMap(\.lines).first { $0.id == task.id })
+            XCTAssertEqual(line.state, .blocked)
+            XCTAssertEqual(line.phrase.text, "Wait for the design review")
+            XCTAssertEqual(line.phrase.detail, "GitHub status unavailable")
+            let failed = try XCTUnwrap(section.status)
             XCTAssertEqual([failed.text, failed.toolTip], ["GitHub error", ProjectBoard.FetchError.notSignedIn(nil).message])
             XCTAssertEqual(failed.tone, .error)
             // Nothing read, a pull request queued all the same: Start counts the list, as the table's.
