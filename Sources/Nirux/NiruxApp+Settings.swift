@@ -340,7 +340,7 @@ extension NiruxApp {
                 onlyAsks,
                 SettingsForm.hint(
                     "When a Claude Code turn ends, Sonnet reads its last message (claude -p, on a Claude "
-                        + "subscription only) and Nirux alerts only if it asks you something. When that check "
+                        + "subscription only) and Nirux alerts when the work needs your input. When that check "
                         + "can't run, the turn alerts. Codex and other agents alert at every turn end.",
                     under: onlyAsks
                 ),

@@ -6,12 +6,9 @@ import Foundation
 /// classifier reads the message so that only a turn that asks something
 /// alerts (notification, Dock bounce and badge); a done turn stays quiet.
 enum TurnEndVerdict: Equatable, Sendable {
-    /// The message hands something back to the user: a question, a choice,
-    /// an action only they can do, an offer waiting for a yes. With the
-    /// sentence that asks when the classifier quoted one found in the
-    /// message.
+    /// The requested work needs the user's input, action or approval.
     case asks(TurnEndQuestion?)
-    /// It reports or answers, and asks nothing.
+    /// The requested work needs no reply.
     case done
     /// No answer (the classifier failed, refused, or can't run here): the
     /// turn alerts as every turn end did before, since a missed question
@@ -338,19 +335,8 @@ enum TurnEndText {
         return String(paragraph[lower...upper])
     }
 
-    /// The message ends on a question: its last paragraph of prose (not
-    /// code, a quote, a table, a heading or a rule) holds a line ending
-    /// with a question mark, past trailing quotes, brackets, markdown and
-    /// emoji. Such a turn asks for sure, model or not: Haiku and Sonnet
-    /// both now and then read a short one as done ("Ça te va ?", "Tu peux
-    /// vérifier le VPN ?"). A rhetorical one costs an extra alert, the
-    /// right side to err on.
-    static func endsOnQuestion(_ message: String) -> Bool {
-        questionLine(of: message) != nil
-    }
-
-    /// The line `endsOnQuestion` found, cleaned for one line of a
-    /// notification (the last such line of that paragraph).
+    /// The last line ending in a question mark in the final prose paragraph,
+    /// for display or when the classifier cannot return a verdict.
     static func questionLine(of message: String, maxLength: Int = 200) -> String? {
         var inParagraph = false
         for line in linesFromTheEnd(of: message) {
