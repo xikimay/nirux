@@ -288,7 +288,7 @@ final class BranchReviewExplainTests: BranchReviewRepositoryTestCase {
     /// not pending: the next Explain makes no run and no copy.
     func testAFileTooLargeForARunIsSeenNotPending() throws {
         try write("Sources/A.swift", "let a = 1\n")
-        try write("Sources/Big.swift", String(repeating: "let value = 1234567890\n", count: 7_000))
+        try write("Sources/Big.swift", Self.diffText(bytes: BranchReview.maxExplainDiffBytes))
         try commit("a and a large file")
         try answer(Self.answer(files: [("f0", "Adds A.")], notes: []), to: "events")
 
@@ -336,7 +336,7 @@ final class BranchReviewExplainTests: BranchReviewRepositoryTestCase {
     /// The page opens the review at a later head during part 2, then at the
     /// job's head again (the agent reset) during part 3: every part is kept.
     func testWhatARunFindsIsKeptWhenTheBranchComesBack() throws {
-        let lines = String(repeating: "let value = 1234567890\n", count: 4_000)
+        let lines = Self.diffText(bytes: BranchReview.maxExplainDiffBytes / 2)
         for name in ["A", "B", "C"] { try write("Sources/\(name).swift", lines) }
         try commit("three large files")
         try answer(Self.answer(files: [("f0", "Adds A.")], notes: []), to: "events.1")
@@ -555,8 +555,13 @@ final class BranchReviewExplainTests: BranchReviewRepositoryTestCase {
         try store().load().record
     }
 
+    private static func diffText(bytes: Int) -> String {
+        let line = "// " + String(repeating: "value ", count: 160) + "\n"
+        return String(repeating: line, count: bytes / line.utf8.count + 1)
+    }
+
     private func twoLargeFiles() throws {
-        let lines = String(repeating: "let value = 1234567890\n", count: 4_000)
+        let lines = Self.diffText(bytes: BranchReview.maxExplainDiffBytes / 2)
         try write("Sources/A.swift", lines)
         try write("Sources/B.swift", lines)
         try commit("two large files")
