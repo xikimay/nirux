@@ -6,6 +6,7 @@
 #
 # Usage, after `swift build --build-tests`:
 #   scripts/run-tests.sh [workers]
+#   scripts/run-tests.sh --only <file of Module.Class lines>
 #   scripts/run-tests.sh --repeat <runs> <Module.Class>...
 # Workers: two per CPU, six at most (six on the CI's three cores took 2.5
 # minutes; eight made tests that time themselves fail). Fails when a class
@@ -27,6 +28,9 @@ if [[ "${1:-}" == --class ]]; then
     log="$NIRUX_TESTS_WORK/$class.log"
     # A repeated class runs as Module.Class#N.
     filter="${class%%#*}"
+    if [[ -n "${NIRUX_TESTS_PROFILES:-}" ]]; then
+        export LLVM_PROFILE_FILE="$NIRUX_TESTS_PROFILES/$class.%p.profraw"
+    fi
     start=$SECONDS
     status=0
     run_xctest() {
@@ -63,7 +67,16 @@ if [[ -n "${NIRUX_TESTS_BUDGET:-}" && ! $NIRUX_TESTS_BUDGET =~ ^[0-9]+$ ]]; then
 fi
 
 repeat=0
-if [[ "${1:-}" == --repeat ]]; then
+only=""
+if [[ "${1:-}" == --only ]]; then
+    only="${2:-}"
+    if [[ ! -f $only ]]; then
+        echo "usage: $0 --only <file of Module.Class lines>" >&2
+        exit 2
+    fi
+    only="$(CDPATH='' cd -- "$(dirname -- "$only")" && pwd)/$(basename -- "$only")"
+    set --
+elif [[ "${1:-}" == --repeat ]]; then
     repeat="${2:-}"
     gated=("${@:3}")
     if [[ ! $repeat =~ ^[1-9][0-9]*$ || ${#gated[@]} -eq 0 ]]; then
@@ -95,6 +108,18 @@ if [[ ! -s "$work/list" ]]; then
     exit 1
 fi
 sed -E 's#/.*##' "$work/list" | sort -u > "$work/classes"
+if [[ -n $only ]]; then
+    sort -u "$only" > "$work/requested"
+    comm -23 "$work/requested" "$work/classes" > "$work/unknown"
+    if [[ ! -s "$work/requested" || -s "$work/unknown" ]]; then
+        echo "Empty selection or unknown class. Running the whole suite."
+    else
+        awk -F/ 'FILENAME == ARGV[1] { selected[$0] = 1; next } $1 in selected' \
+            "$work/requested" "$work/list" > "$work/selected"
+        mv "$work/selected" "$work/list"
+        mv "$work/requested" "$work/classes"
+    fi
+fi
 
 if [[ $repeat -gt 0 ]]; then
     printf '%s\n' "${gated[@]}" | awk '!seen[$0]++' > "$work/gated"

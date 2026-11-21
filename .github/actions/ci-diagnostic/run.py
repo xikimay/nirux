@@ -14,9 +14,13 @@ SOURCE_ERROR = re.compile(r"^(.+?):(\d+)(?::\d+)?: error: (.+)")
 
 
 def execute(state, phase):
+    command = COMMANDS[phase]
+    selected = os.environ.get("NIRUX_TESTS_ONLY")
+    if phase == "suite" and selected:
+        command = [*command, "--only", selected]
     with (state / "log").open("wb") as log:
         try:
-            result = subprocess.run(COMMANDS[phase], stdout=log, stderr=subprocess.STDOUT,
+            result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
                                     env={**os.environ, "NIRUX_STREAM_TEST_ERRORS": "1",
                                          "GITHUB_STEP_SUMMARY": str(state / "summary")})
             code = result.returncode
