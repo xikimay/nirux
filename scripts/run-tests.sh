@@ -5,8 +5,9 @@
 # other: a serial `swift test` spent ten of the CI's thirteen minutes on them.
 #
 # Usage, after `swift build --build-tests`: scripts/run-tests.sh [workers]
-# (two per CPU, six at most: six on the CI's three cores took 2.5 minutes;
-# eight made tests that time themselves fail). Fails when a class fails,
+# Use --only <file> to run selected XCTest classes on a draft.
+# Workers are two per CPU, six at most: six on the CI's three cores took 2.5 minutes;
+# eight made tests that time themselves fail. Fails when a class fails,
 # crashes or runs past NIRUX_TESTS_CLASS_TIMEOUT (600 s), or when fewer tests
 # ran than `swift test list` names.
 set -euo pipefail
@@ -18,6 +19,9 @@ set -euo pipefail
 if [[ "${1:-}" == --class ]]; then
     class="$2"
     log="$NIRUX_TESTS_WORK/$class.log"
+    if [[ -n "${NIRUX_TESTS_PROFILES:-}" ]]; then
+        export LLVM_PROFILE_FILE="$NIRUX_TESTS_PROFILES/$class.%p.profraw"
+    fi
     start=$SECONDS
     status=0
     perl -e '$ENV{DYLD_FRAMEWORK_PATH} = $ENV{NIRUX_TESTS_FRAMEWORK_PATH};
@@ -40,6 +44,17 @@ if [[ "${1:-}" == --class ]]; then
     exit 0
 fi
 
+only=""
+if [[ "${1:-}" == --only ]]; then
+    only="${2:-}"
+    if [[ ! -f $only ]]; then
+        echo "usage: $0 --only <file of Module.Class lines>" >&2
+        exit 2
+    fi
+    only="$(CDPATH='' cd -- "$(dirname -- "$only")" && pwd)/$(basename -- "$only")"
+    set --
+fi
+
 cpus=$(sysctl -n hw.activecpu)
 workers="${1:-$((cpus * 2 < 6 ? cpus * 2 : 6))}"
 script="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")"
@@ -57,12 +72,24 @@ if grep -vE '^[A-Za-z0-9_]+\.[A-Za-z0-9_]+/[A-Za-z0-9_]+$' "$work/listed" | grep
     exit 1
 fi
 mv "$work/listed" "$work/list"
-expected=$(wc -l < "$work/list" | tr -d ' ')
-if [[ $expected -eq 0 ]]; then
+if [[ ! -s "$work/list" ]]; then
     echo "::error::swift test list named no test"
     exit 1
 fi
 sed -E 's#/.*##' "$work/list" | sort -u > "$work/classes"
+if [[ -n $only ]]; then
+    sort -u "$only" > "$work/requested"
+    comm -23 "$work/requested" "$work/classes" > "$work/unknown"
+    if [[ ! -s "$work/requested" || -s "$work/unknown" ]]; then
+        echo "Empty selection or unknown class. Running the whole suite."
+    else
+        awk -F/ 'FILENAME == ARGV[1] { selected[$0] = 1; next } $1 in selected' \
+            "$work/requested" "$work/list" > "$work/selected"
+        mv "$work/selected" "$work/list"
+        mv "$work/requested" "$work/classes"
+    fi
+fi
+expected=$(wc -l < "$work/list" | tr -d ' ')
 echo "$expected tests in $(wc -l < "$work/classes" | tr -d ' ') classes, $workers at a time"
 
 # What `swift test` sets for xctest on macOS.
