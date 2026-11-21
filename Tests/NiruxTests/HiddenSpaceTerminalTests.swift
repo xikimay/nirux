@@ -27,7 +27,7 @@ final class HiddenSpaceTerminalTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let (shell, task) = try Self.hiddenTask(in: harness)
             task.addColumn(
-                deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: nil, lastStatus: nil),
+                deferredAgent: DeferredAgentLaunch(launch: .claude(resume: .session("s1"), mode: .default), title: nil, lastStatus: nil),
                 agentUUID: UUID().uuidString, cwd: harness.repo
             )
             let column = try XCTUnwrap(task.columns.first(where: \.isAwaitingResume))

@@ -23,6 +23,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex", "Open Antigravity", "Next Waiting Agent"],
             "testSessionHistoryCommand": ["Session History…"],
+            "testRestartLeadCommand": [NiruxShellView.restartLeadTitle],
             "testProjectMemoryCommand": ["Space Memory…"],
             "testResumeAllAgentsCommand": ["Resume All Agents"],
             "testWorkspaceCommands": ["Rename Workspace", "Show/Hide Sidebar", "Show/Hide Archived", "Open Board"],
@@ -44,7 +45,13 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
             let titles = harness.paletteCommandTitles()
             XCTAssertEqual(titles.count, Set(titles).count, "two palette commands share a title: \(titles)")
-            Self.commandCoverage.checkEveryItemIsCovered(offered: titles, testNames: UIFlowCoverage.testNames(of: Self.self))
+            // Restart Lead… is offered only in a space with a Lead.
+            _ = try harness.makeLead()
+            let withLead = harness.paletteCommandTitles()
+            XCTAssertEqual(withLead.count, Set(withLead).count, "two palette commands share a title: \(withLead)")
+            Self.commandCoverage.checkEveryItemIsCovered(
+                offered: Array(Set(titles + withLead)), testNames: UIFlowCoverage.testNames(of: Self.self)
+            )
         }
     }
 
@@ -55,7 +62,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         let availability = try SymbolAvailability()
         try UIFlowHarness.run { harness in
             harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
-            var names = ["circle.fill", "command"] + ["claude", "codex"].compactMap(SidebarRenderer.agentSymbol(processName:))
+            var names = ["circle.fill", "command"] + CodingAgent.allCases.map(\.symbolName)
             for action in harness.paletteCommands() {
                 if case .symbol(let name) = action.icon { names.append(name) }
             }
@@ -184,6 +191,17 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
+    /// Offered in a space with a Lead: it asks first.
+    func testRestartLeadCommand() throws {
+        try UIFlowHarness.run { harness in
+            XCTAssertFalse(harness.paletteCommandTitles().contains(NiruxShellView.restartLeadTitle), "no Lead in General")
+            _ = try harness.makeLead()
+            harness.runPaletteCommand(NiruxShellView.restartLeadTitle)
+            XCTAssertEqual(harness.alerts.last, "Restart the Lead of “Tools”?")
+            XCTAssertEqual(harness.terminalRestarts, [], "cancelled")
+        }
+    }
+
     /// The project's sessions, the one a restored column holds first; the
     /// switches; under the list, what Return does: going to the restored
     /// column resumes its agent there, Return on an ended one resumes it.
@@ -202,7 +220,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
                 reviewed
             ], in: harness)
             workspace.addColumn(
-                deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session(restoredID), mode: .default), title: nil, lastStatus: nil),
+                deferredAgent: DeferredAgentLaunch(launch: .claude(resume: .session(restoredID), mode: .default), title: nil, lastStatus: nil),
                 agentUUID: UUID().uuidString, cwd: harness.repo
             )
             let restoredColumn = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
@@ -488,7 +506,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             let session = "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11"
             restored.addColumn(
                 deferredAgent: DeferredAgentLaunch(
-                    agent: .claude(resume: .session(session), mode: .default), title: nil, lastStatus: nil
+                    launch: .claude(resume: .session(session), mode: .default), title: nil, lastStatus: nil
                 ),
                 agentUUID: UUID().uuidString,
                 cwd: harness.repo

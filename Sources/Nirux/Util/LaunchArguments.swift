@@ -24,9 +24,10 @@ enum LaunchArguments {
         /// in a new worktree (SpaceSetupScript). An older build reads a Codex
         /// payload it can't parse and exits.
         case setupFailure(workspaceID: String)
-        /// `--hook claude|codex [payload-json]`: Claude Code hooks and Codex's
-        /// notify command append one event line and exit (AgentHookInstaller).
-        case hook(AgentHookEvent.Kind, payload: String?)
+        /// `--hook <agent> [payload-json]`, for an agent that sends hooks:
+        /// Claude Code hooks and Codex's notify command append one event line
+        /// and exit (AgentHookInstaller).
+        case hook(CodingAgent, payload: String?)
         /// `--mission <command> [options]` (MissionEventCLI).
         case mission([String])
         /// `--check-terminal-runtime`: the nightly runs it on the app it
@@ -83,8 +84,8 @@ enum LaunchArguments {
         // Antigravity's Stop hook (AgentHookInstaller.agyHookCommand).
         if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--agy" { return .hook(.agy, payload: nil) }
         if let workspaceID = SetupFailureSignal.workspaceID(in: args) { return .setupFailure(workspaceID: workspaceID) }
-        if args.count >= 3, args[1] == "--hook", let kind = AgentHookEvent.Kind(rawValue: args[2]) {
-            return .hook(kind, payload: args.count > 3 ? args.last : nil)
+        if args.count >= 3, args[1] == "--hook", let agent = CodingAgent(rawValue: args[2]), agent.sendsHooks {
+            return .hook(agent, payload: args.count > 3 ? args.last : nil)
         }
         if args.count >= 2, args[1] == "--mission" { return .mission(Array(args.dropFirst(2))) }
         if args.count == 2, args[1] == "--check-terminal-runtime" { return .checkTerminalRuntime }

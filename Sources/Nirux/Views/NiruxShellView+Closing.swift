@@ -4,7 +4,9 @@ import AppKit
 
 /// Every path that closes a column or a workspace — ⌘W and the sidebar's
 /// Close Column / Close Workspace — goes through `WorkspaceClosePolicy`,
-/// so a live agent is never killed without confirmation.
+/// so a live agent is never killed without confirmation. A space's Lead
+/// and its Claude column close only when the Lead is turned off
+/// (`stopLead`).
 extension NiruxShellView {
     /// A column that was closing stays after all (its sibling went first):
     /// it isn't left invisible, nor without its light.
@@ -21,6 +23,7 @@ extension NiruxShellView {
               let closingColumn = workspace.columns[safe: workspace.focusedIndex],
               !closingColumn.isClosing // repeat ⌘W during its exit animation
         else { return }
+        guard closingColumn !== workspace.leadTerminal else { return refuseClosingLead() }
         // Last column closes the workspace — same confirmation as the sidebar.
         guard workspace.openColumns.count > 1 else { return requestCloseWorkspace(at: activeWSIndex) }
         guard confirmCloseColumn(closingColumn, in: workspace) else { return }
@@ -73,21 +76,21 @@ extension NiruxShellView {
 
     /// Close-workspace entry point for the sidebar menu and for ⌘W on a
     /// workspace's last column: confirm before killing live agent sessions
-    /// or multi-column workspaces. `replacingLast` (turning a space's Lead
-    /// off) closes even the last workspace of all, once confirmed: a plain
-    /// one opens in its space first.
-    func requestCloseWorkspace(at index: Int, replacingLast: Bool = false) {
-        let remaining = workspaceStore.remainingWorkspaceCount + (replacingLast ? 1 : 0)
-        guard let workspace = workspaces[safe: index], !workspace.isClosing,
-              WorkspaceClosePolicy.canClose(totalWorkspaceCount: remaining)
-        else { return }
+    /// or multi-column workspaces. `turningLeadOff` (Space Settings › Lead)
+    /// is the one way a Lead closes; it closes even the last workspace of
+    /// all, once confirmed: a plain one opens in its space first.
+    func requestCloseWorkspace(at index: Int, turningLeadOff: Bool = false) {
+        let remaining = workspaceStore.remainingWorkspaceCount + (turningLeadOff ? 1 : 0)
+        guard let workspace = workspaces[safe: index], !workspace.isClosing else { return }
+        guard !workspace.isLead || turningLeadOff else { return refuseClosingLead() }
+        guard WorkspaceClosePolicy.canClose(totalWorkspaceCount: remaining) else { return }
         let close = { [weak self] (index: Int) in
             guard let self else { return }
-            if replacingLast, self.workspaceStore.remainingWorkspaceCount <= 1 {
+            if turningLeadOff, self.workspaceStore.remainingWorkspaceCount <= 1 {
                 self.addWorkspace(profileID: workspace.profileID)
                 self.saveState()
             }
-            self.closeWorkspace(at: index)
+            self.closeWorkspace(at: index, turningLeadOff: turningLeadOff)
         }
         let columns = workspace.openColumns
         let snapshot = ProcessSnapshot()
@@ -129,7 +132,7 @@ extension NiruxShellView {
         let agent = column.pty == nil ? nil : column.liveAgent(snapshot: ProcessSnapshot())
         guard let details = WorkspaceClosePolicy.columnConfirmation(for: agent), let agent else { return true }
         guard confirmDestructiveClose(
-            message: agent.isPaused ? "Close paused \(agent.displayName) column?" : "Close column running \(agent.displayName)?",
+            message: agent.isPaused ? "Close paused \(agent.agent.name) column?" : "Close column running \(agent.agent.name)?",
             details: details,
             confirmTitle: "Close Column"
         ) else { return false }
@@ -149,9 +152,10 @@ extension NiruxShellView {
     func closeColumn(workspaceIndex: Int, columnIndex: Int) {
         guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing,
               workspace.openColumns.count > 1,
-              let column = workspace.columns[safe: columnIndex], !column.isClosing,
-              confirmCloseColumn(column, in: workspace)
+              let column = workspace.columns[safe: columnIndex], !column.isClosing
         else { return }
+        guard column !== workspace.leadTerminal else { return refuseClosingLead() }
+        guard confirmCloseColumn(column, in: workspace) else { return }
         afterUnsavedEdits(in: [column]) { [weak self] in
             guard let self, self.canStillClose(column, in: workspace),
                   let currentIndex = workspace.columns.firstIndex(where: { $0 === column })
@@ -166,14 +170,17 @@ extension NiruxShellView {
     }
 
     /// `refocusing`: false for a close the user didn't make (a Lead's
-    /// tool), which leaves the keyboard where it is.
-    func closeWorkspace(at index: Int, refocusing: Bool = true) {
+    /// tool), which leaves the keyboard where it is. A Lead closes only
+    /// `turningLeadOff`.
+    func closeWorkspace(at index: Int, refocusing: Bool = true, turningLeadOff: Bool = false) {
         guard workspaceStore.remainingWorkspaceCount > 1,
-              let wsToRemove = workspaces[safe: index], !wsToRemove.isClosing
+              let wsToRemove = workspaces[safe: index], !wsToRemove.isClosing, !wsToRemove.isStarting,
+              !wsToRemove.isLead || turningLeadOff
         else { return }
         // The store keeps it until the exit animation ends — flag it so a
         // quick second ⌘W neither counts nor selects it meanwhile.
         wsToRemove.isClosing = true
+        closeMergeWaits(of: wsToRemove, now: Date().timeIntervalSince1970)
         // Closing the Lead turns it off: Space Settings says so at once.
         if wsToRemove.isLead { refreshSpaceSettingsLead() }
         // Only move the selection when the *active* workspace is going away —
@@ -272,13 +279,9 @@ extension ColumnState {
     /// until it resumes (nothing runs: idle).
     func liveAgent(snapshot: ProcessSnapshot) -> WorkspaceClosePolicy.LiveAgent? {
         if let deferredAgent {
-            return WorkspaceClosePolicy.LiveAgent(processName: deferredAgent.processName, status: .idle, isPaused: true)
+            return WorkspaceClosePolicy.LiveAgent(agent: deferredAgent.launch.agent, status: .idle, isPaused: true)
         }
-        guard let pty, let name = pty.agentProcessName(snapshot: snapshot) else { return nil }
-        return WorkspaceClosePolicy.LiveAgent(
-            processName: name,
-            machineStatus: pty.cachedAgentState,
-            hookKind: pty.agentHookKind
-        )
+        guard let pty, let agent = pty.terminalAgent(snapshot: snapshot) else { return nil }
+        return WorkspaceClosePolicy.LiveAgent(agent: agent, machineStatus: pty.cachedAgentState, hookAgent: pty.hookAgent)
     }
 }

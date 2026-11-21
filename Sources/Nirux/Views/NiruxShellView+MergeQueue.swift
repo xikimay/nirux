@@ -80,7 +80,7 @@ extension NiruxShellView {
                 let foreground = column.pty?.foregroundProcess(snapshot: snapshot)
                 let agent = projectBoardAgent(of: column, in: workspace, foreground: foreground, snapshot: snapshot, now: now)
                 guard let label = MergeQueue.busyLabel(agent.state) else { continue }
-                let name = column.pty?.agentProcessName(snapshot: snapshot) ?? "an agent"
+                let name = column.pty?.terminalAgent(snapshot: snapshot)?.rawValue ?? "an agent"
                 busy.append("\(name) \(label) in “\(workspace.title)”")
             }
         }
@@ -185,6 +185,7 @@ extension NiruxShellView {
         } else {
             shown = nil
         }
+        if state.run == .ended { state.stoppedAt = controller.saved?.savedAt }
         if let shown {
             state.workflow = shown.workflow
             state.entries = shown.entries

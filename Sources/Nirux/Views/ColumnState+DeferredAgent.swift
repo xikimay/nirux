@@ -5,14 +5,20 @@ import AppKit
 extension ColumnState {
     var isAwaitingResume: Bool { deferredAgent != nil }
 
+    /// Claude Code is in front, or will be once its restored column resumes.
+    func runsClaude(snapshot: ProcessSnapshot) -> Bool {
+        if deferredAgent?.launch.agent == .claude { return true }
+        return pty?.foregroundProcess(snapshot: snapshot)?.interactiveAgent == .claude
+    }
+
     /// Where the agent will resume, while it waits to.
     var awaitingResumeDirectory: String? { isAwaitingResume ? launchDirectory : nil }
 
     /// Cover the terminal with what the column holds until its agent
     /// resumes. The terminal stays empty: no shell runs yet.
-    func showDeferredAgentNotice(_ agent: DeferredAgentLaunch) {
+    func showDeferredAgentNotice(_ deferred: DeferredAgentLaunch) {
         let overlay = ShellExitedOverlay(content: .notResumed(
-            processName: agent.processName, summary: agent.summary
+            processName: deferred.launch.agent.rawValue, summary: deferred.summary
         ))
         overlay.onRestart = { [weak self] in self?.onResumeDeferredAgent?() }
         if let terminal = terminalView { overlay.frame = terminal.frame }

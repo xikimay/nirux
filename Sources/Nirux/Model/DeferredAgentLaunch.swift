@@ -35,43 +35,10 @@ enum PersistedAgentStatus: String, Codable {
 /// (see NiruxShellView+LazyRestore.swift). The resume target was claimed
 /// when the layout was restored, so two columns never resume one session.
 struct DeferredAgentLaunch: Equatable {
-    enum Agent: Equatable {
-        /// Nil `resume`: a fresh `claude`, the column's last session was
-        /// never prompted.
-        case claude(resume: NiruxShellView.AgentResumeTarget?, mode: ClaudeLaunchMode)
-        case codex(resume: NiruxShellView.AgentResumeTarget, mode: CodexLaunchMode?)
-        case agy(resume: NiruxShellView.AgentResumeTarget)
-
-        /// The launch, through the picker when another column already runs
-        /// its session: `liveText` holds what they run (launch lines, the
-        /// sessions their hooks confirmed). Two agents appending to one
-        /// transcript corrupt it.
-        func openingElsewhere(_ liveText: [String]) -> Agent {
-            switch self {
-            case .claude(.session(let sessionID)?, let mode) where AgentSessionHolder.mentions(sessionID, in: liveText):
-                return .claude(resume: .picker, mode: mode)
-            case .codex(.session(let sessionID), let mode) where AgentSessionHolder.mentions(sessionID, in: liveText):
-                return .codex(resume: .picker, mode: mode)
-            case .agy(.session(let sessionID)) where AgentSessionHolder.mentions(sessionID, in: liveText):
-                return .agy(resume: .picker)
-            default:
-                return self
-            }
-        }
-    }
-
-    let agent: Agent
+    let launch: AgentLaunch
     /// The session's title the last time it ran here, if it had one.
     let title: String?
     let lastStatus: PersistedAgentStatus?
-
-    var processName: String {
-        switch agent {
-        case .claude: return "claude"
-        case .codex: return "codex"
-        case .agy: return AgentProgramStatus.agy
-        }
-    }
 
     /// Where the agent was the last time it ran here, nil when unknown.
     var lastStatusText: String? {
@@ -85,7 +52,7 @@ struct DeferredAgentLaunch: Equatable {
 
     /// "Fix the login form · last seen working", or what is known of it.
     var summary: String {
-        [title ?? "\(processName) session", lastStatusText].compactMap { $0 }.joined(separator: " · ")
+        [title ?? "\(launch.agent.rawValue) session", lastStatusText].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// The session title an agent column's terminal title gives, or nil for
@@ -98,17 +65,12 @@ struct DeferredAgentLaunch: Equatable {
         let title = String(scalars)
         let lowered = title.lowercased()
         guard !title.isEmpty,
-              !genericTitles.contains(lowered),
+              !Shell.isShell(lowered), !CodingAgent.allCases.contains(where: { $0.genericTitles.contains(lowered) }),
               !launchLinePrefixes.contains(where: { lowered.hasPrefix($0) }) else { return nil }
         return title
     }
 
     static let maxTitleLength = 80
-
-    /// Shells and the agents' own names say nothing of the session.
-    private static let genericTitles: Set<String> = [
-        "zsh", "bash", "fish", "sh", "-zsh", "-bash", "claude", "claude code", "codex", "openai codex"
-    ]
 
     /// A shell that titles its window with the running command shows the
     /// launch line until the agent sets its own title.

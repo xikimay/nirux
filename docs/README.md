@@ -41,6 +41,7 @@ A design record holds the decisions behind one feature, as they were taken. Reco
 | [CI failure triage](design/ci-failure-triage.md) | Shipped |
 | [PR auto follow-up](design/pr-follow-up.md) | Shipped, on by default |
 | [Mission tell](design/mission-tell.md) | Shipped |
+| [Task dependencies](design/task-dependencies.md) | In progress: messages held until a merge are built; waiting tasks and the Board's order are not |
 | [Drafts](design/drafts.md) | Shipped as the `nirux-draft` skill |
 | [Second opinion](design/second-opinion.md) | Shipped as the `nirux-second-opinion` skill |
 | [Project memory](design/project-memory.md) | Shipped in part, as Space Memory |

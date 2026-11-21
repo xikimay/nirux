@@ -65,7 +65,7 @@ extension NiruxShellView {
             .prefix(SessionHistory.paletteLimit)
         let rows = records.map { record in
             PaletteAction(
-                icon: .agent(record.agent.rawValue),
+                icon: .agent(record.agent),
                 title: SessionHistory.title(of: record),
                 subtitle: SessionHistory.subtitle(of: record, now: now) { $0.abbreviatedPath() },
                 shortcut: nil,
@@ -89,7 +89,7 @@ extension NiruxShellView {
         return Self.agentSessionHolders(in: open, snapshot: snapshot).compactMap { holder in
             guard let column = columns[holder.columnID], !column.isClosing else { return nil }
             var holder = holder
-            holder.launchedSessionID = sessionResume.launchedSession(in: column, now: now)
+            holder.launchedSessionID = column.relaunchingLeadSessionID ?? sessionResume.launchedSession(in: column, now: now)
             return holder
         }
     }
@@ -98,14 +98,15 @@ extension NiruxShellView {
     /// arguments they run with (the session a launch resumes); the session
     /// a restored column will resume; the one an agent died on mid-turn.
     static func agentSessionHolders(in workspaces: [WorkspaceState], snapshot: ProcessSnapshot) -> [AgentSessionHolder] {
-        workspaces.flatMap { workspace in
+        // The agents whose launch line names the session it resumes.
+        let agentNames = Set([CodingAgent.claude, .codex, .agy].map(\.rawValue))
+        return workspaces.flatMap { workspace in
             workspace.columns.map { column in
                 var holder = AgentSessionHolder(workspaceID: workspace.id, columnID: column.id)
-                holder.deferredSessionID = column.deferredAgent?.agent.sessionID
+                holder.deferredSessionID = column.deferredAgent?.launch.sessionID
                 guard let pty = column.pty else { return holder }
-                if let exit = pty.agentMidTurnExit, exit.processName == "claude" { holder.exitedSessionID = exit.sessionID }
+                if let exit = pty.agentMidTurnExit, exit.agent == .claude { holder.exitedSessionID = exit.sessionID }
                 guard let shellPID = pty.shellPID else { return holder }
-                let agentNames: Set<String> = ["claude", "codex", AgentProgramStatus.agy]
                 let foreground = pty.foregroundProcess(snapshot: snapshot)
                 let confirmed = foreground.map {
                     [
@@ -267,17 +268,13 @@ extension NiruxShellView {
     private func launchResumedSession(
         _ record: AgentSessionRecord, in workspace: WorkspaceState, column: ColumnState, directory: String
     ) {
-        let agent: DeferredAgentLaunch.Agent = switch record.agent {
-        case .claude: .claude(resume: .session(record.sessionID), mode: Self.claudeLaunchMode(for: workspace))
-        case .codex: .codex(resume: .session(record.sessionID), mode: Self.codexLaunchMode(for: workspace))
-        case .agy: .agy(resume: .session(record.sessionID))
-        }
-        sideEffects.launchAgent(column, resumeLaunchCommand(agent, workingDirectory: directory, in: workspace, column: column))
+        guard let launch = Self.launch(of: record.agent, resume: .session(record.sessionID), in: workspace) else { return }
+        sideEffects.launchAgent(column, resumeLaunchCommand(launch, workingDirectory: directory, in: workspace, column: column))
         updateSidebar()
         focusActiveTerminal(in: window)
     }
 
-    /// The launch line that resumes `agent` in `column`, with the space's
+    /// The launch line that resumes `launch` in `column`, with the space's
     /// brief: restores and Resume share it. A resumed conversation keeps
     /// the system prompt it recorded until it compacts, then rebuilds it
     /// from the flags of this launch. `workingDirectory` tells Codex the
@@ -286,34 +283,22 @@ extension NiruxShellView {
     /// `SessionResumeState`), and the id in the agent's arguments proves it
     /// until its hooks do.
     func resumeLaunchCommand(
-        _ agent: DeferredAgentLaunch.Agent, workingDirectory: String? = nil, in workspace: WorkspaceState, column: ColumnState,
+        _ launch: AgentLaunch, workingDirectory: String? = nil, in workspace: WorkspaceState, column: ColumnState,
         settingsFiles: [String: String]? = nil
     ) -> String {
-        let brief = spaceBriefInjection(for: workspace)
-        if let sessionID = agent.sessionID {
+        if let sessionID = launch.sessionID {
             sessionResume.noteLaunch(of: sessionID, in: column, now: ProcessInfo.processInfo.systemUptime)
+            switch launch.agent {
+            case .claude: column.prepareClaudeResume(sessionID: sessionID)
+            case .codex: column.prepareCodexResume(sessionID: sessionID)
+            case .agy: column.prepareAgyResume(sessionID: sessionID)
+            case .gemini, .opencode: break
+            }
         }
-        switch agent {
-        case .claude(let resume, let mode):
-            if let sessionID = agent.sessionID { column.prepareClaudeResume(sessionID: sessionID) }
-            return Self.claudeCommand(
-                resume: resume, mode: mode, briefFile: brief?.claudePromptFile,
-                settingsFile: claudeSpaceSettingsFile(for: workspace, prepared: settingsFiles)
-            )
-        case .codex(let resume, let mode):
-            if let sessionID = agent.sessionID { column.prepareCodexResume(sessionID: sessionID) }
-            return Self.codexCommand(
-                resume: resume,
-                workingDirectory: workingDirectory,
-                mode: mode ?? Self.codexLaunchMode(for: workspace),
-                briefFile: Self.codexBriefFile(
-                    from: brief, launchDirectory: workingDirectory ?? column.launchDirectory ?? workspace.cwd
-                )
-            )
-        case .agy(let resume):
-            if let sessionID = agent.sessionID { column.prepareAgyResume(sessionID: sessionID) }
-            return Self.agyCommand(resume: resume)
-        }
+        return agentCommand(
+            launch, in: workspace, column: column, launchDirectory: workingDirectory ?? column.launchDirectory ?? workspace.cwd,
+            resumeDirectory: workingDirectory, settingsFiles: settingsFiles
+        )
     }
 
     /// Brings forward the column that holds the session: a restored one

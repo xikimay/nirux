@@ -51,6 +51,9 @@ struct ColumnInfo: Hashable {
     var waitingMessages: SidebarWaitingMessages?
     /// The column's identity (`ColumnState.id`): a menu's items find it by it.
     var id: UUID?
+    /// The Lead's Claude column (`WorkspaceState.leadTerminal`), which
+    /// closes only with the Lead.
+    var isLeadTerminal = false
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
@@ -91,6 +94,7 @@ struct ColumnInfo: Hashable {
             && lhs.dialog == rhs.dialog
             && lhs.circling == rhs.circling
             && lhs.waitingMessages == rhs.waitingMessages
+            && lhs.isLeadTerminal == rhs.isLeadTerminal
     }
 
     func hash(into hasher: inout Hasher) {
@@ -118,6 +122,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(dialog)
         hasher.combine(circling)
         hasher.combine(waitingMessages)
+        hasher.combine(isLeadTerminal)
     }
 }
 
@@ -255,7 +260,7 @@ struct SidebarMissionQuestion: Hashable {
 /// (see `DeferredAgentLaunch`). `columnID` tells a Resume click aimed at
 /// it from one that lands on another column after a rebuild.
 struct SidebarDeferredAgent: Hashable {
-    let processName: String
+    let agent: CodingAgent
     let summary: String
     let columnID: UUID
 
@@ -272,7 +277,7 @@ enum SidebarStuckState: Hashable {
     /// The turn failed on an API error. `failedAt` tells the failure a
     /// Resume click was aimed at from any later one.
     case stoppedOnError(kind: String?, detail: String?, failedAt: TimeInterval, resume: Resume)
-    case exitedMidTurn(processName: String)
+    case exitedMidTurn(agent: CodingAgent)
     /// A turn waits on the model with no sign of life, for how long, since
     /// when (`AgentSilence.since`: what Interrupt aims at), and whether
     /// Interrupt may press Esc there.
@@ -316,7 +321,7 @@ enum SidebarStuckState: Hashable {
     /// The name the row shows: the agent that died, not the shell that
     /// took its place in front.
     var agentName: String? {
-        if case .exitedMidTurn(let processName) = self { return processName }
+        if case .exitedMidTurn(let agent) = self { return agent.rawValue }
         return nil
     }
 
@@ -328,8 +333,8 @@ enum SidebarStuckState: Hashable {
         case .stoppedOnError(let kind, let detail, _, _):
             let error = AgentAttentionReason.apiError(kind: kind, detail: detail).detailLine
             return ["Stopped on an API error", error].compactMap { $0 }.joined(separator: " — ")
-        case .exitedMidTurn(let processName):
-            return "\(processName) exited in the middle of a turn, without ending its session"
+        case .exitedMidTurn(let agent):
+            return "\(agent.rawValue) exited in the middle of a turn, without ending its session"
         case .silent(let duration, _, _):
             return "Claude has been silent for \(duration). \(AgentAttentionReason.silentAdvice)"
         }
@@ -408,11 +413,15 @@ struct WorkspaceInfo: Hashable {
     /// what a finished turn says beside its check.
     var turnStatusLine: String?
     /// The Lead's row: how many rules it proposed wait for the user.
+    var leadLaunchIssue: LeadLaunchIssue?
     var ruleProposalCount = 0
     /// The Lead's row: its space's last daily pass, for a day after it.
     var dailyPassNote: String?
     /// Its pull request's automatic follow-up, when the row says it.
     var followUp: SidebarFollowUp?
+    /// The Lead's messages it holds until other tasks' pull requests merge.
+    var heldMessages: SidebarHeldMessages?
+    var waitingTask: WaitingTaskView.Facts.State?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
@@ -541,8 +550,13 @@ enum WorktreeCleanupMenuOffer {
 }
 
 enum WorkspaceSidebarAction {
+    case startWaitingTask
     case moveUp, moveDown, markActive, markInactive
-    case close, rename, editContext, reviewBranch, newSubtask, moveOutOfParent
+    case close, rename, editContext, reviewBranch, resumeWith, newSubtask, moveOutOfParent
+    /// "Turn Off Lead…": Space Settings › Lead, where the Lead closes.
+    case turnOffLead
+    case restartLead
+    case recoverLead(LeadLaunchIssue)
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI

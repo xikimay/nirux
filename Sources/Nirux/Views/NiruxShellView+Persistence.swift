@@ -58,6 +58,8 @@ extension NiruxShellView {
                 : WorkspaceProfile.defaultID
             let isLead = persistedWS.isLead && profileID != WorkspaceProfile.defaultID
                 && spacesWithALead.insert(profileID).inserted
+            let waits = persistedWS.mergeWaits ?? []
+            let waiting = waits.contains { $0.pendingStart != nil }
             let workspace = WorkspaceState(
                 id: persistedWS.id ?? UUID().uuidString,
                 title: persistedWS.title,
@@ -73,7 +75,8 @@ extension NiruxShellView {
                 isLead: isLead,
                 reportsToLead: persistedWS.reportsToLead,
                 reportsToTask: persistedWS.reportsToTask,
-                taskFolder: isLead ? nil : persistedWS.taskFolder
+                taskFolder: isLead ? nil : persistedWS.taskFolder,
+                firstColumn: waiting ? ColumnState(waitingTask: WaitingTaskView()) : nil
             )
             // A Lead is never parked.
             workspace.isInactive = persistedWS.isInactive && !isLead
@@ -91,15 +94,21 @@ extension NiruxShellView {
             for (rawValue, run) in persistedWS.reviewRuns ?? [:] {
                 if let pass = ReviewPass(rawValue: rawValue) { workspace.reviewRuns[pass] = run }
             }
+            workspace.mergeWaits = waits
             // Remove the default column created by WorkspaceState.init
-            if let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
-            for persistedColumn in persistedWS.columns {
+            if !waiting, let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
+            for persistedColumn in persistedWS.columns where !waiting {
                 restoreColumn(
                     persistedColumn,
                     in: workspace,
                     spacesWithTheirOwnBoard: spacesWithTheirOwnBoard,
                     claimedSessionIDs: &claimedSessionIDs
                 )
+            }
+            if isLead {
+                // Saved by a build before: the column its Claude resumes in, else its first terminal.
+                let claude = workspace.columns.first { $0.deferredAgent?.processName == "claude" } ?? workspace.columns.first { $0.pty != nil }
+                workspace.leadAgentUUID = persistedWS.leadAgentUUID ?? claude?.agentUUID
             }
             workspace.focusedIndex = min(persistedWS.focusedColumnIndex, max(workspace.columns.count - 1, 0))
             wireWorkspace(workspace)
@@ -124,6 +133,7 @@ extension NiruxShellView {
             resumeAllDeferredAgents()
         }
         updateSidebar()
+        restoreMergeWaits(now: Date().timeIntervalSince1970)
     }
 
     private func restoreSidebarState(_ settings: PersistedSettings?) {
@@ -238,13 +248,13 @@ extension NiruxShellView {
     /// An agent column back without its agent, which starts later (see
     /// NiruxShellView+LazyRestore.swift).
     private func addDeferredAgentColumn(
-        _ agent: DeferredAgentLaunch.Agent,
+        _ launch: AgentLaunch,
         restoring persistedColumn: PersistedColumn,
         in workspace: WorkspaceState
     ) {
         workspace.addColumn(
             deferredAgent: DeferredAgentLaunch(
-                agent: agent,
+                launch: launch,
                 // Hand-edited state shows like a title Nirux saved.
                 title: DeferredAgentLaunch.sessionTitle(fromTerminalTitle: persistedColumn.lastAgentTitle),
                 lastStatus: persistedColumn.lastAgentStatus
@@ -347,11 +357,11 @@ extension NiruxShellView {
         settings.sidebarExpanded = sidebarFold.chosenExpanded
         settings.boardOrder = boardOrder
         return PersistedState(
-            workspaces: workspaces.map { workspace in
+            workspaces: workspaces.filter { !$0.isClosing || $0.columns.first?.waitingTask == nil }.map { workspace in
                 PersistedWorkspace(
                     id: workspace.id, title: workspace.title,
                     cwd: Self.persistedWorkspaceCwd(for: workspace),
-                    columns: workspace.columns.map { persistedColumn($0, in: workspace, snapshot: snapshot) },
+                    columns: workspace.columns.filter { $0.waitingTask == nil }.map { persistedColumn($0, in: workspace, snapshot: snapshot) },
                     focusedColumnIndex: workspace.focusedIndex,
                     profileID: workspace.profileID,
                     isInactive: workspace.isInactive,
@@ -378,9 +388,11 @@ extension NiruxShellView {
                     // One closing is no longer the Lead: a new one may
                     // start before it goes.
                     isLead: workspace.isLead && !workspace.isClosing,
+                    leadAgentUUID: workspace.isLead && !workspace.isClosing ? workspace.leadAgentUUID : nil,
                     reportsToLead: workspace.reportsToLead,
                     reportsToTask: workspace.reportsToTask,
-                    taskFolder: workspace.taskFolder)
+                    taskFolder: workspace.taskFolder,
+                    mergeWaits: workspace.mergeWaits.isEmpty ? nil : workspace.mergeWaits)
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,
@@ -445,15 +457,15 @@ extension NiruxShellView {
             kind = .webView
             webURL = col.webViewColumn?.currentURL
         } else if let foregroundProcess {
-            switch foregroundProcess.name {
-            case "claude":
+            switch foregroundProcess.agent {
+            case .claude?:
                 kind = .claudeCode; webURL = nil
-                claudeMode = detectClaudeLaunchMode(process: foregroundProcess)
+                claudeMode = ClaudeLaunchMode.detect(arguments: foregroundProcess.arguments)
                 claudeRestore = col.persistedClaudeRestore(foregroundProcess: foregroundProcess)
-            case "codex":
+            case .codex?:
                 kind = .codex; webURL = nil
                 codexMode = CodexLaunchMode.detect(arguments: foregroundProcess.arguments) ?? .default
-            case AgentProgramStatus.agy where !AgentHookCenter.isHeadlessAgy(foregroundProcess):
+            case .agy? where foregroundProcess.interactiveAgent == .agy:
                 kind = .agy; webURL = nil
             default: kind = .terminal; webURL = nil
             }
@@ -498,25 +510,5 @@ extension NiruxShellView {
 
     static func persistedWorkspaceCwd(for workspace: WorkspaceState) -> String {
         workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd
-    }
-
-    /// Map a running `claude` process's argv flags back to the launch mode it
-    /// was started with, so restore reproduces the column faithfully.
-    private func detectClaudeLaunchMode(process: ForegroundProcess) -> ClaudeLaunchMode? {
-        ClaudeLaunchMode.detect(arguments: process.arguments)
-    }
-}
-
-extension ClaudeLaunchMode {
-    /// The mode a `claude` argv was launched in (see
-    /// `detectClaudeLaunchMode`); nil when it names none.
-    static func detect(arguments: [String]) -> ClaudeLaunchMode? {
-        if arguments.contains("--dangerously-skip-permissions") {
-            return .skipPermissions
-        }
-        guard let index = arguments.firstIndex(of: "--permission-mode"),
-              arguments.indices.contains(index + 1) else { return nil }
-        let mode = arguments[index + 1]
-        return mode == "default" ? .manual : ClaudeLaunchMode(rawValue: mode)
     }
 }

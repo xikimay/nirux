@@ -76,6 +76,7 @@ final class SidebarView: NSView {
     var worktreeCleanupOffer: ((Int) -> WorktreeCleanupMenuOffer?)?
     /// Whether the workspace's menu offers "New Sub-task…". Asked on each
     /// menu.
+    var offersTaskResume: ((Int) -> Bool)?
     var offersSubtask: ((Int) -> Bool)?
     /// The store index of the open workspace with this id, nil once it is
     /// gone: a menu's items act on the workspace it was built for.
@@ -749,7 +750,10 @@ final class SidebarView: NSView {
             lastButtonActionAt = event.timestamp
             onCatchUpAction?(action)
         case .link(let url, let label):
-            if let target = Self.missionQuestionTarget(url) {
+            if let issue = LeadLaunchIssue.allCases.first(where: { url.hasPrefix(Self.leadRecoveryURL($0, workspaceID: "")) }) {
+                let id = String(url.dropFirst(Self.leadRecoveryURL(issue, workspaceID: "").count))
+                if let index = currentIndex(ofWorkspace: id) { onWorkspaceAction?(.recoverLead(issue), index) }
+            } else if let target = Self.missionQuestionTarget(url) {
                 onMissionQuestionClicked?(target.workspaceIndex, target.columnIndex, label)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.diffActionPrefix) {
                 onDiffStatsClicked?(workspaceIndex)
@@ -833,9 +837,15 @@ final class SidebarView: NSView {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
+        if let waiting = workspace?.waitingTask {
+            menu.addClosureItem(title: "Start Now") { act(.startWaitingTask) }.isEnabled = waiting != .starting
+            menu.addClosureItem(title: "Close Workspace") { act(.close) }.isEnabled = waiting != .starting
+            return menu
+        }
         if let columnIndex {
             // The column too, by id: one closing meanwhile shifts the others.
-            let columnID = workspace?.columns.first { $0.index == columnIndex }?.id
+            let columnInfo = workspace?.columns.first { $0.index == columnIndex }
+            let columnID = columnInfo?.id
             let column = { [weak self] () -> (workspace: Int, column: Int)? in
                 guard let self, let workspaceID, let columnID, let index = self.currentIndex(ofWorkspace: workspaceID),
                       let column = self.columnIndexForID?(workspaceID, columnID)
@@ -847,10 +857,12 @@ final class SidebarView: NSView {
                 self?.onColumnClicked?(target.workspace, target.column)
             }
             // Wording and ⌘W match the main menu's Column ▸ Close Column.
-            menu.addClosureItem(title: "Close Column", keyEquivalent: "w") { [weak self] in
+            let close = menu.addClosureItem(title: "Close Column", keyEquivalent: "w") { [weak self] in
                 guard let target = column() else { return }
                 self?.onWorkspaceAction?(.closeColumn(columnIndex: target.column), target.workspace)
-            }.isEnabled = (workspace?.columnCount ?? 0) > 1
+            }
+            close.isEnabled = (workspace?.columnCount ?? 0) > 1 && columnInfo?.isLeadTerminal != true
+            if columnInfo?.isLeadTerminal == true { close.toolTip = NiruxShellView.leadStaysText }
             menu.addItem(.separator())
         }
 
@@ -874,6 +886,9 @@ final class SidebarView: NSView {
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.
         if workspace?.isLead != true {
+            if offersTaskResume?(workspaceIndex) == true {
+                menu.addClosureItem(title: "Resume with…") { act(.resumeWith) }
+            }
             if offersSubtask?(workspaceIndex) == true {
                 menu.addClosureItem(title: Self.newSubtaskTitle) { act(.newSubtask) }
             }
@@ -886,8 +901,16 @@ final class SidebarView: NSView {
         // Apart, so a click aimed at the context doesn't close the workspace.
         menu.addItem(.separator())
         if cleanup == .available { addWorktreeCleanupItem(to: menu, act: act) }
-        menu.addClosureItem(title: "Close Workspace") { act(.close) }
-            .isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
+        if workspace?.isLead == true {
+            if workspace?.leadLaunchIssue == .olderOptions {
+                menu.addClosureItem(title: "Relaunch with New Options…") { act(.recoverLead(.olderOptions)) }
+            }
+            menu.addClosureItem(title: NiruxShellView.restartLeadTitle) { act(.restartLead) }
+            menu.addClosureItem(title: Self.turnOffLeadTitle) { act(.turnOffLead) }
+        } else {
+            menu.addClosureItem(title: "Close Workspace") { act(.close) }
+                .isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
+        }
         return menu
     }
 
@@ -898,6 +921,7 @@ final class SidebarView: NSView {
     }
 
     static let newSubtaskTitle = "New Sub-task…"
+    static let turnOffLeadTitle = "Turn Off Lead…"
     static let addRuleTitle = "Add a Rule to the Brief…"
     static let dismissQuestionTitle = "Dismiss Question"
 
@@ -1000,6 +1024,10 @@ final class SidebarView: NSView {
         label.attributedStringValue = attr
         hoveredLabel = nil
         NSCursor.arrow.set()
+    }
+
+    static func leadRecoveryURL(_ issue: LeadLaunchIssue, workspaceID: String) -> String {
+        "action:lead-\(issue.rawValue):\(workspaceID)"
     }
 
     private static let diffActionPrefix = "action:diff:"

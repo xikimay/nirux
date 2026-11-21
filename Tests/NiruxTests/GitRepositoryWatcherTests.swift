@@ -223,8 +223,7 @@ final class GitRepositoryWatcherTests: XCTestCase {
         process.currentDirectoryURL = directory
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
+        try process.runToEnd()
         guard process.terminationStatus == 0 else {
             throw NSError(domain: "GitRefreshTests.Git", code: Int(process.terminationStatus))
         }

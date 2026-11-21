@@ -100,7 +100,7 @@ extension NiruxShellView {
     func openRoutedWorkspace(
         title: String,
         cwd: String,
-        agent: NiruxApp.WorkspaceAgent? = nil,
+        agent: CodingAgent? = nil,
         parentWorkspaceID: String? = nil,
         startedFromSpaceID: String?,
         worktreeBranch: String? = nil
@@ -123,7 +123,7 @@ extension NiruxShellView {
     /// the user confirmed, names none and goes where its folder belongs,
     /// else to the default space, with the banner that says so.
     func openRequestedWorkspace(
-        title: String?, cwd: String?, agent: NiruxApp.WorkspaceAgent?, requestedSpaceID: String?, startedOutsideNirux: Bool = false,
+        title: String?, cwd: String?, agent: CodingAgent?, requestedSpaceID: String?, startedOutsideNirux: Bool = false,
         confirmedCodexLaunch: ConfirmedCodexLaunch? = nil
     ) {
         let folder = cwd ?? defaultFolder(forSpace: requestedSpaceID ?? WorkspaceProfile.defaultID)

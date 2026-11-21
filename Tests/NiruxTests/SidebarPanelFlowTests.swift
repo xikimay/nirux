@@ -21,10 +21,12 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Rename Workspace"
             ],
             "testOrganizeMenuItems": ["Organize"],
+            "testResumeTaskMenuItem": ["Resume with…"],
             "testNewSubtaskMenuItem": [SidebarView.newSubtaskTitle],
             "testAddRuleMenuItem": [SidebarView.addRuleTitle],
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
             "testReviewBranchMenuItem": ["Review Branch"],
+            "testLeadMenuItems": [NiruxShellView.restartLeadTitle, SidebarView.turnOffLeadTitle],
             "testSpaceMenuItems": ["New Space…", "Space Settings…", "Delete Space…"]
         ],
         exemptions: [:]
@@ -69,7 +71,13 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             ]
             // The spaces themselves, listed first: SidebarSpacePickerTests.
             let spaces = Set(picker.items.prefix(shell.sidebar.lastProfiles.count).map(ObjectIdentifier.init))
-            let titles = menus.flatMap(\.items)
+            // Last: the Lead's space comes on screen.
+            let lead = try harness.makeLead()
+            shell.updateSidebar()
+            let leadMenu = shell.sidebar.workspaceActionMenu(
+                workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === lead.workspace }), columnIndex: nil
+            )
+            let titles = (menus + [leadMenu]).flatMap(\.items)
                 .filter { !$0.isSeparatorItem && !spaces.contains(ObjectIdentifier($0)) }.map(\.title)
             Self.menuCoverage.checkEveryItemIsCovered(
                 offered: Array(Set(titles)), testNames: UIFlowCoverage.testNames(of: Self.self)
@@ -79,13 +87,56 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(menus[0].items.map(\.title), [
                 "Focus Column", "Close Column", "",
                 "Review Branch", "Ask Agent Why CI Failed", "Rerun Failed CI Jobs…", "",
-                "New Sub-task…", "Organize", "",
+                "Resume with…", "New Sub-task…", "Organize", "",
                 "Rename Workspace", "View/Edit Context…", SidebarView.addRuleTitle, "",
                 "Clean Up Worktree…", "Close Workspace"
             ])
             // The folder is gone: Clean Up comes up among the state actions,
             // and it is no task to start a sub-task of.
             XCTAssertEqual(menus[2].items.prefix(4).map(\.title), ["Review Branch", "Clean Up Worktree…", "", "Organize"])
+        }
+    }
+
+    func testResumeTaskMenuItem() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.addWorkspace(title: "Switch me", cwd: harness.worktree)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            let menu = shell.sidebar.workspaceActionMenu(workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), columnIndex: nil)
+            harness.perform(["Resume with…"], in: menu)
+            XCTAssertEqual(harness.alerts.last, "Resume “Switch me” with another CLI?")
+            XCTAssertTrue(harness.terminalRestarts.isEmpty, "Cancel preserves the current session")
+        }
+    }
+
+    /// The Lead's row closes nothing: Restart Lead… asks first, Turn Off
+    /// Lead… opens Space Settings › Lead, where its switch is, and its Claude
+    /// column's Close Column is off; its Board's isn't.
+    func testLeadMenuItems() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            shell.updateSidebar()
+            let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === lead.workspace })
+            let menu = shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
+            XCTAssertEqual(menu.items.last?.title, SidebarView.turnOffLeadTitle)
+            XCTAssertFalse(menu.items.contains { $0.title == "Close Workspace" })
+            @MainActor func closeColumn(_ column: Int) throws -> NSMenuItem {
+                try XCTUnwrap(shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: column).items.first { $0.title == "Close Column" })
+            }
+            XCTAssertFalse(try closeColumn(0).isEnabled)
+            XCTAssertEqual(try closeColumn(0).toolTip, NiruxShellView.leadStaysText)
+            XCTAssertTrue(try closeColumn(1).isEnabled, "its Board's")
+
+            harness.perform([NiruxShellView.restartLeadTitle], in: menu)
+            XCTAssertEqual(harness.alerts.last, "Restart the Lead of “Tools”?")
+            XCTAssertEqual(harness.terminalRestarts, [], "cancelled")
+
+            harness.perform([SidebarView.turnOffLeadTitle], in: menu)
+            let settings = try XCTUnwrap(shell.spaceSettings)
+            XCTAssertEqual(settings.spaceID, lead.space)
+            XCTAssertEqual(settings.selectedTab, .lead)
+            XCTAssertFalse(lead.workspace.isClosing)
         }
     }
 

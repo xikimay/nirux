@@ -47,6 +47,12 @@ extension NiruxApp {
     static let leadItemTitle = "Lead"
     static let startLeadItemTitle = "Start a Lead"
 
+    /// Enabled while the active space has a Lead.
+    @objc func restartLead(_ sender: Any?) {
+        guard let shell else { return }
+        shell.requestRestartLead(spaceID: shell.activeProfileID)
+    }
+
     @objc func showSessionHistory(_ sender: Any?) {
         shell?.showSessionHistory()
     }
@@ -74,16 +80,9 @@ extension NiruxApp {
 
     // MARK: Agent
 
-    @objc func newClaudeCode(_ sender: Any?) {
-        shell?.openClaudeCode()
-    }
-
-    @objc func newCodex(_ sender: Any?) {
-        shell?.openCodex()
-    }
-
-    @objc func newAgy(_ sender: Any?) {
-        shell?.openAgy()
+    @objc func newAgent(_ sender: Any?) {
+        guard let agent = (sender as? NSMenuItem)?.representedObject as? CodingAgent else { return }
+        shell?.openAgent(agent)
     }
 
     @objc func reviewBranch(_ sender: Any?) {
@@ -121,6 +120,7 @@ extension NiruxApp {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Board", action: #selector(openBoard(_:)), shortcut: .board)
         menu.addItem(withTitle: Self.leadItemTitle, action: #selector(focusLead(_:)), shortcut: .lead)
+        menu.addItem(withTitle: NiruxShellView.restartLeadTitle, action: #selector(restartLead(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Session History…", action: #selector(showSessionHistory(_:)), keyEquivalent: "")
         menu.addItem(.separator())
 
@@ -164,9 +164,10 @@ extension NiruxApp {
     @MainActor
     func agentMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: "Agent")
-        menu.addItem(withTitle: "New Claude Code", action: #selector(newClaudeCode(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "New Codex", action: #selector(newCodex(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "New Antigravity", action: #selector(newAgy(_:)), keyEquivalent: "")
+        for agent in CodingAgent.launchable {
+            menu.addItem(withTitle: "New \(agent.productName)", action: #selector(newAgent(_:)), keyEquivalent: "")
+                .representedObject = agent
+        }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Next Waiting Agent", action: #selector(jumpToNextWaitingAgent(_:)), shortcut: .nextWaitingAgent)
         menu.addItem(withTitle: "Resume All Agents", action: #selector(resumeAllAgents(_:)), keyEquivalent: "")

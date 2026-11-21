@@ -157,21 +157,24 @@ extension NiruxShellView {
 
     /// The space's Lead as a Mission parent: its workspace and the column
     /// its Claude runs in (or will, once a restored one resumes), else its
-    /// first terminal.
+    /// Claude column.
     func leadMissionParent(inSpace spaceID: String) -> NewTask.MissionParent? {
         guard let lead = leadWorkspace(inSpace: spaceID) else { return nil }
         let snapshot = ProcessSnapshot()
         let terminals = lead.columns.filter { !$0.isClosing && $0.agentUUID != nil && ($0.pty != nil || $0.deferredAgent != nil) }
-        let claude = terminals.first { column in
-            column.deferredAgent?.processName == "claude" || column.pty?.foregroundProcessName(snapshot: snapshot) == "claude"
+        func runsClaude(_ column: ColumnState) -> Bool {
+            column.isRestartingShell || column.runsClaude(snapshot: snapshot)
         }
-        guard let agentUUID = (claude ?? terminals.first)?.agentUUID else { return nil }
+        let designated = lead.leadTerminal
+        let parent = designated.flatMap { runsClaude($0) ? $0 : nil } ?? terminals.first(where: runsClaude)
+            ?? designated ?? terminals.first
+        guard let agentUUID = parent?.agentUUID else { return nil }
         return NewTask.MissionParent(workspaceID: lead.id, agentUUID: agentUUID)
     }
 
     /// The agent a space's tasks start with unless the sheet says otherwise:
     /// its default (Space Settings › Defaults), else Claude Code.
-    func defaultTaskAgent(forSpace spaceID: String) -> NiruxApp.WorkspaceAgent {
+    func defaultTaskAgent(forSpace spaceID: String) -> CodingAgent {
         SpaceDefaultsStore.defaults(forSpace: spaceID).taskAgent
     }
 
@@ -228,9 +231,7 @@ extension NiruxShellView {
         completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void,
         opened: (@MainActor (_ workspaceID: String, _ created: CreatedTask) -> Void)? = nil
     ) {
-        Self.createTask(
-            request, handoverFilename: Self.handoverFilename(for: request.agent), routesByAnchor: routesByAnchor
-        ) { [weak self] result in
+        createTask(request) { [weak self] result in
             guard let self else { return }
             switch result {
             case .failed(let message):
@@ -362,11 +363,6 @@ extension NiruxShellView {
         case fetchFailed(String)
     }
 
-    /// Handover files never belong in a commit: the repository ignores them
-    /// (see `GitWorktree.ensureExcluded`), in any folder, since a task's
-    /// workspace may open in a folder of the repository.
-    nonisolated static let excludedHandovers = HandoverFile.filenames
-
     /// Off the main thread through nonisolated functions, so the closures
     /// can't inherit this view's main-actor isolation (see `runOffMain` in
     /// the worktree cleanup). `stateDirectory` is read on the main thread:
@@ -391,6 +387,17 @@ extension NiruxShellView {
             DispatchQueue.main.async { @MainActor in
                 completion(NewTaskPanel.ProjectInfo(target: target, templates: templates, isOutsideGit: isOutsideGit, isGone: isGone))
             }
+        }
+    }
+
+    func createTask(_ request: NewTask.Request, completion: @escaping @MainActor @Sendable (TaskResult) -> Void) {
+        let destination = request.target.map { $0.repository + "." + request.name.replacingOccurrences(of: "/", with: "-").lowercased() }
+        if let destination, !taskWorktreesBeingCreated.insert(destination).inserted {
+            return completion(.failed("Another task is creating this worktree. Try again once it opens."))
+        }
+        Self.createTask(request, handoverFilename: HandoverFile.filename(for: request.agent), routesByAnchor: routesByAnchor) { [weak self] result in
+            if let destination { self?.taskWorktreesBeingCreated.remove(destination) }
+            completion(result)
         }
     }
 
@@ -483,7 +490,7 @@ extension NiruxShellView {
         }
         let (path, error) = GitWorktree.create(branch: branch, repoRoot: target.repository, newBranchFrom: target.startPoint)
         guard let path else { return .failed(error ?? "git worktree add failed") }
-        GitWorktree.ensureExcluded(excludedHandovers, repoRoot: target.repository)
+        GitWorktree.ensureExcluded(HandoverFile.filenames, repoRoot: target.repository)
         let workingDirectory = NewTask.workingDirectory(in: path, subdirectory: target.subdirectory)
         // Where the agent starts: its prompt names the file, not a path.
         var handoverError: HandoverFile.TransferError?

@@ -116,8 +116,13 @@ extension NiruxShellView {
                 if let pty = parent.pty, !pty.hasExited {
                     let process = foreground(parent)
                     foregroundKnown = process != nil
+                    var typedAt = question.parentTypedAt
+                    if let process, let previous = typedAt, previous < process.instance.startedAt,
+                       parentEnd?.workspace.runsRestartedLead(process) == true {
+                        typedAt = nil
+                    }
                     parentState = Self.missionParent(
-                        foreground: process, typedAt: question.parentTypedAt,
+                        foreground: process, typedAt: typedAt,
                         finishedTurnAfterTyping: pty.finishedTurn(afterTypingAt:),
                         tookPrompt: { process in
                             pty.agentTookPrompt(since: process).map { $0 || pty.sitsAtFirstPrompt(process, now: now, record: sessionRecord(of:)) }
@@ -161,7 +166,7 @@ extension NiruxShellView {
         finishedTurnAfterTyping: (TimeInterval) -> Bool, tookPrompt: (ForegroundProcess) -> Bool?
     ) -> SidebarMissionQuestion.Parent {
         guard let foreground else { return .claude }
-        guard AgentHookCenter.isInteractiveClaude(foreground) else { return .notClaude }
+        guard foreground.interactiveAgent == .claude else { return .notClaude }
         if let typedAt {
             if foreground.instance.startedAt > typedAt { return .restartedSinceTyped }
             return finishedTurnAfterTyping(typedAt) ? .stoppedWithoutAnswer : .claude
@@ -324,8 +329,8 @@ extension NiruxShellView {
         }
         // The parent that saw the question, a Lead or a task's agent, hears
         // the answer too: the `claude` that last took it into its prompt or
-        // handed it over, not one started since. One that never saw it hears
-        // nothing.
+        // handed it over, not one started since, unless Restart Lead started
+        // it. One that never saw it hears nothing.
         if let question = response.mission.events.first(where: { $0.id == questionID }),
            let seenAt = [question.parentTypedAt, question.handedToUserAt].compactMap({ $0 }).max() {
             let childTitle = workspaces.first { $0.id == response.mission.childWorkspaceID }?.title ?? response.mission.branch

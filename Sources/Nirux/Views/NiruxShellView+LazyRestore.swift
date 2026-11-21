@@ -19,7 +19,7 @@ extension NiruxShellView {
     }
 
     private func needsCodexModeConfirmation(_ column: ColumnState, in workspace: WorkspaceState) -> Bool {
-        if case .codex(_, nil)? = column.deferredAgent?.agent { return workspace.startedOutsideNirux }
+        if case .codex(_, nil)? = column.deferredAgent?.launch { return workspace.startedOutsideNirux }
         return false
     }
 
@@ -31,8 +31,8 @@ extension NiruxShellView {
     func resumeDeferredAgent(
         _ column: ColumnState, in workspace: WorkspaceState, liveSessions: [String]? = nil, settingsFiles: [String: String]? = nil
     ) -> Bool {
-        guard workspace.columns.contains(where: { $0 === column }), var agent = column.deferredAgent?.agent else { return false }
-        if case .codex(let resume, nil) = agent {
+        guard workspace.columns.contains(where: { $0 === column }), var launch = column.deferredAgent?.launch else { return false }
+        if case .codex(let resume, nil) = launch {
             let destination = codexLaunchForConfirmation(in: workspace.profileID)
             var mode = destination.mode
             if workspace.startedOutsideNirux {
@@ -50,27 +50,28 @@ extension NiruxShellView {
                 guard workspace.profileID == destination.spaceID, !workspace.isClosing, workspace.columns.contains(where: { $0 === column })
                 else { return false }
             }
-            agent = .codex(resume: resume, mode: mode)
+            launch = .codex(resume: resume, mode: mode)
             column.restoredColumn?.codexLaunchMode = mode
         }
         guard column.takeDeferredAgent() != nil else { return false }
-        // Its folder may be gone since the restore (a removed worktree): the
-        // workspace's then, as at restore. Its environment is the one a new
-        // terminal gets now: the workspace may have moved to another space,
-        // Settings may have changed.
-        if let agentUUID = column.agentUUID {
-            column.setLaunch(
-                directory: column.launchDirectory.flatMap(Self.existingDirectory) ?? workspace.cwd,
-                environment: workspace.terminalEnvironment(agentUUID: agentUUID)
-            )
-        }
+        refreshLaunch(of: column, in: workspace)
         let command = resumeLaunchCommand(
-            agent.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)), in: workspace, column: column,
+            launch.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)), in: workspace, column: column,
             settingsFiles: settingsFiles
         )
         sideEffects.startRestoredAgent(column, command)
         scheduleMetadataRefresh()
         return true
+    }
+
+    /// Use the space's current environment for a resume or restart. If the
+    /// column's directory has disappeared, launch in the workspace directory.
+    func refreshLaunch(of column: ColumnState, in workspace: WorkspaceState) {
+        guard let agentUUID = column.agentUUID else { return }
+        column.setLaunch(
+            directory: column.launchDirectory.flatMap(Self.existingDirectory) ?? workspace.cwd,
+            environment: workspace.terminalEnvironment(agentUUID: agentUUID)
+        )
     }
 
     /// How long a column stays on screen before its agent resumes on its
@@ -173,7 +174,7 @@ extension NiruxShellView {
     /// What a column row shows of an agent that hasn't resumed.
     static func sidebarDeferredAgent(of column: ColumnState) -> SidebarDeferredAgent? {
         column.deferredAgent.map {
-            SidebarDeferredAgent(processName: $0.processName, summary: $0.summary, columnID: column.id)
+            SidebarDeferredAgent(agent: $0.launch.agent, summary: $0.summary, columnID: column.id)
         }
     }
 }

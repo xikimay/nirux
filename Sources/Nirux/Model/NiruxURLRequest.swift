@@ -56,7 +56,7 @@ enum NiruxLaunchAuthorization {
 struct NiruxURLRequest: Equatable, Sendable {
     enum Action: Equatable, Sendable {
         /// nirux://new-workspace?cwd=...&title=...&agent=claude|codex|agy&profile=...
-        case newWorkspace(cwd: String?, title: String?, agent: NiruxApp.WorkspaceAgent?)
+        case newWorkspace(cwd: String?, title: String?, agent: CodingAgent?)
         /// nirux://new-worktree?branch=...&repo=...&agent=...&handover=...&profile=...&from=head
         case newWorktree(NewWorktree)
         /// nirux://open-editor?file=...&line=...&endLine=...&workspace=...
@@ -68,7 +68,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     struct NewWorktree: Equatable, Sendable {
         var branch: String
         var repo: String
-        var agent: NiruxApp.WorkspaceAgent?
+        var agent: CodingAgent?
         /// Kept even when it breaks the handover rules: only the handover is
         /// dropped then (see `HandoverFile.transfer`), not the whole request.
         var handoverPath: String?
@@ -99,7 +99,7 @@ struct NiruxURLRequest: Equatable, Sendable {
             guard let raw = items.first(where: { $0.name == name })?.value, !raw.isEmpty else { return nil }
             return raw
         }
-        let agent = value("agent").flatMap(NiruxApp.WorkspaceAgent.init(rawValue:))
+        let agent = value("agent").flatMap(CodingAgent.init(launchable:))
 
         switch url.host {
         case "new-workspace":
@@ -233,13 +233,14 @@ struct NiruxURLRequest: Equatable, Sendable {
         // Confirming runs git in the folder (worktree creation, sidebar status),
         // and a repository's own hooks and config can execute code.
         let gitNote = "Nirux runs git in this folder: a repository you don’t trust can run code that way."
-        func agentLine(_ agent: NiruxApp.WorkspaceAgent?) -> String {
-            switch agent {
-            case .claude: return "Agent: Claude Code — \(claudeMode.displayName)"
-            case .codex: return "Agent: Codex — \(codexMode.displayName)" + (spaceName.map { "\nSpace: \(Self.displaySafe($0))" } ?? "")
-            case .agy: return "Agent: Antigravity — its own permission settings (Nirux sets none)"
-            case nil: return "Agent: none (plain shell)"
+        func agentLine(_ agent: CodingAgent?) -> String {
+            guard let agent else { return "Agent: none (plain shell)" }
+            let mode = switch agent {
+            case .claude: claudeMode.displayName
+            case .codex: codexMode.displayName + (spaceName.map { "\nSpace: \(Self.displaySafe($0))" } ?? "")
+            case .agy, .gemini, .opencode: "its own permission settings (Nirux sets none)"
             }
+            return "Agent: \(agent.productName) — \(mode)"
         }
         switch action {
         case let .newWorkspace(cwd, title, agent):

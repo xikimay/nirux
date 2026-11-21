@@ -9,7 +9,7 @@ extension ColumnState {
     /// was in flight.
     func trackForegroundAgent(_ foregroundProcess: ForegroundProcess?, snapshot: ProcessSnapshot, now: TimeInterval) {
         guard let pty else { return }
-        if let foregroundProcess, AgentStatusMachine.isRecognizedAgentProcess(foregroundProcess.name) {
+        if let foregroundProcess, foregroundProcess.agent != nil {
             if pty.agentMidTurnExit != nil { pty.clearAgentMidTurnExit() }
             lastForegroundAgent = foregroundProcess
             lastForegroundAgentSeenAt = now
@@ -17,17 +17,17 @@ extension ColumnState {
         }
         // An empty snapshot can't tell; a process still listed is suspended
         // (or not reaped yet): keep watching it.
-        guard let agent = lastForegroundAgent, !snapshot.isEmpty, !snapshot.contains(agent.instance) else { return }
+        guard let process = lastForegroundAgent, !snapshot.isEmpty, !snapshot.contains(process.instance) else { return }
         lastForegroundAgent = nil
-        // `claude -p` has no conversation to come back to.
-        guard !AgentHookCenter.isHeadlessClaude(agent) else { return }
+        // A headless run has no conversation to come back to.
+        guard let agent = process.interactiveAgent else { return }
         pty.noteAgentExited(AgentMidTurnExit(
-            processName: agent.name,
+            agent: agent,
             exitedAt: now,
             lastSeenAt: lastForegroundAgentSeenAt,
-            sessionID: agent.name == "claude" ? lastConfirmedClaudeSessionID(of: agent.instance) : nil,
-            arguments: agent.arguments,
-            firedHooks: claudeHooksFired(by: agent.instance)
+            sessionID: agent == .claude ? lastConfirmedClaudeSessionID(of: process.instance) : nil,
+            arguments: process.arguments,
+            firedHooks: claudeHooksFired(by: process.instance)
         ))
     }
 
@@ -38,7 +38,7 @@ extension ColumnState {
             agentExitOverlay?.isHidden = true
             return
         }
-        let content = ShellExitedOverlay.Content.agentExited(processName: exit.processName)
+        let content = ShellExitedOverlay.Content.agentExited(processName: exit.agent.rawValue)
         let wasShowing = isShowingAgentExit
         if let overlay = agentExitOverlay {
             guard !wasShowing || overlay.content != content else { return }

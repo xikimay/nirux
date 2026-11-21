@@ -52,6 +52,11 @@ final class UIFlowHarness {
     private(set) var agentLaunches: [String] = []
     /// Launch lines of restored agents resuming, in order.
     private(set) var restoredAgentLaunches: [String] = []
+    /// Launch lines of terminals restarted for an agent (Restart Lead), in
+    /// order.
+    private(set) var terminalRestarts: [String] = []
+    /// What a restarted terminal runs in place of the agent's launch line.
+    var restartedAgent = ":"
     /// `messageText` of every app-modal alert, in order.
     private(set) var alerts: [String] = []
     /// `informativeText` of every app-modal alert, in order.
@@ -202,6 +207,18 @@ final class UIFlowHarness {
         }
         shell.sideEffects.startRestoredAgent = { [weak self] _, command in
             self?.restoredAgentLaunches.append(command)
+        }
+        shell.sideEffects.restartTaskTerminal = { [weak self] column, command, canStop, starts in
+            guard let self else { return }
+            column.restartTerminal(running: restartedAgent, canStop: {
+                guard canStop() else { return false }
+                terminalRestarts.append(command)
+                return true
+            }, starts: starts)
+        }
+        let restart = shell.sideEffects.restartTaskTerminal
+        shell.sideEffects.restartTerminal = { column, command, starts in
+            restart(column, command, { true }, starts)
         }
         shell.sideEffects.homeDirectory = { [home] in home }
         // Never UNUserNotificationCenter in xctest.

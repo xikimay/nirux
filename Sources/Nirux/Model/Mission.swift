@@ -14,7 +14,8 @@ struct Mission: Codable, Equatable {
     let parentAgentUUID: String
     let childWorkspaceID: String
     let childAgentUUID: String
-    let childAgentKind: String
+    /// `CodingAgent`'s raw value, or "agent" when the child started none.
+    var childAgentKind: String
     let branch: String
     var status: Status
     let createdAt: TimeInterval
@@ -34,6 +35,8 @@ struct Mission: Codable, Equatable {
     /// parent's Missions or a child's leaves it out. Nil means no.
     var oneWay: Bool?
 
+    var childAgent: CodingAgent? { CodingAgent(rawValue: childAgentKind) }
+
     /// Carried whatever the Mission handoffs setting: a Lead's task, a
     /// sub-task a task's agent started with its tools, or a Lead's tells.
     var isAlwaysCarried: Bool { reportsToLead == true || reportsToTask == true || oneWay == true }
@@ -44,19 +47,12 @@ struct Mission: Codable, Equatable {
         handoffsEnabled || isAlwaysCarried
     }
 
-    /// The agent its child runs, as Nirux's lines name it, when Nirux
-    /// delivers its parent's messages to it (`agentName(ofKind:)`).
-    var childAgentName: String? { Self.agentName(ofKind: childAgentKind) }
-
-    /// An agent kind (its process's name too), as Nirux's lines name it,
-    /// when Nirux delivers messages to it: typed into Claude Code's or
-    /// Antigravity's prompt, or handed to Codex's queue.
-    static func agentName(ofKind kind: String) -> String? {
-        switch kind {
-        case NiruxApp.WorkspaceAgent.claude.rawValue: "Claude Code"
-        case NiruxApp.WorkspaceAgent.codex.rawValue: "Codex"
-        case NiruxApp.WorkspaceAgent.agy.rawValue: "Antigravity"
-        default: nil
+    /// The agent its child runs, when Nirux delivers its parent's messages:
+    /// typed into Claude Code or Antigravity, or handed to Codex's queue.
+    var deliveryAgent: CodingAgent? {
+        switch childAgent {
+        case .claude?, .codex?, .agy?: childAgent
+        case .gemini?, .opencode?, nil: nil
         }
     }
 }
@@ -247,13 +243,14 @@ final class MissionStore {
     static let shared = MissionStore()
 
     private(set) var missions: [Mission] = []
-    private let fileURL: URL
+    let fileURL: URL
     private let persistsToDisk: Bool
     private enum LedgerState: Equatable {
         case notLoaded
         case available
         case unavailable
     }
+    var hasLoadedLedger: Bool { ledgerState == .available }
     private var ledgerState: LedgerState
 
     nonisolated static var defaultFileURL: URL {
@@ -330,6 +327,31 @@ final class MissionStore {
         var updated = missions
         updated.append(mission)
         return commit(updated) ? mission : nil
+    }
+
+    /// Switch all routes into this terminal together, including a Lead's one-way tells.
+    func resumeWorker(workspaceID: String, agentUUID: String, missionID: String?, as agent: CodingAgent) -> Bool {
+        guard ensureLoaded() else { return false }
+        var updated = missions
+        let routes = updated.indices.filter { updated[$0].childWorkspaceID == workspaceID && updated[$0].childAgentUUID == agentUUID }
+        guard missionID == nil || routes.contains(where: { updated[$0].id == missionID }) else { return false }
+        for index in routes {
+            updated[index].childAgentKind = agent.rawValue
+            if updated[index].id == missionID { updated[index].status = .active }
+            let events = updated[index].events
+            let round = events.lastIndex { $0.kind == .completed }.map { $0 + 1 } ?? 0
+            let received = Set(events.compactMap { $0.kind == .response && $0.childConsumedAt != nil ? $0.inReplyTo : nil })
+            for event in events.indices {
+                // The previous CLI's blocking ask exited with it. Deliver its answer to the new prompt.
+                if event >= round, events[event].kind == .question, !received.contains(events[event].id) {
+                    updated[index].events[event].expectsTypedAnswer = true
+                }
+                if events[event].kind == .instruction, events[event].childConsumedAt == nil, events[event].expiredAt == nil {
+                    updated[index].events[event].childSessionID = nil
+                }
+            }
+        }
+        return updated == missions || commit(updated)
     }
 
     struct AcceptedEvent {
@@ -441,7 +463,7 @@ final class MissionStore {
             // A Claude Code child's `ask` ends its turn (MissionEventCLI.ask):
             // the store decides from the recorded child, not from the queue.
             expectsTypedAnswer: incoming.kind == .question
-                && missions[index].childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue ? true : nil,
+                && missions[index].childAgent == .claude ? true : nil,
             answeredByUser: incoming.kind == .response && fromUser ? true : nil
         )
         if event.kind == .instruction {
