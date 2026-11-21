@@ -217,7 +217,7 @@ extension NewTask {
             while let last = address.last, ".,;:!?)]".contains(last) { mark = String(address.removeLast()) + mark }
             guard let url = URL(string: address), let host = url.host() else { return mark }
             let parts = url.pathComponents.filter { $0 != "/" }
-            if host.hasSuffix("github.com"), parts.count >= 4, ["pull", "issues"].contains(parts[2]), Int(parts[3]) != nil {
+            if ["github.com", "www.github.com"].contains(host.lowercased()), parts.count >= 4, ["pull", "issues"].contains(parts[2]), Int(parts[3]) != nil {
                 return "#" + parts[3] + mark
             }
             return (host.hasPrefix("www.") ? String(host.dropFirst(4)) : host) + mark

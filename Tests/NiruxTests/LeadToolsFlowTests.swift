@@ -1249,17 +1249,31 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(shell.workspaces.first { $0.title == title }?.purpose, "Merge stacked PRs in order")
 
             let edited = try call(
-                LeadTools.startTask, ["description": "Write parser notes", "goal": "Compare parser tradeoffs"],
+                LeadTools.startTask, ["description": "docs: parser notes", "title": "Parser notes", "goal": "Compare parser tradeoffs"],
                 lead: lead, in: harness
             )
             XCTAssertFalse(edited.isError, edited.text)
             let editSheet = try XCTUnwrap(shell.newTaskPanel)
-            editSheet.descriptionView.string = "Write release notes"
+            editSheet.descriptionView.string = "Write release notes\n\ndocs: parser notes"
             editSheet.descriptionView.didChangeText()
             harness.waitUntil("the edited proposal can start") { editSheet.startButton.isEnabled }
+            XCTAssertEqual(editSheet.branchField.stringValue, "docs/write-release-notes")
             editSheet.startButton.performClick(nil)
             harness.waitUntil("the edited task") { shell.workspaces.contains { $0.title == "Write release notes" } }
             XCTAssertNil(shell.workspaces.first { $0.title == "Write release notes" }?.purpose)
+
+            let explicit = try call(
+                LeadTools.startTask, ["description": "Write parser notes", "title": "Parser notes", "branch": "docs/handbook"],
+                lead: lead, in: harness
+            )
+            XCTAssertFalse(explicit.isError, explicit.text)
+            let explicitSheet = try XCTUnwrap(shell.newTaskPanel)
+            explicitSheet.descriptionView.string = "Document the parser"
+            explicitSheet.descriptionView.didChangeText()
+            harness.waitUntil("the explicitly named branch can start") { explicitSheet.startButton.isEnabled }
+            XCTAssertEqual(explicitSheet.branchField.stringValue, "docs/handbook")
+            explicitSheet.startButton.performClick(nil)
+            harness.waitUntil("the task on its explicit branch") { shell.workspaces.contains { $0.title == "Document the parser" } }
         }
     }
 

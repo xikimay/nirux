@@ -32,6 +32,8 @@ final class NewTaskTests: XCTestCase {
         XCTAssertEqual(NewTask.suggestedBranch(description: "Fix N+1 queries on the board", templateName: nil), "fix/n-1-queries-on-board")
         XCTAssertEqual(NewTask.suggestedBranch(description: "Je veux que tu corriges le crash", templateName: nil), "fix/crash")
         XCTAssertEqual(NewTask.suggestedBranch(description: "Il faut que tu corriges le crash", templateName: nil), "fix/crash")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "Review https://GitHub.COM/a/b/issues/42"), "Review #42")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "Review https://notgithub.com/a/b/pull/42"), "Review notgithub.com")
         let pullRequest = "Review https://github.com/xikimay/nirux/pull/657"
         XCTAssertEqual(NewTask.workspaceTitle(description: pullRequest), "Review #657")
         XCTAssertEqual(NewTask.suggestedBranch(description: pullRequest, templateName: nil), "feat/review-657")

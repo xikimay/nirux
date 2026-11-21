@@ -256,10 +256,7 @@ extension NiruxShellView {
                   let panel = showNewSubtaskPanel(under: task)
             else { return false }
             panel.reportsToTaskAgent = proposal.parent
-            panel.prefill(
-                description: proposal.sheetDescription, templateName: proposal.templateName, options: proposal.options,
-                branch: proposal.sheetBranch, proposedBy: "“\(task.title)”"
-            )
+            panel.prefill(proposal, proposedBy: "“\(task.title)”")
             let firstLine = NewTask.workspaceTitle(description: proposal.sheetDescription) ?? proposal.description
             panel.onDeclineProposal = { [weak self] in
                 self?.tellProposer(proposal.parent, "The user closed the New Sub-task sheet you proposed (“\(MissionPromptText.quoted(firstLine))”): "
@@ -272,10 +269,7 @@ extension NiruxShellView {
               )
         else { return false }
         panel.reportsTo = proposal.parent
-        panel.prefill(
-            description: proposal.sheetDescription, templateName: proposal.templateName, options: proposal.options,
-            branch: proposal.sheetBranch
-        )
+        panel.prefill(proposal)
         return true
     }
 
@@ -937,13 +931,6 @@ struct LeadProposal: Equatable {
         return title + "\n\n" + description
     }
 
-    /// The branch the sheet shows as typed: the one given, else the one
-    /// start_task would make from the title, so both ways name it alike.
-    var sheetBranch: String? {
-        options.branch ?? options.title
-            .map { NewTask.suggestedBranch(description: description, title: $0, templateName: templateName) }
-            .flatMap { $0.isEmpty ? nil : $0 }
-    }
 }
 
 private extension ColumnState {
