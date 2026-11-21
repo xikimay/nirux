@@ -17,6 +17,8 @@ CI runs the app’s XCTest suite one process per test class, several at a time.
 swift build --build-tests && scripts/run-tests.sh
 ```
 
+Draft pull requests run `test (selected)`. The daily Coverage map workflow records which XCTest classes executed each Swift source file on main. The selector examines all changes since the indexed commit, including changes that landed on main after the map was recorded. It also includes classes declared by changed test files. Shared test helpers, removed test files, uncovered sources, build inputs, and missing or empty selections trigger the full suite. Marking the PR ready and each subsequent push run the full suite under the separate `test` check.
+
 The longest classes start first, in the order `scripts/test-class-times.txt` gives. When classes have grown or new long ones came in, `scripts/test-class-times.sh` rewrites it from main's last green nightly runs.
 
 A new or reworked UI test class passes a flake gate before its pull request is ready. On a pushed branch:
