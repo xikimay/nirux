@@ -6,7 +6,9 @@ extension BoardStagesView {
     /// What a repository's header says of its queue, `proposed` being the
     /// pull requests of the next Start's list the Board shows a place for:
     /// one merged counts for none (`BoardStages.nextStartList`).
-    nonisolated static func sectionQueue(_ state: ProjectBoard.QueueState, proposed: Int) -> SectionQueue {
+    nonisolated static func sectionQueue(
+        _ state: ProjectBoard.QueueState, proposed: Int, timeout: BoardStages.CheckTimeout? = nil
+    ) -> SectionQueue {
         // The Board shows a place for some of the list, never more.
         let proposed = min(proposed, state.selection.count)
         var queue = SectionQueue(tone: tone(of: state), dryRun: state.isDryRun ? MergeQueue.dryRunTooltip(reason: state.dryRunReason) : nil)
@@ -44,6 +46,15 @@ extension BoardStagesView {
             start.tooltip = "The confirmation sheet is open."
         } else {
             start.tooltip = "Read the queued pull requests on GitHub, then confirm what the queue will do"
+        }
+        if let timeout, state.run == .ended {
+            queue.status = timeout.status
+            queue.detail = [timeout.status, state.status].compactMap { $0 }.joined(separator: "\n")
+            queue.tone = timeout.reading == .failed ? .failed : .normal
+            if timeout.canRetry, state.selection == [timeout.number], proposed == 1, start.isEnabled {
+                start.title = (state.isDryRun ? "Retry Dry Run #" : "Retry #") + "\(timeout.number)…"
+                start.tooltip = "Read #\(timeout.number) again and review the confirmation."
+            }
         }
         queue.start = start
         return queue

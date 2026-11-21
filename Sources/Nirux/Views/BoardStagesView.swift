@@ -76,6 +76,7 @@ final class BoardStagesView: NSView {
         /// "Merging #52, 2 of 3", "3 pull requests queued"; nil at rest
         /// with nothing queued.
         var status: String?
+        var detail: String?
         var tone = QueueTone.normal
         /// Why this build can't change GitHub, for the DRY RUN badge's
         /// tooltip; nil for a real queue.
@@ -1527,11 +1528,11 @@ final class BoardStagesSectionHeaderView: NSView {
         pill.isHidden = pill.status == nil || take(pillWidth, upTo: pillWidth, gap: 10) == nil
         // What went is still said under the pointer.
         let unsaid = [
-            dryRunBadge.isHidden && queue?.dryRun != nil ? "DRY RUN" : nil, queueLabel.isHidden ? queue?.status : nil,
+            dryRunBadge.isHidden && queue?.dryRun != nil ? "DRY RUN" : nil, queueLabel.isHidden ? (queue?.detail ?? queue?.status) : nil,
             pill.isHidden ? pill.status?.text : nil
         ].compactMap { $0 }
         toolTip = unsaid.isEmpty ? nil : unsaid.joined(separator: "\n")
-        queueLabel.toolTip = queue?.status
+        queueLabel.toolTip = queue?.detail ?? queue?.status
         // Right to left: DRY RUN, the pill, the words; the name, then `owner/name`, at the left.
         if !dryRunBadge.isHidden {
             dryRunBadge.frame = NSRect(x: right - badgeWidth, y: baseline + 1, width: badgeWidth, height: 14)
