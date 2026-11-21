@@ -501,11 +501,10 @@ final class AgentLightShellTests: XCTestCase {
     func testAnotherWorkspacesLightsStayStill() throws {
         try withShell { shell, _, folder in
             let first = try XCTUnwrap(shell.activeWorkspace)
-            shell.addWorkspace(title: "second", cwd: folder)
-            let second = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "second", cwd: folder, activate: false)
+            let second = try XCTUnwrap(shell.workspaces.last)
             XCTAssertFalse(first === second)
-            // Its column comes in first, and lights up once in.
-            waitUntil("its column in", timeout: 2) { second.columns.first?.isArriving == false }
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === second }))
             let light = {
                 shell.updateAgentLights(infos: [
                     self.info(first, index: 0, in: shell, statuses: [.working]),
