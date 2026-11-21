@@ -129,6 +129,7 @@ extension NiruxShellView {
                 place: folder, fetchesFirst: false, reportsTo: parent
             )
             request.title = options.title
+            request.goal = options.goal
             configure(&request)
             return startLeadTask(request, repository: nil, fetchError: nil, answer: answer)
         }
@@ -147,6 +148,7 @@ extension NiruxShellView {
                 place: .worktree(target, branch: branch), fetchesFirst: true, reportsTo: parent
             )
             request.title = options.title
+            request.goal = options.goal
             configure(&request)
             self.startLeadTask(request, repository: repository.name, fetchError: nil, answer: answer)
         }
@@ -255,7 +257,7 @@ extension NiruxShellView {
             else { return false }
             panel.reportsToTaskAgent = proposal.parent
             panel.prefill(
-                description: proposal.sheetDescription, templateName: proposal.templateName, title: proposal.options.title,
+                description: proposal.sheetDescription, templateName: proposal.templateName, options: proposal.options,
                 branch: proposal.sheetBranch, proposedBy: "“\(task.title)”"
             )
             let firstLine = NewTask.workspaceTitle(description: proposal.sheetDescription) ?? proposal.description
@@ -271,7 +273,7 @@ extension NiruxShellView {
         else { return false }
         panel.reportsTo = proposal.parent
         panel.prefill(
-            description: proposal.sheetDescription, templateName: proposal.templateName, title: proposal.options.title,
+            description: proposal.sheetDescription, templateName: proposal.templateName, options: proposal.options,
             branch: proposal.sheetBranch
         )
         return true

@@ -58,6 +58,8 @@ enum NewTask {
         var parentWorkspaceID: String?
         /// The title start_task gave; nil: the description's first line.
         var title: String?
+        /// The goal start_task gave: the workspace's purpose.
+        var goal: String?
         /// A task its Lead started by itself (`start_task`): it opens in the
         /// Lead's space, without taking the user's focus or space.
         var startedByLead = false

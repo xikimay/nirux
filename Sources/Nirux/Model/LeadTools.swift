@@ -64,8 +64,14 @@ enum LeadTools {
         [
             "title": [
                 "type": "string",
-                "description": "Its name on its row: English, the distinctive word first, at most 22 characters to show whole "
-                    + "(\"Clearer task rows\"). Left out: the description's first line."
+                "description": "Its name on its row: English, the distinctive word first, at most \(maxTaskTitleLength) characters "
+                    + "(\(maxSubtaskTitleLength) for a sub-task), no branch, slug or PR number (\"Clearer task rows\"). "
+                    + "Left out: the description's first line."
+            ],
+            "goal": [
+                "type": "string",
+                "description": "What it delivers, on its row under the title: one line in English starting with a verb, at most "
+                    + "\(maxGoalLength) characters (\"Show a goal line on task rows\")."
             ],
             "branch": [
                 "type": "string",
@@ -80,6 +86,12 @@ enum LeadTools {
 
     /// A task's title, as the rename panel takes it.
     static let maxTitleLength = 80
+    /// start_task's title: what a task's row shows whole; a sub-task's row
+    /// is indented.
+    static let maxTaskTitleLength = 22
+    static let maxSubtaskTitleLength = 20
+    /// start_task's goal: what the task delivers, a line under its title.
+    static let maxGoalLength = 34
 
     /// What read_task returns of a message, its start and its end.
     static let maxReadLength = 6_000
@@ -393,9 +405,12 @@ enum LeadTools {
         (arguments["title"] as? String).flatMap { AgentText.clean($0, maxLength: maxTitleLength * 2) }
     }
 
-    /// start_task's `title` and `branch`, checked by `problem` first.
+    /// start_task's `title`, `branch` and `goal`, checked by `problem` first.
     static func startOptions(_ arguments: [String: Any]) -> NewTask.StartOptions {
-        NewTask.StartOptions(title: title(arguments), branch: string(arguments, "branch"))
+        NewTask.StartOptions(
+            title: title(arguments), branch: string(arguments, "branch"),
+            goal: (arguments["goal"] as? String).flatMap { AgentText.clean($0, maxLength: maxGoalLength * 2) }
+        )
     }
 
     /// `key` is there, and not null.
@@ -412,13 +427,19 @@ enum LeadTools {
     }
 
     /// What's wrong with a call's arguments before it reaches the app, or nil.
-    static func problem(tool: String, arguments: [String: Any]) -> String? {
+    /// `subtask`: a task's agent calls, for a sub-task.
+    static func problem(tool: String, arguments: [String: Any], subtask: Bool = false) -> String? {
         let messageLimit = MissionEventCLI.maxInstructionLength
         switch tool {
         case startTask:
             guard string(arguments, "description") != nil else { return "description must say what the task must do." }
-            if isGiven(arguments, "title"), title(arguments).map({ $0.count <= maxTitleLength }) != true {
-                return "title must hold 1 to \(maxTitleLength) characters."
+            let options = startOptions(arguments)
+            let titleLength = subtask ? maxSubtaskTitleLength : maxTaskTitleLength
+            if isGiven(arguments, "title"), options.title.map({ $0.count <= titleLength }) != true {
+                return "title must hold 1 to \(titleLength) characters\(subtask ? " for a sub-task" : ""): its row shows no more."
+            }
+            if isGiven(arguments, "goal"), options.goal.map({ $0.count <= maxGoalLength }) != true {
+                return "goal must hold 1 to \(maxGoalLength) characters: what the task delivers, starting with a verb."
             }
             if isGiven(arguments, "branch"), string(arguments, "branch").map(NewTask.isTaskBranchName) != true {
                 return "branch must be a valid git branch name of its own, such as fix/stale-labels (not origin/…)."

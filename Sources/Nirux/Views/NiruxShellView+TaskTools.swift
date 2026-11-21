@@ -19,7 +19,7 @@ extension NiruxShellView {
                 + "sub-tasks. The user starts tasks with ⌘N.", true)
         }
         let arguments = request.argumentObject
-        if let problem = LeadTools.problem(tool: request.tool, arguments: arguments) { return answer(problem, true) }
+        if let problem = LeadTools.problem(tool: request.tool, arguments: arguments, subtask: true) { return answer(problem, true) }
         let subtasks = subtasks(of: caller)
         let place = subtaskPlace(of: caller)
         if let refusal = subtaskRefusal(for: caller, place: place, subtasks: subtasks) { return answer(refusal, true) }

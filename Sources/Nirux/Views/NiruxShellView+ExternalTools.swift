@@ -311,7 +311,8 @@ extension NiruxShellView {
            branch names (`git branch -a`) for a naming convention and follow it. Default to
            `feat/short-description` or `fix/short-description` if no convention is apparent.
            Also write the title the task's row shows: English, its distinctive word first, at most
-           22 characters ("Clearer task rows"), URL-encoded in step 4 (`Clearer%20task%20rows`).
+           22 characters (20 when you are a task: it lists under yours), no branch, slug or PR number
+           ("Clearer task rows"), URL-encoded in step 4 (`Clearer%20task%20rows`).
         2. **Detect the git repo root** — the top level of the current checkout, even inside a
            linked worktree. Nirux still places the new worktree next to the main checkout, named
            after it:

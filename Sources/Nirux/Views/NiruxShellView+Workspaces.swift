@@ -12,6 +12,7 @@ extension NiruxShellView {
 
     func addWorkspace(
         title: String? = nil,
+        purpose: String? = nil,
         cwd: String? = nil,
         agent: NiruxApp.WorkspaceAgent? = nil,
         profileID requestedProfileID: String? = nil,
@@ -62,6 +63,7 @@ extension NiruxShellView {
             taskFolder: taskFolder,
             initialAgentUUID: initialAgentUUID
         )
+        workspace.purpose = purpose
         wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace, activate: activate)
         verticalStrip.addSubview(workspace.containerView)

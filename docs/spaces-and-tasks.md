@@ -49,7 +49,7 @@ A change reaches sessions as they start: a running session keeps the file it rea
 
 `Cmd+N` opens the New sheet, titled **New in \<space\>**. The same sheet opens from `New…` in the command palette and the Workspaces menu, and from the sidebar's `+`.
 
-Describe the task, then pick the repository (in every space but General), the agent and a template. The first line of the description names the workspace and suggests the branch: `fix/…` when the template is about a bug or the description starts with a word such as "Fix", "Bug" or "Crash", `feat/…` otherwise. **Edit** changes the branch name. Return starts, `Shift+Return` adds a line, and `Cmd+Return` starts from anywhere in the sheet.
+Describe the task, then pick the repository (in every space but General), the agent and a template. The first line of the description names the workspace and suggests the branch: `fix/…` when the template is about a bug or the description starts with a word such as "Fix", "Bug" or "Crash", `feat/…` otherwise. The branch keeps the words that say something (no "the", "a", repeated words or an opening "can you"), takes a branch the line asks for, such as "(branch fix/labels)", and reads a GitHub pull request link as its number. **Edit** changes the branch name. Return starts, `Shift+Return` adds a line, and `Cmd+Return` starts from anywhere in the sheet.
 
 **Start** then does four things:
 

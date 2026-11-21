@@ -57,6 +57,8 @@ extension NewTask {
     struct StartOptions: Equatable, Sendable {
         var title: String?
         var branch: String?
+        /// What the task delivers: its workspace's purpose.
+        var goal: String?
     }
 
     /// A first line, read for the task's name.

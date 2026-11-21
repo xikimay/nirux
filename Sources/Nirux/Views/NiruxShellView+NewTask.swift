@@ -279,6 +279,7 @@ extension NiruxShellView {
         }
         addWorkspace(
             title: title,
+            purpose: request.goal,
             cwd: created.workingDirectory,
             agent: request.agent,
             profileID: decision.spaceID,

@@ -97,8 +97,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// The name the user typed for the other kind, kept while the field
     /// shows this one: picking a repository again brings it back.
     private var otherEditedName: String?
-    /// The title a proposal gave (see `prefill`).
-    private var proposedTitle: String?
+    /// A proposal's first line, and the title and goal it gave (see `prefill`).
+    private var proposal: (firstLine: String?, options: NewTask.StartOptions)?
     /// Edit was clicked: the branch shows in a field.
     private(set) var isEditingBranch = false
     private(set) var isStarting = false
@@ -379,15 +379,15 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// A proposal (`start_task` with "Starts tasks without asking" off),
     /// from the Lead or a task's agent: its description, and its template,
     /// picked once the repository's templates are read.
-    /// `title`, the one the proposal gives, names the task while the
-    /// description's first line still reads it; `branch` shows in the field
-    /// as if typed once the task gets a worktree.
+    /// `options`' title and goal, the proposal's, hold while the
+    /// description's first line is still the one it showed; `branch` shows
+    /// in the field as if typed once the task gets a worktree.
     func prefill(
-        description: String, templateName: String?, title: String? = nil, branch: String? = nil, proposedBy: String = "the Lead"
+        description: String, templateName: String?, options: NewTask.StartOptions, branch: String?, proposedBy: String = "the Lead"
     ) {
         guard panel != nil else { return }
         descriptionView.string = description
-        proposedTitle = title
+        proposal = (NewTask.firstLine(of: description), options)
         if let templateName { pickedTemplateName = templateName }
         if let branch, namesFolder {
             otherEditedName = branch
@@ -624,7 +624,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         )
         request.reportsToTask = agentParent != nil
         request.proposedByTaskAgent = reportsToTaskAgent
-        if let proposedTitle, NewTask.firstLine(of: taskText) == proposedTitle { request.title = proposedTitle }
+        if let proposal, NewTask.firstLine(of: taskText) == proposal.firstLine {
+            request.title = proposal.options.title
+            request.goal = proposal.options.goal
+        }
         return request
     }
 

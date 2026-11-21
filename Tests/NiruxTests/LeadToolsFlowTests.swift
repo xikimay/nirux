@@ -149,11 +149,14 @@ final class LeadToolsFlowTests: XCTestCase {
             // A title and a branch of its own: its row, its handover and its
             // branch take them. A title alone names the branch too.
             let named = try call(
-                LeadTools.startTask, ["description": "feat/x — Orders as CSV", "title": "CSV export", "branch": "feat/orders-csv"],
+                LeadTools.startTask,
+                ["description": "feat/x — Orders as CSV", "title": "CSV export", "branch": "feat/orders-csv", "goal": "Export orders as CSV"],
                 lead: lead, in: harness
             )
             XCTAssertTrue(named.text.hasPrefix("Started “CSV export” on feat/orders-csv in "), named.text)
             let csv = try XCTUnwrap(shell.workspaces.first { $0.title == "CSV export" })
+            XCTAssertEqual(csv.purpose, "Export orders as CSV")
+            XCTAssertEqual(Persistence.load()?.workspaces.first { $0.id == csv.id }?.purpose, "Export orders as CSV")
             let handover = try String(contentsOfFile: csv.cwd + "/.claude-handover.md", encoding: .utf8)
             XCTAssertTrue(handover.hasPrefix("# Task: CSV export\n"), handover)
             let titled = try call(LeadTools.startTask, ["description": "Let the user pick it", "title": "Date format"], lead: lead, in: harness)
@@ -1173,11 +1176,14 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(MissionStore.shared.missions.first { $0.childWorkspaceID == notes.id }?.branch, "Notes: Q3")
             // A title of its own names its row, its folder and its handover.
             let titled = try call(
-                LeadTools.startTask, ["description": "Write up what we found", "repo": "none", "title": "Findings"], lead: lead, in: harness
+                LeadTools.startTask,
+                ["description": "Write up what we found", "repo": "none", "title": "Findings", "goal": "Compare parser tradeoffs"],
+                lead: lead, in: harness
             )
             XCTAssertFalse(titled.isError, titled.text)
             let findings = harness.home + "/Nirux Tasks/Findings"
             XCTAssertTrue(shell.workspaces.contains { $0.title == "Findings" && $0.taskFolder == findings })
+            XCTAssertEqual(shell.workspaces.first { $0.taskFolder == findings }?.purpose, "Compare parser tradeoffs")
             XCTAssertTrue(try String(contentsOfFile: findings + "/.claude-handover.md", encoding: .utf8).hasPrefix("# Task: Findings\n"))
 
             // Proposed: the sheet starts it in a folder too.
@@ -1225,20 +1231,35 @@ final class LeadToolsFlowTests: XCTestCase {
             // One sheet at a time: the next waits for this one to close. Its
             // title heads the description; the branch start_task would make
             // fills the field.
-            // Started as proposed, it keeps the title whole.
-            let title = "Other: a proposal whose title runs past fifty characters"
+            // Started as proposed, it keeps the title as given, and the goal.
+            let title = "Let's merge in order"
             let queued = try call(
-                LeadTools.startTask, ["description": "fix: another one", "title": title], lead: lead, in: harness
+                LeadTools.startTask, ["description": "fix: another one", "title": title, "goal": "Merge stacked PRs in order"],
+                lead: lead, in: harness
             )
             XCTAssertFalse(queued.isError)
             XCTAssertTrue(queued.text.hasPrefix("Queued for the user"), queued.text)
             sheet.cancelButton.performClick(nil)
             harness.waitUntil("the next proposal") { shell.newTaskPanel?.descriptionView.string == title + "\n\nfix: another one" }
             let next = try XCTUnwrap(shell.newTaskPanel)
-            XCTAssertEqual(next.branchField.stringValue, "fix/other-proposal-whose-title-runs")
+            XCTAssertEqual(next.branchField.stringValue, "fix/let-merge-in-order")
             harness.waitUntil("the repository read") { next.startButton.isEnabled }
             next.startButton.performClick(nil)
             harness.waitUntil("the proposed task") { shell.workspaces.contains { $0.title == title } }
+            XCTAssertEqual(shell.workspaces.first { $0.title == title }?.purpose, "Merge stacked PRs in order")
+
+            let edited = try call(
+                LeadTools.startTask, ["description": "Write parser notes", "goal": "Compare parser tradeoffs"],
+                lead: lead, in: harness
+            )
+            XCTAssertFalse(edited.isError, edited.text)
+            let editSheet = try XCTUnwrap(shell.newTaskPanel)
+            editSheet.descriptionView.string = "Write release notes"
+            editSheet.descriptionView.didChangeText()
+            harness.waitUntil("the edited proposal can start") { editSheet.startButton.isEnabled }
+            editSheet.startButton.performClick(nil)
+            harness.waitUntil("the edited task") { shell.workspaces.contains { $0.title == "Write release notes" } }
+            XCTAssertNil(shell.workspaces.first { $0.title == "Write release notes" }?.purpose)
         }
     }
 
@@ -1424,7 +1445,10 @@ final class LeadToolsFlowTests: XCTestCase {
             guard case .accepted = MissionStore.shared.process(completed, enabled: false) else { return XCTFail("its result is carried") }
             XCTAssertEqual(shell.runningSubtaskCount(of: task), TaskTools.maxRunningSubtasks - 1)
             XCTAssertTrue(try call(LeadTools.listTasks, from: task, agentUUID: agent, in: harness).text.contains("completed: Docs written"))
-            // A title of its own names its row and its branch.
+            // A title of its own names its row and its branch; a sub-task's
+            // row is narrower.
+            let wide = try call(LeadTools.startTask, ["description": "x", "title": "Twenty-one characters"], from: task, agentUUID: agent, in: harness)
+            XCTAssertTrue(wide.isError && wide.text.contains("1 to 20 characters for a sub-task"), wide.text)
             let titled = try call(LeadTools.startTask, ["description": "List every endpoint", "title": "API index"], from: task, agentUUID: agent, in: harness)
             XCTAssertTrue(titled.text.hasPrefix("Started “API index” on feat/api-index in "), titled.text)
         }
