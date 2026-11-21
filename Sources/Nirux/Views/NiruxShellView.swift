@@ -4,7 +4,7 @@ import GhosttyTerminal
 /// Root AppKit view: sidebar + niri-style 2D scrolling viewport
 final class NiruxShellView: NSView {
     private static let collapsedSidebarWidth = SidebarView.foldedWidth
-    private static let expandedSidebarWidth: CGFloat = 260
+    let sidebarResizeHandle = HorizontalResizeHandle<CGFloat>()
     /// The requests waiting for the user, the inbox and the callout (see
     /// NiruxShellView+Requests).
     let requestsState = RequestsState()
@@ -23,6 +23,9 @@ final class NiruxShellView: NSView {
     var underGlassGeneration = 0
     /// The workspace whose cards pass under the rail, until its edge closes.
     weak var passingUnderRail: WorkspaceState?
+    /// Over the title band while floors play, but for the command bar
+    /// (NiruxShellView+UnderBar).
+    var titleBandCover: TitleBandCover?
     /// Counts space crossings: a crossing's end acts only on its own, and
     /// its pictures over the viewport (NiruxShellView+SpaceCrossing).
     var spaceCrossingGeneration = 0
@@ -47,7 +50,7 @@ final class NiruxShellView: NSView {
     var offScreenViewportSize = NSSize.zero
 
     private var sidebarWidth: CGFloat {
-        isSidebarExpanded ? Self.expandedSidebarWidth : Self.collapsedSidebarWidth
+        isSidebarExpanded ? sidebarFold.expandedWidth(in: bounds.width) : Self.collapsedSidebarWidth
     }
 
     let sidebar = SidebarView()
@@ -259,7 +262,7 @@ final class NiruxShellView: NSView {
     var boardSettingsPanel: BoardSettingsPanel?
     /// Each task's station by workspace id: its line's on its space's Board
     /// (`noteTaskStations`), drawn or not. No Board, none.
-    var taskStations: [String: BoardStages.Station] = [:]
+    var taskStations: [String: SidebarBoardProgress] = [:]
     /// The Board tab reading board.json and the checkouts: one read at a
     /// time.
     var isReadingBoardSettings = false
@@ -354,6 +357,7 @@ final class NiruxShellView: NSView {
         addSubview(viewport)
         // Over the work: the cards pass under the rail (NiruxShellView+UnderGlass).
         addSubview(sidebar)
+        wireSidebarResizeHandle()
         sidebar.onRailShownChange = { [weak self] in self?.railMayHaveChanged(animated: true) }
         addSubview(columnIndicator)
         addSubview(edgeGlowLeft)
