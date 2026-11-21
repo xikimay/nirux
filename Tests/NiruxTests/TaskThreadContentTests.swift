@@ -80,6 +80,8 @@ final class TaskThreadContentTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let sidebar = shell.sidebar
+            // Synthetic hover events share no pointer with the other CI windows.
+            harness.window.orderOut(nil)
             let space = shell.activeProfileID
             let tasks = [UUID().uuidString, UUID().uuidString]
             for (index, id) in tasks.enumerated() {
@@ -90,11 +92,16 @@ final class TaskThreadContentTests: XCTestCase {
             shell.updateSidebar()
             for (index, id) in tasks.enumerated() {
                 let expanded = index == 0
-                if shell.isSidebarExpanded != expanded { shell.toggleSidebar() }
-                harness.waitUntil("the requested sidebar layout") { sidebar.isExpanded == expanded }
+                shell.isSidebarExpanded = expanded
+                sidebar.isExpanded = expanded
+                shell.relayout(animated: false)
                 harness.window.contentView?.layoutSubtreeIfNeeded()
                 if expanded {
-                    let frame = try XCTUnwrap(sidebar.rowFrame(workspaceID: id))
+                    let document = sidebar.contentDocumentView
+                    let row = try XCTUnwrap(sidebar.rowFrame(workspaceID: id))
+                    document.scrollToVisible(document.convert(row, from: sidebar))
+                    let frame = try XCTUnwrap(sidebar.rowFrame(workspaceID: id)).intersection(sidebar.visibleRect)
+                    XCTAssertFalse(frame.isEmpty)
                     let point = sidebar.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
                     let event = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [],
                         timestamp: 0, windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
@@ -102,7 +109,10 @@ final class TaskThreadContentTests: XCTestCase {
                 } else {
                     try XCTUnwrap(sidebar.iconRail.itemViews[id]).mouseEntered(with: NSEvent())
                 }
-                harness.waitUntil("the preview for the hovered task") { sidebar.taskPreview.workspaceID == id && sidebar.taskPreview.card != nil }
+                XCTAssertEqual(sidebar.taskPreview.workspaceID, id)
+                waitUntil("the preview for \(expanded ? "row" : "rail") \(id), tracking \(sidebar.taskPreview.workspaceID ?? "none")") {
+                    sidebar.taskPreview.workspaceID == id && sidebar.taskPreview.card != nil
+                }
                 let preview = try XCTUnwrap(sidebar.taskPreview.card)
                 let open = try XCTUnwrap(preview.subviews.compactMap { $0 as? NSButton }.first { $0.title == "Open task thread" })
                 preview.mouseExited(with: NSEvent())
