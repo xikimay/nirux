@@ -12,9 +12,8 @@ enum PaletteIcon {
 
     /// The icon the sidebar shows for this agent: its app's, else its symbol.
     @MainActor
-    static func agent(_ processName: String) -> PaletteIcon {
-        if let image = SidebarRenderer.agentAppIcon(processName: processName) { return .image(image) }
-        return .symbol(SidebarRenderer.agentSymbol(processName: processName) ?? "terminal")
+    static func agent(_ agent: CodingAgent) -> PaletteIcon {
+        agent.appIcon.map(PaletteIcon.image) ?? .symbol(agent.symbolName)
     }
 }
 

@@ -255,7 +255,7 @@ struct SidebarMissionQuestion: Hashable {
 /// (see `DeferredAgentLaunch`). `columnID` tells a Resume click aimed at
 /// it from one that lands on another column after a rebuild.
 struct SidebarDeferredAgent: Hashable {
-    let processName: String
+    let agent: CodingAgent
     let summary: String
     let columnID: UUID
 
@@ -272,7 +272,7 @@ enum SidebarStuckState: Hashable {
     /// The turn failed on an API error. `failedAt` tells the failure a
     /// Resume click was aimed at from any later one.
     case stoppedOnError(kind: String?, detail: String?, failedAt: TimeInterval, resume: Resume)
-    case exitedMidTurn(processName: String)
+    case exitedMidTurn(agent: CodingAgent)
     /// A turn waits on the model with no sign of life, for how long, since
     /// when (`AgentSilence.since`: what Interrupt aims at), and whether
     /// Interrupt may press Esc there.
@@ -316,7 +316,7 @@ enum SidebarStuckState: Hashable {
     /// The name the row shows: the agent that died, not the shell that
     /// took its place in front.
     var agentName: String? {
-        if case .exitedMidTurn(let processName) = self { return processName }
+        if case .exitedMidTurn(let agent) = self { return agent.rawValue }
         return nil
     }
 
@@ -328,8 +328,8 @@ enum SidebarStuckState: Hashable {
         case .stoppedOnError(let kind, let detail, _, _):
             let error = AgentAttentionReason.apiError(kind: kind, detail: detail).detailLine
             return ["Stopped on an API error", error].compactMap { $0 }.joined(separator: " — ")
-        case .exitedMidTurn(let processName):
-            return "\(processName) exited in the middle of a turn, without ending its session"
+        case .exitedMidTurn(let agent):
+            return "\(agent.rawValue) exited in the middle of a turn, without ending its session"
         case .silent(let duration, _, _):
             return "Claude has been silent for \(duration). \(AgentAttentionReason.silentAdvice)"
         }
@@ -413,6 +413,9 @@ struct WorkspaceInfo: Hashable {
     var dailyPassNote: String?
     /// Its pull request's automatic follow-up, when the row says it.
     var followUp: SidebarFollowUp?
+    /// The Lead's messages it holds until other tasks' pull requests merge.
+    var heldMessages: SidebarHeldMessages?
+    var waitingTask: WaitingTaskView.Facts.State?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
@@ -541,6 +544,7 @@ enum WorktreeCleanupMenuOffer {
 }
 
 enum WorkspaceSidebarAction {
+    case startWaitingTask
     case moveUp, moveDown, markActive, markInactive
     case close, rename, editContext, reviewBranch, newSubtask, moveOutOfParent
     case closeColumn(columnIndex: Int)

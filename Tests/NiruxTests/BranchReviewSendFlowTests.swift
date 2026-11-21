@@ -40,9 +40,9 @@ final class BranchReviewSendFlowTests: XCTestCase {
             let claudes = workspace.columns.suffix(5).prefix(3).compactMap(\.pty)
             XCTAssertEqual(claudes.count, 3)
             harness.waitUntil("the launcher's claude, the background one") {
-                launched.runningAgentName(snapshot: ProcessSnapshot()) == "claude"
+                launched.runningAgent(snapshot: ProcessSnapshot()) == .claude
                     && launched.foregroundProcess(snapshot: ProcessSnapshot())?.name == "time"
-                    && background.runningAgentName(snapshot: ProcessSnapshot()) == "claude"
+                    && background.runningAgent(snapshot: ProcessSnapshot()) == .claude
                     && background.foregroundProcess(snapshot: ProcessSnapshot())?.name == "zsh"
             }
             for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit, .stop] {

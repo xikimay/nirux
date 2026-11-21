@@ -991,12 +991,12 @@ say why and change nothing for it. Then say what you did for each number.
 - **"Idle at its prompt" is a new predicate.** `PtySession.agentResumeRefusal`
   doesn't fit: it refuses any agent without a failed turn, and any agent but
   `claude`. The new one keeps its at-prompt checks without the failed turn:
-  the foreground process is `claude` driven by Nirux's hooks (`hookKind ==
-  "claude"`, and not headless as `AgentHookCenter.isHeadlessClaude` reads it),
+  the foreground process is `claude` driven by Nirux's hooks (`hookAgent ==
+  .claude`, and not headless as `ForegroundProcess.headlessAgent` reads it),
   no dialog is pending, no hook says it is working and no turn has started;
   and a prompt went in since the process started, as Mission's `tell` asks:
   `SessionStart` comes before Claude's own dialogs (trust, an MCP server),
-  and the column's `hookKind` is cleared when Claude ends or another
+  and the column's `hookAgent` is cleared when Claude ends or another
   process comes to the front (Ctrl-Z), so a Claude back in front reports
   again first. Its last turn didn't end on an error that needs the user
   first (a usage limit, a login, a model), as Resume knows: some show a
@@ -1008,8 +1008,8 @@ say why and change nothing for it. Then say what you did for each number.
   A subagent at work after the main turn, or a turn interrupted with Esc,
   reads as working.
   Closing a column or a workspace trusts "idle" on part of this condition
-  (`WorkspaceClosePolicy.LiveAgent`: `processName == "claude" &&
-  hookKind == "claude"`). Every other agent is
+  (`WorkspaceClosePolicy.LiveAgent`: `agent == .claude &&
+  hookAgent == .claude`). Every other agent is
   refused, with the reason: Codex's notify hook reports turn ends only, so an
   open approval prompt would read as idle; Gemini CLI and OpenCode report
   nothing. It is checked when the sheet opens and again on Send: a

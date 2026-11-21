@@ -129,7 +129,7 @@ extension NiruxShellView {
         let agent = column.pty == nil ? nil : column.liveAgent(snapshot: ProcessSnapshot())
         guard let details = WorkspaceClosePolicy.columnConfirmation(for: agent), let agent else { return true }
         guard confirmDestructiveClose(
-            message: agent.isPaused ? "Close paused \(agent.displayName) column?" : "Close column running \(agent.displayName)?",
+            message: agent.isPaused ? "Close paused \(agent.agent.name) column?" : "Close column running \(agent.agent.name)?",
             details: details,
             confirmTitle: "Close Column"
         ) else { return false }
@@ -169,12 +169,13 @@ extension NiruxShellView {
     /// tool), which leaves the keyboard where it is.
     func closeWorkspace(at index: Int, refocusing: Bool = true) {
         guard workspaceStore.remainingWorkspaceCount > 1,
-              let wsToRemove = workspaces[safe: index], !wsToRemove.isClosing
+              let wsToRemove = workspaces[safe: index], !wsToRemove.isClosing, !wsToRemove.isStarting
         else { return }
         // The store keeps it until the exit animation ends — flag it so a
         // quick second ⌘W neither counts nor selects it meanwhile.
         wsToRemove.isClosing = true
         freezeThread(of: wsToRemove)
+        closeMergeWaits(of: wsToRemove, now: Date().timeIntervalSince1970)
         // Closing the Lead turns it off: Space Settings says so at once.
         if wsToRemove.isLead { refreshSpaceSettingsLead() }
         // Only move the selection when the *active* workspace is going away —
@@ -273,13 +274,9 @@ extension ColumnState {
     /// until it resumes (nothing runs: idle).
     func liveAgent(snapshot: ProcessSnapshot) -> WorkspaceClosePolicy.LiveAgent? {
         if let deferredAgent {
-            return WorkspaceClosePolicy.LiveAgent(processName: deferredAgent.processName, status: .idle, isPaused: true)
+            return WorkspaceClosePolicy.LiveAgent(agent: deferredAgent.launch.agent, status: .idle, isPaused: true)
         }
-        guard let pty, let name = pty.agentProcessName(snapshot: snapshot) else { return nil }
-        return WorkspaceClosePolicy.LiveAgent(
-            processName: name,
-            machineStatus: pty.cachedAgentState,
-            hookKind: pty.agentHookKind
-        )
+        guard let pty, let agent = pty.terminalAgent(snapshot: snapshot) else { return nil }
+        return WorkspaceClosePolicy.LiveAgent(agent: agent, machineStatus: pty.cachedAgentState, hookAgent: pty.hookAgent)
     }
 }

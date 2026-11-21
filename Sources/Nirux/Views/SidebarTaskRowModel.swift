@@ -119,6 +119,10 @@ extension WorkspaceInfo {
             SidebarRowSummary(mark: mark, status: SidebarStatusLine(text: text, tone: tone, action: action), trailing: trailing ?? age)
         }
 
+        if let waitingTask {
+            if case .needsYou = waitingTask { return row(.needsYou, waitingTask.line, .needsYou) }
+            return row(.blocked, waitingTask.line, .neutral)
+        }
         let step = agentStep
         if case .needsYou(let waiting, let words, let isHandedOff)? = step {
             var summary: SidebarRowSummary
@@ -229,8 +233,10 @@ extension WorkspaceInfo {
         case answered(SidebarMissionQuestion)
     }
 
-    var agentStep: AgentStep? {
-        if let waiting = columns.first(where: { $0.attention == .waiting }) {
+    var agentStep: AgentStep? { agentStep(in: columns, includingWait: { _ in true }) }
+
+    func agentStep(in columns: [ColumnInfo], includingWait: (ColumnInfo) -> Bool) -> AgentStep? {
+        if let waiting = columns.first(where: { $0.attention == .waiting && includingWait($0) }) {
             if let question = waiting.missionQuestion, question.handOff != nil, !question.isAnswered {
                 return .needsYou(waiting, words: question.needsYouDetail, isHandedOff: true)
             }
