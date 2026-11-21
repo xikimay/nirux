@@ -163,14 +163,11 @@ final class UIFlowHarness {
         installDoubles()
         installModalWatchdog()
 
-        // The default workspace opens in the real home folder: work in the
-        // repository instead.
-        let homeWorkspace = shell.workspaces.first
-        shell.addWorkspace(title: "repo", cwd: repo)
-        shell.closeWorkspace(at: 0)
-        waitUntil("the home-folder workspace to close") {
-            !self.shell.workspaces.contains { $0 === homeWorkspace }
+        // Fixture setup doesn't need the workspace's exit animation.
+        if let homeWorkspace = shell.workspaces.first {
+            shell.workspaceStore.removeWorkspace(homeWorkspace)?.containerView.removeFromSuperview()
         }
+        shell.addWorkspace(title: "repo", cwd: repo)
     }
 
     /// Dismisses what the test left open and closes the windows it created.
