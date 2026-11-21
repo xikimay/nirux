@@ -17,6 +17,8 @@ CI runs the app’s XCTest suite one process per test class, several at a time.
 swift build --build-tests && scripts/run-tests.sh
 ```
 
+An agent waiting on the PR’s Tests workflow can run `scripts/watch-ci-failure.sh <run-id>` from the checkout. It prints the first source-located Swift build error or XCTest assertion as JSON, including the tested checkout, PR head, run and attempt. Match the PR head to the revision you’re working on. The command exits 1 on a diagnostic or a failed run, and 0 on a successful run with no diagnostic. The suite continues and the final checks remain on the PR. Use `gh run list --workflow tests.yml --branch <branch>` to find the run. Other failures still appear in the normal job logs.
+
 The longest classes start first, in the order `scripts/test-class-times.txt` gives. When classes have grown or new long ones came in, `scripts/test-class-times.sh` rewrites it from main's last green nightly runs.
 
 A new or reworked UI test class passes a flake gate before its pull request is ready. On a pushed branch:

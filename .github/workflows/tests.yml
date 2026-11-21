@@ -77,10 +77,14 @@ jobs:
           key: deps-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
       - name: Build
-        run: swift build --build-tests
+        uses: ./.github/actions/ci-diagnostic
+        with:
+          command: build
 
       - name: Run tests
         # A warning past it, not a failure: runners vary up to 4x.
         env:
           NIRUX_TESTS_BUDGET: 500
-        run: scripts/run-tests.sh
+        uses: ./.github/actions/ci-diagnostic
+        with:
+          command: suite
