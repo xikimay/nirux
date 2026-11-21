@@ -44,8 +44,9 @@ struct MergeWait: Codable, Equatable, Sendable {
         case read(PRInfo?)
         /// The awaited task closed.
         case gone
-        /// What GitHub said: of the recorded pull request, or, as the task
-        /// closed, of its branch's; nil: none.
+        /// What GitHub said of the recorded pull request (its URL may have
+        /// changed since, with the repository's name), or, as the task
+        /// closed, of a branch's that is the wait's; nil: none.
         case lookedUp(LookedUp?, awaitedGone: Bool)
         /// GitHub didn't answer, for the `attempt`th time in a row.
         case unanswered(String, awaitedGone: Bool, attempt: Int)
@@ -78,7 +79,6 @@ struct MergeWait: Codable, Equatable, Sendable {
         case .gone:
             return awaited.pullRequest == nil ? .fail(.closedFirst(number: nil)) : .lookUp
         case .lookedUp(let found?, let awaitedGone):
-            if let recorded = awaited.pullRequest, recorded.url != found.url { return .lookUp }
             return step(found: found, awaitedGone: awaitedGone)
         case .lookedUp(nil, let awaitedGone):
             return awaitedGone ? .fail(.closedFirst(number: nil)) : .keep

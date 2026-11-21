@@ -109,6 +109,8 @@ extension NiruxShellView {
         }
         for holder in workspaces where !holder.isClosing {
             for wait in holder.mergeWaits where wait.awaited.workspaceID == workspace.id {
+                // GitHub gets its tries from now.
+                mergeWaitTracking.unanswered[wait.id] = nil
                 settleMergeWait(wait.id, of: holder.id, after: .gone, key: Self.readingKey(.gone, now: now), now: now)
             }
         }
@@ -116,18 +118,30 @@ extension NiruxShellView {
     }
 
     /// `close_task` read GitHub's word on `task`'s branch before closing
-    /// it: the waits on it take that answer.
+    /// it: the waits on it take that answer, when it is about the pull
+    /// request they recorded, or, with none recorded, one that merged the
+    /// branch's tip (a reused branch name has older ones).
     func closeMergeWaits(of task: WorkspaceState, inspected inspection: WorktreeCleanup.Inspection, now: TimeInterval) {
         guard case .inspected(let report) = inspection, let pullRequest = report.pullRequest else { return }
         let found = MergeWait.LookedUp(number: pullRequest.number, state: pullRequest.state, url: pullRequest.url)
         for holder in workspaces where !holder.isClosing {
             for wait in holder.mergeWaits where wait.awaited.workspaceID == task.id {
+                let isTheirs = wait.awaited.pullRequest.map { $0.url == pullRequest.url } ?? report.mergedHoldsTip
+                guard isTheirs else { continue }
                 settleMergeWait(wait.id, of: holder.id, after: .lookedUp(found, awaitedGone: true), key: "closed", now: now)
             }
         }
     }
 
-    /// Each heartbeat, away from Nirux too, and after a restore: a wait
+    /// After a restore: those whose task didn't come back ask GitHub, and
+    /// merged messages wait one window for their agents to resume.
+    func restoreMergeWaits(now: TimeInterval) {
+        let window = Int(now / MergeWait.lookUpInterval)
+        for wait in workspaces.lazy.flatMap(\.mergeWaits) where wait.mergedAt != nil { mergeWaitTracking.triedIn[wait.id] = window }
+        sweepMergeWaits(now: now)
+    }
+
+    /// Each heartbeat, and away from Nirux too: a wait
     /// whose task is gone asks GitHub again, and a merged message that
     /// couldn't go is tried again, once per `lookUpInterval`, for a day.
     func sweepMergeWaits(now: TimeInterval) {
@@ -147,13 +161,17 @@ extension NiruxShellView {
     }
 
     /// Away from Nirux the heartbeat stops: the pull requests a wait follows
-    /// are still read, their git state first.
+    /// are still read when due. Their git state is read too, which the read
+    /// after this one needs: no tick keeps it current meanwhile.
     func refreshAwaitedPullRequests() {
         let awaited = awaitedWorkspaceIDs
         guard !awaited.isEmpty else { return }
         let tiers = gitRefreshTiers.filter { awaited.contains($0.workspace.id) }
-        for (workspace, tier) in tiers { gitRefresh.refreshNow(workspace, tier: tier) }
-        refreshPRInfo(for: gitRefresh.pullRequestsDue(tiers, awaited: awaited))
+        let due = gitRefresh.pullRequestsDue(tiers, awaited: awaited)
+        for (workspace, tier) in tiers where due.contains(where: { $0 === workspace }) {
+            gitRefresh.refreshNow(workspace, tier: tier)
+        }
+        refreshPRInfo(for: due)
     }
 
     /// The step `reading` takes the wait to, if both are still there.
@@ -165,7 +183,9 @@ extension NiruxShellView {
         let before = holder.mergeWaits[index]
         var wait = before
         let step = wait.step(after: reading)
-        Self.mergeWaitLog.info("wait=\(waitID, privacy: .public) step=\(String(describing: step), privacy: .public)")
+        if step != .keep || wait != before {
+            Self.mergeWaitLog.info("wait=\(waitID, privacy: .public) step=\(String(describing: step), privacy: .public)")
+        }
         switch step {
         case .keep, .lookUp:
             if wait != before {

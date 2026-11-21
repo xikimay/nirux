@@ -1698,17 +1698,19 @@ final class LeadToolsFlowTests: XCTestCase {
             login.prInfo = pullRequest(61, "OPEN")
             XCTAssertFalse(try call(LeadTools.tell, ["task": "Flow work", "message": "pull main", "after": "Fix login"],
                                     lead: lead, in: harness).isError)
-            shell.followMergeWaits(awaiting: login, read: pullRequest(61, "MERGED"), now: 1_000)
-            XCTAssertEqual(flow.mergeWaits.map(\.mergedAt), [1_000], "kept")
+            // The real clock: a stuck-agent pass the test doesn't make may run.
+            let mergedAt = Date().timeIntervalSince1970
+            shell.followMergeWaits(awaiting: login, read: pullRequest(61, "MERGED"), now: mergedAt)
+            XCTAssertEqual(flow.mergeWaits.map(\.mergedAt), [mergedAt], "kept")
             XCTAssertEqual(notice()?.hasPrefix("[Nirux Mission] #61 (“Fix login”) merged, but your message for “Flow work” can't go yet: "),
                            true, notice() ?? "")
             let notices = shell.pendingLeadNotices.count
             XCTAssertEqual(SidebarHeldMessages(flow.mergeWaits)?.line, "#61 merged · a message from the Lead waits to go")
             // Away from Nirux too.
-            shell.refreshStuckAgents(now: 1_000 + MergeWait.lookUpInterval, appIsActive: false)
+            shell.refreshStuckAgents(now: mergedAt + MergeWait.lookUpInterval, appIsActive: false)
             XCTAssertEqual(flow.mergeWaits.count, 1, "tried again, still no agent")
             XCTAssertEqual(shell.pendingLeadNotices.count, notices, "heard once")
-            shell.refreshStuckAgents(now: 1_000 + MergeWait.deliveryLifetime, appIsActive: false)
+            shell.refreshStuckAgents(now: mergedAt + MergeWait.deliveryLifetime, appIsActive: false)
             XCTAssertTrue(flow.mergeWaits.isEmpty)
             XCTAssertEqual(notice(), "[Nirux Mission] #61 (“Fix login”) merged a day ago, and your message for “Flow work” couldn't go "
                 + "since: Nirux dropped it. It said: “pull main”")
@@ -1729,19 +1731,47 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(filter.mergeWaits.isEmpty)
             XCTAssertTrue(github.asked.isEmpty, "close_task's word was enough")
 
+            // A branch name used before: its old merged pull request, which
+            // lacks the branch's tip, doesn't count.
+            let reused = harness.root + "/repo.feat-reused"
+            try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/reused", reused], at: harness.repo)
+            try UIFlowHarness.git(
+                ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "new work"], at: reused
+            )
+            try UIFlowHarness.git(["config", "branch.feat/reused.pushRemote", "acme"], at: harness.repo)
+            let old = try UIFlowHarness.git(["rev-parse", "main"], at: harness.repo).trimmingCharacters(in: .whitespacesAndNewlines)
+            let oldPullRequest: [String: Any] = [
+                "number": 5, "state": "MERGED", "headRefOid": old, "url": "https://github.com/acme/widgets/pull/5",
+                "headRepositoryOwner": ["login": "acme"], "headRepository": ["name": "widgets"]
+            ]
+            try JSONSerialization.data(withJSONObject: [oldPullRequest]).write(to: URL(fileURLWithPath: harness.root + "/prs/feat-reused.json"))
+            shell.addWorkspace(title: "Reused work", cwd: reused, profileID: lead.space)
+            XCTAssertFalse(try call(LeadTools.tell, ["task": "Add a date filter", "message": "after reuse", "after": "Reused work"],
+                                    lead: lead, in: harness).isError)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.closeTask, ["task": "Reused work"], lead: lead, timeout: 180).isError)
+            XCTAssertTrue(filter.mergeWaits.isEmpty)
+            XCTAssertEqual(notice(), "[Nirux Mission] “Reused work” closed without a merged pull request: your message for "
+                + "“Add a date filter” wasn't typed. It said: “after reuse”")
+            XCTAssertEqual(instructions(to: filter), ["after 7"])
+
             // GitHub doesn't answer about a closed task's #62: asked again
             // each window, a few times, then the Lead hears it.
             login.prInfo = pullRequest(62, "OPEN")
             XCTAssertFalse(try call(LeadTools.tell, ["task": "Add a date filter", "message": "after 62", "after": "Fix login"],
                                     lead: lead, in: harness).isError)
             github.isDown = true
-            shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === login }), refocusing: false)
+            // Unanswered while the task is open: those tries don't count once
+            // it closes.
+            shell.followMergeWaits(awaiting: login, read: nil, now: Date().timeIntervalSince1970)
             harness.waitUntil("GitHub asked") { github.asked.count == 1 && shell.mergeWaitTracking.lookingUp.isEmpty }
+            XCTAssertEqual(filter.mergeWaits.count, 1)
+            shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === login }), refocusing: false)
+            harness.waitUntil("GitHub asked as it closed") { github.asked.count == 2 && shell.mergeWaitTracking.lookingUp.isEmpty }
             let start = Date().timeIntervalSince1970
             for window in 1..<MergeWait.maxUnansweredLookUps {
                 XCTAssertEqual(filter.mergeWaits.count, 1, "try \(window)")
                 shell.sweepMergeWaits(now: start + Double(window) * MergeWait.lookUpInterval)
-                harness.waitUntil("GitHub asked again") { github.asked.count == window + 1 && shell.mergeWaitTracking.lookingUp.isEmpty }
+                harness.waitUntil("GitHub asked again") { github.asked.count == window + 2 && shell.mergeWaitTracking.lookingUp.isEmpty }
             }
             XCTAssertTrue(filter.mergeWaits.isEmpty)
             XCTAssertEqual(notice(), "[Nirux Mission] “Fix login” closed, and GitHub couldn't say whether it merged (gh: offline): "

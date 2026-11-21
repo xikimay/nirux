@@ -42,8 +42,13 @@ final class MergeWaitTests: XCTestCase {
             var other = self.wait(pullRequest: recorded)
             XCTAssertEqual(other.step(after: .read(pullRequest(42, state))), .lookUp, "#42 \(state): #41 is asked about")
             XCTAssertEqual(other.awaited.pullRequest, recorded)
-            XCTAssertEqual(other.step(after: .lookedUp(found(42, state), awaitedGone: true)), .lookUp, "close_task's word on another one")
         }
+        // GitHub's answer about #41 holds, under a URL the repository's new
+        // name gave it.
+        var renamed = self.wait(pullRequest: recorded)
+        let moved = MergeWait.LookedUp(number: 41, state: "MERGED", url: "https://github.com/o/renamed/pull/41")
+        XCTAssertEqual(renamed.step(after: .lookedUp(moved, awaitedGone: true)), .release)
+        XCTAssertEqual(renamed.awaited.pullRequest?.url, moved.url)
         var unrecorded = self.wait()
         XCTAssertEqual(unrecorded.step(after: .read(pullRequest(41, "CLOSED"))), .fail(.closedUnmerged(number: 41)))
     }
