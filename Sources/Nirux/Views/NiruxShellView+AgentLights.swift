@@ -95,8 +95,8 @@ extension NiruxShellView {
     func applyAgentLights(sweeping ended: Set<UUID> = []) {
         let plan = agentLights.plan
         let moves = agentLightsMayMove
-        // Stillness wins over a pass under the rail or a crossing on its way.
         if !moves {
+            if workspaceSwitch.isSwitching && !ZZ("stillIgnored") { endWorkspaceSwitch() }
             stillUnderGlass()
             stillSpaceCrossing()
             stillSpacePlan()

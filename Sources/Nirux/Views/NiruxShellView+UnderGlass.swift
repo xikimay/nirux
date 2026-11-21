@@ -111,11 +111,9 @@ extension NiruxShellView {
         }
     }
 
-    /// Movement turned off: a pass under the rail or the bar, or a sweep,
-    /// ends at once.
+    /// Movement turned off: the pass under the rail and its sweep end at once.
     func stillUnderGlass() {
         if passingUnderRail != nil || workspaces.contains(where: { !$0.containerView.clipsToBounds }) { endUnderGlass() }
-        if !ZZ("stillIgnored") { endUnderBar() }
     }
 
     /// At rest: the viewport where it lies, every workspace clipping its

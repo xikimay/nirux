@@ -59,6 +59,6 @@ jobs:
       - name: Flake gate
         run: |
           status=0
-          scripts/mutants-class.sh NiruxTests.UnderBarTests noReach noCover noOpening rowsShown notEnded layoutEnds opaquePasses stillIgnored restGrows slideTall planTall crossingTall || status=1
+          scripts/mutants-class.sh NiruxTests.UnderBarTests noReach noCover noOpening rowsShown notEnded layoutEnds opaquePasses stillIgnored restGrows slideTall planTall crossingTall earlyDeadline staleAppearance staleMask || status=1
           scripts/repeat-class.sh NiruxTests.UnderBarTests 10 3 NiruxTests.WorkspaceSwitchTests NiruxTests.UnderGlassTests || status=1
           exit $status
