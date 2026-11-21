@@ -76,6 +76,39 @@ final class TaskThreadContentTests: XCTestCase {
         }
     }
 
+    private func pinThread(_ id: String, expanded: Bool, in harness: UIFlowHarness) throws -> TaskPreviewCard {
+        let shell = harness.shell
+        let sidebar = shell.sidebar
+        shell.isSidebarExpanded = expanded
+        sidebar.isExpanded = expanded
+        shell.relayout(animated: false)
+        harness.window.contentView?.layoutSubtreeIfNeeded()
+        if expanded {
+            let document = sidebar.contentDocumentView
+            let row = try XCTUnwrap(sidebar.rowFrame(workspaceID: id))
+            document.scrollToVisible(document.convert(row, from: sidebar))
+            let frame = try XCTUnwrap(sidebar.rowFrame(workspaceID: id)).intersection(sidebar.visibleRect)
+            XCTAssertFalse(frame.isEmpty)
+            let point = sidebar.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
+            let event = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [],
+                timestamp: 0, windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+            sidebar.mouseMoved(with: event)
+        } else {
+            try XCTUnwrap(sidebar.iconRail.itemViews[id]).mouseEntered(with: NSEvent())
+        }
+        XCTAssertEqual(sidebar.taskPreview.workspaceID, id)
+        waitUntil("the preview for \(expanded ? "row" : "rail") \(id), tracking \(sidebar.taskPreview.workspaceID ?? "none")") {
+            sidebar.taskPreview.workspaceID == id && sidebar.taskPreview.card != nil
+        }
+        let preview = try XCTUnwrap(sidebar.taskPreview.card)
+        let open = try XCTUnwrap(preview.subviews.compactMap { $0 as? NSButton }.first { $0.title == "Open task thread" })
+        preview.mouseExited(with: NSEvent())
+        XCTAssertNotNil(sidebar.taskPreview.pending)
+        open.performClick(nil)
+        XCTAssertNil(sidebar.taskPreview.pending)
+        return preview
+    }
+
     func testRowAndRailPinTheirOwnThreadThroughRefreshUntilEscape() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -98,33 +131,7 @@ final class TaskThreadContentTests: XCTestCase {
             shell.updateSidebar()
             for (index, id) in tasks.enumerated() {
                 let expanded = index == 0
-                shell.isSidebarExpanded = expanded
-                sidebar.isExpanded = expanded
-                shell.relayout(animated: false)
-                harness.window.contentView?.layoutSubtreeIfNeeded()
-                if expanded {
-                    let document = sidebar.contentDocumentView
-                    let row = try XCTUnwrap(sidebar.rowFrame(workspaceID: id))
-                    document.scrollToVisible(document.convert(row, from: sidebar))
-                    let frame = try XCTUnwrap(sidebar.rowFrame(workspaceID: id)).intersection(sidebar.visibleRect)
-                    XCTAssertFalse(frame.isEmpty)
-                    let point = sidebar.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
-                    let event = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [],
-                        timestamp: 0, windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
-                    sidebar.mouseMoved(with: event)
-                } else {
-                    try XCTUnwrap(sidebar.iconRail.itemViews[id]).mouseEntered(with: NSEvent())
-                }
-                XCTAssertEqual(sidebar.taskPreview.workspaceID, id)
-                waitUntil("the preview for \(expanded ? "row" : "rail") \(id), tracking \(sidebar.taskPreview.workspaceID ?? "none")") {
-                    sidebar.taskPreview.workspaceID == id && sidebar.taskPreview.card != nil
-                }
-                let preview = try XCTUnwrap(sidebar.taskPreview.card)
-                let open = try XCTUnwrap(preview.subviews.compactMap { $0 as? NSButton }.first { $0.title == "Open task thread" })
-                preview.mouseExited(with: NSEvent())
-                XCTAssertNotNil(sidebar.taskPreview.pending)
-                open.performClick(nil)
-                XCTAssertNil(sidebar.taskPreview.pending)
+                let preview = try pinThread(id, expanded: expanded, in: harness)
                 let body = try XCTUnwrap(preview.subviews.compactMap { $0 as? TaskThreadContentView }.first)
                 harness.waitUntil("the pinned workspace's recorded request") {
                     self.labels(body).contains { $0.contains("Request for task \(index)") }
@@ -167,6 +174,144 @@ final class TaskThreadContentTests: XCTestCase {
                 harness.waitUntil("Escape closes the pinned card") { preview.superview == nil }
                 XCTAssertNil(sidebar.taskPreview.pinnedBody)
             }
+        }
+    }
+
+    func testRefreshPreservesTheDraftAndDisablesSendWhenItsQuestionCloses() throws {
+        let body = TaskThreadContentView(frame: NSRect(x: 0, y: 0, width: 372, height: 500))
+        let window = NSWindow(contentRect: body.frame, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.contentView = body
+        body.onReply = { _, _ in XCTFail("a closed question cannot send"); return .retry }
+        let ask = TaskThread.Event(time: 1, kind: .question, text: "Ship?", ref: "q1", recipient: .user)
+        let other = TaskThread.Event(time: 2, kind: .question, text: "Ship?", ref: "q2", recipient: .user)
+        @MainActor func show(_ events: [TaskThread.Event]) {
+            body.show(workspaceID: "task", spaceID: "space") { _, _, done in done(.init(events: events, context: .init())) }
+        }
+        show([ask])
+        let cell = try XCTUnwrap(body.outline.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        try XCTUnwrap(UIFlowHarness.button(titled: "Reply…", in: cell)).performClick(nil)
+        let editor = try XCTUnwrap(UIFlowHarness.descendant(of: body, as: TaskThreadReplyView.self))
+        editor.field.string = "Only after review"
+        show([ask, other])
+        XCTAssertTrue(window.firstResponder === editor.field)
+        let send = try XCTUnwrap(UIFlowHarness.button(titled: "Send ⌘↩", in: editor))
+        XCTAssertTrue(send.isEnabled)
+        show([ask, other, .init(time: 3, kind: .questionRetired, ref: "q1")])
+        XCTAssertFalse(send.isEnabled)
+        XCTAssertEqual(editor.field.string, "Only after review")
+        editor.field.onCommandReturn?()
+        XCTAssertEqual(labels(body).filter { $0.hasPrefix("Needs you") }.count, 1)
+    }
+
+    func testPinnedReplyKeepsItsQuestionAcrossAnswersRetirementAndReplacement() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let store = MissionStore.shared
+            harness.window.orderOut(nil)
+            let parent = try XCTUnwrap(shell.activeWorkspace)
+            let id = UUID().uuidString
+            let mission = try XCTUnwrap(store.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: parent.id, parentAgentUUID: UUID().uuidString,
+                childWorkspaceID: id, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+                branch: "feat/reply", reportsToTask: true
+            ), enabled: true))
+            shell.addWorkspace(title: "Reply task", cwd: harness.worktree, profileID: parent.profileID, workspaceID: id,
+                               initialAgentUUID: mission.childAgentUUID, missionID: mission.id,
+                               reportsToTask: true, activate: false)
+            let activeID = shell.activeWorkspace?.id
+            XCTAssertNotEqual(activeID, id)
+
+            @MainActor func ask(_ text: String) throws -> MissionEvent {
+                let question = MissionEvent(id: UUID().uuidString, missionID: mission.id, childWorkspaceID: id,
+                    childAgentUUID: mission.childAgentUUID, kind: .question, message: text, timestamp: Date().timeIntervalSince1970)
+                guard case .accepted = store.process(question, enabled: false) else {
+                    XCTFail("the child asks its parent")
+                    return question
+                }
+                _ = try XCTUnwrap(store.handToUser(questionID: question.id, because: "User decision"))
+                return question
+            }
+
+            shell.updateSidebar()
+            let card = try pinThread(id, expanded: true, in: harness)
+            let body = try XCTUnwrap(shell.sidebar.taskPreview.pinnedBody)
+            harness.waitUntil("the initial pinned read") { !body.isReading }
+            let first = try ask("Which format?")
+            let second = try ask("Which timezone?")
+            shell.refreshPinnedTaskThread()
+
+            @MainActor func openReply(_ question: MissionEvent) throws -> TaskThreadReplyView {
+                harness.waitUntil("the open question") {
+                    self.labels(body).contains { $0.hasPrefix("Needs you") && $0.contains(question.message) }
+                }
+                let row = try XCTUnwrap(self.labels(body).firstIndex { $0.hasPrefix("Needs you") && $0.contains(question.message) })
+                let cell = try XCTUnwrap(body.outline.view(atColumn: 0, row: row, makeIfNecessary: true))
+                let reply = try XCTUnwrap(UIFlowHarness.button(titled: "Reply…", in: cell))
+                XCTAssertFalse(reply.isHidden)
+                reply.performClick(nil)
+                let editor = try XCTUnwrap(UIFlowHarness.descendant(of: body, as: TaskThreadReplyView.self))
+                XCTAssertEqual(editor.questionID, question.id)
+                XCTAssertTrue(harness.window.firstResponder === editor.field)
+                return editor
+            }
+
+            try harness.withApp {
+                let editor = try openReply(second)
+                XCTAssertTrue(shell.isOverlayActive, "the terminal interceptor leaves these keys to AppKit")
+                // XCTest has no key window. Deliver AppKit’s key to this window’s first responder.
+                @MainActor func type(_ text: String, code: UInt16, modifiers: NSEvent.ModifierFlags = []) throws {
+                    let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
+                        timestamp: 0, windowNumber: harness.window.windowNumber, context: nil, characters: text,
+                        charactersIgnoringModifiers: text, isARepeat: false, keyCode: code))
+                    harness.window.sendEvent(event)
+                }
+                try type("y", code: 0x10)
+                XCTAssertEqual(editor.field.string, "y")
+                try type("\r", code: 0x24, modifiers: .command)
+                XCTAssertEqual(store.response(to: second.id)?.message, "y")
+                XCTAssertEqual(store.response(to: second.id)?.answeredByUser, true)
+                XCTAssertNil(store.response(to: first.id))
+                XCTAssertNil(editor.superview)
+                XCTAssertTrue(shell.sidebar.taskPreview.card === card)
+                XCTAssertEqual(shell.activeWorkspace?.id, activeID)
+            }
+
+            let answered = try openReply(first)
+            answered.field.string = "My draft"
+            let replacement = try ask("Which schema?")
+            XCTAssertNotNil(store.respond(to: first.id, message: "Already decided", enabled: true))
+            try XCTUnwrap(UIFlowHarness.button(titled: "Send ⌘↩", in: answered)).performClick(nil)
+            XCTAssertEqual(store.response(to: first.id)?.message, "Already decided")
+            XCTAssertNil(store.response(to: replacement.id))
+            XCTAssertFalse(answered.field.isEditable)
+            XCTAssertEqual(answered.field.string, "My draft")
+            try XCTUnwrap(UIFlowHarness.button(titled: "Done", in: answered)).performClick(nil)
+
+            shell.refreshPinnedTaskThread()
+            let retired = try openReply(replacement)
+            retired.field.string = "Draft for the retired question"
+            let newest = try ask("Which version?")
+            // The ledger as written by #691 when a new prompt retires a question.
+            var missions = store.missions
+            let index = try XCTUnwrap(missions.firstIndex { $0.id == mission.id })
+            let event = try XCTUnwrap(missions[index].events.firstIndex { $0.id == replacement.id })
+            let now = Date().timeIntervalSince1970
+            missions[index].events[event].retiredAt = now
+            missions[index].events[event].parentConsumedAt = now
+            try JSONEncoder().encode(missions).write(to: store.fileURL, options: .atomic)
+            XCTAssertTrue(store.load())
+            XCTAssertEqual(store.missions[index].events[event].retiredAt, now)
+            retired.field.onCommandReturn?()
+            XCTAssertNil(store.response(to: replacement.id))
+            XCTAssertNil(store.response(to: newest.id))
+            XCTAssertFalse(retired.field.isEditable)
+            shell.refreshPinnedTaskThread()
+            harness.waitUntil("the replacement question is visible while the draft stays put") {
+                self.labels(body).contains { $0.hasPrefix("Needs you") && $0.contains(newest.message) }
+            }
+            XCTAssertEqual(retired.field.string, "Draft for the retired question")
+            XCTAssertFalse(try XCTUnwrap(UIFlowHarness.button(titled: "Send ⌘↩", in: retired)).isEnabled)
+            XCTAssertFalse(self.labels(body).contains { $0.hasPrefix("Needs you") && $0.contains(replacement.message) })
         }
     }
 
