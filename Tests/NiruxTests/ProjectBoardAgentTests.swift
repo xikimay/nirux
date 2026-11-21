@@ -97,17 +97,17 @@ final class ProjectBoardAgentTests: XCTestCase {
         XCTAssertEqual(failed, .stoppedOnError(kind: "overloaded", resume: .offered))
         XCTAssertEqual(
             ProjectBoard.agentState(
-                stuck: .exitedMidTurn(processName: "claude"), hasAgent: false, agentInFront: false,
+                stuck: .exitedMidTurn(agent: .claude), hasAgent: false, agentInFront: false,
                 status: .idle, openDialog: nil
             ),
-            .exitedMidTurn(processName: "claude")
+            .exitedMidTurn(agent: .claude)
         )
     }
 
     func testARowShowsItsMostUrgentColumn() {
         let columns: [ProjectBoard.AgentState] = [
             .idle, .working(duration: "2m"), .waiting(.question(nil)), .none,
-            .stoppedOnError(kind: nil, resume: .unavailable), .exitedMidTurn(processName: "claude")
+            .stoppedOnError(kind: nil, resume: .unavailable), .exitedMidTurn(agent: .claude)
         ]
         let agents = columns.enumerated().map { ProjectBoard.Agent(state: $1, workspaceID: "ws\($0)") }
         XCTAssertEqual(ProjectBoard.Agent.mostUrgent(agents).workspaceID, "ws4", "failures first")

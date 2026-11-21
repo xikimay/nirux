@@ -710,11 +710,9 @@ extension WorkspaceState {
                 // Native notification with click-to-focus routing.
                 let processName: String
                 if reason == .exitedMidTurn {
-                    // The title is the shell's now; only claude's exits are
-                    // reported (see AgentStatusMachine.noteAgentExited).
-                    processName = "claude"
-                } else if let col, let title = col.terminalTitle,
-                   !title.isEmpty, !ColumnState.boringTitles.contains(title) {
+                    // The title is the shell's now.
+                    processName = col?.pty?.agentMidTurnExit?.agent.rawValue ?? "Agent"
+                } else if let col, let title = col.terminalTitle, !title.isEmpty, !Shell.isShell(title) {
                     processName = title
                 } else {
                     processName = "Agent"

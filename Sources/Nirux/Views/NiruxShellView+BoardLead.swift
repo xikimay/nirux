@@ -31,7 +31,7 @@ extension NiruxShellView {
 
 private struct BoardLeadSession {
     let agentUUID: String
-    let agent: NiruxApp.WorkspaceAgent
+    let agent: CodingAgent
     let index: Int
     let name: String
     var status: BoardStagesView.Lead
@@ -39,13 +39,12 @@ private struct BoardLeadSession {
     @MainActor
     init?(_ column: ColumnState, info: ColumnInfo, foreground: ForegroundProcess?, snapshot: ProcessSnapshot, now: TimeInterval) {
         guard let uuid = column.agentUUID, NiruxShellView.terminalCarriesMissions(column.launchEnvironment),
-              let agent = column.missionAgent(foreground: foreground) ?? info.stuck?.agentName.flatMap(NiruxApp.WorkspaceAgent.init(rawValue:)),
-              let name = Mission.agentName(ofKind: agent.rawValue)
+              let agent = column.missionAgent(foreground: foreground) ?? info.stuck?.agentName.flatMap(CodingAgent.init(launchable:))
         else { return nil }
         self.agentUUID = uuid
         self.agent = agent
         self.index = info.index
-        self.name = name
+        self.name = agent.productName
         if agent == .claude, case .stoppedOnError? = info.stuck, let emitter = column.pty?.agentTurnFailure?.emitter,
            let foreground, !snapshot.ownsEmitter(emitter, foreground: foreground) {
             status = .init(state: .idle, text: "Status unknown")
@@ -57,7 +56,7 @@ private struct BoardLeadSession {
 
     @MainActor
     private static func status(
-        of column: ColumnState, info: ColumnInfo, agent: NiruxApp.WorkspaceAgent, foreground: ForegroundProcess?, now: TimeInterval
+        of column: ColumnState, info: ColumnInfo, agent: CodingAgent, foreground: ForegroundProcess?, now: TimeInterval
     ) -> BoardStagesView.Lead {
         if column.deferredAgent != nil { return .init(state: .idle, text: "Paused · Resume in terminal") }
         if let stuck = info.stuck, stuck.isFailure, agent == .claude || stuck.agentName == agent.rawValue {

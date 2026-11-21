@@ -395,7 +395,7 @@ final class TurnEndClassificationTests: XCTestCase {
     private var machine = AgentStatusMachine()
 
     private func event(_ name: AgentHookEvent.Name, at offset: TimeInterval, message: String? = nil,
-                       kind: AgentHookEvent.Kind = .claude, agent: String? = nil, tool: String? = nil,
+                       kind: CodingAgent = .claude, agent: String? = nil, tool: String? = nil,
                        notificationType: String? = nil, source: String? = nil) -> AgentHookEvent {
         AgentHookEvent(
             kind: kind, name: name, sessionID: "s", source: source, toolName: tool, toolKey: tool.map { _ in "k" },

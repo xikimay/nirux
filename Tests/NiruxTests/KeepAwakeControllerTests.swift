@@ -422,7 +422,7 @@ final class KeepAwakeShellTests: XCTestCase {
             shell.updateSidebar(snapshot: ProcessSnapshot(entries: []))
             for pty in ptys {
                 XCTAssertEqual(pty.cachedAgentState, .working)
-                XCTAssertEqual(pty.agentHookKind, "claude")
+                XCTAssertEqual(pty.hookAgent, .claude)
             }
         }
     }
@@ -538,7 +538,7 @@ final class KeepAwakeShellTests: XCTestCase {
         }
         let hookedClaude = ticked[0].0
         _ = hookedClaude.applyAgentHook(AgentHookEvent(kind: .claude, name: .stop, timestamp: 2), isUserFocused: false)
-        XCTAssertEqual(hookedClaude.agentHookKind, "claude")
+        XCTAssertEqual(hookedClaude.hookAgent, .claude)
         XCTAssertFalse(NiruxShellView.needsBackgroundRefresh(hookedClaude))
     }
 
