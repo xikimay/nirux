@@ -427,49 +427,14 @@ struct BoardConfigStore: Sendable {
 
     // MARK: - Files
 
-    /// What reading a small file found. The merge queue reads its saved
-    /// state the same way.
-    enum ReadResult {
-        case missing
-        case notARegularFile
-        case tooLarge
-        /// A regular file whose bytes can't be read (permissions, say).
-        case unreadableBytes
-        case data(Data)
-
-        var contents: Data? {
-            if case .data(let data) = self { return data }
-            return nil
-        }
-    }
+    typealias ReadResult = RegularFileRead
 
     private func read() -> ReadResult {
         Self.read(fileURL, maxBytes: Self.maxFileBytes)
     }
 
-    /// Opened without following a link and without blocking, then checked on
-    /// the open file: a FIFO swapped in after a check would block the read.
     static func read(_ fileURL: URL, maxBytes: Int) -> ReadResult {
-        let descriptor = open(fileURL.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        guard descriptor >= 0 else {
-            switch errno {
-            case ENOENT, ENOTDIR: return .missing
-            case ELOOP: return .notARegularFile
-            default: return .unreadableBytes
-            }
-        }
-        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-        var info = stat()
-        guard fstat(descriptor, &info) == 0 else { return .unreadableBytes }
-        guard info.st_mode & S_IFMT == S_IFREG else { return .notARegularFile }
-        guard info.st_size <= maxBytes else { return .tooLarge }
-        let data: Data
-        do {
-            data = try handle.read(upToCount: maxBytes + 1) ?? Data()
-        } catch {
-            return .unreadableBytes
-        }
-        return data.count <= maxBytes ? .data(data) : .tooLarge
+        RegularFileRead.read(fileURL, maxBytes: maxBytes)
     }
 
     /// Keeps an unreadable file's bytes next to it before Save replaces it.
