@@ -116,6 +116,9 @@ final class ColumnState {
         header?.isFocused = isFocused
     }
 
+    /// Session History treats this column as the holder while the old Lead is stopping.
+    var relaunchingLeadSessionID: String?
+    var leadSafetyAtLaunch: ClaudeSpaceSettings.File?
     /// Spec needed to respawn the shell after it exits.
     private var terminalSpec: (cwd: String, shellArgs: [String], environment: [String: String])?
     /// The first shell start is on its way (or done): a column restored

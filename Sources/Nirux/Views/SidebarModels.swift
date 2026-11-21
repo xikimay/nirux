@@ -349,6 +349,7 @@ struct WorkspaceInfo: Hashable {
     /// what a finished turn says beside its check.
     var turnStatusLine: String?
     /// The Lead's row: how many rules it proposed wait for the user.
+    var leadLaunchIssue: LeadLaunchIssue?
     var ruleProposalCount = 0
     /// The Lead's row: its space's last daily pass, for a day after it.
     var dailyPassNote: String?
@@ -491,6 +492,7 @@ enum WorkspaceSidebarAction {
     /// "Turn Off Lead…": Space Settings › Lead, where the Lead closes.
     case turnOffLead
     case restartLead
+    case recoverLead(LeadLaunchIssue)
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI

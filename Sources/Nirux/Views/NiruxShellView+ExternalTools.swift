@@ -158,10 +158,7 @@ extension NiruxShellView {
     /// a workspace opened from outside Nirux. A space whose file can't be
     /// written says so once, and its launches pass none.
     func claudeSpaceSettingsFiles(for workspaces: [WorkspaceState]) -> [String: String] {
-        var userEnvironment: [String]?
-        if case .parsed(let settings, _) = AgentHookInstaller.readClaudeSettings(home: FileManager.default.homeDirectoryForCurrentUser) {
-            userEnvironment = ClaudeSpaceSettings.userEnvironment(settings)
-        }
+        let userEnvironment = Self.claudeUserEnvironment()
         var files: [String: String] = [:]
         for spaceID in Set(workspaces.filter { !$0.startedOutsideNirux }.map(\.profileID)) {
             do {
@@ -175,6 +172,12 @@ extension NiruxShellView {
             }
         }
         return files
+    }
+
+    static func claudeUserEnvironment() -> [String]? {
+        guard case .parsed(let settings, _) = AgentHookInstaller.readClaudeSettings(home: FileManager.default.homeDirectoryForCurrentUser)
+        else { return nil }
+        return ClaudeSpaceSettings.userEnvironment(settings)
     }
 
     /// The file one launch in `workspace` passes: `prepared` for a batch
@@ -200,14 +203,16 @@ extension NiruxShellView {
     /// takes the brief unless a config from `launchDirectory` up sets its
     /// own, and `resumeDirectory` resumes its thread there.
     func agentCommand(
-        _ launch: AgentLaunch, in workspace: WorkspaceState, launchDirectory: String, resumeDirectory: String? = nil,
+        _ launch: AgentLaunch, in workspace: WorkspaceState, column: ColumnState? = nil, launchDirectory: String, resumeDirectory: String? = nil,
         sessionName: String? = nil, handoverPrompt: String? = nil, settingsFiles: [String: String]? = nil
     ) -> String {
         switch launch {
         case .claude(let resume, let mode, let model):
+            let file = claudeSpaceSettingsFile(for: workspace, prepared: settingsFiles)
+            if let column, column === workspace.leadTerminal { column.recordLeadSafety(file: file) }
             return Self.claudeCommand(
                 resume: resume, mode: mode, model: model, sessionName: sessionName, briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
-                settingsFile: claudeSpaceSettingsFile(for: workspace, prepared: settingsFiles), handoverPrompt: handoverPrompt
+                settingsFile: file, handoverPrompt: handoverPrompt
             )
         case .codex(let resume, let mode, let model):
             return Self.codexCommand(

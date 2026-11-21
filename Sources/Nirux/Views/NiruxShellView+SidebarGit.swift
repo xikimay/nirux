@@ -59,9 +59,13 @@ extension NiruxShellView {
                 info.isLeadTerminal = col === leadTerminal
                 return info
             }
-            return sidebarWorkspaceInfo(
+            var info = sidebarWorkspaceInfo(
                 at: index, columns: colInfos, isActive: isActive, parentTitle: parents[index].map { workspaces[$0].title }
             )
+            if workspace.isLead {
+                info.leadLaunchIssue = leadLaunchIssue(in: workspace, foreground: leadTerminal.flatMap { foregroundProcesses[ObjectIdentifier($0)] }, snapshot: snapshot)
+            }
+            return info
         }
         tickHiddenSpaceAgents(
             visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses, processTableRead: processTableRead

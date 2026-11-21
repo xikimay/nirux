@@ -99,6 +99,7 @@ final class WorkspaceState {
     /// The agent UUID of a Lead's Claude column (`leadTerminal`): moving
     /// columns doesn't pass the role on.
     var leadAgentUUID: String?
+    var leadOptionsCache: (options: LeadLaunchOptions, readAt: TimeInterval)?
     /// The folder Nirux made for a task without a repository
     /// (NewTask+Folder), kept across launches whatever folder its shells
     /// are in: its sub-tasks get their folders there, and it is never a

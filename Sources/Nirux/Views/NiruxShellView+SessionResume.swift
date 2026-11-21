@@ -89,7 +89,7 @@ extension NiruxShellView {
         return Self.agentSessionHolders(in: open, snapshot: snapshot).compactMap { holder in
             guard let column = columns[holder.columnID], !column.isClosing else { return nil }
             var holder = holder
-            holder.launchedSessionID = sessionResume.launchedSession(in: column, now: now)
+            holder.launchedSessionID = column.relaunchingLeadSessionID ?? sessionResume.launchedSession(in: column, now: now)
             return holder
         }
     }
@@ -296,7 +296,7 @@ extension NiruxShellView {
             }
         }
         return agentCommand(
-            launch, in: workspace, launchDirectory: workingDirectory ?? column.launchDirectory ?? workspace.cwd,
+            launch, in: workspace, column: column, launchDirectory: workingDirectory ?? column.launchDirectory ?? workspace.cwd,
             resumeDirectory: workingDirectory, settingsFiles: settingsFiles
         )
     }
