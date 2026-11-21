@@ -306,8 +306,16 @@ final class WaitingTaskFlowTests: XCTestCase {
             _ = try UIFlowHarness.git(["remote", "add", "origin", harness.root + "/missing-remote"], at: harness.repo)
             _ = try UIFlowHarness.git(["update-ref", "refs/remotes/origin/main", "HEAD"], at: harness.repo)
             let launches = harness.agentLaunches.count
-            XCTAssertFalse(try change(["task": task.title]).isError)
-            harness.waitUntil("fetch failure", timeout: 30) { task.waitingStart?.failure?.contains("fetch") == true }
+            let retry = try change(["task": task.title])
+            XCTAssertFalse(retry.isError, retry.text)
+            // Report whether the manual start reached the fetch if it times out.
+            var reachedWorktreeCreation = false
+            guard UIFlowHarness.waitUntil("manual start to finish (reached worktree creation: \(reachedWorktreeCreation))", {
+                if !shell.taskWorktreesBeingCreated.isEmpty { reachedWorktreeCreation = true }
+                return !task.isStarting
+            }) else { return }
+            let failure = try XCTUnwrap(task.waitingStart?.failure, "the unavailable remote must leave the task waiting")
+            XCTAssertTrue(failure.contains("fetch"), failure)
             XCTAssertEqual(launches, harness.agentLaunches.count)
             XCTAssertEqual(try UIFlowHarness.git(["branch", "--list", "feat/update-schema"], at: harness.repo), "")
             _ = try UIFlowHarness.git(["remote", "set-url", "origin", harness.repo], at: harness.repo)
