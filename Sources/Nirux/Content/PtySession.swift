@@ -255,6 +255,18 @@ final class PtySession: @unchecked Sendable {
         state.machine.visibleDialog(foreground: foreground)
     }
 
+    /// Read the foreground Codex's own state between heartbeat ticks, including a dialog over a working turn.
+    func taskActivity(foreground: ForegroundProcess?, status: AgentStatus) -> (status: AgentStatus, codexChoice: AgentAttentionReason?) {
+        guard let report = state.machine.codexReport(foreground: foreground)?.status else { return (status, nil) }
+        if let choice = report.codexChoice { return (.needsAttention, choice) }
+        switch report.state {
+        case .working: return (.working, nil)
+        case .idle: return (.idle, nil)
+        case .done: return (agentAttentionReason == .turnFinished ? status : .idle, nil)
+        case .blocked, .error: return (status, nil)
+        }
+    }
+
     /// The request the sidebar can answer, or whose answer is on its way.
     func sidebarApproval(now: TimeInterval) -> AgentPermissionRequest? {
         state.machine.sidebarApproval(now: now)

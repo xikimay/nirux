@@ -343,6 +343,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             try FileManager.default.createDirectory(atPath: notes, withIntermediateDirectories: true)
             let docs = try XCTUnwrap((harness.repo + "/docs").realPath)
             let space = try Self.anchoredSpace(harness, also: [.folder(docs), .folder(notes)])
+            _ = try XCTUnwrap(SpaceDefaultsStore(spaceID: space.id)).save(SpaceDefaults(codexLaunchMode: .bypass)).get()
             let sheet = try openSheet(harness)
             XCTAssertFalse(sheet.repositoryPopup.isHidden)
             XCTAssertEqual(sheet.repositoryPopup.itemTitles, ["repo", "docs", "notes", "", "No Repository"])
@@ -397,7 +398,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             }
             XCTAssertEqual(try UIFlowHarness.git(["status", "--porcelain"], at: worktree), "")
             let launch = try XCTUnwrap(harness.agentLaunches.last)
-            XCTAssertTrue(launch.hasPrefix("command codex"), launch)
+            XCTAssertTrue(launch.hasPrefix("command codex --dangerously-bypass-approvals-and-sandbox "), launch)
             XCTAssertTrue(launch.contains("--model 'codex-fast'"), launch)
             XCTAssertTrue(launch.contains("Read .codex-handover.md for full context"), launch)
         }

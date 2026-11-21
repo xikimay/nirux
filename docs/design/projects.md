@@ -540,8 +540,13 @@ What shipped differs from the proposal below in these ways:
 - **From outside Nirux.** A workspace opened by a `nirux://` request the
   user confirmed (no launch ID) is marked so in `state.json`: its shells
   never get the space's environment nor a launch ID (its agents' requests
-  ask first too), its first agent no setup script, and its launches take
-  Settings' modes, the ones the confirmation named. An older build drops the
+  ask first too), and its first agent gets no setup script. For Codex the sheet names the
+  destination space and the mode it will start with. A change of destination
+  asks again before Codex launches. Opening Codex or resuming a conversation
+  from Session History in that workspace uses the current space choice.
+  Restore keeps the column’s recorded
+  mode. An external Codex column without one waits for the user to choose
+  its mode with Resume. An older build drops the
   mark when it saves, so after a rollback such a workspace counts as started
   in Nirux. Older builds also ignore the space's modes.
 - **Environment.** Names steering the shell or the agents (`PATH`, `HOME`,

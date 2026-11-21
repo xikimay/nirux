@@ -160,6 +160,8 @@ extension NiruxShellView {
         // while its tool runs, the column working. A question
         // waits even while subagents work, as the header and ⌘J
         // say; behind a dialog, the dialog is what waits.
+        let activity = col.pty?.taskActivity(foreground: foregroundProcess, status: agentStatus)
+        let agentStatus = activity?.status ?? agentStatus
         let dialog = agentStatus == .working ? nil : col.pty?.agentVisibleDialog(foreground: foregroundProcess)
         let asked = dialog == nil ? col.pty?.agentQuestion(foreground: foregroundProcess) : nil
         return ColumnInfo(
@@ -182,7 +184,7 @@ extension NiruxShellView {
                 .map { Date().timeIntervalSince($0) },
             attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
             permissionApproval: permissionApproval,
-            openDialog: dialog?.reason ?? asked.map { .askedInReply($0.text) }
+            openDialog: activity?.codexChoice ?? dialog?.reason ?? asked.map { .askedInReply($0.text) }
                 ?? col.pty?.agentTrustPrompt(foreground: foregroundProcess).map { _ in AgentTrustPrompt.reason },
             stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
             deferredAgent: Self.sidebarDeferredAgent(of: col),

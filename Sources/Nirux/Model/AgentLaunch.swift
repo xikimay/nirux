@@ -14,7 +14,7 @@ enum AgentResumeTarget: Equatable {
 /// one) and its flags.
 enum AgentLaunch: Equatable {
     case claude(resume: AgentResumeTarget?, mode: ClaudeLaunchMode, model: String? = nil)
-    case codex(resume: AgentResumeTarget?, mode: CodexLaunchMode, model: String? = nil)
+    case codex(resume: AgentResumeTarget?, mode: CodexLaunchMode?, model: String? = nil)
     case agy(resume: AgentResumeTarget?, model: String? = nil)
 
     /// `agent`'s, with the mode of its kind; nil for an agent Nirux doesn't

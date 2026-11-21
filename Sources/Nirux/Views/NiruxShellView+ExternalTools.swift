@@ -188,14 +188,17 @@ extension NiruxShellView {
     }
 
     static func codexLaunchMode(for workspace: WorkspaceState) -> CodexLaunchMode {
-        guard !workspace.startedOutsideNirux else { return currentCodexLaunchMode() }
-        return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).codexMode(settings: currentCodexLaunchMode())
+        codexLaunchMode(inSpace: workspace.profileID)
+    }
+
+    static func codexLaunchMode(inSpace id: String) -> CodexLaunchMode {
+        SpaceDefaultsStore.defaults(forSpace: id).codexMode(settings: currentCodexLaunchMode())
     }
 
     /// `agent`'s launch in `workspace`, in the space's mode; nil for an
     /// agent Nirux doesn't start.
-    static func launch(of agent: CodingAgent, resume: AgentResumeTarget?, model: String? = nil, in workspace: WorkspaceState) -> AgentLaunch? {
-        AgentLaunch(agent, resume: resume, model: model, claudeMode: claudeLaunchMode(for: workspace), codexMode: codexLaunchMode(for: workspace))
+    static func launch(of agent: CodingAgent, resume: AgentResumeTarget?, model: String? = nil, in workspace: WorkspaceState, codexMode: CodexLaunchMode? = nil) -> AgentLaunch? {
+        AgentLaunch(agent, resume: resume, model: model, claudeMode: claudeLaunchMode(for: workspace), codexMode: codexMode ?? codexLaunchMode(for: workspace))
     }
 
     /// The line that runs `launch` in `workspace`, with the space's brief
@@ -216,7 +219,7 @@ extension NiruxShellView {
             )
         case .codex(let resume, let mode, let model):
             return Self.codexCommand(
-                resume: resume, workingDirectory: resumeDirectory, mode: mode, model: model,
+                resume: resume, workingDirectory: resumeDirectory, mode: mode ?? Self.codexLaunchMode(for: workspace), model: model,
                 briefFile: Self.codexBriefFile(from: spaceBriefInjection(for: workspace), launchDirectory: launchDirectory),
                 handoverPrompt: handoverPrompt
             )

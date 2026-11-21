@@ -109,12 +109,12 @@ extension NiruxApp {
         presentNextURLConfirmation()
     }
 
-    private func perform(_ request: NiruxURLRequest) {
+    private func perform(_ request: NiruxURLRequest, codexLaunch: ConfirmedCodexLaunch? = nil) {
         switch request.action {
         case let .newWorkspace(cwd, title, agent):
             shell?.openRequestedWorkspace(
                 title: title, cwd: cwd, agent: agent, requestedSpaceID: request.profileID,
-                startedOutsideNirux: request.cameFromOutside
+                startedOutsideNirux: request.cameFromOutside, confirmedCodexLaunch: codexLaunch
             )
         case .newWorktree(let worktree):
             shell?.createWorktreeWorkspace(
@@ -127,7 +127,7 @@ extension NiruxApp {
                 parentWorkspaceID: worktree.parentWorkspaceID,
                 parentAgentUUID: worktree.parentAgentUUID,
                 startsFromHead: worktree.startsFromHead,
-                startedOutsideNirux: request.cameFromOutside
+                startedOutsideNirux: request.cameFromOutside, confirmedCodexLaunch: codexLaunch
             )
         case .openEditor(_, let target):
             guard let target else { return }
@@ -140,12 +140,34 @@ extension NiruxApp {
     /// Window-modal sheet, one at a time: unlike an app-modal alert it
     /// doesn't stall the heartbeat timer (state saves, sidebar refresh).
     private func presentNextURLConfirmation() {
-        guard let window = mainWindow else { return }
-        guard let request = urlConfirmations.startNext() else { return }
+        guard let shell, let window = mainWindow, var request = urlConfirmations.startNext() else { return }
+        let folder: String
+        switch request.action {
+        case .newWorkspace(let cwd, let title, .codex):
+            folder = cwd ?? shell.defaultFolder(forSpace: WorkspaceProfile.defaultID)
+            request.action = .newWorkspace(cwd: folder, title: title, agent: .codex)
+        case .newWorktree(let worktree) where worktree.agent == .codex:
+            folder = worktree.repo
+        default:
+            return presentURLConfirmation(request, codexLaunch: nil, on: window)
+        }
+        // The sheet precedes permission to run git. Read checkout metadata only.
+        Task { [weak self] in
+            let identity = await Task.detached {
+                let top = BranchReviewController.topLevel(of: folder)
+                let layout = top.map(GitRepositoryLayout.resolve(worktreeRoot:))
+                return FolderIdentity(path: folder, commonDir: layout?.commonDirectory, topLevel: layout?.worktreeRoot)
+            }.value
+            let decision = shell.decideSpace(identity: identity, parentWorkspaceID: nil, startedFromSpaceID: nil)
+            self?.presentURLConfirmation(request, codexLaunch: shell.codexLaunchForConfirmation(in: decision.spaceID), on: window)
+        }
+    }
+
+    private func presentURLConfirmation(_ request: NiruxURLRequest, codexLaunch: ConfirmedCodexLaunch?, on window: NSWindow) {
         let settings = Persistence.load()?.settings
         let text = request.confirmation(
             claudeMode: settings?.claudeLaunchMode ?? .default,
-            codexMode: settings?.codexLaunchMode ?? .default
+            codexMode: codexLaunch?.mode ?? settings?.codexLaunchMode ?? .default, spaceName: codexLaunch?.spaceName
         )
 
         let alert = NSAlert()
@@ -195,7 +217,7 @@ extension NiruxApp {
                 // A Cancel also drops whatever else was queued.
                 self.urlConfirmations.finish(confirmed: confirmed, now: ProcessInfo.processInfo.systemUptime)
                 if confirmed {
-                    self.perform(request)
+                    self.perform(request, codexLaunch: codexLaunch)
                 } else {
                     // Give focus back to whatever the user was in.
                     self.urlConfirmationRestoreApp?.activate()
