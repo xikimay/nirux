@@ -16,7 +16,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         let agentUUID = UUID().uuidString
         workspace.addColumn(command: command, agentUUID: agentUUID, cwd: workspace.cwd)
         let pty = try XCTUnwrap(workspace.columns.first { $0.agentUUID == agentUUID }?.pty)
-        harness.waitUntil("its claude") { pty.runningAgentName(snapshot: ProcessSnapshot()) == "claude" }
+        harness.waitUntil("its claude") { pty.runningAgent(snapshot: ProcessSnapshot()) == .claude }
         let hook: @MainActor (AgentHookEvent.Name) -> Void = { name in
             _ = pty.applyAgentHook(AgentHookEvent(
                 kind: .claude, name: name, agentUUID: agentUUID, sessionID: agentUUID,
@@ -94,7 +94,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             let later = try named("Later")
             shell.workspaceStore.selectWorkspace(id: lead.workspace.id)
             later.addColumn(
-                deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: nil, lastStatus: .working),
+                deferredAgent: DeferredAgentLaunch(launch: .claude(resume: .session("s1"), mode: .default), title: nil, lastStatus: .working),
                 agentUUID: UUID().uuidString, cwd: harness.worktree
             )
             try refusal("Later", "hasn't resumed since Nirux restarted, last seen working")
@@ -404,7 +404,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             }
             let ownAgent = try XCTUnwrap(task.columns.first?.agentUUID)
             @MainActor func session(
-                _ id: String, agent: AgentHookEvent.Kind = .claude, transcript: String?, at time: TimeInterval, column: String? = nil
+                _ id: String, agent: CodingAgent = .claude, transcript: String?, at time: TimeInterval, column: String? = nil
             ) {
                 for (event, source) in [(AgentHookEvent.Name.sessionStart, "startup"), (.userPromptSubmit, nil), (.stop, nil)] {
                     shell.sessionLedger.record(AgentSessionObservation(
@@ -834,7 +834,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             )
             let task = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
             task.addColumn(
-                deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session("resumed"), mode: .default), title: nil, lastStatus: nil),
+                deferredAgent: DeferredAgentLaunch(launch: .claude(resume: .session("resumed"), mode: .default), title: nil, lastStatus: nil),
                 agentUUID: agentUUID, cwd: harness.worktree
             )
             XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Paused", "message": "Go on."], lead: lead).isError)
@@ -1059,7 +1059,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 return (column, try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())), agent)
             }
             @MainActor func report(_ state: AgentProgramStatus.State, in column: ColumnState) {
-                column.pty?.onProgramStatus?(AgentProgramStatus(state: state, kind: nil, message: nil, process: "codex"))
+                column.pty?.onProgramStatus?(AgentProgramStatus(state: state, kind: nil, message: nil, agent: .codex))
             }
             @MainActor func thread(_ id: String, first: String, of task: (column: ColumnState, codex: ForegroundProcess, agent: AgentStandIn)) {
                 _ = task.column.captureCodexSession(
@@ -1205,7 +1205,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 return (column, agent)
             }
             @MainActor func report(_ state: AgentProgramStatus.State, in column: ColumnState) {
-                column.pty?.onProgramStatus?(AgentProgramStatus(state: state, kind: nil, message: nil, process: "agy"))
+                column.pty?.onProgramStatus?(AgentProgramStatus(state: state, kind: nil, message: nil, agent: .agy))
             }
             @MainActor func instruction(of column: ColumnState) -> MissionEvent? {
                 MissionStore.shared.missions.flatMap(\.events).first { $0.kind == .instruction && $0.childAgentUUID == column.agentUUID }

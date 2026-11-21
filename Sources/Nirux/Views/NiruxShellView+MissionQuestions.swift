@@ -161,7 +161,7 @@ extension NiruxShellView {
         finishedTurnAfterTyping: (TimeInterval) -> Bool, tookPrompt: (ForegroundProcess) -> Bool?
     ) -> SidebarMissionQuestion.Parent {
         guard let foreground else { return .claude }
-        guard AgentHookCenter.isInteractiveClaude(foreground) else { return .notClaude }
+        guard foreground.interactiveAgent == .claude else { return .notClaude }
         if let typedAt {
             if foreground.instance.startedAt > typedAt { return .restartedSinceTyped }
             return finishedTurnAfterTyping(typedAt) ? .stoppedWithoutAnswer : .claude
