@@ -59,7 +59,7 @@ extension NiruxShellView {
         let board = ProjectBoardController(projectID: projectID, client: projectBoardClient, offersSettings: offersSettings)
         board.workspaceFolders = { [weak self, weak board] in
             guard let self, let board else { return [] }
-            return self.projectWorkspaces(of: board.projectID).map(\.cwd)
+            return self.projectWorkspaces(of: board.projectID).filter { !$0.isWaitingTask }.map(\.cwd)
         }
         board.spaceAnchors = { [weak self, weak board] in
             guard let self, let board else { return [] }
@@ -236,8 +236,9 @@ extension NiruxShellView {
         let boardWorkspaces = projectBoardWorkspaces(members, of: board, snapshot: snapshot, now: now, foregroundProcesses: foreground)
         if isShown {
             // A workspace opened in a folder not listed yet, or one closed or moved away: list them again.
-            board.expireWorktreesIfWorkspacesLeft(members.map(\.cwd))
-            if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
+            let folders = members.filter { !$0.isWaitingTask }.map(\.cwd)
+            board.expireWorktreesIfWorkspacesLeft(folders)
+            if let local = board.local, folders.contains(where: { local.folders[$0] == nil }) {
                 board.expireWorktrees()
             }
             board.reloadIfAnchorsChanged()

@@ -402,6 +402,67 @@ final class BoardStagesContentFlowTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testWaitingWorkspaceFollowsItsDependencyAcrossSectionsUntilRelease() throws {
+        try withShell(client: ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")) { shell, space in
+            let repo = root + "/widgets", docs = root + "/docs"
+            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try BoardConfigSuggestionsTests.makeRepository(at: docs, remote: "https://github.com/acme/docs.git")
+            let widgets = try XCTUnwrap(FolderIdentity.identify(repo, timeout: 10)).anchor
+            let guides = try XCTUnwrap(FolderIdentity.identify(docs, timeout: 10)).anchor
+            XCTAssertTrue(shell.workspaceStore.setAnchors([widgets, guides], forProfile: space.id))
+            shell.addWorkspace(title: "Sign in", cwd: repo, profileID: space.id, workspaceID: "login")
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.id == "login" }))
+            let path = root + "/waiting/docs"
+            let wait = BoardStagesLineTests.startWait(after: "login", repo: guides.key)
+            shell.addWorkspace(title: "Write the guide", cwd: path, profileID: space.id, workspaceID: "guide",
+                               waitingStart: wait, activate: false)
+            let guide = try XCTUnwrap(shell.workspaces.first { $0.id == "guide" })
+            try runPaletteAction("Open Board", in: shell)
+            let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
+            waitUntil("the Board lists both repositories") {
+                board.local?.folders[docs] != nil && board.local?.folders[repo] != nil && board.sections.count == 2
+            }
+            func ids(_ content: BoardStagesView.Content, in section: String) -> [String] {
+                content.sections.first { $0.id == section }?.lines.units.flatMap(\.lines).map(\.id) ?? []
+            }
+            for order in [BoardStages.Order.sidebar, .progress] {
+                let content = try stages(of: board, in: shell, order: order)
+                XCTAssertEqual(ids(content, in: widgets.key), ["login", "guide"])
+                XCTAssertEqual(ids(content, in: guides.key), [])
+                XCTAssertFalse(content.sections.contains { $0.id == ProjectBoardController.noRepositoryID })
+            }
+            XCTAssertFalse(board.workspaceFolders().contains(path))
+            shell.renderProjectBoard(board)
+            XCTAssertEqual(board.stagesTargets.focus["guide"], .focus(workspaceID: "guide", columnID: nil))
+            XCTAssertNil(board.stagesTargets.folders["guide"])
+
+            var failed = BoardStagesLineTests.startWait(after: "gone", repo: guides.key)
+            failed.failure = "The dependency closed"
+            guide.mergeWaits = [failed]
+            let changed = try stages(of: board, in: shell)
+            XCTAssertEqual(ids(changed, in: widgets.key), ["login"])
+            XCTAssertEqual(ids(changed, in: guides.key), ["guide"])
+            let orphan = try XCTUnwrap(changed.sections.first { $0.id == guides.key }?.lines.units.first?.lines.first)
+            XCTAssertEqual(orphan.state, .needsYou)
+            XCTAssertEqual(orphan.phrase.text, "Needs you · The dependency closed")
+            XCTAssertTrue(orphan.menu.isEmpty)
+
+            let unread = shell.makeProjectBoard(projectID: space.id, offersSettings: true)
+            let beforeRead = try stages(of: unread, in: shell)
+            XCTAssertEqual(beforeRead.message?.showsWaitingTasks, true)
+            unread.view.stages.show(beforeRead)
+            XCTAssertEqual(unread.view.stages.lineViews.map(\.line.id), ["guide"])
+            XCTAssertEqual(unread.view.stages.lineViews.first?.line.state, .needsYou)
+
+            guide.mergeWaits = []
+            guide.beginTask(at: docs, mission: nil)
+            let released = try stages(of: board, in: shell)
+            XCTAssertEqual(ids(released, in: guides.key), ["guide"])
+            XCTAssertEqual(released.sections.flatMap { $0.lines.units.flatMap(\.lines) }.filter { $0.id == "guide" }.count, 1)
+        }
+    }
+
     // MARK: - Helpers
 
     /// What the stages would show now, from the shell's own readings.

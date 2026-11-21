@@ -9,6 +9,36 @@ final class BoardStagesLineTests: XCTestCase {
     private typealias Facts = BoardStages.Facts
     private typealias Queue = BoardStages.Queue
 
+    static func startWait(after id: String, title: String = "Sign in", repo: String = "widgets") -> MergeWait {
+        MergeWait(id: UUID().uuidString, awaited: .init(workspaceID: id, title: title),
+                  action: .start(.init(description: "Ship it", repositoryKey: repo, repository: repo, template: nil)), createdAt: 0)
+    }
+
+    func testWaitingStartNamesTheMergeAndHasNoWorktreeActionsOrStation() throws {
+        var wait = Self.startWait(after: "login")
+        func line() throws -> BoardStages.Line {
+            try XCTUnwrap(BoardStages.WaitingTask(id: "docs", title: "Write docs", wait: wait)).line
+        }
+        let queued = try line()
+        XCTAssertEqual(queued.state, .waiting)
+        XCTAssertEqual(queued.phrase.text, "Starts after “Sign in” merges")
+        wait.awaited.pullRequest = .init(number: 42, url: "https://github.com/acme/widgets/pull/42")
+        XCTAssertEqual(try line().phrase.text, "Starts after #42 merges")
+        wait.mergedAt = 123
+        XCTAssertEqual(try line().phrase.text, "Starting")
+        wait.failure = "Couldn’t fetch origin/main"
+        let failed = try line()
+        XCTAssertEqual(failed.state, .needsYou)
+        XCTAssertEqual(failed.phrase.text, "Needs you · Couldn’t fetch origin/main")
+        for row in [queued, failed] {
+            XCTAssertNil(row.rail)
+            XCTAssertNil(row.offer)
+            XCTAssertNil(row.phrase.link)
+            XCTAssertTrue(row.menu.isEmpty)
+            XCTAssertEqual(row.pullRequest, "")
+        }
+    }
+
     private static let head = String(repeating: "a", count: 40)
     /// A code review on the current HEAD.
     private static let reviewed = reviews(fresh: [.codeReview])

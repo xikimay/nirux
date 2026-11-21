@@ -133,6 +133,7 @@ final class BoardStagesView: NSView {
     struct Message: Equatable {
         var text: String
         var offersSettings = false
+        var showsWaitingTasks = false
     }
 
     /// The order switch was pressed.
@@ -464,9 +465,10 @@ final class BoardStagesView: NSView {
         }
         var departed = Set<String>()
         func held(_ line: BoardStages.Line) -> BoardStages.Line {
-            if let now = lines[line.id] { return now }
-            departed.insert(line.id)
-            return line
+            var latest = lines[line.id] ?? line
+            if lines[line.id] == nil { departed.insert(line.id) }
+            latest.following = line.following.map(held)
+            return latest
         }
         func held(_ unit: BoardStages.Unit) -> BoardStages.Unit {
             switch unit {
@@ -538,7 +540,7 @@ final class BoardStagesView: NSView {
     /// a stack's title by its place.
     private func buildItems() {
         // A message in their place: the folds stay as they are, for when the sections come back.
-        if let message = content?.message {
+        if let message = content?.message, !message.showsWaitingTasks {
             messageView.show(message)
             documentView.subviews = [messageView]
             self.items = [.message(messageView)]
@@ -566,6 +568,10 @@ final class BoardStagesView: NSView {
         var keptMerged = mergedViews
         var keptCaptions = captions[...]
         var items: [Item] = []
+        if let message = content?.message {
+            messageView.show(message)
+            items.append(.message(messageView))
+        }
         lineViews = []
         sectionHeaders = [:]
         foldButtons = [:]
@@ -608,6 +614,7 @@ final class BoardStagesView: NSView {
             view.isDeparted = departed.contains(line.id)
             lineViews.append(view)
             items.append(.line(view))
+            for waiting in line.following { add(waiting, link: .none) }
         }
         func add(_ unit: BoardStages.Unit) {
             switch unit {

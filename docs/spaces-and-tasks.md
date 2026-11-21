@@ -70,6 +70,8 @@ With the description empty, **Start** opens a plain workspace instead: a shell i
 
 With **Starts tasks without asking** enabled, the Lead can pass `after` to `start_task`. The sidebar shows the new task and the pull request it needs. When that request merges, Nirux fetches the repository’s base branch, creates the worktree and starts the agent in the same row. The description and template survive a relaunch. The Lead gets a stable `task:<id>` when it queues the task and can find it again in `list_tasks`. When a waiting task shares a name with another task, use this ID to change or close the intended task.
 
+The Board lists each waiting task immediately after its dependency, in the same repository section, in both sidebar and progress order. When the dependency is gone, the waiting task appears in its intended repository if available.
+
 If the dependency closes without a merge or the worktree cannot start, the row reads **Needs you** and gives the reason. Choose **Start Now** to fetch the base and try now, or ask the Lead to change the dependency with `set_task_after`. Closing the waiting task drops its scheduled start.
 
 ### Sub-tasks

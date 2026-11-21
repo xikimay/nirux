@@ -74,6 +74,9 @@ extension NiruxShellView {
             },
             workspaces: workspaces,
             tasks: members.filter { !$0.isLead }.map(\.id),
+            waiting: members.compactMap { workspace in
+                workspace.waitingStart.flatMap { BoardStages.WaitingTask(id: workspace.id, title: workspace.title, wait: $0) }
+            },
             // Ids as restored: two the same must not trap.
             parents: Dictionary(workspaceStore.activeParents(in: spaceID).map {
                 (self.workspaces[$0.key].id, self.workspaces[$0.value].id)
