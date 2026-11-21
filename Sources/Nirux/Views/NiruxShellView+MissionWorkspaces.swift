@@ -64,7 +64,7 @@ extension NiruxShellView {
                 case .failure(let error): handoverError = error
                 }
             }
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async { [weak self, deliveredHandover, handoverError] in
                 guard let self else { return }
                 // An agent retrying the same `open` after its handover was
                 // delivered: focus the workspace the first request opened
@@ -115,7 +115,8 @@ extension NiruxShellView {
                     let decision = self.decideSpace(
                         identity: identity, parentWorkspaceID: parentWorkspaceID, startedFromSpaceID: requestedProfileID
                     )
-                    @MainActor func openWorktree(agent: NiruxApp.WorkspaceAgent?, mode: CodexLaunchMode?) {
+                    let openWorktree: @MainActor (NiruxApp.WorkspaceAgent?, CodexLaunchMode?) -> Void = {
+                        [missionID, reportsToLead] agent, mode in
                         self.addWorkspace(
                             title: branch,
                             cwd: path,
@@ -143,8 +144,8 @@ extension NiruxShellView {
                     // Codex mode leaves that work accessible in a plain terminal.
                     self.withConfirmedCodexLaunch(confirmedCodexLaunch, required: startedOutsideNirux && agent == .codex,
                                                   in: decision.spaceID, folder: path, ifDeclined: {
-                        openWorktree(agent: nil, mode: nil)
-                    }) { mode in openWorktree(agent: agent, mode: mode) }
+                        openWorktree(nil, nil)
+                    }) { mode in openWorktree(agent, mode) }
                     // Above the banner, when there is one.
                     if let start, let fetchError = start.fetchError {
                         let from = start.startPoint == nil ? "the checkout’s HEAD" : "it as last fetched"
