@@ -201,8 +201,9 @@ final class CodexTaskFlowTests: XCTestCase {
                 ("native", false, nil), ("explicit", false, .default), ("outside", true, nil), ("recorded", true, .readOnly)
             ]
             for (title, outside, mode) in cases {
-                let column = PersistedColumn(widthPreset: 1, cwd: harness.repo, columnType: .codex, webViewURL: nil,
+                var column = PersistedColumn(widthPreset: 1, cwd: harness.repo, columnType: .codex, webViewURL: nil,
                                              claudeLaunchMode: nil, codexLaunchMode: mode, codexSessionID: UUID().uuidString)
+                if title == "native" { column.agentModel = "codex-fast" }
                 state.workspaces.append(PersistedWorkspace(id: title, title: title, cwd: harness.repo, columns: [column],
                                                           focusedColumnIndex: 0, profileID: space.id, startedOutsideNirux: outside))
             }
@@ -214,7 +215,8 @@ final class CodexTaskFlowTests: XCTestCase {
             let launches = try harness.restoredAgentLaunches.map { try arguments($0, in: harness) }
             for (title, _, mode) in cases where title != "outside" {
                 let id = try XCTUnwrap(state.workspaces.first { $0.title == title }?.columns.first?.codexSessionID)
-                XCTAssertTrue(launches.contains(["resume", id] + (mode ?? .bypass).cliArgs), title)
+                let modelArgs = title == "native" ? ["--model", "codex-fast"] : []
+                XCTAssertTrue(launches.contains(["resume", id] + (mode ?? .bypass).cliArgs + modelArgs), title)
             }
             let legacy = try XCTUnwrap(shell.workspaces.first { $0.id == "outside" })
             let column = try XCTUnwrap(legacy.columns.first)

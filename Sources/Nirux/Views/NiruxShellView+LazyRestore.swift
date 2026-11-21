@@ -19,7 +19,7 @@ extension NiruxShellView {
     }
 
     private func needsCodexModeConfirmation(_ column: ColumnState, in workspace: WorkspaceState) -> Bool {
-        if case .codex(_, nil)? = column.deferredAgent?.launch { return workspace.startedOutsideNirux }
+        if case .codex(_, nil, _)? = column.deferredAgent?.launch { return workspace.startedOutsideNirux }
         return false
     }
 
@@ -32,7 +32,7 @@ extension NiruxShellView {
         _ column: ColumnState, in workspace: WorkspaceState, liveSessions: [String]? = nil, settingsFiles: [String: String]? = nil
     ) -> Bool {
         guard workspace.columns.contains(where: { $0 === column }), var launch = column.deferredAgent?.launch else { return false }
-        if case .codex(let resume, nil) = launch {
+        if case .codex(let resume, nil, let model) = launch {
             let destination = codexLaunchForConfirmation(in: workspace.profileID)
             var mode = destination.mode
             if workspace.startedOutsideNirux {
@@ -50,7 +50,7 @@ extension NiruxShellView {
                 guard workspace.profileID == destination.spaceID, !workspace.isClosing, workspace.columns.contains(where: { $0 === column })
                 else { return false }
             }
-            launch = .codex(resume: resume, mode: mode)
+            launch = .codex(resume: resume, mode: mode, model: model)
             column.restoredColumn?.codexLaunchMode = mode
         }
         guard column.takeDeferredAgent() != nil else { return false }
