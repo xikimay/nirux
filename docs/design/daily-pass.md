@@ -88,6 +88,109 @@ The pass also reports per-task waits, question and round counts and the time to 
 - **Per run:** 3–8k tokens of facts, plus the Lead's compacted context (30–60k tokens) written to the cache once and read by about 5 requests, plus 3–5k tokens of output.
 - **API-equivalent:** about $0.45–0.60 per run, up to about $1.50 for a 150k-token context. A day with nothing to read costs nothing.
 
+## Forgotten tasks
+
+The digest also lists the tasks the Lead forgot. It only reports: it never
+closes or tells anything.
+
+**Which tasks.** list_tasks' tasks: the space's open workspaces, without the
+Lead, archived or closing ones, and plain checkouts that aren't tasks (a
+worktree or a task folder). The Lead's own tasks always count.
+
+**Activity.** A task's last activity is the latest of these three. Each
+comes from a source Nirux already has:
+- a turn: `WorkspaceState.lastActivityAt`, the time of its last agent hook
+  event that is work. It is saved with the workspace, and it is the age the
+  sidebar row shows. A session resumed (Nirux restores them at launch) or
+  ended doesn't move it; a new session's start does;
+- a commit: the committer date of its newest commit that isn't on its
+  repository's base branch (`git log -1 --format=%ct HEAD --not
+  <remote>/<base>`), so the base's own commits don't count. HEAD's date
+  when the base isn't known. Read off the main thread beside the pass's
+  GitHub reads;
+- a check run: the newest `startedAt` among its pull request's checks
+  (`PRInfo.checks`). A push starts them, and so does a rerun.
+
+**Pull request state.** The sidebar's `prInfo`. It stops refreshing while
+Nirux is in the background, which is when the pass runs, so a pull request
+GitHub's merged list has counts as merged: the pass's own read of the
+window, reaching back by numbers alone to the oldest read of a task's open
+pull request when that came first (a week at most).
+"No pull request" needs a successful read for the current revision
+(`WorkspaceState.pullRequestReadAt`). Changing revision invalidates the read
+along with the PR, so a pending or failed first read leaves its status unknown.
+
+**Kinds**, checked in this order:
+- **closable**:
+  - a pull request merged, at once;
+  - a pull request closed unmerged, at once;
+  - a finished task: the newest event of its Missions is its `completed`
+    result, no question after it, and no tell typed after it or still on
+    its way (a held tell sent before the result but typed after it counts;
+    the Lead's one-way tells too). `Mission.status` isn't used: a held tell
+    typed after the result turns it back to active. It also needs no pull
+    request, activity no later than the result's turn (an hour), and a day
+    since the result;
+- **waiting**: an open pull request that is green (or has no check at all),
+  MERGEABLE, not a draft, without changes requested, not set to merge by
+  itself, and on its repository's base branch (`<remote>/HEAD`; a stacked
+  one waits for its parent), with a day without activity;
+- **quiet**: three days without activity, with an open pull request that
+  isn't waiting, or with none.
+
+**Thresholds.** `DailyPass.unattendedAfter` = 1 day (waiting, finished).
+`DailyPass.quietAfter` = 3 days.
+
+**Moves.**
+- merged: close_task;
+- closed unmerged: ask the user whether it was dropped, then close_task;
+- finished: close_task; for a task without a repository, once the user has
+  its result (its folder goes to the Trash);
+- waiting: ask the user to merge it (merging stays the user's call);
+- quiet, waiting on a question handed to the user: ask the user;
+- quiet, waiting on a question to the Lead: reply to it;
+- quiet, its agent waiting on the user: ask the user;
+- a task that isn't the Lead's (finished or quiet): tell the task that
+  started it (a sub-task), else ask the user;
+- quiet, the Lead's: tell it what comes next, or close_task if it was
+  dropped.
+
+**News.** A forgotten task is news until a read of `daily_pass` lists it,
+and again once its kind or its last activity changes. `daily-pass.json`
+keeps the keys the last read listed (`listedTasks`: task, kind, last
+activity). So a task that stays forgotten doesn't bring a daily line every
+day. Every digest still lists all forgotten tasks, the "Nothing happened"
+one too; those listed last time come after the others, under "Listed last
+time too, nothing changed since". One listed last time but left out now for
+room stays known. The section is a snapshot of now, not a
+fact of the window: it stays outside `readUntil`, and it lists the
+section limit's count at most.
+
+**Wording** (after the rules sections):
+
+    ## Tasks you may have forgotten
+    Nirux only lists them: nothing was closed or told. Make each move, or tell the user why not.
+    - “Glass sidebar” · branch feat/glass-sidebar · PR #600 merged · last activity 11-18 22:40 (a turn), 2 d ago → close_task
+    - “Slider test” · branch feat/slider-test · result sent 11-19 09:12, nothing since, no pull request · last activity 11-19 09:15 (a turn), 1 d 21 h ago → close_task
+    - “Depth P5” · branch feat/depth-p5 · PR #640 green and mergeable, unmerged · last activity 11-19 10:20 (a check run), 1 d 20 h ago → ask the user to merge it
+    - “Haiku H6” · branch feat/haiku-h6 · PR #602 open, checks failing · quiet: last activity 11-17 18:02 (a commit), 3 d 12 h ago → tell it what comes next, or close_task if it was dropped
+    Listed last time too, nothing changed since:
+    - “Stale rows” · branch feat/stale-rows · not yours (started by the user) · no pull request · quiet: last activity 11-16 08:40 (a turn), 4 d 21 h ago → ask the user
+
+**Lead instructions.** They don't change (2,030/2,048). The `daily_pass`
+description gains "the tasks you may have forgotten".
+
+**Lane 2.** It changes when the daily line is typed into the Lead's terminal,
+and it adds git reads to the pass.
+
+**Not covered by a test.** Some glue in `dailyPassTasks` and
+`readDailyPassSources` has no test of its own: the agent's wait on the user
+(list_tasks' `agentReadings`), the Mission question it waits on, its parent
+task, whether it has a folder of its own, and the base-branch read (the flow
+harness's repository has no GitHub remote). The functions they feed are
+tested. A session Nirux relaunches fresh (one never prompted) still counts
+its start as work.
+
 ## Later
 
 - **Tasks recording their own reviews.** Their adversarial reviews, `/code-review` and premortems find most defects. Today only their round commits reach the digest.

@@ -299,6 +299,7 @@ struct PersistedSettings: Codable {
     /// `alertOnlyWhenClaudeAsks`: whoever turned that off kept final
     /// messages away from a model.
     var showTurnStatus: Bool = true
+    var generateTaskNames: Bool = true
     /// After an absence, a card lists the tasks whose turn ended meanwhile
     /// (see `SidebarCatchUp`). On by default: missing decodes to true.
     var showCatchUp: Bool = true
@@ -376,6 +377,7 @@ struct PersistedSettings: Codable {
         case showClaudeUsageLimits
         case alertOnlyWhenClaudeAsks
         case showTurnStatus
+        case generateTaskNames
         case showCatchUp
         case triageCIFailures
         case stuckAgentMinutes
@@ -421,6 +423,7 @@ struct PersistedSettings: Codable {
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
         showTurnStatus = (try? container.decodeIfPresent(Bool.self, forKey: .showTurnStatus)) ?? alertOnlyWhenClaudeAsks
+        generateTaskNames = (try? container.decodeIfPresent(Bool.self, forKey: .generateTaskNames)) ?? true
         showCatchUp = (try? container.decodeIfPresent(Bool.self, forKey: .showCatchUp)) ?? true
         triageCIFailures = try container.decodeIfPresent(Bool.self, forKey: .triageCIFailures) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
@@ -476,6 +479,7 @@ struct PersistedSettings: Codable {
         try container.encode(animatesInterface, forKey: .animatesInterface)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
+        try container.encode(generateTaskNames, forKey: .generateTaskNames)
         try container.encode(showTurnStatus, forKey: .showTurnStatus)
         try container.encode(showCatchUp, forKey: .showCatchUp)
         try container.encode(triageCIFailures, forKey: .triageCIFailures)
@@ -547,6 +551,9 @@ struct PersistedWorkspace: Codable {
     /// See `WorkspaceState.isLead`. Written only when true: a build before
     /// the Lead restores it as a plain workspace.
     var isLead: Bool
+    /// See `WorkspaceState.leadAgentUUID`. A Lead saved without it takes
+    /// its first terminal.
+    var leadAgentUUID: String?
     /// See `WorkspaceState.reportsToLead`. Written only when true.
     var reportsToLead: Bool
     /// See `WorkspaceState.reportsToTask`. Written only when true.
@@ -584,6 +591,7 @@ struct PersistedWorkspace: Codable {
         startedOutsideNirux: Bool = false,
         startedByAgent: Bool = false,
         isLead: Bool = false,
+        leadAgentUUID: String? = nil,
         reportsToLead: Bool = false,
         reportsToTask: Bool = false,
         taskFolder: String? = nil,
@@ -614,6 +622,7 @@ struct PersistedWorkspace: Codable {
         self.startedOutsideNirux = startedOutsideNirux
         self.startedByAgent = startedByAgent
         self.isLead = isLead
+        self.leadAgentUUID = leadAgentUUID
         self.reportsToLead = reportsToLead
         self.reportsToTask = reportsToTask
         self.taskFolder = taskFolder
@@ -624,6 +633,7 @@ struct PersistedWorkspace: Codable {
         case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID, parentWorkspaceID, parentIsSettled
         case purpose, phase, lastSummary, lastSummaryIsManual, lastSummaryIsStatus, lastActivityAt
         case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
+        case leadAgentUUID
         case reportsToLead, reportsToTask
         case taskFolder, mergeWaits
     }
@@ -659,6 +669,7 @@ struct PersistedWorkspace: Codable {
         startedOutsideNirux = (try? container.decodeIfPresent(Bool.self, forKey: .startedOutsideNirux)) ?? false
         startedByAgent = (try? container.decodeIfPresent(Bool.self, forKey: .startedByAgent)) ?? false
         isLead = (try? container.decodeIfPresent(Bool.self, forKey: .isLead)) ?? false
+        leadAgentUUID = (try? container.decodeIfPresent(String.self, forKey: .leadAgentUUID)) ?? nil
         reportsToLead = (try? container.decodeIfPresent(Bool.self, forKey: .reportsToLead)) ?? false
         reportsToTask = (try? container.decodeIfPresent(Bool.self, forKey: .reportsToTask)) ?? false
         // Only an absolute path: anything else is no task folder.
@@ -698,6 +709,7 @@ struct PersistedWorkspace: Codable {
         if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }
         if startedByAgent { try container.encode(true, forKey: .startedByAgent) }
         if isLead { try container.encode(true, forKey: .isLead) }
+        try container.encodeIfPresent(leadAgentUUID, forKey: .leadAgentUUID)
         if reportsToLead { try container.encode(true, forKey: .reportsToLead) }
         if reportsToTask { try container.encode(true, forKey: .reportsToTask) }
         try container.encodeIfPresent(taskFolder, forKey: .taskFolder)

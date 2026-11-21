@@ -525,6 +525,10 @@ final class NiruxShellView: NSView {
             if let workspace { self?.startWaitingTask(workspace) }
         }
         wireMetadataAndGitRefresh(workspace)
+        workspace.onUserPrompt = { [weak self, weak workspace] column, typedAt in
+            guard let self, let workspace else { return }
+            self.retireMissionQuestions(of: column, in: workspace, promptedAt: typedAt)
+        }
         workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url in
             self?.openWebView(url: url, in: targetWorkspace)
         }
