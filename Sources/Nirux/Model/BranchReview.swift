@@ -203,6 +203,7 @@ enum BranchReview {
         let baseRefName: String
         let headRefOid: String
         let isDraft: Bool
+        var checkReceipts: [Receipt] = []
     }
 
     /// What a snapshot found for its branch, for the next one to reuse

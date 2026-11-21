@@ -993,7 +993,7 @@ final class BranchReviewController {
         statusAction = nil
         var page = BranchReview.page(
             for: snapshot, handover: handover, explanation: explanation, explain: explainBar, generation: snapshotCount,
-            readAt: readAt, review: pageReview()
+            readAt: readAt, review: pageReview(), receipts: reviewRecord?.receipts ?? []
         )
         page.notesVersion = explanationVersion
         pageNotesVersion = explanationVersion
@@ -1092,9 +1092,14 @@ final class BranchReviewController {
 
     private func apply(_ state: BranchReviewState) {
         guard state != review else { return }
+        let previousReceipts = reviewRecord?.fields["receipts"]
         review = state
         pageComments = nil
-        sendReview()
+        if status == nil, previousReceipts != reviewRecord?.fields["receipts"] {
+            showCurrent()
+        } else {
+            sendReview()
+        }
         onReviewChange?()
     }
 
