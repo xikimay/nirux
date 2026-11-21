@@ -6,8 +6,8 @@ name: Tests
 # (nightly.yml) already runs the tests there, and a second run held another
 # macOS runner on every merge.
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [test/board-now-stack-726]
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -33,6 +33,7 @@ jobs:
           # merged pull request's commits runs here, before merge, rather
           # than first in the nightly.
           fetch-depth: 0
+          ref: fcf877594d76742eb29c1fa0e89397cd7696ca4a
 
       # The dependencies' clones and binaries (GhosttyKit's download sometimes
       # fails to connect), per toolchain: a new runner image's SwiftPM starts
@@ -55,4 +56,15 @@ jobs:
         run: swift build --build-tests
 
       - name: Run tests
-        run: scripts/run-tests.sh
+        env:
+          NIRUX_BOARD_CAPTURES: ${{ runner.temp }}/board-now
+        run: |
+          mkdir -p "$NIRUX_BOARD_CAPTURES"
+          scripts/run-tests.sh
+
+      - name: Upload Board decision, answer and narrow layout
+        uses: actions/upload-artifact@v4
+        with:
+          name: board-now
+          path: ${{ runner.temp }}/board-now/*.png
+          if-no-files-found: error
