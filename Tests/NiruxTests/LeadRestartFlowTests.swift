@@ -186,6 +186,8 @@ final class LeadRestartFlowTests: XCTestCase {
             XCTAssertTrue(harness.terminalRestarts.isEmpty)
             XCTAssertEqual(ProcessInstance.running(pid: original.pid), original)
             holdInOtherColumn(UUID().uuidString)
+            let restartTerminal = shell.sideEffects.restartTerminal
+            defer { shell.sideEffects.restartTerminal = restartTerminal }
             shell.sideEffects.restartTerminal = { _, _, starts in
                 XCTAssertEqual(column.relaunchingLeadSessionID, sessionID)
                 XCTAssertFalse(starts(["claude"]))
