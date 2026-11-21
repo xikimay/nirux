@@ -209,6 +209,7 @@ final class BranchReviewPageTests: XCTestCase {
         swift.additions = 180
         swift.deletions = 4
         swift.patchHash = "h0"
+        swift.rawPatchDigest = Data(repeating: 0, count: 32)
         swift.hunks = [BranchReview.Hunk(
             oldStart: 1, oldCount: 2, newStart: 1, newCount: 2, section: " struct KeepAwake {",
             lines: [
@@ -225,12 +226,14 @@ final class BranchReviewPageTests: XCTestCase {
         lockfile.omission = .onDemand
         lockfile.fold = .lockfile
         lockfile.patchHash = "h1"
+        lockfile.rawPatchDigest = Data(repeating: 1, count: 32)
         lockfile.signals = [.init(kind: .dependencies, reasons: ["Package.resolved"], hunks: [], byPath: true)]
         var untracked = BranchReview.FileChange(path: "Sources/New.swift", status: .added)
         untracked.additions = 6
         untracked.isUntracked = true
         untracked.isUncommitted = true
         untracked.patchHash = "h2"
+        untracked.rawPatchDigest = Data(repeating: 2, count: 32)
         untracked.signals = [.init(kind: .concurrency, reasons: ["@MainActor"], hunks: [0], byPath: false)]
         var tests = BranchReview.TestsAgainstCode()
         tests.testLines = 40

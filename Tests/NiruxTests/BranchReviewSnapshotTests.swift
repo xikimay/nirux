@@ -28,6 +28,29 @@ final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(ci.freshness(head: committed.head, tree: committed.workingTree), .stale(.earlierCommit))
     }
 
+    func testReceiptDetectsAnIdenticalEditMovedToAnotherLine() throws {
+        let path = "positions.txt"
+        let lines = ["before", "target", "middle", "target", "after"]
+        try write(path, lines.joined(separator: "\n"))
+        try commitToMain("two identical lines")
+        func changeLine(_ index: Int) throws -> BranchReview.Snapshot {
+            var edited = lines
+            edited[index] = "changed"
+            try write(path, edited.joined(separator: "\n"))
+            return try snapshot()
+        }
+        let first = try changeLine(1)
+        let second = try changeLine(3)
+        XCTAssertEqual(first.head, second.head)
+        XCTAssertEqual(try file(path, in: first).patchHash, try file(path, in: second).patchHash)
+        let receipt = BranchReview.Receipt(
+            id: "test", title: "test", command: nil, status: .passed, summary: nil, provenance: .local,
+            recordedAt: Date(), head: first.head, workingTreeDigest: try XCTUnwrap(first.workingTreeDigest)
+        )
+        XCTAssertEqual(receipt.freshness(head: first.head, tree: first.workingTree), .fresh)
+        XCTAssertEqual(receipt.freshness(head: second.head, tree: second.workingTree), .stale(.localEdits))
+    }
+
     func testDiffLeavesTheIndexUntouchedAndSkipsTouchedFiles() throws {
         try write("Sources/App.swift", "let a = 1\nlet b = 20\nlet c = 3\n")
         try git(["config", "core.splitIndex", "true"])

@@ -135,6 +135,8 @@ enum BranchReview {
         var isUncommitted = false
         /// See `patchHash(of:)`. Nil only for `.notRead`.
         var patchHash: String?
+        /// Receipts include the exact diff bytes, including context and hunk positions.
+        var rawPatchDigest: Data?
         /// Empty when `omission` says why.
         var hunks: [Hunk] = []
         var omission: Omission?

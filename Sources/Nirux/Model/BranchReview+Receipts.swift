@@ -65,9 +65,10 @@ extension BranchReview.Snapshot {
         guard hasUncommittedChanges else { return .clean }
         var hash = SHA256()
         for file in files.sorted(by: { $0.path.utf8.lexicographicallyPrecedes($1.path.utf8) }) {
-            guard let patchHash = file.patchHash else { return .incomplete }
+            guard let patchHash = file.patchHash, let rawDigest = file.rawPatchDigest else { return .incomplete }
             // Git paths cannot contain NUL, and patch hashes are hexadecimal.
             hash.update(data: Data("\(file.path)\0\(patchHash)\0".utf8))
+            hash.update(data: rawDigest)
         }
         return .edited(hash.finalize().map { String(format: "%02x", $0) }.joined())
     }
