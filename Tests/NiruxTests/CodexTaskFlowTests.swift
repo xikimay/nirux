@@ -102,6 +102,38 @@ final class CodexTaskFlowTests: XCTestCase {
         }
     }
 
+    func testResumeWithCodexInAnExternalClaudeTaskUsesTheDestinationSpaceMode() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let space = try NewTaskFlowTests.anchoredSpace(harness)
+            XCTAssertNil(Persistence.load()?.settings?.codexLaunchMode)
+            try setMode(.bypass, in: space.id)
+            shell.openRequestedWorkspace(title: "External task", cwd: harness.worktree, agent: .claude,
+                                         requestedSpaceID: nil, startedOutsideNirux: true)
+            harness.waitUntil("the external task opens") { shell.activeWorkspace?.title == "External task" }
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(task.profileID, space.id)
+            XCTAssertTrue(task.startedOutsideNirux)
+            let pty = try XCTUnwrap(task.columns.first?.pty)
+            let claude = AgentStandIn(), codex = AgentStandIn()
+            defer {
+                claude.remove()
+                codex.remove()
+            }
+            harness.waitUntil("the task shell starts") { pty.shellPID != nil }
+            pty.sendShellLaunchCommand("(\(claude.command()))")
+            harness.waitUntil("Claude owns the task terminal") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.interactiveAgent == .claude }
+            harness.restartedAgent = codex.command(named: "codex")
+            harness.alertResponses = [.alertSecondButtonReturn]
+            shell.showResumeTask(task)
+            harness.waitUntil("Codex resumes the same task") {
+                !shell.resumingTasks.contains(task.id) && pty.foregroundProcess(snapshot: ProcessSnapshot())?.interactiveAgent == .codex
+            }
+            XCTAssertEqual(harness.terminalRestarts.count, 1)
+            XCTAssertEqual(try arguments(harness.terminalRestarts.first, in: harness).first, "--dangerously-bypass-approvals-and-sandbox")
+        }
+    }
+
     func testExternalWorkspaceConfirmsAChangedDestinationBeforeStarting() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

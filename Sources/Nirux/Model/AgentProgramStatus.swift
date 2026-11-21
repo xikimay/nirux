@@ -45,7 +45,7 @@ struct AgentProgramStatus: Equatable, Sendable {
 
     /// Codex 0.171 reports the dialog kind even when it omits the command or question.
     var codexChoice: AgentAttentionReason? {
-        guard process == Self.codex, state == .blocked else { return nil }
+        guard agent == .codex, state == .blocked else { return nil }
         switch kind {
         case "permission": return .permission(tool: nil, summary: message ?? "approval in Codex")
         case "question": return .question(message ?? "choose an option in Codex")

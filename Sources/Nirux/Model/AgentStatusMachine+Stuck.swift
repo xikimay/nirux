@@ -29,7 +29,7 @@ extension AgentStatusMachine {
     }
 
     func codexReport(foreground: ForegroundProcess?) -> ReportedStatus? {
-        guard let foreground, foreground.name == AgentProgramStatus.codex, !AgentHookCenter.isHeadlessCodex(foreground),
+        guard let foreground, foreground.interactiveAgent == .codex,
               let codexStatus, codexStatus.isFrom(foreground.instance) else { return nil }
         return codexStatus
     }
