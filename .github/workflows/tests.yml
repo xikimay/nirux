@@ -6,8 +6,8 @@ name: Tests
 # (nightly.yml) already runs the tests there, and a second run held another
 # macOS runner on every merge.
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [test/verify-dependency-stack-on-main]
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -18,6 +18,15 @@ permissions:
 
 jobs:
   test:
+    name: Verify PR ${{ matrix.pr }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 703
+            head: b333c134bd541a68bab5cfe7b9244a7abc0130ab
+          - pr: 716
+            head: c27358afc31deed6d3d7b445cabd07bfef370942
     runs-on: macos-15
     # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift
     # 6.1): libghostty-spm 2.2 needs Swift tools 6.2.
@@ -33,6 +42,7 @@ jobs:
           # merged pull request's commits runs here, before merge, rather
           # than first in the nightly.
           fetch-depth: 0
+          ref: ${{ matrix.head }}
 
       # The dependencies' clones and binaries (GhosttyKit's download sometimes
       # fails to connect), per toolchain: a new runner image's SwiftPM starts
@@ -51,8 +61,51 @@ jobs:
             .build/workspace-state.json
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
+      - name: Check exact feature commit
+        run: test "$(git rev-parse HEAD)" = "${{ matrix.head }}"
+
       - name: Build
         run: swift build --build-tests
 
       - name: Run tests
-        run: scripts/run-tests.sh
+        env:
+          STACK_PR: ${{ matrix.pr }}
+          NIRUX_BOARD_WAITING_RENDER: ${{ runner.temp }}/waiting-board.png
+        run: |
+          if [[ "$STACK_PR" == 703 ]]; then
+            git show c7ded7191fb7f7b6dd6d1f7faae2c5f06549f9e5:scripts/run-tests.sh > scripts/run-tests.sh
+          fi
+          scripts/run-tests.sh
+
+      - name: Recheck each regression against XCTest
+        env:
+          STACK_PR: ${{ matrix.pr }}
+        run: |
+          if [[ "$STACK_PR" == 703 ]]; then
+            git show c7ded7191fb7f7b6dd6d1f7faae2c5f06549f9e5:scripts/prove-waiting-regressions.py | python3
+          else
+            git show b7c86c86d5b457d70a5f5255e16a7d317ee54bcc:scripts/prove-board-waits.py | python3
+          fi
+
+      - name: Reproduce the two original fixture type errors
+        if: matrix.pr == 703
+        run: |
+          for fixture in WaitingTaskFlowTests MergeWaitTests; do
+            path="Tests/NiruxTests/$fixture.swift"
+            if [[ "$fixture" == WaitingTaskFlowTests ]]; then
+              git show "b476bb4b:$path" > "$path"
+            else
+              sed -i '' '/pending.step(after: .read(pullRequest(41, .merged)))/s/41, .merged/41, "MERGED"/' "$path"
+            fi
+            if swift build --build-tests > "$RUNNER_TEMP/$fixture.log" 2>&1; then exit 1; fi
+            grep -m1 -E "$fixture.swift:[0-9]+:[0-9]+: error: .*String.*GitHub.PullRequestState" "$RUNNER_TEMP/$fixture.log"
+            git restore "$path"
+          done
+
+      - name: Upload offscreen Board
+        if: matrix.pr == 716
+        uses: actions/upload-artifact@v4
+        with:
+          name: waiting-board
+          path: ${{ runner.temp }}/waiting-board.png
+          if-no-files-found: error
