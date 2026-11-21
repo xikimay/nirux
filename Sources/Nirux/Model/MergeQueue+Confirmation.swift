@@ -42,7 +42,7 @@ extension MergeQueue {
         var rateLimit: RateLimit?
         var baseMergeQueue: Bool?
         /// The post-merge workflow's recent runs on the base, newest first.
-        var baseRuns: [Run]?
+        var baseRuns: [GitHub.WorkflowRun]?
         /// In the order the next Start proposes.
         var candidates: [Candidate] = []
     }
@@ -94,7 +94,7 @@ extension MergeQueue {
         var plan: [String] {
             let base = settings.baseBranch
             let workflow = settings.postMergeWorkflow
-            let label = MergeQueue.workflowLabel(workflow)
+            let label = GitHub.workflowLabel(workflow)
             let count = items.count
             let method = settings.mergeMethod == .squash ? "Squash and merge it" : "Merge it with a merge commit"
             var lines = [
@@ -185,11 +185,11 @@ extension MergeQueue {
 
     /// The last post-merge run on the base failed: the base may already be
     /// broken. One still running: the first merge waits for it.
-    private static func baseWarnings(_ runs: [Run]?, settings: BoardConfig.QueueSettings) -> [String] {
+    private static func baseWarnings(_ runs: [GitHub.WorkflowRun]?, settings: BoardConfig.QueueSettings) -> [String] {
         guard let workflow = settings.postMergeWorkflow, let runs else { return [] }
-        let label = MergeQueue.workflowLabel(workflow)
+        let label = GitHub.workflowLabel(workflow)
         var warnings: [String] = []
-        if let last = runs.first(where: \.isCompleted), runFailed(last) {
+        if let last = runs.first(where: \.isCompleted), GitHub.isFailedRun(last.conclusion) {
             warnings.append("The last \(label) on \(settings.baseBranch) failed (\(Engine.short(last.headSha))"
                 + (last.title.map { ", “\($0)”" } ?? "") + "): the base may already be broken.")
         }
@@ -219,7 +219,7 @@ extension MergeQueue {
         if let reason = exclusionReason(pullRequest, settings: settings) { return leftOut(reason) }
         if let error = candidate.error { return leftOut("Couldn’t read it in full: \(error)") }
         let entry = ConfirmedEntry(number: pullRequest.number, head: pullRequest.headOid, branch: pullRequest.headRefName)
-        if let problem = MergeQueueController.problem(with: [entry]) { return leftOut(problem) }
+        if let problem = MergeQueue.ConfirmedEntry.problem(in: [entry]) { return leftOut(problem) }
         if case .some(nil) = candidate.comparison {
             return leftOut("GitHub can’t compare its head \(Engine.short(pullRequest.headOid)) with \(settings.baseBranch).")
         }
@@ -327,9 +327,9 @@ extension MergeQueue {
     }
 
     static func openExclusion(
-        state: String, isDraft: Bool, baseRefName: String?, mergeable: String?, baseBranch: String?
+        state: GitHub.PullRequestState, isDraft: Bool, baseRefName: String?, mergeable: String?, baseBranch: String?
     ) -> OpenExclusion? {
-        if state.uppercased() != "OPEN" { return .notOpen(state.lowercased()) }
+        if state != .open { return .notOpen(state.word) }
         if isDraft { return .draft }
         if let baseRefName, let baseBranch, baseRefName != baseBranch { return .otherBase(baseRefName) }
         if mergeable?.uppercased() == "CONFLICTING" { return .conflict }

@@ -49,7 +49,7 @@ A change reaches sessions as they start: a running session keeps the file it rea
 
 `Cmd+N` opens the New sheet, titled **New in \<space\>**. The same sheet opens from `New…` in the command palette and the Workspaces menu, and from the sidebar's `+`.
 
-Describe the task, then pick the repository (in every space but General), the agent and a template. The first line of the description names the workspace and suggests the branch: `fix/…` when the template is about a bug or the description starts with a word such as "Fix", "Bug" or "Crash", `feat/…` otherwise. **Edit** changes the branch name. Return starts, `Shift+Return` adds a line, and `Cmd+Return` starts from anywhere in the sheet.
+Describe the task, then pick the repository (in every space but General), the agent and a template. The first line suggests the branch shown in the sheet: `fix/…` when the template is about a bug or the description starts with a word such as "Fix", "Bug" or "Crash", `feat/…` otherwise. The branch keeps the words that say something (no "the", "a", repeated words or an opening "can you"), takes a branch the line asks for, such as "(branch fix/labels)", and reads a GitHub pull request link as its number. At Start, Haiku can turn the description into a short English title and goal while Git fetches. The title names the workspace and suggests its branch or folder. An explicit branch or leading short name in the description wins. For example, `stale-labels — labels stay stale` keeps `feat/stale-labels`. After a failed fetch, starting again with the same naming input reuses the first Haiku call. If Haiku is unavailable or takes over five seconds, Nirux uses the first-line suggestion. **Edit** lets you name the branch or folder yourself and skips Haiku. You can turn off model naming in **Settings › General**. Return starts, `Shift+Return` adds a line, and `Cmd+Return` starts from anywhere in the sheet.
 
 **Start** then does four things:
 
@@ -65,6 +65,14 @@ If the fetch fails, the sheet says why, and a second **Start** uses the branch a
 With the description empty, **Start** opens a plain workspace instead: a shell in the repository's main checkout, or in your home folder when **No Repository** is selected.
 
 **Existing Branch…** lists the repository's worktrees, then its local branches and origin's that have none. Picking a worktree opens it. Picking a branch creates its worktree and opens a shell there.
+
+### Waiting for another task
+
+With **Starts tasks without asking** enabled, the Lead can pass `after` to `start_task`. The sidebar shows the new task and the pull request it needs. When that request merges, Nirux fetches the repository’s base branch, creates the worktree and starts the agent in the same row. The description and template survive a relaunch. The Lead gets a stable `task:<id>` when it queues the task and can find it again in `list_tasks`. When a waiting task shares a name with another task, use this ID to change or close the intended task.
+
+The Board lists each waiting task immediately after its dependency, in the same repository section, in both sidebar and progress order. When the dependency is gone, the waiting task appears in its intended repository if available.
+
+If the dependency closes without a merge or the worktree cannot start, the row reads **Needs you** and gives the reason. Choose **Start Now** to fetch the base and try now, or ask the Lead to change the dependency with `set_task_after`. Closing the waiting task drops its scheduled start.
 
 ### Sub-tasks
 
@@ -128,7 +136,7 @@ You can search the list, filter it by scope and follow `[[links]]`. Return opens
 
 A space can have a Lead: a Claude Code session, pinned at the top of the sidebar, that starts tasks for you and follows them. Turn it on with **Start a Lead**, in New Space… or the Space menu, or with the **Lead workspace** switch in Space Settings › Lead. `Ctrl+Cmd+L` goes to the Lead, or starts one when the space has none. General can't have a Lead.
 
-The Lead can start tasks, send messages to any task of the space (yours and sub-tasks too: those that don't report to it get them marked as the Lead's, and keep asking whoever started them), answer its tasks' questions or hand one to you, propose a merge queue, and note each task's next step and blocker. It also tidies the space's list: it moves tasks up or down, renames them, puts one under another or takes it out, reads a task's last message, interrupts a task's turn (as Esc), and closes finished ones, yours too. A closed task's worktree and branch go only when its pull request is merged, after the checks of Clean Up Worktree…; a task without a repository has its folder moved to the Trash. It never closes a task you have on screen, whose agent is working or waiting on you, or that has unsaved editor changes or a program running. It cannot merge or reach another space. Its rules are written down in the design record [Spaces, anchors and the Lead](design/spaces.md#the-lead).
+The Lead can start tasks, send messages to any task of the space (yours and sub-tasks too: those that don't report to it get them marked as the Lead's, and keep asking whoever started them), answer its tasks' questions or hand one to you, propose a merge queue, and note each task's next step and blocker. It also tidies the space's list: it moves tasks up or down, renames them, puts one under another or takes it out, reads a task's last message, interrupts a task's turn (as Esc), and closes finished ones, yours too. A closed task's worktree and branch go only when its pull request is merged, after the checks of Clean Up Worktree…; a task without a repository has its folder moved to the Trash. It never closes a task you have on screen, whose agent is working or waiting on you, or that has unsaved editor changes or a program running. It can also hold a message for a task until another task's pull request merges ("merge origin/main" once the pull request it builds on lands). The task's row says what it holds ("After #651 merges · a message from the Lead"), the message goes as the Lead's message once the merge shows, Nirux in the background too, and the Lead hears that it went. One that can't go then (no agent to take it yet) is tried again every 10 minutes for a day. If that pull request closes without merging, or either task closes first, the message isn't typed and the Lead hears why. It cannot merge or reach another space. Its rules are written down in the design record [Spaces, anchors and the Lead](design/spaces.md#the-lead).
 
 ### The daily pass
 

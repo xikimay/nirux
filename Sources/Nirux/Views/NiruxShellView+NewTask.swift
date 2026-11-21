@@ -35,7 +35,9 @@ extension NiruxShellView {
         }
         let spaceID = requestedSpaceID ?? activeProfileID
         guard let space = profiles.first(where: { $0.id == spaceID }) else { return nil }
-        let panel = NewTaskPanel()
+        let listModels = sideEffects.listTaskModels
+        let environment = SpaceDefaultsStore.defaults(forSpace: spaceID).effectiveEnvironment
+        let panel = NewTaskPanel { try await listModels($0, environment) }
         newTaskPanel = panel
         let stateDirectory = Persistence.stateDirectory
         // Capture lists in the inner closures too: they are @Sendable, and
@@ -50,7 +52,9 @@ extension NiruxShellView {
         }
         panel.onStart = { [weak self, weak panel] request in
             guard let self, let panel else { return }
-            self.startTask(request) { [weak self, weak panel] outcome in
+            let settings = PersistedSettings.effective(Persistence.load()?.settings)
+            let names = panel.nameSuggestion(for: request, using: settings.generateTaskNames ? self.sideEffects.generateTaskNames : nil)
+            self.startTask(request, names: names) { [weak self, weak panel] outcome in
                 // Its picture, before it closes: it folds toward the
                 // task's row.
                 if case .opened = outcome, let panel { self?.takeTaskSheetPicture(of: panel) }
@@ -157,21 +161,24 @@ extension NiruxShellView {
 
     /// The space's Lead as a Mission parent: its workspace and the column
     /// its Claude runs in (or will, once a restored one resumes), else its
-    /// first terminal.
+    /// Claude column.
     func leadMissionParent(inSpace spaceID: String) -> NewTask.MissionParent? {
         guard let lead = leadWorkspace(inSpace: spaceID) else { return nil }
         let snapshot = ProcessSnapshot()
         let terminals = lead.columns.filter { !$0.isClosing && $0.agentUUID != nil && ($0.pty != nil || $0.deferredAgent != nil) }
-        let claude = terminals.first { column in
-            column.deferredAgent?.processName == "claude" || column.pty?.foregroundProcessName(snapshot: snapshot) == "claude"
+        func runsClaude(_ column: ColumnState) -> Bool {
+            column.isRestartingShell || column.runsClaude(snapshot: snapshot)
         }
-        guard let agentUUID = (claude ?? terminals.first)?.agentUUID else { return nil }
+        let designated = lead.leadTerminal
+        let parent = designated.flatMap { runsClaude($0) ? $0 : nil } ?? terminals.first(where: runsClaude)
+            ?? designated ?? terminals.first
+        guard let agentUUID = parent?.agentUUID else { return nil }
         return NewTask.MissionParent(workspaceID: lead.id, agentUUID: agentUUID)
     }
 
     /// The agent a space's tasks start with unless the sheet says otherwise:
     /// its default (Space Settings › Defaults), else Claude Code.
-    func defaultTaskAgent(forSpace spaceID: String) -> NiruxApp.WorkspaceAgent {
+    func defaultTaskAgent(forSpace spaceID: String) -> CodingAgent {
         SpaceDefaultsStore.defaults(forSpace: spaceID).taskAgent
     }
 
@@ -224,13 +231,11 @@ extension NiruxShellView {
     /// it comes back to show a failure. `opened` follows `.opened`, once the
     /// workspace is there, with its id and what was made.
     func startTask(
-        _ request: NewTask.Request,
+        _ request: NewTask.Request, names: Task<TaskNameSuggestion?, Never>? = nil,
         completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void,
         opened: (@MainActor (_ workspaceID: String, _ created: CreatedTask) -> Void)? = nil
     ) {
-        Self.createTask(
-            request, handoverFilename: Self.handoverFilename(for: request.agent), routesByAnchor: routesByAnchor
-        ) { [weak self] result in
+        createTask(request, names: names) { [weak self] named, result in
             guard let self else { return }
             switch result {
             case .failed(let message):
@@ -238,9 +243,8 @@ extension NiruxShellView {
             case .fetchFailed(let message):
                 completion(.fetchFailed(message))
             case .created(let created):
-                // The sheet goes first: the new terminal then takes the focus.
                 completion(.opened)
-                let workspaceID = self.openTaskWorkspace(request, created)
+                let workspaceID = self.openTaskWorkspace(named, created)
                 opened?(workspaceID, created)
             }
         }
@@ -251,6 +255,7 @@ extension NiruxShellView {
     /// space, else the sheet's, whatever space anchors a folder above it.
     @discardableResult
     private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTask) -> String {
+        let bornAt = Date()
         var decision = decideSpace(
             identity: created.identity, parentWorkspaceID: request.parentWorkspaceID ?? request.reportsTo?.workspaceID,
             startedFromSpaceID: request.projectID
@@ -267,20 +272,22 @@ extension NiruxShellView {
         let childAgentUUID = UUID().uuidString
         // The branch, or the folder's name as it was made.
         let label = created.checkedOutBranch ?? created.folderName ?? request.name
-        let title = NewTask.workspaceTitle(description: request.description) ?? label
+        let title = request.workspaceTitle ?? label
         // A Mission names its child by its branch: a folder task has none,
         // so its title stands in ("Fix login", not "Fix login (branch Fix
         // login 2)"), and `--mission tell --branch` takes that title.
         let mission = request.reportsTo.flatMap { parent in
             createMission(
                 parent: parent, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
-                agent: request.agent, branch: created.folderName == nil ? label : title, reportsToTask: request.reportsToTask
+                agent: request.agent, branch: created.folderName == nil ? label : title, reportsToTask: request.reportsToTask,
+                startedByParent: request.startedByLead || request.startedByTaskAgent
             )
         }
         addWorkspace(
             title: title,
+            purpose: request.goal,
             cwd: created.workingDirectory,
-            agent: request.agent,
+            agent: request.agent, agentModel: request.model,
             profileID: decision.spaceID,
             workspaceID: childWorkspaceID,
             initialAgentUUID: childAgentUUID,
@@ -299,7 +306,10 @@ extension NiruxShellView {
             activate: request.opensInFront,
             fadesBackdrop: pendingTaskSheet != nil
         )
-        if let born = workspaces.first(where: { $0.id == childWorkspaceID }) { playTaskBirth(of: born) }
+        if let born = workspaces.first(where: { $0.id == childWorkspaceID }) {
+            recordRequest(request, of: born, bornAt: bornAt)
+            playTaskBirth(of: born)
+        }
         // The agent that proposed it hears what the user started.
         if let proposer = request.proposedByTaskAgent {
             tellProposer(proposer, mission?.reportsToTask == true
@@ -357,15 +367,10 @@ extension NiruxShellView {
     }
 
     enum TaskResult: Sendable {
+        case fetchFailed(String)
         case created(CreatedTask)
         case failed(String)
-        case fetchFailed(String)
     }
-
-    /// Handover files never belong in a commit: the repository ignores them
-    /// (see `GitWorktree.ensureExcluded`), in any folder, since a task's
-    /// workspace may open in a folder of the repository.
-    nonisolated static let excludedHandovers = HandoverFile.filenames
 
     /// Off the main thread through nonisolated functions, so the closures
     /// can't inherit this view's main-actor isolation (see `runOffMain` in
@@ -394,25 +399,46 @@ extension NiruxShellView {
         }
     }
 
-    nonisolated private static func createTask(
-        _ request: NewTask.Request,
-        handoverFilename: String,
-        routesByAnchor: Bool,
-        completion: @escaping @MainActor @Sendable (TaskResult) -> Void
+    func createTask(_ request: NewTask.Request, completion: @escaping @MainActor @Sendable (TaskResult) -> Void) {
+        createTask(request, names: nil) { _, result in completion(result) }
+    }
+
+    private func createTask(
+        _ request: NewTask.Request, names: Task<TaskNameSuggestion?, Never>?,
+        completion: @escaping @MainActor @Sendable (NewTask.Request, TaskResult) -> Void
     ) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result: TaskResult
-            switch request.place {
-            case .worktree(let target, let branch):
-                result = makeTaskWorktree(
-                    request, target: target, branch: branch, handoverFilename: handoverFilename, routesByAnchor: routesByAnchor
-                )
-            case .folder(let parent, let name, let makesParent):
-                result = makeTaskFolder(request, parent: parent, name: name, makesParent: makesParent, handoverFilename: handoverFilename)
+        Task {
+            if request.fetchesFirst, let target = request.target, let remote = target.remoteBranch {
+                let error = await withCheckedContinuation { continuation in
+                    Self.offMain({ GitWorktree.fetch(branch: remote, repoRoot: target.repository) }) {
+                        continuation.resume(returning: $0)
+                    }
+                }
+                if let error { return completion(request, .fetchFailed(error)) }
             }
-            DispatchQueue.main.async { @MainActor in
-                completion(result)
+            let named = request.applying(await names?.value)
+            let destination = named.target.map { $0.repository + "." + named.name.replacingOccurrences(of: "/", with: "-").lowercased() }
+            if let destination, !taskWorktreesBeingCreated.insert(destination).inserted {
+                return completion(named, .failed("Another task is creating this worktree. Try again once it opens."))
             }
+            let routes = routesByAnchor
+            Self.offMain({
+                Self.createTask(named, handoverFilename: HandoverFile.filename(for: named.agent), routesByAnchor: routes)
+            }) { [weak self] result in
+                if let destination { self?.taskWorktreesBeingCreated.remove(destination) }
+                completion(named, result)
+            }
+        }
+    }
+
+    nonisolated private static func createTask(
+        _ request: NewTask.Request, handoverFilename: String, routesByAnchor: Bool
+    ) -> TaskResult {
+        switch request.place {
+        case .worktree(let target, let branch):
+            makeTaskWorktree(request, target: target, branch: branch, handoverFilename: handoverFilename, routesByAnchor: routesByAnchor)
+        case .folder(let parent, let name, let makesParent):
+            makeTaskFolder(request, parent: parent, name: name, makesParent: makesParent, handoverFilename: handoverFilename)
         }
     }
 
@@ -424,7 +450,7 @@ extension NiruxShellView {
         // Checked before the folder is made, with the longest name it may
         // get: a refusal leaves nothing behind.
         let longest = NewTask.folderHandover(
-            description: request.description, template: request.template,
+            description: request.description, title: request.title, template: request.template,
             folder: (parent as NSString).appendingPathComponent("\(name) \(NewTask.maxFolderAttempts)")
         )
         guard longest.utf8.count <= HandoverFile.maxBytes else {
@@ -447,7 +473,9 @@ extension NiruxShellView {
         case .success(let path): folder = path
         case .failure(let error): return .failed(error.message)
         }
-        let handover = NewTask.folderHandover(description: request.description, template: request.template, folder: folder)
+        let handover = NewTask.folderHandover(
+            description: request.description, title: request.title, template: request.template, folder: folder
+        )
         var handoverError: HandoverFile.TransferError?
         if case .failure(let failure) = HandoverFile.deliver(handover, toDirectory: folder, filename: handoverFilename) {
             handoverError = failure
@@ -462,20 +490,13 @@ extension NiruxShellView {
         _ request: NewTask.Request, target: NewTask.Target, branch: String, handoverFilename: String, routesByAnchor: Bool
     ) -> TaskResult {
         let start: NewTask.Start
-        if let remoteBranch = target.remoteBranch, let name = target.remoteBranchName {
-            if request.fetchesFirst {
-                if let error = GitWorktree.fetch(branch: remoteBranch, repoRoot: target.repository) {
-                    return .fetchFailed(error)
-                }
-                start = .fetched(name)
-            } else {
-                start = .lastFetched(name)
-            }
+        if let name = target.remoteBranchName {
+            start = request.fetchesFirst ? .fetched(name) : .lastFetched(name)
         } else {
             start = .checkoutHead(repository: target.repository, branch: target.checkoutBranch)
         }
         let handover = NewTask.handover(
-            description: request.description, template: request.template, branch: branch,
+            description: request.description, title: request.title, template: request.template, branch: branch,
             start: start, subdirectory: target.subdirectory
         )
         guard handover.utf8.count <= HandoverFile.maxBytes else {
@@ -483,7 +504,7 @@ extension NiruxShellView {
         }
         let (path, error) = GitWorktree.create(branch: branch, repoRoot: target.repository, newBranchFrom: target.startPoint)
         guard let path else { return .failed(error ?? "git worktree add failed") }
-        GitWorktree.ensureExcluded(excludedHandovers, repoRoot: target.repository)
+        GitWorktree.ensureExcluded(HandoverFile.filenames, repoRoot: target.repository)
         let workingDirectory = NewTask.workingDirectory(in: path, subdirectory: target.subdirectory)
         // Where the agent starts: its prompt names the file, not a path.
         var handoverError: HandoverFile.TransferError?

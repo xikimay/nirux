@@ -113,7 +113,7 @@ extension ProjectBoard {
         var listed: Set<String> = []
         var listedPaths: Set<String> = []
         for folder in folders where snapshot.folders[folder] == nil {
-            let comparable = NiruxShellView.comparablePath(folder)
+            let comparable = folder.comparablePath
             snapshot.folders[folder] = comparable
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory), isDirectory.boolValue else {
@@ -125,11 +125,11 @@ extension ProjectBoard {
             guard !isInListedCheckout(comparable, listed: listedPaths),
                   let listing = WorktreeCleanup.worktreeListing(in: folder, tools: tools),
                   let first = listing.first,
-                  listed.insert(NiruxShellView.comparablePath(first.path)).inserted
+                  listed.insert(first.path.comparablePath).inserted
             else { continue }
             let worktrees = listing.map { entry -> WorktreeCleanup.ListedWorktree in
                 var resolved = entry
-                resolved.path = NiruxShellView.comparablePath(entry.path)
+                resolved.path = entry.path.comparablePath
                 // A folder deleted by hand that git doesn't flag yet: the
                 // board would otherwise list again and again to see it go.
                 if !entry.isBare, !FileManager.default.fileExists(atPath: entry.path) { resolved.isPrunable = true }
@@ -144,7 +144,7 @@ extension ProjectBoard {
             snapshot.repositories.append(LocalRepository(
                 worktrees: worktrees,
                 remotes: remotes.status == 0 ? parseRemotes(remotes.stdout) : [],
-                commonDir: commonDir.status == 0 && commonDirPath.hasPrefix("/") ? NiruxShellView.comparablePath(commonDirPath) : nil
+                commonDir: commonDir.status == 0 && commonDirPath.hasPrefix("/") ? commonDirPath.comparablePath : nil
             ))
         }
         return snapshot

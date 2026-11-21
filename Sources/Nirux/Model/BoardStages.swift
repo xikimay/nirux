@@ -225,6 +225,7 @@ extension BoardStages {
         var phrase: Phrase
         /// "#52", "#53 · 2/3", "no PR yet"; empty without a repository.
         var pullRequest: String
+        var pullRequestNumber: Int?
         /// What the line's clock counts from: its turn's start while an
         /// agent works, its checks' while it waits for them, else its last
         /// activity. Nil where no clock of its own runs: a line that is
@@ -240,16 +241,22 @@ extension BoardStages {
         /// without a task.
         var hasTask = true
         /// Why its agent waits for the user, for its icon's glyph.
-        var reason: StateIcon.Reason = .question
+        var reason: AgentInputReason = .question
         /// Its agent asked the agent that started it, and the line says so
         /// (a grey ring and a question, as on the sidebar's row).
         var asksParent = false
+        /// Waiting starts in dependency order, flat even when one waits for another.
+        var following: [Line] = []
     }
 }
 
 // MARK: - What a line is derived from
 
 extension BoardStages {
+    enum InputAction: String, Equatable, Sendable {
+        case reply = "Reply", decide = "Decide", permission = "Review permission", plan = "Review plan", inspect = "Check terminal"
+    }
+
     /// What the task's agents do, the most pressing first, as its sidebar
     /// row reads them. Not `ProjectBoard.AgentState`, which the merge
     /// queue reads: there only a dialog waits, here a turn that ended on a
@@ -257,17 +264,16 @@ extension BoardStages {
     enum Activity: Equatable, Sendable {
         /// An agent waits for the user: "a question", the command to allow;
         /// `reason`, its icon's glyph, as the row's.
-        case needsYou(String, reason: StateIcon.Reason = .question)
+        case needsYou(String, action: InputAction = .reply)
         /// An agent stopped: "Stopped on an API error".
         case failed(String)
         /// An agent asked the agent that started it, named here, and
         /// waits for its answer.
-        case asking(String)
+        case asking(String, question: String? = nil)
         /// An agent works, since when if known.
         case working(since: TimeInterval?)
         /// At its prompt, or no agent.
         case idle
-
     }
 
     /// The pull request's checks as the merge queue counts them.
@@ -318,10 +324,25 @@ extension BoardStages {
         }
     }
 
+    enum GitHubStatus: Equatable, Sendable {
+        case current, stale, unavailable
+
+        var notice: String? {
+            switch self {
+            case .current: nil
+            case .stale: "GitHub status outdated"
+            case .unavailable: "GitHub status unavailable"
+            }
+        }
+    }
+
     struct PullRequest: Equatable, Sendable {
         var number: Int
         var isMerged = false
         var isDraft = false
+        var autoMerges = false
+        var mergeIsBlocked = false
+        var mergeabilityUnknown = false
         var isConflicting = false
         /// The branch it targets.
         var base: String
@@ -385,6 +406,7 @@ extension BoardStages {
 
     struct Queue: Equatable, Sendable {
         var list = QueueList.none
+        var awaitsTurn = false
         /// The queue's list holds it, or the queue works on it: not one
         /// to retarget.
         var holds: Bool { order != nil || step != nil }
@@ -428,6 +450,8 @@ extension BoardStages {
         var hasTask = true
         var isArchived = false
         var activity: Activity = .idle
+        var isParked = false
+        var gitHubStatus: GitHubStatus = .current
         /// Each review pass's latest run, against the current HEAD.
         var reviews: ReviewBadges?
         /// The passes whose turn isn't over: a pass is recorded as it starts.
@@ -473,7 +497,10 @@ extension BoardStages {
 extension BoardStages {
     static func line(_ facts: Facts, rules: Rules = Rules()) -> Line {
         let station = station(of: facts, rules: rules)
-        let reading = reading(of: facts, at: station, rules: rules)
+        var reading = reading(of: facts, at: station, rules: rules)
+        if let note = facts.nextStep.flatMap({ AgentText.clean($0, maxLength: $0.count) }), reading.phrase.text != note {
+            reading.phrase.detail = [reading.phrase.detail, "Next step · " + note].compactMap { $0 }.joined(separator: "\n")
+        }
         let rail = rail(of: facts, at: station, rules: rules)
         let offer = rail == nil ? nil : offer(facts)
         return Line(
@@ -484,6 +511,7 @@ extension BoardStages {
             rail: rail,
             phrase: reading.phrase,
             pullRequest: pullRequestText(facts),
+            pullRequestNumber: facts.pullRequest?.number,
             since: reading.since,
             offer: offer,
             tooltips: tooltips(of: facts, rail: rail, offer: offer, rules: rules),
@@ -594,7 +622,7 @@ extension BoardStages {
     /// whoever posted it can't send a click elsewhere.
     static func isGitHubAddress(_ url: String) -> Bool {
         guard let parsed = URL(string: url) else { return false }
-        return parsed.scheme == "https" && parsed.host?.lowercased() == "github.com"
+        return parsed.scheme == "https" && parsed.host?.lowercased() == GitHub.host
     }
 
     /// This many checks under the pointer, then how many more: a tooltip
@@ -653,7 +681,7 @@ extension BoardStages {
     /// "#52", "#53 · 2/3" in a straight stack, "#53 · on #52" in a fork.
     private static func pullRequestText(_ facts: Facts) -> String {
         guard facts.hasRepository else { return "" }
-        guard let pullRequest = facts.pullRequest else { return "no PR yet" }
+        guard let pullRequest = facts.pullRequest else { return facts.gitHubStatus == .current ? "no PR yet" : "PR unknown" }
         return (["#\(pullRequest.number)"] + (pullRequest.stack?.label.map { [$0] } ?? [])).joined(separator: " · ")
     }
 
@@ -667,7 +695,7 @@ extension BoardStages {
         var since: TimeInterval?
         /// Set by the branch that read it: why its agent waits, and whether
         /// it says the agent asks its parent.
-        var reason: StateIcon.Reason = .question
+        var reason: AgentInputReason = .question
         var asksParent = false
 
         init(_ state: State, _ text: String, since: TimeInterval? = nil, link: Link? = nil, detail: String? = nil) {
@@ -677,35 +705,44 @@ extension BoardStages {
         }
     }
 
-    /// The first that holds, in the sidebar row's order:
-    /// 1. what its agents say: they need the user, they stopped, they work;
-    /// 2. the queue working on its pull request;
-    /// 3. what is wrong with it now (a conflict, a red check), then the
-    ///    last queue's stop: the present comes before what stopped a queue;
-    /// 4. its agent asking its parent; a blocker;
-    /// 5. its pull request merged, or on a merged base;
-    /// 6. what its station waits for; at rest, the next step, where the
-    ///    task stands, else what the station needs.
     private static func reading(of facts: Facts, at station: Station, rules: Rules) -> Reading {
         let last = facts.lastActivityAt
         switch facts.activity {
-        case .needsYou(let what, let reason):
-            var reading = Reading(.needsYou, text(what).map { "Needs you · \($0)" } ?? "Needs you", since: last)
-            reading.reason = reason
+        case .needsYou(let what, let action):
+            var reading = Reading(.needsYou, text(what).map { "\(action.rawValue) · \($0)" } ?? action.rawValue, since: last)
+            reading.reason = action == .permission ? .command : .question
             return reading
         case .failed(let what):
             return Reading(.failed, text(what) ?? "Stopped", since: last)
         case .working(let since):
-            return Reading(.working, text(facts.summary) ?? "Working", since: since ?? last)
-        case .asking, .idle:
+            let conflict = facts.pullRequest.flatMap { pr in
+                facts.gitHubStatus == .current && !pr.isMerged && pr.isConflicting ? "Conflict with " + branch(pr.base) : nil
+            }
+            return Reading(.working, ["Agent working", conflict ?? text(facts.summary)].compactMap { $0 }.joined(separator: " · "), since: since ?? last)
+        case .asking(let parent, let question):
+            let owner = "Awaiting " + (text(parent) ?? "parent") + " reply"
+            var reading = Reading(.waiting, [owner, text(question)].compactMap { $0 }.joined(separator: " · "), since: last)
+            reading.asksParent = true
+            return reading
+        case .idle:
             break
         }
         let pullRequest = facts.pullRequest
-        if let pullRequest {
+        if pullRequest != nil {
             switch facts.queue.step {
-            case .checks(let label)?, .merge(let label)?: return Reading(.waiting, text(label) ?? "In the queue")
+            case .checks(let label)?, .merge(let label)?:
+                return Reading(.waiting, "Auto · " + (text(label) ?? "In the queue"))
             case nil: break
             }
+        }
+        if facts.isParked || facts.resume?.kind == .afterRelaunch {
+            return Reading(.idle, facts.isParked ? "Parked" : "Paused · Resume", since: last)
+        }
+        if let notice = facts.gitHubStatus.notice, pullRequest?.isMerged != true {
+            if let blocker = text(facts.blocker) { return Reading(.blocked, blocker, detail: notice) }
+            return Reading(.idle, notice)
+        }
+        if let pullRequest {
             if !pullRequest.isMerged, let problem = problem(of: pullRequest, flakyReason: text(facts.flakyReason)) {
                 return Reading(.failed, problem.text, since: last, detail: problem.detail)
             }
@@ -713,14 +750,6 @@ extension BoardStages {
                 let label = text(stop.label).map { "Queue stopped: \($0)" } ?? "Queue stopped"
                 return Reading(.failed, label, since: last, detail: text(stop.message))
             }
-        }
-        if case .asking(let parent) = facts.activity {
-            var reading = Reading(.waiting, text(parent).map { "Asking \($0)" } ?? "Asking its parent", since: last)
-            reading.asksParent = true
-            return reading
-        }
-        if let blocker = text(facts.blocker) { return Reading(.blocked, "Blocked · \(blocker)") }
-        if let pullRequest {
             if pullRequest.isMerged {
                 switch facts.cleanUp {
                 case .offered?: return Reading(.merged, "Merged · \(Link.cleanUp.title)", link: .cleanUp)
@@ -740,7 +769,12 @@ extension BoardStages {
                     .idle, "Base #\(merged.number) merged · \(link.title)", since: last, link: blocked == nil ? link : nil, detail: blocked
                 )
             }
-            let parent = pullRequest.stack?.parent
+            if let parent = pullRequest.stack?.parent { return Reading(.waiting, "Lands after #\(parent)", since: last) }
+            if let order = facts.queue.order {
+                return Reading(.waiting, facts.queue.awaitsTurn ? "Queue place \(order) · automatic" : "Queued · awaiting Start")
+            }
+            if let request = pullRequest.reviewRequest { return Reading(.idle, request.text, since: last) }
+            if let blocker = text(facts.blocker) { return Reading(.blocked, blocker) }
             switch station {
             case .checks:
                 // Pending: red checks were said above, green ones are at Merge.
@@ -748,30 +782,34 @@ extension BoardStages {
                 var missing: [String] = []
                 if case .pending(let start, let names) = pullRequest.checks { (since, missing) = (start, names.compactMap(text)) }
                 let checks = missing.isEmpty ? "Checks running" : "No \(missing.joined(separator: ", ")) run yet"
-                return Reading(.waiting, checks + (parent.map { " · lands after #\($0)" } ?? ""), since: since)
+                return Reading(.waiting, checks, since: since)
             case .merge:
                 // What it passed, as far as anything was asked of it.
                 let reviewed = !rules.requiredReviews.isEmpty && reviewGaps(facts, rules: rules).isEmpty
                 let passed = [reviewed ? "reviews done" : nil, pullRequest.checks == .passed ? "checks green" : nil]
                     .compactMap { $0 }.joined(separator: ", ")
                 let with = { (word: String) in passed.isEmpty ? word : "\(word) · \(passed)" }
-                if let parent { return Reading(.waiting, "Lands after #\(parent)", since: last) }
                 if pullRequest.isDraft { return Reading(.idle, with("Draft"), since: last) }
                 if !pullRequest.isOnBaseBranch { return Reading(.idle, "Targets \(branch(pullRequest.base))", since: last) }
-                if let request = pullRequest.reviewRequest { return Reading(.idle, request.text, since: last) }
-                return Reading(.ready, with("Ready"))
+                if pullRequest.mergeIsBlocked { return Reading(.blocked, "Merge blocked by GitHub") }
+                if pullRequest.mergeabilityUnknown { return Reading(.waiting, "GitHub checking mergeability") }
+                if pullRequest.autoMerges { return Reading(.waiting, with("GitHub auto-merge")) }
+                return Reading(.ready, with("Merge manually"))
             case .code, .reviews:
                 break
             }
         }
+        if let blocker = text(facts.blocker) { return Reading(.blocked, blocker) }
         return Reading(.idle, atRest(facts, at: station, rules: rules), since: last)
     }
 
     /// What an idle line says: the next step, where the task stands, else
     /// what its station needs.
     private static func atRest(_ facts: Facts, at station: Station, rules: Rules) -> String {
-        if let next = text(facts.nextStep) { return "Next · \(next)" }
-        if let line = text(facts.summary) ?? text(facts.statusLine) { return line }
+        if facts.pullRequest == nil {
+            if let next = text(facts.nextStep) { return next }
+            if let line = text(facts.summary) ?? text(facts.statusLine) { return line }
+        }
         if facts.isArchived { return "Archived" }
         switch station {
         case .code:
@@ -793,7 +831,7 @@ extension BoardStages {
     /// conflicts with its base, a check is red. Only a likely flake says
     /// more than which checks.
     private static func problem(of pullRequest: PullRequest, flakyReason: String?) -> (text: String, detail: String?)? {
-        if pullRequest.isConflicting { return ("Conflicts with \(branch(pullRequest.base))", nil) }
+        if pullRequest.isConflicting { return ("Resolve conflict with \(branch(pullRequest.base))", nil) }
         guard case .failed(let failed) = pullRequest.checks else { return nil }
         if let flakyReason { return ("Checks failed · likely flaky", flakyReason) }
         let names = failed.compactMap(text)

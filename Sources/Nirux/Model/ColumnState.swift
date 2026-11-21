@@ -23,6 +23,8 @@ final class ColumnState {
     private(set) var projectBoard: ProjectBoardController?
     /// The branch this column reviews.
     private(set) var branchReview: BranchReviewController?
+    /// A waiting task's only column, until it starts: what it waits for.
+    private(set) var waitingTask: WaitingTaskView?
     /// Column width as a fraction of the columns viewport (0.15…2.0).
     /// Freeform (drag the resize handles); the ColumnWidth presets are just
     /// named stops the width cycler snaps to.
@@ -39,6 +41,8 @@ final class ColumnState {
     /// An agent that says its state (OSC 7501) reported its turn over:
     /// Codex done or idle, Antigravity done. A Mission message may go to it.
     var onProgramTurnOver: (() -> Void)?
+    /// The user typed a prompt to its agent (`PtySession.onUserPrompt`).
+    var onUserPrompt: ((TimeInterval) -> Void)?
 
     /// Fires when the user cmd-clicks an http(s) link in the terminal —
     /// the workspace opens it in a browser column.
@@ -81,7 +85,6 @@ final class ColumnState {
     }
 
     // MARK: - Header (pushes the terminal down)
-    static let boringTitles: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
     /// A terminal column's header; the other types own theirs.
     private(set) var terminalHeader: ColumnHeaderView?
     /// The column's header, whatever its type (see `ColumnHeaderView`).
@@ -113,12 +116,23 @@ final class ColumnState {
         header?.isFocused = isFocused
     }
 
+    /// Session History treats this column as the holder while the old Lead is stopping.
+    var relaunchingLeadSessionID: String?
+    var leadSafetyAtLaunch: ClaudeSpaceSettings.File?
     /// Spec needed to respawn the shell after it exits.
     private var terminalSpec: (cwd: String, shellArgs: [String], environment: [String: String])?
     /// The first shell start is on its way (or done): a column restored
     /// without its agent starts one only when the agent resumes.
     private(set) var isShellStartScheduled = false
     private var shellExitedOverlay: ShellExitedOverlay?
+    /// Nirux ends the shell to start it again (`restartTerminal`): its exit
+    /// shows no "Session ended", and nothing else starts it meanwhile.
+    private(set) var isRestartingShell = false
+    private(set) var shellGeneration = 0
+    // A hung-up shell can exit before its jobs. Keep their identities
+    // across retries, when a fresh process tree can no longer find them.
+    private var restartProcesses: [ProcessInstance: String] = [:]
+    var isShowingShellExit: Bool { shellExitedOverlay?.isHidden == false }
     /// An agent died mid-turn in the shell that still runs here
     /// (ColumnState+StuckAgent.swift).
     var agentExitOverlay: ShellExitedOverlay?
@@ -186,8 +200,8 @@ final class ColumnState {
     func updateHeaderTitle(snapshot: @autoclosure () -> ProcessSnapshot) {
         guard let header = terminalHeader else { return }
         if let deferredAgent {
-            header.title = deferredAgent.processName
-        } else if let termTitle = terminalTitle, !termTitle.isEmpty, !Self.boringTitles.contains(termTitle) {
+            header.title = deferredAgent.launch.agent.rawValue
+        } else if let termTitle = terminalTitle, !termTitle.isEmpty, !Shell.isShell(termTitle) {
             header.title = termTitle
         } else {
             header.title = pty?.foregroundProcessName(snapshot: snapshot()) ?? "shell"
@@ -203,7 +217,7 @@ final class ColumnState {
     /// task's station.
     func updateHeaderAgentState(_ column: ColumnInfo, wait: AgentWait?, now: TimeInterval, station: BoardStages.Station?) {
         guard let header = terminalHeader else { return }
-        header.icon = .terminal(processName: column.deferredAgent?.processName ?? column.processName)
+        header.icon = .terminal(processName: column.deferredAgent?.agent.rawValue ?? column.processName)
         header.status = .agent(column, wait: wait, now: now, station: station)
     }
 
@@ -263,8 +277,10 @@ final class ColumnState {
     }
 
     convenience init(cwd: String, environment: [String: String] = [:]) {
-        self.init(cwd: cwd, shellArgs: ["-l"], environment: environment)
+        self.init(cwd: cwd, shellArgs: Self.plainShellArgs, environment: environment)
     }
+
+    private static let plainShellArgs = ["-l"]
 
     /// Init for a terminal that runs a command immediately (e.g. claude --resume <id>).
     /// When the command exits, drops into an interactive shell.
@@ -430,15 +446,18 @@ final class ColumnState {
         ptySession.onApprovalsAbandoned = { [weak self] requests in
             requests.forEach { AgentHookCenter.shared.release($0, agentUUID: self?.agentUUID) }
         }
+        ptySession.onUserPrompt = { [weak self] typedAt in
+            self?.onUserPrompt?(typedAt)
+        }
         // Only the agent's own, in front: any program can print the sequence.
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
             guard let self, let ptySession else { return }
-            guard status.process != AgentProgramStatus.codex else { return noteCodexStatus(status, in: ptySession) }
+            guard status.agent != .codex else { return noteCodexStatus(status, in: ptySession) }
             // One read on an empty process table goes to the agy last seen in front.
             let snapshot = readsProcesses()
             guard ptySession.isNewProgramStatus(status),
                   let agy = snapshot.isEmpty ? lastForegroundAgent : ptySession.foregroundProcess(snapshot: snapshot),
-                  agy.name == status.process
+                  agy.agent == status.agent
             else { return }
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
@@ -499,10 +518,9 @@ final class ColumnState {
     var launchDirectory: String? { terminalSpec?.cwd }
     var launchEnvironment: [String: String]? { terminalSpec?.environment }
 
-    /// Where, and with what environment, the shell of a column created
-    /// without one starts. No effect once it started.
+    /// Directory and environment for the next shell in this terminal.
     func setLaunch(directory: String, environment: [String: String]) {
-        guard !isShellStartScheduled, let spec = terminalSpec else { return }
+        guard let spec = terminalSpec else { return }
         terminalSpec = (directory, spec.shellArgs, environment)
     }
 
@@ -537,6 +555,17 @@ final class ColumnState {
         board.autoresizingMask = [.width, .height]
         view.addSubview(board)
         self.projectBoard = projectBoard
+    }
+
+    /// A waiting task's column: no terminal, what it waits for.
+    init(waitingTask: WaitingTaskView) {
+        agentUUID = nil
+        view = Self.filled(NSView())
+
+        waitingTask.frame = view.bounds
+        waitingTask.autoresizingMask = [.width, .height]
+        view.addSubview(waitingTask)
+        self.waitingTask = waitingTask
     }
 
     /// Branch Review column: one branch, read-only.
@@ -588,7 +617,7 @@ final class ColumnState {
     /// own, not a nested agy's that its shell tool started in its job.
     func captureAgySession(sessionID: String?, emitterProcess: ProcessInstance?, snapshot: ProcessSnapshot) -> Bool {
         guard let place = hookEmitterPlace(emitterProcess, snapshot: snapshot),
-              !AgentHookCenter.isHeadlessAgy(place.foreground) else { return false }
+              place.foreground?.headlessAgent != .agy else { return false }
         return agySessionTracker.capture(
             sessionID: sessionID, emitterBelongsToForegroundJob: emitterProcess == place.foreground?.instance,
             foregroundProcess: place.foreground
@@ -633,7 +662,7 @@ final class ColumnState {
     private func noteCodexStatus(_ status: AgentProgramStatus, in pty: PtySession) {
         let snapshot = ProcessSnapshot()
         let front = pty.foregroundProcess(snapshot: snapshot)
-        guard snapshot.isEmpty || front?.name == status.process else { return }
+        guard snapshot.isEmpty || front?.agent == status.agent else { return }
         pty.noteCodexStatus(status, from: snapshot.isEmpty ? nil : front?.instance)
         if [.done, .idle].contains(status.state) { onProgramTurnOver?() }
     }
@@ -651,8 +680,7 @@ final class ColumnState {
     /// Whether this column's `codex` will never prove a thread: one started
     /// without a prompt, and not resumed (`CodexLaunch.canProve`).
     func runsUnprovableCodex(snapshot: ProcessSnapshot) -> Bool {
-        guard let codex = pty?.foregroundProcess(snapshot: snapshot), codex.name == AgentProgramStatus.codex,
-              !AgentHookCenter.isHeadlessCodex(codex) else { return false }
+        guard let codex = pty?.foregroundProcess(snapshot: snapshot), codex.interactiveAgent == .codex else { return false }
         return provenCodexSessionID(of: codex) == nil && !CodexLaunch.canProve(codex)
     }
 
@@ -665,6 +693,13 @@ final class ColumnState {
 
     func prepareClaudeResume(sessionID: String) {
         claudeSessionTracker.prepareResume(sessionID: sessionID)
+    }
+
+    private var planningSession: (process: ProcessInstance, id: String)?
+
+    func isPlanning(in foreground: ForegroundProcess?) -> Bool {
+        guard let planningSession, let foreground, foreground.instance == planningSession.process else { return false }
+        return claudeSessionTracker.boundSessionID(for: foreground.instance) == planningSession.id
     }
 
     /// Whether a Claude hook event comes from this column's own `claude`
@@ -690,11 +725,15 @@ final class ColumnState {
         // Follow the transcript of the session now bound to the foreground
         // `claude` — never one a subagent, teammate or nested run reports.
         if admission != .rejected, event.agentID == nil,
-           let transcriptPath = event.transcriptPath.flatMap(AgentHookEvent.validTranscriptPath),
            let sessionID = event.sessionID,
            let foregroundProcess,
            claudeSessionTracker.boundSessionID(for: foregroundProcess.instance) == sessionID {
-            followClaudeTranscript(at: transcriptPath, sessionID: sessionID, process: foregroundProcess.instance)
+            if event.name == .sessionEnd || event.name == .sessionStart || event.permissionMode != nil {
+                planningSession = event.name != .sessionEnd && event.permissionMode == "plan" ? (foregroundProcess.instance, sessionID) : nil
+            }
+            if let path = event.transcriptPath.flatMap(AgentHookEvent.validTranscriptPath) {
+                followClaudeTranscript(at: path, sessionID: sessionID, process: foregroundProcess.instance)
+            }
         }
         return admission
     }
@@ -777,7 +816,7 @@ final class ColumnState {
 
     private func showShellExitedOverlay() {
         // Column closing also detaches the view — no overlay on a dead column.
-        guard view.window != nil, let terminal = terminalView else { return }
+        guard !isRestartingShell, view.window != nil, let terminal = terminalView else { return }
         // The overlay would cover the find bar while its field kept the
         // keyboard, and Enter would navigate instead of restarting.
         closeFindBar()
@@ -793,21 +832,58 @@ final class ColumnState {
         shellExitedOverlay?.isHidden = false
     }
 
-    /// Respawn the shell with the original spec after it exited. No-op while
-    /// the shell is alive. The new shell starts at the last known grid size
-    /// and the terminal surface keeps its scrollback.
-    func restartShell() {
-        guard pty?.hasExited == true, let spec = terminalSpec else { return }
+    /// Respawn the shell with the original spec after it exited, or running
+    /// `command` in its place. No-op while the shell is alive. The new shell
+    /// starts at the last known grid size and the terminal surface keeps its
+    /// scrollback.
+    func restartShell(running command: String? = nil) {
+        guard !isRestartingShell, pty?.hasExited == true, let spec = terminalSpec else { return }
         shellExitedOverlay?.isHidden = true
         let size = pty?.lastSize ?? (cols: 80, rows: 24)
         pty?.start(
             shell: PtySession.defaultShell,
-            args: spec.shellArgs,
+            args: command.map(Self.commandShellArgs) ?? spec.shellArgs,
             cwd: spec.cwd,
             cols: size.cols > 0 ? size.cols : 80,
             rows: size.rows > 0 ? size.rows : 24,
             environment: spec.environment
         )
+    }
+
+    /// A restored column starts directly. A live terminal waits for its
+    /// shell and jobs to exit before the caller can authorize the new launch.
+    func restartTerminal(
+        running command: String, canStop: @MainActor () -> Bool = { true }, starts: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Bool
+    ) {
+        guard !isRestartingShell, terminalSpec != nil else { return }
+        let shellName = (PtySession.defaultShell as NSString).lastPathComponent
+        var processes = pty?.shellPID.map { ProcessSnapshot().tree(of: $0) } ?? []
+        if let pid = pty?.shellPID, !processes.contains(where: { $0.process.pid == pid }),
+           let shell = ProcessInstance.running(pid: pid) {
+            processes.append((shell, shellName))
+        }
+        guard canStop(), let spec = terminalSpec else { return }
+        shellGeneration += 1
+        restoredColumn = nil
+        defer { terminalSpec = (spec.cwd, Self.plainShellArgs, spec.environment) }
+        if takeDeferredAgent() != nil {
+            if starts([]) { startShell(command: command) }
+            return
+        }
+        for (process, name) in processes { restartProcesses[process] = name }
+        isRestartingShell = true
+        pty?.hangUp()
+        NiruxShellView.waitForExit(restartProcesses.map { (process: $0.key, name: $0.value) }) { [weak self] stillRunning in
+            guard let self else { return }
+            self.isRestartingShell = false
+            let remaining = stillRunning.isEmpty && self.pty?.hasExited != true ? [shellName] : stillRunning
+            if remaining.isEmpty { self.restartProcesses.removeAll() }
+            guard starts(remaining), remaining.isEmpty else {
+                if self.pty?.hasExited == true { self.showShellExitedOverlay() }
+                return
+            }
+            self.restartShell(running: command)
+        }
     }
 }
 

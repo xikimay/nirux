@@ -52,7 +52,7 @@ extension ColumnHeaderView.Status {
         let detail = dialog.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
         let toolTip = [dialog.headline, detail].compactMap { $0 }.joined(separator: " — ")
         if dialog.isBlockingDialog {
-            let duration = waited.flatMap { $0 >= 60 ? SidebarRenderer.shortDuration($0) : nil }
+            let duration = waited.flatMap { $0 >= 60 ? $0.shortDuration : nil }
             return Self(
                 [dialog.shortLabel, duration].compactMap { $0 }.joined(separator: " · "),
                 tone: .waiting, icon: icon(.needsYou), toolTip: toolTip
@@ -79,8 +79,7 @@ extension ColumnHeaderView.Icon {
     /// it (its app icon, else its symbol).
     @MainActor
     static func terminal(processName: String?) -> Self {
-        guard let processName else { return .symbol(Theme.Symbol.terminal) }
-        if let image = SidebarRenderer.agentAppIcon(processName: processName) { return .image(image) }
-        return .symbol(SidebarRenderer.agentSymbol(processName: processName) ?? Theme.Symbol.terminal)
+        guard let agent = processName.flatMap(CodingAgent.init(rawValue:)) else { return .symbol(Theme.Symbol.terminal) }
+        return agent.appIcon.map(Self.image) ?? .symbol(agent.symbolName)
     }
 }

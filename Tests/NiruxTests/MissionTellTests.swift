@@ -411,7 +411,7 @@ final class MissionTellTests: XCTestCase {
             machine.codexQueueRefusal(foreground: foreground, runningSince: since)
         }
         func report(_ state: AgentProgramStatus.State, kind: String? = nil, from process: ProcessInstance? = nil) {
-            let status = AgentProgramStatus(state: state, kind: kind, message: nil, process: "codex")
+            let status = AgentProgramStatus(state: state, kind: kind, message: nil, agent: .codex)
             machine.noteCodexStatus(status, from: process ?? claudeProcess, now: t0 + 50)
         }
         XCTAssertEqual(refusal(nil), .noClaude)
@@ -439,7 +439,7 @@ final class MissionTellTests: XCTestCase {
         report(.done, from: ProcessInstance(pid: 9, startedAt: t0))
         XCTAssertEqual(refusal(), .noPromptYet, "another codex's word")
         // Read on an empty process table: the codex in front then's.
-        machine.noteCodexStatus(AgentProgramStatus(state: .done, kind: nil, message: nil, process: "codex"), from: nil, now: t0 + 70)
+        machine.noteCodexStatus(AgentProgramStatus(state: .done, kind: nil, message: nil, agent: .codex), from: nil, now: t0 + 70)
         XCTAssertNil(refusal(), "one already running")
         XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 12, startedAt: t0 + 80), name: "codex", arguments: ["codex"])),
                        .noPromptYet, "not one started since")
@@ -454,11 +454,11 @@ final class MissionTellTests: XCTestCase {
         var machine = AgentStatusMachine()
         _ = machine.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0))
         func refusal(_ foreground: ForegroundProcess? = agy, since: TimeInterval = t0 + 100) -> AgentPromptRefusal? {
-            machine.promptRefusal(foreground: foreground, runningSince: since, agent: "agy")
+            machine.promptRefusal(foreground: foreground, runningSince: since, agent: .agy)
         }
         func report(_ state: AgentProgramStatus.State, kind: String? = nil, at offset: TimeInterval, from process: ProcessInstance? = nil) {
             _ = machine.noteProgramStatus(
-                AgentProgramStatus(state: state, kind: kind, message: nil, process: "agy"), from: process ?? claudeProcess,
+                AgentProgramStatus(state: state, kind: kind, message: nil, agent: .agy), from: process ?? claudeProcess,
                 isUserFocused: true, now: Date(timeIntervalSince1970: t0 + offset)
             )
         }
@@ -551,9 +551,9 @@ final class MissionTellTests: XCTestCase {
         // An agy that left with its dialog open: the keys of what runs next are drafts.
         var after = AgentStatusMachine()
         _ = after.tick(fgName: "agy", isUserFocused: true, now: Date(timeIntervalSince1970: t0))
-        _ = after.noteProgramStatus(AgentProgramStatus(state: .working, kind: nil, message: nil, process: "agy"), from: claudeProcess,
+        _ = after.noteProgramStatus(AgentProgramStatus(state: .working, kind: nil, message: nil, agent: .agy), from: claudeProcess,
                                     isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 1))
-        _ = after.noteProgramStatus(AgentProgramStatus(state: .blocked, kind: "permission", message: nil, process: "agy"), from: claudeProcess,
+        _ = after.noteProgramStatus(AgentProgramStatus(state: .blocked, kind: "permission", message: nil, agent: .agy), from: claudeProcess,
                                     isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 2))
         _ = after.tick(fgName: "claude", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 3))
         after.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 4), keys: Data("x".utf8))
@@ -712,11 +712,60 @@ final class MissionTellTests: XCTestCase {
         pty.sendRaw("\r")
         submit("peer")
         try record("peer", origin: "peer")
-        XCTAssertTrue(pty.reviewSendHasDraft)
+        XCTAssertTrue(pty.hasPromptDraft)
         pty.sendRaw("\r")
         submit("typed")
         try record("typed", origin: "human")
-        XCTAssertFalse(pty.reviewSendHasDraft)
+        XCTAssertFalse(pty.hasPromptDraft)
+    }
+
+    /// A column says when the user typed a prompt to its agent, with that
+    /// prompt's time: at its hook without a transcript, once its line is
+    /// read with one. Never for one Nirux typed, nor one Claude took in by
+    /// itself.
+    func testTheColumnSaysWhenTheUserTypedAPrompt() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-typed-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("task.jsonl")
+        try Data().write(to: transcript)
+        let pty = PtySession()
+        var typed: [TimeInterval] = []
+        pty.onUserPrompt = { typed.append($0) }
+        func submit(_ id: String? = nil, transcript: URL? = nil) -> TimeInterval {
+            let at = Date().timeIntervalSince1970
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .userPromptSubmit, sessionID: "s", promptID: id, transcriptPath: transcript?.path, timestamp: at
+            ), isUserFocused: false)
+            return at
+        }
+        func record(_ id: String, origin: String) throws {
+            let time = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+            let handle = try FileHandle(forWritingTo: transcript)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((#"{"type":"user","origin":{"kind":""# + origin + #""},"promptId":""# + id
+                + #"","timestamp":""# + time + #"","message":{"role":"user","content":"…"}}"# + "\n").utf8))
+        }
+        _ = submit()
+        XCTAssertEqual(typed, [], "no Enter sent it")
+        pty.sendRaw(": tell\r", typedByNirux: true)
+        _ = submit()
+        XCTAssertEqual(typed, [], "Nirux typed it")
+        pty.sendRaw(": go\r")
+        let first = submit()
+        XCTAssertEqual(typed, [first])
+
+        _ = submit("peer", transcript: transcript)
+        try record("peer", origin: "peer")
+        pty.readTranscriptPrompts()
+        XCTAssertEqual(typed, [first], "a peer's message")
+        pty.sendRaw("\r")
+        let second = submit("typed", transcript: transcript)
+        XCTAssertEqual(typed, [first], "until its line says so")
+        try record("typed", origin: "human")
+        pty.readTranscriptPrompts()
+        XCTAssertEqual(typed, [first, second])
     }
 
     /// Without a transcript, an Enter stands for the prompt whose hook
@@ -1027,6 +1076,45 @@ final class MissionTellTests: XCTestCase {
         _ = left.apply(hook(.userPromptSubmit, at: 6.5), isUserFocused: false)
         _ = left.apply(hook(.stop, at: 9), isUserFocused: false)
         XCTAssertFalse(left.finishedTurn(afterTypingAt: typedAt))
+    }
+
+    /// Who typed the last prompt: Nirux when it pressed its Enter (a paste
+    /// and its Enter in one write, or the Enter after a long paste), the
+    /// user at the box, or elsewhere (Remote Control) when the transcript
+    /// says a person typed one with no Enter at the box. Nobody before any:
+    /// the first prompt given at launch, though its line says a person
+    /// typed it, and Claude's own messages.
+    func testWhoTypedTheLastPrompt() {
+        var machine = AgentStatusMachine()
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0))
+        _ = machine.apply(hook(.sessionStart, at: 0), isUserFocused: false)
+        machine.readsTranscript = true
+        // Its transcript says a person typed it, as Claude Code writes a
+        // prompt given at launch.
+        _ = machine.apply(prompt("handover", at: 1), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "handover", at: t0 + 1.1, typed: true))
+        _ = machine.apply(hook(.stop, at: 5), isUserFocused: false)
+        XCTAssertEqual(machine.lastPromptTyper, .nobody, "its handover came with its launch")
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 6), keys: Data("\u{1B}[200~Go on\u{1B}[201~\r".utf8), byNirux: true)
+        _ = machine.apply(prompt("tell", at: 6.5), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "tell", at: t0 + 6.6, typed: true))
+        _ = machine.apply(hook(.stop, at: 7), isUserFocused: false)
+        XCTAssertEqual(machine.lastPromptTyper, .nirux)
+        _ = machine.apply(prompt("peer", at: 7.5), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "peer", at: t0 + 7.6, typed: false))
+        XCTAssertEqual(machine.lastPromptTyper, .nirux, "a peer's message")
+        press("which one?\r", at: 8, into: &machine)
+        _ = machine.apply(prompt("typed", at: 8.2), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "typed", at: t0 + 8.3, typed: true))
+        XCTAssertEqual(machine.lastPromptTyper, .user)
+        press("\u{1B}[200~Rebase on main\u{1B}[201~", at: 10, into: &machine)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 10.5), keys: Data("\r".utf8), byNirux: true)
+        _ = machine.apply(prompt("long", at: 10.6), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "long", at: t0 + 10.7, typed: true))
+        XCTAssertEqual(machine.lastPromptTyper, .nirux, "Nirux's Enter after its paste")
+        _ = machine.apply(prompt("phone", at: 12), isUserFocused: false)
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "phone", at: t0 + 12.1, typed: true))
+        XCTAssertEqual(machine.lastPromptTyper, .user, "typed elsewhere")
     }
 
     /// Claude Code shows some dialogs (trust, MCP servers) before any hook

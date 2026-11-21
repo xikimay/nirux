@@ -116,8 +116,13 @@ extension NiruxShellView {
                 if let pty = parent.pty, !pty.hasExited {
                     let process = foreground(parent)
                     foregroundKnown = process != nil
+                    var typedAt = question.parentTypedAt
+                    if let process, let previous = typedAt, previous < process.instance.startedAt,
+                       parentEnd?.workspace.runsRestartedLead(process) == true {
+                        typedAt = nil
+                    }
                     parentState = Self.missionParent(
-                        foreground: process, typedAt: question.parentTypedAt,
+                        foreground: process, typedAt: typedAt,
                         finishedTurnAfterTyping: pty.finishedTurn(afterTypingAt:),
                         tookPrompt: { process in
                             pty.agentTookPrompt(since: process).map { $0 || pty.sitsAtFirstPrompt(process, now: now, record: sessionRecord(of:)) }
@@ -147,6 +152,57 @@ extension NiruxShellView {
         return result
     }
 
+    /// The user typed a prompt to a column's agent: the Mission questions it
+    /// asked before are behind it, and stop waiting on its parent or the
+    /// user.
+    func retireMissionQuestions(
+        of column: ColumnState, in workspace: WorkspaceState, promptedAt: TimeInterval, store: MissionStore = .shared
+    ) {
+        guard let agentUUID = column.agentUUID,
+              store.retireQuestions(childWorkspaceID: workspace.id, childAgentUUID: agentUUID, before: promptedAt)
+        else { return }
+        scheduleMetadataRefresh()
+    }
+
+    /// A Mission child's turn ended on a question its parent sent the prompt
+    /// for: the last prompt typed to it was Nirux's (a Mission message, a
+    /// notice), or none was and the parent started it. The question goes to
+    /// the parent as the child's question, which the parent answers or hands
+    /// to the user, and the row says "Asking …". False, and the user is
+    /// asked, when the user typed that prompt or started the task, is at its
+    /// prompt, or the turn may go on (a Stop hook), or when the ledger takes
+    /// no question (the Mission completed, handoffs are off).
+    func askParent(
+        for resolution: AgentHookCenter.Resolution, _ request: TurnEndRequest, asking question: TurnEndQuestion?,
+        store: MissionStore = .shared
+    ) -> Bool {
+        guard let pty = resolution.column.pty, let agentUUID = resolution.column.agentUUID, store.ensureLoaded(),
+              let mission = store.missions.last(where: {
+                  $0.oneWay != true && $0.childWorkspaceID == resolution.workspace.id && $0.childAgentUUID == agentUUID
+              })
+        else { return false }
+        let handoffs = Self.currentMissionHandoffsEnabled()
+        guard mission.isCarried(handoffsEnabled: handoffs) else { return false }
+        // Who sent the turn's prompt: its transcript line may be unread yet.
+        pty.readTranscriptPrompts()
+        switch pty.agentLastPromptTyper {
+        case .user: return false
+        case .nobody where mission.startedByParent != true: return false
+        case .nobody, .nirux: break
+        }
+        guard pty.mayAskParent(endingTurnAt: request.turnEndedAt) else { return false }
+        // It asked with `--mission ask` meanwhile: it waits on that one.
+        if store.waitingQuestion(childWorkspaceID: mission.childWorkspaceID, childAgentUUID: agentUUID) != nil { return true }
+        guard let message = TurnEndText.questionForParent(request.message, asking: question),
+              let asked = store.accept(MissionEvent(
+                  id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID,
+                  childAgentUUID: agentUUID, kind: .question, message: message, timestamp: request.turnEndedAt
+              ), enabled: handoffs)
+        else { return false }
+        if handleMissionEvent(asked.mission, event: asked.event) { store.markDelivered(eventID: asked.event.id) }
+        return true
+    }
+
     /// What a parent whose terminal runs can do with a question, from its
     /// foreground process (nil: a process-table miss, which `settle` reads
     /// as nothing new) and when Nirux typed the question into it, if it
@@ -161,7 +217,7 @@ extension NiruxShellView {
         finishedTurnAfterTyping: (TimeInterval) -> Bool, tookPrompt: (ForegroundProcess) -> Bool?
     ) -> SidebarMissionQuestion.Parent {
         guard let foreground else { return .claude }
-        guard AgentHookCenter.isInteractiveClaude(foreground) else { return .notClaude }
+        guard foreground.interactiveAgent == .claude else { return .notClaude }
         if let typedAt {
             if foreground.instance.startedAt > typedAt { return .restartedSinceTyped }
             return finishedTurnAfterTyping(typedAt) ? .stoppedWithoutAnswer : .claude
@@ -211,7 +267,7 @@ extension NiruxShellView {
         popover.close()
         missionReplyPopover = nil
         missionReplyQuestionID = nil
-        showToast("That question was answered")
+        showToast("That question was answered, or its task moved on")
     }
 
     /// The card's question row was clicked: the whole question and a reply
@@ -261,6 +317,21 @@ extension NiruxShellView {
         missionReplyPopover = popover
         missionReplyQuestionID = question.questionID
         controller.focusReplyField()
+    }
+
+    func replyToThreadQuestion(_ id: String, in workspaceID: String, text: String) -> TaskThreadContentView.ReplyResult {
+        let store = MissionStore.shared
+        guard store.ensureLoaded() else {
+            showToast("Couldn’t read the Mission. Try again.", tone: .error)
+            return .retry
+        }
+        guard store.missions.contains(where: { mission in
+            mission.childWorkspaceID == workspaceID && mission.status == .active
+                && mission.events.contains { $0.kind == .question && $0.id == id && $0.retiredAt == nil && $0.parentConsumedAt == nil }
+        }), store.response(to: id) == nil else { return .noLongerOpen }
+        guard answerMissionQuestion(id, text: text) else { return .retry }
+        refreshPinnedTaskThread()
+        return .sent
     }
 
     /// The user's answer from the popover, as if the parent had sent it:
@@ -324,8 +395,8 @@ extension NiruxShellView {
         }
         // The parent that saw the question, a Lead or a task's agent, hears
         // the answer too: the `claude` that last took it into its prompt or
-        // handed it over, not one started since. One that never saw it hears
-        // nothing.
+        // handed it over, not one started since, unless Restart Lead started
+        // it. One that never saw it hears nothing.
         if let question = response.mission.events.first(where: { $0.id == questionID }),
            let seenAt = [question.parentTypedAt, question.handedToUserAt].compactMap({ $0 }).max() {
             let childTitle = workspaces.first { $0.id == response.mission.childWorkspaceID }?.title ?? response.mission.branch

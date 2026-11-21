@@ -21,7 +21,7 @@ enum DailyPass {
     /// The sightings a kind lists at most.
     static let maxSightings = 6
 
-    struct Window: Equatable, Sendable {
+    struct Window: Codable, Equatable, Sendable {
         var start: TimeInterval
         var end: TimeInterval
 
@@ -66,34 +66,16 @@ enum DailyPass {
         /// in one counts for its pull requests.
         var folders: [String] = []
         var merged: [MergedPullRequest] = []
+        /// Every pull request merged since the window's start, or since the
+        /// oldest read of a task's open one when that came first: what a
+        /// sidebar that stopped reading doesn't know yet.
+        var mergedLately: Set<Int> = []
         var reruns: [Rerun] = []
         /// Why part of it couldn't be read.
         var problems: [String] = []
         /// A read failed that may work next time: the next pass reads the
         /// window again.
         var readsAgain = false
-    }
-
-    struct ReadFailure: Error, Equatable {
-        let message: String
-        /// gh didn't answer in time: it may next time. Anything it said
-        /// (signed out, no access) holds until someone acts.
-        var retryable = false
-    }
-
-    typealias GitHubRead = @Sendable (_ arguments: [String]) -> Result<Data, ReadFailure>
-
-    static let installedGitHub: GitHubRead = { arguments in
-        guard let ghPath = PRDetect.installedGHPath() else { return .failure(ReadFailure(message: "gh isn’t installed")) }
-        guard let result = GitHubCLIBoardClient.runGH(ghPath, arguments: arguments, timeout: 30, maxStandardOutputBytes: 8_000_000) else {
-            return .failure(ReadFailure(message: "gh didn’t answer within 30 s", retryable: true))
-        }
-        guard result.terminationStatus == 0 else {
-            return .failure(readFailure(GitHubCLIQueueClient.Output(
-                status: result.terminationStatus, standardOutput: result.standardOutput, standardError: result.standardError
-            )))
-        }
-        return .success(result.standardOutput)
     }
 
     /// Past 49, gh's query (each commit's authors) passes GitHub's 500,000
@@ -106,14 +88,10 @@ enum DailyPass {
     /// A failed gh call, as the merge queue reads it: no answer (no
     /// network yet, a timeout, a 5xx) or a rate limit may pass; anything
     /// GitHub or gh said (signed out, refused) holds until someone acts.
-    static func readFailure(_ output: GitHubCLIQueueClient.Output) -> ReadFailure {
-        let error = GitHubCLIQueueClient.classify(output)
-        let message = GitHubCLIQueueClient.message(of: error)
-        switch error {
-        case .noAnswer, .rateLimited, .secondaryRateLimit:
-            return ReadFailure(message: message, retryable: true)
-        case .ghMissing, .notSignedIn, .refused, .unreadable:
-            return ReadFailure(message: message)
+    static func mayPassLater(_ failure: GitHub.CLI.Failure) -> Bool {
+        switch failure {
+        case .noAnswer, .rateLimited, .secondaryRateLimit: return true
+        case .ghMissing, .notSignedIn, .refused, .unreadable: return false
         }
     }
 
@@ -137,15 +115,28 @@ enum DailyPass {
 
     static func mergedArguments(repository: String, since: TimeInterval) -> [String] {
         [
-            "pr", "list", "--repo", repository, "--state", "merged", "--search", "merged:>=\(isoTime(since)) sort:updated-desc",
+            "pr", "list", "--repo", "\(GitHub.host)/\(repository)", "--state", "merged", "--search", "merged:>=\(isoTime(since)) sort:updated-desc",
             "--json", "number,title,headRefName,mergedAt,body,commits", "--limit", "\(mergedLimit)"
         ]
     }
 
+    /// Numbers only: a long reach costs GitHub little.
+    static func mergedNumbersArguments(repository: String, since: TimeInterval) -> [String] {
+        [
+            "pr", "list", "--repo", "\(GitHub.host)/\(repository)", "--state", "merged", "--search", "merged:>=\(isoTime(since)) sort:updated-desc",
+            "--json", "number", "--limit", "500"
+        ]
+    }
+
+    /// Nil when `data` isn't a JSON list.
+    static func mergedNumbers(_ data: Data) -> [Int]? {
+        ((try? JSONSerialization.jsonObject(with: data)) as? [Any]).map { list in list.compactMap { ($0 as? [String: Any])?["number"] as? Int } }
+    }
+
     static func runArguments(repository: String, since: TimeInterval) -> [String] {
         [
-            "run", "list", "--repo", repository, "--created", ">=" + isoTime(since - rerunReach),
-            "--json", "databaseId,attempt,headBranch,conclusion,workflowName,startedAt", "--limit", "1000"
+            "run", "list", "--repo", "\(GitHub.host)/\(repository)", "--created", ">=" + isoTime(since - rerunReach),
+            "--json", GitHub.WorkflowRun.fields, "--limit", "1000"
         ]
     }
 
@@ -181,34 +172,44 @@ enum DailyPass {
     /// Each repository's pull requests merged and runs rerun in the
     /// window, the repositories read at once: the call's wait doesn't grow
     /// with their number. Never on the main thread.
-    static func readGitHub(_ repositories: [String], window: Window, read: GitHubRead) -> [RepositoryReport] {
+    static func readGitHub(
+        _ repositories: [String], window: Window, mergedSince: TimeInterval? = nil, gh: GitHub.CLI.Runner
+    ) -> [RepositoryReport] {
         let reports = OSAllocatedUnfairLock(initialState: [Int: RepositoryReport]())
         DispatchQueue.concurrentPerform(iterations: repositories.count) { index in
-            let report = readGitHub(repositories[index], window: window, read: read)
+            let report = readGitHub(repositories[index], window: window, mergedSince: mergedSince, gh: gh)
             reports.withLock { $0[index] = report }
         }
         return reports.withLock { found in repositories.indices.compactMap { found[$0] } }
     }
 
-    private static func readGitHub(_ name: String, window: Window, read: GitHubRead) -> RepositoryReport {
+    private static func readGitHub(_ name: String, window: Window, mergedSince: TimeInterval?, gh: GitHub.CLI.Runner) -> RepositoryReport {
         var report = RepositoryReport(name: name)
-        func failed(_ what: String, _ failure: ReadFailure) {
-            report.problems.append("\(what): \(failure.message)")
-            report.readsAgain = report.readsAgain || failure.retryable
+        func parsed<Value>(_ what: String, _ arguments: [String], _ parse: (Data) -> Value?, inWindow: Bool = true) -> Value? {
+            let answer = gh(.init(arguments, maxStandardOutputBytes: 8_000_000)).flatMap(\.result)
+            switch answer.flatMap({ data in parse(data).map(Result.success) ?? .failure(.unreadable(output: data)) }) {
+            case .success(let value):
+                return value
+            case .failure(let failure):
+                report.problems.append("\(what): " + (AgentText.clean(failure.message, maxLength: 300) ?? ""))
+                if inWindow && mayPassLater(failure) { report.readsAgain = true }
+                return nil
+            }
         }
-        switch read(mergedArguments(repository: name, since: window.start)).map(mergedPullRequests) {
-        case .success(let merged?):
+        if let merged = parsed("merged pull requests", mergedArguments(repository: name, since: window.start), mergedPullRequests) {
             report.merged = merged.filter { window.contains($0.mergedAt) }
+            report.mergedLately = Set(merged.map(\.number))
             if merged.count >= mergedLimit {
                 report.problems.append("only the \(mergedLimit) most recently updated merged pull requests were read")
             }
-        case .success(nil): failed("merged pull requests", ReadFailure(message: "gh’s answer wasn’t its JSON"))
-        case .failure(let failure): failed("merged pull requests", failure)
         }
-        switch read(runArguments(repository: name, since: window.start)).map(reruns) {
-        case .success(let reruns?): report.reruns = reruns.filter { window.contains($0.startedAt) }
-        case .success(nil): failed("workflow runs", ReadFailure(message: "gh’s answer wasn’t its JSON"))
-        case .failure(let failure): failed("workflow runs", failure)
+        if let mergedSince, mergedSince < window.start,
+           let numbers = parsed("pull requests merged before the window", mergedNumbersArguments(repository: name, since: mergedSince),
+                                mergedNumbers, inWindow: false) {
+            report.mergedLately.formUnion(numbers)
+        }
+        if let runs = parsed("workflow runs", runArguments(repository: name, since: window.start), reruns) {
+            report.reruns = runs.filter { window.contains($0.startedAt) }
         }
         return report
     }
@@ -231,17 +232,13 @@ enum DailyPass {
         }.sorted { $0.mergedAt < $1.mergedAt }
     }
 
-    /// Nil when `data` isn't a JSON list.
+    /// The runs started again; nil when gh's list can't be read.
     static func reruns(_ data: Data) -> [Rerun]? {
-        guard let list = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else { return nil }
-        return list.compactMap { item -> Rerun? in
-            guard let json = item as? [String: Any], let id = json["databaseId"] as? Int, let attempt = json["attempt"] as? Int, attempt > 1,
-                  let startedAt = (json["startedAt"] as? String).flatMap(time(fromISO:))
-            else { return nil }
-            let conclusion = (json["conclusion"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "running"
+        GitHub.parseWorkflowRuns(data)?.compactMap { run in
+            guard run.attempt > 1, let startedAt = run.startedAt else { return nil }
             return Rerun(
-                id: id, attempt: attempt, branch: json["headBranch"] as? String ?? "", workflow: json["workflowName"] as? String ?? "",
-                conclusion: conclusion, startedAt: startedAt
+                id: run.id, attempt: run.attempt, branch: run.headBranch ?? "", workflow: run.workflowName ?? "",
+                conclusion: run.conclusion ?? "running", startedAt: startedAt.timeIntervalSince1970
             )
         }
     }
@@ -453,19 +450,26 @@ enum DailyPass {
         var repositories: [RepositoryReport]
         var triagedRuns: [TriagedRun]
         var flakyTests: [String]
+        var waitWindow: Window?
+        var threadWaits: [ThreadWaits] = []
         var missions: [MissionFact]
         /// RuleProposalStore's: pending, and decided in the last 90 days.
         var proposals: [RuleProposal]
         /// The brief's "Rules learned", as sessions read them now.
         var briefRules: [String]
+        /// The space's open tasks, as they stand at the window's end.
+        var tasks: [TaskActivity] = []
+        /// The forgotten tasks the last read listed (`ForgottenTask.key`).
+        var reported: Set<String> = []
 
         /// Anything for the pass to read. What GitHub didn't say isn't: a
         /// signed-out gh would make every day one.
         var hasNews: Bool {
             findings.contains { window.contains($0.time) }
                 || repositories.contains { !$0.merged.isEmpty || !$0.reruns.isEmpty }
-                || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty
+                || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty || !threadWaits.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }
+                || forgottenTasks(tasks, now: window.end).contains { !reported.contains($0.key) }
         }
 
         /// GitHub may answer next time: the window isn't marked read.
@@ -485,6 +489,9 @@ enum DailyPass {
     struct Digest: Equatable, Sendable {
         let text: String
         let readUntil: TimeInterval
+        var nextWaitPage: WaitPage?
+        /// The forgotten tasks it lists (`ForgottenTask.key`).
+        var listed: [String] = []
     }
 
     /// How much a section lists, lowered until the digest fits
@@ -505,17 +512,23 @@ enum DailyPass {
         var text: String?
         var leftOut: [TimeInterval] = []
         var times: [TimeInterval] = []
+        var waitRows = 0
+        /// The forgotten tasks it lists.
+        var listed: [String] = []
     }
 
     static func digest(_ facts: Facts, timeZone: TimeZone = .current) -> Digest {
         let window = facts.window
         let since = clock(window.start, timeZone: timeZone)
         let header = "# Daily pass · \(facts.spaceName) · since \(since)"
+        let forgotten = forgottenTasks(facts.tasks, now: window.end, timeZone: timeZone)
         guard facts.hasNews else {
             let merged = facts.repositories.contains { !$0.problems.isEmpty } ? "" : "no pull request merged, "
+            let tasks = forgottenSection(forgotten, reported: facts.reported, limits[0])
             let quiet = header + "\n\nNothing happened since \(since): no review recorded, \(merged)no CI failure, "
-                + "no Mission message held, no rule decided. Nothing to propose: say so in one line."
-            return Digest(text: ([quiet] + [gitHubSection(facts)].compactMap { $0 }).joined(separator: "\n\n"), readUntil: window.end)
+                + "no Mission message held, no rule decided. Nothing to propose" + (tasks.text == nil ? ": say so in one line." : ".")
+            let sections = [gitHubSection(facts), tasks.text].compactMap { $0 }
+            return Digest(text: ([quiet] + sections).joined(separator: "\n\n"), readUntil: window.end, listed: tasks.listed)
         }
         // The rules before the facts; each section lists its facts in time
         // order, so what it leaves out comes after what it shows.
@@ -523,8 +536,9 @@ enum DailyPass {
         for limit in limits {
             parts = [
                 Part(text: instructions(facts)), Part(text: gitHubSection(facts)), rulesSection(facts, limit),
-                findingsSection(facts, limit), pullRequestsSection(facts, limit), ciSection(facts, limit, timeZone: timeZone),
-                missionsSection(facts, limit, timeZone: timeZone)
+                forgottenSection(forgotten, reported: facts.reported, limit), findingsSection(facts, limit),
+                pullRequestsSection(facts, limit), ciSection(facts, limit, timeZone: timeZone), missionsSection(facts, limit, timeZone: timeZone),
+                threadWaitsSection(facts, limit)
             ]
             if joined(header, parts).count <= maxCharacters { break }
         }
@@ -541,7 +555,11 @@ enum DailyPass {
             text += "\n\nLeft out: what came after \(clock(readUntil, timeZone: timeZone)). The window is read up to there only: "
                 + "call daily_pass again for the rest once you have proposed."
         }
-        return Digest(text: text, readUntil: readUntil)
+        let shown = parts.last?.waitRows ?? 0
+        let page = WaitPage(window: facts.waitWindow ?? window)
+        let continuation = page.next(afterShowing: shown, of: facts.threadWaits)
+        if continuation != nil { text += "\n\n" + WaitPage.more }
+        return Digest(text: text, readUntil: readUntil, nextWaitPage: continuation, listed: parts.flatMap(\.listed))
     }
 
     private static func joined(_ header: String, _ parts: [Part]) -> String {
@@ -576,6 +594,22 @@ enum DailyPass {
             ? "The next pass reads this window again. Read what you need with gh meanwhile."
             : "Read what you need with gh."
         return section("What GitHub didn’t say", lines + [after], total: lines.count + 1)
+    }
+
+    /// The tasks forgotten at the window's end, those the last read didn't
+    /// list first: a snapshot of now, not a fact of the window.
+    private static func forgottenSection(_ forgotten: [ForgottenTask], reported: Set<String>, _ limit: Limits) -> Part {
+        guard !forgotten.isEmpty else { return Part() }
+        let isNew = { (task: ForgottenTask) in !reported.contains(task.key) }
+        let shown = (forgotten.filter(isNew) + forgotten.filter { !isNew($0) }).prefix(limit.items)
+        var lines = ["Nirux only lists them: nothing was closed or told. Make each move, or tell the user why not."]
+        lines += shown.filter(isNew).map(\.line)
+        let again = shown.filter { !isNew($0) }.map(\.line)
+        if !again.isEmpty { lines += ["Listed last time too, nothing changed since:"] + again }
+        let text = section("Tasks you may have forgotten", lines, total: lines.count + forgotten.count - shown.count)
+        // Listed last time and left out now for room: still known.
+        let shownKeys = Set(shown.map(\.key))
+        return Part(text: text, listed: shown.map(\.key) + forgotten.filter { !isNew($0) && !shownKeys.contains($0.key) }.map(\.key))
     }
 
     /// The kinds seen in the window, with where else they showed up in
@@ -654,6 +688,13 @@ enum DailyPass {
             text: section("CI", flaky + items.prefix(limit.items).map(\.line), total: flaky.count + items.count),
             leftOut: items.dropFirst(limit.items).map(\.time), times: items.map(\.time)
         )
+    }
+
+    private static func threadWaitsSection(_ facts: Facts, _ limit: Limits) -> Part {
+        let waits = WaitPage(window: facts.waitWindow ?? facts.window).remaining(in: facts.threadWaits)
+        guard !waits.isEmpty else { return Part() }
+        let shown = waits.prefix(limit.items)
+        return Part(text: section("Task waits in this window", shown.map(\.line), total: waits.count), waitRows: shown.count)
     }
 
     private static func missionsSection(_ facts: Facts, _ limit: Limits, timeZone: TimeZone) -> Part {
@@ -845,10 +886,20 @@ struct DailyPassState: Codable, Equatable, Sendable {
     var readAt: TimeInterval?
     /// When Nirux last typed the daily line into the Lead.
     var typedAt: TimeInterval?
+    /// The forgotten tasks the last read listed (`ForgottenTask.key`): no
+    /// news until their kind or last activity changes.
+    var listedTasks: [String]?
     /// When a due pass last found nothing to read.
     var checkedAt: TimeInterval?
     /// The last pass's counts, for the Lead row.
     var note: DailyPass.Note?
+    var nextWaitPage: DailyPass.WaitPage?
+    var waitsThrough: TimeInterval?
+
+    func waitWindow(for window: DailyPass.Window) -> DailyPass.Window {
+        guard let waitsThrough else { return window }
+        return DailyPass.Window(start: max(window.start, waitsThrough), end: window.end)
+    }
 
     /// The window a call at `now` reads, and the state to save once it
     /// was read; nil for a call that reads the last window again, so calls

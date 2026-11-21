@@ -12,8 +12,10 @@ extension NiruxShellView {
 
     func addWorkspace(
         title: String? = nil,
+        purpose: String? = nil,
         cwd: String? = nil,
-        agent: NiruxApp.WorkspaceAgent? = nil,
+        agent: CodingAgent? = nil,
+        agentModel: String? = nil,
         profileID requestedProfileID: String? = nil,
         workspaceID: String = UUID().uuidString,
         initialAgentUUID: String = UUID().uuidString,
@@ -24,20 +26,23 @@ extension NiruxShellView {
         deliveredHandover: Bool = false,
         worktreeBranch: String? = nil,
         startedOutsideNirux: Bool = false,
+        codexMode: CodexLaunchMode? = nil,
         startedByAgent: Bool = false,
         setupScript: URL? = nil,
         isLead: Bool = false,
         taskFolder: String? = nil,
+        waitingStart: MergeWait? = nil,
         activate: Bool = true,
         fadesBackdrop: Bool = false
     ) {
         // In the background (a task its Lead started): no selection, no
         // focus, no slide; the user stays where they type.
         // Its picture slides away while the interface may move only, of what
-        // shows: a crossing on its way ends.
+        // shows at rest: a crossing on its way ends, and a pass under the bar.
         if activate {
             closeSpacePlan(going: nil, animated: false)
             endSpaceCrossing()
+            endUnderBar()
         }
         let snapshot = activate && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
 
@@ -60,8 +65,11 @@ extension NiruxShellView {
             reportsToLead: reportsToLead,
             reportsToTask: reportsToTask,
             taskFolder: taskFolder,
-            initialAgentUUID: initialAgentUUID
+            initialAgentUUID: initialAgentUUID,
+            firstColumn: waitingStart.map { _ in ColumnState(waitingTask: WaitingTaskView()) }
         )
+        workspace.purpose = purpose
+        workspace.mergeWaits = waitingStart.map { [$0] } ?? []
         wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace, activate: activate)
         verticalStrip.addSubview(workspace.containerView)
@@ -74,8 +82,8 @@ extension NiruxShellView {
         let setupScript = startedOutsideNirux ? nil : setupScript
         if let agent {
             launchAgent(
-                agent, in: workspace, deliveredHandover: deliveredHandover,
-                worktreeBranch: worktreeBranch, setupScript: setupScript
+                agent, model: agentModel, in: workspace, deliveredHandover: deliveredHandover,
+                worktreeBranch: worktreeBranch, setupScript: setupScript, codexMode: codexMode
             )
         } else if let setupScript, let column = workspace.columns.first {
             sideEffects.launchAgent(column, setupCommand(setupScript, in: workspace, then: nil))
@@ -121,6 +129,7 @@ extension NiruxShellView {
     /// worktree removed is no task, one re-added or repaired may be another
     /// repository's.
     static func taskLocation(of workspace: WorkspaceState) -> FolderIdentity? {
+        guard !workspace.isWaitingTask else { return nil }
         if let cached = workspace.taskLocationCache, FileManager.default.fileExists(atPath: workspace.cwd),
            modificationDate(of: cached.gitFile) == cached.gitFileDate {
             return cached.location
@@ -215,7 +224,7 @@ extension NiruxShellView {
     /// merely exists in the folder (committed to the branch, left by an
     /// earlier session, shipped in a downloaded archive) is never followed.
     nonisolated static func agentStartupPrompt(
-        agent: NiruxApp.WorkspaceAgent, deliveredHandover: Bool, isMission: Bool
+        agent: CodingAgent, deliveredHandover: Bool, isMission: Bool
     ) -> String? {
         startupPrompt(
             agent: agent, deliveredHandover: deliveredHandover,
@@ -224,16 +233,20 @@ extension NiruxShellView {
     }
 
     nonisolated static func startupPrompt(
-        agent: NiruxApp.WorkspaceAgent, deliveredHandover: Bool, mission: String?
+        agent: CodingAgent, deliveredHandover: Bool, mission: String?
     ) -> String? {
         var instructions: [String] = []
         if deliveredHandover {
-            let handoverName = handoverFilename(for: agent)
+            let handoverName = HandoverFile.filename(for: agent)
             instructions.append("Read \(handoverName) for full context, then proceed with the next steps described there.")
         }
         if let mission { instructions.append(mission) }
         return instructions.isEmpty ? nil : instructions.joined(separator: " ")
     }
+
+    private nonisolated static let missionAskEndGuide = "Status 4 means the Mission is over or unavailable; do not retry. "
+        + "Status 5 means the question was retired. Continue with the new prompt without retrying that ask. "
+        + "Report the final result with \"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
 
     /// A Claude Code child: Nirux types the answer into its prompt
     /// (`MissionPromptText`).
@@ -243,8 +256,7 @@ extension NiruxShellView {
         + "\(MissionEventCLI.maxRecommendationLength)), then end your turn: Nirux types "
         + "the answer into your prompt as a message starting with \(MissionPromptText.prefix). "
         + "\(MissionEventCLI.askGuide) If it exits with status 3, run the exact same command again: it does not ask twice. "
-        + "Status 4 means the Mission is over; do not retry. Report the final result with "
-        + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
+        + missionAskEndGuide
 
     /// A Codex child, and every child before Nirux typed answers: `ask`
     /// waits for the answer.
@@ -256,54 +268,61 @@ extension NiruxShellView {
         + "It waits up to \(Int(MissionEventCLI.defaultWaitTimeout)) seconds, so allow it a shell-tool timeout "
         + "of at least 120 seconds. If it exits with status 3, or your shell tool stops it before it "
         + "prints anything, run the exact same command again: it resumes the same question. "
-        + "Status 4 means the Mission is over; do not retry. Report the final result with "
-        + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
+        + missionAskEndGuide
 
     /// `worktreeBranch` is the branch read back from the checkout
     /// (`GitWorktree.currentBranch(at:)`) of a worktree workspace Nirux just
     /// opened; nil when unreadable, detached, or not a worktree workspace. It
     /// names the Claude session (see `SessionName`).
-    private func launchAgent(
-        _ agent: NiruxApp.WorkspaceAgent,
+    func launchAgent(
+        _ agent: CodingAgent, model: String?,
         in workspace: WorkspaceState,
         deliveredHandover: Bool,
         worktreeBranch: String?,
-        setupScript: URL?
+        setupScript: URL?,
+        codexMode: CodexLaunchMode? = nil
     ) {
-        guard let col = workspace.columns[safe: workspace.focusedIndex] else { return }
-        let handoverPrompt = Self.agentStartupPrompt(
-            agent: agent,
-            deliveredHandover: deliveredHandover,
-            isMission: workspace.missionID != nil
+        guard let col = workspace.columns[safe: workspace.focusedIndex],
+              let launch = Self.launch(of: agent, resume: nil, model: model, in: workspace, codexMode: codexMode) else { return }
+        let cmd = freshAgentCommand(
+            launch, in: workspace, column: col, launchDirectory: workspace.cwd, worktreeBranch: worktreeBranch,
+            handoverPrompt: Self.agentStartupPrompt(agent: agent, deliveredHandover: deliveredHandover, isMission: workspace.missionID != nil)
         )
-
-        let brief = spaceBriefInjection(for: workspace)
-        let cmd: String
-        switch agent {
-        case .claude:
-            cmd = NiruxShellView.claudeCommand(
-                mode: NiruxShellView.claudeLaunchMode(for: workspace),
-                sessionName: SessionName.make(
-                    worktreeBranch: worktreeBranch,
-                    spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
-                    isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
-                ),
-                briefFile: brief?.claudePromptFile,
-                settingsFile: claudeSpaceSettingsFile(for: workspace),
-                handoverPrompt: handoverPrompt
-            )
-        case .codex:
-            cmd = NiruxShellView.codexCommand(
-                mode: NiruxShellView.codexLaunchMode(for: workspace),
-                briefFile: NiruxShellView.codexBriefFile(from: brief, launchDirectory: workspace.cwd),
-                handoverPrompt: handoverPrompt
-            )
-        case .agy:
-            AgentHookInstaller.installAgyHooksIfInstalling()
-            cmd = NiruxShellView.agyCommand(handoverPrompt: handoverPrompt)
-        }
-
         sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
+    }
+
+    func freshAgentCommand(
+        _ launch: AgentLaunch, in workspace: WorkspaceState, column: ColumnState, launchDirectory: String,
+        worktreeBranch: String?, handoverPrompt: String? = nil
+    ) -> String {
+        if launch.agent == .agy { AgentHookInstaller.installAgyHooksIfInstalling() }
+        return agentCommand(
+            launch, in: workspace, column: column, launchDirectory: launchDirectory,
+            sessionName: SessionName.make(
+                worktreeBranch: worktreeBranch,
+                spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
+                isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
+            ),
+            handoverPrompt: handoverPrompt
+        )
+    }
+
+    /// A new Claude's launch line in `workspace`: its space's mode, brief
+    /// and safety settings, and Nirux's tools.
+    func claudeLaunchCommand(
+        in workspace: WorkspaceState, worktreeBranch: String?, handoverPrompt: String?, settingsFile: String?, resume: AgentResumeTarget? = nil
+    ) -> String {
+        NiruxShellView.claudeCommand(
+            resume: resume, mode: NiruxShellView.claudeLaunchMode(for: workspace),
+            sessionName: SessionName.make(
+                worktreeBranch: worktreeBranch,
+                spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
+                isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
+            ),
+            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
+            settingsFile: settingsFile,
+            handoverPrompt: handoverPrompt
+        )
     }
 
     /// The setup script's line (see SpaceSetupScript), then `agentCommand`.
@@ -414,10 +433,11 @@ extension NiruxShellView {
     private func activateProfile(_ profileID: String, crosses: Bool, profileAlreadySelected: Bool = false) {
         let previousProfileID = activeProfileID
         // The plan goes, a crossing on its way ends, and a pass under the
-        // rail: what shows now, at rest, is what leaves.
+        // rail or the bar: what shows now, at rest, is what leaves.
         closeSpacePlan(going: nil, animated: false)
         endSpaceCrossing()
         endUnderGlass()
+        endUnderBar()
         let leaving = crosses && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }
@@ -456,6 +476,15 @@ extension NiruxShellView {
         case .close:
             requestCloseWorkspace(at: workspaceIndex)
             return
+        case .turnOffLead:
+            showSpaceSettings(profileID: workspaces[workspaceIndex].profileID, tab: .lead)
+            return
+        case .recoverLead(let issue):
+            requestLeadRecovery(issue, in: workspaces[workspaceIndex])
+            return
+        case .restartLead:
+            requestRestartLead(spaceID: workspaces[workspaceIndex].profileID)
+            return
         case .editContext:
             showWorkspaceContextPanel(workspaceIndex: workspaceIndex)
             return
@@ -464,6 +493,12 @@ extension NiruxShellView {
             return
         case .reviewBranch:
             openBranchReview(in: workspaces[workspaceIndex])
+            return
+        case .resumeWith:
+            showResumeTask(workspaces[workspaceIndex])
+            return
+        case .startWaitingTask:
+            startWaitingTask(workspaces[workspaceIndex])
             return
         case .newSubtask:
             showNewSubtaskPanel(under: workspaces[workspaceIndex])
@@ -577,6 +612,8 @@ extension NiruxShellView {
             edgeGlowBottom.frame = frames.glowBottom
             columnIndicator.frame = frames.indicator
         }
+        sidebarResizeHandle.isHidden = !isSidebarExpanded
+        sidebarResizeHandle.frame = frames.divider.insetBy(dx: -3, dy: 0)
         statusBar.frame = frames.statusBar
     }
 

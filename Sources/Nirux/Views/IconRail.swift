@@ -40,6 +40,7 @@ final class IconRail: NSView {
 
     /// A click on a task, a double-click on a waiting one, or VoiceOver's
     /// "Open task": go to it.
+    var onTaskHover: ((String, Bool) -> Void)?
     var onSelect: ((String) -> Void)?
     /// A click on a waiting task: its request, anchored to the task's icon
     /// (scrolled into view first), which a popover can follow as the rail
@@ -156,6 +157,7 @@ final class IconRail: NSView {
             let view = itemViews[item.id] ?? {
                 let view = RailItemView()
                 view.onPress = { [weak self] id, clicks, time in self?.press(id, clicks: clicks, at: time) }
+                view.onHover = { [weak self] id, entered in self?.onTaskHover?(id, entered) }
                 view.onOpen = { [weak self] id in self?.onSelect?(id) }
                 view.menuForTask = { [weak self] id in self?.menuForTask?(id) }
                 itemViews[item.id] = view
@@ -281,6 +283,7 @@ final class RailItemView: NSView {
     /// A click: the task's id, the click count, the event's time.
     var onPress: ((String, Int, TimeInterval) -> Void)?
     /// VoiceOver's "Open task" on a waiting task.
+    var onHover: ((String, Bool) -> Void)?
     var onOpen: ((String) -> Void)?
     /// A right-click: the task's menu.
     var menuForTask: ((String) -> NSMenu?)?
@@ -308,7 +311,10 @@ final class RailItemView: NSView {
     private var isHovered = false {
         didSet {
             updateHalo()
-            if isHovered != oldValue { updateRelief() }
+            if isHovered != oldValue {
+                updateRelief()
+                if let item { onHover?(item.id, isHovered) }
+            }
         }
     }
     private var isPressed = false {

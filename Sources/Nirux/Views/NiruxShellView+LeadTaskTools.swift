@@ -7,12 +7,19 @@ import AppKit
 /// and its branch only when they all pass: the Lead's call stands in for
 /// the alert's click.
 extension NiruxShellView {
-    /// The task of `space` named `name`, whoever started it, as every Lead
-    /// tool reads names: the first of `nameRanks` any task answers decides;
-    /// within it, the Lead's own task when only one of them answers, else
-    /// the only task that does. Nil when none answers, or several do.
+    /// A reference stays scoped to the Lead’s space. Ordinary names keep
+    /// their branch, folder and Mission precedence unless a waiting task shares the name.
     func spaceTask(_ name: String, in space: WorkspaceProfile) -> WorkspaceState? {
         let candidates = workspaces.filter { $0.profileID == space.id && !$0.isLead && !$0.isClosing }
+        if name.lowercased().hasPrefix(LeadTools.taskIDPrefix) {
+            let id = String(name.dropFirst(LeadTools.taskIDPrefix.count))
+            let matches = candidates.filter { $0.id.caseInsensitiveCompare(id) == .orderedSame }
+            return matches.count == 1 ? matches.first : nil
+        }
+        // A waiting task has no branch or Mission. Its title can also be a different task’s branch or folder.
+        if let waiting = candidates.first(where: { $0.isWaitingTask && Self.answers($0, to: name) }) {
+            return candidates.contains { $0 !== waiting && Self.answers($0, to: name) } ? nil : waiting
+        }
         guard let found = Self.nameRanks(name).lazy.map({ candidates.filter($0) }).first(where: { !$0.isEmpty }) else { return nil }
         let leadID = leadWorkspace(inSpace: space.id)?.id
         let own = found.filter { workspace in leadID.map { leadMission(of: workspace, lead: $0) != nil } ?? false }
@@ -21,8 +28,7 @@ extension NiruxShellView {
     }
 
     func noSpaceTask(_ name: String, in space: WorkspaceProfile) -> String {
-        "No task in \(space.name) is named “\(name)”, or several share that name: use its title or branch from list_tasks "
-            + "(its folder, for a task without a repository)."
+        "No task in \(space.name) is named “\(name)”, or several share that name: use its task:<id> from list_tasks."
     }
 
     // MARK: close_task
@@ -32,18 +38,23 @@ extension NiruxShellView {
         guard let task = spaceTask(name, in: space) else { return answer(noSpaceTask(name, in: space), true) }
         let title = MissionPromptText.quoted(task.title)
         // A task whose folder is gone only closes (see finishLeadClose).
-        guard Self.isTask(task) || !FileManager.default.fileExists(atPath: task.cwd) else {
+        guard task.isWaitingTask || Self.isTask(task) || !FileManager.default.fileExists(atPath: task.cwd) else {
             return answer("“\(title)” isn't a task (a worktree of one of the space's repositories, or a task's folder): "
                 + "ask the user to close it.", true)
         }
         let snapshot = ProcessSnapshot()
         if let refusal = leadCloseRefusal(of: task, snapshot: snapshot) { return answer(refusal, true) }
+        if task.isWaitingTask {
+            guard !task.isStarting else { return answer("The task is starting. Try again once it opens.", true) }
+            closeLeadTask(task)
+            return answer("Closed “\(title)”.", false)
+        }
         if let folder = task.taskFolder { return closeFolderTask(task, folder: folder, snapshot: snapshot, answer: answer) }
         guard let path = Self.worktreeCleanupPath(forCwd: task.cwd) else {
             closeLeadTask(task)
             return answer("Closed “\(title)”. Nirux found no worktree of it to clean up.", false)
         }
-        let key = Self.comparablePath(path)
+        let key = path.comparablePath
         guard worktreeCleanupsInFlight.insert(key).inserted else {
             return answer("A clean-up of “\(title)”'s worktree is already running: call again in a minute.", true)
         }
@@ -66,7 +77,7 @@ extension NiruxShellView {
     private func finishLeadClose(
         taskID: String, spaceID: String, path: String, inspection: WorktreeCleanup.Inspection, answer: @escaping LeadAnswer
     ) {
-        let key = Self.comparablePath(path)
+        let key = path.comparablePath
         guard let task = workspaces.first(where: { $0.id == taskID && $0.profileID == spaceID && !$0.isClosing }) else {
             worktreeCleanupsInFlight.remove(key)
             return answer("The task was closed or moved to another space meanwhile: nothing was cleaned up.", true)
@@ -77,14 +88,15 @@ extension NiruxShellView {
             worktreeCleanupsInFlight.remove(key)
             return answer(refusal, true)
         }
+        // What GitHub said of its branch: the messages held until it merges.
+        closeMergeWaits(of: task, inspected: inspection, now: Date().timeIntervalSince1970)
         let title = MissionPromptText.quoted(task.title)
         var candidate = worktreeCleanupCandidate(path: path, snapshot: snapshot)
         candidate.inspection = inspection
         let others = candidate.workspaces.filter { $0.id != taskID }
         let availability = others.isEmpty ? candidate.availability : .blocked([Self.openInIt(others.map(\.title))])
-        // A folder named for another branch may be a base reused across
-        // branches, which the alert warns about.
-        guard case .ready(let plan, _) = availability, plan.worktree.folderMatchesBranch else {
+        guard case .ready(let plan, _) = availability,
+              plan.worktree.folderMatchesBranch || isOriginalMissionWorktree(plan.worktree, of: task) else {
             closeLeadTask(task)
             worktreeCleanupsInFlight.remove(key)
             return answer(Self.closedWithout(title, availability), false)
@@ -101,6 +113,13 @@ extension NiruxShellView {
                 answer(Self.cleanedUp(title, plan: plan, outcome: outcome), outcome?.succeeded != true)
             }
         }
+    }
+
+    private func isOriginalMissionWorktree(_ worktree: WorktreeCleanup.Worktree, of task: WorkspaceState) -> Bool {
+        guard let id = task.missionID, MissionStore.shared.ensureLoaded(),
+              let mission = MissionStore.shared.missions.first(where: { $0.id == id && $0.childWorkspaceID == task.id && $0.oneWay != true })
+        else { return false }
+        return worktree.path == GitWorktree.siblingPath(for: mission.branch, mainCheckout: worktree.mainCheckout)
     }
 
     /// A task without a repository: its folder goes to the Trash, where
@@ -223,7 +242,7 @@ extension NiruxShellView {
         // launcher (npx) too. The screen adds what no hook reports.
         let dialog = agentReadings(of: task, snapshot: snapshot).lazy.compactMap(\.dialog).first
         for column in columns {
-            guard let pty = column.pty, pty.runningAgentName(snapshot: snapshot) != nil, let hold = pty.agentHold else { continue }
+            guard let pty = column.pty, pty.runningAgent(snapshot: snapshot) != nil, let hold = pty.agentHold else { continue }
             return Self.closeRefusal(hold, title: title, dialog: dialog)
         }
         if let dialog { return "“\(title)” waits for the user (\(dialog)): leave it to them." }
@@ -233,16 +252,15 @@ extension NiruxShellView {
         }
         // Idle is only known from Claude's hooks (see WorkspaceClosePolicy).
         if let unknown = agents.first(where: { $0.status == nil }) {
-            return "Nirux can't tell whether “\(title)”'s \(unknown.displayName) is done: ask the user to close it."
+            return "Nirux can't tell whether “\(title)”'s \(unknown.agent.name) is done: ask the user to close it."
         }
         // A dev server or a test run in front of a terminal of its own (one
         // sent to the background isn't seen).
         let programs = columns.compactMap { column -> String? in
-            guard let pty = column.pty, pty.runningAgentName(snapshot: snapshot) == nil,
+            guard let pty = column.pty, pty.runningAgent(snapshot: snapshot) == nil,
                   let name = pty.foregroundProcess(snapshot: snapshot)?.name else { return nil }
-            let program = name.hasPrefix("-") ? String(name.dropFirst()) : name
             // A terminal just opened: its fork bears this app's name until its shell starts.
-            return Self.interactiveShells.contains(program) || program == ProcessInfo.processInfo.processName ? nil : name
+            return Shell.isShell(name) || name == ProcessInfo.processInfo.processName ? nil : name
         }
         if let program = programs.first {
             return "“\(title)” runs \(program) in a terminal: ask the user to close it."
@@ -551,7 +569,7 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         guard !snapshot.isEmpty else { return answer("Nirux couldn't read the running processes: call again in a moment.", true) }
         guard let column = task.columns.first(where: { $0.agentUUID == mission.childAgentUUID }), let pty = column.pty,
-              let foreground = pty.foregroundProcess(snapshot: snapshot), foreground.name == "claude"
+              let foreground = pty.foregroundProcess(snapshot: snapshot), foreground.agent == .claude
         else { return answer("“\(title)”'s Claude Code isn't running in its column: there is no turn to interrupt.", true) }
         if let refusal = pty.interruptRefusal(snapshot: snapshot) { return answer(Self.interruptRefusal(refusal, title: title), true) }
         guard let transcript = column.claudeTranscript, transcript.process == foreground.instance else {

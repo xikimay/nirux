@@ -17,13 +17,9 @@ struct AgentProgramStatus: Equatable, Sendable {
     let kind: String?
     /// What it shows: the pending command or question, the turn's answer.
     let message: String?
-    /// The process it speaks for, which must be in front to be heard.
-    let process: String
+    /// The agent it speaks for, which must be in front to be heard.
+    let agent: CodingAgent
 
-    /// The apps Nirux reads, by name, and their processes.
-    static let processes = ["antigravity": agy, "codex": codex]
-    static let agy = "agy"
-    static let codex = "codex"
     /// Every launch says `blocked:kind=auth` for a moment while it signs in.
     static let signInGrace: TimeInterval = 5
     /// agy's spinner never stops this long while it works: past it, a
@@ -47,6 +43,16 @@ struct AgentProgramStatus: Equatable, Sendable {
         }
     }
 
+    /// Codex 0.171 reports the dialog kind even when it omits the command or question.
+    var codexChoice: AgentAttentionReason? {
+        guard agent == .codex, state == .blocked else { return nil }
+        switch kind {
+        case "permission": return .permission(tool: nil, summary: message ?? "approval in Codex")
+        case "question": return .question(message ?? "choose an option in Codex")
+        default: return nil
+        }
+    }
+
     /// `payload`, what follows `ESC ] 7501 ;`: nil for an app Nirux doesn't
     /// read, or a query.
     static func parse(_ payload: Substring) -> AgentProgramStatus? {
@@ -55,14 +61,14 @@ struct AgentProgramStatus: Equatable, Sendable {
             let pair = field.split(separator: "=", maxSplits: 1)
             if pair.count == 2 { fields[pair[0]] = pair[1] }
         }
-        guard let process = fields["app"].flatMap({ processes[String($0)] }),
+        guard let agent = fields["app"].flatMap({ app in CodingAgent.allCases.first { $0.programStatusApp == String(app) } }),
               let state = fields["state"].flatMap({ State(rawValue: String($0)) })
         else { return nil }
         let message = fields["msg"]
             .flatMap { Data(base64Encoded: String($0)) }
             .flatMap { String(data: $0, encoding: .utf8) }
             .flatMap { AgentText.clean($0, maxLength: AgentToolInput.maxSummaryLength) }
-        return AgentProgramStatus(state: state, kind: fields["kind"].map(String.init), message: message, process: process)
+        return AgentProgramStatus(state: state, kind: fields["kind"].map(String.init), message: message, agent: agent)
     }
 
     /// Reads them out of terminal output, which comes in chunks: a sequence

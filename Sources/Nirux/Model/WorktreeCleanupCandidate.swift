@@ -24,6 +24,9 @@ struct WorktreeCleanupCandidate: Equatable {
     /// Agents of other workspaces running inside the folder, e.g.
     /// "Claude in “main”": deleting the folder would pull it from under them.
     var foreignAgents: [String] = []
+    /// The spaces whose Lead is open in `workspaces`: a Lead closes only
+    /// when turned off.
+    var leads: [String] = []
     /// Titles of the workspaces with an editor holding unsaved changes in
     /// `workspaces`, or to a file in the folder.
     var unsavedEditors: [String]
@@ -53,6 +56,9 @@ struct WorktreeCleanupCandidate: Equatable {
         }
         if !foreignAgents.isEmpty {
             problems.append("Running in this folder from another workspace: \(foreignAgents.joined(separator: ", ")).")
+        }
+        for space in leads {
+            problems.append("The Lead of “\(space)” works in this folder: only turning it off in Space Settings › Lead closes it.")
         }
         return problems
     }
@@ -109,7 +115,7 @@ struct WorktreeCleanupCandidate: Equatable {
         case .blocked(let problems):
             let first = problems.first ?? ""
             if let pullRequest = report?.pullRequest, !first.contains("#\(pullRequest.number) ") {
-                parts.append("PR #\(pullRequest.number) \(pullRequest.state.lowercased())")
+                parts.append("PR #\(pullRequest.number) \(pullRequest.state.word)")
             }
             parts.append(problems.count > 1 ? "\(first) (+\(problems.count - 1) more)" : first)
         case .ready(let plan, _):
@@ -122,7 +128,7 @@ struct WorktreeCleanupCandidate: Equatable {
             if workspaces.isEmpty { parts.append("not open in Nirux") }
         }
         if !agents.isEmpty {
-            parts.append(agents.map { "\($0.displayName) \($0.statusDescription)" }.joined(separator: ", "))
+            parts.append(agents.map { "\($0.agent.name) \($0.statusDescription)" }.joined(separator: ", "))
         }
         return parts.joined(separator: " · ")
     }
@@ -194,7 +200,7 @@ struct WorktreeCleanupCandidate: Equatable {
                 continue
             }
             if !candidate.agents.isEmpty {
-                let agents = candidate.agents.map { "\($0.displayName) \($0.statusDescription)" }
+                let agents = candidate.agents.map { "\($0.agent.name) \($0.statusDescription)" }
                 agentLines.append("• \(agents.joined(separator: ", ")) in \(quotedList(candidate.workspaces.map(\.title)))")
             }
         }

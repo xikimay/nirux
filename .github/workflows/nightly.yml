@@ -29,6 +29,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Test NiruxCore
+        run: scripts/test-core.sh
+
       - name: Validate signing and notarization secrets
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
@@ -121,8 +124,36 @@ jobs:
             .build/workspace-state.json
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
+      # The dependencies' build products, as tests.yml reads them: never this
+      # package's own modules.
+      - name: Restore dependency build products
+        id: depbuild
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/arm64-apple-macosx/debug/GhosttyKit.build
+            .build/arm64-apple-macosx/debug/DisplayLink.build
+            .build/arm64-apple-macosx/debug/GhosttyTerminal.build
+            .build/arm64-apple-macosx/debug/Modules/GhosttyKit.*
+            .build/arm64-apple-macosx/debug/Modules/DisplayLink.*
+            .build/arm64-apple-macosx/debug/Modules/GhosttyTerminal.*
+          key: deps-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+
       - name: Build tests
         run: swift build --build-tests
+
+      - name: Save dependency build products
+        if: steps.depbuild.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            .build/arm64-apple-macosx/debug/GhosttyKit.build
+            .build/arm64-apple-macosx/debug/DisplayLink.build
+            .build/arm64-apple-macosx/debug/GhosttyTerminal.build
+            .build/arm64-apple-macosx/debug/Modules/GhosttyKit.*
+            .build/arm64-apple-macosx/debug/Modules/DisplayLink.*
+            .build/arm64-apple-macosx/debug/Modules/GhosttyTerminal.*
+          key: ${{ steps.depbuild.outputs.cache-primary-key }}
 
       - name: Save SwiftPM dependencies
         if: steps.swiftpm.outputs.cache-hit != 'true'

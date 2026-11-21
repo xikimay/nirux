@@ -1,22 +1,41 @@
 # Development
 
-Nirux is a Swift package with one AppKit executable target. It runs on macOS 14 or later. Building needs Swift 6.2 or later; CI uses Xcode 26.3 on macOS 15.
+The root Swift package builds the AppKit executable and links the local NiruxCore library. It runs on macOS 14 or later. Building needs Swift 6.2 or later; CI uses Xcode 26.3 on macOS 15.
 
 ## Build, test, run
 
 ```bash
 swift build
 swift test
+scripts/test-core.sh
 NIRUX_STATE_DIR=/tmp/nirux-dev swift run Nirux
 ```
 
-CI runs the tests one process per test class, several at a time:
+CI runs the app’s XCTest suite one process per test class, several at a time.
 
 ```bash
 swift build --build-tests && scripts/run-tests.sh
 ```
 
 Draft pull requests run `test (selected)`. The daily Coverage map workflow records which XCTest classes executed each Swift source file on main. The selector examines all changes since the indexed commit, including changes that landed on main after the map was recorded. It also includes classes declared by changed test files. Shared test helpers, removed test files, uncovered sources, build inputs, and missing or empty selections trigger the full suite. Marking the PR ready and each subsequent push run the full suite under the separate `test` check.
+
+The longest classes start first, in the order `scripts/test-class-times.txt` gives. When classes have grown or new long ones came in, `scripts/test-class-times.sh` rewrites it from main's last green nightly runs.
+
+A new or reworked UI test class passes a flake gate before its pull request is ready. On a pushed branch:
+
+```bash
+gh workflow run flake-gate.yml --ref <branch> -f classes="NiruxTests.FooTests" -f runs=10
+```
+
+One job builds the branch and runs each class 10 times, each run in its own process, beside the six heaviest classes. It ends with a line like `NiruxTests.FooTests: 10 of 10 runs passed`. After a local build, `scripts/run-tests.sh --repeat 10 NiruxTests.FooTests` does the same.
+
+## NiruxCore
+
+Put policy that only needs core types in `NiruxCore/Sources/NiruxCore` and its Swift Testing cases in `NiruxCore/Tests/NiruxCoreTests`. AppKit and Ghostty adapters stay in the app. Policies that still depend on app models can live in `Sources/Nirux/Model` and use the core API through the app’s re-export.
+
+Run `scripts/test-core.sh` from the root or `../scripts/test-core.sh` inside `NiruxCore`. The script builds the independent package and locates the active toolchain’s Swift Testing macros, including with the macOS Command Line Tools. With Xcode, `swift test` inside the package runs the same suite. From the root, `swift test` runs the app tests, which require Xcode.
+
+Run `scripts/check-core-boundary.sh` to check for UI imports in NiruxCore and typecheck Model, Util and GitHub against the core module. The remaining app exceptions are listed in `scripts/core-boundary-exceptions.txt`.
 
 ## Development builds and your real workspaces
 

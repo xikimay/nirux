@@ -4,7 +4,7 @@ import GhosttyTerminal
 /// Root AppKit view: sidebar + niri-style 2D scrolling viewport
 final class NiruxShellView: NSView {
     private static let collapsedSidebarWidth = SidebarView.foldedWidth
-    private static let expandedSidebarWidth: CGFloat = 260
+    let sidebarResizeHandle = HorizontalResizeHandle<CGFloat>()
     /// The requests waiting for the user, the inbox and the callout (see
     /// NiruxShellView+Requests).
     let requestsState = RequestsState()
@@ -23,6 +23,9 @@ final class NiruxShellView: NSView {
     var underGlassGeneration = 0
     /// The workspace whose cards pass under the rail, until its edge closes.
     weak var passingUnderRail: WorkspaceState?
+    /// Over the title band while floors play, but for the command bar
+    /// (NiruxShellView+UnderBar).
+    var titleBandCover: TitleBandCover?
     /// Counts space crossings: a crossing's end acts only on its own, and
     /// its pictures over the viewport (NiruxShellView+SpaceCrossing).
     var spaceCrossingGeneration = 0
@@ -47,7 +50,7 @@ final class NiruxShellView: NSView {
     var offScreenViewportSize = NSSize.zero
 
     private var sidebarWidth: CGFloat {
-        isSidebarExpanded ? Self.expandedSidebarWidth : Self.collapsedSidebarWidth
+        isSidebarExpanded ? sidebarFold.expandedWidth(in: bounds.width) : Self.collapsedSidebarWidth
     }
 
     let sidebar = SidebarView()
@@ -106,10 +109,16 @@ final class NiruxShellView: NSView {
     }
 
     // Heartbeat
+    lazy var pinnedThreadReader: TaskThreadContentView.Read = { [weak self] id, space, done in
+        guard let self else { return done(nil) }
+        readThreadTimeline(workspaceID: id, spaceID: space, completion: done)
+    }
+
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
     /// Event-driven git/PR refresh scheduling (FSEvents + throttles).
-    let gitRefresh = GitRefreshCoordinator()
+    /// Tests give it a clock of their own.
+    var gitRefresh = GitRefreshCoordinator()
     /// See scheduleMetadataRefresh(): one process-table scan per window.
     var isMetadataRefreshScheduled = false
     /// Restored agents on screen resume after a wait (see
@@ -165,7 +174,17 @@ final class NiruxShellView: NSView {
     /// over), typed once that prompt is free (`typeMissionMessages`).
     var pendingLeadNotices: [LeadNotice] = []
     /// Mission messages that wait too long for a prompt (`waitingMissionMessages`).
+    var resumingTasks: Set<String> = []
     var missionWaits = MissionWaitState()
+    /// What merge waits looked up (NiruxShellView+MergeWaits).
+    var mergeWaitTracking = MergeWaitTracking()
+    /// How a merge wait asks GitHub about a pull request; tests answer for it.
+    var taskWorktreesBeingCreated = Set<String>()
+    var mergeWaitLookUp: @Sendable (String) -> Result<MergeWait.LookedUp?, MergeWait.LookUpFailure> = MergeWait.lookUp
+    /// How a workspace's pull request is read; tests answer for it.
+    var fetchPullRequest: @MainActor (
+        _ branch: String, _ cwd: String, _ startFolder: String?, _ done: @escaping @MainActor @Sendable (PRDetect.FetchResult) -> Void
+    ) -> Void = { PRDetect.fetchAsync(branch: $0, cwd: $1, startFolder: $2, completion: $3) }
     /// A Lead's tasks waiting to be proposed in the New sheet, one sheet at
     /// a time, and the timer that shows the next once no sheet is up.
     var pendingLeadProposals: [LeadProposal] = []
@@ -244,7 +263,7 @@ final class NiruxShellView: NSView {
     var boardSettingsPanel: BoardSettingsPanel?
     /// Each task's station by workspace id: its line's on its space's Board
     /// (`noteTaskStations`), drawn or not. No Board, none.
-    var taskStations: [String: BoardStages.Station] = [:]
+    var taskStations: [String: SidebarBoardProgress] = [:]
     /// The Board tab reading board.json and the checkouts: one read at a
     /// time.
     var isReadingBoardSettings = false
@@ -339,6 +358,7 @@ final class NiruxShellView: NSView {
         addSubview(viewport)
         // Over the work: the cards pass under the rail (NiruxShellView+UnderGlass).
         addSubview(sidebar)
+        wireSidebarResizeHandle()
         sidebar.onRailShownChange = { [weak self] in self?.railMayHaveChanged(animated: true) }
         addSubview(columnIndicator)
         addSubview(edgeGlowLeft)
@@ -358,6 +378,18 @@ final class NiruxShellView: NSView {
         wireWorkspace(workspace)
         workspaces.append(workspace)
         verticalStrip.addSubview(workspace.containerView)
+        sidebar.onOpenTaskThread = { [weak self] id, card in
+            guard let self else { return }
+            let space = activeProfileID
+            sidebar.taskPreview.pin(workspaceID: id, card: card) { [weak self, weak card] questionID, text in
+                guard let self, let card, sidebar.taskPreview.card === card,
+                      sidebar.taskPreview.workspaceID == id, activeProfileID == space,
+                      workspaces.contains(where: { $0.id == id && $0.profileID == space && !$0.isClosing })
+                else { return .noLongerOpen }
+                return replyToThreadQuestion(questionID, in: id, text: text)
+            }
+            refreshPinnedTaskThread()
+        }
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
         sidebar.worktreeCleanupOffer = { [weak self] index in self?.worktreeCleanupOffer(workspaceIndex: index) }
@@ -365,6 +397,10 @@ final class NiruxShellView: NSView {
         sidebar.workspaceIDForIndex = { [weak self] index in self?.workspaces[safe: index].flatMap { $0.isClosing ? nil : $0.id } }
         sidebar.columnIndexForID = { [weak self] workspaceID, columnID in
             self?.workspaces.first { $0.id == workspaceID && !$0.isClosing }?.columns.firstIndex { $0.id == columnID && !$0.isClosing }
+        }
+        sidebar.offersTaskResume = { [weak self] index in
+            guard let task = self?.workspaces[safe: index] else { return false }
+            return !task.isInactive && Self.isTask(task)
         }
         sidebar.offersSubtask = { [weak self] index in
             guard let self, let workspace = self.workspaces[safe: index], !workspace.isClosing else { return false }
@@ -462,9 +498,12 @@ final class NiruxShellView: NSView {
                 self.heartbeatTick &+= 1
                 // Git and PR reads are event-driven; the tick only starts
                 // the ones that are due (see GitRefreshPolicy).
+                let now = Date().timeIntervalSince1970
                 self.refreshGitAndPullRequests()
-                self.checkMissionWaits(snapshot: snapshot, now: Date().timeIntervalSince1970)
+                self.sweepMergeWaits(now: now)
+                self.checkMissionWaits(snapshot: snapshot, now: now)
                 self.refreshMetadata(snapshot: snapshot)
+                self.refreshPinnedTaskThread()
                 // Save state every ~10s (every 5th tick)
                 if self.heartbeatTick % 5 == 0 {
                     self.saveState(snapshot: snapshot)
@@ -487,7 +526,14 @@ final class NiruxShellView: NSView {
     /// sidebar refresh, terminal link opening. Used by init, addWorkspace
     /// and session restore.
     func wireWorkspace(_ workspace: WorkspaceState) {
+        workspace.columns.first?.waitingTask?.onStart = { [weak self, weak workspace] in
+            if let workspace { self?.startWaitingTask(workspace) }
+        }
         wireMetadataAndGitRefresh(workspace)
+        workspace.onUserPrompt = { [weak self, weak workspace] column, typedAt in
+            guard let self, let workspace else { return }
+            self.retireMissionQuestions(of: column, in: workspace, promptedAt: typedAt)
+        }
         workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url in
             self?.openWebView(url: url, in: targetWorkspace)
         }
@@ -756,7 +802,7 @@ extension NiruxShellView {
     // MARK: - Columns
 
     func addColumn() {
-        guard let ws = activeWorkspace else { return }
+        guard let ws = activeWorkspace, !ws.isWaitingTask else { return }
         ws.addColumn()
         // The strip glides to its new place, a centred one aside; the new
         // column comes in at its own.
@@ -847,7 +893,7 @@ extension NiruxShellView {
         workspaceContextPanel?.onSave = { [weak self, weak workspace] values in
             guard let self, let workspace,
                   self.workspaces.contains(where: { $0 === workspace }) else { return }
-            workspace.purpose = WorkspaceState.normalizedContextText(values.purpose)
+            workspace.setPurpose(values.purpose, by: .user)
             workspace.phase = values.phase
             if values.phase != nil {
                 workspace.unknownPhaseRawValue = nil
@@ -856,11 +902,8 @@ extension NiruxShellView {
             workspace.setContextByHand(.nextStep, values.nextStep, presented: presentedNextStep)
             workspace.setContextByHand(.blocker, values.blocker, presented: presentedBlocker)
 
-            let savedSummary = WorkspaceState.normalizedContextText(values.lastSummary)
-            if savedSummary != presentedSummary {
-                workspace.lastSummary = savedSummary
-                workspace.lastSummaryIsManual = savedSummary != nil
-                workspace.lastSummaryIsStatus = false
+            if WorkspaceState.normalizedContextText(values.lastSummary) != presentedSummary {
+                workspace.setSummaryByHand(values.lastSummary)
             }
             self.updateSidebar()
             self.saveState()
@@ -922,7 +965,7 @@ extension NiruxShellView {
         let folder = repositoryFolder ?? activeWorkspace?.focusedWorkingDirectory
         guard let folder, let repoRoot = GitWorktree.repoRoot(at: folder)
         else { return showToast("Not in a git repository: \(folder?.abbreviatedPath() ?? "")") }
-        let excluded = repositoryFolder == nil ? Self.comparablePath(repoRoot) : nil
+        let excluded = repositoryFolder == nil ? repoRoot.comparablePath : nil
         // From the focused terminal, not the active workspace: its folder is
         // where it was opened, not where its terminal is now, and going back
         // to it would do nothing. From the sheet it counts, so picking its
@@ -935,11 +978,11 @@ extension NiruxShellView {
         DispatchQueue.global(qos: .userInitiated).async {
             let worktrees = GitWorktree.list(repoRoot: repoRoot)
             let branches = listsBranches ? GitWorktree.branchesWithoutWorktree(repoRoot: repoRoot, worktrees: worktrees) : []
-            let comparablePaths = worktrees.map { Self.comparablePath($0.path) }
+            let comparablePaths = worktrees.map(\.path.comparablePath)
             // The worktree each workspace is open in (the main checkout may
             // hold the others), and whether at its root.
             let workspaceWorktrees = openWorkspaces.compactMap { workspace in
-                let cwd = Self.comparablePath(workspace.cwd)
+                let cwd = workspace.cwd.comparablePath
                 return ProjectBoard.innermost(of: comparablePaths, holding: cwd).map {
                     (id: workspace.id, path: comparablePaths[$0], isAtRoot: cwd == comparablePaths[$0])
                 }
@@ -1198,6 +1241,8 @@ extension NiruxShellView {
         // leaves them to the workspace it goes to, which shows under it.
         if let spacePlan, !spacePlan.isDiving { return true }
         if NSApp.keyWindow is NSPanel { return true }
+        if let body = sidebar.taskPreview.pinnedBody, let responder = window?.firstResponder as? NSView,
+           responder.isDescendant(of: body) { return true }
         // A popover hanging from the window has the keyboard (the Mission
         // reply's field): AppKit keeps the window key, gives it the
         // popover's first responder and hands it the keys. Not once that

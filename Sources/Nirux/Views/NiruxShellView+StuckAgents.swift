@@ -94,6 +94,9 @@ extension NiruxShellView {
         noteMissionQuestionHandOffs(missionQuestions(foreground: { $0.pty?.foregroundProcess(snapshot: snapshot) }, now: now))
         // The log, and one more try, away too.
         checkMissionWaits(snapshot: snapshot, now: now)
+        // A merge a message waits for, away too.
+        refreshAwaitedPullRequests()
+        sweepMergeWaits(now: now)
     }
 
     /// What the column's row shows of a stuck agent.
@@ -106,17 +109,17 @@ extension NiruxShellView {
         guard let pty = column.pty else { return nil }
         switch pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess) {
         case .waiting(let reason, let since)?:
-            return .waiting(reason, duration: SidebarRenderer.shortDuration(now - since))
+            return .waiting(reason, duration: (now - since).shortDuration)
         case .stoppedOnError(let failure)?:
             let resume = SidebarStuckState.Resume(
                 pty.agentResumeRefusal(foreground: foregroundProcess, snapshot: snapshot, now: now)
             )
             return .stoppedOnError(kind: failure.kind, detail: failure.detail, failedAt: failure.failedAt, resume: resume)
         case .exitedMidTurn(let exit)?:
-            return .exitedMidTurn(processName: exit.processName)
+            return .exitedMidTurn(agent: exit.agent)
         case .silent(let silence)?:
             return .silent(
-                duration: SidebarRenderer.shortDuration(now - silence.startedAt), since: silence.since,
+                duration: (now - silence.startedAt).shortDuration, since: silence.since,
                 interruptible: pty.silentInterruptPlan(foreground: foregroundProcess).offersEsc
             )
         case nil:
@@ -290,22 +293,17 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
         guard let pty = column.pty, !pty.hasExited else { return showToast("That terminal has closed") }
-        guard let exit = pty.agentMidTurnExit, exit.processName == "claude" else {
+        guard let exit = pty.agentMidTurnExit, exit.agent == .claude else {
             return showToast("There’s no Claude session to resume there")
         }
         guard let shellPID = pty.shellPID, pty.foregroundInstance(snapshot: snapshot)?.pid == shellPID else {
             return showToast("Something else runs in that terminal now")
         }
-        let command = Self.claudeCommand(
-            resume: exit.sessionID.map { .session($0) } ?? .picker,
-            mode: ClaudeLaunchMode.detect(arguments: exit.arguments) ?? .default,
-            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
-            settingsFile: claudeSpaceSettingsFile(for: workspace)
+        let command = resumeLaunchCommand(
+            .claude(resume: exit.sessionID.map { .session($0) } ?? .picker, mode: ClaudeLaunchMode.detect(arguments: exit.arguments) ?? .default,
+                   model: AgentModels.launchModel(arguments: exit.arguments)),
+            in: workspace, column: column
         )
-        if let sessionID = exit.sessionID {
-            column.prepareClaudeResume(sessionID: sessionID)
-            sessionResume.noteLaunch(of: sessionID, in: column, now: ProcessInfo.processInfo.systemUptime)
-        }
         column.dismissAgentExit()
         pty.sendRaw("\(command)\n")
     }

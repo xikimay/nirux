@@ -76,6 +76,7 @@ final class SidebarView: NSView {
     var worktreeCleanupOffer: ((Int) -> WorktreeCleanupMenuOffer?)?
     /// Whether the workspace's menu offers "New Sub-task…". Asked on each
     /// menu.
+    var offersTaskResume: ((Int) -> Bool)?
     var offersSubtask: ((Int) -> Bool)?
     /// The store index of the open workspace with this id, nil once it is
     /// gone: a menu's items act on the workspace it was built for.
@@ -136,6 +137,7 @@ final class SidebarView: NSView {
     }
     var isExpanded: Bool = false {
         didSet {
+            if isExpanded != oldValue { taskPreview.dismissHover() }
             isRailHidden = false
             // Reset on each switch so the new mode follows the active
             // workspace instead of staying at whatever offset was left.
@@ -164,6 +166,9 @@ final class SidebarView: NSView {
         }
     }
 
+    lazy var taskPreview = SidebarTaskPreview(sidebar: self)
+    /// Called synchronously while the preview is still attached to its window.
+    var onOpenTaskThread: ((_ workspaceID: String, _ card: TaskPreviewCard) -> Void)?
     var lastInfos: [WorkspaceInfo] = []
     var lastProfiles: [ProfileInfo] = []
     /// The workspace each row of the last build stands for, by the index
@@ -329,12 +334,23 @@ final class SidebarView: NSView {
         updateScrollerVisibility()
         addSubview(contentScrollView)
         wireIconRail()
+        NotificationCenter.default.addObserver(self, selector: #selector(taskPreviewWindowResigned(_:)),
+                                               name: NSWindow.didResignKeyNotification, object: nil)
         observeScrollingForApprovalArming()
         contentScrollView.onScrollWheel = { [weak self] in self?.notePointer(.scroll) }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func taskPreviewWindowResigned(_ note: Notification) {
+        if note.object as? NSWindow === window { taskPreview.dismissHover() }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        taskPreview.dismiss()
+        super.viewWillMove(toWindow: newWindow)
+    }
 
     override func layout() {
         super.layout()
@@ -385,6 +401,7 @@ final class SidebarView: NSView {
         let spacesChanged = profiles != lastProfiles
         // Before the rows change: what happened to them, in the same space.
         if spaceChanged {
+            taskPreview.dismiss()
             // Another space's rows: what played for the last one stops.
             forgetRowMoments()
         } else if !lastProfiles.isEmpty || !lastInfos.isEmpty {
@@ -651,6 +668,8 @@ final class SidebarView: NSView {
         notePointer(.move)
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
 
+        trackTaskPreview(at: point)
+
         // The checklist's buttons track their own hover and cursor.
         if isShown(point), let card = onboardingCardView, card.superview != nil, card.frame.contains(point) {
             clearHover()
@@ -749,7 +768,10 @@ final class SidebarView: NSView {
             lastButtonActionAt = event.timestamp
             onCatchUpAction?(action)
         case .link(let url, let label):
-            if let target = Self.missionQuestionTarget(url) {
+            if let issue = LeadLaunchIssue.allCases.first(where: { url.hasPrefix(Self.leadRecoveryURL($0, workspaceID: "")) }) {
+                let id = String(url.dropFirst(Self.leadRecoveryURL(issue, workspaceID: "").count))
+                if let index = currentIndex(ofWorkspace: id) { onWorkspaceAction?(.recoverLead(issue), index) }
+            } else if let target = Self.missionQuestionTarget(url) {
                 onMissionQuestionClicked?(target.workspaceIndex, target.columnIndex, label)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.diffActionPrefix) {
                 onDiffStatsClicked?(workspaceIndex)
@@ -833,9 +855,15 @@ final class SidebarView: NSView {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
+        if let waiting = workspace?.waitingTask {
+            menu.addClosureItem(title: "Start Now") { act(.startWaitingTask) }.isEnabled = waiting != .starting
+            menu.addClosureItem(title: "Close Workspace") { act(.close) }.isEnabled = waiting != .starting
+            return menu
+        }
         if let columnIndex {
             // The column too, by id: one closing meanwhile shifts the others.
-            let columnID = workspace?.columns.first { $0.index == columnIndex }?.id
+            let columnInfo = workspace?.columns.first { $0.index == columnIndex }
+            let columnID = columnInfo?.id
             let column = { [weak self] () -> (workspace: Int, column: Int)? in
                 guard let self, let workspaceID, let columnID, let index = self.currentIndex(ofWorkspace: workspaceID),
                       let column = self.columnIndexForID?(workspaceID, columnID)
@@ -847,10 +875,12 @@ final class SidebarView: NSView {
                 self?.onColumnClicked?(target.workspace, target.column)
             }
             // Wording and ⌘W match the main menu's Column ▸ Close Column.
-            menu.addClosureItem(title: "Close Column", keyEquivalent: "w") { [weak self] in
+            let close = menu.addClosureItem(title: "Close Column", keyEquivalent: "w") { [weak self] in
                 guard let target = column() else { return }
                 self?.onWorkspaceAction?(.closeColumn(columnIndex: target.column), target.workspace)
-            }.isEnabled = (workspace?.columnCount ?? 0) > 1
+            }
+            close.isEnabled = (workspace?.columnCount ?? 0) > 1 && columnInfo?.isLeadTerminal != true
+            if columnInfo?.isLeadTerminal == true { close.toolTip = NiruxShellView.leadStaysText }
             menu.addItem(.separator())
         }
 
@@ -874,6 +904,9 @@ final class SidebarView: NSView {
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.
         if workspace?.isLead != true {
+            if offersTaskResume?(workspaceIndex) == true {
+                menu.addClosureItem(title: "Resume with…") { act(.resumeWith) }
+            }
             if offersSubtask?(workspaceIndex) == true {
                 menu.addClosureItem(title: Self.newSubtaskTitle) { act(.newSubtask) }
             }
@@ -886,8 +919,16 @@ final class SidebarView: NSView {
         // Apart, so a click aimed at the context doesn't close the workspace.
         menu.addItem(.separator())
         if cleanup == .available { addWorktreeCleanupItem(to: menu, act: act) }
-        menu.addClosureItem(title: "Close Workspace") { act(.close) }
-            .isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
+        if workspace?.isLead == true {
+            if workspace?.leadLaunchIssue == .olderOptions {
+                menu.addClosureItem(title: "Relaunch with New Options…") { act(.recoverLead(.olderOptions)) }
+            }
+            menu.addClosureItem(title: NiruxShellView.restartLeadTitle) { act(.restartLead) }
+            menu.addClosureItem(title: Self.turnOffLeadTitle) { act(.turnOffLead) }
+        } else {
+            menu.addClosureItem(title: "Close Workspace") { act(.close) }
+                .isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
+        }
         return menu
     }
 
@@ -898,6 +939,7 @@ final class SidebarView: NSView {
     }
 
     static let newSubtaskTitle = "New Sub-task…"
+    static let turnOffLeadTitle = "Turn Off Lead…"
     static let addRuleTitle = "Add a Rule to the Brief…"
     static let dismissQuestionTitle = "Dismiss Question"
 
@@ -967,6 +1009,7 @@ final class SidebarView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
+        if isExpanded, let id = taskPreview.workspaceID { taskPreview.leave(id) }
         clearHover()
         setHoverTarget(nil)
     }
@@ -1000,6 +1043,10 @@ final class SidebarView: NSView {
         label.attributedStringValue = attr
         hoveredLabel = nil
         NSCursor.arrow.set()
+    }
+
+    static func leadRecoveryURL(_ issue: LeadLaunchIssue, workspaceID: String) -> String {
+        "action:lead-\(issue.rawValue):\(workspaceID)"
     }
 
     private static let diffActionPrefix = "action:diff:"

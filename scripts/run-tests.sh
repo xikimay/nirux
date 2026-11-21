@@ -4,12 +4,19 @@
 # its own pasteboard and defaults suite), so classes need not wait for each
 # other: a serial `swift test` spent ten of the CI's thirteen minutes on them.
 #
-# Usage, after `swift build --build-tests`: scripts/run-tests.sh [workers]
-# Use --only <file> to run selected XCTest classes on a draft.
-# Workers are two per CPU, six at most: six on the CI's three cores took 2.5 minutes;
-# eight made tests that time themselves fail. Fails when a class fails,
-# crashes or runs past NIRUX_TESTS_CLASS_TIMEOUT (600 s), or when fewer tests
-# ran than `swift test list` names.
+# Usage, after `swift build --build-tests`:
+#   scripts/run-tests.sh [workers]
+#   scripts/run-tests.sh --only <file of Module.Class lines>
+#   scripts/run-tests.sh --repeat <runs> <Module.Class>...
+# Workers: two per CPU, six at most (six on the CI's three cores took 2.5
+# minutes; eight made tests that time themselves fail). Fails when a class
+# fails, crashes or runs past NIRUX_TESTS_CLASS_TIMEOUT (600 s), or when
+# fewer tests ran than `swift test list` names. Warns when all classes take
+# longer than NIRUX_TESTS_BUDGET seconds, if set.
+#
+# --repeat is the flake gate of a new or reworked class: each run of it is
+# its own process, as in the suite, and the runs go beside the heaviest
+# classes, so they meet the load the suite puts on them.
 set -euo pipefail
 
 # One class, run by a worker below. xargs, bash and perl are protected
@@ -19,6 +26,8 @@ set -euo pipefail
 if [[ "${1:-}" == --class ]]; then
     class="$2"
     log="$NIRUX_TESTS_WORK/$class.log"
+    # A repeated class runs as Module.Class#N.
+    filter="${class%%#*}"
     if [[ -n "${NIRUX_TESTS_PROFILES:-}" ]]; then
         export LLVM_PROFILE_FILE="$NIRUX_TESTS_PROFILES/$class.%p.profraw"
     fi
@@ -27,7 +36,7 @@ if [[ "${1:-}" == --class ]]; then
     perl -e '$ENV{DYLD_FRAMEWORK_PATH} = $ENV{NIRUX_TESTS_FRAMEWORK_PATH};
         $ENV{DYLD_LIBRARY_PATH} = $ENV{NIRUX_TESTS_LIBRARY_PATH};
         alarm shift; exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!\n"' \
-        "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$class" "$NIRUX_TESTS_BUNDLE" \
+        "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$filter" "$NIRUX_TESTS_BUNDLE" \
         > "$log" 2>&1 || status=$?
     # 128 + SIGALRM.
     if [[ $status -eq 142 ]]; then
@@ -44,6 +53,12 @@ if [[ "${1:-}" == --class ]]; then
     exit 0
 fi
 
+if [[ -n "${NIRUX_TESTS_BUDGET:-}" && ! $NIRUX_TESTS_BUDGET =~ ^[0-9]+$ ]]; then
+    echo "::error::NIRUX_TESTS_BUDGET is a number of seconds, not '$NIRUX_TESTS_BUDGET'"
+    exit 1
+fi
+
+repeat=0
 only=""
 if [[ "${1:-}" == --only ]]; then
     only="${2:-}"
@@ -52,6 +67,14 @@ if [[ "${1:-}" == --only ]]; then
         exit 2
     fi
     only="$(CDPATH='' cd -- "$(dirname -- "$only")" && pwd)/$(basename -- "$only")"
+    set --
+elif [[ "${1:-}" == --repeat ]]; then
+    repeat="${2:-}"
+    gated=("${@:3}")
+    if [[ ! $repeat =~ ^[1-9][0-9]*$ || ${#gated[@]} -eq 0 ]]; then
+        echo "usage: $0 --repeat <runs> <Module.Class>..." >&2
+        exit 2
+    fi
     set --
 fi
 
@@ -89,8 +112,32 @@ if [[ -n $only ]]; then
         mv "$work/requested" "$work/classes"
     fi
 fi
-expected=$(wc -l < "$work/list" | tr -d ' ')
-echo "$expected tests in $(wc -l < "$work/classes" | tr -d ' ') classes, $workers at a time"
+
+if [[ $repeat -gt 0 ]]; then
+    printf '%s\n' "${gated[@]}" | awk '!seen[$0]++' > "$work/gated"
+    if grep -vxF -f "$work/classes" "$work/gated" > "$work/unknown"; then
+        echo "::error::no test class named $(paste -sd' ' "$work/unknown")"
+        exit 1
+    fi
+    for (( run = 1; run <= repeat; run++ )); do
+        sed "s/$/#$run/" "$work/gated"
+    done > "$work/runs"
+    # A run of the gated classes before each of the six heaviest other
+    # classes (scripts/test-class-times.txt), then the rest of the runs.
+    cut -d' ' -f2 scripts/test-class-times.txt | grep -xF -f "$work/classes" | grep -vxF -f "$work/gated" | head -6 > "$work/heavy" || true
+    paste -d'\n' "$work/runs" "$work/heavy" | grep . > "$work/entries"
+    # Each entry runs its class's tests once.
+    expected=$(awk 'FILENAME == ARGV[1] { sub(/\/.*/, ""); tests[$0]++; next }
+        { class = $0; sub(/#.*/, "", class); total += tests[class] } END { print total + 0 }' "$work/list" "$work/entries")
+else
+    # The longest classes first (scripts/test-class-times.sh), so the last
+    # to start are short and no worker is left running a long one alone. A
+    # class with no time yet may be long: it starts with them.
+    awk 'FILENAME == ARGV[1] { seconds[$2] = $1; next } { print ($1 in seconds ? seconds[$1] : 999999), $1 }' \
+        scripts/test-class-times.txt "$work/classes" | sort -k1,1nr -k2,2 | cut -d' ' -f2 > "$work/entries"
+    expected=$(wc -l < "$work/list" | tr -d ' ')
+fi
+echo "$expected tests in $(wc -l < "$work/entries" | tr -d ' ') class runs, $workers at a time"
 
 # What `swift test` sets for xctest on macOS.
 platform="$(xcrun --sdk macosx --show-sdk-platform-path)/Developer"
@@ -105,11 +152,19 @@ export NIRUX_TESTS_CLASS_TIMEOUT="${NIRUX_TESTS_CLASS_TIMEOUT:-600}"
 status=0
 start=$SECONDS
 # A worker always exits 0: xargs failing means one was killed.
-xargs -P "$workers" -n 1 bash "$script" --class < "$work/classes" || {
+xargs -P "$workers" -n 1 bash "$script" --class < "$work/entries" || {
     echo "::error::a worker stopped early (xargs exit $?)"
     status=1
 }
-echo "All classes done in $((SECONDS - start))s"
+elapsed=$((SECONDS - start))
+echo "All classes done in ${elapsed}s"
+if [[ -n "${NIRUX_TESTS_BUDGET:-}" ]]; then
+    summary="Tests: ${elapsed}s, budget ${NIRUX_TESTS_BUDGET}s"
+    if [[ $elapsed -gt $NIRUX_TESTS_BUDGET ]]; then
+        echo "::warning::$summary"
+    fi
+    echo "$summary" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+fi
 
 # A class that crashed has no summary, and one whose worker never ran no log.
 executed=0
@@ -123,7 +178,7 @@ while read -r class; do
         cat "$log" 2>/dev/null || echo "(no log)"
         echo "::endgroup::"
     fi
-done < "$work/classes"
+done < "$work/entries"
 
 echo "Slowest classes:"
 { sort -rn "$work/times" | head -15 | sed 's/^/  /'; } || true
@@ -138,6 +193,11 @@ if [[ -s "$work/failed" ]]; then
     echo "Failures:"
     grep -h ': error: ' "$work"/*.log 2>/dev/null || true
     status=1
+fi
+if [[ $repeat -gt 0 ]]; then
+    while read -r class; do
+        echo "$class: $((repeat - $(grep -c "^$class#" "$work/failed" || true))) of $repeat runs passed"
+    done < "$work/gated"
 fi
 if [[ $executed -ne $expected ]]; then
     echo "::error::$executed tests ran out of $expected listed"

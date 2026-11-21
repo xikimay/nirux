@@ -17,7 +17,7 @@ final class SessionHistoryFlowTests: XCTestCase {
     private static let forgottenID = "f6a7b8c9-d0e1-4f2a-9b3c-5d6e7f8091a2"
 
     static func session(
-        _ sessionID: String, title: String, folder: String, agent: AgentHookEvent.Kind = .claude,
+        _ sessionID: String, title: String, folder: String, agent: CodingAgent = .claude,
         workspaceID: String? = nil, checkout: AgentSessionRecord.Checkout? = nil, hoursAgo: Double = 1
     ) -> AgentSessionRecord {
         let lastActivity = Date().timeIntervalSince1970 - hoursAgo * 3600
@@ -84,7 +84,8 @@ final class SessionHistoryFlowTests: XCTestCase {
                 checkout: AgentSessionRecord.Checkout(branch: "feat/flow", worktreeRoot: harness.worktree, mainCheckout: harness.repo),
                 hoursAgo: 2
             )
-            let codex = Self.session(Self.codexID, title: "codex-task", folder: harness.worktree, agent: .codex, workspaceID: workspace.id)
+            var codex = Self.session(Self.codexID, title: "codex-task", folder: harness.worktree, agent: .codex, workspaceID: workspace.id)
+            codex.agentModel = "chosen-model"
             let restored = Self.session(Self.restoredID, title: "restored-task", folder: harness.repo)
             var unprompted = Self.session(Self.emptyID, title: "empty-task", folder: harness.repo)
             unprompted.hasConversation = false
@@ -92,7 +93,7 @@ final class SessionHistoryFlowTests: XCTestCase {
             let forged = Self.session("--dangerously-skip-permissions", title: "forged-task", folder: harness.repo)
             try Self.seed([flow, codex, restored, unprompted, forged], in: harness)
             workspace.addColumn(
-                deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session(Self.restoredID), mode: .default), title: nil, lastStatus: nil),
+                deferredAgent: DeferredAgentLaunch(launch: .claude(resume: .session(Self.restoredID), mode: .default), title: nil, lastStatus: nil),
                 agentUUID: UUID().uuidString, cwd: harness.repo
             )
             let restoredColumn = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
@@ -139,7 +140,7 @@ final class SessionHistoryFlowTests: XCTestCase {
             shell.resumeSession(codex, spaceID: shell.activeProfileID)
             harness.waitUntil("the Codex resume") { harness.agentLaunches.count == 2 }
             XCTAssertTrue(
-                harness.agentLaunches[1].hasPrefix("command codex resume '\(Self.codexID)' -C '\(harness.worktree)'"),
+                harness.agentLaunches[1].hasPrefix("command codex resume '\(Self.codexID)' -C '\(harness.worktree)' --model 'chosen-model'"),
                 harness.agentLaunches[1]
             )
             // Saved with its thread before its first turn, as a restore is.

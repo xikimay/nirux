@@ -6,6 +6,7 @@ struct GitContextObservation: Sendable {
 }
 
 struct PullRequestObservation: Sendable {
+    let startedAt = Date().timeIntervalSince1970
     fileprivate let generation: UInt64
     fileprivate let context: GitContext
 }
@@ -40,7 +41,9 @@ final class WorkspaceState {
     /// Where the camera stays while the pointer works on a card; nil: where
     /// the strip wants it.
     var heldCamera: CameraHold?
-    let cwd: String
+    /// Where it works; a waiting task's moves once, to its worktree
+    /// (`beginTask`).
+    private(set) var cwd: String
     var title: String
     var titleIsManual: Bool = false
     var profileID: String = WorkspaceProfile.defaultID
@@ -49,7 +52,7 @@ final class WorkspaceState {
     /// until its exit animation ends. It no longer counts as remaining and
     /// must not be selected or closed again.
     var isClosing = false
-    let missionID: String?
+    private(set) var missionID: String?
     /// The task this one is a sub-task of: it lists under it in the
     /// sidebar (see `WorkspaceStore.visibleWorkspaceIndices(in:)`). Set
     /// when it opens: by ⌘N's "Sub-task of", or by the worktree skill's
@@ -70,7 +73,7 @@ final class WorkspaceState {
     var missionHandoffsEnabled: Bool
     /// A task a space's Lead started (`Mission.reportsToLead`): like the
     /// Lead's, its shells get the Mission variables whatever the setting.
-    let reportsToLead: Bool
+    private(set) var reportsToLead: Bool
     /// A sub-task a task's agent started with its tools
     /// (`Mission.reportsToTask`): its shells get the Mission variables
     /// whatever the setting, as a Lead's task's do.
@@ -93,6 +96,10 @@ final class WorkspaceState {
     /// Lead's instructions (NiruxMCPServer). Cleared when its space is
     /// deleted and it moves to General.
     var isLead: Bool
+    /// The agent UUID of a Lead's Claude column (`leadTerminal`): moving
+    /// columns doesn't pass the role on.
+    var leadAgentUUID: String?
+    var leadOptionsCache: (options: LeadLaunchOptions, readAt: TimeInterval)?
     /// The folder Nirux made for a task without a repository
     /// (NewTask+Folder), kept across launches whatever folder its shells
     /// are in: its sub-tasks get their folders there, and it is never a
@@ -121,12 +128,14 @@ final class WorkspaceState {
     /// The most urgent of what happened while the user looked elsewhere.
     var notification: AttentionSignal?
     var hasNotification: Bool { notification != nil }
+    /// Start of the last successful PR read for this revision, including an empty result.
+    private(set) var pullRequestReadAt: TimeInterval?
     var prInfo: PRInfo? {
         didSet {
-            if prInfo?.url != oldValue?.url || prInfo?.state != "OPEN" { prFeedback = nil }
+            if prInfo?.url != oldValue?.url || prInfo?.state != .open { prFeedback = nil }
             // Merged (or first seen merged): what the Lead wrote is over, and
             // nothing tells it. The user's stays.
-            if prInfo?.state == "MERGED", oldValue?.state != "MERGED" { clearLeadContext() }
+            if prInfo?.state == .merged, oldValue?.state != .merged { clearLeadContext() }
         }
     }
     /// The open PR's feedback (docs/design/pr-feedback-inbox.md), read after each
@@ -189,6 +198,24 @@ final class WorkspaceState {
     /// Apart from `reviewRuns`, whose run needs a HEAD git may not find.
     /// Not kept across launches: no turn outlives one.
     var reviewsRunning: [RunningPass] = []
+    /// What waits on another task's pull request to merge before it acts
+    /// here (docs/design/task-dependencies.md). Kept across launches.
+    var mergeWaits: [MergeWait] = []
+
+    /// The wait of a waiting task: no worktree, no agent until it starts.
+    var waitingStart: MergeWait? { mergeWaits.first { $0.pendingStart != nil } }
+    var leadTaskReference: String { LeadTools.taskIDPrefix + id }
+    var isWaitingTask: Bool { waitingStart != nil }
+    var isStarting: Bool { waitingStart?.startingBranch != nil }
+
+    /// A waiting task starts: its worktree is made, and its Mission, before
+    /// its first terminal opens there.
+    func beginTask(at cwd: String, mission: Mission?) {
+        self.cwd = cwd
+        self.missionID = mission?.id
+        reportsToLead = mission?.reportsToLead == true
+        taskLocationCache = nil
+    }
 
     var effectivePhase: WorkspacePhase {
         if let phase { return phase }
@@ -202,8 +229,13 @@ final class WorkspaceState {
 
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
+    /// Something its task's thread keeps happened (`TaskThread`): the shell
+    /// records it when the workspace is a task.
+    var onThreadEvent: ((TaskThread.Event) -> Void)?
     /// A column's agent reported its turn over (`ColumnState.onProgramTurnOver`).
     var onProgramTurnOver: (() -> Void)?
+    /// The user typed a prompt to a column's agent (`ColumnState.onUserPrompt`).
+    var onUserPrompt: ((ColumnState, TimeInterval) -> Void)?
     /// A column's terminal title changed (fires before onMetadataChanged).
     var onColumnTitleChanged: ((ColumnState) -> Void)?
     var onFocusedColumnChanged: (() -> Void)?
@@ -241,7 +273,8 @@ final class WorkspaceState {
         reportsToLead: Bool = false,
         reportsToTask: Bool = false,
         taskFolder: String? = nil,
-        initialAgentUUID: String = UUID().uuidString
+        initialAgentUUID: String = UUID().uuidString,
+        firstColumn: ColumnState? = nil
     ) {
         self.id = id
         self.taskFolder = taskFolder
@@ -249,6 +282,7 @@ final class WorkspaceState {
         self.startedOutsideNirux = startedOutsideNirux
         self.startedByAgent = startedByAgent
         self.isLead = isLead
+        self.leadAgentUUID = isLead ? initialAgentUUID : nil
         self.reportsToLead = reportsToLead
         self.reportsToTask = reportsToTask
         self.cwd = cwd
@@ -268,7 +302,11 @@ final class WorkspaceState {
         stripView.wantsLayer = true
         containerView.addSubview(stripView)
 
-        addColumn(agentUUID: initialAgentUUID)
+        if let firstColumn {
+            insertColumn(firstColumn)
+        } else {
+            addColumn(agentUUID: initialAgentUUID)
+        }
     }
 }
 
@@ -300,7 +338,8 @@ extension WorkspaceState {
         }
     }
 
-    private func setContext(_ field: ContextField, _ text: String?, fromLead: Bool) {
+    private func setContext(_ field: ContextField, _ text: String?, by author: TaskThread.Author) {
+        let fromLead = author == .lead
         switch field {
         case .nextStep:
             nextStep = text
@@ -309,6 +348,29 @@ extension WorkspaceState {
             blocker = text
             blockerIsFromLead = fromLead && text != nil
         }
+        noteThread(field == .nextStep ? .nextStep : .blocker, by: author, text: text)
+    }
+
+    /// The goal (`purpose`): what the task delivers.
+    func setPurpose(_ text: String?, by author: TaskThread.Author) {
+        let value = Self.normalizedContextText(text)
+        guard value != purpose else { return }
+        purpose = value
+        noteThread(.goal, by: author, text: value)
+    }
+
+    /// A summary saved from View/Edit Context…: it stays the user's until
+    /// they clear it.
+    func setSummaryByHand(_ text: String?) {
+        let value = Self.normalizedContextText(text)
+        lastSummary = value
+        lastSummaryIsManual = value != nil
+        lastSummaryIsStatus = false
+        noteThread(.status, by: .user, text: value)
+    }
+
+    private func noteThread(_ kind: TaskThread.Kind, by author: TaskThread.Author?, text: String?, time: TimeInterval? = nil) {
+        onThreadEvent?(TaskThread.Event(time: time ?? Date().timeIntervalSince1970, kind: kind, by: author, text: text))
     }
 
     /// A field saved from View/Edit Context…: one the user changed from
@@ -318,13 +380,13 @@ extension WorkspaceState {
     func setContextByHand(_ field: ContextField, _ text: String, presented: String?) {
         let value = Self.normalizedContextText(text)
         guard value != Self.normalizedContextText(presented) else { return }
-        setContext(field, value, fromLead: false)
+        setContext(field, value, by: .user)
     }
 
     /// Clears the next step and blocker the Lead wrote.
     func clearLeadContext() {
         for field in ContextField.allCases where contextIsFromLead(field) {
-            setContext(field, nil, fromLead: false)
+            setContext(field, nil, by: .nirux)
         }
     }
 
@@ -345,7 +407,7 @@ extension WorkspaceState {
             return value == current ? .unchanged : .keptUsers(current)
         }
         guard value != current else { return .unchanged }
-        setContext(field, value, fromLead: true)
+        setContext(field, value, by: .lead)
         return value.map { .set($0) } ?? .cleared
     }
 
@@ -410,6 +472,7 @@ extension WorkspaceState {
                 == context?.upstreamRepositoryObservation
         if !sameRevision || (context?.identity.isDirty == true && Self.isTerminalPullRequest(prInfo)) {
             prInfo = nil
+            pullRequestReadAt = nil
         }
         diffStats = nil
         if !titleIsManual, let branch = context?.branch, !branch.isEmpty {
@@ -434,18 +497,21 @@ extension WorkspaceState {
     }
 
     @discardableResult
-    func applyPullRequestInfo(_ info: PRInfo?, for context: GitContext) -> Bool {
+    func applyPullRequestInfo(
+        _ info: PRInfo?, for context: GitContext, readStartedAt: TimeInterval = Date().timeIntervalSince1970
+    ) -> Bool {
         guard gitContext == context,
-              !(context.identity.isDirty && Self.isTerminalPullRequest(info)),
-              prInfo != info
+              !(context.identity.isDirty && Self.isTerminalPullRequest(info))
         else { return false }
+        pullRequestReadAt = readStartedAt
+        guard prInfo != info else { return false }
         prInfo = info
         return true
     }
 
     /// The red checks of `prInfo` not reported yet, each once
     /// (docs/design/ci-failure-actions.md).
-    func takeNewRedChecks() -> [ProjectBoard.Check] {
+    func takeNewRedChecks() -> [GitHub.Check] {
         let red = prInfo.map(CIFailure.redChecks) ?? []
         let keys = red.map(CIFailure.reportKey)
         let branch = gitContext?.branch
@@ -497,7 +563,7 @@ extension WorkspaceState {
     ) -> Bool {
         guard isCurrentPullRequestObservation(observation, for: context) else { return false }
         pullRequestObservation = nil
-        return applyPullRequestInfo(info, for: context)
+        return applyPullRequestInfo(info, for: context, readStartedAt: observation.startedAt)
     }
 
     func beginDiffStatsObservation(
@@ -546,8 +612,8 @@ extension WorkspaceState {
     }
 
     private static func isTerminalPullRequest(_ info: PRInfo?) -> Bool {
-        guard let state = info?.state.uppercased() else { return false }
-        return state == "MERGED" || state == "CLOSED"
+        guard let state = info?.state else { return false }
+        return state == .merged || state == .closed
     }
 
     /// Record meaningful agent activity without overwriting a user-edited
@@ -611,6 +677,7 @@ extension WorkspaceState {
         settledTurnStatus = turnEndedAt
         switch status {
         case .line(let line)? where !lastSummaryIsManual:
+            noteThread(.status, by: .nirux, text: line, time: turnEndedAt)
             lastSummary = line
             lastSummaryIsStatus = true
         case .unchanged?, .line?:
@@ -640,15 +707,18 @@ extension WorkspaceState {
     @discardableResult
     func recordAgentHookActivity(_ event: AgentHookEvent) -> Bool {
         switch event.name {
-        // Claude's reminder of a turn already over, and its compactions
-        // (mostly its own, while idle): the card's age stays the agent's
-        // last real work.
+        // Claude's reminder of a turn already over, its compactions (mostly
+        // its own, while idle), a session resumed (as Nirux restores them
+        // at launch) or ended: the card's age stays the agent's last real
+        // work. A new session's start is work beginning.
         case .notification where event.notificationType == "idle_prompt",
-             .sessionStart where event.source == "compact":
+             .sessionStart where event.source == "compact" || event.source == "resume",
+             .sessionEnd:
             return false
         case .stop, .turnComplete:
+            onThreadEvent?(TaskThread.Event(time: event.timestamp, kind: .turnEnd, detail: event.kind.rawValue))
             return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
-        case .notification, .permissionRequest, .sessionStart, .sessionEnd, .userPromptSubmit, .stopFailure:
+        case .notification, .permissionRequest, .sessionStart, .userPromptSubmit, .stopFailure:
             return recordAgentActivity(at: event.timestamp, automaticSummary: nil)
         case .preToolUse, .postToolUse, .permissionDenied, .subagentStop, .approvalResolved:
             return false
@@ -688,12 +758,19 @@ extension WorkspaceState {
     /// it waits on the parent, not on the user.
     func waitsOnParent(_ col: ColumnState) -> Bool {
         guard let uuid = col.agentUUID else { return false }
+        // A prompt the user typed since retires its question (`onUserPrompt`):
+        // its transcript line may be unread yet.
+        col.pty?.readTranscriptPrompts()
         return MissionStore.shared.waitingQuestion(childWorkspaceID: id, childAgentUUID: uuid) != nil
             || MissionStore.shared.pendingAnswer(childWorkspaceID: id, childAgentUUID: uuid) != nil
     }
 
     private func setupAgentAttentionTracking(for col: ColumnState) {
         col.onProgramTurnOver = { [weak self] in self?.onProgramTurnOver?() }
+        col.onUserPrompt = { [weak self, weak col] typedAt in
+            guard let self, let col else { return }
+            self.onUserPrompt?(col, typedAt)
+        }
         col.onAgentAttention = { [weak self, weak col] reason in
             guard let self else { return }
             // A Mission child ends its turn after asking (even in prose).
@@ -710,11 +787,9 @@ extension WorkspaceState {
                 // Native notification with click-to-focus routing.
                 let processName: String
                 if reason == .exitedMidTurn {
-                    // The title is the shell's now; only claude's exits are
-                    // reported (see AgentStatusMachine.noteAgentExited).
-                    processName = "claude"
-                } else if let col, let title = col.terminalTitle,
-                   !title.isEmpty, !ColumnState.boringTitles.contains(title) {
+                    // The title is the shell's now.
+                    processName = col?.pty?.agentMidTurnExit?.agent.rawValue ?? "Agent"
+                } else if let col, let title = col.terminalTitle, !title.isEmpty, !Shell.isShell(title) {
                     processName = title
                 } else {
                     processName = "Agent"
@@ -787,7 +862,7 @@ extension WorkspaceState {
         }
         // Blank elsewhere: a Nirux started from a Lead's shell must not
         // pass the role on to every terminal it opens.
-        environment[Self.leadEnvironmentKey] = isLead ? "1" : ""
+        environment[LeadChannel.environmentKey] = isLead ? "1" : ""
         // Nor from an SDK run's: its agents would read as headless
         // (`TurnEndText.isHeadless`). Blank, Claude Code sets its own.
         environment["CLAUDE_CODE_ENTRYPOINT"] = ""
@@ -801,9 +876,6 @@ extension WorkspaceState {
         // NIRUX_ one (SpaceDefaults refuses those names anyway).
         return environment.merging(SpaceDefaultsStore.defaults(forSpace: profileID).effectiveEnvironment) { nirux, _ in nirux }
     }
-
-    /// Set to "1" in the Lead's shells (see `isLead`).
-    nonisolated static let leadEnvironmentKey = "NIRUX_LEAD"
 
     // Pure builder so feature-gating of terminal metadata can be tested
     // without starting a PTY-backed WorkspaceState.
@@ -1083,6 +1155,7 @@ extension WorkspaceState {
     }
 
     func addColumn(agentUUID: String = UUID().uuidString, cwd: String? = nil) {
+        guard !isWaitingTask else { return }
         let col = ColumnState(
             cwd: cwd ?? focusedWorkingDirectory,
             environment: terminalEnvironment(agentUUID: agentUUID)
@@ -1092,6 +1165,7 @@ extension WorkspaceState {
     }
 
     func addColumn(command: String, agentUUID: String = UUID().uuidString, cwd: String? = nil) {
+        guard !isWaitingTask else { return }
         let col = ColumnState(
             cwd: cwd ?? focusedWorkingDirectory,
             command: command,
@@ -1102,6 +1176,7 @@ extension WorkspaceState {
     }
 
     func addColumn(deferredAgent: DeferredAgentLaunch, agentUUID: String, cwd: String?) {
+        guard !isWaitingTask else { return }
         let environment = terminalEnvironment(agentUUID: agentUUID)
         let col = ColumnState(cwd: cwd ?? focusedWorkingDirectory, deferredAgent: deferredAgent, environment: environment)
         setupAllTracking(for: col)
@@ -1109,6 +1184,7 @@ extension WorkspaceState {
     }
 
     func addColumn(webViewURL: String) {
+        guard !isWaitingTask else { return }
         let col = ColumnState(url: webViewURL)
         insertColumn(col)
         // A browser column on a proposed port makes that proposal moot.
@@ -1121,6 +1197,7 @@ extension WorkspaceState {
     /// open path — session restore passes false so a binary or huge file in
     /// the persisted tabs can't pop a modal alert at every launch.
     func addEditorColumn(initialFile: String? = nil, workspaceCwd: String? = nil, interactive: Bool = true) {
+        guard !isWaitingTask else { return }
         let col = ColumnState(editorWorkspaceCwd: workspaceCwd ?? cwd)
         insertColumn(col)
         if let initialFile {
@@ -1130,11 +1207,13 @@ extension WorkspaceState {
 
     /// Insert a Project Board column next to the focused one.
     func addProjectBoardColumn(_ board: ProjectBoardController) {
+        guard !isWaitingTask else { return }
         insertColumn(ColumnState(projectBoard: board))
     }
 
     /// Insert a Branch Review column next to the focused one.
     func addBranchReviewColumn(_ review: BranchReviewController) {
+        guard !isWaitingTask else { return }
         insertColumn(ColumnState(branchReview: review))
     }
 

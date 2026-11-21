@@ -6,7 +6,9 @@ extension BoardStagesView {
     /// What a repository's header says of its queue, `proposed` being the
     /// pull requests of the next Start's list the Board shows a place for:
     /// one merged counts for none (`BoardStages.nextStartList`).
-    nonisolated static func sectionQueue(_ state: ProjectBoard.QueueState, proposed: Int) -> SectionQueue {
+    nonisolated static func sectionQueue(
+        _ state: ProjectBoard.QueueState, proposed: Int, timeout: BoardStages.CheckTimeout? = nil
+    ) -> SectionQueue {
         // The Board shows a place for some of the list, never more.
         let proposed = min(proposed, state.selection.count)
         var queue = SectionQueue(tone: tone(of: state), dryRun: state.isDryRun ? MergeQueue.dryRunTooltip(reason: state.dryRunReason) : nil)
@@ -14,7 +16,7 @@ extension BoardStagesView {
         let count = proposed > 0 ? " · \(proposed)" : ""
         switch state.run {
         case .running:
-            queue.status = state.status ?? "Running"
+            queue.status = runningStatus(state)
             queue.stop = stopButton(state)
             return queue
         case .elsewhere:
@@ -45,6 +47,15 @@ extension BoardStagesView {
         } else {
             start.tooltip = "Read the queued pull requests on GitHub, then confirm what the queue will do"
         }
+        if let timeout, state.run == .ended {
+            queue.status = timeout.status
+            queue.detail = [timeout.status, state.status].compactMap { $0 }.joined(separator: "\n")
+            queue.tone = timeout.reading == .failed ? .failed : .normal
+            if timeout.canRetry, state.selection == [timeout.number], proposed == 1, start.isEnabled {
+                start.title = (state.isDryRun ? "Retry Dry Run #" : "Retry #") + "\(timeout.number)…"
+                start.tooltip = "Read #\(timeout.number) again and review the confirmation."
+            }
+        }
         queue.start = start
         return queue
     }
@@ -55,12 +66,17 @@ extension BoardStagesView {
         switch state.run {
         // Green, as its header says it.
         case .running:
-            return RunningQueue(id: id, title: title, tooltip: tooltip, status: state.status ?? "Running", stop: stopButton(state))
+            return RunningQueue(id: id, title: title, tooltip: tooltip, status: runningStatus(state), stop: stopButton(state))
         case .elsewhere:
             return RunningQueue(id: id, title: title, tooltip: tooltip, status: elsewhere(state))
         case .none, .ended:
             return nil
         }
+    }
+
+    private nonisolated static func runningStatus(_ state: ProjectBoard.QueueState) -> String {
+        let owner = state.run == .running(isStopping: true) ? "Stopping" : "Auto"
+        return [owner, state.status].compactMap { $0 }.joined(separator: " · ")
     }
 
     private nonisolated static func elsewhere(_ state: ProjectBoard.QueueState) -> String {

@@ -10,14 +10,42 @@ import GhosttyTerminal
 /// a click or reaching GitHub.
 @MainActor
 struct ShellSideEffects {
+    var listTaskModels: @MainActor (CodingAgent, [String: String]) async throws -> [AgentModels.Choice] = { agent, environment in
+        try await Task.detached(priority: .userInitiated) {
+            try AgentModels.listedChoices(for: agent, environment: environment)
+        }.value
+    }
+
+    var validateTaskAgent: @Sendable (TaskAgentSelection, [String: String]) throws -> TaskAgentSelection = {
+        try AgentModels.validate($0, environment: $1)
+    }
+    var generateTaskNames: TaskNameSuggestion.Generator = TaskNameSuggestion.generate
+
     /// Types an agent's launch command into a new terminal column.
     var launchAgent: @MainActor (_ column: ColumnState, _ command: String) -> Void = { column, command in
         // After the column's shell has started (0.5 s, see ColumnState).
         // Weak: a column closed meanwhile neither starts a shell nor gets
         // the command.
+        let generation = column.shellGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak column] in
-            column?.pty?.sendRaw("\(command)\n")
+            guard let column, column.shellGeneration == generation else { return }
+            column.pty?.sendShellLaunchCommand(command)
         }
+    }
+
+    /// Ends a terminal's shell and starts it again running an agent's
+    /// launch command (Restart Lead, see `ColumnState.restartTerminal`).
+    var restartTerminal: @MainActor (
+        _ column: ColumnState, _ command: String, _ starts: @escaping @MainActor @Sendable ([String]) -> Bool
+    ) -> Void = { column, command, starts in
+        column.restartTerminal(running: command, starts: starts)
+    }
+
+    /// Task switches can still be refused when a draft arrives during handover.
+    var restartTaskTerminal: @MainActor (
+        _ column: ColumnState, _ command: String, _ canStop: @MainActor () -> Bool, _ starts: @escaping @MainActor @Sendable ([String]) -> Bool
+    ) -> Void = { column, command, canStop, starts in
+        column.restartTerminal(running: command, canStop: canStop, starts: starts)
     }
 
     /// Starts a restored agent column's shell with the agent's launch

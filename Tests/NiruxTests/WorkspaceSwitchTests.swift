@@ -36,7 +36,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             shell.sideEffects.reducesMotion = { reducesMotion }
             shell.agentLights.isDisplayAsleep = false
             let clock = ManualSchedule()
-            shell.workspaceSwitch.schedule = clock.schedule
+            shell.sideEffects.afterCommit = clock.schedule
             // Never a real event monitor in a test.
             shell.sideEffects.watchUserInput = { _ in nil }
             let window = NSWindow(
@@ -506,7 +506,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             columns: columns,
             prInfo: ci.map {
                 PRInfo(
-                    number: 7, state: "OPEN", isDraft: false, ciStatus: $0, checks: [], reviewDecision: nil, mergeable: nil,
+                    number: 7, state: .open, isDraft: false, ciStatus: $0, checks: [], reviewDecision: nil, mergeable: nil,
                     url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil
                 )
             },
@@ -525,7 +525,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             let shown = try XCTUnwrap(shell.sidebar.lastInfos.first { $0.id == workspace.id })
             XCTAssertEqual(card.state, shown.stateIcon, "a real switch")
             var permission = info([.working, .needsAttention], reason: .permission(tool: "Bash", summary: "x"), id: workspace.id)
-            permission.station = .checks
+            permission.boardProgress = SidebarBoardProgress(station: .checks)
             let rows: [(WorkspaceInfo, StateIcon)] = [
                 (info([.idle], ci: "FAILURE", id: workspace.id), StateIcon(.error)),
                 (info([.idle], ci: "SUCCESS", id: workspace.id), StateIcon(.readyToMerge)),

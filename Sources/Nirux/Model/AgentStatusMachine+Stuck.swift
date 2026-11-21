@@ -11,14 +11,14 @@ extension AgentStatusMachine {
         now: TimeInterval, waitThreshold: TimeInterval?, silence: AgentSilence? = nil, foreground: ForegroundProcess?
     ) -> AgentStuckState? {
         if let midTurnExit {
-            let agentInFront = foreground.map { Self.isRecognizedAgentProcess($0.name) } ?? false
+            let agentInFront = foreground?.agent != nil
             guard !agentInFront, now - midTurnExit.exitedAt >= Self.exitConfirmationDelay else { return nil }
             return .exitedMidTurn(midTurnExit)
         }
         // A failure and dialogs are the foreground claude's own: not those
         // of one suspended behind a shell, nor of an earlier claude (events
         // queued while Nirux was closed replay at launch).
-        guard let foreground, foreground.name == "claude" else { return nil }
+        guard let foreground, foreground.agent == .claude else { return nil }
         if let turnFailure, turnFailure.failedAt >= foreground.instance.startedAt { return .stoppedOnError(turnFailure) }
         if let waitThreshold, let dialog = visibleDialog(foreground: foreground),
            now - dialog.requestedAt >= waitThreshold {
@@ -26,6 +26,12 @@ extension AgentStatusMachine {
         }
         if let silence, awaitsModel(foreground: foreground) { return .silent(silence) }
         return nil
+    }
+
+    func codexReport(foreground: ForegroundProcess?) -> ReportedStatus? {
+        guard let foreground, foreground.interactiveAgent == .codex,
+              let codexStatus, codexStatus.isFrom(foreground.instance) else { return nil }
+        return codexStatus
     }
 
     /// The dialog the foreground `claude` is showing, if any: open, raised
@@ -36,7 +42,7 @@ extension AgentStatusMachine {
     /// waits until its submit's PostToolUse, or an Esc or Ctrl-C. Claude's
     /// reminder clears the keystroke once a dialog sits unanswered.
     func visibleDialog(foreground: ForegroundProcess?) -> AgentPermissionRequest? {
-        guard let foreground, foreground.name == "claude" else { return nil }
+        guard let foreground, foreground.agent == .claude else { return nil }
         return openDialogs.first { $0.requestedAt >= foreground.instance.startedAt && waitsForKeys($0) }
     }
 
@@ -62,7 +68,7 @@ extension AgentStatusMachine {
         now: TimeInterval
     ) -> AgentResumeRefusal? {
         guard let turnFailure else { return .notStopped }
-        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
+        guard let foreground, foreground.interactiveAgent == .claude,
               turnFailure.failedAt >= foreground.instance.startedAt,
               turnFailure.emitter.map(ownsEmitter) ?? true else { return .notClaude }
         guard turnFailure.isResumable else { return .needsFix }
@@ -101,10 +107,10 @@ extension AgentStatusMachine {
     /// child's (`agyPromptRefusal`).
     func promptRefusal(
         foreground: ForegroundProcess?, runningSince time: TimeInterval, seenByUser: Bool = false,
-        agent: String = NiruxApp.WorkspaceAgent.claude.rawValue, showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
+        agent: CodingAgent = .claude, showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
     ) -> AgentPromptRefusal? {
-        if agent == AgentProgramStatus.agy { return agyPromptRefusal(foreground, runningSince: time) }
-        guard let foreground, AgentHookCenter.isInteractiveClaude(foreground) else { return .noClaude }
+        if agent == .agy { return agyPromptRefusal(foreground, runningSince: time) }
+        guard agent == .claude, let foreground, foreground.interactiveAgent == .claude else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
         let startedAt = foreground.instance.startedAt
         guard prompt(since: startedAt) != nil else {
@@ -134,7 +140,7 @@ extension AgentStatusMachine {
     /// first turn ends it may show a screen no state tells of: one that ended
     /// none since it started waits for that.
     private func agyPromptRefusal(_ agy: ForegroundProcess?, runningSince time: TimeInterval) -> AgentPromptRefusal? {
-        guard let agy, agy.name == AgentProgramStatus.agy, !AgentHookCenter.isHeadlessAgy(agy) else { return .noClaude }
+        guard let agy, agy.interactiveAgent == .agy else { return .noClaude }
         guard agy.instance.startedAt <= time else { return .restarted }
         guard let turn = agyTurn, turn.process == agy.instance else { return .noPromptYet }
         // Its last word, else how its turn ended (another process in front, or
@@ -186,7 +192,7 @@ extension AgentStatusMachine {
     /// `startedAt`: an event stamped since (events of an earlier one, queued
     /// while Nirux was closed, carry their own time).
     func reportsHooks(since startedAt: TimeInterval) -> Bool {
-        hookKind == "claude" && lastEventAt >= startedAt
+        hookAgent == .claude && lastEventAt >= startedAt
     }
 
     /// Why a Mission message can't go into Codex's own queue now
@@ -199,8 +205,7 @@ extension AgentStatusMachine {
     /// for all the same, so that what holds a message stays Nirux's to tell
     /// and to give up.
     func codexQueueRefusal(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> AgentPromptRefusal? {
-        guard let foreground, foreground.name == AgentProgramStatus.codex, !AgentHookCenter.isHeadlessCodex(foreground)
-        else { return .noClaude }
+        guard let foreground, foreground.interactiveAgent == .codex else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
         guard let reported = codexStatus, reported.isFrom(foreground.instance) else { return .noPromptYet }
         switch reported.status.state {

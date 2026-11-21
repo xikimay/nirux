@@ -64,6 +64,11 @@ extension NiruxApp {
         SettingsForm.select(NiruxShellView.currentAgentResumeOnLaunch().rawValue, in: resume)
         settingsAgentResumePopup = resume
 
+        let nameTasks = SettingsForm.checkbox(
+            "Name new tasks with Claude Haiku", target: self, action: #selector(settingsGenerateTaskNamesChanged(_:))
+        )
+        nameTasks.state = PersistedSettings.effective(Persistence.load()?.settings).generateTaskNames ? .on : .off
+        settingsTaskNamesCheckbox = nameTasks
         let tasksFolder = NSTextField(labelWithString: settingsTasksFolderText())
         tasksFolder.lineBreakMode = .byTruncatingMiddle
         tasksFolder.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -87,6 +92,11 @@ extension NiruxApp {
                 )
             ],
             [
+                nameTasks,
+                SettingsForm.hint(
+                    "At Start, ⌘N sends the task description to Haiku on your Claude subscription for a short English title and goal. "
+                        + "Editing the branch or folder name skips Haiku.", under: nameTasks
+                ),
                 SettingsForm.row("Tasks without a repository", tasksFolderControl),
                 SettingsForm.hint(
                     "Each one gets a new folder here, named after it, instead of a worktree. Nirux never deletes "
@@ -526,8 +536,11 @@ extension NiruxApp {
 
     @objc func settingsClaudeLaunchModeChanged(_ sender: NSPopUpButton) {
         guard let raw = sender.selectedItem?.representedObject as? String, let mode = ClaudeLaunchMode(rawValue: raw) else { return }
-        saveSetting(revert: { SettingsForm.select(NiruxShellView.currentClaudeLaunchMode().rawValue, in: sender) }) {
+        if saveSetting(revert: { SettingsForm.select(NiruxShellView.currentClaudeLaunchMode().rawValue, in: sender) }, {
             $0.claudeLaunchMode = mode
+        }), let shell {
+            for lead in shell.workspaces where lead.isLead { lead.leadOptionsCache = nil }
+            shell.updateSidebar()
         }
     }
 
@@ -624,6 +637,11 @@ extension NiruxApp {
 
     static func currentAlertOnlyWhenClaudeAsks() -> Bool {
         PersistedSettings.effective(Persistence.load()?.settings).alertOnlyWhenClaudeAsks
+    }
+
+    @objc func settingsGenerateTaskNamesChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        _ = saveSetting(revert: Self.toggledBack(sender), { $0.generateTaskNames = enabled })
     }
 
     @objc func settingsTurnStatusChanged(_ sender: NSButton) {
@@ -724,6 +742,7 @@ extension NiruxApp {
     /// Drops the panes' controls; the next `showSettings` rebuilds them from
     /// persisted state.
     private func clearSettingsWindowReferences() {
+        settingsTaskNamesCheckbox = nil
         settingsKeepAwakeCheckbox = nil
         settingsAnimationsCheckbox = nil
         settingsTransparencyPicker = nil

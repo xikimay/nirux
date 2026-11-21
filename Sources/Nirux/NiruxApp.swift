@@ -12,6 +12,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var updaterController: SPUStandardUpdaterController?
     /// Settings without a shell (tests); the app's are the shell's.
     var standaloneSettings: SettingsWindow?
+    weak var settingsTaskNamesCheckbox: NSButton?
     weak var settingsKeepAwakeCheckbox: NSButton?
     weak var settingsAnimationsCheckbox: NSButton?
     weak var settingsTransparencyPicker: TransparencyPicker?
@@ -226,6 +227,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         hooks.resolver = { [weak shellView] uuid in
             shellView?.resolveAgentColumn(uuid: uuid)
         }
+        hooks.asksParent = { [weak shellView] resolution, request, question in
+            shellView?.askParent(for: resolution, request, asking: question) ?? false
+        }
         hooks.onEventsApplied = { [weak shellView] events in
             shellView?.applyAgentHookEvents(events)
         }
@@ -324,6 +328,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shell?.saveState(snapshot: ProcessSnapshot())
         // A queue's last step is written before the process ends.
         MergeQueueController.waitForFiles()
+        // So are the threads' last lines (local appends, quick).
+        TaskThread.Store.queue.sync {}
         keepAwakeController?.shutdown()
         // A claude left running would go on reading, on the user's plan.
         ExplainQueue.shared.cancelAll(waitingUpTo: 2)
@@ -340,14 +346,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         LeadRequestCenter.shared.stop()
     }
 
-    // MARK: - URL Scheme
-
-    enum WorkspaceAgent: String, CaseIterable {
-        case claude, codex
-        /// Antigravity CLI, Google's successor to Gemini CLI.
-        case agy
-    }
-
     // MARK: - NSMenuItemValidation
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
@@ -356,6 +354,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         }
         if menuItem.action == #selector(focusLead(_:)) {
             return validateLeadItem(menuItem)
+        }
+        if menuItem.action == #selector(restartLead(_:)) {
+            return shell.map { $0.leadWorkspace(inSpace: $0.activeProfileID) != nil } ?? false
         }
         if menuItem.action == #selector(newSubtask(_:)) {
             return shell?.activeWorkspaceOffersSubtask ?? false

@@ -24,10 +24,10 @@ extension NiruxShellView {
         missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
         snapshot: ProcessSnapshot,
         now: TimeInterval
-    ) -> [String: BoardStages.TaskReading] {
+    ) -> ProjectBoardController.StagesReadings {
         let built = Dictionary(sidebarInfos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let parents = workspaceStore.activeParents(in: spaceID)
-        var readings: [String: BoardStages.TaskReading] = [:]
+        var readings = ProjectBoardController.StagesReadings()
         for index in workspaceStore.visibleWorkspaceIndices(in: spaceID) where !workspaces[index].isClosing {
             let workspace = workspaces[index]
             let info = built[workspace.id] ?? {
@@ -44,17 +44,43 @@ extension NiruxShellView {
                     at: index, columns: columns, isActive: isActive, parentTitle: parents[index].map { workspaces[$0].title }
                 )
             }()
-            readings[workspace.id] = BoardStages.TaskReading(
+            if workspace.isLead {
+                let status = boardLeadStatus(of: workspace, columns: info.columns, foreground: foregroundProcesses, snapshot: snapshot, now: now)
+                readings.lead = (workspace.id, status)
+                continue
+            }
+            var reading = BoardStages.TaskReading(
                 info,
                 summary: workspace.lastSummaryIsManual ? WorkspaceInfo.oneRunOfWords(workspace.lastSummary) : nil,
                 gitRoot: workspace.gitContext?.identity.resolvedRepositoryRoot,
                 reviewsInFlight: Set(workspace.reviewsRunning.map(\.pass)),
+                settledTurn: { column in
+                    guard let terminal = workspace.columns.first(where: { $0.id == column.id }) else { return false }
+                    if column.attentionReason == nil, column.openDialog == nil, column.questionAskedAt == nil,
+                       column.processName == CodingAgent.codex.rawValue, let pty = terminal.pty,
+                       pty.codexQueueRefusal(runningSince: now, snapshot: snapshot) == nil { return true }
+                    guard let agent = terminal.agentUUID, let ended = column.questionAskedAt ?? terminal.pty?.agentLastTurnEndedAt,
+                          ended > 0 else { return false }
+                    return MissionStore.shared.missions.contains { mission in
+                        mission.childWorkspaceID == workspace.id && mission.childAgentUUID == agent && mission.oneWay != true
+                            && Self.settledTurn(ended, events: mission.events)
+                    }
+                },
                 turnStartedAt: { id in
                     workspace.columns.first { $0.id == id }?.pty?.agentTurnStartedAt?.timeIntervalSince1970
                 }
             )
+            reading.terminalStatusKnown = !snapshot.isEmpty || workspace.openColumns.allSatisfy { $0.pty == nil }
+            readings.tasks[workspace.id] = reading
         }
         return readings
+    }
+
+    /// A completion supersedes earlier turn-end notices. A response settles only the turn that asked its question.
+    static func settledTurn(_ ended: TimeInterval, events: [MissionEvent]) -> Bool {
+        if events.contains(where: { $0.kind == .completed && $0.timestamp >= ended }) { return true }
+        guard let question = events.first(where: { $0.kind == .question && $0.timestamp == ended }) else { return false }
+        return events.contains { $0.kind == .response && $0.inReplyTo == question.id }
     }
 
     /// What the shell holds of a Board's space for its stages, beside what
@@ -64,22 +90,28 @@ extension NiruxShellView {
     /// Board's foot), the clean-ups running.
     func stagesInputs(
         of board: ProjectBoardController, members: [WorkspaceState], workspaces: [ProjectBoard.Workspace],
-        readings: [String: BoardStages.TaskReading], order: BoardStages.Order
+        readings: ProjectBoardController.StagesReadings, order: BoardStages.Order
     ) -> ProjectBoardController.StagesInputs {
         let spaceID = board.projectID
         let queues = projectBoardQueues(board)
+        let lead = members.first { $0.isLead }?.id
         return ProjectBoardController.StagesInputs(
             space: profiles.first { $0.id == spaceID }.map { profile in
                 ProjectBoardController.StagesInputs.Space(name: profile.name, color: NSColor.niruxColor(hex: profile.colorHex) ?? Theme.Color.accent)
             },
             workspaces: workspaces,
             tasks: members.filter { !$0.isLead }.map(\.id),
+            waiting: members.compactMap { workspace in
+                workspace.waitingStart.flatMap { BoardStages.WaitingTask(id: workspace.id, title: workspace.title, wait: $0) }
+            },
+            missionStatusAvailable: board.stagesReadings != nil && MissionStore.shared.hasLoadedLedger,
             // Ids as restored: two the same must not trap.
             parents: Dictionary(workspaceStore.activeParents(in: spaceID).map {
                 (self.workspaces[$0.key].id, self.workspaces[$0.value].id)
             }, uniquingKeysWith: { first, _ in first }),
-            lead: members.first { $0.isLead }?.id,
-            readings: readings,
+            lead: lead,
+            leadStatus: readings.lead?.id == lead ? readings.lead?.status : nil,
+            readings: readings.tasks,
             queues: queues.states,
             runningQueues: queues.running,
             cleaningUp: worktreeCleanupsInFlight,

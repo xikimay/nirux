@@ -40,14 +40,8 @@ enum PRDetect {
         }
     }
 
-    /// Where the GitHub CLI is looked for; nil when it isn't there. The
-    /// Project Board finds it the same way.
-    static func installedGHPath() -> String? {
-        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"].first { FileManager.default.fileExists(atPath: $0) }
-    }
-
     private static func fetch(branch: String, cwd: String, startFolder: String?) -> FetchResult {
-        guard let ghPath = installedGHPath(),
+        guard let ghPath = GitHub.CLI.installedPath(),
               let context = GitDetect.context(at: cwd, startFolder: startFolder),
               context.branch == branch
         else { return .failure }
@@ -79,7 +73,7 @@ enum PRDetect {
         ) else { return .failure }
 
         let sortedOpenCandidates = openCandidates
-            .filter { ($0["state"] as? String)?.uppercased() == "OPEN" }
+            .filter { GitHub.PullRequestState($0["state"] as? String) == .open }
             .sorted(by: pullRequestNumberDescending)
         if !sortedOpenCandidates.isEmpty {
             if let openCandidate = sortedOpenCandidates.first(where: {
@@ -106,8 +100,8 @@ enum PRDetect {
         ) else { return .failure }
         let matchingTerminalCandidates = terminalCandidates
             .filter {
-                guard let state = ($0["state"] as? String)?.uppercased() else { return false }
-                return (state == "MERGED" || state == "CLOSED")
+                guard let state = GitHub.PullRequestState($0["state"] as? String) else { return false }
+                return (state == .merged || state == .closed)
                     && ($0["headRefOid"] as? String) == head
             }
         guard matchingTerminalCandidates.allSatisfy({ repository(for: $0) != nil })
@@ -118,7 +112,7 @@ enum PRDetect {
             .first
         return .success(
             context: context,
-            info: terminalCandidate.map { pullRequestInfo(from: $0) }
+            info: terminalCandidate.flatMap { pullRequestInfo(from: $0) }
         )
     }
 
@@ -132,21 +126,14 @@ enum PRDetect {
             "number", "state", "headRefOid", "headRepositoryOwner",
             "headRepository", "isDraft", "statusCheckRollup",
             "reviewDecision", "mergeable", "url", "additions",
-            "deletions", "changedFiles", "baseRefName", "autoMergeRequest"
+            "deletions", "changedFiles", "baseRefName", "autoMergeRequest", "createdAt"
         ].joined(separator: ",")
-        let result = BoundedProcess.run(
-            executableURL: URL(fileURLWithPath: cliContext.executablePath),
-            arguments: ["pr", "list", "--head", branch,
-                        "--state", state,
-                        "--json", fields,
-                        "--limit", String(limit)],
-            currentDirectoryURL: URL(fileURLWithPath: cliContext.repositoryRoot),
-            timeout: cliContext.timeout
+        let call = GitHub.CLI.Call(
+            ["pr", "list", "--head", branch, "--state", state, "--json", fields, "--limit", String(limit)],
+            in: URL(fileURLWithPath: cliContext.repositoryRoot), timeout: cliContext.timeout
         )
-        guard let result, result.terminationStatus == 0 else { return nil }
-        return try? JSONSerialization.jsonObject(
-            with: result.standardOutput
-        ) as? [[String: Any]]
+        let output = try? GitHub.CLI.run(call, gh: cliContext.executablePath).flatMap(\.result).get()
+        return output.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] }
     }
 
     private static func pullRequestNumberDescending(
@@ -156,7 +143,8 @@ enum PRDetect {
         (lhs["number"] as? Int ?? 0) > (rhs["number"] as? Int ?? 0)
     }
 
-    static func pullRequestInfo(from candidate: [String: Any]) -> PRInfo {
+    static func pullRequestInfo(from candidate: [String: Any]) -> PRInfo? {
+        guard let state = GitHub.PullRequestState(candidate["state"] as? String) else { return nil }
         let rollup = candidate["statusCheckRollup"] as? [[String: Any]] ?? []
         let conclusions = rollup.compactMap { $0["conclusion"] as? String }
         // One running check keeps the rollup pending: a CheckRun that has
@@ -172,9 +160,7 @@ enum PRDetect {
             return (check["conclusion"] as? String)?.isEmpty ?? false
         }
         let allChecksPending = !rollup.isEmpty && conclusions.allSatisfy({ $0.isEmpty })
-        // Red as the Project Board defines it (docs/design/project-board.md,
-        // section 3.2): only the latest run of each check counts.
-        let checks = ProjectBoard.latest(rollup.compactMap(ProjectBoard.check(from:)))
+        let checks = GitHub.latest(rollup.compactMap(GitHub.check(from:)))
         let ciStatus: String?
         if checks.contains(where: { $0.result == .failure }) {
             ciStatus = "FAILURE"
@@ -188,7 +174,7 @@ enum PRDetect {
 
         return PRInfo(
             number: candidate["number"] as? Int ?? 0,
-            state: candidate["state"] as? String ?? "",
+            state: state,
             isDraft: candidate["isDraft"] as? Bool ?? false,
             ciStatus: ciStatus,
             checks: checks,
@@ -200,7 +186,7 @@ enum PRDetect {
             changedFiles: candidate["changedFiles"] as? Int,
             headRefOid: (candidate["headRefOid"] as? String)?.lowercased(),
             baseRefName: candidate["baseRefName"] as? String,
-            autoMerges: candidate["autoMergeRequest"] is [String: Any]
+            autoMerges: candidate["autoMergeRequest"] is [String: Any], createdAt: candidate["createdAt"] as? String
         )
     }
 

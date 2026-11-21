@@ -23,19 +23,20 @@ final class MergedCleanupLinkTests: XCTestCase {
             waitForGitContext(of: worktreeWorkspace, at: harness.repo, shell: shell, harness: harness)
             // Set and read in one run-loop turn: a git refresh can't clear
             // them in between.
-            worktreeWorkspace.prInfo = pullRequest(state: "MERGED")
-            mainCheckout.prInfo = pullRequest(state: "MERGED")
+            worktreeWorkspace.prInfo = pullRequest(state: .merged)
+            mainCheckout.prInfo = pullRequest(state: .merged)
             shell.updateSidebar()
             XCTAssertEqual(cleanupTexts(in: shell.sidebar), [], "merged, but in the main checkout")
-            XCTAssertEqual(texts(in: shell.sidebar).filter { $0.hasSuffix("#7") }.count, 2, "both cards show the PR")
+            let steps = shell.sidebar.expandedViews.compactMap { ($0 as? SidebarBadgeView)?.accessibilityLabel() }
+            XCTAssertEqual(steps.filter { $0 == "Merged #7" }.count, 2, "both cards show the merged PR")
 
             shell.focusColumnByIndex(0)
             waitForGitContext(of: worktreeWorkspace, at: harness.worktree, shell: shell, harness: harness)
-            worktreeWorkspace.prInfo = pullRequest(state: "OPEN")
+            worktreeWorkspace.prInfo = pullRequest(state: .open)
             shell.updateSidebar()
             XCTAssertEqual(cleanupTexts(in: shell.sidebar), [], "open")
 
-            worktreeWorkspace.prInfo = pullRequest(state: "MERGED")
+            worktreeWorkspace.prInfo = pullRequest(state: .merged)
             shell.updateSidebar()
             XCTAssertEqual(cleanupTexts(in: shell.sidebar), ["Merged · Clean up"])
 
@@ -55,15 +56,15 @@ final class MergedCleanupLinkTests: XCTestCase {
     }
 
     private func waitForGitContext(of workspace: WorkspaceState, at folder: String, shell: NiruxShellView, harness: UIFlowHarness) {
-        let expected = NiruxShellView.comparablePath(folder)
-        XCTAssertEqual(NiruxShellView.comparablePath(workspace.focusedWorkingDirectory), expected)
+        let expected = folder.comparablePath
+        XCTAssertEqual(workspace.focusedWorkingDirectory.comparablePath, expected)
         shell.refreshGitContextNow(for: workspace)
         harness.waitUntil("the git context of \(folder)") {
-            workspace.gitContext.map { NiruxShellView.comparablePath($0.identity.repositoryRoot) } == expected
+            workspace.gitContext.map(\.identity.repositoryRoot.comparablePath) == expected
         }
     }
 
-    private func pullRequest(state: String) -> PRInfo {
+    private func pullRequest(state: GitHub.PullRequestState) -> PRInfo {
         PRInfo(
             number: 7, state: state, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
             mergeable: nil, url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil

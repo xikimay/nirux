@@ -31,11 +31,11 @@ final class SidebarPullRequestLinkTests: XCTestCase {
     private func pullRequest(ciStatus: String, failedCheckUrl: String? = nil) -> PRInfo {
         PRInfo(
             number: 42,
-            state: "OPEN",
+            state: .open,
             isDraft: false,
             ciStatus: ciStatus,
             checks: failedCheckUrl.map {
-                [ProjectBoard.Check(name: "test", workflowName: "Tests", result: .failure, startedAt: nil, url: $0)]
+                [GitHub.Check(name: "test", workflowName: "Tests", result: .failure, startedAt: nil, url: $0)]
             } ?? [],
             reviewDecision: "REVIEW_REQUIRED",
             mergeable: nil,

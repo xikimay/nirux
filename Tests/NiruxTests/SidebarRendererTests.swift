@@ -30,30 +30,6 @@ final class SidebarRendererTests: XCTestCase {
         XCTAssertEqual(SidebarRenderer.formatDiffStats("nothing to parse"), "nothing to parse")
     }
 
-    // MARK: - shortDuration
-
-    func testShortDurationSeconds() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(0), "0s")
-        XCTAssertEqual(SidebarRenderer.shortDuration(42), "42s")
-        XCTAssertEqual(SidebarRenderer.shortDuration(59.9), "59s")
-    }
-
-    func testShortDurationMinutes() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(60), "1m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(732), "12m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(3599), "59m")
-    }
-
-    func testShortDurationHours() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(3600), "1h00m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(3920), "1h05m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(7384), "2h03m")
-    }
-
-    func testShortDurationNegativeClampsToZero() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(-5), "0s")
-    }
-
     // MARK: - Attention reason
 
     private func column(_ status: AgentStatus, reason: AgentAttentionReason?) -> ColumnInfo {
@@ -164,25 +140,25 @@ final class SidebarRendererTests: XCTestCase {
     // MARK: - prStateDisplay
 
     func testPrStateDisplayDraft() {
-        let pullRequest = makePR(state: "OPEN", isDraft: true)
+        let pullRequest = makePR(state: .open, isDraft: true)
         let (text, _) = SidebarRenderer.prStateDisplay(pullRequest)
         XCTAssertEqual(text, "draft")
     }
 
     func testPrStateDisplayOpen() {
-        let pullRequest = makePR(state: "OPEN", isDraft: false)
+        let pullRequest = makePR(state: .open, isDraft: false)
         let (text, _) = SidebarRenderer.prStateDisplay(pullRequest)
         XCTAssertEqual(text, "open")
     }
 
     func testPrStateDisplayMerged() {
-        let pullRequest = makePR(state: "MERGED", isDraft: false)
+        let pullRequest = makePR(state: .merged, isDraft: false)
         let (text, _) = SidebarRenderer.prStateDisplay(pullRequest)
         XCTAssertEqual(text, "merged")
     }
 
     func testPrStateDisplayClosed() {
-        let pullRequest = makePR(state: "CLOSED", isDraft: false)
+        let pullRequest = makePR(state: .closed, isDraft: false)
         let (text, _) = SidebarRenderer.prStateDisplay(pullRequest)
         XCTAssertEqual(text, "closed")
     }
@@ -235,7 +211,7 @@ final class SidebarRendererTests: XCTestCase {
     /// them.
     func testPullRequestToolTipSaysChecksAndReview() {
         let pullRequest = PRInfo(
-            number: 7, state: "OPEN", isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: "CHANGES_REQUESTED",
+            number: 7, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: "CHANGES_REQUESTED",
             mergeable: "MERGEABLE", url: "https://example.test/pr/7", additions: nil, deletions: nil, changedFiles: nil
         )
         XCTAssertEqual(
@@ -286,7 +262,7 @@ final class SidebarRendererTests: XCTestCase {
 
     // MARK: - Test helpers
 
-    private func makePR(state: String, isDraft: Bool) -> PRInfo {
+    private func makePR(state: GitHub.PullRequestState, isDraft: Bool) -> PRInfo {
         PRInfo(
             number: 1, state: state, isDraft: isDraft, ciStatus: nil,
             checks: [], reviewDecision: nil, mergeable: nil,

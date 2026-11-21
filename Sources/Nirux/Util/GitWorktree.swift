@@ -9,6 +9,12 @@ struct GitResult {
 // MARK: - Git Worktree Operations
 
 enum GitWorktree {
+    static func siblingPath(for branch: String, mainCheckout: String) -> String {
+        let main = URL(fileURLWithPath: mainCheckout)
+        let suffix = branch.replacingOccurrences(of: "/", with: "-")
+        return main.deletingLastPathComponent().appendingPathComponent(main.lastPathComponent + "." + suffix).path
+    }
+
     /// Create a worktree for the given branch. Auto-detects existing vs new branch.
     /// Returns (path, nil) on success or (nil, errorMessage) on failure.
     /// Both inputs can come from a `nirux://new-worktree` URL, so they are
@@ -48,14 +54,8 @@ enum GitWorktree {
             startCommit = commit
         }
 
-        // Sanitize branch name for directory path
-        let dirName = branch.replacingOccurrences(of: "/", with: "-")
         let mainRoot = mainWorktreeRoot(of: repoRoot)
-        let repoName = URL(fileURLWithPath: mainRoot).lastPathComponent
-        let worktreePath = URL(fileURLWithPath: mainRoot)
-            .deletingLastPathComponent()
-            .appendingPathComponent("\(repoName).\(dirName)")
-            .path
+        let worktreePath = siblingPath(for: branch, mainCheckout: mainRoot)
 
         // A branch is checked out in one worktree at most: open that one,
         // wherever it is (older versions named a worktree made from another
@@ -72,7 +72,7 @@ enum GitWorktree {
             }
             let existing = worktrees[index].path
             if let reusable = reusableWorktree(existing, branch: branch, requester: repoRoot, worktrees: worktrees) {
-                ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repoRoot)
+                ensureExcluded(HandoverFile.filenames, repoRoot: repoRoot)
                 return (reusable, nil)
             }
             if FileManager.default.fileExists(atPath: existing) {
@@ -117,7 +117,7 @@ enum GitWorktree {
 
         let result = gitRunFull(args, cwd: repoRoot)
         if result.status == 0 {
-            ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repoRoot)
+            ensureExcluded(HandoverFile.filenames, repoRoot: repoRoot)
             return (worktreePath, nil)
         }
         let msg = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -125,7 +125,7 @@ enum GitWorktree {
         guard let startCommit else { return (nil, error) }
         let kept = afterFailedNewBranch(branch, at: worktreePath, from: startCommit, repoRoot: repoRoot, error: error)
         // A worktree git left behind gets a handover too.
-        if kept.path != nil { ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repoRoot) }
+        if kept.path != nil { ensureExcluded(HandoverFile.filenames, repoRoot: repoRoot) }
         return kept
     }
 
@@ -197,8 +197,8 @@ enum GitWorktree {
     }
 
     /// Detect the git repo root from a path
-    static func repoRoot(at path: String) -> String? {
-        let output = gitRunFull(["rev-parse", "--show-toplevel"], cwd: path, timeout: mainThreadTimeout)
+    static func repoRoot(at path: String, timeout: TimeInterval = mainThreadTimeout) -> String? {
+        let output = gitRunFull(["rev-parse", "--show-toplevel"], cwd: path, timeout: timeout)
             .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return output.isEmpty ? nil : output
     }

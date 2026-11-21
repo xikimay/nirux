@@ -122,19 +122,19 @@ extension MergeQueueController {
         switch client.read(.pullRequest(number), settings: settings) {
         case .success(.pullRequest(let pullRequest)): candidate.pullRequest = pullRequest
         case .success: candidate.error = "unexpected answer"
-        case .failure(let error): candidate.error = GitHubCLIQueueClient.message(of: error)
+        case .failure(let error): candidate.error = error.message
         }
         // Unread (a rate limit, say): no more calls for it.
         guard candidate.pullRequest != nil, !cancellation.isCancelled else { return (candidate, nil) }
         switch client.read(.pullRequestDetails(number), settings: settings) {
         case .success(.pullRequestDetails(let details)): candidate.details = details
         case .success: candidate.detailsError = "unexpected answer"
-        case .failure(let error): candidate.detailsError = GitHubCLIQueueClient.message(of: error)
+        case .failure(let error): candidate.detailsError = error.message
         }
         // A pull request left out anyway needs nothing more.
         guard !cancellation.isCancelled, let pullRequest = candidate.pullRequest,
               MergeQueue.exclusionReason(pullRequest, settings: settings) == nil,
-              MergeQueueController.problem(with: [MergeQueue.ConfirmedEntry(
+              MergeQueue.ConfirmedEntry.problem(in: [MergeQueue.ConfirmedEntry(
                 number: number, head: pullRequest.headOid, branch: pullRequest.headRefName
               )]) == nil
         else { return (candidate, nil) }
@@ -142,33 +142,33 @@ extension MergeQueueController {
         switch client.read(.checks(head), settings: settings) {
         case .success(.checks(let checks)): candidate.checks = checks
         case .success: candidate.checksError = "unexpected answer"
-        case .failure(let error): candidate.checksError = GitHubCLIQueueClient.message(of: error)
+        case .failure(let error): candidate.checksError = error.message
         }
         switch client.read(.compare(base: settings.baseBranch, head: head), settings: settings) {
         case .success(.comparison(let comparison)): candidate.comparison = .some(comparison)
         case .success: candidate.compareError = "unexpected answer"
-        case .failure(let error): candidate.compareError = GitHubCLIQueueClient.message(of: error)
+        case .failure(let error): candidate.compareError = error.message
         }
         switch inspect(folders, pullRequest.headRefName, head, settings, client) {
         case .success(let inspection):
             return (candidate, inspection)
         case .failure(let error):
-            candidate.error = "its worktrees couldn’t be checked: \(GitHubCLIQueueClient.message(of: error))"
+            candidate.error = "its worktrees couldn’t be checked: \(error.message)"
             return (candidate, nil)
         }
     }
 
     /// Why the sheet can't read GitHub for the queue.
-    nonisolated static func setupMessage(_ error: MergeQueue.ClientError) -> String {
+    nonisolated static func setupMessage(_ error: GitHub.CLI.Failure) -> String {
         switch error {
         case .ghMissing:
-            return "The GitHub CLI (gh) isn’t installed: install it, sign in with gh auth login, then Start again."
+            return "\(GitHub.CLI.missing): install it, sign in with gh auth login, then Start again."
         case .notSignedIn(let message):
-            return "gh isn’t signed in to github.com (\(message)): run gh auth login in a terminal, then Start again."
+            return GitHub.CLI.signedOut + (message.map { " (\($0))" } ?? "") + ": run gh auth login in a terminal, then Start again."
         case .rateLimited, .secondaryRateLimit:
             return "GitHub’s rate limit is reached: Start again later."
         case .refused, .noAnswer, .unreadable:
-            return "Couldn’t read GitHub: \(GitHubCLIQueueClient.message(of: error)). Start again to retry."
+            return "Couldn’t read GitHub: \(error.message). Start again to retry."
         }
     }
 }

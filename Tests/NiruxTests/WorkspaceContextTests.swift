@@ -17,7 +17,7 @@ final class WorkspaceContextTests: XCTestCase {
                 isInactive: false,
                 hasBlocker: false,
                 agentStatuses: [.working, .needsAttention],
-                pullRequestState: "OPEN"
+                pullRequestState: .open
             ),
             .waiting
         )
@@ -54,7 +54,7 @@ final class WorkspaceContextTests: XCTestCase {
                 isInactive: false,
                 hasBlocker: false,
                 agentStatuses: [],
-                pullRequestState: "OPEN"
+                pullRequestState: .open
             ),
             .review
         )
@@ -90,12 +90,54 @@ final class WorkspaceContextTests: XCTestCase {
         workspace.prInfo = makePullRequest()
         XCTAssertEqual(workspace.blocker, "waits for #212", "open: still the Lead's to clear")
         workspace.prInfo = PRInfo(
-            number: 42, state: "MERGED", isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: nil,
+            number: 42, state: .merged, isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: nil,
             mergeable: nil, url: "https://example.test/pull/42", additions: nil, deletions: nil, changedFiles: nil
         )
         XCTAssertNil(workspace.blocker)
         XCTAssertFalse(workspace.blockerIsFromLead)
         XCTAssertEqual(workspace.nextStep, "my own note")
+    }
+
+    /// What a task's thread keeps reaches the shell as it happens, with
+    /// who did it: the Lead's and the user's context, a merge clearing the
+    /// Lead's, the goal, each status line, each turn end.
+    func testWhatTheThreadKeepsReachesItWithItsAuthor() throws {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        var events: [TaskThread.Event] = []
+        workspace.onThreadEvent = { events.append($0) }
+        @MainActor func took() -> [String] {
+            defer { events.removeAll() }
+            return events.map { [$0.kind.rawValue, $0.by?.rawValue ?? "·", $0.text ?? "cleared"].joined(separator: " ") }
+        }
+
+        _ = workspace.setContextByLead(.nextStep, "write tests")
+        _ = workspace.setContextByLead(.nextStep, "write tests")
+        workspace.setContextByHand(.blocker, "no API key", presented: nil)
+        _ = workspace.setContextByLead(.blocker, "something else")
+        XCTAssertEqual(took(), ["nextStep lead write tests", "blocker user no API key"], "nothing for a field left as it was")
+        workspace.clearLeadContext()
+        XCTAssertEqual(took(), ["nextStep nirux cleared"], "the user's blocker stays")
+        workspace.setPurpose("Exports CSV", by: .user)
+        workspace.setPurpose(" Exports CSV ", by: .user)
+        XCTAssertEqual(took(), ["goal user Exports CSV"])
+
+        for (turn, status) in [(10.0, TurnStatus.line("export half done")), (20, .line("export half done")), (30, .unchanged)] {
+            workspace.awaitTurnStatus(turnEndedAt: turn)
+            workspace.settleTurnStatus(status, turnEndedAt: turn)
+        }
+        XCTAssertEqual(events.map(\.time), [10, 20], "at its turn's end; a repeat is dropped at read")
+        XCTAssertEqual(took(), ["status nirux export half done", "status nirux export half done"])
+        workspace.setSummaryByHand("my own summary")
+        workspace.awaitTurnStatus(turnEndedAt: 40)
+        workspace.settleTurnStatus(.line("export done"), turnEndedAt: 40)
+        XCTAssertEqual(took(), ["status user my own summary"], "the user's summary stays")
+
+        let stop = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: ["hook_event_name": "Stop"], env: [:], now: 50))
+        let prompt = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: ["hook_event_name": "UserPromptSubmit"], env: [:], now: 60))
+        workspace.recordAgentHookActivity(stop)
+        workspace.recordAgentHookActivity(prompt)
+        XCTAssertEqual(events.map { "\($0.time) \($0.detail ?? "")" }, ["50.0 claude"])
+        XCTAssertEqual(took(), ["turnEnd · cleared"])
     }
 
     func testUserPromptUpdatesActivityWithoutReplacingSummaryOrCountingToolUse() throws {
@@ -123,15 +165,19 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.lastSummary, "Keep the completed work summary")
     }
 
-    /// Claude's idle reminder and its compaction while idle are no work of
-    /// the agent's: the card's age stays its last turn.
-    func testIdleReminderAndIdleCompactionLeaveTheCardsAge() throws {
+    /// Claude's idle reminder, its compaction while idle, a session resumed
+    /// (as Nirux restores them at launch) or ended are no work of the
+    /// agent's: the card's age stays its last turn. A new session's start
+    /// is work beginning.
+    func testIdleReminderCompactionResumeAndEndLeaveTheCardsAge() throws {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let stop = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: ["hook_event_name": "Stop"], env: [:], now: 20))
         XCTAssertTrue(workspace.recordAgentHookActivity(stop))
         let idle: [[String: Any]] = [
             ["hook_event_name": "Notification", "notification_type": "idle_prompt", "message": "Claude is waiting for your input"],
-            ["hook_event_name": "SessionStart", "source": "compact"]
+            ["hook_event_name": "SessionStart", "source": "compact"],
+            ["hook_event_name": "SessionStart", "source": "resume"],
+            ["hook_event_name": "SessionEnd", "reason": "other"]
         ]
         for payload in idle {
             let event = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: [:], now: 3_000))
@@ -140,11 +186,13 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.lastActivityAt, 20)
         let real: [[String: Any]] = [
             ["hook_event_name": "Notification", "notification_type": "permission_prompt"],
-            ["hook_event_name": "SessionStart", "source": "clear"]
+            ["hook_event_name": "SessionStart", "source": "clear"],
+            ["hook_event_name": "SessionStart", "source": "startup"]
         ]
         for (index, payload) in real.enumerated() {
             let event = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: [:], now: 3_100 + Double(index)))
             XCTAssertTrue(workspace.recordAgentHookActivity(event))
+            XCTAssertEqual(workspace.lastActivityAt, 3_100 + Double(index))
         }
     }
 
@@ -152,7 +200,7 @@ final class WorkspaceContextTests: XCTestCase {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let pullRequest = PRInfo(
             number: 42,
-            state: "MERGED",
+            state: .merged,
             isDraft: false,
             ciStatus: "SUCCESS",
             checks: [],
@@ -235,7 +283,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         workspace.prInfo = PRInfo(
             number: 42,
-            state: "OPEN",
+            state: .open,
             isDraft: false,
             ciStatus: nil,
             checks: [],
@@ -271,7 +319,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         let open = PRInfo(
             number: 41,
-            state: "OPEN",
+            state: .open,
             isDraft: false,
             ciStatus: nil,
             checks: [],
@@ -284,7 +332,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         let merged = PRInfo(
             number: 41,
-            state: "MERGED",
+            state: .merged,
             isDraft: false,
             ciStatus: "SUCCESS",
             checks: [],
@@ -330,7 +378,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         let merged = PRInfo(
             number: 41,
-            state: "MERGED",
+            state: .merged,
             isDraft: false,
             ciStatus: nil,
             checks: [],
@@ -343,7 +391,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         let open = PRInfo(
             number: 42,
-            state: "OPEN",
+            state: .open,
             isDraft: false,
             ciStatus: nil,
             checks: [],

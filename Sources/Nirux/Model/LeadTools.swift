@@ -7,6 +7,7 @@ import Foundation
 /// a worktree and a branch, once its pull request is merged.
 enum LeadTools {
     static let startTask = "start_task"
+    static let setTaskAfter = "set_task_after"
     static let listTasks = "list_tasks"
     static let tell = "tell"
     static let reply = "reply"
@@ -18,23 +19,32 @@ enum LeadTools {
     static let moveTask = "move_task"
     static let renameTask = "rename_task"
     static let setTaskParent = "set_task_parent"
+    static let readThread = "read_thread"
     static let readTask = "read_task"
+    static let resumeTask = "resume_task"
     static let interruptTask = "interrupt_task"
     static let recordReview = "record_review"
     static let dailyPass = "daily_pass"
     static let names = [
-        startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule, recordReview, dailyPass,
-        closeTask, moveTask, renameTask, setTaskParent, readTask, interruptTask
+        startTask, setTaskAfter, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule, recordReview, dailyPass,
+        closeTask, moveTask, renameTask, setTaskParent, readThread, readTask, resumeTask, interruptTask
     ]
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
     /// of its own (unless a repository of the space has that name).
     static let noRepository = "none"
 
+    static let taskIDPrefix = "task:"
+
     /// How a tool names one of the Lead's tasks.
-    static let taskDescription = "The task's branch (its folder, as list_tasks shows it, or the folder's name, "
-        + "for a task without a repository), or its title. A name several tasks answer goes to the one of yours, "
-        + "if only one is; otherwise it is refused."
+    static let taskDescription = "The stable task:<id> from list_tasks, the task’s branch, its folder or folder name, or its title. "
+        + "Use the ID when a waiting task shares a name. For other shared names, a single task reporting to you takes precedence."
+
+    /// tell's `after`.
+    static let afterDescription = "Another task of this space, named the same way: the message is held until that task's "
+        + "pull request merges, then typed as a tell then would be (\"merge origin/main\" once the pull request it builds on "
+        + "lands). Held across relaunches. If that pull request closes without merging, or its task closes first, the message "
+        + "isn't typed and you hear it."
 
     /// What reply's description adds about a question's kind and recommendation.
     static let replyKindsDescription = "A question may say its kind (decision, access, spec-mismatch) and what the task "
@@ -54,11 +64,44 @@ enum LeadTools {
         ]
     }
 
+    /// start_task's arguments: `own`, then `title` and `branch`, for the
+    /// Lead's tasks and a task's sub-tasks.
+    static func startTaskProperties(_ own: [String: Any]) -> [String: Any] {
+        own.merging(nameProperties) { first, _ in first }.merging(agentProperties) { first, _ in first }
+    }
+
+    private static var nameProperties: [String: Any] {
+        [
+            "title": [
+                "type": "string",
+                "description": "Its name on its row: English, the distinctive word first, at most \(maxTaskTitleLength) characters "
+                    + "(\(maxSubtaskTitleLength) for a sub-task), no branch, slug or PR number (\"Clearer task rows\"). "
+                    + "Left out: the description's first line."
+            ],
+            "goal": [
+                "type": "string",
+                "description": "What it delivers, on its row under the title: one line in English starting with a verb, at most "
+                    + "\(maxGoalLength) characters (\"Show a goal line on task rows\")."
+            ],
+            "branch": [
+                "type": "string",
+                "description": "Its new branch, type/kebab-words (fix/stale-labels). Left out: made from the title. "
+                    + "Taken: -2, -3… is added. A task without a repository has none."
+            ]
+        ]
+    }
+
     /// A next step or blocker: one line on the task's row.
     static let maxContextLength = 200
 
     /// A task's title, as the rename panel takes it.
     static let maxTitleLength = 80
+    /// start_task's title: what a task's row shows whole; a sub-task's row
+    /// is indented.
+    static let maxTaskTitleLength = 22
+    static let maxSubtaskTitleLength = 20
+    /// start_task's goal: what the task delivers, a line under its title.
+    static let maxGoalLength = 34
 
     /// What read_task returns of a message, its start and its end.
     static let maxReadLength = 6_000
@@ -75,13 +118,21 @@ enum LeadTools {
         return [startTask, closeTask].contains(tool) ? 300 : 30
     }
 
+    static var agentProperties: [String: Any] {
+        [
+            "agent": ["type": "string", "enum": CodingAgent.launchable.map(\.rawValue),
+                      "description": "Agent to launch. Defaults to the space's task agent."],
+            "model": ["type": "string", "description": "Optional --model for that agent: an agy models slug, a codex debug models slug, or a Claude alias or full ID. Omit for its default. Preselected in the New sheet when approval is required."]
+        ]
+    }
+
     static var definitions: [[String: Any]] {
         [
             definition(
                 startTask, title: "Start a task",
                 description: """
                     Start a task in a new worktree of this space, from origin's base branch, fetched: Nirux writes \
-                    the description into its handover, launches the space's agent and links the task to you (its \
+                    the description into its handover, launches the chosen agent and links the task to you (its \
                     questions and result are typed into your prompt). One repository per task. Work that needs no \
                     repository (research, writing, a one-off script) starts in a new folder of its own instead, \
                     with no git, branch or pull request: repo "\(noRepository)", or any task in a space without a \
@@ -89,12 +140,22 @@ enum LeadTools {
                     start it in that repository. When the user turned "Starts tasks without asking" off, it opens \
                     the New sheet filled in for the user to start instead.
                     """,
-                properties: [
-                    "description": ["type": "string", "description": "What the task must do, as you would tell the agent. Its first line names the task and its branch or folder."],
+                properties: startTaskProperties([
+                    "description": ["type": "string", "description": "What the task must do, as you would tell the agent."],
                     "repo": ["type": "string", "description": "The repository's name in this space (see list_tasks); its default one when left out. \"\(noRepository)\": a new folder, no repository."],
+                    "after": ["type": "string", "description": "Create a waiting task. Once the named task’s pull request merges, fetch the base and start the agent. Requires a repository and Starts tasks without asking."],
                     "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."]
-                ],
+                ]),
                 required: ["description"]
+            ),
+            definition(
+                setTaskAfter, title: "Change a waiting task’s dependency",
+                description: "Point a waiting task at another task, or omit after to start it now.",
+                properties: [
+                    "task": ["type": "string", "description": taskDescription],
+                    "after": ["type": "string", "description": "The task whose pull request must merge before this one starts."]
+                ],
+                required: ["task"]
             ),
             definition(
                 listTasks, title: "List the space's tasks",
@@ -118,7 +179,8 @@ enum LeadTools {
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],
-                    "message": ["type": "string", "description": "At most \(MissionEventCLI.maxInstructionLength) characters."]
+                    "message": ["type": "string", "description": "At most \(MissionEventCLI.maxInstructionLength) characters."],
+                    "after": ["type": "string", "description": afterDescription]
                 ],
                 required: ["task", "message"]
             ),
@@ -235,9 +297,9 @@ enum LeadTools {
                 description: """
                     What happened in this space since the last daily pass (the last day, for the first): your recorded \
                     findings by kind, the pull requests merged with their review rounds, CI failures, flaky tests and \
-                    reruns, Mission messages held, given up or crossed, the questions the user answered, and the rules \
-                    decided, waiting or in the brief. Nirux asks for it once a day; the user may ask too. Its text says \
-                    what to propose.
+                    reruns, task wait times, Mission messages held, given up or crossed, the questions the user answered, the rules \
+                    decided, waiting or in the brief, and the tasks you may have forgotten. Nirux asks for it once a \
+                    day; the user may ask too. Its text says what to propose.
                     """,
                 properties: [:], required: []
             ),
@@ -292,6 +354,12 @@ enum LeadTools {
                 required: ["task"]
             ),
             definition(
+                readThread, title: "Read a task’s thread",
+                description: "Read a task’s request, decisions, open questions, latest status, PRs and next step in up to 6,000 characters. Use after restarting the Lead.",
+                properties: ["task": ["type": "string", "description": taskDescription + " A retained thread also accepts its workspace ID."]],
+                required: ["task"], readOnly: true
+            ),
+            definition(
                 readTask, title: "Read a task's last message",
                 description: """
                     The last message a task's Claude Code agent wrote, in full up to \(maxReadLength) characters (its \
@@ -299,6 +367,16 @@ enum LeadTools {
                     """,
                 properties: ["task": ["type": "string", "description": taskDescription]],
                 required: ["task"], readOnly: true
+            ),
+            definition(
+                resumeTask, title: "Resume a task with another CLI",
+                description: "End the worker of one of your tasks and start a fresh session with the selected CLI in its existing terminal and worktree.",
+                properties: [
+                    "task": ["type": "string", "description": taskDescription],
+                    "agent": ["type": "string", "enum": CodingAgent.launchable.map(\.rawValue)],
+                    "model": ["type": "string", "description": "The provider’s model ID. Omit to use the CLI’s configured default."]
+                ],
+                required: ["task", "agent"], destructive: true
             ),
             definition(
                 interruptTask, title: "Interrupt a task's turn",
@@ -365,10 +443,25 @@ enum LeadTools {
         return numbers
     }
 
-    /// rename_task's title on one line, whitespace folded. A huge one is
-    /// cut past twice the limit, so a cut one is still refused as too long.
+    /// rename_task's and start_task's title on one line, whitespace folded.
+    /// A huge one is cut past twice the limit, so a cut one is still refused
+    /// as too long.
     static func title(_ arguments: [String: Any]) -> String? {
         (arguments["title"] as? String).flatMap { AgentText.clean($0, maxLength: maxTitleLength * 2) }
+    }
+
+    /// start_task's `title`, `branch` and `goal`, checked by `problem` first.
+    static func startOptions(_ arguments: [String: Any]) -> NewTask.StartOptions {
+        NewTask.StartOptions(
+            title: title(arguments), branch: string(arguments, "branch"),
+            goal: (arguments["goal"] as? String).flatMap { AgentText.clean($0, maxLength: maxGoalLength * 2) }
+        )
+    }
+
+    /// `key` is there, and not null.
+    static func isGiven(_ arguments: [String: Any], _ key: String) -> Bool {
+        guard let value = arguments[key] else { return false }
+        return !(value is NSNull)
     }
 
     /// A whole positive number, as JSON gives it (not a boolean).
@@ -379,16 +472,39 @@ enum LeadTools {
     }
 
     /// What's wrong with a call's arguments before it reaches the app, or nil.
-    static func problem(tool: String, arguments: [String: Any]) -> String? {
+    /// `subtask`: a task's agent calls, for a sub-task.
+    static func problem(tool: String, arguments: [String: Any], subtask: Bool = false) -> String? {
         let messageLimit = MissionEventCLI.maxInstructionLength
+        if [startTask, setTaskAfter].contains(tool), arguments["after"] != nil, string(arguments, "after") == nil {
+            return "after must name a task of this space."
+        }
         switch tool {
         case startTask:
-            return string(arguments, "description") == nil ? "description must say what the task must do." : nil
+            if arguments["agent"] != nil, string(arguments, "agent").flatMap(CodingAgent.init(launchable:)) == nil {
+                return "Unknown agent “\(string(arguments, "agent") ?? "")”. Choices: \(CodingAgent.launchable.map(\.rawValue).joined(separator: ", "))."
+            }
+            if arguments["model"] != nil, string(arguments, "model") == nil { return "model must be a nonempty string." }
+            guard string(arguments, "description") != nil else { return "description must say what the task must do." }
+            let options = startOptions(arguments)
+            let titleLength = subtask ? maxSubtaskTitleLength : maxTaskTitleLength
+            if isGiven(arguments, "title"), options.title.map({ $0.count <= titleLength }) != true {
+                return "title must hold 1 to \(titleLength) characters\(subtask ? " for a sub-task" : ""): its row shows no more."
+            }
+            if isGiven(arguments, "goal"), options.goal.map({ $0.count <= maxGoalLength }) != true {
+                return "goal must hold 1 to \(maxGoalLength) characters: what the task delivers, starting with a verb."
+            }
+            if isGiven(arguments, "branch"), string(arguments, "branch").map(NewTask.isTaskBranchName) != true {
+                return "branch must be a valid git branch name of its own, such as fix/stale-labels (not origin/…)."
+            }
+            return nil
         case listTasks:
             return nil
         case tell, reply:
             let target = tool == tell ? "task" : "question"
             guard string(arguments, target) != nil else { return "\(target) is missing." }
+            if tool == tell, let after = arguments["after"], !(after is NSNull), !(after is String) {
+                return "after must name a task of this space."
+            }
             if tool == reply {
                 guard let accepts = accepts(arguments) else { return "accept must be true or false." }
                 if accepts { return string(arguments, "message") == nil ? nil : "Pass message or accept, not both." }
@@ -409,7 +525,11 @@ enum LeadTools {
                 return "title must hold 1 to \(maxTitleLength) characters."
             }
             return nil
-        case setTaskParent, readTask, interruptTask:
+        case resumeTask:
+            guard string(arguments, "task") != nil else { return "task is missing." }
+            if case .failure(let problem) = TaskAgentChoice.parse(arguments) { return problem.localizedDescription }
+            return nil
+        case setTaskAfter, setTaskParent, readThread, readTask, interruptTask:
             return string(arguments, "task") == nil ? "task is missing." : nil
         case recordReview:
             guard string(arguments, "task") != nil else { return "task is missing." }

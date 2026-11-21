@@ -1,0 +1,354 @@
+import AppKit
+import XCTest
+@testable import Nirux
+
+@MainActor
+final class WaitingTaskFlowTests: XCTestCase {
+    private func pullRequest(_ state: GitHub.PullRequestState) -> PRInfo {
+        PRInfo(number: 42, state: state, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
+               mergeable: nil, url: "https://github.com/o/r/pull/42", additions: nil, deletions: nil, changedFiles: nil)
+    }
+
+    private func upstreamTask(_ title: String, lead: UIFlowHarness.Lead, in harness: UIFlowHarness) throws -> WorkspaceState {
+        harness.shell.addWorkspace(title: title, cwd: harness.worktree, profileID: lead.space, activate: false)
+        return try XCTUnwrap(harness.shell.workspaces.first { $0.title == title })
+    }
+
+    private func start(
+        _ title: String, after: String, template: String? = nil, repo: String? = nil, lead: UIFlowHarness.Lead, in harness: UIFlowHarness
+    ) throws -> WorkspaceState {
+        var arguments = ["description": title]
+        arguments["after"] = after
+        arguments["template"] = template
+        arguments["repo"] = repo
+        let result = try harness.callLeadTool(LeadTools.startTask, arguments, lead: lead)
+        XCTAssertFalse(result.isError, "\(title): \(result.text)")
+        return try XCTUnwrap(harness.shell.workspaces.first { $0.title == title })
+    }
+
+    func testQueuedStartPreservesTheExplicitNameBranchAndGoal() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let upstream = try upstreamTask("Prepare catalog", lead: lead, in: harness)
+            harness.shell.refreshGitContextNow(for: upstream)
+            harness.waitUntil("the upstream branch") { upstream.gitBranch != nil }
+            upstream.prInfo = pullRequest(.open)
+            let result = try harness.callLeadTool(LeadTools.startTask, [
+                "description": "Ship the updated catalog", "after": upstream.title,
+                "title": "Catalog release", "branch": "release/catalog", "goal": "Publish the catalog"
+            ], lead: lead)
+            XCTAssertFalse(result.isError, result.text)
+            let task = try XCTUnwrap(harness.shell.workspaces.first { $0.title == "Catalog release" })
+            XCTAssertEqual(task.purpose, "Publish the catalog")
+            let wait = try XCTUnwrap(task.waitingStart)
+            let restored = try JSONDecoder().decode(MergeWait.self, from: JSONEncoder().encode(wait))
+            XCTAssertEqual(restored.pendingStart?.suggestedBranch, "release/catalog")
+            XCTAssertEqual(restored.pendingStart?.options?.title, task.title)
+            XCTAssertEqual(restored.pendingStart?.options?.goal, task.purpose)
+        }
+    }
+
+    func testMergeStartsTheRestoredRowFromTheNewRemoteTipOnce() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let git = { (arguments: [String]) in try UIFlowHarness.git(arguments, at: harness.repo) }
+            _ = try git(["remote", "add", "origin", harness.repo])
+            _ = try git(["fetch", "origin", "main:refs/remotes/origin/main"])
+            let upstream = try upstreamTask("Prepare catalog", lead: lead, in: harness)
+            shell.refreshGitContextNow(for: upstream)
+            harness.waitUntil("the upstream branch") { upstream.gitBranch != nil }
+            upstream.prInfo = pullRequest(.open)
+            let branches = try git(["branch", "--list"])
+            let launched = harness.agentLaunches.count
+            let task = try start("Publish catalog", after: upstream.title, template: "Bugfix", lead: lead, in: harness)
+            XCTAssertEqual(try git(["branch", "--list"]), branches)
+            XCTAssertEqual(harness.agentLaunches.count, launched)
+            XCTAssertNil(task.missionID)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: task.cwd))
+            XCTAssertFalse(NiruxShellView.isTask(task))
+            let row = try XCTUnwrap(shell.sidebar.lastInfos.first { $0.id == task.id })
+            XCTAssertEqual(row.rowSummary.mark, .blocked)
+            XCTAssertTrue(row.rowSummary.status.text.contains("#42"))
+            XCTAssertTrue(try harness.callLeadTool(LeadTools.tell, ["task": task.title, "message": "go"], lead: lead).isError)
+            XCTAssertNil(shell.worktreeCleanupOffer(workspaceIndex: row.index))
+            XCTAssertFalse(shell.worktreeCleanupCandidates().contains { $0.path == task.cwd || $0.workspaceIDs.contains(task.id) })
+            XCTAssertNotNil(shell.sidebar.workspaceActionMenu(workspaceIndex: row.index, columnIndex: nil).item(withTitle: "Start Now"))
+            XCTAssertTrue(try harness.callLeadTool(LeadTools.listTasks, lead: lead).text.contains(row.rowSummary.status.text))
+            XCTAssertEqual(shell.persistedState().workspaces.first { $0.id == task.id }?.columns.count, 0)
+            shell.saveState()
+            shell.restoreState()
+            let restored = try XCTUnwrap(shell.workspaces.first { $0.id == task.id })
+            XCTAssertEqual(restored.mergeWaits, task.mergeWaits)
+            restored.addColumn()
+            XCTAssertEqual(restored.columns.count, 1)
+            XCTAssertNil(restored.columns.first?.pty)
+            let view = try XCTUnwrap(restored.columns.first?.waitingTask)
+            XCTAssertEqual(view.facts?.description, task.title)
+            XCTAssertEqual(view.facts?.state, row.waitingTask)
+            _ = try git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "merged"])
+            let tip = try git(["rev-parse", "HEAD"])
+            let oldTip = try git(["rev-parse", "refs/remotes/origin/main"])
+            XCTAssertNotEqual(tip, oldTip)
+            let source = try XCTUnwrap(shell.workspaces.first { $0.id == upstream.id })
+            let beforeMerge = harness.agentLaunches.count
+            for _ in 0..<2 { shell.followMergeWaits(awaiting: source, read: pullRequest(.merged), now: 41) }
+            harness.waitUntil("the waiting row to launch", timeout: 30) { !restored.isWaitingTask }
+            XCTAssertEqual(harness.agentLaunches.count, beforeMerge + 1)
+            XCTAssertEqual(try UIFlowHarness.git(["rev-parse", "HEAD"], at: restored.cwd), tip)
+            XCTAssertEqual(restored.columns.count, 1)
+            XCTAssertNil(restored.columns.first?.waitingTask)
+            let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.id == restored.missionID })
+            XCTAssertEqual(mission.parentWorkspaceID, lead.workspace.id)
+            XCTAssertEqual(mission.childWorkspaceID, task.id)
+            XCTAssertEqual(restored.columns.first?.agentUUID, mission.childAgentUUID)
+            let handover = try String(contentsOfFile: restored.cwd + "/.claude-handover.md", encoding: .utf8)
+            XCTAssertTrue(handover.contains("Started after #42"), handover)
+            XCTAssertTrue(handover.contains(task.title))
+            XCTAssertTrue(handover.contains(try XCTUnwrap(TaskTemplates.defaults.first { $0.name == "Bugfix" }).body))
+        }
+    }
+
+    func testWaitingTaskKeepsAnExplicitAgentAndModelAfterItsDependencyMerges() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            shell.sideEffects.validateTaskAgent = { selection, _ in selection }
+            _ = try UIFlowHarness.git(["remote", "add", "origin", harness.repo], at: harness.repo)
+            _ = try UIFlowHarness.git(["fetch", "origin", "main:refs/remotes/origin/main"], at: harness.repo)
+            let upstream = try upstreamTask("Prepare release", lead: lead, in: harness)
+            shell.refreshGitContextNow(for: upstream)
+            harness.waitUntil("the dependency’s branch") { upstream.gitBranch != nil }
+            upstream.prInfo = pullRequest(.open)
+            let result = try harness.callLeadTool(LeadTools.startTask, [
+                "description": "Check release", "after": upstream.title, "agent": "codex", "model": "test-model"
+            ], lead: lead)
+            XCTAssertFalse(result.isError, result.text)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Check release" })
+            let wait = try XCTUnwrap(task.waitingStart)
+            let restored = try JSONDecoder().decode(MergeWait.self, from: JSONEncoder().encode(wait))
+            XCTAssertEqual(restored.pendingStart?.selection, TaskAgentSelection(agent: .codex, model: "test-model"))
+            shell.followMergeWaits(awaiting: upstream, read: pullRequest(.merged), now: 42)
+            harness.waitUntil("the model-specific launch", timeout: 30) { !task.isWaitingTask }
+            let command = try XCTUnwrap(harness.agentLaunches.last)
+            XCTAssertTrue(command.hasPrefix("command codex "), command)
+            XCTAssertTrue(command.contains("--model 'test-model'"), command)
+            XCTAssertTrue(command.contains(".codex-handover.md"), command)
+        }
+    }
+
+    func testImmediateAndReleasedStartsDeliverTheSelectedAgentsHandover() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let store = try XCTUnwrap(SpaceDefaultsStore(spaceID: lead.space))
+            _ = try UIFlowHarness.git(["remote", "add", "origin", harness.repo], at: harness.repo)
+            _ = try UIFlowHarness.git(["fetch", "origin", "main:refs/remotes/origin/main"], at: harness.repo)
+            let upstream = try upstreamTask("Prepare release", lead: lead, in: harness)
+            shell.refreshGitContextNow(for: upstream)
+            harness.waitUntil("the dependency’s branch") { upstream.gitBranch != nil }
+            let agents: [(CodingAgent, String)] = [(.claude, ".claude-handover.md"), (.codex, ".codex-handover.md"), (.agy, ".agy-handover.md")]
+
+            for (agent, filename) in agents {
+                upstream.prInfo = pullRequest(.open)
+                let before = harness.agentLaunches.count
+                let queued = try start("Queue \(agent.rawValue) notes", after: upstream.title, lead: lead, in: harness)
+                shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === queued }))
+                for (requested, _) in agents { shell.openAgent(requested) }
+                XCTAssertEqual(harness.agentLaunches.count, before)
+                XCTAssertEqual(queued.columns.count, 1)
+                XCTAssertNil(queued.columns.first?.pty)
+                XCTAssertFalse(FileManager.default.fileExists(atPath: queued.cwd))
+
+                var defaults = store.load().defaults
+                defaults.agent = agent
+                _ = try store.save(defaults).get()
+
+                @MainActor func verify(_ task: WorkspaceState, afterMerge: Bool) throws {
+                    let command = try XCTUnwrap(harness.agentLaunches.last)
+                    XCTAssertTrue(command.hasPrefix("command \(agent.rawValue) "), command)
+                    XCTAssertTrue(command.contains("Read \(filename)"), command)
+                    let handovers = try FileManager.default.contentsOfDirectory(atPath: task.cwd).filter { $0.hasSuffix("-handover.md") }
+                    XCTAssertEqual(handovers, [filename])
+                    let contents = try String(contentsOfFile: task.cwd + "/" + filename, encoding: .utf8)
+                    XCTAssertTrue(contents.contains(task.title), contents)
+                    XCTAssertEqual(contents.contains("Started after #42"), afterMerge)
+                    XCTAssertEqual(MissionStore.shared.missions.first { $0.id == task.missionID }?.childAgentKind, agent.rawValue)
+                }
+
+                let title = "Start \(agent.rawValue) notes"
+                let started = try harness.callLeadTool(LeadTools.startTask, ["description": title], lead: lead)
+                XCTAssertFalse(started.isError, started.text)
+                XCTAssertEqual(harness.agentLaunches.count, before + 1)
+                try verify(try XCTUnwrap(shell.workspaces.first { $0.title == title }), afterMerge: false)
+
+                shell.followMergeWaits(awaiting: upstream, read: pullRequest(.merged), now: 42)
+                harness.waitUntil("the \(agent.rawValue) waiting task starts", timeout: 30) { !queued.isWaitingTask }
+                XCTAssertEqual(harness.agentLaunches.count, before + 2)
+                try verify(queued, afterMerge: true)
+            }
+        }
+    }
+
+    func testSharedWaitingTitleCannotCloseTheLeadsOtherTask() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            _ = try harness.stubCleanupTools()
+            let upstream = try upstreamTask("Prepare accounts", lead: lead, in: harness)
+            let title = "Publish accounts"
+            let started = try harness.callLeadTool(LeadTools.startTask, ["description": title, "repo": "none"], lead: lead)
+            XCTAssertFalse(started.isError, started.text)
+            let active = try XCTUnwrap(shell.workspaces.first { $0.title == title })
+            XCTAssertNotNil(shell.leadMission(of: active, lead: lead.workspace.id))
+
+            @MainActor func queue(_ detail: String) throws -> WorkspaceState {
+                let description = title + "\n" + detail
+                let queued = try harness.callLeadTool(LeadTools.startTask, ["description": description, "after": upstream.title], lead: lead)
+                XCTAssertFalse(queued.isError, queued.text)
+                let task = try XCTUnwrap(shell.workspaces.first { $0.waitingStart?.pendingStart?.description == description })
+                XCTAssertEqual(task.title, title)
+                XCTAssertTrue(queued.text.contains("task:\(task.id)"), queued.text)
+                return task
+            }
+            let first = try queue("Publish the guide.")
+            let second = try queue("Publish the schemas.")
+            let firstID = "task:\(first.id)"
+            let secondID = "task:\(second.id)"
+            XCTAssertNotEqual(firstID, secondID)
+            let list = try harness.callLeadTool(LeadTools.listTasks, lead: lead).text
+            for id in [firstID, secondID, "task:\(active.id)"] {
+                XCTAssertTrue(list.split(separator: "\n").contains { $0.contains(title) && $0.contains(id) }, list)
+            }
+
+            @MainActor func close(_ name: String) throws -> (text: String, isError: Bool) {
+                try harness.callLeadTool(LeadTools.closeTask, ["task": name], lead: lead)
+            }
+            let ambiguous = try close(title.lowercased())
+            XCTAssertTrue(ambiguous.isError && ambiguous.text.contains("task:<id>"), ambiguous.text)
+            XCTAssertFalse(active.isClosing || first.isClosing || second.isClosing)
+
+            let changed = try harness.callLeadTool(LeadTools.setTaskAfter, ["task": secondID, "after": firstID], lead: lead)
+            XCTAssertFalse(changed.isError, changed.text)
+            XCTAssertEqual(second.waitingStart?.awaited.workspaceID, first.id)
+            XCTAssertEqual(first.waitingStart?.awaited.workspaceID, upstream.id)
+            XCTAssertFalse(try close(secondID).isError)
+            harness.waitUntil("only the addressed task closes") { !shell.workspaces.contains { $0 === second } }
+            XCTAssertTrue(shell.workspaces.contains { $0 === first && !$0.isClosing })
+            XCTAssertTrue(shell.workspaces.contains { $0 === active && !$0.isClosing })
+            XCTAssertTrue(FileManager.default.fileExists(atPath: active.cwd))
+
+            active.title = secondID
+            let stale = try close(secondID.lowercased())
+            XCTAssertTrue(stale.isError && stale.text.contains("task:<id>"), stale.text)
+            XCTAssertFalse(active.isClosing)
+        }
+    }
+
+    func testInterruptedStartAndMissingRepositoryStayActionableAfterRestore() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let upstream = try upstreamTask("Add accounts", lead: lead, in: harness)
+            var spaces = shell.profiles
+            let space = try XCTUnwrap(spaces.firstIndex { $0.id == lead.space })
+            spaces[space].anchors.append(.init(kind: .gitRepository(commonDir: harness.root + "/offline/.git"), name: "offline"))
+            shell.workspaceStore.replaceProfiles(spaces, activeProfileID: lead.space)
+            let task = try start("List accounts", after: upstream.title, repo: "offline", lead: lead, in: harness)
+            var state = try XCTUnwrap(Persistence.load())
+            let index = try XCTUnwrap(state.workspaces.firstIndex { $0.id == task.id })
+            state.workspaces[index].mergeWaits?[0].startingBranch = "feat/list-accounts"
+            XCTAssertTrue(Persistence.save(state))
+            let count = harness.agentLaunches.count
+            shell.restoreState()
+            let restored = try XCTUnwrap(shell.workspaces.first { $0.id == task.id })
+            XCTAssertTrue(restored.waitingStart?.failure?.contains("feat/list-accounts") == true)
+            XCTAssertEqual(count, harness.agentLaunches.count)
+            XCTAssertNotNil(try XCTUnwrap(Persistence.load()).workspaces.first { $0.id == task.id }?.mergeWaits?.first?.failure)
+            spaces[space].anchors.removeAll { $0.name == "offline" }
+            shell.workspaceStore.replaceProfiles(spaces, activeProfileID: lead.space)
+            shell.startWaitingTask(restored)
+            XCTAssertTrue(restored.waitingStart?.failure?.contains("left the space") == true)
+            shell.sweepMergeWaits(now: Date().timeIntervalSince1970 + MergeWait.deliveryLifetime)
+            XCTAssertTrue(restored.isWaitingTask)
+            XCTAssertNil(restored.missionID)
+            XCTAssertEqual(count, harness.agentLaunches.count)
+        }
+    }
+
+    func testFailedDependencyCanBeRepointedOrStartedManually() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let upstream = try upstreamTask("Prepare schema", lead: lead, in: harness)
+            let task = try start("Update schema", after: upstream.title, lead: lead, in: harness)
+            let downstream = try start("Ship schema", after: task.title, lead: lead, in: harness)
+            let change = { (args: [String: Any]) in try harness.callLeadTool(LeadTools.setTaskAfter, args, lead: lead) }
+            XCTAssertTrue(try change(["task": task.title, "after": downstream.title]).isError)
+            XCTAssertTrue(try change(["task": task.title, "after": task.title]).isError)
+            XCTAssertTrue(try change(["task": task.title, "after": 123]).isError)
+            XCTAssertEqual(task.waitingStart?.awaited.workspaceID, upstream.id)
+            shell.followMergeWaits(awaiting: upstream, read: pullRequest(.closed), now: 100)
+            let failed = try XCTUnwrap(shell.sidebar.lastInfos.first { $0.id == task.id })
+            XCTAssertEqual(failed.rowSummary.status.tone, .needsYou)
+            XCTAssertTrue(failed.rowSummary.status.text.contains("#42"))
+            XCTAssertFalse(shell.awaitedWorkspaceIDs.contains(upstream.id))
+            XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("#42") && $0.text.contains(task.title) })
+            let other = try start("Prepare API", after: upstream.title, lead: lead, in: harness)
+            XCTAssertFalse(try change(["task": task.title, "after": other.title]).isError)
+            XCTAssertNil(task.waitingStart?.failure)
+            XCTAssertEqual(task.waitingStart?.awaited.workspaceID, other.id)
+            let close = try harness.callLeadTool(LeadTools.closeTask, ["task": other.title], lead: lead)
+            XCTAssertFalse(close.isError, close.text)
+            XCTAssertTrue(task.waitingStart?.failure?.contains("without a merged pull request") == true)
+
+            // A cached branch exists. Have the local remote record and refuse
+            // the actual fetch, then allow the same remote to serve the retry.
+            let transport = ".git/refuse-fetch"
+            let transportPath = harness.repo + "/" + transport
+            let refusal = "test remote refused the fetch"
+            try """
+            #!/bin/sh
+            touch "$0.started"
+            echo "fatal: \(refusal)" >&2
+            exit 1
+            """.write(toFile: transportPath, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: transportPath)
+            _ = try UIFlowHarness.git(["remote", "add", "origin", harness.repo], at: harness.repo)
+            _ = try UIFlowHarness.git(["config", "remote.origin.uploadpack", transport], at: harness.repo)
+            _ = try UIFlowHarness.git(["update-ref", "refs/remotes/origin/main", "HEAD"], at: harness.repo)
+            let launches = harness.agentLaunches.count
+            let retry = try change(["task": task.title])
+            XCTAssertFalse(retry.isError, retry.text)
+            let marker = transportPath + ".started"
+            guard harness.waitUntil("the manual start to reach the remote", timeout: GitCommand.defaultTimeout, {
+                FileManager.default.fileExists(atPath: marker) || !task.isStarting
+            }) else { return }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: marker), task.waitingStart?.failure ?? "fetch never started")
+            guard harness.waitUntil("the task to report the refused fetch", { !task.isStarting }) else { return }
+            let failure = try XCTUnwrap(task.waitingStart?.failure)
+            XCTAssertTrue(failure.contains(refusal), failure)
+            XCTAssertEqual(launches, harness.agentLaunches.count)
+            XCTAssertEqual(try UIFlowHarness.git(["branch", "--list", "feat/update-schema"], at: harness.repo), "")
+            _ = try UIFlowHarness.git(["config", "--unset", "remote.origin.uploadpack"], at: harness.repo)
+            let column = try XCTUnwrap(task.columns.first?.waitingTask)
+            let occupied = harness.repo + ".feat-update-schema"
+            try FileManager.default.createDirectory(atPath: occupied, withIntermediateDirectories: true)
+            column.startButton.performClick(nil)
+            harness.waitUntil("the occupied worktree path", timeout: 30) { task.waitingStart?.failure?.contains(occupied) == true }
+            XCTAssertEqual(harness.agentLaunches.count, launches)
+            try FileManager.default.removeItem(atPath: occupied)
+            column.startButton.performClick(nil)
+            harness.waitUntil("Start Now makes its worktree", timeout: 30) { !task.isWaitingTask }
+            XCTAssertEqual(harness.agentLaunches.count, launches + 1)
+            XCTAssertEqual(downstream.waitingStart?.awaited.workspaceID, task.id)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.closeTask, ["task": downstream.title], lead: lead).isError)
+            XCTAssertTrue(downstream.isClosing || !shell.workspaces.contains { $0 === downstream })
+
+            shell.setLeadStartsTasks(false, spaceID: lead.space)
+            let refused = try harness.callLeadTool(LeadTools.startTask, ["description": "Later", "after": task.title], lead: lead)
+            XCTAssertTrue(refused.isError)
+            XCTAssertNil(shell.newTaskPanel)
+        }
+    }
+}

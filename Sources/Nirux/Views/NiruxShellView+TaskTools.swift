@@ -19,14 +19,18 @@ extension NiruxShellView {
                 + "sub-tasks. The user starts tasks with ⌘N.", true)
         }
         let arguments = request.argumentObject
-        if let problem = LeadTools.problem(tool: request.tool, arguments: arguments) { return answer(problem, true) }
+        if let problem = LeadTools.problem(tool: request.tool, arguments: arguments, subtask: true) { return answer(problem, true) }
         let subtasks = subtasks(of: caller)
         let place = subtaskPlace(of: caller)
         if let refusal = subtaskRefusal(for: caller, place: place, subtasks: subtasks) { return answer(refusal, true) }
         let parent = NewTask.MissionParent(workspaceID: caller.id, agentUUID: request.agentUUID)
         switch request.tool {
         case LeadTools.startTask:
-            taskStartSubtask(arguments, from: caller, place: place, subtasks: subtasks, parent: parent, answer: answer)
+            if arguments["after"] != nil { return answer("Only the space’s Lead can start a waiting task.", true) }
+            selectTaskAgent(arguments, parent: parent, spaceID: caller.profileID, answer: answer) { selection in
+                self.taskStartSubtask(arguments, selection: selection, from: caller, place: self.subtaskPlace(of: caller),
+                                      subtasks: self.subtasks(of: caller), parent: parent, answer: answer)
+            }
         case LeadTools.listTasks:
             answer(taskSubtaskList(of: caller, for: parent, subtasks: subtasks), false)
         case LeadTools.tell, LeadTools.askUser:
@@ -95,10 +99,10 @@ extension NiruxShellView {
     // MARK: start_task
 
     private func taskStartSubtask(
-        _ arguments: [String: Any], from caller: WorkspaceState, place: NewTaskPanel.ParentTask.Place?,
+        _ arguments: [String: Any], selection: TaskAgentSelection, from caller: WorkspaceState, place: NewTaskPanel.ParentTask.Place?,
         subtasks: [WorkspaceState], parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
-        guard let place, let space = profiles.first(where: { $0.id == caller.profileID }) else {
+        guard !caller.isClosing, !isSubtask(caller), let place, let space = profiles.first(where: { $0.id == caller.profileID }) else {
             return answer("Nirux can't start a sub-task here any more: this task's folder or repository isn't there.", true)
         }
         let running = runningSubtaskCount(of: caller, among: subtasks) + pendingSubtaskStarts[caller.id, default: 0]
@@ -108,14 +112,18 @@ extension NiruxShellView {
         }
         let description = LeadTools.string(arguments, "description") ?? ""
         let templateName = LeadTools.string(arguments, "template")
+        let options = LeadTools.startOptions(arguments)
         guard leadStartsTasksWithoutAsking(spaceID: space.id) else {
-            return taskProposeSubtask(description, templateName: templateName, under: caller, parent: parent, answer: answer)
+            return taskProposeSubtask(
+                description, options: options, templateName: templateName, selection: arguments["agent"] != nil || selection.model != nil ? selection : nil,
+                under: caller, parent: parent, answer: answer
+            )
         }
         let folder: NewTask.Place?
         let repository: NewTaskPanel.Repository?
         switch place {
         case .folder(let path):
-            folder = .folder(parent: path, name: NewTask.suggestedFolderName(description: description), makesParent: false)
+            folder = .folder(parent: path, name: NewTask.suggestedFolderName(description: options.title ?? description), makesParent: false)
             repository = nil
         case .repository(let key):
             folder = nil
@@ -124,7 +132,6 @@ extension NiruxShellView {
                 return answer("Nirux can't tell which repository this task works in: ask the user to start the sub-task with ⌘N.", true)
             }
         }
-        let agent = defaultTaskAgent(forSpace: space.id)
         let callerID = caller.id
         // Counted until it answers: by then its workspace exists, or
         // nothing was made.
@@ -143,7 +150,7 @@ extension NiruxShellView {
             // It lists under the task, reports to its agent with Missions
             // off, and opens behind what the user is doing.
             self.startAgentTask(
-                description, templateName: templateName, info: info, agent: agent, spaceID: space.id, parent: parent,
+                description, options: options, templateName: templateName, info: info, selection: selection, spaceID: space.id, parent: parent,
                 folder: folder, repository: repository, configure: { request in
                     request.parentWorkspaceID = callerID
                     request.reportsToTask = true
@@ -158,12 +165,12 @@ extension NiruxShellView {
     /// proposal waits); the sub-task reports to the agent if the user
     /// starts it as a sub-task, and the agent hears what the user did.
     private func taskProposeSubtask(
-        _ description: String, templateName: String?, under caller: WorkspaceState, parent: NewTask.MissionParent,
+        _ description: String, options: NewTask.StartOptions, templateName: String?, selection: TaskAgentSelection?, under caller: WorkspaceState, parent: NewTask.MissionParent,
         answer: @escaping LeadAnswer
     ) {
         let proposal = LeadProposal(
-            spaceID: caller.profileID, repository: .spaceDefault, description: description, templateName: templateName,
-            parent: parent, subtaskOf: caller.id
+            spaceID: caller.profileID, repository: .spaceDefault, description: description, options: options, templateName: templateName,
+            parent: parent, subtaskOf: caller.id, selection: selection
         )
         let followUp = "If they start it under your task, it reports to you; either way, a line tells you what they did."
         if pendingLeadProposals.isEmpty, showLeadProposal(proposal) {

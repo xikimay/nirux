@@ -186,9 +186,9 @@ final class MergeQueueStoreTests: XCTestCase {
         try "notes\n".write(to: worktree.appendingPathComponent(".claude-handover.md"), atomically: true, encoding: .utf8)
         var inspection = try inspect(head)
         XCTAssertEqual(inspection.worktrees.map(\.problem), [nil])
-        XCTAssertEqual(inspection.worktrees.first?.path, NiruxShellView.comparablePath(worktree.path))
+        XCTAssertEqual(inspection.worktrees.first?.path, worktree.path.comparablePath)
         XCTAssertEqual(Set(inspection.allWorktreePaths),
-                       Set([repository.path, worktree.path].map(NiruxShellView.comparablePath)))
+                       Set([repository.path, worktree.path].map(\.comparablePath)))
         XCTAssertTrue(client.reads.isEmpty)
 
         // A tracked file changed.

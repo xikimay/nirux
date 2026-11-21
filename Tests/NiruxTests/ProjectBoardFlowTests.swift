@@ -10,20 +10,7 @@ import XCTest
 /// real, in temporary repositories. Clicks are hit-tested by hand
 /// (`BoardStagesClicks`), since a window that is never shown (CI) drops
 /// events sent with `sendEvent`.
-final class ProjectBoardFlowTests: XCTestCase {
-    private var root: String!
-
-    override func setUpWithError() throws {
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("nirux-project-board-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        root = try XCTUnwrap(base.path.realPath)
-    }
-
-    override func tearDown() {
-        if let root { try? FileManager.default.removeItem(atPath: root) }
-        super.tearDown()
-    }
+final class ProjectBoardFlowTests: BoardRepositoryTestCase {
 
     /// Answers like `gh`, from whatever thread asks, and records each call.
     final class FakeGitHub: ProjectBoardGitHub, @unchecked Sendable {
@@ -36,11 +23,11 @@ final class ProjectBoardFlowTests: XCTestCase {
         /// repositories; the others get `openPullRequests`.
         let openByRepository: [String: String]
         /// What gh answers instead for these `owner/name`.
-        let failures: [String: ProjectBoard.FetchError]
+        let failures: [String: GitHub.CLI.Failure]
 
         init(
             openPullRequests: String, mergedPullRequests: String = "[]", runs: String,
-            openByRepository: [String: String] = [:], failures: [String: ProjectBoard.FetchError] = [:]
+            openByRepository: [String: String] = [:], failures: [String: GitHub.CLI.Failure] = [:]
         ) {
             self.openPullRequests = openPullRequests
             self.mergedPullRequests = mergedPullRequests
@@ -61,26 +48,26 @@ final class ProjectBoardFlowTests: XCTestCase {
             lock.unlock()
         }
 
-        func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError> {
+        func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, GitHub.CLI.Failure> {
             record("pr \(state) \(repository)")
             if let failure = failures[repository] { return .failure(failure) }
             let open = openByRepository[repository] ?? openPullRequests
             return .success(Data((state == .open ? open : mergedPullRequests).utf8))
         }
 
-        func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError> {
+        func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, GitHub.CLI.Failure> {
             record("run \(repository) \(workflow) \(branch)")
             return .success(Data(runs.utf8))
         }
 
-        private var failure: ProjectBoard.FetchError?
+        private var failure: GitHub.CLI.Failure?
         /// What the next retargets answer, when GitHub refuses them.
-        var retargetFailure: ProjectBoard.FetchError? {
+        var retargetFailure: GitHub.CLI.Failure? {
             get { lock.lock(); defer { lock.unlock() }; return failure }
             set { lock.lock(); failure = newValue; lock.unlock() }
         }
 
-        func retarget(repository: String, number: Int, base: String) -> Result<Data, ProjectBoard.FetchError> {
+        func retarget(repository: String, number: Int, base: String) -> Result<Data, GitHub.CLI.Failure> {
             record("retarget \(repository) #\(number) \(base)")
             return retargetFailure.map { .failure($0) } ?? .success(Data(base.utf8))
         }
@@ -112,7 +99,7 @@ final class ProjectBoardFlowTests: XCTestCase {
         let client = makeClient()
         try withShell(client: client) { shell, space in
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             let login = root + "/widgets.feat-login"
             let scratch = root + "/widgets.scratch"
             try git(["worktree", "add", "-q", "-b", "feat/login", login], at: repo)
@@ -250,7 +237,7 @@ final class ProjectBoardFlowTests: XCTestCase {
         let client = makeClient()
         try withShell(client: client) { shell, space in
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
 
             try runPaletteAction("Open Board", in: shell)
@@ -299,7 +286,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             shell.mergeQueueClient = FakeQueueClient(isDryRun: true)
             shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/me/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/me/widgets.git")
             try git(["remote", "add", "upstream", "https://github.com/acme/widgets.git"], at: repo)
             try git(["update-ref", "refs/remotes/upstream/main", "HEAD"], at: repo)
             try git(["symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/main"], at: repo)
@@ -369,7 +356,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             ]
             var anchors: [SpaceAnchor] = []
             for name in ["saved", "front", "back", "docs", "copy"] {
-                try BoardConfigSuggestionsTests.makeRepository(at: root + "/" + name, remote: remotes[name])
+                try makeRepository(at: root + "/" + name, remote: remotes[name])
                 var anchor = try XCTUnwrap(FolderIdentity.identify(root + "/" + name, timeout: 10)).anchor
                 anchor.isDefault = name == "saved"
                 anchors.append(anchor)
@@ -384,7 +371,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
 
-            let signedOut = "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
+            let signedOut = "gh isn’t signed in to github.com: run gh auth login in a terminal, then Refresh."
             let pills = { (board.view.stages.content?.sections ?? []).map { [$0.title, $0.status?.text ?? "-", $0.status?.toolTip ?? "-"] } }
             let expected = [
                 ["saved", "-", "-"],
@@ -423,8 +410,8 @@ final class ProjectBoardFlowTests: XCTestCase {
         try withShell(client: makeClient()) { shell, space in
             let front = root + "/front"
             let back = root + "/back"
-            try BoardConfigSuggestionsTests.makeRepository(at: front, remote: "https://github.com/acme/front.git")
-            try BoardConfigSuggestionsTests.makeRepository(at: back, remote: "https://github.com/acme/back.git")
+            try makeRepository(at: front, remote: "https://github.com/acme/front.git")
+            try makeRepository(at: back, remote: "https://github.com/acme/back.git")
             var frontAnchor = try XCTUnwrap(FolderIdentity.identify(front, timeout: 10)).anchor
             frontAnchor.isDefault = true
             let backAnchor = try XCTUnwrap(FolderIdentity.identify(back, timeout: 10)).anchor
@@ -457,8 +444,8 @@ final class ProjectBoardFlowTests: XCTestCase {
         try withShell(client: makeClient()) { shell, space in
             let front = root + "/front"
             let copy = root + "/copy"
-            try BoardConfigSuggestionsTests.makeRepository(at: front, remote: "https://github.com/acme/front.git")
-            try BoardConfigSuggestionsTests.makeRepository(at: copy, remote: "https://github.com/acme/front.git")
+            try makeRepository(at: front, remote: "https://github.com/acme/front.git")
+            try makeRepository(at: copy, remote: "https://github.com/acme/front.git")
             var frontAnchor = try XCTUnwrap(FolderIdentity.identify(front, timeout: 10)).anchor
             frontAnchor.isDefault = true
             let copyAnchor = try XCTUnwrap(FolderIdentity.identify(copy, timeout: 10)).anchor
@@ -501,7 +488,7 @@ final class ProjectBoardFlowTests: XCTestCase {
     func testAGoneCheckoutSaysSoWithoutBoardSettings() throws {
         try withShell(client: makeClient()) { shell, space in
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             var anchor = try XCTUnwrap(FolderIdentity.identify(repo, timeout: 10)).anchor
             anchor.isDefault = true
             XCTAssertTrue(shell.workspaceStore.setAnchors([anchor], forProfile: space.id))
@@ -577,10 +564,10 @@ final class ProjectBoardFlowTests: XCTestCase {
             shell.addWorkspace(title: "tools task", cwd: root, profileID: third.id)
             let toolsTask = try XCTUnwrap(shell.workspaces.first { $0.title == "tools task" })
             try select("widgets", in: shell)
-            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.keys) }, [widgets.workspace.id])
+            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.tasks.keys) }, [widgets.workspace.id])
             shell.moveWorkspaceToSpace(workspaceID: widgets.workspace.id, profileID: third.id)
             XCTAssertEqual(widgets.board.projectID, third.id)
-            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.keys) }, [toolsTask.id, widgets.workspace.id])
+            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.tasks.keys) }, [toolsTask.id, widgets.workspace.id])
             XCTAssertEqual(widgets.board.view.stages.content?.header.name, "Tools")
             XCTAssertEqual(widgets.board.view.header.titleToolTip, "Board · Tools")
 
@@ -688,10 +675,10 @@ final class ProjectBoardFlowTests: XCTestCase {
             let front = root + "/front"
             let back = root + "/back"
             let docs = root + "/docs"
-            try BoardConfigSuggestionsTests.makeRepository(at: front, remote: "https://github.com/acme/front.git")
-            try BoardConfigSuggestionsTests.makeRepository(at: back, remote: "git@github.com:acme/back.git")
+            try makeRepository(at: front, remote: "https://github.com/acme/front.git")
+            try makeRepository(at: back, remote: "git@github.com:acme/back.git")
             // No remote and no config: only its anchor puts it in its section.
-            try BoardConfigSuggestionsTests.makeRepository(at: docs, remote: nil)
+            try makeRepository(at: docs, remote: nil)
             try git(["worktree", "add", "-q", "-b", "feat/login", root + "/front.login"], at: front)
             try git(["worktree", "add", "-q", "-b", "feat/api", root + "/back.api"], at: back)
             var frontAnchor = try XCTUnwrap(FolderIdentity.identify(front, timeout: 10)).anchor
@@ -780,16 +767,16 @@ final class ProjectBoardFlowTests: XCTestCase {
         try withShell(client: client) { shell, space in
             let widgets = root + "/widgets", copy = root + "/widgets-copy"
             let gadgets = root + "/gadgets", gadgetsClone = root + "/gadgets-clone"
-            try BoardConfigSuggestionsTests.makeRepository(at: widgets, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: widgets, remote: "https://github.com/acme/widgets.git")
             // Through an SSH host alias: the same repository, by owner and name.
-            try BoardConfigSuggestionsTests.makeRepository(at: copy, remote: "git@github-work:acme/widgets.git")
+            try makeRepository(at: copy, remote: "git@github-work:acme/widgets.git")
             // A clone of the fork alone, before the fork's checkout by path: a section of its own, reading the fork.
             let fork = root + "/fork"
-            try BoardConfigSuggestionsTests.makeRepository(at: fork, remote: "https://github.com/someone/gadgets.git")
+            try makeRepository(at: fork, remote: "https://github.com/someone/gadgets.git")
             // A fork's checkout: its section reads upstream, as gh does, and the clone of upstream joins it.
-            try BoardConfigSuggestionsTests.makeRepository(at: gadgets, remote: "https://github.com/someone/gadgets.git")
+            try makeRepository(at: gadgets, remote: "https://github.com/someone/gadgets.git")
             try git(["remote", "add", "upstream", "https://github.com/acme/gadgets.git"], at: gadgets)
-            try BoardConfigSuggestionsTests.makeRepository(at: gadgetsClone, remote: "git@github.com:acme/gadgets.git")
+            try makeRepository(at: gadgetsClone, remote: "git@github.com:acme/gadgets.git")
             // Another space's worktree of gadgets: not this Board's to show, nor to clean up.
             try git(["worktree", "add", "-q", "-b", "feat/elsewhere", root + "/gadgets.elsewhere"], at: gadgets)
             // A bare repository, named as adding it to the space from its workspace would: "app-feature".
@@ -880,7 +867,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             shell.mergeQueueClient = FakeQueueClient(world: world, isDryRun: true)
             shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             try writeConfig(for: space, workflow: "nightly.yml")
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
             try select("widgets", in: shell)
@@ -923,7 +910,7 @@ final class ProjectBoardFlowTests: XCTestCase {
     func testTheMenusTheLeadAndTheOrderRunWhatTheySay() throws {
         try withShell(client: makeClient()) { shell, space in
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             let login = root + "/widgets.feat-login"
             let notes = root + "/widgets.lead-notes"
             try git(["worktree", "add", "-q", "-b", "feat/login", login], at: repo)
@@ -952,7 +939,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             // The Lead, in the space's header: its workspace.
             try select("login", in: shell)
-            XCTAssertEqual(board.view.stages.content?.header.lead?.text, "Lead · No activity yet")
+            XCTAssertEqual(board.view.stages.content?.header.lead?.text, "Lead · No identifiable session")
             try BoardStagesClicks.click(board.view.stages.leadButton)
             XCTAssertEqual(shell.activeWorkspace?.title, "Lead")
 
@@ -1001,7 +988,7 @@ final class ProjectBoardFlowTests: XCTestCase {
     func testTheBoardReadsTheSidebarsPassAndKeepsItBetweenPasses() throws {
         try withShell(client: makeClient()) { shell, space in
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             let login = root + "/widgets.feat-login"
             try git(["worktree", "add", "-q", "-b", "feat/login", login], at: repo)
             try writeConfig(for: space, workflow: "nightly.yml")
@@ -1020,11 +1007,11 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             let now = Date().timeIntervalSince1970
             shell.drawProjectBoards(shell.readProjectBoards(snapshot: ProcessSnapshot(entries: []), now: now, pass: pass), now: now)
-            XCTAssertEqual(phrase(), "Asking Lead")
+            XCTAssertEqual(phrase(), "Awaiting Lead reply · Which base?")
             shell.renderProjectBoard(board)
-            XCTAssertEqual(phrase(), "Asking Lead", "between two passes: the last pass's reading")
+            XCTAssertEqual(phrase(), "Awaiting Lead reply · Which base?", "between two passes: the last pass's reading")
             shell.updateSidebar()
-            XCTAssertNotEqual(phrase(), "Asking Lead", "the next pass's")
+            XCTAssertNotEqual(phrase(), "Awaiting Lead reply · Which base?", "the next pass's")
         }
     }
 
@@ -1055,7 +1042,7 @@ final class ProjectBoardFlowTests: XCTestCase {
           "url": "https://github.com/acme/widgets/pull/12", "title": "Sign in", "mergedAt": "\(mergedAt)", "statusCheckRollup": []}]
         """
         let repo = root + "/widgets"
-        try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+        try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
         let login = root + "/widgets.feat-login"
         try git(["worktree", "add", "-q", "-b", "feat/login", login], at: repo)
         // Pushed elsewhere than GitHub: its clean-up check stops before gh.

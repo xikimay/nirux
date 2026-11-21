@@ -53,7 +53,7 @@ final class MenuBarFlowTests: XCTestCase {
             bar.run(["Space", "Clean Up Merged Worktrees…"])
             let cleanup = try XCTUnwrap(shell.worktreeCleanupPanel)
             harness.waitUntil("the worktree inspected") {
-                cleanup.candidates.contains { NiruxShellView.comparablePath($0.path) == NiruxShellView.comparablePath(harness.worktree) && $0.inspection != nil }
+                cleanup.candidates.contains { $0.path.comparablePath == harness.worktree.comparablePath && $0.inspection != nil }
             }
             cleanup.dismiss()
         }
@@ -354,7 +354,8 @@ extension MenuBarFlowTests {
 /// a nil-target item goes to the app once it validates, a closure item to
 /// its own target.
 @MainActor
-private struct MenuBar {
+/// The main menu as NiruxApp builds it, run item by item.
+struct MenuBar {
     let app: NiruxApp
     let menu: NSMenu
 

@@ -49,7 +49,7 @@ final class WorkspaceContextPanel {
     private var nextStepField: NSTextField?
     private var blockerField: NSTextField?
     private var contextHelpLabel: NSTextField?
-    private var liveContextLabel: NSTextField?
+    private(set) var liveContextLabel: NSTextField?
     private var editorUndoStacks: [EditorUndoStack] = []
 
     private static let size = NSSize(width: 660, height: 640)
@@ -363,7 +363,7 @@ final class WorkspaceContextPanel {
         let pullRequest: String
         if let pr = configuration.prInfo {
             let ci = pr.ciStatus.map { "  ·  CI \($0.lowercased())" } ?? ""
-            pullRequest = "PR        #\(pr.number) \(pr.state.lowercased())\(ci)"
+            pullRequest = "PR        #\(pr.number) \(pr.state.word)\(ci)"
         } else {
             pullRequest = "PR        None detected"
         }

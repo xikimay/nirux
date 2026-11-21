@@ -75,6 +75,10 @@ final class AgentHookCenter {
     /// the time the turn ended, for whoever shows it to check that it
     /// still stands by then.
     var onTurnDone: ((Resolution, TimeInterval) -> Void)?
+    /// A turn end that asks, in a Mission child whose parent sent its last
+    /// prompt: true when the question went to the parent, which answers it
+    /// (`NiruxShellView.askParent`). Its row then says so, not the user.
+    var asksParent: ((Resolution, TurnEndRequest, TurnEndQuestion?) -> Bool)?
     /// A turn end older than this is no news: a backlog replayed at
     /// launch, a verdict that took too long.
     static let turnDoneFreshness: TimeInterval = 30
@@ -193,7 +197,8 @@ final class AgentHookCenter {
         var appliedEvents: [AppliedEvent] = []
         var snapshot: ProcessSnapshot?
         for line in slice.split(separator: 0x0A) {
-            guard let event = try? decoder.decode(AgentHookEvent.self, from: Data(line)) else { continue }
+            // Only an agent with hooks writes events: another's line is a newer build's.
+            guard let event = try? decoder.decode(AgentHookEvent.self, from: Data(line)), event.kind.sendsHooks else { continue }
             if let appliedEvent = dispatch(event, snapshot: &snapshot) { appliedEvents.append(appliedEvent) }
         }
         // One sidebar refresh per drain, not per event: updateSidebar does a
@@ -227,7 +232,7 @@ final class AgentHookCenter {
             case .claude:
                 // `claude -p` runs PermissionRequest hooks with no dialog to
                 // show, then denies the call itself: nobody is asked.
-                if event.name == .permissionRequest, Self.isHeadlessClaude(foregroundProcess) {
+                if event.name == .permissionRequest, foregroundProcess?.headlessAgent == .claude {
                     releaseHeldRequest(event)
                     return nil
                 }
@@ -246,7 +251,7 @@ final class AgentHookCenter {
                     event, foregroundProcess: foregroundProcess, snapshot: processes
                 )
                 // `claude -p` has no conversation to come back to.
-                if isFromOwnClaude, !Self.isHeadlessClaude(foregroundProcess) {
+                if isFromOwnClaude, foregroundProcess?.headlessAgent != .claude {
                     claudeSessionAgent = foregroundProcess
                 }
                 if isFromOwnClaude, event.reportsAccount, let onNiruxAccount = event.onNiruxAccount, let foregroundProcess {
@@ -262,7 +267,7 @@ final class AgentHookCenter {
                     && isFromOwnClaude
             case .codex:
                 if Self.isNestedCodexHook(foregroundName: foregroundProcess?.name) { return nil }
-            case .agy:
+            case .agy, .gemini, .opencode:
                 break
             }
         }
@@ -280,7 +285,7 @@ final class AgentHookCenter {
             event.approvalText = nil
         }
         // Antigravity's hooks only bind its conversation: OSC 7501 drives its status.
-        if let resolution, event.kind != .agy { _ = apply(event, to: resolution) }
+        if let resolution, event.kind.statusSource == .hooks { _ = apply(event, to: resolution) }
         return resolution.map {
             AppliedEvent(
                 event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged,
@@ -357,8 +362,12 @@ final class AgentHookCenter {
             // backlog): no wait for it.
             guard let self, self.resolver?(agentUUID)?.column.pty?.isCurrentTurnEnd(event.timestamp) == true else { return }
             await self.waitBeforeAsking(delay)
-            guard self.turnEndClassifier != nil, let resolution = self.resolver?(agentUUID),
-                  resolution.column.pty?.noteAgentQuestion(question, in: message, endingTurnAt: event.timestamp, seen: seen) == true
+            guard self.turnEndClassifier != nil, let resolution = self.resolver?(agentUUID), let pty = resolution.column.pty,
+                  pty.mayNoteAgentQuestion(endingTurnAt: event.timestamp)
+            else { return }
+            let request = TurnEndRequest(message: message, turnEndedAt: event.timestamp)
+            guard self.asksParent?(resolution, request, question) == true
+                || pty.noteAgentQuestion(question, in: message, endingTurnAt: event.timestamp, seen: seen)
             else { return }
             // No alert refreshes the sidebar for it, and no heartbeat with
             // Nirux in the background.
@@ -404,13 +413,27 @@ final class AgentHookCenter {
             // behind first: the verdict then drops, as a late one does).
             if let endingQuestion {
                 await self.waitBeforeAsking(questionDelay)
-                self.applyTurnEndVerdict(.asks(endingQuestion), for: request, agentUUID: agentUUID)
+                self.settleAsking(endingQuestion, for: request, agentUUID: agentUUID)
                 return
             }
             let verdict = await classifier.classify(request.message)
             // Turned off meanwhile: every turn end alerts.
-            self.applyTurnEndVerdict(self.turnEndClassifier == nil ? .unknown : verdict, for: request, agentUUID: agentUUID)
+            switch self.turnEndClassifier == nil ? .unknown : verdict {
+            case .asks(let question): self.settleAsking(question, for: request, agentUUID: agentUUID)
+            case let settled: self.applyTurnEndVerdict(settled, for: request, agentUUID: agentUUID)
+            }
         }
+    }
+
+    /// A turn end that asks: its parent's question when the parent sent
+    /// its last prompt (`asksParent`), which then waits on the parent as a
+    /// child that asked; else the user's.
+    private func settleAsking(_ question: TurnEndQuestion?, for request: TurnEndRequest, agentUUID: String) {
+        if awaitsVerdict(request, agentUUID: agentUUID), let resolution = resolver?(agentUUID),
+           asksParent?(resolution, request, question) == true {
+            return applyTurnEndVerdict(.done, for: request, agentUUID: agentUUID, reportsDone: false)
+        }
+        applyTurnEndVerdict(.asks(question), for: request, agentUUID: agentUUID)
     }
 
     /// Asks for the status line of the turn that ended at `time` in
@@ -531,62 +554,14 @@ final class AgentHookCenter {
     /// status line: none reads it with both options off, and a `claude -p`
     /// run in the terminal asks nobody, and is no task, at its turn end.
     nonisolated static func keepsFinalMessage(readsFinalMessages: Bool, foreground: ForegroundProcess?) -> Bool {
-        readsFinalMessages && !isHeadlessClaude(foreground)
+        readsFinalMessages && foreground?.headlessAgent != .claude
     }
-
-    /// A `claude` a person talks to: not `claude -p`.
-    nonisolated static func isInteractiveClaude(_ process: ForegroundProcess?) -> Bool {
-        process?.name == "claude" && !isHeadlessClaude(process)
-    }
-
-    nonisolated static func isHeadlessClaude(_ process: ForegroundProcess?) -> Bool {
-        guard let process, process.name == "claude" else { return false }
-        return process.hasFlag("-p") || process.hasFlag("--print")
-    }
-
-    /// An `agy` that holds no conversation to resume: a one-shot `-p` run, or
-    /// one of its subcommands (agy 1.5's `agy help`).
-    nonisolated static func isHeadlessAgy(_ process: ForegroundProcess?) -> Bool {
-        guard let process, process.name == AgentProgramStatus.agy else { return false }
-        let arguments = process.arguments.dropFirst()
-        return arguments.contains { ["-p", "--print", "--prompt"].contains($0) }
-            || arguments.first.map(agySubcommands.contains) ?? false
-    }
-
-    nonisolated static let agySubcommands: Set<String> = [
-        "acp", "agent", "agents", "changelog", "help", "install", "mcp", "mic-serve", "models",
-        "plugin", "plugins", "remote-control", "update"
-    ]
-
-    /// `codex exec` (alias `e`): a run, not a conversation to come back to.
-    /// The subcommand follows Codex's global options, and `codex` itself may
-    /// be a script its runtime runs (`node …/bin/codex`, from npm or bun).
-    nonisolated static func isHeadlessCodex(_ process: ForegroundProcess?) -> Bool {
-        guard let process, process.name == "codex",
-              let codex = process.arguments.firstIndex(where: {
-                  (($0 as NSString).lastPathComponent as NSString).deletingPathExtension == "codex"
-              })
-        else { return false }
-        var index = codex + 1
-        while let argument = process.arguments[safe: index], argument != "--" {
-            guard argument.hasPrefix("-") else { return argument == "exec" || argument == "e" }
-            index += codexOptionsWithValue.contains(argument) ? 2 : 1
-        }
-        return false
-    }
-
-    /// Codex's global options whose value is the next argument.
-    nonisolated static let codexOptionsWithValue: Set<String> = [
-        "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env", "-i", "--image",
-        "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox", "-C", "--cd", "--add-dir",
-        "-a", "--ask-for-approval"
-    ]
 
     /// A Codex hook while another agent owns the terminal came from a
     /// `codex exec` that agent launched.
     nonisolated static func isNestedCodexHook(foregroundName: String?) -> Bool {
-        guard let foregroundName, AgentStatusMachine.isRecognizedAgentProcess(foregroundName) else { return false }
-        return foregroundName != "codex"
+        guard let agent = foregroundName.flatMap(CodingAgent.init(rawValue:)) else { return false }
+        return agent != .codex
     }
 
     func stop() {

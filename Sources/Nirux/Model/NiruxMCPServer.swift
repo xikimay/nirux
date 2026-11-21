@@ -109,7 +109,7 @@ enum NiruxMCPServer {
         /// it once, so after `/clear` or `/resume` it names the previous one.
         var sessionID: String? { nonEmpty("CLAUDE_CODE_SESSION_ID") }
         /// Launched in a space's Lead workspace (see `WorkspaceState.isLead`).
-        var isLead: Bool { environment[WorkspaceState.leadEnvironmentKey] == "1" }
+        var isLead: Bool { environment[LeadChannel.environmentKey] == "1" }
         /// Launched by a Nirux workspace's terminal, which names itself (the
         /// app can tell who calls) and carries this launch's id: one opened
         /// by a link from outside Nirux has none, and its agents get no task
@@ -235,7 +235,7 @@ enum NiruxMCPServer {
     /// A Lead's or a task's tool: checked here, then sent to the running
     /// app, which acts and answers (see LeadChannel).
     static func callAppTool(_ name: String, arguments: [String: Any], context: Context) -> ToolResult {
-        if let problem = LeadTools.problem(tool: name, arguments: arguments) {
+        if let problem = LeadTools.problem(tool: name, arguments: arguments, subtask: !context.isLead) {
             return ToolResult(text: problem, isError: true)
         }
         guard let workspaceID = context.nonEmpty("NIRUX_WORKSPACE_ID"), let agentUUID = context.nonEmpty("NIRUX_AGENT_UUID"),

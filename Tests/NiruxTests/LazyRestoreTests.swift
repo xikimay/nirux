@@ -321,12 +321,12 @@ final class LazyRestoreTests: XCTestCase {
             XCTAssertFalse(recorder.commands.contains(Self.resume(Self.sessionD)))
         }
         XCTAssertEqual(
-            DeferredAgentLaunch.Agent.codex(resume: .session(Self.thread), mode: .default)
+            AgentLaunch.codex(resume: .session(Self.thread), mode: .default)
                 .openingElsewhere(["codex", "resume", Self.thread.uppercased()]),
             .codex(resume: .picker, mode: .default)
         )
         XCTAssertEqual(
-            DeferredAgentLaunch.Agent.claude(resume: .session(Self.sessionA), mode: .plan).openingElsewhere([Self.thread]),
+            AgentLaunch.claude(resume: .session(Self.sessionA), mode: .plan).openingElsewhere([Self.thread]),
             .claude(resume: .session(Self.sessionA), mode: .plan)
         )
     }
@@ -364,11 +364,14 @@ final class LazyRestoreTests: XCTestCase {
     // MARK: - Asking for it
 
     func testSidebarResumeStartsTheAgentWhereItIs() throws {
-        try withRestoredShell(layout()) { shell, recorder in
+        var state = layout()
+        state.workspaces[1].columns[0].agentModel = "chosen-model"
+        try withRestoredShell(state) { shell, recorder in
             let codex = try column(shell, 1, 0)
             let info = try XCTUnwrap(shell.sidebar.lastInfos.first { $0.index == 1 }?.columns.first)
+            XCTAssertEqual(info.agentLabel, "Codex (chosen-model)")
             XCTAssertEqual(info.deferredAgent, SidebarDeferredAgent(
-                processName: "codex", summary: "codex session", columnID: codex.id
+                agent: .codex, summary: "codex session", columnID: codex.id
             ))
 
             // A click aimed at another column that moved there does nothing.
@@ -378,7 +381,7 @@ final class LazyRestoreTests: XCTestCase {
 
             resume(1, 0, codex.id)
             XCTAssertEqual(recorder.launches.last, Launch(
-                column: ObjectIdentifier(codex), command: "command codex resume '\(Self.thread)'"
+                column: ObjectIdentifier(codex), command: "command codex resume '\(Self.thread)' --model 'chosen-model'"
             ))
             XCTAssertEqual(shell.activeWSIndex, 0, "the workspace on screen stays")
             XCTAssertNil(shell.sidebar.lastInfos.first { $0.index == 1 }?.columns.first?.deferredAgent)
@@ -442,14 +445,14 @@ final class LazyRestoreTests: XCTestCase {
         XCTAssertEqual(title("⠂ Fix the login form"), "Fix the login form", "a spinner frame")
         XCTAssertEqual(title("· Fix\nthe   login form"), "Fix the login form")
         XCTAssertEqual(title("[WIP] login"), "[WIP] login")
-        for generic in [nil, "", "✳ Claude Code", "zsh", "codex", "command claude --resume 'x'", "claude --resume"] {
+        for generic in [nil, "", "✳ Claude Code", "zsh", "-fish", "dash", "nu", "codex", "command claude --resume 'x'", "claude --resume"] {
             XCTAssertNil(title(generic), generic ?? "nil")
         }
         XCTAssertEqual(title(String(repeating: "a", count: 200))?.count, DeferredAgentLaunch.maxTitleLength)
     }
 
     func testRowAndNoticeSayWhatTheColumnHolds() throws {
-        let agent = SidebarDeferredAgent(processName: "claude", summary: "claude session", columnID: UUID())
+        let agent = SidebarDeferredAgent(agent: .claude, summary: "claude session", columnID: UUID())
         let info = ColumnInfo(
             index: 1, processName: nil, abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
             terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil, deferredAgent: agent
@@ -513,7 +516,7 @@ final class LazyRestoreTests: XCTestCase {
         state.workspaces[1].columns = [Self.codex(Self.thread, cwd: worktree)]
         try withRestoredShell(state) { shell, _ in
             let paused = try column(shell, 1, 0).liveAgent(snapshot: ProcessSnapshot())
-            XCTAssertEqual(paused, WorkspaceClosePolicy.LiveAgent(processName: "codex", status: .idle, isPaused: true))
+            XCTAssertEqual(paused, WorkspaceClosePolicy.LiveAgent(agent: .codex, status: .idle, isPaused: true))
             XCTAssertEqual(
                 WorkspaceClosePolicy.columnConfirmation(for: paused),
                 ["Codex is paused — closing the column ends its session."]

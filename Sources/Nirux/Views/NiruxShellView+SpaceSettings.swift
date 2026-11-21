@@ -113,7 +113,10 @@ extension NiruxShellView {
         var defaultsActions = SpaceSettingsDefaultsPane.Actions()
         defaultsActions.save = { [weak self] defaults, loaded in
             let saved = store.map { $0.save(defaults, replacing: loaded) } ?? .failure(.couldNotWrite("The space’s folder can’t be named."))
-            if case .success = saved { self?.spaceDefaultsSaved(defaults, replacing: loaded.defaults, spaceID: spaceID) }
+            if case .success = saved {
+                self?.leadWorkspace(inSpace: spaceID)?.leadOptionsCache = nil
+                self?.spaceDefaultsSaved(defaults, replacing: loaded.defaults, spaceID: spaceID)
+            }
             return saved
         }
         defaultsActions.reload = { store?.load() ?? unread }
@@ -131,6 +134,7 @@ extension NiruxShellView {
             guard let self else { return }
             if on { self.startLead(spaceID: spaceID) } else { self.stopLead(spaceID: spaceID) }
         }
+        lead.actions.restartLead = { [weak self] in self?.requestRestartLead(spaceID: spaceID) }
         lead.actions.setStartsTasks = { [weak self] on in self?.setLeadStartsTasks(on, spaceID: spaceID) }
         lead.actions.setDailyPass = { [weak self] on in self?.setDailyPass(on, spaceID: spaceID) }
         lead.actions.setDailyPassHour = { [weak self] hour in self?.setDailyPassHour(hour, spaceID: spaceID) }

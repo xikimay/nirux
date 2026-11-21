@@ -81,7 +81,7 @@ extension SidebarView {
             }
             if !old.isInactive, new.isInactive, fold(old, at: now) { archived = true }
             guard old.prInfo != new.prInfo else { continue }
-            if old.prInfo?.state == "OPEN", new.prInfo?.state == "MERGED" { mergedAt[old.id] = now }
+            if old.prInfo?.state == .open, new.prInfo?.state == .merged { mergedAt[old.id] = now }
             if old.rowSummary.mark == .checksRunning, new.rowSummary.mark == .readyToMerge { readyAt[old.id] = now }
         }
         if archived { archivedBumpAt = now }

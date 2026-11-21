@@ -3,15 +3,6 @@ import AppKit
 // MARK: - External Tools, Cookie Import, URL Input
 
 extension NiruxShellView {
-    enum AgentResumeTarget: Equatable {
-        /// No usable stored ID (state written by an older Nirux, a session
-        /// never bound, or one another column already claimed). Let the user
-        /// choose; `codex resume --last` / `claude --continue` would attach
-        /// several columns to the most recent conversation.
-        case picker
-        case session(String)
-    }
-
     static func shellQuotedArgument(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
@@ -38,6 +29,7 @@ extension NiruxShellView {
     static func claudeCommand(
         resume: AgentResumeTarget? = nil,
         mode: ClaudeLaunchMode,
+        model: String? = nil,
         sessionName: String? = nil,
         briefFile: String? = nil,
         settingsFile: String? = nil,
@@ -53,6 +45,7 @@ extension NiruxShellView {
             }
         }
         parts.append(contentsOf: mode.cliArgs)
+        if let model { parts += ["--model", Self.shellQuotedArgument(model)] }
         if resume == nil, let sessionName {
             // One `--name=` argument, so a name starting with "-" can't be
             // read as another flag.
@@ -100,6 +93,7 @@ extension NiruxShellView {
         resume: AgentResumeTarget? = nil,
         workingDirectory: String? = nil,
         mode: CodexLaunchMode,
+        model: String? = nil,
         briefFile: String? = nil,
         shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
@@ -115,6 +109,7 @@ extension NiruxShellView {
             }
         }
         parts.append(contentsOf: mode.cliArgs)
+        if let model { parts += ["--model", Self.shellQuotedArgument(model)] }
         if let briefFile, let override = Self.codexDeveloperInstructionsOverride(briefFile: briefFile, shell: shell) {
             parts.append(contentsOf: ["-c", override])
         }
@@ -129,11 +124,15 @@ extension NiruxShellView {
     /// starts a fresh one (agy has no picker flag; `/resume` is in it).
     /// `handoverPrompt` is its first prompt (`-i`), as in the worktree
     /// handover flow.
-    static func agyCommand(resume: AgentResumeTarget? = nil, handoverPrompt: String? = nil) -> String {
+    static func agyCommand(
+        resume: AgentResumeTarget? = nil, model: String? = nil, settings: String? = nil, handoverPrompt: String? = nil
+    ) -> String {
         var parts = ["command", "agy"]
         if case .session(let sessionID)? = resume {
             parts.append(contentsOf: ["--conversation", Self.shellQuotedArgument(sessionID)])
         }
+        if let model { parts += ["--model", Self.shellQuotedArgument(model)] }
+        if let settings { parts += ["--settings", Self.shellQuotedArgument(settings)] }
         if let prompt = handoverPrompt {
             parts.append(contentsOf: ["-i", Self.shellQuotedArgument(prompt)])
         }
@@ -159,10 +158,7 @@ extension NiruxShellView {
     /// a workspace opened from outside Nirux. A space whose file can't be
     /// written says so once, and its launches pass none.
     func claudeSpaceSettingsFiles(for workspaces: [WorkspaceState]) -> [String: String] {
-        var userEnvironment: [String]?
-        if case .parsed(let settings, _) = AgentHookInstaller.readClaudeSettings(home: FileManager.default.homeDirectoryForCurrentUser) {
-            userEnvironment = ClaudeSpaceSettings.userEnvironment(settings)
-        }
+        let userEnvironment = Self.claudeUserEnvironment()
         var files: [String: String] = [:]
         for spaceID in Set(workspaces.filter { !$0.startedOutsideNirux }.map(\.profileID)) {
             do {
@@ -178,6 +174,12 @@ extension NiruxShellView {
         return files
     }
 
+    static func claudeUserEnvironment() -> [String]? {
+        guard case .parsed(let settings, _) = AgentHookInstaller.readClaudeSettings(home: FileManager.default.homeDirectoryForCurrentUser)
+        else { return nil }
+        return ClaudeSpaceSettings.userEnvironment(settings)
+    }
+
     /// The file one launch in `workspace` passes: `prepared` for a batch
     /// (`claudeSpaceSettingsFiles`), else written now.
     func claudeSpaceSettingsFile(for workspace: WorkspaceState, prepared: [String: String]? = nil) -> String? {
@@ -186,37 +188,55 @@ extension NiruxShellView {
     }
 
     static func codexLaunchMode(for workspace: WorkspaceState) -> CodexLaunchMode {
-        guard !workspace.startedOutsideNirux else { return currentCodexLaunchMode() }
-        return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).codexMode(settings: currentCodexLaunchMode())
+        codexLaunchMode(inSpace: workspace.profileID)
     }
 
-    func openClaudeCode() {
-        guard let workspace = activeWorkspace else { return }
-        launchInNewColumn(Self.claudeCommand(
-            mode: Self.claudeLaunchMode(for: workspace),
-            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
-            settingsFile: claudeSpaceSettingsFile(for: workspace)
-        ), in: workspace)
+    static func codexLaunchMode(inSpace id: String) -> CodexLaunchMode {
+        SpaceDefaultsStore.defaults(forSpace: id).codexMode(settings: currentCodexLaunchMode())
     }
 
-    func openCodex() {
-        guard let workspace = activeWorkspace else { return }
-        launchInNewColumn(Self.codexCommand(
-            mode: Self.codexLaunchMode(for: workspace),
-            briefFile: Self.codexBriefFile(
-                from: spaceBriefInjection(for: workspace), launchDirectory: workspace.focusedWorkingDirectory
+    /// `agent`'s launch in `workspace`, in the space's mode; nil for an
+    /// agent Nirux doesn't start.
+    static func launch(of agent: CodingAgent, resume: AgentResumeTarget?, model: String? = nil, in workspace: WorkspaceState, codexMode: CodexLaunchMode? = nil) -> AgentLaunch? {
+        AgentLaunch(agent, resume: resume, model: model, claudeMode: claudeLaunchMode(for: workspace), codexMode: codexMode ?? codexLaunchMode(for: workspace))
+    }
+
+    /// The line that runs `launch` in `workspace`, with the space's brief
+    /// and Claude settings (`settingsFiles`: prepared for a batch). Codex
+    /// takes the brief unless a config from `launchDirectory` up sets its
+    /// own, and `resumeDirectory` resumes its thread there.
+    func agentCommand(
+        _ launch: AgentLaunch, in workspace: WorkspaceState, column: ColumnState? = nil, launchDirectory: String, resumeDirectory: String? = nil,
+        sessionName: String? = nil, handoverPrompt: String? = nil, settingsFiles: [String: String]? = nil
+    ) -> String {
+        switch launch {
+        case .claude(let resume, let mode, let model):
+            let file = claudeSpaceSettingsFile(for: workspace, prepared: settingsFiles)
+            if let column, column === workspace.leadTerminal { column.recordLeadSafety(file: file) }
+            return Self.claudeCommand(
+                resume: resume, mode: mode, model: model, sessionName: sessionName, briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
+                settingsFile: file, handoverPrompt: handoverPrompt
             )
-        ), in: workspace)
+        case .codex(let resume, let mode, let model):
+            return Self.codexCommand(
+                resume: resume, workingDirectory: resumeDirectory, mode: mode ?? Self.codexLaunchMode(for: workspace), model: model,
+                briefFile: Self.codexBriefFile(from: spaceBriefInjection(for: workspace), launchDirectory: launchDirectory),
+                handoverPrompt: handoverPrompt
+            )
+        case .agy(let resume, let model):
+            let settings = workspace.startedOutsideNirux || workspace.isFolderTask ? nil
+                : AgyWorktreeTrust.settings(for: launchDirectory, home: sideEffects.homeDirectory())
+            return Self.agyCommand(resume: resume, model: model, settings: settings, handoverPrompt: handoverPrompt)
+        }
     }
 
-    func openAgy() {
-        guard let workspace = activeWorkspace else { return }
-        AgentHookInstaller.installAgyHooksIfInstalling()
-        launchInNewColumn(Self.agyCommand(), in: workspace)
-    }
-
-    /// Runs `command` in a new terminal column of `workspace`, focused.
-    private func launchInNewColumn(_ command: String, in workspace: WorkspaceState) {
+    /// Starts `agent` in a new terminal column of the active workspace, focused.
+    func openAgent(_ agent: CodingAgent) {
+        guard let workspace = activeWorkspace, !workspace.isWaitingTask,
+              let launch = Self.launch(of: agent, resume: nil, in: workspace) else { return }
+        // A new agy says which conversation it runs through Nirux's hook.
+        if agent == .agy { AgentHookInstaller.installAgyHooksIfInstalling() }
+        let command = agentCommand(launch, in: workspace, launchDirectory: workspace.focusedWorkingDirectory)
         workspace.addColumn()
         relayout(animated: false)
         updateSidebar()
@@ -310,6 +330,9 @@ extension NiruxShellView {
         1. **Determine the branch name** from the user's request. If not specified, check recent
            branch names (`git branch -a`) for a naming convention and follow it. Default to
            `feat/short-description` or `fix/short-description` if no convention is apparent.
+           Also write the title the task's row shows: English, its distinctive word first, at most
+           22 characters (20 when you are a task: it lists under yours), no branch, slug or PR number
+           ("Clearer task rows"), URL-encoded in step 4 (`Clearer%20task%20rows`).
         2. **Detect the git repo root** — the top level of the current checkout, even inside a
            linked worktree. Nirux still places the new worktree next to the main checkout, named
            after it:
@@ -369,7 +392,8 @@ extension NiruxShellView {
              fi
            fi
            open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
-        &agent=<claude-codex-or-agy>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}"
+        &agent=<claude-codex-or-agy>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}\
+        &title=<url-encoded-title>"
            ```
            For a stacked branch, put `&from=head` right after the handover parameter. Nirux moves
            the handover file into the worktree on launch; no manual cleanup is needed.
@@ -448,6 +472,7 @@ extension NiruxShellView {
           for example because the user answered it in Nirux, (for `reply --accept`) it has no
           recommendation to accept, or (for `tell`) no Mission on that branch came from this
           terminal, or its child runs none of Claude Code, Codex and Antigravity.
+        - 5: the question was retired while `ask` waited. Continue with the new prompt without retrying that ask.
         - 2: invalid usage, or not a Mission terminal; the error message says which.
         - 1: Nirux's state could not be read or written. If a sandbox blocks it, run the command
           outside the sandbox.

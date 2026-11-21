@@ -56,8 +56,8 @@ enum NiruxLaunchAuthorization {
 struct NiruxURLRequest: Equatable, Sendable {
     enum Action: Equatable, Sendable {
         /// nirux://new-workspace?cwd=...&title=...&agent=claude|codex|agy&profile=...
-        case newWorkspace(cwd: String?, title: String?, agent: NiruxApp.WorkspaceAgent?)
-        /// nirux://new-worktree?branch=...&repo=...&agent=...&handover=...&profile=...&from=head
+        case newWorkspace(cwd: String?, title: String?, agent: CodingAgent?)
+        /// nirux://new-worktree?branch=...&title=...&repo=...&agent=...&handover=...&profile=...&from=head
         case newWorktree(NewWorktree)
         /// nirux://open-editor?file=...&line=...&endLine=...&workspace=...
         /// `target` is filled by `resolvingPaths()`: validating the file
@@ -67,8 +67,11 @@ struct NiruxURLRequest: Equatable, Sendable {
 
     struct NewWorktree: Equatable, Sendable {
         var branch: String
+        /// The workspace's title, cleaned as rename_task cleans one; nil: the
+        /// branch.
+        var title: String?
         var repo: String
-        var agent: NiruxApp.WorkspaceAgent?
+        var agent: CodingAgent?
         /// Kept even when it breaks the handover rules: only the handover is
         /// dropped then (see `HandoverFile.transfer`), not the whole request.
         var handoverPath: String?
@@ -99,7 +102,7 @@ struct NiruxURLRequest: Equatable, Sendable {
             guard let raw = items.first(where: { $0.name == name })?.value, !raw.isEmpty else { return nil }
             return raw
         }
-        let agent = value("agent").flatMap(NiruxApp.WorkspaceAgent.init(rawValue:))
+        let agent = value("agent").flatMap(CodingAgent.init(launchable:))
 
         switch url.host {
         case "new-workspace":
@@ -111,6 +114,7 @@ struct NiruxURLRequest: Equatable, Sendable {
             else { return nil }
             action = .newWorktree(NewWorktree(
                 branch: branch,
+                title: value("title").flatMap { AgentText.clean($0, maxLength: LeadTools.maxTitleLength) },
                 repo: repo,
                 agent: agent,
                 handoverPath: value("handover"),
@@ -186,8 +190,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// It must not link the new agent to a live parent agent's Mission
     /// mailbox (that would give an outside caller a channel to it), and it
     /// opens in the space its folder belongs to, else the default space
-    /// (docs/design/spaces.md, "Routing"), never one the caller picked. None of
-    /// that is shown on the sheet.
+    /// (docs/design/spaces.md, "Routing"), never one the caller picked.
     func restrictedForConfirmation() -> NiruxURLRequest {
         var restricted = self
         restricted.profileID = nil
@@ -224,7 +227,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// launch ID. Everything the action will do is spelled out, including
     /// the agent's permission mode: a request from a web page would inherit
     /// it. Call it on a request that went through `resolvingPaths()`.
-    func confirmation(claudeMode: ClaudeLaunchMode, codexMode: CodexLaunchMode) -> Confirmation {
+    func confirmation(claudeMode: ClaudeLaunchMode, codexMode: CodexLaunchMode, spaceName: String? = nil) -> Confirmation {
         // One wording whether the launch ID is missing or stale: a caller
         // could add a fake `launch=` to pick a more reassuring text.
         let intro = "This request didn’t come from a current Nirux terminal. That happens with an agent "
@@ -234,13 +237,14 @@ struct NiruxURLRequest: Equatable, Sendable {
         // Confirming runs git in the folder (worktree creation, sidebar status),
         // and a repository's own hooks and config can execute code.
         let gitNote = "Nirux runs git in this folder: a repository you don’t trust can run code that way."
-        func agentLine(_ agent: NiruxApp.WorkspaceAgent?) -> String {
-            switch agent {
-            case .claude: return "Agent: Claude Code — \(claudeMode.displayName)"
-            case .codex: return "Agent: Codex — \(codexMode.displayName)"
-            case .agy: return "Agent: Antigravity — its own permission settings (Nirux sets none)"
-            case nil: return "Agent: none (plain shell)"
+        func agentLine(_ agent: CodingAgent?) -> String {
+            guard let agent else { return "Agent: none (plain shell)" }
+            let mode = switch agent {
+            case .claude: claudeMode.displayName
+            case .codex: codexMode.displayName + (spaceName.map { "\nSpace: \(Self.displaySafe($0))" } ?? "")
+            case .agy, .gemini, .opencode: "its own permission settings (Nirux sets none)"
             }
+            return "Agent: \(agent.productName) — \(mode)"
         }
         switch action {
         case let .newWorkspace(cwd, title, agent):
@@ -263,6 +267,7 @@ struct NiruxURLRequest: Equatable, Sendable {
                     : "A new branch starts from origin’s base branch, fetched first (a network access).",
                 agentLine(request.agent)
             ]
+            if let title = request.title { lines.insert("Title: \(Self.displaySafe(title))", at: 2) }
             if let handover = request.handoverPath {
                 let shown = Self.displaySafe(handover)
                 if !HandoverFile.isAllowedSourcePath(handover) {

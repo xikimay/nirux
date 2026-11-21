@@ -89,7 +89,7 @@ struct BoardConfig: Equatable, Sendable {
     var problems: [String] {
         var problems: [String] = []
         if let repository {
-            if !Self.isValidRepository(repository) {
+            if !GitHubRepository.isValid(ownerAndName: repository) {
                 problems.append("The repository must be owner/name, as on github.com: “\(repository)” isn’t.")
             }
         } else {
@@ -122,26 +122,6 @@ struct BoardConfig: Equatable, Sendable {
     /// Nil unless `repository` is valid.
     var gitHubRepository: GitHubRepository? {
         repository.flatMap(GitHubRepository.init(ownerAndName:))
-    }
-
-    /// `owner/name` with GitHub's characters: an owner of 1 to 39 letters,
-    /// digits, hyphens and underscores (managed users' accounts), not
-    /// starting with a hyphen; a name of 1 to 100 letters, digits, `.`, `-`
-    /// and `_`, other than `.` and `..`, not ending in `.git`.
-    static func isValidRepository(_ value: String) -> Bool {
-        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
-        guard parts.count == 2 else { return false }
-        let owner = parts[0].unicodeScalars
-        let name = parts[1].unicodeScalars
-        let isASCIIAlphanumeric = { (scalar: Unicode.Scalar) in
-            scalar.isASCII && CharacterSet.alphanumerics.contains(scalar)
-        }
-        guard (1...39).contains(owner.count), owner.first != "-",
-              owner.allSatisfy({ isASCIIAlphanumeric($0) || $0 == "-" || $0 == "_" })
-        else { return false }
-        return (1...100).contains(name.count) && parts[1] != "." && parts[1] != ".."
-            && !parts[1].lowercased().hasSuffix(".git")
-            && name.allSatisfy { isASCIIAlphanumeric($0) || "._-".unicodeScalars.contains($0) }
     }
 
     /// The rules of `git check-ref-format --branch`, plus no leading hyphen
@@ -233,18 +213,5 @@ extension BoardConfig: Codable {
         try container.encode(mergeMethod.rawValue, forKey: .mergeMethod)
         try container.encode(checksTimeoutMinutes, forKey: .checksTimeoutMinutes)
         try container.encode(postMergeTimeoutMinutes, forKey: .postMergeTimeoutMinutes)
-    }
-}
-
-extension GitHubRepository {
-    /// `owner/name`, lowercased as compared.
-    var ownerAndName: String { "\(owner)/\(name)" }
-
-    /// `owner/name` as board.json and a saved queue spell it, on
-    /// github.com; nil for anything `BoardConfig.isValidRepository` refuses.
-    init?(ownerAndName value: String) {
-        guard BoardConfig.isValidRepository(value) else { return nil }
-        let parts = value.split(separator: "/")
-        self.init(owner: String(parts[0]), name: String(parts[1]))
     }
 }

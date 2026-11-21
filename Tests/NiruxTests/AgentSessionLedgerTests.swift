@@ -56,7 +56,7 @@ final class AgentSessionLedgerTests: XCTestCase {
         column: String = "column-1",
         fromColumnAgent: Bool = true,
         checkout: AgentSessionRecord.Checkout? = nil,
-        agent: AgentHookEvent.Kind = .claude
+        agent: CodingAgent = .claude
     ) -> AgentSessionObservation {
         AgentSessionObservation(
             agent: agent, sessionID: session, event: event, source: source, timestamp: timestamp,
@@ -395,6 +395,21 @@ final class AgentSessionLedgerTests: XCTestCase {
         var query = AgentSessionLedger.Query()
         query.pullRequest = .without
         XCTAssertEqual(ledger.sessions(inSpace: "space-1", matching: query).map(\.sessionID), ["other-branch"])
+    }
+
+    @MainActor
+    func testFreezeKeepsThePullRequestOfAnUnpromptedSessionOffline() {
+        let ledger = makeLedger()
+        let checkout = AgentSessionRecord.Checkout(branch: "feat/x", worktreeRoot: "/wt", mainCheckout: "/repo")
+        ledger.record(observation(.sessionStart, at: 10, source: "startup", checkout: checkout), spaceID: "previous-space")
+        let pr = AgentSessionRecord.PullRequest(number: 7, url: "https://github.com/o/r/pull/7", state: "OPEN")
+        ledger.notePullRequest(pr, branch: checkout.branch, worktreeRoot: checkout.worktreeRoot)
+
+        let reloaded = makeLedger()
+        XCTAssertTrue(reloaded.sessions(inSpace: "previous-space").isEmpty)
+        let urls = reloaded.pullRequestURLs(workspaceID: "ws-1")
+        XCTAssertEqual(TaskThread.frozen(.init(), closedAt: 20, pullRequests: urls).last?.text, pr.url)
+        XCTAssertTrue(reloaded.pullRequestURLs(workspaceID: "ws-2").isEmpty)
     }
 
     // MARK: - Context from the workspace

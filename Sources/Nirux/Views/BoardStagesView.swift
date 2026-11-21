@@ -12,8 +12,10 @@ import AppKit
 final class BoardStagesView: NSView {
     struct Lead: Equatable {
         var state: BoardStages.State
-        /// "Lead · reviewing #438".
+        var columnID: UUID?
         var text: String
+        var detail: String?
+        var tooltip: String { [text, detail].compactMap { $0 }.joined(separator: "\n") }
         /// Why it waits for the user: its icon's glyph, as on its row.
         var reason: StateIcon.Reason = .question
     }
@@ -76,6 +78,7 @@ final class BoardStagesView: NSView {
         /// "Merging #52, 2 of 3", "3 pull requests queued"; nil at rest
         /// with nothing queued.
         var status: String?
+        var detail: String?
         var tone = QueueTone.normal
         /// Why this build can't change GitHub, for the DRY RUN badge's
         /// tooltip; nil for a real queue.
@@ -123,6 +126,7 @@ final class BoardStagesView: NSView {
         /// The wall clock the lines' times count to.
         var now: TimeInterval
         var runningQueues: [RunningQueue] = []
+        var inputStatus: String?
         /// In place of the sections: the space deleted, board.json unread
         /// or unreadable, no repository set. The running queues' lines stay.
         var message: Message?
@@ -133,6 +137,7 @@ final class BoardStagesView: NSView {
     struct Message: Equatable {
         var text: String
         var offersSettings = false
+        var showsWaitingTasks = false
     }
 
     /// The order switch was pressed.
@@ -241,9 +246,8 @@ final class BoardStagesView: NSView {
     let leadLabel = NSTextField(labelWithString: "")
     /// Over the Lead's icon and line: a click focuses the Lead.
     let leadButton = BoardStagesButton(title: "", target: nil, action: nil)
-    /// The space whose Lead the button shows, as laid out: another space's
-    /// Lead is another target.
-    private var leadSpace = ""
+    /// The click target from the last layout, for a pointer held over a handoff.
+    private var leadTarget = ""
     let orderSwitch = BoardStagesKeySwitch(labels: ["Sidebar order", "By progress"], trackingMode: .selectOne, target: nil, action: nil)
     /// "Task", "Now", "Pull request": over their columns.
     let columnTitles = ["Task", "Now", "Pull request"].map { NSTextField(labelWithString: $0) }
@@ -333,6 +337,7 @@ final class BoardStagesView: NSView {
             title.font = Theme.Font.label
             title.textColor = Theme.Color.textTertiary
         }
+        columnTitles[1].textColor = Theme.Color.textSecondary
         separator.wantsLayer = true
         separator.layer?.backgroundColor = Theme.Color.line.cgColor
         scrollView.drawsBackground = false
@@ -348,7 +353,6 @@ final class BoardStagesView: NSView {
         leadButton.target = self
         leadButton.action = #selector(leadClicked)
         leadButton.aim = aim
-        leadButton.setAccessibilityHelp("Focus the Lead")
         // The button says the Lead's line, whole even where the label cuts it. (A label speaks through its cell.)
         leadLabel.cell?.setAccessibilityElement(false)
         aim.onUse = { [weak self] in self?.pointerUsed() }
@@ -379,20 +383,22 @@ final class BoardStagesView: NSView {
         guard content != self.content else { return }
         let previous = self.content
         self.content = content
-        guard content.header != previous?.header || content.order != previous?.order || content.sections != previous?.sections
+        guard content.inputStatus != previous?.inputStatus || content.header != previous?.header || content.order != previous?.order || content.sections != previous?.sections
             || content.runningQueues != previous?.runningQueues || content.message != previous?.message else { return showTimes() }
         let focus = viewsWillChange()
         defer { viewsChanged(focus: focus) }
         spaceDot.layer?.backgroundColor = content.header.color.cgColor
         nameLabel.stringValue = content.header.name
         summaryLabel.stringValue = content.header.summary
+        columnTitles[1].stringValue = content.inputStatus.map { "Now · " + $0 } ?? "Now"
         if let lead = content.header.lead {
             leadIcon.icon = StateIcon(state: lead.state, station: nil, reason: lead.reason)
         }
         leadLabel.stringValue = content.header.lead?.text ?? ""
         // Where the Lead's line has no room, its icon says it.
-        leadIcon.toolTip = content.header.lead?.text
-        leadButton.toolTip = content.header.lead?.text
+        leadIcon.toolTip = content.header.lead?.tooltip
+        leadButton.toolTip = content.header.lead?.tooltip
+        leadButton.setAccessibilityHelp([content.header.lead?.detail, "Focus the Lead"].compactMap { $0 }.joined(separator: "\n"))
         leadButton.setAccessibilityLabel(content.header.lead?.text)
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
         let aimedBefore = aimed()
@@ -464,9 +470,10 @@ final class BoardStagesView: NSView {
         }
         var departed = Set<String>()
         func held(_ line: BoardStages.Line) -> BoardStages.Line {
-            if let now = lines[line.id] { return now }
-            departed.insert(line.id)
-            return line
+            var latest = lines[line.id] ?? line
+            if lines[line.id] == nil { departed.insert(line.id) }
+            latest.following = line.following.map(held)
+            return latest
         }
         func held(_ unit: BoardStages.Unit) -> BoardStages.Unit {
             switch unit {
@@ -538,7 +545,7 @@ final class BoardStagesView: NSView {
     /// a stack's title by its place.
     private func buildItems() {
         // A message in their place: the folds stay as they are, for when the sections come back.
-        if let message = content?.message {
+        if let message = content?.message, !message.showsWaitingTasks {
             messageView.show(message)
             documentView.subviews = [messageView]
             self.items = [.message(messageView)]
@@ -566,6 +573,10 @@ final class BoardStagesView: NSView {
         var keptMerged = mergedViews
         var keptCaptions = captions[...]
         var items: [Item] = []
+        if let message = content?.message {
+            messageView.show(message)
+            items.append(.message(messageView))
+        }
         lineViews = []
         sectionHeaders = [:]
         foldButtons = [:]
@@ -608,6 +619,7 @@ final class BoardStagesView: NSView {
             view.isDeparted = departed.contains(line.id)
             lineViews.append(view)
             items.append(.line(view))
+            for waiting in line.following { add(waiting, link: .none) }
         }
         func add(_ unit: BoardStages.Unit) {
             switch unit {
@@ -785,7 +797,7 @@ final class BoardStagesView: NSView {
         /// What the phrase keeps before the pull request, then the time,
         /// take their columns; and under what it isn't worth showing.
         static let minimumPhrase: CGFloat = 180
-        static let shortestPhrase: CGFloat = 70
+        static let shortestPhrase: CGFloat = 150
         /// The name is whole beside the order switch; a long one keeps
         /// this much.
         static let minimumName: CGFloat = 160
@@ -796,17 +808,7 @@ final class BoardStagesView: NSView {
 
     /// A line's columns for a width: task, rail, phrase, pull request,
     /// time.
-    /// - From where a phrase shows, the task's column and the rail grow
-    ///   with the Board, never by a jump: widening a column moves no rail
-    ///   back.
-    /// - Below about 760 pt the rail tightens, its stations closer, before
-    ///   any title is cut further.
-    /// - The phrase takes the rest. The pull request, then the time, show
-    ///   once the phrase keeps `minimumPhrase` beside them.
-    /// - A phrase under `shortestPhrase` says nothing: it goes, and the
-    ///   title takes its place (below about 390 pt).
-    /// - A Board too narrow for a rail beside a title (about 300 pt) keeps
-    ///   each line's icon and title.
+    /// The task and Now stay visible. The rail, PR and time fit around them.
     struct Columns: Equatable {
         var task: NSRect
         /// No width when the Board is too narrow for it.
@@ -821,15 +823,11 @@ final class BoardStagesView: NSView {
             let inner = max(0, width - 2 * Metrics.padding)
             let eased = (Metrics.compactRailWidth + 0.4 * (width - 600)).rounded(.down)
             let wholeRail = min(Metrics.railWidth, max(Metrics.compactRailWidth, eased))
-            let showsRail = inner - wholeRail - Metrics.gap >= Metrics.minimumTask
-            let railWidth = showsRail ? wholeRail : 0
             let wanted = min(Metrics.maximumTask, max(Metrics.minimumTask, (inner * 0.4).rounded(.down)))
-            var taskWidth = showsRail ? wanted : inner
-            var phraseWidth = max(0, inner - taskWidth - railWidth - 2 * Metrics.gap)
-            if phraseWidth < Metrics.shortestPhrase {
-                phraseWidth = 0
-                if showsRail { taskWidth = inner - railWidth - Metrics.gap }
-            }
+            let showsRail = inner - wanted - wholeRail - 2 * Metrics.gap >= Metrics.shortestPhrase
+            let railWidth = showsRail ? wholeRail : 0
+            let taskWidth = showsRail ? wanted : min(wanted, max(0, (inner * 0.42).rounded(.down)))
+            var phraseWidth = max(0, inner - taskWidth - railWidth - (showsRail ? 2 : 1) * Metrics.gap)
             let showsPullRequest = phraseWidth - Metrics.pullRequestWidth - Metrics.gap >= Metrics.minimumPhrase
             if showsPullRequest { phraseWidth -= Metrics.pullRequestWidth + Metrics.gap }
             let showsTime = showsPullRequest && phraseWidth - Metrics.timeWidth - Metrics.gap >= Metrics.minimumPhrase
@@ -840,7 +838,7 @@ final class BoardStagesView: NSView {
                 return NSRect(x: x, y: 0, width: width, height: height)
             }
             task = next(taskWidth)
-            rail = next(railWidth)
+            rail = showsRail ? next(railWidth) : .zero
             phrase = next(phraseWidth)
             pullRequest = showsPullRequest ? next(Metrics.pullRequestWidth) : nil
             time = showsTime ? next(Metrics.timeWidth) : nil
@@ -1000,7 +998,7 @@ final class BoardStagesView: NSView {
         leadButton.isHidden = !hasLead
         let leadEnd = showsLeadLine ? leadLabel.frame.maxX : leadIcon.frame.maxX
         leadButton.frame = hasLead ? NSRect(x: leadIcon.frame.minX - 4, y: midY - 10, width: leadEnd - leadIcon.frame.minX + 8, height: 20) : .zero
-        leadSpace = content?.header.name ?? ""
+        leadTarget = [content?.header.name, content?.header.lead?.columnID?.uuidString].compactMap { $0 }.joined(separator: " ")
         leadHandChanged()
         // What the space holds, where 60 pt are left for it: never beside
         // a Lead's line that is cut, nor beside its dot alone.
@@ -1104,7 +1102,7 @@ final class BoardStagesView: NSView {
         if let foot = runningQueueViews.first(where: { !$0.isHidden && $0.frame.contains(point) }) {
             return "queue \(foot.queue.id) \(String(describing: foot.queue.stop))"
         }
-        if !leadButton.isHidden, leadButton.frame.contains(point) { return "lead \(leadSpace)" }
+        if !leadButton.isHidden, leadButton.frame.contains(point) { return "lead \(leadTarget)" }
         guard scrollView.frame.contains(point) else { return nil }
         func under(_ view: NSView) -> NSPoint? {
             let local = view.convert(location, from: nil)
@@ -1531,11 +1529,11 @@ final class BoardStagesSectionHeaderView: NSView {
         pill.isHidden = pill.status == nil || take(pillWidth, upTo: pillWidth, gap: 10) == nil
         // What went is still said under the pointer.
         let unsaid = [
-            dryRunBadge.isHidden && queue?.dryRun != nil ? "DRY RUN" : nil, queueLabel.isHidden ? queue?.status : nil,
+            dryRunBadge.isHidden && queue?.dryRun != nil ? "DRY RUN" : nil, queueLabel.isHidden ? (queue?.detail ?? queue?.status) : nil,
             pill.isHidden ? pill.status?.text : nil
         ].compactMap { $0 }
         toolTip = unsaid.isEmpty ? nil : unsaid.joined(separator: "\n")
-        queueLabel.toolTip = queue?.status
+        queueLabel.toolTip = queue?.detail ?? queue?.status
         // Right to left: DRY RUN, the pill, the words; the name, then `owner/name`, at the left.
         if !dryRunBadge.isHidden {
             dryRunBadge.frame = NSRect(x: right - badgeWidth, y: baseline + 1, width: badgeWidth, height: 14)

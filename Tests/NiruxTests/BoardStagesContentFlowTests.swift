@@ -6,25 +6,13 @@ import XCTest
 /// read (docs/design/board-stages.md, sections 5 and 6): a real shell, git
 /// for real in temporary repositories, a fake `gh` (`ProjectBoardFlowTests`).
 /// The content is asked for directly, beside what the column shows.
-final class BoardStagesContentFlowTests: XCTestCase {
-    private var root: String!
-
-    override func setUpWithError() throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-board-stages-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        root = try XCTUnwrap(base.path.realPath)
-    }
-
-    override func tearDown() {
-        if let root { try? FileManager.default.removeItem(atPath: root) }
-        super.tearDown()
-    }
+final class BoardStagesContentFlowTests: BoardRepositoryTestCase {
 
     private static let pullRequests = """
     [
       {"number": 12, "state": "OPEN", "headRefName": "feat/login", "headRefOid": "\(String(repeating: "a", count: 40))",
        "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",
-       "isDraft": false, "mergeable": "MERGEABLE", "url": "https://github.com/acme/widgets/pull/12", "title": "Sign in",
+       "isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED", "url": "https://github.com/acme/widgets/pull/12", "title": "Sign in",
        "statusCheckRollup": [{"__typename": "CheckRun", "name": "test", "workflowName": "Tests",
                               "status": "COMPLETED", "conclusion": "SUCCESS", "startedAt": "2026-09-27T23:05:04Z"}]},
       {"number": 13, "state": "OPEN", "headRefName": "fix/remote", "headRefOid": "\(String(repeating: "b", count: 40))",
@@ -51,13 +39,13 @@ final class BoardStagesContentFlowTests: XCTestCase {
         )
         try withShell(client: client) { shell, space in
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             let login = root + "/widgets.feat-login", scratch = root + "/widgets.scratch", notes = root + "/widgets.lead-notes"
             try git(["worktree", "add", "-q", "-b", "feat/login", login], at: repo)
             try git(["worktree", "add", "-q", "-b", "scratch", scratch], at: repo)
             try git(["worktree", "add", "-q", "-b", "lead/notes", notes], at: repo)
             let gadgets = root + "/gadgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: gadgets, remote: "https://github.com/acme/gadgets.git")
+            try makeRepository(at: gadgets, remote: "https://github.com/acme/gadgets.git")
             let folder = root + "/release-notes"
             try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
             // Saved with its own capitals: the section is named as saved.
@@ -80,6 +68,8 @@ final class BoardStagesContentFlowTests: XCTestCase {
                     && board.reads.values.contains { $0.name == "acme/gadgets" && $0.openPullRequests != nil }
             }
             let ids = { (title: String) in shell.workspaces.first { $0.title == title }?.id ?? "" }
+            let loginTask = try XCTUnwrap(shell.workspaces.first { $0.id == ids("login") })
+            loginTask.reviewRuns[.codeReview] = ReviewRun(head: String(repeating: "a", count: 40), at: 1, branch: "feat/login")
             let content = try stages(of: board, in: shell)
 
             // A click on a task's line focuses its workspace, at its most urgent agent column when one works there: as the
@@ -90,7 +80,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
                 of: board, members: shell.projectWorkspaces(of: board.projectID),
                 workspaces: shell.projectBoardWorkspaces(shell.projectWorkspaces(of: board.projectID), of: board, snapshot: ProcessSnapshot(),
                                                          now: Date().timeIntervalSince1970, foregroundProcesses: [:]),
-                readings: [:], order: .sidebar
+                readings: .init(), order: .sidebar
             )
             let loginIndex = try XCTUnwrap(withAgent.workspaces.firstIndex { $0.id == ids("login") })
             let shown = withAgent.workspaces[loginIndex]
@@ -119,6 +109,10 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // Its tasks in the sidebar's order, the pull request without a task folded, its other worktrees with the Lead's first.
             XCTAssertEqual(widgets.lines.units.flatMap(\.lines).map(\.id), [ids("widgets"), ids("login"), ids("old")])
             XCTAssertEqual(widgets.lines.units.flatMap(\.lines).map(\.pullRequest), ["no PR yet", "#12", "no PR yet"])
+            let loginPR = try XCTUnwrap(widgets.lines.units.flatMap(\.lines).first { $0.id == loginTask.id })
+            XCTAssertEqual(loginPR.station, .merge)
+            XCTAssertEqual(loginPR.state, .blocked)
+            XCTAssertEqual(loginPR.phrase.text, "Merge blocked by GitHub")
             XCTAssertEqual(widgets.lines.withoutTask.flatMap(\.lines).map(\.title), ["Remote fix"])
             XCTAssertEqual(widgets.lines.otherWorktrees.map(\.title), ["Lead · lead/notes", "scratch"])
             XCTAssertEqual(widgets.lines.otherWorktrees.first?.menu.first, .focus(workspaceID: ids("Lead"), columnID: nil))
@@ -150,6 +144,10 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // An hour without a read (a Board not shown doesn't read): its stations have aged, the rows drop them.
             let later = board.freshSections(now: Date().addingTimeInterval(3_600), clock: ProjectBoard.clock() + 3_600)
             XCTAssertEqual(later, [])
+            let aged = board.stagesContent(withAgent, now: Date().addingTimeInterval(3_600)).content
+            XCTAssertEqual(aged.inputStatus, "Status incomplete")
+            let loginLine = aged.sections.first?.lines.units.flatMap(\.lines).first { $0.id == ids("login") }
+            XCTAssertEqual(loginLine?.phrase.text, "GitHub status outdated")
             shell.noteTaskStations(of: board, content: try stages(of: board, in: shell), fresh: later)
             XCTAssertTrue(rows.allSatisfy { shell.taskStations[$0.id] == nil })
 
@@ -171,7 +169,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
         )
         try withShell(client: client) { shell, space in
             let repo = root + "/widgets", login = root + "/widgets.feat-login"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             try git(["worktree", "add", "-q", "-b", "feat/login", login], at: repo)
             try writeConfig(for: space)
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
@@ -254,7 +252,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
         )
         try withShell(client: client) { shell, space in
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             try writeConfig(for: space)
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "widgets" }))
@@ -264,8 +262,15 @@ final class BoardStagesContentFlowTests: XCTestCase {
                 board.reads.values.first?.errors.isEmpty == false && board.local != nil
             }
             XCTAssertEqual(try stages(of: board, in: shell).sections.map(\.id), ["legacy"], "no No repository, no Other workspaces: none")
-            let failed = try XCTUnwrap(try stages(of: board, in: shell).sections.first?.status)
-            XCTAssertEqual([failed.text, failed.toolTip], ["GitHub error", ProjectBoard.FetchError.notSignedIn(nil).message])
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "widgets" })
+            task.blocker = "Wait for the design review"
+            let section = try XCTUnwrap(try stages(of: board, in: shell).sections.first)
+            let line = try XCTUnwrap(section.lines.units.flatMap(\.lines).first { $0.id == task.id })
+            XCTAssertEqual(line.state, .blocked)
+            XCTAssertEqual(line.phrase.text, "Wait for the design review")
+            XCTAssertEqual(line.phrase.detail, "GitHub status unavailable")
+            let failed = try XCTUnwrap(section.status)
+            XCTAssertEqual([failed.text, failed.toolTip], ["GitHub error", ProjectBoard.message(.notSignedIn(nil))])
             XCTAssertEqual(failed.tone, .error)
             // Nothing read, a pull request queued all the same: Start counts the list, as the table's.
             shell.addToMergeQueue(12, board: board, section: nil)
@@ -298,12 +303,12 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertNil(emptyContent.message)
             let emptyPill = try XCTUnwrap(emptyContent.sections.first?.status)
             XCTAssertEqual(emptyPill.tone, .error)
-            XCTAssertEqual(emptyPill.toolTip?.contains(ProjectBoard.FetchError.notSignedIn(nil).message), true, emptyPill.toolTip ?? "")
+            XCTAssertEqual(emptyPill.toolTip?.contains(ProjectBoard.message(.notSignedIn(nil))), true, emptyPill.toolTip ?? "")
 
             // Another space, its repository anchored but not saved in Board Settings: read from its remote, read-only.
             let other = shell.workspaceStore.createProfile(named: "Gadgets")
             let gadgets = root + "/gadgets-app"
-            try BoardConfigSuggestionsTests.makeRepository(at: gadgets, remote: "https://github.com/acme/gadgets.git")
+            try makeRepository(at: gadgets, remote: "https://github.com/acme/gadgets.git")
             var anchor = try XCTUnwrap(FolderIdentity.identify(gadgets, timeout: 10)).anchor
             anchor.isDefault = true
             XCTAssertTrue(shell.workspaceStore.setAnchors([anchor], forProfile: other.id))
@@ -321,7 +326,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // A third space whose board.json a newer Nirux saved: read-only, why under the pointer, no Board Settings… to offer.
             let locked = shell.workspaceStore.createProfile(named: "Locked")
             let tools = root + "/tools-app"
-            try BoardConfigSuggestionsTests.makeRepository(at: tools, remote: "https://github.com/acme/tools.git")
+            try makeRepository(at: tools, remote: "https://github.com/acme/tools.git")
             var toolsAnchor = try XCTUnwrap(FolderIdentity.identify(tools, timeout: 10)).anchor
             toolsAnchor.isDefault = true
             XCTAssertTrue(shell.workspaceStore.setAnchors([toolsAnchor], forProfile: locked.id))
@@ -332,8 +337,8 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // No remote of the space's is read for a read-only file: another repository's workspace has its section all
             // the same, and a second clone of its own repository none (under Other workspaces: its section reads nothing).
             let outside = root + "/outside-app", toolsCopy = root + "/tools-copy"
-            try BoardConfigSuggestionsTests.makeRepository(at: outside, remote: "https://github.com/acme/outside.git")
-            try BoardConfigSuggestionsTests.makeRepository(at: toolsCopy, remote: "git@github.com:acme/tools.git")
+            try makeRepository(at: outside, remote: "https://github.com/acme/outside.git")
+            try makeRepository(at: toolsCopy, remote: "git@github.com:acme/tools.git")
             shell.addWorkspace(title: "outside", cwd: outside, profileID: locked.id)
             shell.addWorkspace(title: "tools copy", cwd: toolsCopy, profileID: locked.id)
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "tool" }))
@@ -352,7 +357,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // repository's workspace has its section all the same.
             let folderSpace = shell.workspaceStore.createProfile(named: "Folder")
             let docs = root + "/docs-app"
-            try BoardConfigSuggestionsTests.makeRepository(at: docs, remote: "https://github.com/acme/docs.git")
+            try makeRepository(at: docs, remote: "https://github.com/acme/docs.git")
             var docsAnchor = try XCTUnwrap(FolderIdentity.identify(docs, timeout: 10)).anchor
             docsAnchor.isDefault = true
             XCTAssertTrue(shell.workspaceStore.setAnchors([docsAnchor], forProfile: folderSpace.id))
@@ -381,7 +386,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // A fourth whose board.json names no valid GitHub repository: its settings are there, but invalid.
             let invalid = shell.workspaceStore.createProfile(named: "Invalid")
             let site = root + "/site-app"
-            try BoardConfigSuggestionsTests.makeRepository(at: site, remote: "https://github.com/acme/site.git")
+            try makeRepository(at: site, remote: "https://github.com/acme/site.git")
             var siteAnchor = try XCTUnwrap(FolderIdentity.identify(site, timeout: 10)).anchor
             siteAnchor.isDefault = true
             XCTAssertTrue(shell.workspaceStore.setAnchors([siteAnchor], forProfile: invalid.id))
@@ -399,6 +404,68 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(invalidSection.status?.text, "Invalid settings")
             XCTAssertEqual(invalidSection.status?.toolTip, "Board Settings has no valid GitHub repository for it: set one to see its pull requests.")
             XCTAssertEqual(invalidSection.menu.first, .boardSettings, "the settings can fix it")
+        }
+    }
+
+    @MainActor
+    func testWaitingWorkspaceFollowsItsDependencyAcrossSectionsUntilRelease() throws {
+        try withShell(client: ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")) { shell, space in
+            let repo = root + "/widgets", docs = root + "/docs"
+            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try BoardConfigSuggestionsTests.makeRepository(at: docs, remote: "https://github.com/acme/docs.git")
+            let widgets = try XCTUnwrap(FolderIdentity.identify(repo, timeout: 10)).anchor
+            let guides = try XCTUnwrap(FolderIdentity.identify(docs, timeout: 10)).anchor
+            let widgetsID = try XCTUnwrap(widgets.key), guidesID = try XCTUnwrap(guides.key)
+            XCTAssertTrue(shell.workspaceStore.setAnchors([widgets, guides], forProfile: space.id))
+            shell.addWorkspace(title: "Sign in", cwd: repo, profileID: space.id, workspaceID: "login")
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.id == "login" }))
+            let path = root + "/waiting/docs"
+            let wait = BoardStagesLineTests.startWait(after: "login", repo: guidesID)
+            shell.addWorkspace(title: "Write the guide", cwd: path, profileID: space.id, workspaceID: "guide",
+                               waitingStart: wait, activate: false)
+            let guide = try XCTUnwrap(shell.workspaces.first { $0.id == "guide" })
+            try runPaletteAction("Open Board", in: shell)
+            let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
+            waitUntil("the Board lists both repositories") {
+                board.local?.folders[docs] != nil && board.local?.folders[repo] != nil && board.sections.count == 2
+            }
+            func ids(_ content: BoardStagesView.Content, in section: String) -> [String] {
+                content.sections.first { $0.id == section }?.lines.units.flatMap(\.lines).map(\.id) ?? []
+            }
+            for order in [BoardStages.Order.sidebar, .progress] {
+                let content = try stages(of: board, in: shell, order: order)
+                XCTAssertEqual(ids(content, in: widgetsID), ["login", "guide"])
+                XCTAssertEqual(ids(content, in: guidesID), [])
+                XCTAssertFalse(content.sections.contains { $0.id == ProjectBoardController.noRepositoryID })
+            }
+            XCTAssertFalse(board.workspaceFolders().contains(path))
+            shell.renderProjectBoard(board)
+            XCTAssertEqual(board.stagesTargets.focus["guide"], .focus(workspaceID: "guide", columnID: nil))
+            XCTAssertNil(board.stagesTargets.folders["guide"])
+
+            var failed = BoardStagesLineTests.startWait(after: "gone", repo: guidesID)
+            failed.failure = "The dependency closed"
+            guide.mergeWaits = [failed]
+            let changed = try stages(of: board, in: shell)
+            XCTAssertEqual(ids(changed, in: widgetsID), ["login"])
+            XCTAssertEqual(ids(changed, in: guidesID), ["guide"])
+            let orphan = try XCTUnwrap(changed.sections.first { $0.id == guidesID }?.lines.units.first?.lines.first)
+            XCTAssertEqual(orphan.state, .needsYou)
+            XCTAssertEqual(orphan.phrase.text, "Needs you · The dependency closed")
+            XCTAssertTrue(orphan.menu.isEmpty)
+
+            let unread = shell.makeProjectBoard(projectID: space.id, offersSettings: true)
+            let beforeRead = try stages(of: unread, in: shell)
+            XCTAssertEqual(beforeRead.message?.showsWaitingTasks, true)
+            unread.view.stages.show(beforeRead)
+            XCTAssertEqual(unread.view.stages.lineViews.map(\.line.id), ["guide"])
+            XCTAssertEqual(unread.view.stages.lineViews.first?.line.state, .needsYou)
+
+            guide.mergeWaits = []
+            guide.beginTask(at: docs, mission: nil)
+            let released = try stages(of: board, in: shell)
+            XCTAssertEqual(ids(released, in: guidesID), ["guide"])
+            XCTAssertEqual(released.sections.flatMap { $0.lines.units.flatMap(\.lines) }.filter { $0.id == "guide" }.count, 1)
         }
     }
 
@@ -421,7 +488,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             ofSpace: board.projectID, foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:], snapshot: ProcessSnapshot(),
             now: now
         )
-        change(&readings)
+        change(&readings.tasks)
         return board.stagesContent(shell.stagesInputs(of: board, members: members, workspaces: workspaces, readings: readings, order: order)).content
     }
 

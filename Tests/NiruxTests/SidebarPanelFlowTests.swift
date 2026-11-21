@@ -21,10 +21,12 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Rename Workspace"
             ],
             "testOrganizeMenuItems": ["Organize"],
+            "testResumeTaskMenuItem": ["Resume with…"],
             "testNewSubtaskMenuItem": [SidebarView.newSubtaskTitle],
             "testAddRuleMenuItem": [SidebarView.addRuleTitle],
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
             "testReviewBranchMenuItem": ["Review Branch"],
+            "testLeadMenuItems": [NiruxShellView.restartLeadTitle, SidebarView.turnOffLeadTitle],
             "testSpaceMenuItems": ["New Space…", "Space Settings…", "Delete Space…"]
         ],
         exemptions: [:]
@@ -53,7 +55,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let worktreeIndex = try XCTUnwrap(shell.activeWorkspace.flatMap { active in
                 shell.workspaces.firstIndex { $0 === active }
             })
-            shell.workspaces[worktreeIndex].prInfo = Self.redPullRequest
+            shell.workspaces[worktreeIndex].prInfo = try Self.redPullRequest()
             let gone = harness.root + "/gone"
             try FileManager.default.createDirectory(atPath: gone, withIntermediateDirectories: true)
             shell.addWorkspace(title: "gone", cwd: gone)
@@ -69,7 +71,13 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             ]
             // The spaces themselves, listed first: SidebarSpacePickerTests.
             let spaces = Set(picker.items.prefix(shell.sidebar.lastProfiles.count).map(ObjectIdentifier.init))
-            let titles = menus.flatMap(\.items)
+            // Last: the Lead's space comes on screen.
+            let lead = try harness.makeLead()
+            shell.updateSidebar()
+            let leadMenu = shell.sidebar.workspaceActionMenu(
+                workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === lead.workspace }), columnIndex: nil
+            )
+            let titles = (menus + [leadMenu]).flatMap(\.items)
                 .filter { !$0.isSeparatorItem && !spaces.contains(ObjectIdentifier($0)) }.map(\.title)
             Self.menuCoverage.checkEveryItemIsCovered(
                 offered: Array(Set(titles)), testNames: UIFlowCoverage.testNames(of: Self.self)
@@ -79,13 +87,56 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(menus[0].items.map(\.title), [
                 "Focus Column", "Close Column", "",
                 "Review Branch", "Ask Agent Why CI Failed", "Rerun Failed CI Jobs…", "",
-                "New Sub-task…", "Organize", "",
+                "Resume with…", "New Sub-task…", "Organize", "",
                 "Rename Workspace", "View/Edit Context…", SidebarView.addRuleTitle, "",
                 "Clean Up Worktree…", "Close Workspace"
             ])
             // The folder is gone: Clean Up comes up among the state actions,
             // and it is no task to start a sub-task of.
             XCTAssertEqual(menus[2].items.prefix(4).map(\.title), ["Review Branch", "Clean Up Worktree…", "", "Organize"])
+        }
+    }
+
+    func testResumeTaskMenuItem() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.addWorkspace(title: "Switch me", cwd: harness.worktree)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            let menu = shell.sidebar.workspaceActionMenu(workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), columnIndex: nil)
+            harness.perform(["Resume with…"], in: menu)
+            XCTAssertEqual(harness.alerts.last, "Resume “Switch me” with another CLI?")
+            XCTAssertTrue(harness.terminalRestarts.isEmpty, "Cancel preserves the current session")
+        }
+    }
+
+    /// The Lead's row closes nothing: Restart Lead… asks first, Turn Off
+    /// Lead… opens Space Settings › Lead, where its switch is, and its Claude
+    /// column's Close Column is off; its Board's isn't.
+    func testLeadMenuItems() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            shell.updateSidebar()
+            let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === lead.workspace })
+            let menu = shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
+            XCTAssertEqual(menu.items.last?.title, SidebarView.turnOffLeadTitle)
+            XCTAssertFalse(menu.items.contains { $0.title == "Close Workspace" })
+            @MainActor func closeColumn(_ column: Int) throws -> NSMenuItem {
+                try XCTUnwrap(shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: column).items.first { $0.title == "Close Column" })
+            }
+            XCTAssertFalse(try closeColumn(0).isEnabled)
+            XCTAssertEqual(try closeColumn(0).toolTip, NiruxShellView.leadStaysText)
+            XCTAssertTrue(try closeColumn(1).isEnabled, "its Board's")
+
+            harness.perform([NiruxShellView.restartLeadTitle], in: menu)
+            XCTAssertEqual(harness.alerts.last, "Restart the Lead of “Tools”?")
+            XCTAssertEqual(harness.terminalRestarts, [], "cancelled")
+
+            harness.perform([SidebarView.turnOffLeadTitle], in: menu)
+            let settings = try XCTUnwrap(shell.spaceSettings)
+            XCTAssertEqual(settings.spaceID, lead.space)
+            XCTAssertEqual(settings.selectedTab, .lead)
+            XCTAssertFalse(lead.workspace.isClosing)
         }
     }
 
@@ -197,14 +248,14 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let worktreeWorkspace = try XCTUnwrap(shell.activeWorkspace)
             shell.refreshGitContextNow(for: worktreeWorkspace)
             harness.waitUntil("the worktree's git context") {
-                worktreeWorkspace.gitContext.map { NiruxShellView.comparablePath($0.identity.repositoryRoot) }
-                    == NiruxShellView.comparablePath(harness.worktree)
+                worktreeWorkspace.gitContext.map(\.identity.repositoryRoot.comparablePath)
+                    == harness.worktree.comparablePath
             }
             XCTAssertEqual(try menu(for: worktreeWorkspace).items.suffix(2).map(\.title), ["Clean Up Worktree…", "Close Workspace"])
             // Set and read in one run-loop turn: a git refresh can't clear it
             // in between.
             worktreeWorkspace.prInfo = PRInfo(
-                number: 7, state: "MERGED", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
+                number: 7, state: .merged, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
                 mergeable: nil, url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil
             )
             let merged = try menu(for: worktreeWorkspace)
@@ -468,13 +519,15 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
     }
 
     /// A pull request whose `test` job failed in a GitHub Actions run.
-    static let redPullRequest = PRDetect.pullRequestInfo(from: [
-        "number": 52, "state": "OPEN", "url": "https://github.com/acme/widgets/pull/52",
-        "statusCheckRollup": [[
-            "name": "test", "workflowName": "Tests", "status": "COMPLETED", "conclusion": "FAILURE",
-            "startedAt": "2026-10-02T10:00:00Z", "detailsUrl": "https://github.com/acme/widgets/actions/runs/7/job/11"
-        ]]
-    ])
+    static func redPullRequest() throws -> PRInfo {
+        try XCTUnwrap(PRDetect.pullRequestInfo(from: [
+            "number": 52, "state": "OPEN", "url": "https://github.com/acme/widgets/pull/52",
+            "statusCheckRollup": [[
+                "name": "test", "workflowName": "Tests", "status": "COMPLETED", "conclusion": "FAILURE",
+                "startedAt": "2026-10-02T10:00:00Z", "detailsUrl": "https://github.com/acme/widgets/actions/runs/7/job/11"
+            ]]
+        ]))
+    }
 
     /// Without an agent in the workspace, Why opens the failed check; a
     /// rerun asks first, and only a confirmed one reaches GitHub.
@@ -483,7 +536,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let shell = harness.shell
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace })
-            workspace.prInfo = Self.redPullRequest
+            workspace.prInfo = try Self.redPullRequest()
             shell.updateSidebar()
 
             harness.perform(["Ask Agent Why CI Failed"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil))

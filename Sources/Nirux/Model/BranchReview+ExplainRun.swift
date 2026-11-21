@@ -54,7 +54,7 @@ extension BranchReview {
         /// installer's must not hide it. Runs each `--help`: call it off
         /// the main thread.
         static func locate(
-            directories: [String] = AgentCLILocator.searchDirectories(path: PtySession.effectivePath, home: NSHomeDirectory())
+            directories: [String] = AgentCLILocator.searchDirectories(path: Shell.effectivePath, home: NSHomeDirectory())
         ) -> Located {
             var seen = Set<String>()
             var tooOld: [String] = []
@@ -94,11 +94,11 @@ extension BranchReview {
 
         /// Every run's environment: `keptVariables`, and a `PATH` that
         /// starts with the binary's folder (an npm install is a `node`
-        /// script), then `PtySession.effectivePath`'s absolute entries: a
+        /// script), then `Shell.effectivePath`'s absolute entries: a
         /// relative one (`./bin`) would find the branch's own `git` in the
         /// copy, which claude runs at startup.
         func environment(
-            from base: [String: String] = ProcessInfo.processInfo.environment, path effectivePath: String = PtySession.effectivePath
+            from base: [String: String] = ProcessInfo.processInfo.environment, path effectivePath: String = Shell.effectivePath
         ) -> [String: String] {
             var environment = base.filter { Self.keptVariables.contains($0.key) }
             let folder = (path as NSString).deletingLastPathComponent

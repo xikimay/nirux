@@ -20,11 +20,11 @@ extension NewTask {
     /// wrong, and Nirux stops looking.
     static let maxFolderAttempts = 999
 
-    /// The folder's name from the description's first line (see
-    /// `cleanedFolderName`), cut at a whole word. "Task" when nothing is
-    /// left.
+    /// The folder's name from the description's first line, as the title
+    /// reads it (see `titleText`, `cleanedFolderName`), cut at a whole
+    /// word. "Task" when nothing is left.
     static func suggestedFolderName(description: String) -> String {
-        let words = (firstLine(of: description) ?? "").split(whereSeparator: \.isWhitespace).map(String.init)
+        let words = (description.firstLine.map(titleText) ?? "").split(whereSeparator: \.isWhitespace).map(String.init)
         var name = ""
         for word in words {
             let candidate = name.isEmpty ? word : name + " " + word
@@ -136,8 +136,10 @@ extension NewTask {
 
     /// The handover of a task in a folder of its own: the description as
     /// the user typed it, then the template's way of working.
-    static func folderHandover(description: String, template: TaskTemplates.Template?, folder: String) -> String {
-        let title = workspaceTitle(description: description) ?? (folder as NSString).lastPathComponent
+    static func folderHandover(
+        description: String, title: String? = nil, template: TaskTemplates.Template?, folder: String
+    ) -> String {
+        let title = title ?? workspaceTitle(description: description) ?? (folder as NSString).lastPathComponent
         var text = """
         # Task: \(title)
 
