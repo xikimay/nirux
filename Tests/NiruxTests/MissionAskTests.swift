@@ -310,12 +310,12 @@ final class MissionAskTests: XCTestCase {
         fixture.center.drain()
         let question = try XCTUnwrap(questions(in: fixture).first)
         XCTAssertTrue(fixture.store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 21))
-        XCTAssertNotNil(fixture.store.respond(to: question.id, message: "Use AuthService.", enabled: true, now: 22))
+        let response = try XCTUnwrap(fixture.store.respond(to: question.id, message: "Use AuthService.", enabled: true, now: 22))
 
         var printed: [String] = []
         XCTAssertEqual(ask("Which API?", in: fixture, at: 23) { printed.append($0) }, 0)
         XCTAssertEqual(printed, ["Use AuthService."])
-        XCTAssertEqual(try queuedEvents(in: fixture).map(\.inReplyTo), [question.id])
+        XCTAssertEqual(try queuedEvents(in: fixture).map(\.inReplyTo), [response.event.id])
     }
 
     func testAskStopsWhenTheMissionCompletesWhileItWaits() async throws {
