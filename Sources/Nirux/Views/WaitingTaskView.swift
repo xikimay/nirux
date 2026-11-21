@@ -5,23 +5,7 @@ import AppKit
 final class WaitingTaskView: NSView {
     /// What the column says.
     struct Facts: Equatable {
-        enum State: Hashable {
-            /// For "#657 (“Fix login”)" to merge.
-            case waits(String)
-            case starting
-            /// Why it didn't start: the row reads Needs you.
-            case needsYou(String)
-
-            var line: String {
-                switch self {
-                case .waits(let name): "Waits for \(name) to merge"
-                case .starting: "Starting"
-                case .needsYou(let reason): "Needs you · \(reason)"
-                }
-            }
-        }
-
-        let state: State
+        let state: MergeWait.WaitingState
         let repository: String
         let description: String
     }

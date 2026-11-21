@@ -53,7 +53,7 @@ final class MenuBarFlowTests: XCTestCase {
             bar.run(["Space", "Clean Up Merged Worktrees…"])
             let cleanup = try XCTUnwrap(shell.worktreeCleanupPanel)
             harness.waitUntil("the worktree inspected") {
-                cleanup.candidates.contains { NiruxShellView.comparablePath($0.path) == NiruxShellView.comparablePath(harness.worktree) && $0.inspection != nil }
+                cleanup.candidates.contains { $0.path.comparablePath == harness.worktree.comparablePath && $0.inspection != nil }
             }
             cleanup.dismiss()
         }

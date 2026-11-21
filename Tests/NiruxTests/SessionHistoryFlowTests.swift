@@ -84,7 +84,8 @@ final class SessionHistoryFlowTests: XCTestCase {
                 checkout: AgentSessionRecord.Checkout(branch: "feat/flow", worktreeRoot: harness.worktree, mainCheckout: harness.repo),
                 hoursAgo: 2
             )
-            let codex = Self.session(Self.codexID, title: "codex-task", folder: harness.worktree, agent: .codex, workspaceID: workspace.id)
+            var codex = Self.session(Self.codexID, title: "codex-task", folder: harness.worktree, agent: .codex, workspaceID: workspace.id)
+            codex.agentModel = "chosen-model"
             let restored = Self.session(Self.restoredID, title: "restored-task", folder: harness.repo)
             var unprompted = Self.session(Self.emptyID, title: "empty-task", folder: harness.repo)
             unprompted.hasConversation = false
@@ -139,7 +140,7 @@ final class SessionHistoryFlowTests: XCTestCase {
             shell.resumeSession(codex, spaceID: shell.activeProfileID)
             harness.waitUntil("the Codex resume") { harness.agentLaunches.count == 2 }
             XCTAssertTrue(
-                harness.agentLaunches[1].hasPrefix("command codex resume '\(Self.codexID)' -C '\(harness.worktree)'"),
+                harness.agentLaunches[1].hasPrefix("command codex resume '\(Self.codexID)' -C '\(harness.worktree)' --model 'chosen-model'"),
                 harness.agentLaunches[1]
             )
             // Saved with its thread before its first turn, as a restore is.

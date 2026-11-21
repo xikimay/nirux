@@ -66,7 +66,7 @@ enum LeadTools {
     /// start_task's arguments: `own`, then `title` and `branch`, for the
     /// Lead's tasks and a task's sub-tasks.
     static func startTaskProperties(_ own: [String: Any]) -> [String: Any] {
-        own.merging(nameProperties) { first, _ in first }
+        own.merging(nameProperties) { first, _ in first }.merging(agentProperties) { first, _ in first }
     }
 
     private static var nameProperties: [String: Any] {
@@ -117,13 +117,21 @@ enum LeadTools {
         return [startTask, closeTask].contains(tool) ? 300 : 30
     }
 
+    static var agentProperties: [String: Any] {
+        [
+            "agent": ["type": "string", "enum": CodingAgent.launchable.map(\.rawValue),
+                      "description": "Agent to launch. Defaults to the space's task agent."],
+            "model": ["type": "string", "description": "Optional --model for that agent: an agy models slug, a codex debug models slug, or a Claude alias or full ID. Omit for its default. Preselected in the New sheet when approval is required."]
+        ]
+    }
+
     static var definitions: [[String: Any]] {
         [
             definition(
                 startTask, title: "Start a task",
                 description: """
                     Start a task in a new worktree of this space, from origin's base branch, fetched: Nirux writes \
-                    the description into its handover, launches the space's agent and links the task to you (its \
+                    the description into its handover, launches the chosen agent and links the task to you (its \
                     questions and result are typed into your prompt). One repository per task. Work that needs no \
                     repository (research, writing, a one-off script) starts in a new folder of its own instead, \
                     with no git, branch or pull request: repo "\(noRepository)", or any task in a space without a \
@@ -461,6 +469,10 @@ enum LeadTools {
         }
         switch tool {
         case startTask:
+            if arguments["agent"] != nil, string(arguments, "agent").flatMap(CodingAgent.init(launchable:)) == nil {
+                return "Unknown agent “\(string(arguments, "agent") ?? "")”. Choices: \(CodingAgent.launchable.map(\.rawValue).joined(separator: ", "))."
+            }
+            if arguments["model"] != nil, string(arguments, "model") == nil { return "model must be a nonempty string." }
             guard string(arguments, "description") != nil else { return "description must say what the task must do." }
             let options = startOptions(arguments)
             let titleLength = subtask ? maxSubtaskTitleLength : maxTaskTitleLength

@@ -586,7 +586,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.press(.returnKey, in: palette.panel)
             let opened = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(opened.title, harness.worktreeBranch)
-            XCTAssertEqual(NiruxShellView.comparablePath(opened.cwd), NiruxShellView.comparablePath(harness.worktree))
+            XCTAssertEqual(opened.cwd.comparablePath, harness.worktree.comparablePath)
 
             // Picks a row of Open Worktree by its title; returns its subtitle.
             @MainActor func pickWorktree(_ title: String) throws -> String {
@@ -636,9 +636,9 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             // Inspects each worktree on an OperationQueue (#46, #48).
             harness.runPaletteCommand("Clean Up Merged Worktrees…")
             let panel = try XCTUnwrap(shell.worktreeCleanupPanel)
-            let expected = Set([harness.worktree, created.cwd].map(NiruxShellView.comparablePath))
+            let expected = Set([harness.worktree, created.cwd].map(\.comparablePath))
             harness.waitUntil("both worktrees inspected") {
-                let inspected = panel.candidates.filter { $0.inspection != nil }.map { NiruxShellView.comparablePath($0.path) }
+                let inspected = panel.candidates.filter { $0.inspection != nil }.map(\.path.comparablePath)
                 return expected.isSubset(of: Set(inspected))
             }
             panel.dismiss()
@@ -691,8 +691,8 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(workspace.title, "Sidebar flickers on resize")
             XCTAssertEqual(workspace.profileID, space.id)
             XCTAssertEqual(
-                NiruxShellView.comparablePath(workspace.cwd),
-                NiruxShellView.comparablePath(harness.root + "/repo.fix-sidebar-flickers-on-resize")
+                workspace.cwd.comparablePath,
+                (harness.root + "/repo.fix-sidebar-flickers-on-resize").comparablePath
             )
             XCTAssertEqual(GitWorktree.currentBranch(at: workspace.cwd), "fix/sidebar-flickers-on-resize")
             let handover = try String(contentsOfFile: workspace.cwd + "/.claude-handover.md", encoding: .utf8)

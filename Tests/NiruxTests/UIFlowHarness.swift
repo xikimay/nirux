@@ -212,6 +212,7 @@ final class UIFlowHarness {
         }
         shell.sideEffects.generateTaskNames = { _, _ in nil }
         shell.sideEffects.homeDirectory = { [home] in home }
+        shell.sideEffects.listTaskModels = { _, _ in [] }
         // Never UNUserNotificationCenter in xctest.
         shell.sideEffects.notifySetupFailure = { [weak self] workspaceID, _ in self?.setupFailures.append(workspaceID) }
         shell.sideEffects.notifyMissionQuestion = { [weak self] workspaceID, _, _, _ in self?.missionQuestionNotices.append(workspaceID) }
@@ -644,7 +645,7 @@ private struct IsolatedEnvironment {
 
     init() {
         // Memoized from HOME on first use: let the real one set it.
-        _ = PtySession.effectivePath
+        _ = Shell.effectivePath
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-ui-flow-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         root = base.path.realPath ?? base.path

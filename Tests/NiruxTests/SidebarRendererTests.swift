@@ -30,30 +30,6 @@ final class SidebarRendererTests: XCTestCase {
         XCTAssertEqual(SidebarRenderer.formatDiffStats("nothing to parse"), "nothing to parse")
     }
 
-    // MARK: - shortDuration
-
-    func testShortDurationSeconds() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(0), "0s")
-        XCTAssertEqual(SidebarRenderer.shortDuration(42), "42s")
-        XCTAssertEqual(SidebarRenderer.shortDuration(59.9), "59s")
-    }
-
-    func testShortDurationMinutes() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(60), "1m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(732), "12m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(3599), "59m")
-    }
-
-    func testShortDurationHours() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(3600), "1h00m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(3920), "1h05m")
-        XCTAssertEqual(SidebarRenderer.shortDuration(7384), "2h03m")
-    }
-
-    func testShortDurationNegativeClampsToZero() {
-        XCTAssertEqual(SidebarRenderer.shortDuration(-5), "0s")
-    }
-
     // MARK: - Attention reason
 
     private func column(_ status: AgentStatus, reason: AgentAttentionReason?) -> ColumnInfo {

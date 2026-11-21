@@ -29,6 +29,7 @@ extension NiruxShellView {
     static func claudeCommand(
         resume: AgentResumeTarget? = nil,
         mode: ClaudeLaunchMode,
+        model: String? = nil,
         sessionName: String? = nil,
         briefFile: String? = nil,
         settingsFile: String? = nil,
@@ -44,6 +45,7 @@ extension NiruxShellView {
             }
         }
         parts.append(contentsOf: mode.cliArgs)
+        if let model { parts += ["--model", Self.shellQuotedArgument(model)] }
         if resume == nil, let sessionName {
             // One `--name=` argument, so a name starting with "-" can't be
             // read as another flag.
@@ -91,6 +93,7 @@ extension NiruxShellView {
         resume: AgentResumeTarget? = nil,
         workingDirectory: String? = nil,
         mode: CodexLaunchMode,
+        model: String? = nil,
         briefFile: String? = nil,
         shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
@@ -106,6 +109,7 @@ extension NiruxShellView {
             }
         }
         parts.append(contentsOf: mode.cliArgs)
+        if let model { parts += ["--model", Self.shellQuotedArgument(model)] }
         if let briefFile, let override = Self.codexDeveloperInstructionsOverride(briefFile: briefFile, shell: shell) {
             parts.append(contentsOf: ["-c", override])
         }
@@ -120,11 +124,15 @@ extension NiruxShellView {
     /// starts a fresh one (agy has no picker flag; `/resume` is in it).
     /// `handoverPrompt` is its first prompt (`-i`), as in the worktree
     /// handover flow.
-    static func agyCommand(resume: AgentResumeTarget? = nil, handoverPrompt: String? = nil) -> String {
+    static func agyCommand(
+        resume: AgentResumeTarget? = nil, model: String? = nil, settings: String? = nil, handoverPrompt: String? = nil
+    ) -> String {
         var parts = ["command", "agy"]
         if case .session(let sessionID)? = resume {
             parts.append(contentsOf: ["--conversation", Self.shellQuotedArgument(sessionID)])
         }
+        if let model { parts += ["--model", Self.shellQuotedArgument(model)] }
+        if let settings { parts += ["--settings", Self.shellQuotedArgument(settings)] }
         if let prompt = handoverPrompt {
             parts.append(contentsOf: ["-i", Self.shellQuotedArgument(prompt)])
         }
@@ -186,8 +194,8 @@ extension NiruxShellView {
 
     /// `agent`'s launch in `workspace`, in the space's mode; nil for an
     /// agent Nirux doesn't start.
-    static func launch(of agent: CodingAgent, resume: AgentResumeTarget?, in workspace: WorkspaceState) -> AgentLaunch? {
-        AgentLaunch(agent, resume: resume, claudeMode: claudeLaunchMode(for: workspace), codexMode: codexLaunchMode(for: workspace))
+    static func launch(of agent: CodingAgent, resume: AgentResumeTarget?, model: String? = nil, in workspace: WorkspaceState) -> AgentLaunch? {
+        AgentLaunch(agent, resume: resume, model: model, claudeMode: claudeLaunchMode(for: workspace), codexMode: codexLaunchMode(for: workspace))
     }
 
     /// The line that runs `launch` in `workspace`, with the space's brief
@@ -199,21 +207,23 @@ extension NiruxShellView {
         sessionName: String? = nil, handoverPrompt: String? = nil, settingsFiles: [String: String]? = nil
     ) -> String {
         switch launch {
-        case .claude(let resume, let mode):
+        case .claude(let resume, let mode, let model):
             let file = claudeSpaceSettingsFile(for: workspace, prepared: settingsFiles)
             if let column, column === workspace.leadTerminal { column.recordLeadSafety(file: file) }
             return Self.claudeCommand(
-                resume: resume, mode: mode, sessionName: sessionName, briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
+                resume: resume, mode: mode, model: model, sessionName: sessionName, briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
                 settingsFile: file, handoverPrompt: handoverPrompt
             )
-        case .codex(let resume, let mode):
+        case .codex(let resume, let mode, let model):
             return Self.codexCommand(
-                resume: resume, workingDirectory: resumeDirectory, mode: mode,
+                resume: resume, workingDirectory: resumeDirectory, mode: mode, model: model,
                 briefFile: Self.codexBriefFile(from: spaceBriefInjection(for: workspace), launchDirectory: launchDirectory),
                 handoverPrompt: handoverPrompt
             )
-        case .agy(let resume):
-            return Self.agyCommand(resume: resume, handoverPrompt: handoverPrompt)
+        case .agy(let resume, let model):
+            let settings = workspace.startedOutsideNirux || workspace.isFolderTask ? nil
+                : AgyWorktreeTrust.settings(for: launchDirectory, home: sideEffects.homeDirectory())
+            return Self.agyCommand(resume: resume, model: model, settings: settings, handoverPrompt: handoverPrompt)
         }
     }
 

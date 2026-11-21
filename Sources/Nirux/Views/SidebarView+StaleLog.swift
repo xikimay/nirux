@@ -17,7 +17,7 @@ extension SidebarView {
     /// without any is told (`onPointerReturn`), with how long that was
     /// (nil: the first ever).
     func notePointer(_ gesture: SidebarStaleLog.Trigger) {
-        if gesture == .press || gesture == .menu || gesture == .scroll { taskPreview.dismiss() }
+        if gesture == .press || gesture == .menu || gesture == .scroll { taskPreview.dismissHover() }
         let now = clock()
         let idle = lastPointerAt.map { now - $0 }
         lastPointerAt = now

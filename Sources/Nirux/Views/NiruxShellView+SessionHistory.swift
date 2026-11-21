@@ -38,6 +38,7 @@ extension NiruxShellView {
             source: event.source,
             timestamp: event.timestamp,
             agentProcess: agentProcess?.instance,
+            model: agentProcess.flatMap { AgentModels.launchModel(arguments: $0.arguments) },
             name: event.kind == .claude
                 ? agentProcess.flatMap { AgentSessionObservation.launchName(arguments: $0.arguments) }
                 : nil,

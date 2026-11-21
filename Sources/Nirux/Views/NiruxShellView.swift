@@ -109,6 +109,11 @@ final class NiruxShellView: NSView {
     }
 
     // Heartbeat
+    lazy var pinnedThreadReader: TaskThreadContentView.Read = { [weak self] id, space, done in
+        guard let self else { return done(nil) }
+        readThreadTimeline(workspaceID: id, spaceID: space, completion: done)
+    }
+
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
     /// Event-driven git/PR refresh scheduling (FSEvents + throttles).
@@ -372,6 +377,11 @@ final class NiruxShellView: NSView {
         wireWorkspace(workspace)
         workspaces.append(workspace)
         verticalStrip.addSubview(workspace.containerView)
+        sidebar.onOpenTaskThread = { [weak self] id, card in
+            guard let self else { return }
+            sidebar.taskPreview.pin(workspaceID: id, card: card)
+            refreshPinnedTaskThread()
+        }
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
         sidebar.worktreeCleanupOffer = { [weak self] index in self?.worktreeCleanupOffer(workspaceIndex: index) }
@@ -481,6 +491,7 @@ final class NiruxShellView: NSView {
                 self.sweepMergeWaits(now: now)
                 self.checkMissionWaits(snapshot: snapshot, now: now)
                 self.refreshMetadata(snapshot: snapshot)
+                self.refreshPinnedTaskThread()
                 // Save state every ~10s (every 5th tick)
                 if self.heartbeatTick % 5 == 0 {
                     self.saveState(snapshot: snapshot)
@@ -942,7 +953,7 @@ extension NiruxShellView {
         let folder = repositoryFolder ?? activeWorkspace?.focusedWorkingDirectory
         guard let folder, let repoRoot = GitWorktree.repoRoot(at: folder)
         else { return showToast("Not in a git repository: \(folder?.abbreviatedPath() ?? "")") }
-        let excluded = repositoryFolder == nil ? Self.comparablePath(repoRoot) : nil
+        let excluded = repositoryFolder == nil ? repoRoot.comparablePath : nil
         // From the focused terminal, not the active workspace: its folder is
         // where it was opened, not where its terminal is now, and going back
         // to it would do nothing. From the sheet it counts, so picking its
@@ -955,11 +966,11 @@ extension NiruxShellView {
         DispatchQueue.global(qos: .userInitiated).async {
             let worktrees = GitWorktree.list(repoRoot: repoRoot)
             let branches = listsBranches ? GitWorktree.branchesWithoutWorktree(repoRoot: repoRoot, worktrees: worktrees) : []
-            let comparablePaths = worktrees.map { Self.comparablePath($0.path) }
+            let comparablePaths = worktrees.map(\.path.comparablePath)
             // The worktree each workspace is open in (the main checkout may
             // hold the others), and whether at its root.
             let workspaceWorktrees = openWorkspaces.compactMap { workspace in
-                let cwd = Self.comparablePath(workspace.cwd)
+                let cwd = workspace.cwd.comparablePath
                 return ProjectBoard.innermost(of: comparablePaths, holding: cwd).map {
                     (id: workspace.id, path: comparablePaths[$0], isAtRoot: cwd == comparablePaths[$0])
                 }

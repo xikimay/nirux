@@ -364,9 +364,12 @@ final class LazyRestoreTests: XCTestCase {
     // MARK: - Asking for it
 
     func testSidebarResumeStartsTheAgentWhereItIs() throws {
-        try withRestoredShell(layout()) { shell, recorder in
+        var state = layout()
+        state.workspaces[1].columns[0].agentModel = "chosen-model"
+        try withRestoredShell(state) { shell, recorder in
             let codex = try column(shell, 1, 0)
             let info = try XCTUnwrap(shell.sidebar.lastInfos.first { $0.index == 1 }?.columns.first)
+            XCTAssertEqual(info.agentLabel, "Codex (chosen-model)")
             XCTAssertEqual(info.deferredAgent, SidebarDeferredAgent(
                 agent: .codex, summary: "codex session", columnID: codex.id
             ))
@@ -378,7 +381,7 @@ final class LazyRestoreTests: XCTestCase {
 
             resume(1, 0, codex.id)
             XCTAssertEqual(recorder.launches.last, Launch(
-                column: ObjectIdentifier(codex), command: "command codex resume '\(Self.thread)'"
+                column: ObjectIdentifier(codex), command: "command codex resume '\(Self.thread)' --model 'chosen-model'"
             ))
             XCTAssertEqual(shell.activeWSIndex, 0, "the workspace on screen stays")
             XCTAssertNil(shell.sidebar.lastInfos.first { $0.index == 1 }?.columns.first?.deferredAgent)

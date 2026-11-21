@@ -8,6 +8,7 @@ let package = Package(
         .macOS(.v14)
     ],
     dependencies: [
+        .package(path: "NiruxCore"),
         // Exact: TerminalScreenText reaches private parts of this version.
         // Temporary pin: libghostty-spm 2.2.2026110702 plus upstream PR #105
         // (Lakr233/libghostty-spm#105, finds the resource bundle in
@@ -23,6 +24,7 @@ let package = Package(
         .executableTarget(
             name: "Nirux",
             dependencies: [
+                .product(name: "NiruxCore", package: "NiruxCore"),
                 .product(name: "GhosttyKit", package: "libghostty-spm"),
                 .product(name: "GhosttyTerminal", package: "libghostty-spm"),
                 .product(name: "Sparkle", package: "Sparkle")

@@ -64,7 +64,7 @@ final class WorktreeCleanupPanel: NSObject {
     }
 
     func append(_ candidate: WorktreeCleanupCandidate) {
-        let key = NiruxShellView.comparablePath(candidate.path)
+        let key = candidate.path.comparablePath
         guard knownPaths.insert(key).inserted else { return }
         candidates.append(candidate)
         addRow(for: candidate, at: candidates.count - 1)
@@ -83,7 +83,7 @@ final class WorktreeCleanupPanel: NSObject {
 
     /// True the first time a folder is asked for its repository's worktrees.
     func markFolderScanned(_ folder: String) -> Bool {
-        scannedFolders.insert(NiruxShellView.comparablePath(folder)).inserted
+        scannedFolders.insert(folder.comparablePath).inserted
     }
 
     func update(path: String, inspection: WorktreeCleanup.Inspection) {
