@@ -1,0 +1,62 @@
+name: Flake gate
+
+# The flake gate of a new or reworked test class, in one job on one macOS
+# runner: each class runs N times, each run its own xctest process, beside
+# the six heaviest classes (scripts/run-tests.sh --repeat). Started by hand
+# on a branch, so it needs no throwaway pull request:
+#   gh workflow run flake-gate.yml --ref <branch> -f classes="NiruxTests.FooTests" [-f runs=10]
+on:
+  workflow_dispatch:
+    inputs:
+      classes:
+        description: Test classes (Module.Class), separated by spaces
+        required: true
+        type: string
+      runs:
+        description: Runs of each class
+        default: "10"
+        type: string
+
+# A newer gate of the same branch replaces the one running.
+concurrency:
+  group: flake-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Toolchain
+        id: toolchain
+        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # The cache tests.yml and the nightly use.
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Repeat the classes
+        env:
+          CLASSES: ${{ inputs.classes }}
+          RUNS: ${{ inputs.runs }}
+        run: |
+          read -ra classes <<< "$CLASSES"
+          scripts/run-tests.sh --repeat "$RUNS" "${classes[@]}"
