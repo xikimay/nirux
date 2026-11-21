@@ -85,32 +85,21 @@ extension NiruxShellView {
     func agentPaletteActions() -> [PaletteAction] {
         let restartLead = leadWorkspace(inSpace: activeProfileID) == nil ? [] : [
             PaletteAction(
-                icon: .agent("claude"), title: Self.restartLeadTitle,
+                icon: .agent(.claude), title: Self.restartLeadTitle,
                 subtitle: "End the Lead’s Claude and start a fresh conversation with the space’s launch options", shortcut: nil
             ) { [weak self] in
                 guard let self else { return }
                 self.requestRestartLead(spaceID: self.activeProfileID)
             }
         ]
-        return restartLead + [
+        return restartLead + CodingAgent.launchable.map { agent in
             PaletteAction(
-                icon: .agent("claude"), title: "Open Claude Code",
-                subtitle: "Launch Claude Code in a new terminal", shortcut: nil
+                icon: .agent(agent), title: "Open \(agent.productName)",
+                subtitle: "Launch \(agent.fullName) in a new terminal", shortcut: nil
             ) { [weak self] in
-                self?.openClaudeCode()
-            },
-            PaletteAction(
-                icon: .agent("codex"), title: "Open Codex",
-                subtitle: "Launch OpenAI Codex in a new terminal", shortcut: nil
-            ) { [weak self] in
-                self?.openCodex()
-            },
-            PaletteAction(
-                icon: .agent("agy"), title: "Open Antigravity",
-                subtitle: "Launch Google’s Antigravity CLI in a new terminal", shortcut: nil
-            ) { [weak self] in
-                self?.openAgy()
-            },
+                self?.openAgent(agent)
+            }
+        } + [
             PaletteAction(
                 icon: .symbol(Theme.Symbol.sessionHistory), title: "Session History…",
                 subtitle: "Every session of this space, to go back to or resume", shortcut: nil

@@ -141,7 +141,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
                 if case .waitingForChecks? = queue.engine?.currentEntry?.step { return true }
                 return false
             }
-            waitUntil("the line says so") { (BoardStagesClicks.shownLine("login", in: board)?.line.phrase.text) == "Waiting for checks" }
+            waitUntil("the line says so") { (BoardStagesClicks.shownLine("login", in: board)?.line.phrase.text) == "Auto · Waiting for checks" }
             BoardStagesClicks.layOut(header)
             XCTAssertTrue(header.startButton.isHidden)
             XCTAssertFalse(header.stopButton.isHidden, "Stop is in reach while it runs")
@@ -172,12 +172,12 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             }
             XCTAssertEqual(try line("feat/api", in: board).line.phrase.text, "Base #10 merged · Retarget to main")
             // GitHub refuses: the repository's pill says why, until Refresh.
-            client.retargetFailure = .failed("HTTP 422: Validation Failed")
+            client.retargetFailure = .refused(status: 422, message: "Validation Failed")
             try BoardStagesClicks.pressLink(try line("feat/api", in: board))
             let header = try self.header(of: board)
-            waitUntil("the refusal shows") { header.pill.status?.toolTip?.contains("Retarget #14: gh: HTTP 422") == true }
+            waitUntil("the refusal shows") { header.pill.status?.toolTip?.contains("Retarget #14: Validation Failed (HTTP 422)") == true }
             XCTAssertEqual(header.pill.status?.tone, .error)
-            XCTAssertTrue(board.view.refreshButton.toolTip?.contains("Retarget #14: gh: HTTP 422") == true, "and under Refresh")
+            XCTAssertTrue(board.view.refreshButton.toolTip?.contains("Retarget #14: Validation Failed (HTTP 422)") == true, "and under Refresh")
             client.retargetFailure = nil
             try BoardStagesClicks.click(board.view.refreshButton)
             waitUntil("Refresh clears it") { header.pill.status?.tone != .error && BoardStagesClicks.wasUpdated(board) }
@@ -245,6 +245,68 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testRestoredTimeoutOpensConfirmationForOnlyTheRemainingPR() throws {
+        let head = "8c757e0" + String(repeating: "a", count: 33)
+        let timeout = MergeQueue.StopReason(kind: .checks, message:
+            "After 30 minutes, required checks are still missing or running on 8c757e0: test. If runners are busy, raise the checks timeout in Board Settings.")
+        let engine = MergeQueue.Engine(settings: MQ.settings(), entries: [
+            MQ.entry(660, head: Self.a), MQ.entry(708, head: Self.b, branch: "feat/login")
+        ])
+        var saved = MergeQueue.SavedQueue(engine: engine, dryRun: false, savedAt: Date().addingTimeInterval(-3 * 3600))
+        saved.status = .stopped
+        saved.current = 1
+        saved.stopReason = timeout
+        saved.entries[0].step = .done
+        saved.entries[0].mergeCommit = MQ.sha("c")
+        saved.entries[1].heads.append(head)
+        saved.entries[1].step = .stopped(timeout)
+        let open = """
+        [{"number":708,"state":"OPEN","headRefName":"feat/login","headRefOid":"\(head)","baseRefName":"main",
+          "title":"Speed up macOS tests","headRepository":{"name":"widgets"},"headRepositoryOwner":{"login":"acme"},
+          "isDraft":false,"mergeable":"MERGEABLE","url":"https://github.com/acme/widgets/pull/708",
+          "statusCheckRollup":[{"name":"test","workflowName":"Tests","status":"COMPLETED","conclusion":"SUCCESS"}]},
+         {"number":14,"state":"OPEN","headRefName":"feat/api","headRefOid":"\(Self.b)","baseRefName":"main",
+          "title":"Update the API","headRepository":{"name":"widgets"},"headRepositoryOwner":{"login":"acme"},
+          "isDraft":true,"mergeable":"MERGEABLE","url":"https://github.com/acme/widgets/pull/14","statusCheckRollup":[]}]
+        """
+        let client = ProjectBoardFlowTests.FakeGitHub(openPullRequests: open, runs: ProjectBoardGitHubTests.postMergeRuns)
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [708: head])
+        try withBoard(world: world, boardClient: client, isDryRun: false, saved: saved) { shell, board in
+            let header = try self.header(of: board)
+            XCTAssertTrue(header.queueLabel.stringValue.contains("#708 queue timed out"))
+            XCTAssertTrue(header.queueLabel.stringValue.hasSuffix("test passed on 8c757e0"))
+            XCTAssertEqual(header.startButton.title, "Retry #708…")
+            let login = try line("login", in: board).line
+            XCTAssertEqual(login.phrase.text, "Queued · awaiting Start")
+            var inputs = try XCTUnwrap(board.builtStages.last?.key.inputs)
+            let aged = board.keptStagesContent(inputs, now: Date().addingTimeInterval(3600))
+            let stale = try XCTUnwrap(aged.sections.first)
+            XCTAssertTrue(stale.queue?.status?.hasSuffix("Current checks unknown") == true)
+            XCTAssertEqual(stale.queue?.start?.title, "Start… · 1")
+            XCTAssertEqual(stale.lines.units.flatMap(\.lines).first { $0.id == login.id }?.phrase.text, "GitHub status outdated")
+
+            inputs.readings[login.id, default: .init()].activity = .needsYou("Ship this version?", action: .decide)
+            let asking = board.stagesContent(inputs).content
+            XCTAssertEqual(asking.inputStatus, "1 needs you · login")
+            let current = try XCTUnwrap(asking.sections.first)
+            XCTAssertEqual(current.lines.units.flatMap(\.lines).first { $0.id == login.id }?.phrase.text, "Decide · Ship this version?")
+            XCTAssertEqual(current.queue?.start?.title, "Retry #708…")
+            XCTAssertEqual(world.callCount, 0)
+            try BoardStagesClicks.click(header.startButton)
+            let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
+            waitUntil("the retry read #708") { sheet.confirmation != nil }
+            let confirmation = try XCTUnwrap(sheet.confirmation)
+            XCTAssertEqual(confirmation.entries.map(\.number), [708])
+            XCTAssertEqual(confirmation.entries.map(\.head), [head])
+            XCTAssertEqual(confirmation.settings.requiredChecks, ["test"])
+            XCTAssertFalse(shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets).isRunning)
+            sheet.dismiss()
+            XCTAssertEqual(world.mergedNumbers, [])
+            XCTAssertEqual(world.forbiddenCalls, [])
+        }
+    }
+
     // MARK: - Helpers
 
     /// A shell in a window with the board of a project whose repository is
@@ -255,6 +317,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         world: MergeQueueFlowTests.GitHubWorld,
         boardClient: ProjectBoardFlowTests.FakeGitHub? = nil,
         isDryRun: Bool = true,
+        saved: MergeQueue.SavedQueue? = nil,
         _ body: (NiruxShellView, ProjectBoardController) throws -> Void
     ) throws {
         let stateDirectory = root + "/state"
@@ -270,7 +333,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         shell.projectBoardClient = boardClient ?? ProjectBoardFlowTests.FakeGitHub(
             openPullRequests: Self.boardPullRequests, runs: ProjectBoardGitHubTests.postMergeRuns
         )
-        let queueClient = GitHubCLIQueueClient(run: world.run)
+        let queueClient = GitHubCLIQueueClient(gh: world.run)
         shell.mergeQueueClient = isDryRun ? DryRunQueueClient(wrapped: queueClient, reason: "NIRUX_STATE_DIR is set") : queueClient
         shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
         let window = NSWindow(
@@ -287,6 +350,11 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             window.close()
         }
         let space = shell.workspaceStore.createProfile(named: "Board")
+        if let saved {
+            let files = try XCTUnwrap(MergeQueue.Files(projectID: space.id, repository: MQ.widgets,
+                                                       stateDirectory: URL(fileURLWithPath: stateDirectory), dryRun: isDryRun))
+            saved.save(to: files.state)
+        }
         let repo = root + "/widgets"
         try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
         let login = root + "/widgets.feat-login"

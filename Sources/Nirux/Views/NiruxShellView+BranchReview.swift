@@ -31,7 +31,7 @@ extension NiruxShellView {
     /// worktree has one review: if it has one already, that one comes to
     /// the front.
     func openBranchReview(in workspace: WorkspaceState?, folder: String? = nil) {
-        guard let workspace, !workspace.isClosing else { return }
+        guard let workspace, !workspace.isClosing, !workspace.isWaitingTask else { return }
         let worktree = folder ?? workspace.cwd
         if let existing = branchReviewLocation(worktree: worktree) {
             focusBranchReview(existing)

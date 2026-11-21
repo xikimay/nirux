@@ -4,6 +4,11 @@ import Foundation
 /// session: ⌘P lists a space's past sessions under "Sessions", and picking
 /// one resumes it (`NiruxShellView.resumeSession`).
 enum SessionHistory {
+    /// The agents whose sessions it lists: their hooks report each
+    /// session's start, turns and end. Antigravity's only name its
+    /// conversation.
+    static let agents: [CodingAgent] = [.claude, .codex]
+
     static let paletteSectionTitle = "Sessions"
     /// ⌘P lists this many past sessions at most, the most recently active.
     static let paletteLimit = 50
@@ -29,7 +34,7 @@ enum SessionHistory {
             .first(where: { !$0.isEmpty }) {
             return title
         }
-        return agentName(record.agent) + " session"
+        return record.agent.name + " session"
     }
 
     /// "2 h ago · feat/x · #112 merged · ~/Projects/repo.feat-x": when it
@@ -70,12 +75,10 @@ enum SessionHistory {
         "#\(pullRequest.number) \(pullRequest.state.lowercased())"
     }
 
-    static func agentName(_ agent: AgentHookEvent.Kind) -> String {
-        switch agent {
-        case .claude: return "Claude"
-        case .codex: return "Codex"
-        case .agy: return "Antigravity"
-        }
+    /// The pull request's label when it merged, whatever case the record
+    /// spells its state in: drawn in the done colour.
+    static func mergedPullRequestLabel(of record: AgentSessionRecord) -> String? {
+        record.pullRequest.flatMap { GitHub.PullRequestState($0.state) == .merged ? pullRequestLabel($0) : nil }
     }
 
     /// "just now", "12 min ago", "3 h ago", "yesterday", "5 days ago".
@@ -91,12 +94,12 @@ enum SessionHistory {
     }
 
     /// Why a session can't be resumed, for a toast.
-    static func message(_ reason: AgentSessionResume.Unavailable, agent: AgentHookEvent.Kind) -> String {
+    static func message(_ reason: AgentSessionResume.Unavailable, agent: CodingAgent) -> String {
         switch reason {
         case .noConversation:
             return "This session was never prompted: there is nothing to resume"
         case .transcriptGone:
-            return "\(agentName(agent)) deleted this session’s transcript: it can’t be resumed"
+            return "\(agent.name) deleted this session’s transcript: it can’t be resumed"
         case .noFolder:
             return "The session’s folder no longer exists, and there is no checkout of its repository to resume it in"
         }
@@ -171,18 +174,6 @@ extension HeldAgentSession {
     }
 }
 
-extension DeferredAgentLaunch.Agent {
-    /// The session it will resume; nil for a fresh agent or the picker.
-    var sessionID: String? {
-        switch self {
-        case .claude(.session(let sessionID)?, _), .codex(.session(let sessionID), _), .agy(.session(let sessionID)):
-            return sessionID
-        default:
-            return nil
-        }
-    }
-}
-
 // MARK: - The Session History panel
 
 /// What the Session History panel lists: a space's sessions, the ones a
@@ -191,7 +182,7 @@ struct SessionHistoryFilter: Equatable {
     var text = ""
     var pullRequest = AgentSessionLedger.Query.PullRequestFilter.any
     /// The agent switch does what typing its name would.
-    var agent: AgentHookEvent.Kind?
+    var agent: CodingAgent?
 
     func admits(_ record: AgentSessionRecord) -> Bool {
         switch pullRequest {

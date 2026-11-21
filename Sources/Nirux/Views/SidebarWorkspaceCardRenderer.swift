@@ -642,7 +642,7 @@ final class SidebarWorkspaceCardRenderer {
         button.hoverFillColor = Theme.Color.accent.withAlphaComponent(0.14)
         button.toolTip = deferred.tooltip
         button.setAccessibilityRole(.button)
-        button.setAccessibilityLabel("Resume \(deferred.processName) here")
+        button.setAccessibilityLabel("Resume \(deferred.agent.rawValue) here")
         views.last?.setAccessibilityElement(false)
         append(button)
         approvalButtons[SidebarHoverTarget.deferredResumeButtonKey(columnID: deferred.columnID)] = button
@@ -765,6 +765,16 @@ final class SidebarWorkspaceCardRenderer {
             ]))
             label.toolTip = "What the Lead's daily pass read of the space's day. Its reply in its terminal says what it proposes, "
                 + "and why."
+            label.frame = NSRect(
+                x: layout.indentX, y: top - Metrics.actionLineHeight,
+                width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
+            )
+            append(label)
+        case .heldMessages(let held):
+            let label = NSTextField.sidebarLine(NSAttributedString(string: held.line, attributes: [
+                .font: Theme.Font.caption, .foregroundColor: Theme.Color.textSecondary
+            ]))
+            label.toolTip = held.tooltip
             label.frame = NSRect(
                 x: layout.indentX, y: top - Metrics.actionLineHeight,
                 width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight

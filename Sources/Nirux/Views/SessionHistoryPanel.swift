@@ -106,7 +106,7 @@ final class SessionHistoryPanel: NSObject {
 
     var filter: SessionHistoryFilter {
         let pullRequests: [AgentSessionLedger.Query.PullRequestFilter] = [.any, .with, .without]
-        let agents: [AgentHookEvent.Kind?] = [nil, .claude, .codex]
+        let agents = [nil] + SessionHistory.agents
         return SessionHistoryFilter(
             text: searchField?.stringValue ?? "",
             pullRequest: pullRequests[safe: pullRequestControl?.selectedSegment ?? 0] ?? .any,
@@ -299,7 +299,7 @@ final class SessionHistoryPanel: NSObject {
             labels: ["All", "With PR", "No PR"], trackingMode: .selectOne, target: self, action: #selector(reload)
         )
         let agents = NSSegmentedControl(
-            labels: ["All Agents", "Claude", "Codex"], trackingMode: .selectOne, target: self, action: #selector(reload)
+            labels: ["All Agents"] + SessionHistory.agents.map(\.name), trackingMode: .selectOne, target: self, action: #selector(reload)
         )
         for (control, x) in [(pullRequests, Theme.Space.lg), (agents, size.width / 2)] {
             // The keyboard stays in the field, whatever is clicked.
@@ -490,7 +490,7 @@ private final class SessionHistoryCellView: NSTableCellView {
 
     func configure(_ row: SessionHistoryRow, now: TimeInterval) {
         icon?.removeFromSuperview()
-        let agentIcon = PaletteIconView(.agent(row.record.agent.rawValue), frame: .zero)
+        let agentIcon = PaletteIconView(.agent(row.record.agent), frame: .zero)
         addSubview(agentIcon)
         icon = agentIcon
         titleLabel.stringValue = SessionHistory.title(of: row.record)
@@ -518,9 +518,9 @@ private final class SessionHistoryCellView: NSTableCellView {
                 details.removeAll { $0 == SessionHistory.folder(of: row.record).map { $0.abbreviatedPath() } }
             }
         }
+        let merged = SessionHistory.mergedPullRequestLabel(of: row.record)
         for part in details {
-            let isMerged = row.record.pullRequest.map { SessionHistory.pullRequestLabel($0) == part && $0.state == "MERGED" }
-            append(part, color: isMerged == true ? Theme.Color.done : Theme.Color.textSecondary)
+            append(part, color: part == merged ? Theme.Color.done : Theme.Color.textSecondary)
         }
         detailLabel.attributedStringValue = detail
         needsLayout = true

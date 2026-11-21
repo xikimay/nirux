@@ -17,7 +17,7 @@ final class SessionHistoryFlowTests: XCTestCase {
     private static let forgottenID = "f6a7b8c9-d0e1-4f2a-9b3c-5d6e7f8091a2"
 
     static func session(
-        _ sessionID: String, title: String, folder: String, agent: AgentHookEvent.Kind = .claude,
+        _ sessionID: String, title: String, folder: String, agent: CodingAgent = .claude,
         workspaceID: String? = nil, checkout: AgentSessionRecord.Checkout? = nil, hoursAgo: Double = 1
     ) -> AgentSessionRecord {
         let lastActivity = Date().timeIntervalSince1970 - hoursAgo * 3600
@@ -92,7 +92,7 @@ final class SessionHistoryFlowTests: XCTestCase {
             let forged = Self.session("--dangerously-skip-permissions", title: "forged-task", folder: harness.repo)
             try Self.seed([flow, codex, restored, unprompted, forged], in: harness)
             workspace.addColumn(
-                deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session(Self.restoredID), mode: .default), title: nil, lastStatus: nil),
+                deferredAgent: DeferredAgentLaunch(launch: .claude(resume: .session(Self.restoredID), mode: .default), title: nil, lastStatus: nil),
                 agentUUID: UUID().uuidString, cwd: harness.repo
             )
             let restoredColumn = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])

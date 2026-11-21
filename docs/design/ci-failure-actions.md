@@ -62,7 +62,7 @@ are typed by hand.
 
 ## Files
 
-`PRDetect` and `ProjectBoard.latest` (red rule, `PRInfo.checks`),
+`PRDetect` and `GitHub.latest` (red rule, `PRInfo.checks`),
 `WorkspaceState.takeNewRedChecks` (notify-once), `CIFailure` (red checks to
 act on, run URL parsing, prompt, rerun),
 `NiruxNotifier` (two categories of two buttons: the rerun first for a likely

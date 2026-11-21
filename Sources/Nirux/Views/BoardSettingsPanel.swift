@@ -160,7 +160,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     func draftConfig() -> BoardConfig {
         var config = BoardConfig()
         config.repository = Self.trimmedValue(of: repositoryField).map { value in
-            value.contains("github.com") ? BoardConfigSuggestions.repositoryName(remoteURL: value) ?? value : value
+            GitHubRepository.gitHubOwnerAndName(remoteURL: value) ?? value
         }
         config.baseBranch = Self.trimmedValue(of: baseBranchField)
         var checks: [String] = []

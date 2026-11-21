@@ -4,38 +4,88 @@ import XCTest
 /// A temporary repository for `BranchReview` tests: a bare remote, and a
 /// clone on `feat/x` branched from `main`, which holds a README and
 /// `Sources/App.swift`. Git runs pinned against the developer's global and
-/// system config (hooks, signing, excludes, templates).
+/// system config (hooks, signing, excludes, templates). Each test gets its
+/// own copy of one made once per class.
 class BranchReviewRepositoryTestCase: XCTestCase {
     var root: String!
     var remote: String!
     var repo: String!
     var environment: [String: String]!
 
-    override func setUpWithError() throws {
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("nirux-review-tests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        root = try XCTUnwrap(base.path.realPath)
-        let home = root + "/home"
-        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
-        environment = ["HOME": home, "XDG_CONFIG_HOME": home, "GIT_CONFIG_NOSYSTEM": "1"]
+    nonisolated(unsafe) private static var template: String?
 
+    override func setUpWithError() throws {
+        root = try Self.makeRoot()
+        environment = Self.environment(root: root)
         remote = root + "/remote.git"
         // A folder named with "/" in the Finder holds a ":" on disk.
         repo = root + "/wid:gets"
-        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
-        try git(["init", "-q", "--bare", "--template=", "-b", "main", remote], at: root)
-        try git(["init", "-q", "--template=", "-b", "main"], at: repo)
-        try write("README.md", "widgets\n")
-        try write("Sources/App.swift", "let a = 1\nlet b = 2\nlet c = 3\n")
-        try commit("initial")
-        try git(["remote", "add", "origin", remote], at: repo)
-        try git(["push", "-q", "-u", "origin", "main"], at: repo)
-        try git(["checkout", "-q", "-b", "feat/x"], at: repo)
+        let template = try Self.template ?? Self.makeTemplate()
+        Self.template = template
+        for folder in ["remote.git", "wid:gets"] {
+            try FileManager.default.copyItem(atPath: template + "/" + folder, toPath: root + "/" + folder)
+        }
+        let config = repo + "/.git/config"
+        try String(contentsOfFile: config, encoding: .utf8).replacingOccurrences(of: template, with: root)
+            .write(toFile: config, atomically: true, encoding: .utf8)
+        // A copy's files have other inodes than its index says.
+        try git(["update-index", "-q", "--refresh"])
     }
 
     override func tearDown() {
         if let root { try? FileManager.default.removeItem(atPath: root) }
+    }
+
+    override class func setUp() {
+        super.setUp()
+        template = try? makeTemplate()
+    }
+
+    override class func tearDown() {
+        if let template { try? FileManager.default.removeItem(atPath: template) }
+        template = nil
+        super.tearDown()
+    }
+
+    private static func makeRoot() throws -> String {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nirux-review-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let root = try XCTUnwrap(base.path.realPath)
+        try FileManager.default.createDirectory(atPath: root + "/home", withIntermediateDirectories: true)
+        return root
+    }
+
+    private static func environment(root: String) -> [String: String] {
+        ["HOME": root + "/home", "XDG_CONFIG_HOME": root + "/home", "GIT_CONFIG_NOSYSTEM": "1"]
+    }
+
+    private static func makeTemplate() throws -> String {
+        let root = try makeRoot()
+        do {
+            try makeRepository(in: root)
+            return root
+        } catch {
+            try? FileManager.default.removeItem(atPath: root)
+            throw error
+        }
+    }
+
+    private static func makeRepository(in root: String) throws {
+        let environment = Self.environment(root: root)
+        let remote = root + "/remote.git"
+        let repo = root + "/wid:gets"
+        let git = { (arguments: [String], directory: String) in _ = try Self.git(arguments, at: directory, environment: environment) }
+        try FileManager.default.createDirectory(atPath: repo + "/Sources", withIntermediateDirectories: true)
+        try git(["init", "-q", "--bare", "--template=", "-b", "main", remote], root)
+        try git(["init", "-q", "--template=", "-b", "main"], repo)
+        try Data("widgets\n".utf8).write(to: URL(fileURLWithPath: repo + "/README.md"))
+        try Data("let a = 1\nlet b = 2\nlet c = 3\n".utf8).write(to: URL(fileURLWithPath: repo + "/Sources/App.swift"))
+        try git(["add", "-A"], repo)
+        try git(["commit", "-q", "-m", "initial"], repo)
+        try git(["remote", "add", "origin", remote], repo)
+        try git(["push", "-q", "-u", "origin", "main"], repo)
+        try git(["checkout", "-q", "-b", "feat/x"], repo)
     }
 
     // MARK: - Helpers
@@ -96,7 +146,7 @@ class BranchReviewRepositoryTestCase: XCTestCase {
         try git(["rev-parse", "HEAD"], at: directory).trimmingCharacters(in: .newlines)
     }
 
-    func options(gitHub: BranchReview.GitHubCLI? = nil, fetchBase: Bool = false) -> BranchReview.Options {
+    func options(gitHub: GitHub.CLI.Runner? = nil, fetchBase: Bool = false) -> BranchReview.Options {
         BranchReview.Options(gitHub: gitHub, fetchBase: fetchBase, environment: environment)
     }
 
