@@ -5,9 +5,15 @@ name: Tests
 # (2026-07-19, ActivityStoreTests). Not on push to main: the nightly
 # (nightly.yml) already runs the tests there, and a second run held another
 # macOS runner on every merge.
+#
+# A draft runs only the test classes its changes reach, under its own check
+# name, "test (selected)". The full suite, the "test" check, runs once the
+# pull request is marked ready and on every push after: a draft never shows
+# a "test" check, passed or skipped, that a merge could read.
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -28,6 +34,7 @@ jobs:
       - run: scripts/check-core-boundary.sh
 
   test:
+    name: ${{ github.event.pull_request.draft && 'test (selected)' || 'test' }}
     runs-on: macos-15
     # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift
     # 6.1): libghostty-spm 2.2 needs Swift tools 6.2.
@@ -79,8 +86,49 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
+      # The latest index the Coverage map workflow saved on main.
+      - name: Coverage index
+        id: coverage
+        if: github.event.pull_request.draft
+        uses: actions/cache/restore@v6
+        with:
+          path: .build/coverage-index.txt
+          key: coverage-index-v2-${{ github.event.pull_request.base.sha }}
+          restore-keys: coverage-index-v2-
+
+      - name: Select tests
+        shell: bash
+        id: select
+        env:
+          INDEX_KEY: ${{ steps.coverage.outputs.cache-matched-key }}
+        if: github.event.pull_request.draft
+        run: |
+          revision="${INDEX_KEY#coverage-index-v2-}"
+          if [[ ! -s .build/coverage-index.txt || ! $revision =~ ^[0-9a-f]{40}$ ]] ||
+             ! git merge-base --is-ancestor "$revision" HEAD^1; then
+            echo "No coverage index from the base history. Running the whole suite."
+            exit 0
+          fi
+          git diff --no-renames --name-only -z "$revision" HEAD > "$RUNNER_TEMP/changed"
+          swift test list --skip-build | cut -d/ -f1 | sort -u > "$RUNNER_TEMP/test-classes"
+          status=0
+          scripts/select-tests.sh .build/coverage-index.txt "$RUNNER_TEMP/test-classes" < "$RUNNER_TEMP/changed" > "$RUNNER_TEMP/selected" || status=$?
+          if [[ $status -eq 0 ]]; then
+            echo "$(wc -l < "$RUNNER_TEMP/selected" | tr -d ' ') classes selected:"
+            cat "$RUNNER_TEMP/selected"
+            echo "only=$RUNNER_TEMP/selected" >> "$GITHUB_OUTPUT"
+          elif [[ $status -ne 3 ]]; then
+            exit "$status"
+          fi
+
       - name: Run tests
         # A warning past it, not a failure: runners vary up to 4x.
         env:
           NIRUX_TESTS_BUDGET: 500
-        run: scripts/run-tests.sh
+          ONLY: ${{ steps.select.outputs.only }}
+        run: |
+          if [[ -n $ONLY ]]; then
+            scripts/run-tests.sh --only "$ONLY"
+          else
+            scripts/run-tests.sh
+          fi
