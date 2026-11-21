@@ -249,9 +249,12 @@ New flow, built on the guarded typing `tell` already uses
   it.
 - **Tools** (Nirux MCP server, given to the Lead's Claude only), limited to its
   space and its anchors (shipped with S11b):
-  - `start_task(description, repo?, template?)`: the ⌘N path (origin's base
-    fetched, else as last fetched; the space's agent; a branch from the
-    description's first line, `-2`… when it exists), reporting to the Lead as
+  - `start_task(description, repo?, template?, title?, branch?, goal?)`: the
+    ⌘N path (origin's base fetched, else as last fetched; the space's agent;
+    the branch given, else the one the description's first line asks for,
+    else one from the title or that line, `-2`… when it exists; the title
+    names the row, at most 22 characters, 20 for a sub-task; the goal, at most
+    34, is the workspace's purpose), reporting to the Lead as
     a Mission, in the Lead's space. `repo: "none"`, or any task in a space
     without a repository, starts in a folder of its own (see "Tasks without a
     repository"). It opens behind what the user is doing:
@@ -324,8 +327,10 @@ New flow, built on the guarded typing `tell` already uses
     too (the call stands in for the alert's click); a task without a
     repository has its folder moved to the Trash (for this tool only: Close
     and Archive keep it). Otherwise they stay and the answer says why: not
-    merged, uncommitted changes, another workspace open in it, a folder named
-    for another branch (a base reused across branches)… The task closes and
+    merged, uncommitted changes, another workspace open in it, or a reused
+    base folder. After a branch switch, the exact worktree path for the
+    starting branch recorded in this workspace’s Mission also qualifies.
+    The merged PR and the local branch removed are the current branch’s. The task closes and
     its shells hang up first; git runs, or the folder goes to the Trash,
     once all their processes ended (10 s at most, else the folder stays and
     the answer names them). A folder task's folder holding a git repository
