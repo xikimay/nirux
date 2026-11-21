@@ -186,6 +186,7 @@ final class SidebarWorkspaceCardRenderer {
     /// last summary, the blocker and the next step, whole.
     private func titleToolTip() -> String {
         var lines = [workspace.title]
+        for agent in workspace.columns.compactMap(\.agentLabel) { lines.append("Agent: \(agent)") }
         if let subtask = workspace.subtaskText { lines.append(subtask) }
         if let branch = workspace.gitBranch { lines.append("Branch: \(branch)") }
         if let stats = workspace.diffStats { lines.append("Changes: \(SidebarRenderer.formatDiffStats(stats))") }

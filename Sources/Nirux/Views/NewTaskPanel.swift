@@ -374,9 +374,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// A proposal (`start_task` with "Starts tasks without asking" off),
     /// from the Lead or a task's agent: its description, and its template,
     /// picked once the repository's templates are read.
-    func prefill(description: String, templateName: String?, proposedBy: String = "the Lead") {
+    func prefill(description: String, templateName: String?, agent: CodingAgent? = nil, proposedBy: String = "the Lead") {
         guard panel != nil else { return }
         descriptionView.string = description
+        if let agent, let index = CodingAgent.launchable.firstIndex(of: agent) { agentPopup.selectItem(at: index) }
         if let templateName { pickedTemplateName = templateName }
         self.proposedBy = proposedBy
         updateForSubtask()

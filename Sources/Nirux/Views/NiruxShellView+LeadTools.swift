@@ -27,7 +27,10 @@ extension NiruxShellView {
         if let problem = LeadTools.problem(tool: request.tool, arguments: arguments) { return answer(problem, true) }
         let parent = NewTask.MissionParent(workspaceID: lead.id, agentUUID: request.agentUUID)
         switch request.tool {
-        case LeadTools.startTask: leadStartTask(arguments, in: space, parent: parent, answer: answer)
+        case LeadTools.startTask:
+            selectTaskAgent(arguments, parent: parent, spaceID: space.id, answer: answer) { selection in
+                self.leadStartTask(arguments, selection: selection, in: space, parent: parent, answer: answer)
+            }
         case LeadTools.listTasks: answer(leadTaskList(in: space, lead: lead.id), false)
         case LeadTools.tell: leadTell(arguments, in: space, lead: parent, answer: answer)
         case LeadTools.reply: leadReply(arguments, in: space, lead: lead.id, answer: answer)
@@ -49,8 +52,32 @@ extension NiruxShellView {
 
     // MARK: start_task
 
+    func selectTaskAgent(
+        _ arguments: [String: Any], parent: NewTask.MissionParent, spaceID: String, answer: @escaping LeadAnswer,
+        then start: @escaping @MainActor (TaskAgentSelection) -> Void
+    ) {
+        let agent = LeadTools.string(arguments, "agent").flatMap(CodingAgent.init(launchable:))
+            ?? defaultTaskAgent(forSpace: spaceID)
+        let selection = TaskAgentSelection(agent: agent, model: LeadTools.string(arguments, "model"))
+        guard arguments["agent"] != nil || selection.model != nil else { return start(selection) }
+        let validate = sideEffects.validateTaskAgent
+        let environment = SpaceDefaultsStore.defaults(forSpace: spaceID).effectiveEnvironment
+        Task { @MainActor in
+            do {
+                let validated = try await Task.detached { try validate(selection, environment) }.value
+                guard let caller = requestingTerminal(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID),
+                      caller.workspace.profileID == spaceID else {
+                    return answer("The requesting terminal closed or changed spaces while Nirux checked the model.", true)
+                }
+                start(validated)
+            } catch {
+                answer(error.localizedDescription, true)
+            }
+        }
+    }
+
     private func leadStartTask(
-        _ arguments: [String: Any], in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
+        _ arguments: [String: Any], selection: TaskAgentSelection, in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
         let description = LeadTools.string(arguments, "description") ?? ""
         let repositories = newTaskRepositories(of: space)
@@ -73,11 +100,11 @@ extension NiruxShellView {
         let templateName = LeadTools.string(arguments, "template")
         guard leadStartsTasksWithoutAsking(spaceID: space.id) else {
             return leadProposeTask(
-                description, repository: repository, withoutRepository: asksNoRepository, templateName: templateName,
+                description, agent: arguments["agent"] == nil ? nil : selection.agent, hasModel: selection.model != nil,
+                repository: repository, withoutRepository: asksNoRepository, templateName: templateName,
                 in: space, parent: parent, answer: answer
             )
         }
-        let agent = defaultTaskAgent(forSpace: space.id)
         Self.readNewTaskInfo(
             spaceID: space.id, folder: repository?.folder, anchors: space.anchors, stateDirectory: Persistence.stateDirectory
         ) { [weak self] info in
@@ -98,7 +125,7 @@ extension NiruxShellView {
             }
             // It opens behind what the user is doing.
             self.startAgentTask(
-                description, templateName: templateName, info: info, agent: agent, spaceID: space.id, parent: parent,
+                description, templateName: templateName, info: info, selection: selection, spaceID: space.id, parent: parent,
                 folder: folder, repository: repository, configure: { $0.startedByLead = true }, answer: answer
             )
         }
@@ -111,7 +138,7 @@ extension NiruxShellView {
     // The request's fields, as start_task gathered them.
     // swiftlint:disable:next function_parameter_count
     func startAgentTask(
-        _ description: String, templateName: String?, info: NewTaskPanel.ProjectInfo, agent: CodingAgent,
+        _ description: String, templateName: String?, info: NewTaskPanel.ProjectInfo, selection: TaskAgentSelection,
         spaceID: String, parent: NewTask.MissionParent, folder: NewTask.Place?, repository: NewTaskPanel.Repository?,
         configure: @escaping @MainActor @Sendable (inout NewTask.Request) -> Void, answer: @escaping LeadAnswer
     ) {
@@ -122,7 +149,7 @@ extension NiruxShellView {
         let template = templateName.flatMap { name in info.templates.first { $0.name.caseInsensitiveCompare(name) == .orderedSame } }
         if let folder {
             var request = NewTask.Request(
-                description: description, template: template, agent: agent, projectID: spaceID,
+                description: description, template: template, agent: selection.agent, model: selection.model, projectID: spaceID,
                 place: folder, fetchesFirst: false, reportsTo: parent
             )
             configure(&request)
@@ -138,7 +165,7 @@ extension NiruxShellView {
         Self.unusedBranch(suggested, repository: target.repository) { [weak self] branch in
             guard let self else { return }
             var request = NewTask.Request(
-                description: description, template: template, agent: agent, projectID: spaceID,
+                description: description, template: template, agent: selection.agent, model: selection.model, projectID: spaceID,
                 place: .worktree(target, branch: branch), fetchesFirst: true, reportsTo: parent
             )
             configure(&request)
@@ -190,7 +217,15 @@ extension NiruxShellView {
             let alone = request.reportsToTask
                 ? (requester == nil ? "your terminal closed meanwhile" : "Nirux couldn’t record its Mission")
                 : (requester?.workspace.isLead == true ? "Nirux couldn’t record its Mission" : "your Lead changed meanwhile")
-            answer("Started “\(title)” \(place), with \(request.agent.rawValue). "
+            let warning: String
+            if request.agent == .agy, let target = request.target,
+               AgyWorktreeTrust.settings(for: created.workingDirectory, home: self.sideEffects.homeDirectory()) == nil {
+                warning = " Antigravity may ask the user to trust this worktree (no inherited trust from \(target.repository))."
+            } else {
+                warning = ""
+            }
+            let model = request.model.map { ", model \($0)" } ?? ""
+            answer("Started “\(title)” \(place), with \(request.agent.rawValue)\(model).\(warning) "
                 + (reports ? "It reports to you: its questions and its result come to your prompt."
                     : "It doesn’t report to you (\(alone)): the user follows it."), false)
         })
@@ -218,23 +253,25 @@ extension NiruxShellView {
     /// Lead's space; the task reports to the Lead if the user starts it.
     /// One sheet at a time: the others wait their turn.
     private func leadProposeTask(
-        _ description: String, repository: NewTaskPanel.Repository?, withoutRepository: Bool, templateName: String?,
+        _ description: String, agent: CodingAgent?, hasModel: Bool, repository: NewTaskPanel.Repository?,
+        withoutRepository: Bool, templateName: String?,
         in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
         let proposal = LeadProposal(
             spaceID: space.id,
             repository: repository.map { .named(key: $0.key) } ?? (withoutRepository ? .noRepository : .spaceDefault),
-            description: description, templateName: templateName, parent: parent
+            description: description, templateName: templateName, parent: parent, agent: agent
         )
+        let modelNotice = hasModel ? LeadProposal.defaultModelNotice : ""
         if pendingLeadProposals.isEmpty, showLeadProposal(proposal) {
             return answer("Proposed to the user in the New sheet (the space’s setting “Starts tasks without asking” is off). "
-                + "If they start it, it reports to you.", false)
+                + "If they start it, it reports to you." + modelNotice, false)
         }
         pendingLeadProposals.append(proposal)
         scheduleLeadProposals()
         let ahead = pendingLeadProposals.count - 1
         answer("Queued for the user: the New sheet shows it once \(ahead == 0 ? "the sheet open now closes" : "\(ahead) proposal(s) ahead are done"). "
-            + "If they start it, it reports to you.", false)
+            + "If they start it, it reports to you." + modelNotice, false)
     }
 
     /// Shows a proposal when no sheet is up and its Lead is still there; a
@@ -246,7 +283,7 @@ extension NiruxShellView {
                   let panel = showNewSubtaskPanel(under: task)
             else { return false }
             panel.reportsToTaskAgent = proposal.parent
-            panel.prefill(description: proposal.description, templateName: proposal.templateName, proposedBy: "“\(task.title)”")
+            panel.prefill(description: proposal.description, templateName: proposal.templateName, agent: proposal.agent, proposedBy: "“\(task.title)”")
             let firstLine = NewTask.workspaceTitle(description: proposal.description) ?? proposal.description
             panel.onDeclineProposal = { [weak self] in
                 self?.tellProposer(proposal.parent, "The user closed the New Sub-task sheet you proposed (“\(MissionPromptText.quoted(firstLine))”): "
@@ -259,7 +296,7 @@ extension NiruxShellView {
               )
         else { return false }
         panel.reportsTo = proposal.parent
-        panel.prefill(description: proposal.description, templateName: proposal.templateName)
+        panel.prefill(description: proposal.description, templateName: proposal.templateName, agent: proposal.agent)
         return true
     }
 
@@ -415,7 +452,10 @@ extension NiruxShellView {
     /// says in red, working, idle.
     private func leadAgentState(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> String {
         let agents = agentReadings(of: workspace, snapshot: snapshot)
-        guard let first = agents.first else { return "no agent running" }
+        guard let first = agents.first else {
+            let deferred = workspace.columns.compactMap { $0.taskAgentSelection(foreground: nil)?.label }
+            return deferred.isEmpty ? "no agent running" : deferred.joined(separator: ", ") + " awaiting Resume"
+        }
         if let waiting = agents.first(where: \.needsUser) {
             return "\(waiting.name) needs the user" + (waiting.dialog.map { ": \($0)" } ?? "")
         }
@@ -482,7 +522,8 @@ extension NiruxShellView {
                 && pty.cachedAgentState == .needsAttention && pty.agentAttentionReason == nil
             let finished = pty.agentAttentionReason == .turnFinished
             let status = pty.isQuietTurnEnd || quiet || finished ? AgentStatus.idle : pty.cachedAgentState
-            return AgentReading(name: foreground.name, status: status, dialog: dialog, failure: failure, isQuiet: quiet)
+            let name = column.taskAgentSelection(foreground: foreground).flatMap { $0.model == nil ? nil : $0.label } ?? foreground.name
+            return AgentReading(name: name, status: status, dialog: dialog, failure: failure, isQuiet: quiet)
         }
     }
 
@@ -890,6 +931,8 @@ extension NiruxShellView {
 
 /// A task a Lead proposes (see `NiruxShellView.pendingLeadProposals`).
 struct LeadProposal: Equatable {
+    static let defaultModelNotice = " The sheet starts the selected agent with its default model."
+
     enum Repository: Equatable {
         case named(key: String)
         /// `repo: "none"`: No Repository, a folder of its own.
@@ -912,6 +955,7 @@ struct LeadProposal: Equatable {
     /// A task's agent proposed it, a sub-task of this task (its
     /// workspace's id); nil for a Lead's proposal.
     var subtaskOf: String?
+    var agent: CodingAgent?
 }
 
 private extension ColumnState {

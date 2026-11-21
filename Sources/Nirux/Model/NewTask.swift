@@ -45,6 +45,7 @@ enum NewTask {
         let description: String
         let template: TaskTemplates.Template?
         let agent: CodingAgent
+        var model: String?
         let projectID: String
         let place: Place
         /// False once the user chose to start without fetching, after a

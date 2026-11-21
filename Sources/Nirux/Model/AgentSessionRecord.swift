@@ -55,6 +55,7 @@ struct AgentSessionRecord: Codable, Equatable, Sendable {
     var agent: CodingAgent
     /// Claude `session_id` / Codex thread id.
     var sessionID: String
+    var model: String?
     /// The name the session was launched with (`claude --name`). Renames
     /// made later, with `/rename` or from claude.ai, aren't seen.
     var name: String?
@@ -85,7 +86,7 @@ struct AgentSessionRecord: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion = "v"
-        case agent, sessionID, name, cwd, transcriptPath, checkout, pullRequest
+        case agent, sessionID, model, name, cwd, transcriptPath, checkout, pullRequest
         case startedAt, lastStartAt, lastActivityAt, endedAt, status, hasConversation
         case workspaceID, workspaceTitle, agentUUID, columnIndex
     }
@@ -114,6 +115,7 @@ struct AgentSessionObservation: Sendable {
     /// replay after the agent exited, an emitter that can't be named),
     /// which only updates the open record of the same column.
     let agentProcess: ProcessInstance?
+    var model: String?
     let name: String?
     let cwd: String?
     let transcriptPath: String?
@@ -229,6 +231,7 @@ extension AgentSessionRecord {
         if observation.event == .sessionEnd {
             endedAt = timestamp
         }
+        if isNewest, observation.isFromColumnAgent { model = observation.model }
         if let name = observation.name { self.name = name }
         if let cwd = observation.cwd { self.cwd = cwd }
         if let transcriptPath = observation.transcriptPath, isReliable(transcriptPathOf: observation) {

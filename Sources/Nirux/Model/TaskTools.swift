@@ -26,7 +26,7 @@ enum TaskTools {
                 description: """
                     Start a sub-task of your task: another agent does part of the work in a new worktree of the same \
                     repository, from origin's base branch, fetched (for a task without a repository, in a folder \
-                    inside your task's folder). Nirux writes the description into its handover, launches the space's \
+                    inside your task's folder). Nirux writes the description into its handover, launches the chosen \
                     agent, lists it under your task and links it to you: its questions and its result are typed into \
                     your prompt once your turn is over. A sub-task can't start sub-tasks, and a task runs at most \
                     \(maxRunningSubtasks) at once. When the user turned "Starts tasks without asking" off for the \
@@ -38,7 +38,7 @@ enum TaskTools {
                         "description": "What the sub-task must do, as you would tell the agent. Its first line names it and its branch or folder."
                     ],
                     "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."]
-                ],
+                ].merging(LeadTools.agentProperties) { _, selection in selection },
                 required: ["description"]
             ),
             LeadTools.definition(

@@ -3,6 +3,7 @@ import AppKit
 struct ColumnInfo: Hashable {
     let index: Int
     let processName: String?
+    var agentLabel: String?
     let abbreviatedCwd: String?
     let isFocused: Bool
     let isWebView: Bool
@@ -69,6 +70,7 @@ struct ColumnInfo: Hashable {
     static func == (lhs: ColumnInfo, rhs: ColumnInfo) -> Bool {
         lhs.index == rhs.index
             && lhs.processName == rhs.processName
+            && lhs.agentLabel == rhs.agentLabel
             && lhs.abbreviatedCwd == rhs.abbreviatedCwd
             && lhs.isFocused == rhs.isFocused
             && lhs.isWebView == rhs.isWebView
@@ -96,6 +98,7 @@ struct ColumnInfo: Hashable {
     func hash(into hasher: inout Hasher) {
         hasher.combine(index)
         hasher.combine(processName)
+        hasher.combine(agentLabel)
         hasher.combine(abbreviatedCwd)
         hasher.combine(isFocused)
         hasher.combine(isWebView)

@@ -75,13 +75,21 @@ enum LeadTools {
         return [startTask, closeTask].contains(tool) ? 300 : 30
     }
 
+    static var agentProperties: [String: Any] {
+        [
+            "agent": ["type": "string", "enum": CodingAgent.launchable.map(\.rawValue),
+                      "description": "Agent to launch. Defaults to the space's task agent."],
+            "model": ["type": "string", "description": "Optional --model for that agent: an agy models slug, a codex debug models slug, or a Claude alias or full ID. Omit for its default. Only applies to automatic starts."]
+        ]
+    }
+
     static var definitions: [[String: Any]] {
         [
             definition(
                 startTask, title: "Start a task",
                 description: """
                     Start a task in a new worktree of this space, from origin's base branch, fetched: Nirux writes \
-                    the description into its handover, launches the space's agent and links the task to you (its \
+                    the description into its handover, launches the chosen agent and links the task to you (its \
                     questions and result are typed into your prompt). One repository per task. Work that needs no \
                     repository (research, writing, a one-off script) starts in a new folder of its own instead, \
                     with no git, branch or pull request: repo "\(noRepository)", or any task in a space without a \
@@ -93,7 +101,7 @@ enum LeadTools {
                     "description": ["type": "string", "description": "What the task must do, as you would tell the agent. Its first line names the task and its branch or folder."],
                     "repo": ["type": "string", "description": "The repository's name in this space (see list_tasks); its default one when left out. \"\(noRepository)\": a new folder, no repository."],
                     "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."]
-                ],
+                ].merging(LeadTools.agentProperties) { _, selection in selection },
                 required: ["description"]
             ),
             definition(
@@ -383,6 +391,10 @@ enum LeadTools {
         let messageLimit = MissionEventCLI.maxInstructionLength
         switch tool {
         case startTask:
+            if arguments["agent"] != nil, string(arguments, "agent").flatMap(CodingAgent.init(launchable:)) == nil {
+                return "Unknown agent “\(string(arguments, "agent") ?? "")”. Choices: \(CodingAgent.launchable.map(\.rawValue).joined(separator: ", "))."
+            }
+            if arguments["model"] != nil, string(arguments, "model") == nil { return "model must be a nonempty string." }
             return string(arguments, "description") == nil ? "description must say what the task must do." : nil
         case listTasks:
             return nil

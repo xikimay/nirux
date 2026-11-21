@@ -3,6 +3,13 @@ import AppKit
 // MARK: - Restored agent waiting to resume
 
 extension ColumnState {
+    func taskAgentSelection(foreground: ForegroundProcess?) -> TaskAgentSelection? {
+        if let foreground, let agent = foreground.interactiveAgent {
+            return TaskAgentSelection(agent: agent, model: AgentModels.launchModel(arguments: foreground.arguments))
+        }
+        return deferredAgent.map { TaskAgentSelection(agent: $0.launch.agent, model: $0.launch.model) }
+    }
+
     var isAwaitingResume: Bool { deferredAgent != nil }
 
     /// Claude Code is in front, or will be once its restored column resumes.
