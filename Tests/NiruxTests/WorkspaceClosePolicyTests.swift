@@ -4,8 +4,8 @@ import XCTest
 final class WorkspaceClosePolicyTests: XCTestCase {
     private typealias LiveAgent = WorkspaceClosePolicy.LiveAgent
 
-    private func agent(_ name: String = "claude", _ status: AgentStatus? = .idle) -> LiveAgent {
-        LiveAgent(processName: name, status: status)
+    private func agent(_ agent: CodingAgent = .claude, _ status: AgentStatus? = .idle) -> LiveAgent {
+        LiveAgent(agent: agent, status: status)
     }
 
     private func context(
@@ -32,7 +32,7 @@ final class WorkspaceClosePolicyTests: XCTestCase {
     func testLastWorkspaceIsBlockedEvenWithLiveAgents() {
         XCTAssertEqual(WorkspaceClosePolicy.decision(for: context(workspaces: 1)), .blocked)
         XCTAssertEqual(
-            WorkspaceClosePolicy.decision(for: context(workspaces: 1, columns: 3, agents: [agent("claude", .working)])),
+            WorkspaceClosePolicy.decision(for: context(workspaces: 1, columns: 3, agents: [agent(.claude, .working)])),
             .blocked
         )
         XCTAssertFalse(WorkspaceClosePolicy.canClose(totalWorkspaceCount: 1))
@@ -49,21 +49,21 @@ final class WorkspaceClosePolicyTests: XCTestCase {
         // Regression: the sidebar used to close a workspace whose agent sat
         // idle at its prompt without asking — ⌘W on the last column now
         // goes through the same policy, so this is the ⌘W guard too.
-        let lines = details(WorkspaceClosePolicy.decision(for: context(agents: [agent("claude", .idle)])))
+        let lines = details(WorkspaceClosePolicy.decision(for: context(agents: [agent(.claude, .idle)])))
         XCTAssertEqual(lines, ["Claude is idle — closing the workspace ends its session."])
     }
 
     func testAgentStatusIsNamedInTheDetail() {
-        let working = details(WorkspaceClosePolicy.decision(for: context(agents: [agent("codex", .working)])))
+        let working = details(WorkspaceClosePolicy.decision(for: context(agents: [agent(.codex, .working)])))
         XCTAssertEqual(working, ["Codex is working — closing the workspace ends its session."])
-        let waiting = details(WorkspaceClosePolicy.decision(for: context(agents: [agent("claude", .needsAttention)])))
+        let waiting = details(WorkspaceClosePolicy.decision(for: context(agents: [agent(.claude, .needsAttention)])))
         XCTAssertEqual(waiting, ["Claude is waiting for you — closing the workspace ends its session."])
     }
 
     func testSeveralAgentsAreListedTogether() {
         let lines = details(WorkspaceClosePolicy.decision(for: context(
             columns: 2,
-            agents: [agent("claude", .working), agent("codex", .idle)]
+            agents: [agent(.claude, .working), agent(.codex, .idle)]
         )))
         XCTAssertEqual(lines, [
             "2 agents are running (Claude working, Codex idle) — closing the workspace ends their sessions.",
@@ -92,42 +92,36 @@ final class WorkspaceClosePolicyTests: XCTestCase {
 
     func testColumnWithLiveAgentRequiresConfirmationInEveryStatus() {
         XCTAssertEqual(
-            WorkspaceClosePolicy.columnConfirmation(for: agent("claude", .idle)),
+            WorkspaceClosePolicy.columnConfirmation(for: agent(.claude, .idle)),
             ["Claude is idle — closing the column ends its session."]
         )
         XCTAssertEqual(
-            WorkspaceClosePolicy.columnConfirmation(for: agent("codex", .working)),
+            WorkspaceClosePolicy.columnConfirmation(for: agent(.codex, .working)),
             ["Codex is working — closing the column ends its session."]
         )
         XCTAssertEqual(
-            WorkspaceClosePolicy.columnConfirmation(for: agent("claude", .needsAttention)),
+            WorkspaceClosePolicy.columnConfirmation(for: agent(.claude, .needsAttention)),
             ["Claude is waiting for you — closing the column ends its session."]
         )
         XCTAssertEqual(
-            WorkspaceClosePolicy.columnConfirmation(for: agent("codex", nil)),
+            WorkspaceClosePolicy.columnConfirmation(for: agent(.codex, nil)),
             ["Codex is running — closing the column ends its session."]
         )
-    }
-
-    func testDisplayNameFallsBackToProcessName() {
-        XCTAssertEqual(agent("claude").displayName, "Claude")
-        XCTAssertEqual(agent("codex").displayName, "Codex")
-        XCTAssertEqual(agent("aider").displayName, "aider")
     }
 
     // MARK: - Status trust
 
     func testIdleIsOnlyTrustedWhenClaudeHooksDriveIt() {
         // Hook-driven Claude: idle means its turn ended.
-        XCTAssertEqual(LiveAgent(processName: "claude", machineStatus: .idle, hookKind: "claude").status, .idle)
+        XCTAssertEqual(LiveAgent(agent: .claude, machineStatus: .idle, hookAgent: .claude).status, .idle)
         // Output fallback: idle until the first keystroke, even while an
         // agent launched with a handover prompt works — don't claim idle.
-        XCTAssertNil(LiveAgent(processName: "claude", machineStatus: .idle, hookKind: nil).status)
-        XCTAssertNil(LiveAgent(processName: "codex", machineStatus: .idle, hookKind: "codex").status)
+        XCTAssertNil(LiveAgent(agent: .claude, machineStatus: .idle, hookAgent: nil).status)
+        XCTAssertNil(LiveAgent(agent: .codex, machineStatus: .idle, hookAgent: .codex).status)
         // Busy states are kept — overstating activity only adds caution.
-        XCTAssertEqual(LiveAgent(processName: "codex", machineStatus: .working, hookKind: nil).status, .working)
+        XCTAssertEqual(LiveAgent(agent: .codex, machineStatus: .working, hookAgent: nil).status, .working)
         XCTAssertEqual(
-            LiveAgent(processName: "claude", machineStatus: .needsAttention, hookKind: "claude").status,
+            LiveAgent(agent: .claude, machineStatus: .needsAttention, hookAgent: .claude).status,
             .needsAttention
         )
     }

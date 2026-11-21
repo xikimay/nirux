@@ -72,7 +72,7 @@ enum GitWorktree {
             }
             let existing = worktrees[index].path
             if let reusable = reusableWorktree(existing, branch: branch, requester: repoRoot, worktrees: worktrees) {
-                ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repoRoot)
+                ensureExcluded(HandoverFile.filenames, repoRoot: repoRoot)
                 return (reusable, nil)
             }
             if FileManager.default.fileExists(atPath: existing) {
@@ -117,7 +117,7 @@ enum GitWorktree {
 
         let result = gitRunFull(args, cwd: repoRoot)
         if result.status == 0 {
-            ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repoRoot)
+            ensureExcluded(HandoverFile.filenames, repoRoot: repoRoot)
             return (worktreePath, nil)
         }
         let msg = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -125,7 +125,7 @@ enum GitWorktree {
         guard let startCommit else { return (nil, error) }
         let kept = afterFailedNewBranch(branch, at: worktreePath, from: startCommit, repoRoot: repoRoot, error: error)
         // A worktree git left behind gets a handover too.
-        if kept.path != nil { ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repoRoot) }
+        if kept.path != nil { ensureExcluded(HandoverFile.filenames, repoRoot: repoRoot) }
         return kept
     }
 
@@ -197,8 +197,8 @@ enum GitWorktree {
     }
 
     /// Detect the git repo root from a path
-    static func repoRoot(at path: String) -> String? {
-        let output = gitRunFull(["rev-parse", "--show-toplevel"], cwd: path, timeout: mainThreadTimeout)
+    static func repoRoot(at path: String, timeout: TimeInterval = mainThreadTimeout) -> String? {
+        let output = gitRunFull(["rev-parse", "--show-toplevel"], cwd: path, timeout: timeout)
             .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return output.isEmpty ? nil : output
     }

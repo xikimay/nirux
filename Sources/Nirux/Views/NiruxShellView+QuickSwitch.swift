@@ -132,7 +132,7 @@ extension NiruxShellView {
             subtitle: workspace.subtitle(folderDisplay: workspace.folder.abbreviatedPath()),
             shortcut: nil,
             ranking: workspace.candidate,
-            badge: workspace.agent.map { PaletteBadge($0, station: taskStations[workspace.id], now: now) },
+            badge: workspace.agent.map { PaletteBadge($0, station: taskStations[workspace.id]?.station, now: now) },
             isDimmed: workspace.isInactive
         ) { [weak self] in
             self?.openWorkspace(id: workspace.id)

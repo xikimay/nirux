@@ -140,7 +140,7 @@ final class SpaceSetupScriptTests: XCTestCase {
     func testOnlyTheExactSignalIsRecognized() {
         let nirux = "/Applications/Nirux.app/Contents/MacOS/Nirux"
         XCTAssertEqual(SetupFailureSignal.workspaceID(in: [nirux] + SetupFailureSignal.arguments(workspaceID: "ABC-123")), "ABC-123")
-        XCTAssertEqual(AgentHookEvent.Kind(rawValue: SetupFailureSignal.arguments(workspaceID: "x")[1]), .codex)
+        XCTAssertEqual(CodingAgent(rawValue: SetupFailureSignal.arguments(workspaceID: "x")[1]), .codex)
         XCTAssertNil(SetupFailureSignal.workspaceID(in: [nirux, "--hook", "codex", "--setup-failed"]))
         XCTAssertNil(SetupFailureSignal.workspaceID(in: [nirux, "--hook", "codex", "--setup-failed", "ABC", "extra"]))
         XCTAssertNil(SetupFailureSignal.workspaceID(in: [nirux, "--hook", "claude", "--setup-failed", "ABC"]))
