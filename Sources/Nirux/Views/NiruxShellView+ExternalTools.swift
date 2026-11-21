@@ -1137,3 +1137,15 @@ extension NiruxShellView {
         return nil
     }
 }
+
+extension TaskAgentChoice {
+    @MainActor func command(_ launch: [String], prompt: String?) -> String {
+        var parts = launch
+        if let model { parts += ["--model", NiruxShellView.shellQuotedArgument(model)] }
+        if let prompt {
+            if agent == .agy { parts.append("-i") }
+            parts.append(NiruxShellView.shellQuotedArgument(prompt))
+        }
+        return parts.joined(separator: " ")
+    }
+}
