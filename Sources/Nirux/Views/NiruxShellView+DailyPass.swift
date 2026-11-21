@@ -95,8 +95,15 @@ extension NiruxShellView {
         )
         let folders = BoardSections.repositoryAnchors(space.anchors).compactMap(\.folder)
         let spaceID = space.id
-        Self.readDailyPassSources(folders: folders, spaceID: spaceID, window: window) { repositories, findings in
+        let live = workspaces.filter { $0.profileID == spaceID && !$0.isClosing && !$0.startedOutsideNirux && keepsThread($0) }
+            .map { DailyPass.LiveThread(id: $0.id, title: $0.title, context: threadContext(of: $0)) }
+        let excluded = elsewhere.union(workspaces.filter(\.startedOutsideNirux).map(\.id))
+        let directory = Persistence.stateDirectory
+        Self.readDailyPassSources(folders: folders, spaceID: spaceID, window: window, waits: { findings in
+            DailyPass.readThreadWaits(spaceID: spaceID, live: live, excluding: excluded, missions: missions, findings: findings, window: window, directory: directory)
+        }) { repositories, findings, waits in
             var facts = base
+            facts.threadWaits = waits
             facts.findings = findings
             facts.repositories = repositories
             (facts.triagedRuns, facts.flakyTests) = DailyPass.ciFacts(ciStore, repositories: repositories.map(\.name), window: window)
@@ -264,7 +271,8 @@ extension NiruxShellView {
     /// what GitHub says of them in the window, and its recorded reviews.
     nonisolated private static func readDailyPassSources(
         folders: [String], spaceID: String, window: DailyPass.Window,
-        completion: @escaping @MainActor @Sendable ([DailyPass.RepositoryReport], [ReviewFindings.Entry]) -> Void
+        waits: @escaping @Sendable ([ReviewFindings.Entry]) -> [DailyPass.ThreadWaits],
+        completion: @escaping @MainActor @Sendable ([DailyPass.RepositoryReport], [ReviewFindings.Entry], [DailyPass.ThreadWaits]) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
             let remotes = DailyPass.repositories(from: folders.map { ($0, GitHubBaseRemote.read(at: $0)) })
@@ -275,7 +283,8 @@ extension NiruxShellView {
                 ReviewFindings.lines.trim(spaceID: spaceID)
                 return ReviewFindings.lines.load(spaceID: spaceID)
             }
-            DispatchQueue.main.async { @MainActor in completion(reports, findings) }
+            let threadWaits = TaskThread.Store.queue.sync { waits(findings) }
+            DispatchQueue.main.async { @MainActor in completion(reports, findings, threadWaits) }
         }
     }
 }

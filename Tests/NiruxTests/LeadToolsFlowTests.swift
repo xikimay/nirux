@@ -151,6 +151,10 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertFalse(try call(
                 LeadTools.setTaskContext, ["task": "Add a date filter", "next_step": "ship the filter"], lead: lead, in: harness
             ).isError)
+            let reading = try call(LeadTools.readThread, ["task": task.title], lead: lead, in: harness)
+            XCTAssertFalse(reading.isError, reading.text)
+            XCTAssertTrue(reading.text.contains("Next · ship the filter"), reading.text)
+            XCTAssertTrue(reading.text.contains("ISO 8601"), reading.text)
             // Merged: its follow-up rounds stay in its thread, and the Lead's
             // next step goes.
             let url = "https://github.com/acme/repo/pull/7"
@@ -174,6 +178,14 @@ final class LeadToolsFlowTests: XCTestCase {
                 thread = TaskThread.Store.load(workspaceID: task.id, stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
                 return thread.contains { $0.kind == .closed }
             }
+            let archived = try call(LeadTools.readThread, ["task": task.id], lead: lead, in: harness)
+            XCTAssertFalse(archived.isError, archived.text)
+            XCTAssertTrue(archived.text.contains("Closed task"), archived.text)
+            XCTAssertTrue(archived.text.contains("Add a date filter"), archived.text)
+            XCTAssertFalse(archived.text.contains("Next · ship the filter"), archived.text)
+            let privateID = UUID().uuidString
+            TaskThread.Store.append(thread, workspaceID: privateID, spaceID: "elsewhere", stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
+            XCTAssertTrue(try call(LeadTools.readThread, ["task": privateID], lead: lead, in: harness).isError)
             let request = try XCTUnwrap(thread.first)
             XCTAssertEqual([request.kind.rawValue, request.by?.rawValue, request.text], ["request", "lead", "Add a date filter\nGET /orders?from=&to="])
             XCTAssertTrue(thread.contains { $0.kind == .nextStep && $0.by == .lead && $0.text == "ship the filter" })

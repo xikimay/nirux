@@ -1,6 +1,6 @@
 # Task Thread
 
-> **Design record:** PR 1 of the socle is built: what Nirux records and the thread frozen at close. Next: `read_thread` and the daily pass's waits (PR 2), then the panel opened from the task's row (two PRs).
+> **Design record:** The foundation records and freezes each task’s thread. The Lead can read it, and the daily pass reports measured waits. The sidebar panel follows separately.
 
 Status: study approved by the user on 2026-11-21, direction B (the panel from
 the row). Study page: https://claude.ai/artifact/R4mJgibGcXiPzqsFjRA1e8
@@ -92,9 +92,14 @@ no sources): the files it was joined from drop the task in time.
   omitted from saved state, even while their exit animation runs.
 - The thread never reads transcripts.
 
-## 5. Not yet
+## 5. Reading and wait times
 
-- `read_thread` for the Lead and the daily pass's waits (PR 2).
+The Lead’s `read_thread(task)` accepts the same name as `list_tasks`, a workspace ID, or an archived title or branch still in the space’s session history. It returns up to 6,000 characters with the request, current goal, next step, blocker, recent status lines, known PRs and checks, pending questions and recent decisions with their authors. Secret-looking lines and answers to access questions are withheld. A thread opened through an external link stays private. For older archives, a recorded New Task request establishes local origin.
+
+The daily pass reports task activity within its existing window. It counts questions, recorded review rounds and PR follow-up rounds. A handoff splits a question’s wait between its parent and the user. An answer, Mission result or workspace close ends the wait. The time to the first recorded PR needs both its creation time and the task’s request time. CI time covers observed check runs with timestamps, counting simultaneous jobs once. A pending run counts up to the last observation. Historical checks without a measured interval contribute no duration. Neither read starts a GitHub request.
+
+## 6. Not yet
+
 - The panel from the task's row, where the user answers (two PRs).
 - The Thread button in the browser column (after the panel).
 - Removing completed Missions older than 30 days from `missions.json`: approved

@@ -425,6 +425,7 @@ enum DailyPass {
         var repositories: [RepositoryReport]
         var triagedRuns: [TriagedRun]
         var flakyTests: [String]
+        var threadWaits: [ThreadWaits] = []
         var missions: [MissionFact]
         /// RuleProposalStore's: pending, and decided in the last 90 days.
         var proposals: [RuleProposal]
@@ -436,7 +437,7 @@ enum DailyPass {
         var hasNews: Bool {
             findings.contains { window.contains($0.time) }
                 || repositories.contains { !$0.merged.isEmpty || !$0.reruns.isEmpty }
-                || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty
+                || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty || !threadWaits.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }
         }
 
@@ -496,7 +497,7 @@ enum DailyPass {
             parts = [
                 Part(text: instructions(facts)), Part(text: gitHubSection(facts)), rulesSection(facts, limit),
                 findingsSection(facts, limit), pullRequestsSection(facts, limit), ciSection(facts, limit, timeZone: timeZone),
-                missionsSection(facts, limit, timeZone: timeZone)
+                missionsSection(facts, limit, timeZone: timeZone), threadWaitsSection(facts, limit)
             ]
             if joined(header, parts).count <= maxCharacters { break }
         }
@@ -625,6 +626,15 @@ enum DailyPass {
         return Part(
             text: section("CI", flaky + items.prefix(limit.items).map(\.line), total: flaky.count + items.count),
             leftOut: items.dropFirst(limit.items).map(\.time), times: items.map(\.time)
+        )
+    }
+
+    private static func threadWaitsSection(_ facts: Facts, _ limit: Limits) -> Part {
+        let waits = facts.threadWaits.sorted { ($0.at, $0.workspaceID) < ($1.at, $1.workspaceID) }
+        guard !waits.isEmpty else { return Part() }
+        return Part(
+            text: section("Task waits in this window", waits.prefix(limit.items).map(\.line), total: waits.count),
+            leftOut: waits.dropFirst(limit.items).map(\.at), times: waits.map(\.at)
         )
     }
 
