@@ -1,7 +1,7 @@
 # Task Dependencies
 
 > **Design record:** in three parts: the wait and the held message (part 1), waiting tasks (part 2), the Board's order (part 3).\
-> **Differs today:** parts 1 and 2 implement deferred messages and waiting tasks. Part 3 will show their order on the Board.\
+> **Implemented:** deferred messages, waiting tasks and their dependency order on the Board.\
 > **User guide:** [Spaces and tasks](../spaces-and-tasks.md#the-lead).
 
 Status: addition 3 of the factory-article review, approved by the user on
