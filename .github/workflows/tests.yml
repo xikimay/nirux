@@ -54,5 +54,7 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the gate of #683's reworked LeadToolsFlowTests (with
+      # #691 on it): ten runs, three at a time, beside a heavy flow class.
+      - name: Flake gate
+        run: scripts/repeat-class.sh NiruxTests.LeadToolsFlowTests 10 3 NiruxTests.LeadTaskToolsFlowTests

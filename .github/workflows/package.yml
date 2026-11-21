@@ -30,6 +30,8 @@ permissions:
 
 jobs:
   package:
+    # DO NOT MERGE: the gate's run keeps to one macOS job.
+    if: ${{ false }}
     runs-on: macos-15
     timeout-minutes: 30
     env:
