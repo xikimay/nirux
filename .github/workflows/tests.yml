@@ -1,4 +1,4 @@
-name: Tests
+name: Task names flake gate
 
 # Runs the suite on every PR into main so mergeStateStatus reflects it before
 # merge: an actor-isolation error in a test file once reached main red
@@ -54,5 +54,5 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      - name: Repeat task-name flows under load
+        run: bash scripts/repeat-names-flow.sh
