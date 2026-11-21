@@ -35,7 +35,9 @@ extension NiruxShellView {
         }
         let spaceID = requestedSpaceID ?? activeProfileID
         guard let space = profiles.first(where: { $0.id == spaceID }) else { return nil }
-        let panel = NewTaskPanel()
+        let listModels = sideEffects.listTaskModels
+        let environment = SpaceDefaultsStore.defaults(forSpace: spaceID).effectiveEnvironment
+        let panel = NewTaskPanel { try await listModels($0, environment) }
         newTaskPanel = panel
         let stateDirectory = Persistence.stateDirectory
         // Capture lists in the inner closures too: they are @Sendable, and
@@ -280,7 +282,7 @@ extension NiruxShellView {
             title: title,
             purpose: request.goal,
             cwd: created.workingDirectory,
-            agent: request.agent,
+            agent: request.agent, agentModel: request.model,
             profileID: decision.spaceID,
             workspaceID: childWorkspaceID,
             initialAgentUUID: childAgentUUID,

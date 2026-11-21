@@ -14,6 +14,48 @@ final class TaskThreadTests: XCTestCase {
         super.tearDown()
     }
 
+    func testRetiredLedgerQuestionRemainsInLiveAndFrozenHistoryAtItsActualTime() throws {
+        let data = Data(#"{"id":"q","missionID":"m","childWorkspaceID":"task","childAgentUUID":"agent","kind":"question","message":"Which account?","timestamp":10,"handedToUserAt":14,"parentConsumedAt":23,"retiredAt":23}"#.utf8)
+        let question = try JSONDecoder().decode(MissionEvent.self, from: data)
+        let sources = TaskThread.Sources(missions: [mission([question])])
+        let live = TaskThread.thread(recorded: [], joining: sources)
+        TaskThread.Store.append(TaskThread.frozen(sources, closedAt: 50, pullRequests: []), workspaceID: "task", spaceID: "space", stateDirectory: directory)
+        let frozen = TaskThread.ordered(TaskThread.Store.load(workspaceID: "task", stateDirectory: directory))
+        for events in [live, frozen] {
+            let entry = try XCTUnwrap(TaskThread.questions(in: events).first)
+            XCTAssertEqual(entry.asked.text, "Which account?")
+            XCTAssertNil(entry.answer)
+            XCTAssertEqual(entry.retiredAt, 23)
+            let panel = TaskThread.Timeline(events: events, context: .init())
+            XCTAssertTrue(panel.current.isEmpty)
+            XCTAssertTrue(panel.sections.flatMap(\.entries).contains { $0.label == "Question retired" && $0.time == 23 })
+            XCTAssertFalse(TaskThread.summary(events, title: "Thread", context: .init()).contains("Open (user)"))
+            let waits = try XCTUnwrap(DailyPass.threadWaits(in: events, task: "Thread", workspaceID: "task", window: .init(start: 0, end: 80)))
+            XCTAssertEqual(waits.lead, 4)
+            XCTAssertEqual(waits.user, 9)
+            XCTAssertNil(DailyPass.threadWaits(in: events, task: "Thread", workspaceID: "task", window: .init(start: 23, end: 80)))
+        }
+    }
+
+    func testOlderQuestionsWithoutARetirementKeepTheirOwnWaitAndAnswer() throws {
+        let data = Data(#"{"id":"old","missionID":"m","childWorkspaceID":"task","childAgentUUID":"agent","kind":"question","message":"Which account?","timestamp":5,"handedToUserAt":8}"#.utf8)
+        let old = try JSONDecoder().decode(MissionEvent.self, from: data)
+        var newer = event(.question, "Which account?", at: 10, id: "new")
+        newer.retiredAt = 15
+        let open = TaskThread.thread(recorded: [], joining: .init(missions: [mission([old, newer])]))
+        XCTAssertEqual(TaskThread.questions(in: open).filter(\.isOpen).map(\.asked.ref), ["old"])
+        XCTAssertEqual(TaskThread.Timeline(events: open, context: .init()).current.map(\.label), ["Needs you"])
+        let oldAnswer = event(.response, "Staging", at: 24, inReplyTo: "old")
+        let lateAnswer = event(.response, "Production", at: 30, inReplyTo: "new")
+        let both = TaskThread.thread(recorded: open, joining: .init(missions: [mission([old, newer, oldAnswer, lateAnswer])]))
+        let questions = TaskThread.questions(in: both)
+        XCTAssertEqual(questions.map(\.answer?.text), ["Staging", "Production"])
+        XCTAssertEqual(questions.map(\.retiredAt), [nil, 15])
+        let waits = try XCTUnwrap(DailyPass.threadWaits(in: both, task: "Thread", workspaceID: "task", window: .init(start: 0, end: 60)))
+        XCTAssertEqual(waits.lead, 8)
+        XCTAssertEqual(waits.user, 16)
+    }
+
     /// An open task's thread: what Nirux recorded, then what the files say
     /// of it, with who said it, in time order.
     func testAnOpenTasksThreadJoinsTheFilesInTimeOrder() {

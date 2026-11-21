@@ -109,6 +109,34 @@ final class WaitingTaskFlowTests: XCTestCase {
         }
     }
 
+    func testWaitingTaskKeepsAnExplicitAgentAndModelAfterItsDependencyMerges() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            shell.sideEffects.validateTaskAgent = { selection, _ in selection }
+            _ = try UIFlowHarness.git(["remote", "add", "origin", harness.repo], at: harness.repo)
+            _ = try UIFlowHarness.git(["fetch", "origin", "main:refs/remotes/origin/main"], at: harness.repo)
+            let upstream = try upstreamTask("Prepare release", lead: lead, in: harness)
+            shell.refreshGitContextNow(for: upstream)
+            harness.waitUntil("the dependency’s branch") { upstream.gitBranch != nil }
+            upstream.prInfo = pullRequest(.open)
+            let result = try harness.callLeadTool(LeadTools.startTask, [
+                "description": "Check release", "after": upstream.title, "agent": "codex", "model": "test-model"
+            ], lead: lead)
+            XCTAssertFalse(result.isError, result.text)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Check release" })
+            let wait = try XCTUnwrap(task.waitingStart)
+            let restored = try JSONDecoder().decode(MergeWait.self, from: JSONEncoder().encode(wait))
+            XCTAssertEqual(restored.pendingStart?.selection, TaskAgentSelection(agent: .codex, model: "test-model"))
+            shell.followMergeWaits(awaiting: upstream, read: pullRequest(.merged), now: 42)
+            harness.waitUntil("the model-specific launch", timeout: 30) { !task.isWaitingTask }
+            let command = try XCTUnwrap(harness.agentLaunches.last)
+            XCTAssertTrue(command.hasPrefix("command codex "), command)
+            XCTAssertTrue(command.contains("--model 'test-model'"), command)
+            XCTAssertTrue(command.contains(".codex-handover.md"), command)
+        }
+    }
+
     func testImmediateAndReleasedStartsDeliverTheSelectedAgentsHandover() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -274,15 +302,35 @@ final class WaitingTaskFlowTests: XCTestCase {
             XCTAssertFalse(close.isError, close.text)
             XCTAssertTrue(task.waitingStart?.failure?.contains("without a merged pull request") == true)
 
-            // A cached remote branch exists, but fetching its new tip fails.
-            _ = try UIFlowHarness.git(["remote", "add", "origin", harness.root + "/missing-remote"], at: harness.repo)
+            // A cached branch exists. Have the local remote record and refuse
+            // the actual fetch, then allow the same remote to serve the retry.
+            let transport = ".git/refuse-fetch"
+            let transportPath = harness.repo + "/" + transport
+            let refusal = "test remote refused the fetch"
+            try """
+            #!/bin/sh
+            touch "$0.started"
+            echo "fatal: \(refusal)" >&2
+            exit 1
+            """.write(toFile: transportPath, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: transportPath)
+            _ = try UIFlowHarness.git(["remote", "add", "origin", harness.repo], at: harness.repo)
+            _ = try UIFlowHarness.git(["config", "remote.origin.uploadpack", transport], at: harness.repo)
             _ = try UIFlowHarness.git(["update-ref", "refs/remotes/origin/main", "HEAD"], at: harness.repo)
             let launches = harness.agentLaunches.count
-            XCTAssertFalse(try change(["task": task.title]).isError)
-            harness.waitUntil("fetch failure", timeout: 30) { task.waitingStart?.failure?.contains("fetch") == true }
+            let retry = try change(["task": task.title])
+            XCTAssertFalse(retry.isError, retry.text)
+            let marker = transportPath + ".started"
+            guard harness.waitUntil("the manual start to reach the remote", timeout: GitCommand.defaultTimeout, {
+                FileManager.default.fileExists(atPath: marker) || !task.isStarting
+            }) else { return }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: marker), task.waitingStart?.failure ?? "fetch never started")
+            guard harness.waitUntil("the task to report the refused fetch", { !task.isStarting }) else { return }
+            let failure = try XCTUnwrap(task.waitingStart?.failure)
+            XCTAssertTrue(failure.contains(refusal), failure)
             XCTAssertEqual(launches, harness.agentLaunches.count)
             XCTAssertEqual(try UIFlowHarness.git(["branch", "--list", "feat/update-schema"], at: harness.repo), "")
-            _ = try UIFlowHarness.git(["remote", "set-url", "origin", harness.repo], at: harness.repo)
+            _ = try UIFlowHarness.git(["config", "--unset", "remote.origin.uploadpack"], at: harness.repo)
             let column = try XCTUnwrap(task.columns.first?.waitingTask)
             let occupied = harness.repo + ".feat-update-schema"
             try FileManager.default.createDirectory(atPath: occupied, withIntermediateDirectories: true)
