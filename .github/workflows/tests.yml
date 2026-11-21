@@ -56,3 +56,6 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      - name: Repeat the sidebar UI tests under contention
+        run: scripts/repeat-class.sh NiruxTests.IconRailSidebarTests 10 2 NiruxTests.WorkspaceSwitchTests
