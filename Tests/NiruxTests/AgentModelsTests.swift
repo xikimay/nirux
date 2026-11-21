@@ -32,5 +32,7 @@ final class AgentModelsTests: XCTestCase {
         XCTAssertEqual(AgentModels.launchModel(arguments: ["claude", "--model", "sonnet"]), "sonnet")
         XCTAssertNil(AgentModels.launchModel(arguments: ["agy", "--", "--model", "two"]))
         XCTAssertNil(AgentModels.launchModel(arguments: ["agy", "--model"]))
+        XCTAssertNil(AgentModels.launchModel(arguments: ["agy", "--model="]))
+        XCTAssertNil(AgentModels.launchModel(arguments: ["codex", "--model", "--sandbox"]))
     }
 }

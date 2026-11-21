@@ -76,7 +76,10 @@ enum AgentModels {
 
     static func codexChoices(_ text: String) -> [Choice] {
         struct Catalog: Decodable {
-            struct Model: Decodable { let slug: String; let visibility: String? }
+            struct Model: Decodable {
+                let slug: String
+                let visibility: String?
+            }
             let models: [Model]
         }
         guard let catalog = try? JSONDecoder().decode(Catalog.self, from: Data(text.utf8)) else { return [] }
@@ -86,8 +89,17 @@ enum AgentModels {
     static func launchModel(arguments: [String]) -> String? {
         for (index, argument) in arguments.enumerated() {
             if argument == "--" { break }
-            if argument == "--model" || argument == "-m" { return arguments[safe: index + 1] }
-            if argument.hasPrefix("--model=") { return String(argument.dropFirst("--model=".count)) }
+            let value: String?
+            if argument == "--model" || argument == "-m" {
+                value = arguments[safe: index + 1]
+            } else if argument.hasPrefix("--model=") {
+                value = String(argument.dropFirst("--model=".count))
+            } else {
+                continue
+            }
+            guard let value, !value.isEmpty, !value.hasPrefix("-"),
+                  value.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
+            return value
         }
         return nil
     }

@@ -42,6 +42,17 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(launch.hasPrefix("command agy --model 'neon-low' --settings "), launch)
             XCTAssertTrue(launch.contains("Read .agy-handover.md"))
             XCTAssertTrue(FileManager.default.fileExists(atPath: task.cwd + "/.agy-handover.md"))
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            task.addColumn(command: standIn.command(named: "agy", arguments: ["--model", "neon-low"]), cwd: task.cwd)
+            let column = try XCTUnwrap(task.columns.last)
+            harness.waitUntil("the chosen model is running") {
+                column.pty?.foregroundProcess(snapshot: ProcessSnapshot())?.interactiveAgent == .agy
+            }
+            let list = try call(LeadTools.listTasks, lead: lead, in: harness)
+            XCTAssertTrue(list.text.contains("Antigravity (neon-low)"), list.text)
+            let saved = shell.persistedState().workspaces.first { $0.id == task.id }
+            XCTAssertEqual(saved?.columns.last?.agentModel, "neon-low")
             let json = try XCTUnwrap(AgyWorktreeTrust.settings(for: task.cwd, home: harness.home))
             XCTAssertEqual(try JSONDecoder().decode([String: [String]].self, from: Data(json.utf8)), ["trustedWorkspaces": [try XCTUnwrap(task.cwd.realPath)]])
             let impostor = URL(fileURLWithPath: harness.root + "/impostor")
