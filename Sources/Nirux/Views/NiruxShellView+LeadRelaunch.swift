@@ -51,7 +51,7 @@ extension NiruxShellView {
         guard !column.isAwaitingResume, !column.isRestartingShell, column.relaunchingLeadSessionID == nil, let pty = column.pty else { return nil }
         if pty.hasExited { return .stopped }
         guard let process = foreground, !process.arguments.isEmpty else { return nil }
-        guard AgentHookCenter.isInteractiveClaude(process) else {
+        guard process.interactiveAgent == .claude else {
             guard let pid = pty.shellPID, !Self.isLaunchingRestoredAgent(foreground: process, shellPID: pid, hasExited: false),
                   snapshot.firstDescendantName(of: pid, where: { $0 == "claude" }) == nil else { return nil }
             return .stopped
