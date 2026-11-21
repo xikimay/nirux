@@ -54,6 +54,7 @@ jobs:
           scripts/run-tests.sh
 
       - name: Index the source files each class runs
+        shell: bash
         env:
           NIRUX_TESTS_PROFILES: ${{ runner.temp }}/profiles
         run: |
