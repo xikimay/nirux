@@ -35,9 +35,7 @@ enum CITriageModel {
 /// thread.
 enum CITriageInvestigation {
     struct Effects: Sendable {
-        /// `gh` with these arguments: its standard output, nil when it
-        /// failed, timed out or wrote more than `maxBytes`.
-        var gh: @Sendable (_ arguments: [String], _ timeout: TimeInterval, _ maxBytes: Int) -> Data?
+        var gh: GitHub.CLI.Runner
         /// `git`, read-only, in a repository: its standard output, nil
         /// when it failed.
         var git: @Sendable (_ arguments: [String], _ repositoryRoot: String) -> Data?
@@ -48,7 +46,13 @@ enum CITriageInvestigation {
         /// The model's verdict on an input, nil without one.
         var model: @Sendable (Data) async -> CITriage.Verdict?
 
-        static let live = Effects(gh: runGH, git: runGit, blobs: readBlobs, model: CITriageModel.verdict(for:))
+        static let live = Effects(gh: GitHub.CLI.installed, git: runGit, blobs: readBlobs, model: CITriageModel.verdict(for:))
+
+        /// gh's standard output; nil when it failed, timed out or wrote more
+        /// than `maxBytes`.
+        func read(_ arguments: [String], timeout: TimeInterval, maxBytes: Int) -> Data? {
+            try? gh(.init(arguments, timeout: timeout, maxStandardOutputBytes: maxBytes)).flatMap(\.result).get()
+        }
     }
 
     struct Request: Equatable, Sendable {
@@ -114,7 +118,7 @@ enum CITriageInvestigation {
 
     private static func read(_ request: Request, effects: Effects) -> Reading {
         let run = request.run
-        guard let facts = effects.gh(runViewArguments(run), 30, 1 << 20).flatMap(CITriage.runFacts(fromRunView:)),
+        guard let facts = effects.read(runViewArguments(run), timeout: 30, maxBytes: 1 << 20).flatMap(CITriage.runFacts(fromRunView:)),
               !facts.redJobs.isEmpty,
               // A job rerun since the pull request was read (red then,
               // running now) would be judged by the others: read later.
@@ -123,7 +127,7 @@ enum CITriageInvestigation {
         // Each red job gets its decision: one that ran no step from why it
         // didn't, the others from their part of the failed log.
         var decisions: [CITriage.Decision] = facts.redJobs.filter { $0.stepCount == 0 }.map { job in
-            let annotations = annotationsArguments(run, job: job).flatMap { effects.gh($0, 30, 1 << 20) }
+            let annotations = annotationsArguments(run, job: job).flatMap { effects.read($0, timeout: 30, maxBytes: 1 << 20) }
                 .map { String(decoding: $0, as: UTF8.self).split(whereSeparator: \.isNewline).map(String.init) }
             return annotations.flatMap(CITriage.neverRanReason(annotations:)).map { .flaky(reason: $0) } ?? .unknown
         }
@@ -133,7 +137,7 @@ enum CITriageInvestigation {
             outcome.verdict = verdict(of: CITriage.combine(jobs: decisions))
             return .settled(outcome)
         }
-        guard let log = effects.gh(failedLogArguments(run, attempt: facts.attempt), 90, maxLogBytes) else { return .settled(Outcome()) }
+        guard let log = effects.read(failedLogArguments(run, attempt: facts.attempt), timeout: 90, maxBytes: maxLogBytes) else { return .settled(Outcome()) }
         let findings = jobFindings(of: ran, in: CITriage.findings(inFailedLog: log))
         let merged = CITriage.LogFindings.merged(findings)
         // Failed, not merely unfinished: what a pass on the rerun may teach.
@@ -145,7 +149,7 @@ enum CITriageInvestigation {
             return .settled(outcome)
         }
         let files = merged.isEmpty ? nil : changedFilesArguments(request)
-            .flatMap { effects.gh($0, 60, 16 << 20) }.flatMap(CITriage.changedFiles(fromFileList:))
+            .flatMap { effects.read($0, timeout: 60, maxBytes: 16 << 20) }.flatMap(CITriage.changedFiles(fromFileList:))
         let earlier = facts.attempt > 1 ? earlierAttempts(of: ran, facts: facts, run: run, effects: effects) : [:]
         decisions += zip(ran, findings).map { job, found in
             CITriage.decide(found, changedFiles: files?.map(\.path), earlier: earlier[job.name] ?? .none, knownFlaky: request.knownFlaky)
@@ -193,12 +197,12 @@ enum CITriageInvestigation {
         of jobs: [CITriage.Job], facts: CITriage.RunFacts, run: CIFailure.Run, effects: Effects
     ) -> [String: CITriage.EarlierAttempt] {
         let unreadable = Dictionary(jobs.map { ($0.name, CITriage.EarlierAttempt.unreadable) }) { first, _ in first }
-        guard let before = effects.gh(runViewArguments(run, attempt: facts.attempt - 1), 30, 1 << 20)
+        guard let before = effects.read(runViewArguments(run, attempt: facts.attempt - 1), timeout: 30, maxBytes: 1 << 20)
             .flatMap(CITriage.runFacts(fromRunView:)), jobs.allSatisfy({ $0.id != nil })
         else { return unreadable }
         let ranAgain = jobs.filter { job in before.jobs.contains { $0.name == job.name && $0.isRed && $0.id != job.id } }
         guard !ranAgain.isEmpty else { return [:] }
-        guard let log = effects.gh(failedLogArguments(run, attempt: facts.attempt - 1), 90, maxLogBytes) else { return unreadable }
+        guard let log = effects.read(failedLogArguments(run, attempt: facts.attempt - 1), timeout: 90, maxBytes: maxLogBytes) else { return unreadable }
         let found = CITriage.findings(inFailedLog: log)
         // A job that failed then and left nothing the parser reads (a hang
         // cancelled at its timeout leaves no failed step) may have failed
@@ -342,14 +346,6 @@ enum CITriageInvestigation {
             let text = String(decoding: entry, as: UTF8.self)
             return text.hasPrefix(commit + ":") ? String(text.dropFirst(commit.count + 1)) : nil
         }.prefix(8).map { $0 }
-    }
-
-    @Sendable private static func runGH(_ arguments: [String], timeout: TimeInterval, maxBytes: Int) -> Data? {
-        guard let ghPath = PRDetect.installedGHPath(),
-              let result = GitHubCLIBoardClient.runGH(ghPath, arguments: arguments, timeout: timeout, maxStandardOutputBytes: maxBytes),
-              result.terminationStatus == 0
-        else { return nil }
-        return result.standardOutput
     }
 
     /// Read-only, and local: a partial clone doesn't fetch what it lacks.

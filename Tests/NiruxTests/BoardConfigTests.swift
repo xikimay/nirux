@@ -145,14 +145,14 @@ final class BoardConfigTests: XCTestCase {
 
     func testRepositoriesUseGitHubsCharacters() {
         for valid in ["xikimay/nirux", "Lakr233/libghostty-spm", "a/b", "my-org/repo.name_2", "o/.github", "user_emu/r"] {
-            XCTAssertTrue(BoardConfig.isValidRepository(valid), valid)
+            XCTAssertTrue(GitHubRepository.isValid(ownerAndName: valid), valid)
         }
         for invalid in [
             "", "nirux", "a/b/c", "/nirux", "xikimay/", "-org/repo", "org/.", "org/..", "o r/g", "org/rép",
             "https://github.com/a/b", String(repeating: "a", count: 40) + "/b", "a/" + String(repeating: "b", count: 101),
             "acme/widgets.git", "acme/widgets.GIT"
         ] {
-            XCTAssertFalse(BoardConfig.isValidRepository(invalid), invalid)
+            XCTAssertFalse(GitHubRepository.isValid(ownerAndName: invalid), invalid)
         }
     }
 

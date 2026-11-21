@@ -162,7 +162,7 @@ final class SidebarRowMotionTests: XCTestCase {
         let waiting = row([column(.needsAttention, reason: permission)])
         XCTAssertEqual(checks(in: views(waiting, turnEndedAt: now)).count, 0)
         let broke = row([column()], pullRequest: PRInfo(
-            number: 7, state: "OPEN", isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil, mergeable: nil,
+            number: 7, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil, mergeable: nil,
             url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil
         ))
         XCTAssertEqual(broke.rowSummary.mark, .error)

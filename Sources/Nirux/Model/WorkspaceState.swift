@@ -123,10 +123,10 @@ final class WorkspaceState {
     var hasNotification: Bool { notification != nil }
     var prInfo: PRInfo? {
         didSet {
-            if prInfo?.url != oldValue?.url || prInfo?.state != "OPEN" { prFeedback = nil }
+            if prInfo?.url != oldValue?.url || prInfo?.state != .open { prFeedback = nil }
             // Merged (or first seen merged): what the Lead wrote is over, and
             // nothing tells it. The user's stays.
-            if prInfo?.state == "MERGED", oldValue?.state != "MERGED" { clearLeadContext() }
+            if prInfo?.state == .merged, oldValue?.state != .merged { clearLeadContext() }
         }
     }
     /// The open PR's feedback (docs/design/pr-feedback-inbox.md), read after each
@@ -445,7 +445,7 @@ extension WorkspaceState {
 
     /// The red checks of `prInfo` not reported yet, each once
     /// (docs/design/ci-failure-actions.md).
-    func takeNewRedChecks() -> [ProjectBoard.Check] {
+    func takeNewRedChecks() -> [GitHub.Check] {
         let red = prInfo.map(CIFailure.redChecks) ?? []
         let keys = red.map(CIFailure.reportKey)
         let branch = gitContext?.branch
@@ -546,8 +546,8 @@ extension WorkspaceState {
     }
 
     private static func isTerminalPullRequest(_ info: PRInfo?) -> Bool {
-        guard let state = info?.state.uppercased() else { return false }
-        return state == "MERGED" || state == "CLOSED"
+        guard let state = info?.state else { return false }
+        return state == .merged || state == .closed
     }
 
     /// Record meaningful agent activity without overwriting a user-edited

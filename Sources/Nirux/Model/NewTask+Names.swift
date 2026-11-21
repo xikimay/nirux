@@ -119,7 +119,7 @@ extension NewTask {
     /// Empty when neither has a letter or digit to use. Always a valid branch
     /// name otherwise.
     static func suggestedBranch(description: String, title: String? = nil, templateName: String?) -> String {
-        let line = nameLine(firstLine(of: description) ?? "")
+        let line = nameLine(description.firstLine ?? "")
         if let branch = line.branch { return branch }
         let template = templateName?.lowercased() ?? ""
         let type = line.type ?? (template.contains("bug") || template.contains("fix") ? "fix" : nil)
@@ -164,7 +164,7 @@ extension NewTask {
     /// The workspace's name: the description's first line as `NameLine`
     /// reads it, cut before `maxTitleLength`. Nil for a blank description.
     static func workspaceTitle(description: String) -> String? {
-        firstLine(of: description).map { cut(titleText(of: $0), at: maxTitleLength) }
+        description.firstLine.map { cut(titleText(of: $0), at: maxTitleLength) }
     }
 
     /// A line's title text (`NameLine.text`), or the line itself, its
@@ -193,13 +193,6 @@ extension NewTask {
         guard standardized != URL(fileURLWithPath: home).standardizedFileURL.path else { return "~" }
         let name = URL(fileURLWithPath: standardized).lastPathComponent
         return name.isEmpty ? standardized : name
-    }
-
-    /// The first line holding more than whitespace, trimmed.
-    static func firstLine(of text: String) -> String? {
-        text.split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { !$0.isEmpty }
     }
 
     /// Letters and digits in ASCII lowercase (accents dropped, other scripts

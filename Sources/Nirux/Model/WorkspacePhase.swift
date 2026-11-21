@@ -32,16 +32,16 @@ enum WorkspacePhase: String, Codable, CaseIterable {
         isInactive: Bool,
         hasBlocker: Bool,
         agentStatuses: [AgentStatus],
-        pullRequestState: String?
+        pullRequestState: GitHub.PullRequestState?
     ) -> WorkspacePhase {
         if hasBlocker { return .blocked }
         if agentStatuses.contains(.needsAttention) { return .waiting }
         if agentStatuses.contains(.working) { return .active }
         if isInactive { return .parked }
-        switch pullRequestState?.uppercased() {
-        case "MERGED", "CLOSED": return .done
-        case "OPEN": return .review
-        default: return .active
+        switch pullRequestState {
+        case .merged?, .closed?: return .done
+        case .open?: return .review
+        case nil: return .active
         }
     }
 }

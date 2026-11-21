@@ -387,7 +387,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     ) {
         guard panel != nil else { return }
         descriptionView.string = description
-        proposal = (NewTask.firstLine(of: description), options)
+        proposal = (description.firstLine, options)
         if let templateName { pickedTemplateName = templateName }
         if let branch, namesFolder {
             otherEditedName = branch
@@ -624,7 +624,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         )
         request.reportsToTask = agentParent != nil
         request.proposedByTaskAgent = reportsToTaskAgent
-        if let proposal, NewTask.firstLine(of: taskText) == proposal.firstLine {
+        if let proposal, taskText.firstLine == proposal.firstLine {
             request.title = proposal.options.title
             request.goal = proposal.options.goal
         }

@@ -228,7 +228,7 @@ final class MergeQueueBoardTests: XCTestCase {
             private var recorded: [MergeQueue.Read] = []
             var reads: [MergeQueue.Read] { lock.withLock { recorded } }
             func read(_ read: MergeQueue.Read, settings: BoardConfig.QueueSettings)
-                -> Result<MergeQueue.ReadResult, MergeQueue.ClientError> {
+                -> Result<MergeQueue.ReadResult, GitHub.CLI.Failure> {
                 lock.withLock { recorded.append(read) }
                 return .failure(.notSignedIn("You are not logged into any GitHub hosts."))
             }
@@ -255,7 +255,7 @@ final class MergeQueueBoardTests: XCTestCase {
         final class Confused: MergeQueueGitHub, @unchecked Sendable {
             var isDryRun: Bool { true }
             func read(_ read: MergeQueue.Read, settings: BoardConfig.QueueSettings)
-                -> Result<MergeQueue.ReadResult, MergeQueue.ClientError> { .success(.signedIn) }
+                -> Result<MergeQueue.ReadResult, GitHub.CLI.Failure> { .success(.signedIn) }
             func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
                 .refused(status: nil, message: "")
             }

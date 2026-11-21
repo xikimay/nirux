@@ -24,7 +24,7 @@ extension NewTask {
     /// reads it (see `titleText`, `cleanedFolderName`), cut at a whole
     /// word. "Task" when nothing is left.
     static func suggestedFolderName(description: String) -> String {
-        let words = (firstLine(of: description).map(titleText) ?? "").split(whereSeparator: \.isWhitespace).map(String.init)
+        let words = (description.firstLine.map(titleText) ?? "").split(whereSeparator: \.isWhitespace).map(String.init)
         var name = ""
         for word in words {
             let candidate = name.isEmpty ? word : name + " " + word
