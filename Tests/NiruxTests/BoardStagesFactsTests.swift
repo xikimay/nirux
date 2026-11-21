@@ -666,6 +666,17 @@ final class BoardStagesFactsTests: XCTestCase {
             XCTAssertEqual(try report(unknown, read: now).reading, .unavailable)
         }
         XCTAssertFalse(try report(pullRequest(708, draft: true, checks: [green], oid: updated), read: now).canRetry)
+        var blocked = pr
+        blocked.mergeIsBlocked = true
+        var automatic = pr
+        automatic.autoMerges = true
+        var needsReview = pr
+        needsReview.reviewDecision = "REVIEW_REQUIRED"
+        for held in [blocked, automatic, needsReview] {
+            let current = try report(held, read: now)
+            XCTAssertEqual(current.reading, .passed)
+            XCTAssertFalse(current.canRetry)
+        }
     }
 
     func testARepositorysHeaderSaysItsQueueByTheTablesRules() {

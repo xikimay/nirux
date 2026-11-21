@@ -49,6 +49,7 @@ extension BoardStages {
             guard required.allSatisfy({ name in latest.contains { $0.matches(name) && $0.conclusion == "SUCCESS" } })
             else { return report(.unavailable, "Required check runs unconfirmed on \(sha)") }
             let eligible = pr.mergeable == "MERGEABLE" && pr.baseRefName == baseBranch
+                && !pr.mergeIsBlocked && !pr.autoMerges && pr.reviewDecision != "CHANGES_REQUESTED" && pr.reviewDecision != "REVIEW_REQUIRED"
                 && ProjectBoard.queueRefusal(row, baseBranch: baseBranch) == nil
             return report(.passed, "\(required.joined(separator: ", ")) passed on \(sha)", canRetry: eligible)
         case .absent:
