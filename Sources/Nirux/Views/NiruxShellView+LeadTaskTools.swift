@@ -77,6 +77,8 @@ extension NiruxShellView {
             worktreeCleanupsInFlight.remove(key)
             return answer(refusal, true)
         }
+        // What GitHub said of its branch: the messages held until it merges.
+        closeMergeWaits(of: task, inspected: inspection, now: Date().timeIntervalSince1970)
         let title = MissionPromptText.quoted(task.title)
         var candidate = worktreeCleanupCandidate(path: path, snapshot: snapshot)
         candidate.inspection = inspection

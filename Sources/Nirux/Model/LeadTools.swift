@@ -36,6 +36,12 @@ enum LeadTools {
         + "for a task without a repository), or its title. A name several tasks answer goes to the one of yours, "
         + "if only one is; otherwise it is refused."
 
+    /// tell's `after`.
+    static let afterDescription = "Another task of this space, named the same way: the message is held until that task's "
+        + "pull request merges, then typed as a tell then would be (\"merge origin/main\" once the pull request it builds on "
+        + "lands). Held across relaunches. If that pull request closes without merging, or its task closes first, the message "
+        + "isn't typed and you hear it."
+
     /// What reply's description adds about a question's kind and recommendation.
     static let replyKindsDescription = "A question may say its kind (decision, access, spec-mismatch) and what the task "
         + "recommends; for access, what it needs, which only the user can give: hand it over with ask_user unless "
@@ -118,7 +124,8 @@ enum LeadTools {
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],
-                    "message": ["type": "string", "description": "At most \(MissionEventCLI.maxInstructionLength) characters."]
+                    "message": ["type": "string", "description": "At most \(MissionEventCLI.maxInstructionLength) characters."],
+                    "after": ["type": "string", "description": afterDescription]
                 ],
                 required: ["task", "message"]
             ),
@@ -389,6 +396,9 @@ enum LeadTools {
         case tell, reply:
             let target = tool == tell ? "task" : "question"
             guard string(arguments, target) != nil else { return "\(target) is missing." }
+            if tool == tell, let after = arguments["after"], !(after is NSNull), !(after is String) {
+                return "after must name a task of this space."
+            }
             if tool == reply {
                 guard let accepts = accepts(arguments) else { return "accept must be true or false." }
                 if accepts { return string(arguments, "message") == nil ? nil : "Pass message or accept, not both." }
