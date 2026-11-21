@@ -12,29 +12,39 @@ final class WorktreeCleanupTests: XCTestCase {
     private var environment: [String: String]!
     private var tools: WorktreeCleanup.Tools!
 
-    override func setUpWithError() throws {
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("nirux-cleanup-tests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        root = try XCTUnwrap(base.path.realPath)
-        let home = root + "/home"
-        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
-        environment = ["HOME": home, "XDG_CONFIG_HOME": home, "GIT_CONFIG_NOSYSTEM": "1"]
+    /// The repositories every test starts from, made once per class: each
+    /// test works on a copy.
+    nonisolated(unsafe) private static var template: String?
 
+    override class func setUp() {
+        super.setUp()
+        template = try? makeTemplate()
+    }
+
+    override class func tearDown() {
+        if let template { try? FileManager.default.removeItem(atPath: template) }
+        template = nil
+        super.tearDown()
+    }
+
+    override func setUpWithError() throws {
+        root = try Self.makeRoot()
+        environment = Self.environment(root: root)
         remote = root + "/remote.git"
         repo = root + "/widgets"
         worktree = root + "/widgets.feat-x"
-        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
-        try git(["init", "-q", "--bare", "--template=", remote], at: root)
-        try git(["init", "-q", "--template=", "-b", "main"], at: repo)
-        try commit("initial", at: repo)
-        try git(["remote", "add", "origin", remote], at: repo)
-        try git(["push", "-q", "-u", "origin", "main"], at: repo)
-        try git(["worktree", "add", "-q", "-b", "feat/x", worktree], at: repo)
-        try commit("work on x", at: worktree)
-        try git(["push", "-q", "-u", "origin", "feat/x"], at: worktree)
-        // gh matches the head repository on the push URL; git never pushes again.
-        try git(["remote", "set-url", "--push", "origin", "https://github.com/acme/widgets.git"], at: repo)
+        let template = try Self.template ?? Self.makeTemplate()
+        Self.template = template
+        for folder in ["remote.git", "widgets", "widgets.feat-x"] {
+            try FileManager.default.copyItem(atPath: template + "/" + folder, toPath: root + "/" + folder)
+        }
+        // Where the repository, its worktree and its remote name each other.
+        // Their commits are empty: no index holds a file whose inode changed.
+        for file in ["widgets/.git/config", "widgets/.git/worktrees/widgets.feat-x/gitdir", "widgets.feat-x/.git"] {
+            let path = root + "/" + file
+            try String(contentsOfFile: path, encoding: .utf8).replacingOccurrences(of: template, with: root)
+                .write(toFile: path, atomically: true, encoding: .utf8)
+        }
 
         let gh = root + "/gh"
         try """
@@ -63,10 +73,55 @@ final class WorktreeCleanupTests: XCTestCase {
         if let root { try? FileManager.default.removeItem(atPath: root) }
     }
 
+    private static func makeRoot() throws -> String {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nirux-cleanup-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let root = try XCTUnwrap(base.path.realPath)
+        try FileManager.default.createDirectory(atPath: root + "/home", withIntermediateDirectories: true)
+        return root
+    }
+
+    private static func environment(root: String) -> [String: String] {
+        ["HOME": root + "/home", "XDG_CONFIG_HOME": root + "/home", "GIT_CONFIG_NOSYSTEM": "1"]
+    }
+
+    private static func makeTemplate() throws -> String {
+        let root = try makeRoot()
+        do {
+            try makeRepositories(in: root)
+            return root
+        } catch {
+            try? FileManager.default.removeItem(atPath: root)
+            throw error
+        }
+    }
+
+    private static func makeRepositories(in root: String) throws {
+        let environment = Self.environment(root: root)
+        let git = { (arguments: [String], directory: String) in _ = try Self.git(arguments, at: directory, environment: environment) }
+        let remote = root + "/remote.git", repo = root + "/widgets", worktree = root + "/widgets.feat-x"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        try git(["init", "-q", "--bare", "--template=", remote], root)
+        try git(["init", "-q", "--template=", "-b", "main"], repo)
+        try git(["commit", "-q", "--allow-empty", "-m", "initial"], repo)
+        try git(["remote", "add", "origin", remote], repo)
+        try git(["push", "-q", "-u", "origin", "main"], repo)
+        try git(["worktree", "add", "-q", "-b", "feat/x", worktree], repo)
+        try git(["commit", "-q", "--allow-empty", "-m", "work on x"], worktree)
+        try git(["push", "-q", "-u", "origin", "feat/x"], worktree)
+        // gh matches the head repository on the push URL; git never pushes again.
+        try git(["remote", "set-url", "--push", "origin", "https://github.com/acme/widgets.git"], repo)
+    }
+
     // MARK: - Helpers
 
     @discardableResult
     private func git(_ arguments: [String], at directory: String) throws -> String {
+        try Self.git(arguments, at: directory, environment: environment)
+    }
+
+    private static func git(_ arguments: [String], at directory: String, environment: [String: String]) throws -> String {
         let pinned = [
             "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "tag.gpgSign=false",
             "-c", "user.name=Nirux Tests", "-c", "user.email=nirux@example.test"

@@ -226,9 +226,7 @@ extension NiruxShellView {
         completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void,
         opened: (@MainActor (_ workspaceID: String, _ created: CreatedTask) -> Void)? = nil
     ) {
-        Self.createTask(
-            request, handoverFilename: HandoverFile.filename(for: request.agent), routesByAnchor: routesByAnchor
-        ) { [weak self] result in
+        createTask(request) { [weak self] result in
             guard let self else { return }
             switch result {
             case .failed(let message):
@@ -384,6 +382,17 @@ extension NiruxShellView {
             DispatchQueue.main.async { @MainActor in
                 completion(NewTaskPanel.ProjectInfo(target: target, templates: templates, isOutsideGit: isOutsideGit, isGone: isGone))
             }
+        }
+    }
+
+    func createTask(_ request: NewTask.Request, completion: @escaping @MainActor @Sendable (TaskResult) -> Void) {
+        let destination = request.target.map { $0.repository + "." + request.name.replacingOccurrences(of: "/", with: "-").lowercased() }
+        if let destination, !taskWorktreesBeingCreated.insert(destination).inserted {
+            return completion(.failed("Another task is creating this worktree. Try again once it opens."))
+        }
+        Self.createTask(request, handoverFilename: HandoverFile.filename(for: request.agent), routesByAnchor: routesByAnchor) { [weak self] result in
+            if let destination { self?.taskWorktreesBeingCreated.remove(destination) }
+            completion(result)
         }
     }
 

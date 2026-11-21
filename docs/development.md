@@ -16,6 +16,16 @@ CI runs the tests one process per test class, several at a time:
 swift build --build-tests && scripts/run-tests.sh
 ```
 
+The longest classes start first, in the order `scripts/test-class-times.txt` gives. When classes have grown or new long ones came in, `scripts/test-class-times.sh` rewrites it from main's last green nightly runs.
+
+A new or reworked UI test class passes a flake gate before its pull request is ready. On a pushed branch:
+
+```bash
+gh workflow run flake-gate.yml --ref <branch> -f classes="NiruxTests.FooTests" -f runs=10
+```
+
+One job builds the branch and runs each class 10 times, each run in its own process, beside the six heaviest classes. It ends with a line like `NiruxTests.FooTests: 10 of 10 runs passed`. After a local build, `scripts/run-tests.sh --repeat 10 NiruxTests.FooTests` does the same.
+
 ## Development builds and your real workspaces
 
 Only the installed app opens your workspaces: `/Applications/Nirux.app`, or `~/Applications/Nirux.app` when `/Applications` has none. Any other copy (`swift run`, `.build/debug/Nirux`, a `bundle.sh` bundle, a download run from elsewhere) quits unless `NIRUX_STATE_DIR` is set. It says why on stderr, and in an alert when Finder, the Dock, `open` or a `nirux://` link started it.

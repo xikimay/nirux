@@ -103,7 +103,7 @@ enum NewTask {
     /// the checkout's HEAD. Nil when `folder` isn't in a git repository.
     /// Runs git (no network): call it off the main thread.
     static func resolveTarget(folder: String, baseBranch: String?, gitPath: String = "/usr/bin/git") -> Target? {
-        guard let topLevel = GitWorktree.repoRoot(at: folder) else { return nil }
+        guard let topLevel = GitWorktree.repoRoot(at: folder, timeout: GitCommand.defaultTimeout) else { return nil }
         let checkout = GitWorktree.mainWorktreeRoot(of: topLevel)
         let hasOrigin = GitCommand.output(["remote"], cwd: checkout, gitPath: gitPath, timeout: 10)?
             .split(separator: "\n").contains("origin") == true

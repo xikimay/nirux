@@ -26,6 +26,7 @@ extension NiruxShellView {
         let parent = NewTask.MissionParent(workspaceID: caller.id, agentUUID: request.agentUUID)
         switch request.tool {
         case LeadTools.startTask:
+            if arguments["after"] != nil { return answer("Only the space’s Lead can start a waiting task.", true) }
             selectTaskAgent(arguments, parent: parent, spaceID: caller.profileID, answer: answer) { selection in
                 self.taskStartSubtask(arguments, selection: selection, from: caller, place: self.subtaskPlace(of: caller),
                                       subtasks: self.subtasks(of: caller), parent: parent, answer: answer)

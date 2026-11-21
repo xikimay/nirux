@@ -23,6 +23,8 @@ final class ColumnState {
     private(set) var projectBoard: ProjectBoardController?
     /// The branch this column reviews.
     private(set) var branchReview: BranchReviewController?
+    /// A waiting task's only column, until it starts: what it waits for.
+    private(set) var waitingTask: WaitingTaskView?
     /// Column width as a fraction of the columns viewport (0.15…2.0).
     /// Freeform (drag the resize handles); the ColumnWidth presets are just
     /// named stops the width cycler snaps to.
@@ -538,6 +540,17 @@ final class ColumnState {
         self.projectBoard = projectBoard
     }
 
+    /// A waiting task's column: no terminal, what it waits for.
+    init(waitingTask: WaitingTaskView) {
+        agentUUID = nil
+        view = Self.filled(NSView())
+
+        waitingTask.frame = view.bounds
+        waitingTask.autoresizingMask = [.width, .height]
+        view.addSubview(waitingTask)
+        self.waitingTask = waitingTask
+    }
+
     /// Branch Review column: one branch, read-only.
     init(branchReview: BranchReviewController) {
         agentUUID = nil
@@ -665,6 +678,13 @@ final class ColumnState {
         claudeSessionTracker.prepareResume(sessionID: sessionID)
     }
 
+    private var planningSession: (process: ProcessInstance, id: String)?
+
+    func isPlanning(in foreground: ForegroundProcess?) -> Bool {
+        guard let planningSession, let foreground, foreground.instance == planningSession.process else { return false }
+        return claudeSessionTracker.boundSessionID(for: foreground.instance) == planningSession.id
+    }
+
     /// Whether a Claude hook event comes from this column's own `claude`
     /// (see ClaudeSessionTracker) — and bind the session it reports.
     func admitClaudeHook(
@@ -688,11 +708,15 @@ final class ColumnState {
         // Follow the transcript of the session now bound to the foreground
         // `claude` — never one a subagent, teammate or nested run reports.
         if admission != .rejected, event.agentID == nil,
-           let transcriptPath = event.transcriptPath.flatMap(AgentHookEvent.validTranscriptPath),
            let sessionID = event.sessionID,
            let foregroundProcess,
            claudeSessionTracker.boundSessionID(for: foregroundProcess.instance) == sessionID {
-            followClaudeTranscript(at: transcriptPath, sessionID: sessionID, process: foregroundProcess.instance)
+            if event.name == .sessionEnd || event.name == .sessionStart || event.permissionMode != nil {
+                planningSession = event.name != .sessionEnd && event.permissionMode == "plan" ? (foregroundProcess.instance, sessionID) : nil
+            }
+            if let path = event.transcriptPath.flatMap(AgentHookEvent.validTranscriptPath) {
+                followClaudeTranscript(at: path, sessionID: sessionID, process: foregroundProcess.instance)
+            }
         }
         return admission
     }
