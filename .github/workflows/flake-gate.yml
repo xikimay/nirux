@@ -17,11 +17,6 @@ on:
         default: "10"
         type: string
 
-# A newer gate of the same branch replaces the one running.
-concurrency:
-  group: flake-gate-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
@@ -58,5 +53,5 @@ jobs:
           CLASSES: ${{ inputs.classes }}
           RUNS: ${{ inputs.runs }}
         run: |
-          read -ra classes <<< "$CLASSES"
+          read -ra classes <<< "${CLASSES//$'\n'/ }"
           scripts/run-tests.sh --repeat "$RUNS" "${classes[@]}"

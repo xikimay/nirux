@@ -89,7 +89,7 @@ fi
 sed -E 's#/.*##' "$work/list" | sort -u > "$work/classes"
 
 if [[ $repeat -gt 0 ]]; then
-    printf '%s\n' "${gated[@]}" > "$work/gated"
+    printf '%s\n' "${gated[@]}" | awk '!seen[$0]++' > "$work/gated"
     if grep -vxF -f "$work/classes" "$work/gated" > "$work/unknown"; then
         echo "::error::no test class named $(paste -sd' ' "$work/unknown")"
         exit 1
@@ -97,20 +97,21 @@ if [[ $repeat -gt 0 ]]; then
     for (( run = 1; run <= repeat; run++ )); do
         sed "s/$/#$run/" "$work/gated"
     done > "$work/runs"
-    # The six heaviest other classes (scripts/test-class-times.txt), one run
-    # of the gated classes after each, then the rest of the runs.
+    # A run of the gated classes before each of the six heaviest other
+    # classes (scripts/test-class-times.txt), then the rest of the runs.
     cut -d' ' -f2 scripts/test-class-times.txt | grep -xF -f "$work/classes" | grep -vxF -f "$work/gated" | head -6 > "$work/heavy" || true
     paste -d'\n' "$work/runs" "$work/heavy" | grep . > "$work/entries"
+    # Each entry runs its class's tests once.
+    expected=$(awk 'FILENAME == ARGV[1] { sub(/\/.*/, ""); tests[$0]++; next }
+        { class = $0; sub(/#.*/, "", class); total += tests[class] } END { print total + 0 }' "$work/list" "$work/entries")
 else
     # The longest classes first (scripts/test-class-times.sh), so the last
     # to start are short and no worker is left running a long one alone. A
     # class with no time yet may be long: it starts with them.
     awk 'FILENAME == ARGV[1] { seconds[$2] = $1; next } { print ($1 in seconds ? seconds[$1] : 999999), $1 }' \
         scripts/test-class-times.txt "$work/classes" | sort -k1,1nr -k2,2 | cut -d' ' -f2 > "$work/entries"
+    expected=$(wc -l < "$work/list" | tr -d ' ')
 fi
-# Each entry runs its class's tests once.
-expected=$(awk 'FILENAME == ARGV[1] { sub(/\/.*/, ""); tests[$0]++; next }
-    { class = $0; sub(/#.*/, "", class); total += tests[class] } END { print total + 0 }' "$work/list" "$work/entries")
 echo "$expected tests in $(wc -l < "$work/entries" | tr -d ' ') class runs, $workers at a time"
 
 # What `swift test` sets for xctest on macOS.
