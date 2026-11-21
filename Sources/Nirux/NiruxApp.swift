@@ -328,6 +328,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shell?.saveState(snapshot: ProcessSnapshot())
         // A queue's last step is written before the process ends.
         MergeQueueController.waitForFiles()
+        // So are the threads' last lines (local appends, quick).
+        TaskThread.Store.queue.sync {}
         keepAwakeController?.shutdown()
         // A claude left running would go on reading, on the user's plan.
         ExplainQueue.shared.cancelAll(waitingUpTo: 2)

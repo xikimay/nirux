@@ -715,20 +715,29 @@ final class MissionStore {
                   question.expectsTypedAnswer == true
             else { return false }
             return !mission.events.contains { $0.kind == .completed && $0.timestamp > question.timestamp }
+        case .question, .completed:
+            return event.parentTypedAt == nil && now - event.timestamp < MissionEventCLI.parentMessageLifetime
+                && awaitsParentReceipt(event, in: mission)
+        case .acknowledged:
+            return false
+        }
+    }
+
+    /// A question or final report still owed to the parent. Only automatic prompt delivery expires.
+    nonisolated static func awaitsParentReceipt(_ event: MissionEvent, in mission: Mission) -> Bool {
+        switch event.kind {
         case .question:
             // Not once its parent handed it to the user (`ask_user`).
-            return mission.status == .active && event.parentTypedAt == nil && event.parentConsumedAt == nil
+            return mission.status == .active && event.parentConsumedAt == nil
                 && event.handedToUserBecause == nil
-                && now - event.timestamp < MissionEventCLI.parentMessageLifetime
                 && !mission.events.contains { $0.kind == .response && $0.inReplyTo == event.id }
         case .completed:
             // Not once the child got more work from the parent: it moved on.
-            return event.parentTypedAt == nil && event.parentConsumedAt == nil
-                && now - event.timestamp < MissionEventCLI.parentMessageLifetime
+            return event.parentConsumedAt == nil
                 && !mission.events.contains {
                     $0.kind == .instruction && $0.timestamp > event.timestamp && $0.childConsumedAt != nil
                 }
-        case .acknowledged:
+        default:
             return false
         }
     }

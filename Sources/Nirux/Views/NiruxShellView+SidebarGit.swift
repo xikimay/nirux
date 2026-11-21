@@ -571,6 +571,7 @@ extension NiruxShellView {
 
     func wireMetadataAndGitRefresh(_ workspace: WorkspaceState) {
         workspace.onMetadataChanged = { [weak self] in self?.scheduleMetadataRefresh() }
+        wireThread(workspace)
         workspace.onProgramTurnOver = { [weak self] in
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }

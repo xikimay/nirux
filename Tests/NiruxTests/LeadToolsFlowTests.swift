@@ -171,6 +171,57 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(instructions?.map(\.message), ["/code-review"])
             XCTAssertTrue(try call(LeadTools.tell, ["task": "nope", "message": "hi"], lead: lead, in: harness).isError)
 
+            // Its thread: the request, the Lead's next step, and what the Lead
+            // and the user said, frozen when it closes.
+            XCTAssertFalse(try call(
+                LeadTools.setTaskContext, ["task": "Add a date filter", "next_step": "ship the filter"], lead: lead, in: harness
+            ).isError)
+            let reading = try call(LeadTools.readThread, ["task": task.title], lead: lead, in: harness)
+            XCTAssertFalse(reading.isError, reading.text)
+            XCTAssertTrue(reading.text.contains("Next · ship the filter"), reading.text)
+            XCTAssertTrue(reading.text.contains("ISO 8601"), reading.text)
+            // Merged: its follow-up rounds stay in its thread, and the Lead's
+            // next step goes.
+            let url = "https://github.com/acme/repo/pull/7"
+            shell.prFollowUpCenter.file.update {
+                $0.pullRequests[url] = PRFollowUp.Entry(rounds: [PRFollowUp.Round(kind: .ci, head: "abc", typedAt: 5)])
+            }
+            task.prInfo = PRInfo(
+                number: 7, state: .merged, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil, url: url,
+                additions: nil, deletions: nil, changedFiles: nil
+            )
+            shell.followUpPullRequest(of: task)
+            XCTAssertNil(shell.prFollowUpCenter.file.value.pullRequests[url])
+            // Its worktree removed under it: it is still a task with a thread.
+            try FileManager.default.removeItem(atPath: task.cwd)
+            shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), refocusing: false)
+            let saved = shell.persistedState()
+            XCTAssertFalse(saved.workspaces.contains { $0.id == task.id }, "quitting during the exit must not restore the closed task")
+            XCTAssertEqual(saved.workspaces[saved.activeWorkspaceIndex].id, lead.workspace.id)
+            var thread: [TaskThread.Event] = []
+            harness.waitUntil("its thread frozen") {
+                thread = TaskThread.Store.load(workspaceID: task.id, stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
+                return thread.contains { $0.kind == .closed }
+            }
+            let archived = try call(LeadTools.readThread, ["task": task.id], lead: lead, in: harness)
+            XCTAssertFalse(archived.isError, archived.text)
+            XCTAssertTrue(archived.text.contains("Closed task"), archived.text)
+            XCTAssertTrue(archived.text.contains("Add a date filter"), archived.text)
+            XCTAssertFalse(archived.text.contains("Next · ship the filter"), archived.text)
+            let privateID = UUID().uuidString
+            TaskThread.Store.append(thread, workspaceID: privateID, spaceID: "elsewhere", stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
+            XCTAssertTrue(try call(LeadTools.readThread, ["task": privateID], lead: lead, in: harness).isError)
+            let request = try XCTUnwrap(thread.first)
+            XCTAssertEqual([request.kind.rawValue, request.by?.rawValue, request.text], ["request", "lead", "Add a date filter\nGET /orders?from=&to="])
+            XCTAssertTrue(thread.contains { $0.kind == .nextStep && $0.by == .lead && $0.text == "ship the filter" })
+            XCTAssertTrue(thread.contains { $0.kind == .nextStep && $0.by == .nirux && $0.text == nil })
+            XCTAssertTrue(thread.contains { $0.kind == .followUp && $0.time == 5 && $0.detail == "ci" && $0.ref == url })
+            XCTAssertNil(thread.last { $0.kind == .closed }?.text, "the live pull request may be another checkout's: only the ledger's count")
+            XCTAssertTrue(thread.contains { $0.kind == .answer && $0.by == .lead && $0.text == "UTC" && $0.detail == "accepted" })
+            XCTAssertTrue(thread.contains { $0.kind == .handedToUser && $0.text == why })
+            XCTAssertTrue(thread.contains { $0.kind == .answer && $0.by == .user && $0.text == "Yes, until v3" })
+            XCTAssertTrue(thread.contains { $0.kind == .tell && $0.by == .lead && $0.text == "/code-review" })
+
             // A title and a branch of its own: its row, its handover and its
             // branch take them. A title alone names the branch too.
             let named = try call(
@@ -841,6 +892,13 @@ final class LeadToolsFlowTests: XCTestCase {
             export.updateGitContext(revision)
             export.applyPullRequestInfo(nil, for: revision)
 
+            let now = Date().timeIntervalSince1970
+            let rows = (0..<(DailyPass.maxItems + 2)).map { String(format: "wait-%03d", $0) }
+            let archivedEvents: [TaskThread.Event] = [.init(time: now - 90_000, kind: .question, ref: "q", recipient: .lead),
+                                                .init(time: now - 60, kind: .closed, detail: "local")]
+            for id in rows {
+                TaskThread.Store.append(archivedEvents, workspaceID: id, spaceID: lead.space, stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
+            }
             let day = try call(LeadTools.dailyPass, lead: lead, in: harness)
             XCTAssertFalse(day.isError, day.text)
             XCTAssertTrue(day.text.contains("- test-waits-on-sleep · 2 tasks: "), day.text)
@@ -854,10 +912,61 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(exportLine.contains(finished) && exportLine.hasSuffix(" → close_task"), exportLine)
             for title in ["A shell", "Archived fix"] { XCTAssertFalse(day.text.contains("- “\(title)” ·"), day.text) }
             XCTAssertEqual(DailyPassState.load(spaceID: lead.space).listedTasks?.count, 2, "the next pass knows what this one listed")
+            XCTAssertNotNil(DailyPassState.load(spaceID: lead.space).nextWaitPage)
+            shell.dailyPassStates.removeValue(forKey: lead.space)
+            let remaining = try call(LeadTools.dailyPass, lead: lead, in: harness)
+            XCTAssertFalse(remaining.isError, remaining.text)
+            for id in rows {
+                XCTAssertEqual((day.text + "\n" + remaining.text).components(separatedBy: "id " + id + " ·").count - 1, 1, id)
+            }
+            XCTAssertNil(DailyPassState.load(spaceID: lead.space).nextWaitPage)
             let again = try call(LeadTools.dailyPass, lead: lead, in: harness).text
             XCTAssertTrue(again.contains("Listed last time too, nothing changed since:\n- “"), again)
             let read = try XCTUnwrap(DailyPassState.load(spaceID: lead.space).end)
             XCTAssertEqual(read, Date().timeIntervalSince1970, accuracy: 60)
+        }
+    }
+
+    func testUnreadableMissionsLeaveTheFirstDailyWindowForRecovery() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let profile = try XCTUnwrap(shell.profiles.first { $0.id == lead.space })
+            shell.addWorkspace(title: "Reader", cwd: harness.worktree, profileID: lead.space)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Reader" })
+            let file = URL(fileURLWithPath: harness.stateDirectory).appendingPathComponent("test-missions.json")
+            let store = MissionStore(fileURL: file)
+            try Data("unreadable".utf8).write(to: file)
+
+            @MainActor func read() throws -> (text: String, isError: Bool) {
+                var result: (String, Bool)?
+                shell.leadDailyPass(in: profile, lead: lead.workspace, store: store) { result = ($0, $1) }
+                harness.waitUntil("the daily pass response") { result != nil }
+                return try XCTUnwrap(result)
+            }
+
+            let before = DailyPassState.load(spaceID: lead.space)
+            let failed = try read()
+            XCTAssertTrue(failed.isError)
+            XCTAssertTrue(failed.text.contains("Mission ledger"))
+            let now = Date().timeIntervalSince1970
+            shell.checkDailyPasses(now: now, store: store, isQuiet: { _ in true }, send: { _, _ in XCTFail("no pass to announce") })
+            XCTAssertEqual(shell.dailyPassRetryAt[lead.space], now + DailyPass.retryAfter)
+            XCTAssertEqual(DailyPassState.load(spaceID: lead.space), before)
+
+            let question = MissionEvent(id: "q", missionID: "m", childWorkspaceID: task.id, childAgentUUID: "agent",
+                                        kind: .question, message: "Which branch?", inReplyTo: nil, timestamp: now - 180)
+            let answer = MissionEvent(id: "a", missionID: "m", childWorkspaceID: task.id, childAgentUUID: "agent",
+                                      kind: .response, message: "main", inReplyTo: "q", timestamp: now - 60)
+            let mission = Mission(id: "m", parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                                  childWorkspaceID: task.id, childAgentUUID: "agent", childAgentKind: "codex", branch: harness.worktreeBranch,
+                                  status: .active, createdAt: now - 240, updatedAt: now - 60, events: [question, answer], reportsToLead: true)
+            try JSONEncoder().encode([mission]).write(to: file)
+            let recovered = try read()
+            XCTAssertFalse(recovered.isError, recovered.text)
+            XCTAssertTrue(recovered.text.contains("Lead 2 min"), recovered.text)
+            XCTAssertNotNil(DailyPassState.load(spaceID: lead.space).waitsThrough)
+            XCTAssertFalse(try read().text.contains("Lead 2 min"))
         }
     }
 

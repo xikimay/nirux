@@ -37,18 +37,43 @@ extension NiruxShellView {
     /// Reads GitHub off the main thread, then answers the digest, marks
     /// its window read (unless GitHub may answer next time), and keeps the
     /// note the Lead's row shows.
-    func leadDailyPass(in space: WorkspaceProfile, lead: WorkspaceState, answer: @escaping LeadAnswer) {
-        let (window, next) = dailyPassState(inSpace: space.id).reading(now: Date().timeIntervalSince1970)
-        gatherDailyPassFacts(in: space, lead: lead, window: window) { [weak self] facts in
+    func leadDailyPass(in space: WorkspaceProfile, lead: WorkspaceState, store: MissionStore = .shared, answer: @escaping LeadAnswer) {
+        guard store.ensureLoaded() else { return answer("The Mission ledger could not be read. Try again.", true) }
+        let state = dailyPassState(inSpace: space.id)
+        if let page = state.nextWaitPage { return continueWaitPage(page, in: space, missions: store.missions, answer: answer) }
+        let (window, next) = state.reading(now: Date().timeIntervalSince1970)
+        gatherDailyPassFacts(in: space, lead: lead, window: window, ledger: store.missions) { [weak self] facts in
             guard let self, let facts else { return answer("This space keeps no daily pass.", true) }
             let digest = DailyPass.digest(facts)
             let readsAgain = self.dailyPassRereads[space.id, default: DailyPass.Rereads()].readsAgain(facts.readsAgain)
             // On what holds now: a check may have saved meanwhile.
-            var saved = self.dailyPassState(inSpace: space.id)
-                .afterReading(next, readsAgain: readsAgain, note: facts.note(at: window.end), readUntil: digest.readUntil)
+            let current = self.dailyPassState(inSpace: space.id)
+            guard current.nextWaitPage == nil, current.waitsThrough == state.waitsThrough else {
+                return answer("Another daily pass advanced. Call daily_pass again.", true)
+            }
+            var saved = current.afterReading(next, readsAgain: readsAgain, note: facts.note(at: window.end), readUntil: digest.readUntil)
             saved.listedTasks = digest.listed
-            self.saveDailyPassState(saved, spaceID: space.id)
+            saved.nextWaitPage = digest.nextWaitPage
+            saved.waitsThrough = window.end
+            guard self.saveDailyPassState(saved, spaceID: space.id) else { return answer("Could not save this daily pass. Try again.", true) }
             answer(digest.text, false)
+        }
+    }
+
+    private func continueWaitPage(_ page: DailyPass.WaitPage, in space: WorkspaceProfile, missions: [Mission], answer: @escaping LeadAnswer) {
+        let read = dailyWaitsReader(in: space, window: page.window, missions: missions)
+        let id = space.id
+        let directory = Persistence.stateDirectory
+        Self.offMain({
+            let findings = ReviewFindings.lines.queue.sync { ReviewFindings.lines.load(spaceID: id, stateDirectory: directory) }
+            return TaskThread.Store.queue.sync { page.read(read(findings)) }
+        }) { [weak self] result in
+            guard let self else { return }
+            var state = self.dailyPassState(inSpace: id)
+            guard state.nextWaitPage == page else { return answer("Another daily pass advanced. Call daily_pass again.", true) }
+            state.nextWaitPage = result.next
+            guard self.saveDailyPassState(state, spaceID: id) else { return answer("Could not save this daily pass. Try again.", true) }
+            answer(result.text, false)
         }
     }
 
@@ -74,7 +99,7 @@ extension NiruxShellView {
     /// What happened in the space in the window, read off the main thread
     /// for GitHub; nil for a space that keeps no pass.
     func gatherDailyPassFacts(
-        in space: WorkspaceProfile, lead: WorkspaceState, window: DailyPass.Window,
+        in space: WorkspaceProfile, lead: WorkspaceState, window: DailyPass.Window, ledger: [Mission],
         completion: @escaping @MainActor @Sendable (DailyPass.Facts?) -> Void
     ) {
         guard let briefURL = SpaceBrief.briefURL(spaceID: space.id) else { return completion(nil) }
@@ -83,13 +108,13 @@ extension NiruxShellView {
         let open = workspaces.filter { $0.profileID == space.id }.map(\.id)
         let elsewhere = Set(workspaces.filter { $0.profileID != space.id }.map(\.id))
         let members = Set(open).union(sessionLedger.sessions(inSpace: space.id).compactMap(\.workspaceID).filter { !elsewhere.contains($0) })
-        _ = MissionStore.shared.ensureLoaded()
-        let missions = MissionStore.shared.missions.filter { mission in
+        let missions = ledger.filter { mission in
             mission.parentWorkspaceID == lead.id || members.contains(mission.childWorkspaceID) || members.contains(mission.parentWorkspaceID)
         }
+        let waitWindow = dailyPassState(inSpace: space.id).waitWindow(for: window)
         let ciStore = ciTriageCenter.store
         let base = DailyPass.Facts(
-            spaceName: space.name, window: window, findings: [], repositories: [], triagedRuns: [], flakyTests: [],
+            spaceName: space.name, window: window, findings: [], repositories: [], triagedRuns: [], flakyTests: [], waitWindow: waitWindow,
             missions: DailyPass.missionFacts(missions, window: window),
             proposals: RuleProposalStore(spaceID: space.id)?.load().proposals ?? [],
             briefRules: LearnedRules.learnedRules(in: LearnedRules.briefText(at: briefURL))
@@ -99,14 +124,30 @@ extension NiruxShellView {
         let reported = Set(dailyPassState(inSpace: space.id).listedTasks ?? [])
         let read = tasks.map { (folder: $0.folder, repository: $0.repository) }
         let mergedSince = DailyPass.mergedSince(tasks.map(\.activity), window: window)
-        Self.readDailyPassSources(folders: folders, tasks: read, spaceID: space.id, window: window, mergedSince: mergedSince) { reads in
+        let waits = dailyWaitsReader(in: space, window: waitWindow, missions: missions)
+        Self.readDailyPassSources(folders: folders, tasks: read, spaceID: space.id, window: window, mergedSince: mergedSince, waits: waits) { reads, threadWaits in
             var facts = base
+            facts.threadWaits = threadWaits
             facts.findings = reads.findings
             facts.repositories = reads.repositories
             (facts.triagedRuns, facts.flakyTests) = DailyPass.ciFacts(ciStore, repositories: reads.repositories.map(\.name), window: window)
             facts.tasks = DailyPass.tasks(tasks.map { ($0.activity, $0.repository) }, with: reads)
             facts.reported = reported
             completion(facts)
+        }
+    }
+
+    private func dailyWaitsReader(
+        in space: WorkspaceProfile, window: DailyPass.Window, missions: [Mission]
+    ) -> @Sendable ([ReviewFindings.Entry]) -> [DailyPass.ThreadWaits] {
+        let id = space.id
+        let live = workspaces.filter { $0.profileID == id && !$0.isClosing && !$0.startedOutsideNirux && keepsThread($0) }
+            .map { DailyPass.LiveThread(id: $0.id, title: $0.title, context: threadContext(of: $0)) }
+        let excluded = Set(workspaces.filter { $0.profileID != id || $0.startedOutsideNirux }.map(\.id))
+        let directory = Persistence.stateDirectory
+        return { findings in
+            DailyPass.readThreadWaits(spaceID: id, live: live, excluding: excluded, missions: missions,
+                                      findings: findings, window: window, directory: directory)
         }
     }
 
@@ -175,16 +216,20 @@ extension NiruxShellView {
     /// did, else marks the pass checked. Quiet is asked again after the
     /// read: GitHub takes seconds.
     func checkDailyPasses(
-        now: TimeInterval = Date().timeIntervalSince1970, isQuiet: DailyPassQuietCheck? = nil, send: DailyPassSend? = nil
+        now: TimeInterval = Date().timeIntervalSince1970, store: MissionStore = .shared, isQuiet: DailyPassQuietCheck? = nil, send: DailyPassSend? = nil
     ) {
         let quiet = isQuiet ?? { [weak self] column in self?.dailyPassIsQuiet(column) == true }
         for lead in workspaces where lead.isLead && !lead.isClosing && !dailyPassChecks.contains(lead.profileID) {
             guard let space = profiles.first(where: { $0.id == lead.profileID }), dailyPassIsDue(inSpace: space.id, now: now),
                   let column = dailyPassColumn(of: lead), quiet(column)
             else { continue }
+            guard store.ensureLoaded() else {
+                dailyPassRetryAt[space.id] = now + DailyPass.retryAfter
+                continue
+            }
             dailyPassChecks.insert(space.id)
             let window = dailyPassState(inSpace: space.id).reading(now: now, extending: false).window
-            gatherDailyPassFacts(in: space, lead: lead, window: window) { [weak self] facts in
+            gatherDailyPassFacts(in: space, lead: lead, window: window, ledger: store.missions) { [weak self] facts in
                 guard let self else { return }
                 self.dailyPassChecks.remove(space.id)
                 // Read again: the user, a pass or the Lead's end may have come meanwhile.
@@ -193,9 +238,10 @@ extension NiruxShellView {
                 else { return }
                 var next = self.dailyPassState(inSpace: space.id)
                 let readsAgain = self.dailyPassRereads[space.id, default: DailyPass.Rereads()].readsAgain(facts.readsAgain)
-                if readsAgain && !facts.hasNews {
+                let hasNews = facts.hasNews || next.nextWaitPage != nil
+                if readsAgain && !hasNews {
                     self.dailyPassRetryAt[space.id] = now + DailyPass.retryAfter
-                } else if !facts.hasNews {
+                } else if !hasNews {
                     // The window is read: the next pass starts there.
                     (next.start, next.end, next.checkedAt) = (window.start, window.end, now)
                     self.saveDailyPassState(next, spaceID: space.id, now: now)
@@ -303,7 +349,8 @@ extension NiruxShellView {
     /// repositories' base branches and its tasks' last commits off them.
     nonisolated private static func readDailyPassSources(
         folders: [String], tasks: [(folder: String, repository: String?)], spaceID: String, window: DailyPass.Window,
-        mergedSince: TimeInterval?, completion: @escaping @MainActor @Sendable (DailyPass.Reads) -> Void
+        mergedSince: TimeInterval?, waits: @escaping @Sendable ([ReviewFindings.Entry]) -> [DailyPass.ThreadWaits],
+        completion: @escaping @MainActor @Sendable (DailyPass.Reads, [DailyPass.ThreadWaits]) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
             let reads = folders.map { ($0, GitHubBaseRemote.read(at: $0)) }
@@ -317,10 +364,11 @@ extension NiruxShellView {
                 ReviewFindings.lines.trim(spaceID: spaceID)
                 return ReviewFindings.lines.load(spaceID: spaceID)
             }
+            let threadWaits = TaskThread.Store.queue.sync { waits(findings) }
             let bases = DailyPass.baseBranches(reads)
             let commits = DailyPass.commitTimes(tasks.map { ($0.folder, $0.repository.flatMap { bases[$0]?.ref }) })
             let read = DailyPass.Reads(repositories: reports, findings: findings, commits: commits, bases: bases)
-            DispatchQueue.main.async { @MainActor in completion(read) }
+            DispatchQueue.main.async { @MainActor in completion(read, threadWaits) }
         }
     }
 }
