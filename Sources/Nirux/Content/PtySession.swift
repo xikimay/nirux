@@ -392,6 +392,11 @@ final class PtySession: @unchecked Sendable {
         state.machine.noteCodexStatus(status, from: process, now: Date().timeIntervalSince1970)
     }
 
+    func codexStatus(of process: ProcessInstance) -> AgentProgramStatus? {
+        guard let report = state.machine.codexStatus, report.isFrom(process) else { return nil }
+        return report.status
+    }
+
     /// Whether `status` says something new: the same again (a redraw) needs
     /// no look at the process table.
     func isNewProgramStatus(_ status: AgentProgramStatus) -> Bool {

@@ -90,7 +90,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
                 of: board, members: shell.projectWorkspaces(of: board.projectID),
                 workspaces: shell.projectBoardWorkspaces(shell.projectWorkspaces(of: board.projectID), of: board, snapshot: ProcessSnapshot(),
                                                          now: Date().timeIntervalSince1970, foregroundProcesses: [:]),
-                readings: [:], order: .sidebar
+                readings: .init(), order: .sidebar
             )
             let loginIndex = try XCTUnwrap(withAgent.workspaces.firstIndex { $0.id == ids("login") })
             let shown = withAgent.workspaces[loginIndex]
@@ -421,7 +421,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             ofSpace: board.projectID, foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:], snapshot: ProcessSnapshot(),
             now: now
         )
-        change(&readings)
+        change(&readings.tasks)
         return board.stagesContent(shell.stagesInputs(of: board, members: members, workspaces: workspaces, readings: readings, order: order)).content
     }
 

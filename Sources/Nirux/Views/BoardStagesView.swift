@@ -12,8 +12,10 @@ import AppKit
 final class BoardStagesView: NSView {
     struct Lead: Equatable {
         var state: BoardStages.State
-        /// "Lead · reviewing #438".
+        var columnID: UUID?
         var text: String
+        var detail: String?
+        var tooltip: String { [text, detail].compactMap { $0 }.joined(separator: "\n") }
         /// Why it waits for the user: its icon's glyph, as on its row.
         var reason: StateIcon.Reason = .question
     }
@@ -241,9 +243,8 @@ final class BoardStagesView: NSView {
     let leadLabel = NSTextField(labelWithString: "")
     /// Over the Lead's icon and line: a click focuses the Lead.
     let leadButton = BoardStagesButton(title: "", target: nil, action: nil)
-    /// The space whose Lead the button shows, as laid out: another space's
-    /// Lead is another target.
-    private var leadSpace = ""
+    /// The click target from the last layout, for a pointer held over a handoff.
+    private var leadTarget = ""
     let orderSwitch = BoardStagesKeySwitch(labels: ["Sidebar order", "By progress"], trackingMode: .selectOne, target: nil, action: nil)
     /// "Task", "Now", "Pull request": over their columns.
     let columnTitles = ["Task", "Now", "Pull request"].map { NSTextField(labelWithString: $0) }
@@ -348,7 +349,6 @@ final class BoardStagesView: NSView {
         leadButton.target = self
         leadButton.action = #selector(leadClicked)
         leadButton.aim = aim
-        leadButton.setAccessibilityHelp("Focus the Lead")
         // The button says the Lead's line, whole even where the label cuts it. (A label speaks through its cell.)
         leadLabel.cell?.setAccessibilityElement(false)
         aim.onUse = { [weak self] in self?.pointerUsed() }
@@ -391,8 +391,9 @@ final class BoardStagesView: NSView {
         }
         leadLabel.stringValue = content.header.lead?.text ?? ""
         // Where the Lead's line has no room, its icon says it.
-        leadIcon.toolTip = content.header.lead?.text
-        leadButton.toolTip = content.header.lead?.text
+        leadIcon.toolTip = content.header.lead?.tooltip
+        leadButton.toolTip = content.header.lead?.tooltip
+        leadButton.setAccessibilityHelp([content.header.lead?.detail, "Focus the Lead"].compactMap { $0 }.joined(separator: "\n"))
         leadButton.setAccessibilityLabel(content.header.lead?.text)
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
         let aimedBefore = aimed()
@@ -1000,7 +1001,7 @@ final class BoardStagesView: NSView {
         leadButton.isHidden = !hasLead
         let leadEnd = showsLeadLine ? leadLabel.frame.maxX : leadIcon.frame.maxX
         leadButton.frame = hasLead ? NSRect(x: leadIcon.frame.minX - 4, y: midY - 10, width: leadEnd - leadIcon.frame.minX + 8, height: 20) : .zero
-        leadSpace = content?.header.name ?? ""
+        leadTarget = [content?.header.name, content?.header.lead?.columnID?.uuidString].compactMap { $0 }.joined(separator: " ")
         leadHandChanged()
         // What the space holds, where 60 pt are left for it: never beside
         // a Lead's line that is cut, nor beside its dot alone.
@@ -1104,7 +1105,7 @@ final class BoardStagesView: NSView {
         if let foot = runningQueueViews.first(where: { !$0.isHidden && $0.frame.contains(point) }) {
             return "queue \(foot.queue.id) \(String(describing: foot.queue.stop))"
         }
-        if !leadButton.isHidden, leadButton.frame.contains(point) { return "lead \(leadSpace)" }
+        if !leadButton.isHidden, leadButton.frame.contains(point) { return "lead \(leadTarget)" }
         guard scrollView.frame.contains(point) else { return nil }
         func under(_ view: NSView) -> NSPoint? {
             let local = view.convert(location, from: nil)

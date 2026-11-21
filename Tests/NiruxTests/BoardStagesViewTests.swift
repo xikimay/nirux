@@ -2427,6 +2427,14 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertFalse(view.isPointerStale)
         view.show(content([section(units: tasks([line("a")]))], leadText: "Lead · reviewing #438 and the notes", name: "nirux-docs"))
         XCTAssertTrue(view.isPointerStale)
+        view.mouseMoved(with: try moved(to: overLead, in: view))
+        var handoff = try XCTUnwrap(view.content)
+        handoff.header.lead?.columnID = UUID()
+        handoff.header.lead?.detail = "Codex receives the review task."
+        view.show(handoff)
+        XCTAssertTrue(view.isPointerStale, "a different terminal in the same Lead is a new click target")
+        XCTAssertEqual(view.leadButton.toolTip, handoff.header.lead?.tooltip)
+        XCTAssertTrue(view.leadButton.accessibilityHelp()?.contains("Codex receives the review task.") == true)
         // Stale anywhere on the Board: no hand over the Lead either, and AppKit is asked again.
         view.show(content([section(units: tasks([offering("a", .add, 51)]))]))
         view.layoutSubtreeIfNeeded()

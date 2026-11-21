@@ -577,10 +577,10 @@ final class ProjectBoardFlowTests: XCTestCase {
             shell.addWorkspace(title: "tools task", cwd: root, profileID: third.id)
             let toolsTask = try XCTUnwrap(shell.workspaces.first { $0.title == "tools task" })
             try select("widgets", in: shell)
-            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.keys) }, [widgets.workspace.id])
+            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.tasks.keys) }, [widgets.workspace.id])
             shell.moveWorkspaceToSpace(workspaceID: widgets.workspace.id, profileID: third.id)
             XCTAssertEqual(widgets.board.projectID, third.id)
-            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.keys) }, [toolsTask.id, widgets.workspace.id])
+            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.tasks.keys) }, [toolsTask.id, widgets.workspace.id])
             XCTAssertEqual(widgets.board.view.stages.content?.header.name, "Tools")
             XCTAssertEqual(widgets.board.view.header.titleToolTip, "Board · Tools")
 

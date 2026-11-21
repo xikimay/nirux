@@ -590,7 +590,7 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         guard !snapshot.isEmpty else { return answer("Nirux couldn't read the running processes: call again in a moment.", true) }
         guard let (agentUUID, kind) = workspace.columns.lazy.compactMap({ column in
-            column.agentUUID.flatMap { uuid in column.missionAgent(snapshot: snapshot).map { (uuid, $0) } }
+            column.agentUUID.flatMap { uuid in column.missionAgent(foreground: column.pty?.foregroundProcess(snapshot: snapshot)).map { (uuid, $0) } }
         }).first
         else { return answer("Nirux delivers messages only to Claude Code, Codex or Antigravity, and “\(title)” runs none.", true) }
         guard let mission = oneWayMission(to: workspace, agentUUID: agentUUID, kind: kind, from: lead) else {
@@ -914,24 +914,18 @@ struct LeadProposal: Equatable {
     var subtaskOf: String?
 }
 
-private extension ColumnState {
-    /// Claude Code is in front, or will be once its task opens.
-    func runsClaude(snapshot: ProcessSnapshot) -> Bool {
-        if case .claude? = deferredAgent?.agent { return true }
-        return AgentHookCenter.isInteractiveClaude(pty?.foregroundProcess(snapshot: snapshot))
-    }
-
+extension ColumnState {
     /// The agent Nirux delivers Mission messages to that this column runs,
     /// or will once restored: an interactive Claude Code, Codex or
     /// Antigravity.
-    func missionAgent(snapshot: ProcessSnapshot) -> NiruxApp.WorkspaceAgent? {
-        if runsClaude(snapshot: snapshot) { return .claude }
+    func missionAgent(foreground: ForegroundProcess?) -> NiruxApp.WorkspaceAgent? {
+        if AgentHookCenter.isInteractiveClaude(foreground) { return .claude }
         switch deferredAgent?.agent {
+        case .claude?: return .claude
         case .codex?: return .codex
         case .agy?: return .agy
         default: break
         }
-        let foreground = pty?.foregroundProcess(snapshot: snapshot)
         switch foreground?.name {
         case AgentProgramStatus.codex? where !AgentHookCenter.isHeadlessCodex(foreground): return .codex
         case AgentProgramStatus.agy? where !AgentHookCenter.isHeadlessAgy(foreground): return .agy
