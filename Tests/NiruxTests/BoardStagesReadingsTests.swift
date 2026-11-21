@@ -30,7 +30,7 @@ final class BoardStagesReadingsTests: XCTestCase {
             columns: columns, prInfo: pullRequest, diffStats: nil, purpose: nil, nextStep: nextStep, blocker: blocker,
             phase: .active, lastSummary: nil, lastActivityAt: 1_000
         )
-        info.prFeedback = feedback ? SidebarPRFeedback(humans: 1, bots: 0) : nil
+        info.prFeedback = feedback ? PRFeedback.Counts(humans: 1, bots: 0) : nil
         info.ciFlakyReason = "timed out on a slow runner"
         info.reviewBadges = ReviewBadges(runs: [.codeReview: ReviewRun(head: "abc", at: 900)], head: "abc")
         info.statusLine = statusLine
@@ -38,7 +38,7 @@ final class BoardStagesReadingsTests: XCTestCase {
         return info
     }
 
-    private func pullRequest(_ state: String, review: String? = nil, checks: String = "SUCCESS") -> PRInfo {
+    private func pullRequest(_ state: GitHub.PullRequestState, review: String? = nil, checks: String = "SUCCESS") -> PRInfo {
         PRInfo(
             number: 52, state: state, isDraft: false, ciStatus: checks, checks: [], reviewDecision: review, mergeable: nil,
             url: "https://github.com/acme/widgets/pull/52", additions: nil, deletions: nil, changedFiles: nil
@@ -86,7 +86,7 @@ final class BoardStagesReadingsTests: XCTestCase {
         XCTAssertEqual(reading(working).activity, .working(since: nil))
         XCTAssertEqual(reading(row([column(0)])).activity, .idle)
         // Red checks are the pull request's: the Board reads them there, not as the agents'.
-        let red = pullRequest("OPEN", checks: "FAILURE")
+        let red = pullRequest(.open, checks: "FAILURE")
         XCTAssertEqual(reading(row([column(0, question: asking)], pullRequest: red)).activity, .asking("Lead"))
     }
 
@@ -101,25 +101,25 @@ final class BoardStagesReadingsTests: XCTestCase {
         XCTAssertNil(read.reviewRequest)
         XCTAssertNil(read.mergedPullRequest)
         // Changes asked, then comments to answer, then a review; only while it is open.
-        let ask = { (state: String, review: String?, feedback: Bool) in
+        let ask = { (state: GitHub.PullRequestState, review: String?, feedback: Bool) in
             self.reading(self.row([self.column(0)], pullRequest: self.pullRequest(state, review: review), feedback: feedback)).reviewRequest
         }
-        XCTAssertEqual(ask("OPEN", "CHANGES_REQUESTED", true), .changesRequested)
-        XCTAssertEqual(ask("OPEN", "REVIEW_REQUIRED", true), .feedback)
-        XCTAssertEqual(ask("OPEN", "REVIEW_REQUIRED", false), .reviewRequired)
-        XCTAssertNil(ask("OPEN", "APPROVED", false))
-        XCTAssertNil(ask("MERGED", "CHANGES_REQUESTED", true))
+        XCTAssertEqual(ask(.open, "CHANGES_REQUESTED", true), .changesRequested)
+        XCTAssertEqual(ask(.open, "REVIEW_REQUIRED", true), .feedback)
+        XCTAssertEqual(ask(.open, "REVIEW_REQUIRED", false), .reviewRequired)
+        XCTAssertNil(ask(.open, "APPROVED", false))
+        XCTAssertNil(ask(.merged, "CHANGES_REQUESTED", true))
         // Merged, as its own detection found it at its head; and the clean-up its row offers.
-        info = row([column(0)], pullRequest: pullRequest("MERGED"), cleanup: .available)
+        info = row([column(0)], pullRequest: pullRequest(.merged), cleanup: .available)
         XCTAssertEqual(reading(info).mergedPullRequest, 52)
         XCTAssertEqual(reading(info).mergedPullRequestRepository, GitHubRepository(owner: "acme", name: "widgets"), "from its address")
-        let enterprise = BoardStages.TaskReading.repository(ofPullRequestAt: "https://ghe.example.com/acme/widgets/pull/52")
+        let enterprise = GitHubRepository(pullRequestURL: "https://ghe.example.com/acme/widgets/pull/52")
         XCTAssertEqual(enterprise?.host, "ghe.example.com", "another host's address is read too")
         XCTAssertNotEqual(enterprise, GitHubRepository(owner: "acme", name: "widgets"), "and is another repository")
         XCTAssertEqual(reading(info).cleanUp, .offered)
         XCTAssertEqual(reading(row([column(0)], cleanup: .inProgress)).cleanUp, .running)
         XCTAssertNil(reading(row([column(0)])).cleanUp)
-        XCTAssertNil(reading(row([column(0)], pullRequest: pullRequest("CLOSED"))).mergedPullRequest)
+        XCTAssertNil(reading(row([column(0)], pullRequest: pullRequest(.closed))).mergedPullRequest)
     }
 
     func testResumeIsTheSidebarsAStopFirstThenAClaudeThatExited() {

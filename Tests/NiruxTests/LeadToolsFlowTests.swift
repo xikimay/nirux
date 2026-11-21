@@ -773,7 +773,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(plain.text.contains("isn't a task"), plain.text)
 
             let merged = PRInfo(
-                number: 7, state: "MERGED", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil,
+                number: 7, state: .merged, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil,
                 url: "https://github.com/acme/app/pull/7", additions: nil, deletions: nil, changedFiles: nil
             )
             usersFix.prInfo = merged
@@ -874,7 +874,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertNil(try taskLine(), "a failed read leaves B's PR unknown")
 
             let open = PRInfo(
-                number: 8, state: "OPEN", isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: nil, mergeable: "MERGEABLE",
+                number: 8, state: .open, isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: nil, mergeable: "MERGEABLE",
                 url: "https://github.com/acme/app/pull/8", additions: nil, deletions: nil, changedFiles: nil
             )
             shell.refreshPRInfo(for: [task])

@@ -125,10 +125,10 @@ extension DailyPass {
         // Not its own to close: its parent's, else the user's.
         let owner = task.notYours.map { _ in task.parentTitle.map { "tell “\(MissionPromptText.quoted($0))”, the task that started it" } ?? "ask the user" }
         let pull = task.pullRequest
-        if let pull, task.mergedLately || pull.state == "MERGED" {
+        if let pull, task.mergedLately || pull.state == .merged {
             return entry(.closable, "PR #\(pull.number) merged", "close_task")
         }
-        if let pull, pull.state == "CLOSED" {
+        if let pull, pull.state == .closed {
             return entry(.closable, "PR #\(pull.number) closed unmerged", "ask the user whether it was dropped, then close_task")
         }
         guard let last else { return nil }
@@ -165,7 +165,7 @@ extension DailyPass {
     /// gh or git didn't name holds nothing back.
     private static func isWaiting(_ pull: PRInfo, repositoryBase: String?) -> Bool {
         let green = pull.ciStatus == "SUCCESS" || (pull.ciStatus == nil && pull.checks.isEmpty)
-        return pull.state == "OPEN" && !pull.isDraft && green && pull.mergeable == "MERGEABLE"
+        return pull.state == .open && !pull.isDraft && green && pull.mergeable == "MERGEABLE"
             && pull.reviewDecision != "CHANGES_REQUESTED" && !pull.autoMerges && isOnBase(pull, repositoryBase: repositoryBase)
     }
 
@@ -222,7 +222,7 @@ extension DailyPass {
     /// requests: the oldest read of an open one, when it came before the
     /// window, a week back at most; nil when the window covers them.
     static func mergedSince(_ tasks: [TaskActivity], window: Window) -> TimeInterval? {
-        guard let oldest = tasks.compactMap({ $0.pullRequest?.state == "OPEN" ? $0.pullRequestReadAt : nil }).min(),
+        guard let oldest = tasks.compactMap({ $0.pullRequest?.state == .open ? $0.pullRequestReadAt : nil }).min(),
               oldest < window.start
         else { return nil }
         return max(oldest, window.end - DailyPassState.longestWindow)
@@ -237,9 +237,9 @@ extension DailyPass {
             var activity = task.activity
             activity.lastCommitAt = commit
             activity.repositoryBase = task.repository.flatMap { reads.bases[$0]?.branch }
-            if let pull = activity.pullRequest, let repository = BoardStages.TaskReading.repository(ofPullRequestAt: pull.url) {
+            if let pull = activity.pullRequest, let repository = GitHubRepository(pullRequestURL: pull.url) {
                 activity.mergedLately = reads.repositories.contains { report in
-                    report.name.lowercased() == "\(repository.owner)/\(repository.name)" && report.mergedLately.contains(pull.number)
+                    GitHubRepository(ownerAndName: report.name) == repository && report.mergedLately.contains(pull.number)
                 }
             }
             return activity

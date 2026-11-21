@@ -68,7 +68,8 @@ final class CITriageInvestigationTests: XCTestCase {
 
     private func effects(_ world: World, _ calls: Calls) -> CITriageInvestigation.Effects {
         CITriageInvestigation.Effects(
-            gh: { arguments, _, _ in
+            gh: { call in
+                let arguments = call.arguments
                 calls.gh(arguments)
                 let attempt = arguments.firstIndex(of: "--attempt").flatMap { Int(arguments[$0 + 1]) }
                 let answer: String?
@@ -79,7 +80,7 @@ final class CITriageInvestigationTests: XCTestCase {
                 } else {
                     answer = attempt == nil ? world.runView : world.earlierRunView
                 }
-                return answer.map { Data($0.utf8) }
+                return answer.map { .success(.init(status: 0, standardOutput: Data($0.utf8), standardError: Data())) } ?? .failure(.noAnswer("no fixture"))
             },
             git: { arguments, _ in
                 calls.git(arguments)

@@ -66,12 +66,9 @@ enum SidebarRenderer {
             return ("draft", Theme.Color.textTertiary)
         }
         switch pullRequest.state {
-        case "MERGED":
-            return ("merged", Theme.Color.done)
-        case "CLOSED":
-            return ("closed", Theme.Color.textTertiary)
-        default:
-            return ("open", Theme.Color.textSecondary)
+        case .merged: return ("merged", Theme.Color.done)
+        case .closed: return ("closed", Theme.Color.textTertiary)
+        case .open: return ("open", Theme.Color.textSecondary)
         }
     }
 

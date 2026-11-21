@@ -17,7 +17,7 @@ final class WorkspaceContextTests: XCTestCase {
                 isInactive: false,
                 hasBlocker: false,
                 agentStatuses: [.working, .needsAttention],
-                pullRequestState: "OPEN"
+                pullRequestState: .open
             ),
             .waiting
         )
@@ -54,7 +54,7 @@ final class WorkspaceContextTests: XCTestCase {
                 isInactive: false,
                 hasBlocker: false,
                 agentStatuses: [],
-                pullRequestState: "OPEN"
+                pullRequestState: .open
             ),
             .review
         )
@@ -90,7 +90,7 @@ final class WorkspaceContextTests: XCTestCase {
         workspace.prInfo = makePullRequest()
         XCTAssertEqual(workspace.blocker, "waits for #212", "open: still the Lead's to clear")
         workspace.prInfo = PRInfo(
-            number: 42, state: "MERGED", isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: nil,
+            number: 42, state: .merged, isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: nil,
             mergeable: nil, url: "https://example.test/pull/42", additions: nil, deletions: nil, changedFiles: nil
         )
         XCTAssertNil(workspace.blocker)
@@ -158,7 +158,7 @@ final class WorkspaceContextTests: XCTestCase {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let pullRequest = PRInfo(
             number: 42,
-            state: "MERGED",
+            state: .merged,
             isDraft: false,
             ciStatus: "SUCCESS",
             checks: [],
@@ -241,7 +241,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         workspace.prInfo = PRInfo(
             number: 42,
-            state: "OPEN",
+            state: .open,
             isDraft: false,
             ciStatus: nil,
             checks: [],
@@ -277,7 +277,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         let open = PRInfo(
             number: 41,
-            state: "OPEN",
+            state: .open,
             isDraft: false,
             ciStatus: nil,
             checks: [],
@@ -290,7 +290,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         let merged = PRInfo(
             number: 41,
-            state: "MERGED",
+            state: .merged,
             isDraft: false,
             ciStatus: "SUCCESS",
             checks: [],
@@ -336,7 +336,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         let merged = PRInfo(
             number: 41,
-            state: "MERGED",
+            state: .merged,
             isDraft: false,
             ciStatus: nil,
             checks: [],
@@ -349,7 +349,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         let open = PRInfo(
             number: 42,
-            state: "OPEN",
+            state: .open,
             isDraft: false,
             ciStatus: nil,
             checks: [],

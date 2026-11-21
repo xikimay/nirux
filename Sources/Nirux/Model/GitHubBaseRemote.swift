@@ -63,15 +63,15 @@ enum GitHubBaseRemote {
         let remotes = Self.remotes(listing: listing.stdout, resolutions: resolutions.stdout)
         var gitHubRemotes: [String: String] = [:]
         for remote in remotes.reversed() {
-            if let repository = BoardConfigSuggestions.repositoryName(remoteURL: remote.url) {
+            if let repository = GitHubRepository.gitHubOwnerAndName(remoteURL: remote.url) {
                 gitHubRemotes[repository.lowercased()] = remote.name
             }
         }
         // An SSH remote on another host may be an alias of github.com
         // (`git@github-work:…`): indexed by owner/name, no ssh asked, as
         // only a repository the user saved is looked up here.
-        for remote in remotes.reversed() where BoardConfigSuggestions.isSSH(remote.url) {
-            if let repository = BoardConfigSuggestions.spelledOwnerAndName(remoteURL: remote.url),
+        for remote in remotes.reversed() where GitHubRepository.isSSH(remote.url) {
+            if let repository = GitHubRepository.spelledOwnerAndName(remoteURL: remote.url),
                gitHubRemotes[repository.lowercased()] == nil {
                 gitHubRemotes[repository.lowercased()] = remote.name
             }
@@ -101,7 +101,7 @@ enum GitHubBaseRemote {
 
         /// The repository gh was told to use instead of the remote's URL.
         var resolvedRepository: String? {
-            guard let resolution, resolution != "base", BoardConfig.isValidRepository(resolution) else { return nil }
+            guard let resolution, resolution != "base", GitHubRepository.isValid(ownerAndName: resolution) else { return nil }
             return resolution
         }
     }
@@ -146,14 +146,14 @@ enum GitHubBaseRemote {
     /// when it isn't; nil when ssh couldn't tell for an alias.
     private static func repository(of url: String, resolveAlias: (String) -> Bool?) -> String?? {
         guard let parsed = GitHubRepository(remoteURL: url) else { return .some(nil) }
-        if parsed.host != "github.com" {
-            guard BoardConfigSuggestions.isSSH(url) else { return .some(nil) }
+        if parsed.host != GitHub.host {
+            guard GitHubRepository.isSSH(url) else { return .some(nil) }
             switch resolveAlias(parsed.host) {
             case nil: return nil
             case false?: return .some(nil)
             case true?: break
             }
         }
-        return .some(BoardConfigSuggestions.spelledOwnerAndName(remoteURL: url))
+        return .some(GitHubRepository.spelledOwnerAndName(remoteURL: url))
     }
 }

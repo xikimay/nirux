@@ -98,9 +98,9 @@ final class GitRefreshTests: XCTestCase {
     // MARK: - PullRequestRefreshPolicy
 
     func testPullRequestCadenceTracksPendingChecksAndTier() {
-        let pending = makePullRequest(state: "OPEN", ciStatus: "PENDING")
-        let settled = makePullRequest(state: "OPEN", ciStatus: "SUCCESS")
-        let merged = makePullRequest(state: "MERGED", ciStatus: "PENDING")
+        let pending = makePullRequest(state: .open, ciStatus: "PENDING")
+        let settled = makePullRequest(state: .open, ciStatus: "SUCCESS")
+        let merged = makePullRequest(state: .merged, ciStatus: "PENDING")
         XCTAssertEqual(PullRequestRefreshPolicy.interval(for: .focused, pullRequest: pending), 30)
         XCTAssertEqual(PullRequestRefreshPolicy.interval(for: .focused, pullRequest: settled), 120)
         XCTAssertEqual(PullRequestRefreshPolicy.interval(for: .focused, pullRequest: nil), 120)
@@ -120,7 +120,7 @@ final class GitRefreshTests: XCTestCase {
             PRDetect.pullRequestInfo(from: [
                 "number": 1, "state": "OPEN", "url": "https://example.test/pull/1",
                 "statusCheckRollup": rollup
-            ]).ciStatus
+            ])?.ciStatus
         }
         let passed: [String: Any] = ["status": "COMPLETED", "conclusion": "SUCCESS"]
         XCTAssertEqual(ciStatus([passed, ["status": "IN_PROGRESS", "conclusion": ""]]), "PENDING")
@@ -432,7 +432,7 @@ final class GitRefreshTests: XCTestCase {
         }
     }
 
-    private func makePullRequest(state: String, ciStatus: String?) -> PRInfo {
+    private func makePullRequest(state: GitHub.PullRequestState, ciStatus: String?) -> PRInfo {
         PRInfo(
             number: 1,
             state: state,

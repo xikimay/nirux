@@ -309,7 +309,7 @@ extension NiruxShellView {
             let reads = folders.map { ($0, GitHubBaseRemote.read(at: $0)) }
             let remotes = DailyPass.repositories(from: reads)
             var reports = DailyPass.readGitHub(
-                remotes.gitHub.map(\.name), window: window, mergedSince: mergedSince, read: DailyPass.installedGitHub
+                remotes.gitHub.map(\.name), window: window, mergedSince: mergedSince, gh: GitHub.CLI.installed
             )
             for index in reports.indices { reports[index].folders = remotes.gitHub[index].folders }
             reports += remotes.unread

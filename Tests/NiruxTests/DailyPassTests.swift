@@ -42,8 +42,10 @@ final class DailyPassTests: XCTestCase {
         XCTAssertNil(DailyPass.roundNumber("fix: review the timeout, round 3 seconds"), "\"review\" right before \"round\", or the forms above")
 
         let runs = Data("""
-            [{"databaseId": 1, "attempt": 1, "headBranch": "a", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z"},
-             {"databaseId": 2, "attempt": 3, "headBranch": "feat/floors", "conclusion": "", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z"}]
+            [{"databaseId": 1, "attempt": 1, "headBranch": "a", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z",
+              "status": "completed", "event": "push", "headSha": "\(String(repeating: "a", count: 40))"},
+             {"databaseId": 2, "attempt": 3, "headBranch": "feat/floors", "conclusion": "", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z",
+              "status": "in_progress", "event": "pull_request", "headSha": "\(String(repeating: "b", count: 40))"}]
             """.utf8)
         XCTAssertEqual(DailyPass.reruns(runs), [
             DailyPass.Rerun(id: 2, attempt: 3, branch: "feat/floors", workflow: "Tests", conclusion: "running", startedAt: now - hour)
@@ -62,24 +64,38 @@ final class DailyPassTests: XCTestCase {
              {"number": 1, "title": "Before", "headRefName": "a", "mergedAt": "2027-01-13T07:00:00Z"}]
             """.utf8)
         let runs = Data("""
-            [{"databaseId": 7, "attempt": 2, "headBranch": "b", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z"},
-             {"databaseId": 6, "attempt": 2, "headBranch": "a", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-14T07:00:00Z"}]
+            [{"databaseId": 7, "attempt": 2, "headBranch": "b", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z",
+              "status": "completed", "event": "push", "headSha": "\(String(repeating: "7", count: 40))"},
+             {"databaseId": 6, "attempt": 2, "headBranch": "a", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-14T07:00:00Z",
+              "status": "completed", "event": "push", "headSha": "\(String(repeating: "6", count: 40))"}]
             """.utf8)
         let many = Data(("[" + (1...DailyPass.mergedLimit).map { "{\"number\": \($0), \"title\": \"t\", \"mergedAt\": \"2027-01-15T07:00:00Z\"}" }
             .joined(separator: ",") + "]").utf8)
-        let reports = DailyPass.readGitHub(["acme/one", "acme/two", "acme/three", "acme/busy"], window: window) { arguments in
-            if arguments.contains("acme/two") { return .failure(DailyPass.ReadFailure(message: "gh didn’t answer", retryable: true)) }
-            if arguments.contains("acme/three") { return .failure(DailyPass.ReadFailure(message: "not signed in")) }
-            if arguments.contains("acme/busy") { return .success(arguments.first == "pr" ? many : Data("[]".utf8)) }
-            return .success(arguments.first == "pr" ? pulls : runs)
+        let repositories = ["acme/one", "acme/two", "acme/three", "acme/busy", "acme/limited", "acme/odd", "acme/wordy"]
+        let answer: @Sendable (Data) -> Result<GitHub.CLI.Output, GitHub.CLI.Failure> = { .success(.init(status: 0, standardOutput: $0, standardError: Data())) }
+        let reports = DailyPass.readGitHub(repositories, window: window) { call in
+            let arguments = call.arguments
+            if arguments.contains("github.com/acme/two") { return .failure(.noAnswer("gh didn’t answer")) }
+            if arguments.contains("github.com/acme/three") { return .failure(.notSignedIn("not signed in")) }
+            if arguments.contains("github.com/acme/busy") { return answer(arguments.first == "pr" ? many : Data("[]".utf8)) }
+            if arguments.contains("github.com/acme/limited") { return .failure(.rateLimited(resetAt: nil)) }
+            if arguments.contains("github.com/acme/odd") { return answer(Data("<html>".utf8)) }
+            if arguments.contains("github.com/acme/wordy") { return .failure(.refused(status: nil, message: "Bad\n" + String(repeating: "word ", count: 100))) }
+            return answer(arguments.first == "pr" ? pulls : runs)
         }
-        XCTAssertEqual(reports.map(\.name), ["acme/one", "acme/two", "acme/three", "acme/busy"])
+        XCTAssertEqual(reports.map(\.name), repositories)
         XCTAssertEqual(reports[0].merged.map(\.number), [2])
         XCTAssertEqual(reports[0].reruns.map(\.id), [7])
         XCTAssertEqual(reports[0].problems, [])
         XCTAssertEqual(reports[1].problems, ["merged pull requests: gh didn’t answer", "workflow runs: gh didn’t answer"])
-        XCTAssertEqual(reports.map(\.readsAgain), [false, true, false, false])
+        XCTAssertEqual(reports.map(\.readsAgain), [false, true, false, false, true, false, false], "a rate limit passes by itself too")
         XCTAssertEqual(reports[3].problems, ["only the \(DailyPass.mergedLimit) most recently updated merged pull requests were read"])
+        XCTAssertEqual(reports[5].problems, [
+            "merged pull requests: gh answered with something Nirux can’t read: <html>",
+            "workflow runs: gh answered with something Nirux can’t read: <html>"
+        ])
+        XCTAssertEqual(reports[6].problems.count, 2)
+        XCTAssertTrue(reports[6].problems.allSatisfy { !$0.contains("\n") && $0.count < 330 }, "gh's words are cleaned before the Lead reads them")
     }
 
     /// No answer (no network, a timeout, a 5xx, what gh never said) and
@@ -87,18 +103,20 @@ final class DailyPassTests: XCTestCase {
     /// (signed out, refused) holds.
     func testAGitHubErrorReadsAgainUnlessItHolds() {
         func retries(_ standardError: String, status: Int32 = 1) -> Bool {
-            DailyPass.readFailure(GitHubCLIQueueClient.Output(status: status, standardOutput: Data(), standardError: Data(standardError.utf8)))
-                .retryable
+            DailyPass.mayPassLater(GitHub.CLI.classify(GitHub.CLI.Output(status: status, standardOutput: Data(), standardError: Data(standardError.utf8))))
         }
         XCTAssertTrue(retries("error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com"))
         XCTAssertTrue(retries("HTTP 502: Bad Gateway (https://api.github.com/graphql)"))
         XCTAssertTrue(retries("GraphQL: API rate limit exceeded for user ID 1."))
+        XCTAssertTrue(retries("gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)"))
         XCTAssertTrue(retries("something gh never said before"))
         XCTAssertFalse(retries("To get started with GitHub CLI, please run:  gh auth login", status: 4))
         XCTAssertFalse(retries("GraphQL: Could not resolve to a Repository with the name 'acme/gone'. (repository)"))
         XCTAssertFalse(retries("HTTP 404: Not Found (https://api.github.com/repos/acme/gone)"))
         XCTAssertFalse(retries("HTTP 422: Validation Failed (https://api.github.com/search/issues)"))
         XCTAssertFalse(retries("GraphQL: Resource protected by organization SAML enforcement. (repository)"))
+        XCTAssertFalse(DailyPass.mayPassLater(.ghMissing))
+        XCTAssertFalse(DailyPass.mayPassLater(.unreadable("<html>")))
     }
 
     /// Three reads in a row that GitHub may answer next time at most: the
@@ -546,11 +564,11 @@ final class DailyPassTests: XCTestCase {
     private let day: TimeInterval = 86_400
 
     private func pullRequest(
-        _ state: String = "OPEN", checks: String? = "SUCCESS", mergeable: String? = "MERGEABLE", draft: Bool = false,
+        _ state: GitHub.PullRequestState = .open, checks: String? = "SUCCESS", mergeable: String? = "MERGEABLE", draft: Bool = false,
         base: String? = "main", checkStartedAt: TimeInterval? = nil
     ) -> PRInfo {
         let check = checkStartedAt.map {
-            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .success, startedAt: DailyPass.isoTime($0), url: nil)
+            GitHub.Check(name: "test", workflowName: "Tests", result: .success, startedAt: DailyPass.isoTime($0), url: nil)
         }
         return PRInfo(
             number: 640, state: state, isDraft: draft, ciStatus: checks, checks: check.map { [$0] } ?? [], reviewDecision: nil,
@@ -576,11 +594,11 @@ final class DailyPassTests: XCTestCase {
     /// with nothing after it a day on, once its turn is over and a pull
     /// request was read as missing. Closable first, oldest first.
     func testAMergedPullRequestOrAnUnattendedResultIsClosable() {
-        var merged = task("Glass", lastTurn: now - 2 * hour, pullRequest: pullRequest("MERGED"))
+        var merged = task("Glass", lastTurn: now - 2 * hour, pullRequest: pullRequest(.merged))
         merged.notYours = "not yours (started by the user)"
         var mergedOvernight = task("Overnight", lastTurn: now - 3 * hour, pullRequest: pullRequest())
         mergedOvernight.mergedLately = true
-        let closed = task("Dropped", lastTurn: nil, pullRequest: pullRequest("CLOSED"))
+        let closed = task("Dropped", lastTurn: nil, pullRequest: pullRequest(.closed))
         var finished = task("Report", lastTurn: now - day - 10 * 60)
         finished.resultAt = now - day - 20 * 60
         var fresh = task("Fresh", lastTurn: now - day + 5 * 60)
@@ -623,7 +641,7 @@ final class DailyPassTests: XCTestCase {
         unnamed.repositoryBase = nil
         let pull = { (review: String?, autoMerges: Bool) in
             PRInfo(
-                number: 640, state: "OPEN", isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: review, mergeable: "MERGEABLE",
+                number: 640, state: .open, isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: review, mergeable: "MERGEABLE",
                 url: "https://github.com/acme/app/pull/640", additions: nil, deletions: nil, changedFiles: nil, autoMerges: autoMerges
             )
         }
@@ -730,7 +748,7 @@ final class DailyPassTests: XCTestCase {
         var quiet = facts()
         quiet.findings = quiet.findings.filter { !window.contains($0.time) }
         quiet.repositories = []
-        quiet.tasks = [task("Old", lastTurn: now - 5 * day), task("Merged", lastTurn: now - hour, pullRequest: pullRequest("MERGED"))]
+        quiet.tasks = [task("Old", lastTurn: now - 5 * day), task("Merged", lastTurn: now - hour, pullRequest: pullRequest(.merged))]
         XCTAssertTrue(quiet.hasNews)
         let first = DailyPass.digest(quiet, timeZone: utc)
         XCTAssertEqual(first.listed.count, 2)
@@ -778,7 +796,7 @@ final class DailyPassTests: XCTestCase {
             bases: ["/w/app": DailyPass.Base(remote: "origin", branch: "trunk")]
         )
         let elsewhere = PRInfo(
-            number: 640, state: "OPEN", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil,
+            number: 640, state: .open, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil,
             url: "https://github.com/acme/third/pull/640", additions: nil, deletions: nil, changedFiles: nil
         )
         let read = DailyPass.tasks([
@@ -797,7 +815,7 @@ final class DailyPassTests: XCTestCase {
     func testTheMergedListReachesTheOldestReadOfAnOpenPullRequest() {
         var open = task("Open", lastTurn: nil, pullRequest: pullRequest())
         open.pullRequestReadAt = now - 3 * day
-        var merged = task("Merged", lastTurn: nil, pullRequest: pullRequest("MERGED"))
+        var merged = task("Merged", lastTurn: nil, pullRequest: pullRequest(.merged))
         merged.pullRequestReadAt = now - 6 * day
         XCTAssertEqual(DailyPass.mergedSince([open, merged], window: window), now - 3 * day)
         open.pullRequestReadAt = now - 30 * day
@@ -810,19 +828,30 @@ final class DailyPassTests: XCTestCase {
             """.utf8)
         final class Calls: @unchecked Sendable { var numbers: [[String]] = [] }
         let calls = Calls()
-        let read: DailyPass.GitHubRead = { arguments in
+        let read: GitHub.CLI.Runner = { call in
+            let arguments = call.arguments
+            let data: Data
             if arguments.contains("number") {
                 calls.numbers.append(arguments)
-                return .success(Data(#"[{"number": 7}, {"number": 2}]"#.utf8))
+                data = Data(#"[{"number": 7}, {"number": 2}]"#.utf8)
+            } else {
+                data = arguments.first == "pr" ? pulls : Data("[]".utf8)
             }
-            return .success(arguments.first == "pr" ? pulls : Data("[]".utf8))
+            return .success(.init(status: 0, standardOutput: data, standardError: Data()))
         }
-        let reached = DailyPass.readGitHub(["acme/app"], window: window, mergedSince: now - 3 * day, read: read)
+        let reached = DailyPass.readGitHub(["acme/app"], window: window, mergedSince: now - 3 * day, gh: read)
         XCTAssertEqual(reached.first?.merged.map(\.number), [2])
         XCTAssertEqual(reached.first?.mergedLately, [2, 7])
         XCTAssertEqual(calls.numbers.first?.contains("merged:>=\(DailyPass.isoTime(now - 3 * day)) sort:updated-desc"), true)
-        XCTAssertEqual(DailyPass.readGitHub(["acme/app"], window: window, read: read).first?.mergedLately, [2])
+        XCTAssertEqual(DailyPass.readGitHub(["acme/app"], window: window, gh: read).first?.mergedLately, [2])
         XCTAssertEqual(calls.numbers.count, 1, "no reach without a stale read")
+        XCTAssertEqual(calls.numbers.first?.contains("github.com/acme/app"), true)
+        let partial = DailyPass.readGitHub(["acme/app"], window: window, mergedSince: now - 3 * day) { call in
+            call.arguments.contains("number") ? .failure(.noAnswer("timeout")) : read(call)
+        }
+        XCTAssertEqual(partial.first?.mergedLately, [2])
+        XCTAssertEqual(partial.first?.problems, ["pull requests merged before the window: timeout"])
+        XCTAssertEqual(partial.first?.readsAgain, false, "the window itself was read")
     }
 
     /// A folder's newest commit off its base branch by its committer date

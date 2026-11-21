@@ -1,11 +1,5 @@
 import Foundation
 
-/// The open PR's feedback counts the card shows (`PRFeedback`).
-struct SidebarPRFeedback: Hashable {
-    let humans: Int
-    let bots: Int
-}
-
 /// What a workspace card's first line says, from its columns and its PR.
 enum SidebarCardState: Hashable {
     case working, waiting, error, done, idle
@@ -169,8 +163,8 @@ extension WorkspaceInfo {
         if signals.contains(.waiting) { return .waiting }
         if signals.contains(.error) { return .error }
         if columns.contains(where: { $0.agentStatus == .working }) { return .working }
-        if prInfo?.state == "OPEN", prInfo?.ciStatus == "FAILURE" { return .error }
-        if prInfo?.state == "MERGED" { return .done }
+        if prInfo?.state == .open, prInfo?.ciStatus == "FAILURE" { return .error }
+        if prInfo?.state == .merged { return .done }
         return .idle
     }
 

@@ -18,7 +18,7 @@ extension WorktreeCleanup {
         branch: String, tip: String, worktree: Worktree, tools: Tools
     ) -> Verdict {
         guard let ghPath = tools.ghPath else {
-            return (nil, ["The GitHub CLI (gh) isn't installed: the pull request can't be checked."], nil)
+            return (nil, ["\(GitHub.CLI.missing): the pull request can’t be checked."], nil)
         }
         let repository: GitHubRepository
         switch headRepository(branch: branch, at: worktree.path, tools: tools) {
@@ -26,16 +26,17 @@ extension WorktreeCleanup {
         case .failure(let failure): return (nil, [failure.message], nil)
         }
         let fields = "number,state,headRefOid,headRepositoryOwner,headRepository,url"
-        let result = run(
-            executable: ghPath,
-            arguments: ["pr", "list", "--head=\(branch)", "--state", "all", "--json", fields, "--limit", "1000"],
-            in: worktree.path, tools: tools
+        let call = GitHub.CLI.Call(
+            ["pr", "list", "--head=\(branch)", "--state", "all", "--json", fields, "--limit", "1000"],
+            in: URL(fileURLWithPath: worktree.path), timeout: tools.timeout
         )
-        guard result.status == 0,
-              let json = try? JSONSerialization.jsonObject(with: Data(result.stdout.utf8)) as? [[String: Any]]
-        else {
-            let reason = firstLine(result.stderr).map { ": \($0)" } ?? ""
-            return (nil, ["gh couldn't list the pull requests of \(branch)\(reason)"], nil)
+        let listed = GitHub.CLI.run(call, gh: ghPath, environment: tools.runEnvironment).flatMap(\.result).flatMap { data in
+            ((try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]).map(Result.success) ?? .failure(.unreadable(output: data))
+        }
+        let json: [[String: Any]]
+        switch listed {
+        case .success(let list): json = list
+        case .failure(let failure): return (nil, ["gh couldn't list the pull requests of \(branch): \(failure.message)"], nil)
         }
         let candidates = json.compactMap { pullRequest(from: $0, headRepository: repository) }
         if candidates.isEmpty, let problem = mergedElsewhere(json, branch: branch, tip: tip, repository: repository, worktree: worktree, tools: tools) {
@@ -58,7 +59,7 @@ extension WorktreeCleanup {
         _ json: [[String: Any]], branch: String, tip: String, repository: GitHubRepository, worktree: Worktree, tools: Tools
     ) -> String? {
         let heads = json.compactMap { candidate -> String? in
-            guard (candidate["state"] as? String)?.uppercased() == "MERGED",
+            guard GitHub.PullRequestState(candidate["state"] as? String) == .merged,
                   let headOid = (candidate["headRefOid"] as? String)?.lowercased(), isObjectID(headOid)
             else { return nil }
             let owner = (candidate["headRepositoryOwner"] as? [String: Any])?["login"] as? String
@@ -90,10 +91,10 @@ extension WorktreeCleanup {
         ancestry: (String) -> Ancestry
     ) -> Verdict {
         let sorted = candidates.sorted { $0.number > $1.number }
-        if let open = sorted.first(where: { $0.state == "OPEN" }) {
+        if let open = sorted.first(where: { $0.state == .open }) {
             return (open, ["Pull request #\(open.number) for \(branch) is still open."], "PR #\(open.number) open")
         }
-        let merged = sorted.filter { $0.state == "MERGED" }
+        let merged = sorted.filter { $0.state == .merged }
         guard let latest = merged.first else {
             if let closed = sorted.first {
                 return (
@@ -128,7 +129,7 @@ extension WorktreeCleanup {
 
     static func pullRequest(from candidate: [String: Any], headRepository: GitHubRepository) -> PullRequest? {
         guard let number = candidate["number"] as? Int,
-              let state = (candidate["state"] as? String)?.uppercased(),
+              let state = GitHub.PullRequestState(candidate["state"] as? String),
               let headOid = candidate["headRefOid"] as? String, isObjectID(headOid),
               let url = candidate["url"] as? String,
               let owner = (candidate["headRepositoryOwner"] as? [String: Any])?["login"] as? String,
@@ -146,7 +147,7 @@ extension WorktreeCleanup {
         let pushRemote = git(["for-each-ref", "--format=%(push:remotename)", "refs/heads/\(branch)"], in: path, tools: tools)
         guard pushRemote.status == 0 else {
             return .failure(ReadFailure(message:
-                "git couldn't read where \(branch) is pushed: \(firstLine(pushRemote.stderr) ?? "unknown error")"))
+                "git couldn't read where \(branch) is pushed: \(pushRemote.stderr.firstLine ?? "unknown error")"))
         }
         var remote = pushRemote.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         if remote.isEmpty || remote == "." { remote = "origin" }
