@@ -6,8 +6,8 @@ name: Tests
 # (nightly.yml) already runs the tests there, and a second run held another
 # macOS runner on every merge.
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [test/task-dependencies-board-proof]
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -52,7 +52,22 @@ jobs:
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
       - name: Build
+        id: build
         run: swift build --build-tests
 
       - name: Run tests
+        env:
+          NIRUX_BOARD_WAITING_RENDER: ${{ runner.temp }}/waiting-board.png
         run: scripts/run-tests.sh
+
+      - name: Upload offscreen Board
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: waiting-board
+          path: ${{ runner.temp }}/waiting-board.png
+          if-no-files-found: error
+
+      - name: Prove Board regressions with XCTest
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: python3 scripts/prove-board-waits.py
