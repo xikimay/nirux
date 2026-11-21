@@ -357,6 +357,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if menuItem.action == #selector(focusLead(_:)) {
             return validateLeadItem(menuItem)
         }
+        if menuItem.action == #selector(restartLead(_:)) {
+            return shell.map { $0.leadWorkspace(inSpace: $0.activeProfileID) != nil } ?? false
+        }
         if menuItem.action == #selector(newSubtask(_:)) {
             return shell?.activeWorkspaceOffersSubtask ?? false
         }

@@ -83,7 +83,16 @@ extension NiruxShellView {
     }
 
     func agentPaletteActions() -> [PaletteAction] {
-        [
+        let restartLead = leadWorkspace(inSpace: activeProfileID) == nil ? [] : [
+            PaletteAction(
+                icon: .agent("claude"), title: Self.restartLeadTitle,
+                subtitle: "End the Lead’s Claude and start a fresh conversation with the space’s launch options", shortcut: nil
+            ) { [weak self] in
+                guard let self else { return }
+                self.requestRestartLead(spaceID: self.activeProfileID)
+            }
+        ]
+        return restartLead + [
             PaletteAction(
                 icon: .agent("claude"), title: "Open Claude Code",
                 subtitle: "Launch Claude Code in a new terminal", shortcut: nil

@@ -574,6 +574,7 @@ enum WorkspaceSidebarAction {
     case close, rename, editContext, reviewBranch, newSubtask, moveOutOfParent
     /// "Turn Off Lead…": Space Settings › Lead, where the Lead closes.
     case turnOffLead
+    case restartLead
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI

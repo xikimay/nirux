@@ -47,6 +47,12 @@ extension NiruxApp {
     static let leadItemTitle = "Lead"
     static let startLeadItemTitle = "Start a Lead"
 
+    /// Enabled while the active space has a Lead.
+    @objc func restartLead(_ sender: Any?) {
+        guard let shell else { return }
+        shell.requestRestartLead(spaceID: shell.activeProfileID)
+    }
+
     @objc func showSessionHistory(_ sender: Any?) {
         shell?.showSessionHistory()
     }
@@ -121,6 +127,7 @@ extension NiruxApp {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Board", action: #selector(openBoard(_:)), shortcut: .board)
         menu.addItem(withTitle: Self.leadItemTitle, action: #selector(focusLead(_:)), shortcut: .lead)
+        menu.addItem(withTitle: NiruxShellView.restartLeadTitle, action: #selector(restartLead(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Session History…", action: #selector(showSessionHistory(_:)), keyEquivalent: "")
         menu.addItem(.separator())
 

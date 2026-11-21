@@ -119,6 +119,13 @@ final class ColumnState {
     /// without its agent starts one only when the agent resumes.
     private(set) var isShellStartScheduled = false
     private var shellExitedOverlay: ShellExitedOverlay?
+    /// Nirux ends the shell to start it again (`restartTerminal`): its exit
+    /// shows no "Session ended".
+    private var isRestartingShell = false
+    var isShowingShellExit: Bool { shellExitedOverlay?.isHidden == false }
+    /// When Restart Lead started a new Claude here: a question typed into
+    /// the one before stays with the Lead, which reads it in list_tasks.
+    var leadRestartedAt: TimeInterval?
     /// An agent died mid-turn in the shell that still runs here
     /// (ColumnState+StuckAgent.swift).
     var agentExitOverlay: ShellExitedOverlay?
@@ -777,7 +784,7 @@ final class ColumnState {
 
     private func showShellExitedOverlay() {
         // Column closing also detaches the view — no overlay on a dead column.
-        guard view.window != nil, let terminal = terminalView else { return }
+        guard !isRestartingShell, view.window != nil, let terminal = terminalView else { return }
         // The overlay would cover the find bar while its field kept the
         // keyboard, and Enter would navigate instead of restarting.
         closeFindBar()
@@ -793,21 +800,43 @@ final class ColumnState {
         shellExitedOverlay?.isHidden = false
     }
 
-    /// Respawn the shell with the original spec after it exited. No-op while
-    /// the shell is alive. The new shell starts at the last known grid size
-    /// and the terminal surface keeps its scrollback.
-    func restartShell() {
+    /// Respawn the shell with the original spec after it exited, or running
+    /// `command` in its place. No-op while the shell is alive. The new shell
+    /// starts at the last known grid size and the terminal surface keeps its
+    /// scrollback.
+    func restartShell(running command: String? = nil) {
         guard pty?.hasExited == true, let spec = terminalSpec else { return }
         shellExitedOverlay?.isHidden = true
         let size = pty?.lastSize ?? (cols: 80, rows: 24)
         pty?.start(
             shell: PtySession.defaultShell,
-            args: spec.shellArgs,
+            args: command.map(Self.commandShellArgs) ?? spec.shellArgs,
             cwd: spec.cwd,
             cols: size.cols > 0 ? size.cols : 80,
             rows: size.rows > 0 ? size.rows : 24,
             environment: spec.environment
         )
+    }
+
+    /// Ends the shell and what runs in it (SIGHUP, on which Claude Code shuts
+    /// down cleanly), then starts the shell again running `command` once all
+    /// of it ended within `NiruxShellView.exitTimeout`. `done` gets the
+    /// names of those still running, which leave the terminal ended. A
+    /// restored agent's column, whose shell never started, starts it.
+    func restartTerminal(running command: String, done: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Void) {
+        if takeDeferredAgent() != nil {
+            startShell(command: command)
+            return done([])
+        }
+        let processes = pty?.shellPID.map { ProcessSnapshot().tree(of: $0) } ?? []
+        isRestartingShell = true
+        pty?.hangUp()
+        NiruxShellView.waitForExit(processes) { [weak self] stillRunning in
+            guard let self else { return }
+            self.isRestartingShell = false
+            if stillRunning.isEmpty { self.restartShell(running: command) } else { self.showShellExitedOverlay() }
+            done(stillRunning)
+        }
     }
 }
 
