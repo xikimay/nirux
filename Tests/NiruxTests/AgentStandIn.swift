@@ -11,9 +11,9 @@ struct AgentStandIn {
         .appendingPathComponent("nirux-agent-stand-in-\(UUID().uuidString).held")
 
     /// The shell command that becomes it. `holdable`: it takes 128 bytes at
-    /// a time, and none between `hold()` and `release()` (20 s at most:
-    /// an app that waited on it fails rather than hangs), as an agent busy
-    /// drawing. `launchPrompt` (no single quote in it): its last argument,
+    /// a time; after `hold()`, one more read, then none until `release()`
+    /// (20 s at most: an app that waited on it fails rather than hangs), as
+    /// an agent busy drawing. `launchPrompt` (no single quote in it): its last argument,
     /// as an agent launched with a prompt has.
     /// `arguments` (no single quote in them) come before it.
     func command(named name: String = "claude", holdable: Bool = false, arguments: [String] = [], launchPrompt: String? = nil) -> String {
@@ -32,7 +32,8 @@ struct AgentStandIn {
         (try? String(contentsOf: received, encoding: .utf8)) ?? ""
     }
 
-    /// What is sent meanwhile waits in the terminal's input queue.
+    /// What is sent meanwhile, past its next read, waits in the terminal's
+    /// input queue.
     func hold() {
         FileManager.default.createFile(atPath: held.path, contents: nil)
     }
