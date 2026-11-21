@@ -6,26 +6,26 @@ import Foundation
 /// follow-up round and triaged failure. The rest is joined at read from the
 /// files that hold it (`events(from:)`), and copied once, when the task
 /// closes, with its pull request's history.
-enum TaskThread {
-    struct Event: Codable, Hashable, Sendable {
-        var time: TimeInterval
-        var kind: Kind
-        var by: Author?
+public enum TaskThread {
+    public struct Event: Codable, Hashable, Sendable {
+        public var time: TimeInterval
+        public var kind: Kind
+        public var by: Author?
         /// The request, a line, a message; nil for a field cleared.
-        var text: String?
+        public var text: String?
         /// A recommendation, a reason, a rule's evidence.
-        var note: String?
+        public var note: String?
         /// A question's kind, a verdict, a review pass, an agent.
-        var detail: String?
+        public var detail: String?
         /// A pull request, a round, a count.
-        var number: Int?
+        public var number: Int?
         /// The Mission event, commit or URL it is about.
-        var ref: String?
-        var recipient: Author?
-        var missionID: String?
-        var until: TimeInterval?
+        public var ref: String?
+        public var recipient: Author?
+        public var missionID: String?
+        public var until: TimeInterval?
 
-        init(
+        public init(
             time: TimeInterval, kind: Kind, by: Author? = nil, text: String? = nil, note: String? = nil,
             detail: String? = nil, number: Int? = nil, ref: String? = nil, recipient: Author? = nil,
             missionID: String? = nil, until: TimeInterval? = nil
@@ -49,80 +49,80 @@ enum TaskThread {
     }
 
     /// Open: a kind a later build adds reads as its raw value.
-    struct Kind: RawRepresentable, Codable, Hashable, Sendable {
-        let rawValue: String
+    public struct Kind: RawRepresentable, Codable, Hashable, Sendable {
+        public let rawValue: String
 
         // Recorded by Nirux.
-        static let request = Kind("request")
-        static let goal = Kind("goal")
-        static let status = Kind("status")
-        static let nextStep = Kind("nextStep")
-        static let blocker = Kind("blocker")
-        static let turnEnd = Kind("turnEnd")
+        public static let request = Kind("request")
+        public static let goal = Kind("goal")
+        public static let status = Kind("status")
+        public static let nextStep = Kind("nextStep")
+        public static let blocker = Kind("blocker")
+        public static let turnEnd = Kind("turnEnd")
         /// Its text names the task's pull requests, one per line.
-        static let closed = Kind("closed")
+        public static let closed = Kind("closed")
         // Recorded as they happen, and joined while their file still has them.
-        static let followUp = Kind("followUp")
-        static let ciFailure = Kind("ciFailure")
+        public static let followUp = Kind("followUp")
+        public static let ciFailure = Kind("ciFailure")
         // Joined from the files that keep them.
-        static let question = Kind("question")
-        static let answer = Kind("answer")
-        static let tell = Kind("tell")
-        static let result = Kind("result")
-        static let handedToUser = Kind("handedToUser")
-        static let questionRetired = Kind("questionRetired")
-        static let review = Kind("review")
-        static let findings = Kind("findings")
-        static let rule = Kind("rule")
+        public static let question = Kind("question")
+        public static let answer = Kind("answer")
+        public static let tell = Kind("tell")
+        public static let result = Kind("result")
+        public static let handedToUser = Kind("handedToUser")
+        public static let questionRetired = Kind("questionRetired")
+        public static let review = Kind("review")
+        public static let findings = Kind("findings")
+        public static let rule = Kind("rule")
         // The pull request's history, read from GitHub at close.
-        static let pullRequest = Kind("pullRequest")
-        static let commit = Kind("commit")
-        static let prReview = Kind("prReview")
-        static let checkRun = Kind("checkRun")
-        static let checks = Kind("checks")
-        static let merged = Kind("merged")
-        static let prClosed = Kind("prClosed")
+        public static let pullRequest = Kind("pullRequest")
+        public static let commit = Kind("commit")
+        public static let prReview = Kind("prReview")
+        public static let checkRun = Kind("checkRun")
+        public static let checks = Kind("checks")
+        public static let merged = Kind("merged")
+        public static let prClosed = Kind("prClosed")
 
-        init(rawValue: String) { self.rawValue = rawValue }
-        init(_ rawValue: String) { self.rawValue = rawValue }
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(_ rawValue: String) { self.rawValue = rawValue }
 
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             rawValue = try decoder.singleValueContainer().decode(String.self)
         }
 
-        func encode(to encoder: Encoder) throws {
+        public func encode(to encoder: Encoder) throws {
             var container = encoder.singleValueContainer()
             try container.encode(rawValue)
         }
     }
 
     /// Open, like `Kind`.
-    struct Author: RawRepresentable, Codable, Hashable, Sendable {
-        let rawValue: String
+    public struct Author: RawRepresentable, Codable, Hashable, Sendable {
+        public let rawValue: String
 
-        static let user = Author("user")
-        static let lead = Author("lead")
+        public static let user = Author("user")
+        public static let lead = Author("lead")
         /// The task that started this one as its sub-task.
-        static let parentTask = Author("task")
+        public static let parentTask = Author("task")
         /// The task's own agent.
-        static let agent = Author("agent")
+        public static let agent = Author("agent")
         /// Nirux itself: a turn's status line, a merge clearing the Lead's context.
-        static let nirux = Author("nirux")
+        public static let nirux = Author("nirux")
 
-        init(rawValue: String) { self.rawValue = rawValue }
-        init(_ rawValue: String) { self.rawValue = rawValue }
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(_ rawValue: String) { self.rawValue = rawValue }
 
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             rawValue = try decoder.singleValueContainer().decode(String.self)
         }
 
-        func encode(to encoder: Encoder) throws {
+        public func encode(to encoder: Encoder) throws {
             var container = encoder.singleValueContainer()
             try container.encode(rawValue)
         }
     }
 
-    static func ordered(_ events: [Event]) -> [Event] {
+    public static func ordered(_ events: [Event]) -> [Event] {
         var seen = Set<Event>()
         let unique = events.filter { seen.insert($0).inserted }
         var lastStatus: String?

@@ -47,10 +47,11 @@ final class SidebarTaskPreview {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    func pin(workspaceID id: String, card: TaskPreviewCard) {
+    func pin(workspaceID id: String, card: TaskPreviewCard, onReply: @escaping (String, String) -> TaskThreadContentView.ReplyResult) {
         guard self.card === card, workspaceID == id, card.window != nil, pinnedBody == nil else { return }
         cancelPending()
         let body = TaskThreadContentView()
+        body.onReply = onReply
         body.onDismiss = { [weak self, weak card] in
             guard let self, let card, self.card === card else { return }
             dismiss()

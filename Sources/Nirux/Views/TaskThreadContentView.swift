@@ -17,6 +17,11 @@ final class TaskThreadContentView: NSView, NSOutlineViewDataSource, NSOutlineVie
         }
     }
 
+    enum ReplyResult { case sent, noLongerOpen, retry }
+    var onReply: ((_ questionID: String, _ answer: String) -> ReplyResult)?
+    private let stack = NSStackView()
+    private var composer: TaskThreadReplyView?
+
     var onDismiss: (() -> Void)?
     private var escapeMonitor: Any?
     let outline = NSOutlineView()
@@ -34,7 +39,7 @@ final class TaskThreadContentView: NSView, NSOutlineViewDataSource, NSOutlineVie
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
-        scroll.autoresizingMask = [.width, .height]
+
         outline.headerView = nil
         outline.backgroundColor = .clear
         outline.style = .plain
@@ -48,7 +53,13 @@ final class TaskThreadContentView: NSView, NSOutlineViewDataSource, NSOutlineVie
         outline.delegate = self
         outline.setAccessibilityLabel("Task thread")
         scroll.documentView = outline
-        addSubview(scroll)
+        stack.orientation = .vertical
+        stack.alignment = .width
+        stack.spacing = 0
+        stack.frame = bounds
+        stack.autoresizingMask = [.width, .height]
+        stack.addArrangedSubview(scroll)
+        addSubview(stack)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -90,6 +101,7 @@ final class TaskThreadContentView: NSView, NSOutlineViewDataSource, NSOutlineVie
         self.workspaceID = workspaceID
         self.spaceID = spaceID
         if changed {
+            closeReply()
             displayed = nil
             replace(with: [message("Loading thread…")])
             outline.scroll(.zero)
@@ -100,6 +112,9 @@ final class TaskThreadContentView: NSView, NSOutlineViewDataSource, NSOutlineVie
             if let timeline, timeline == displayed { return }
             displayed = timeline
             guard let timeline else { return replace(with: [message("Thread unavailable")]) }
+            if let composer, !timeline.current.contains(where: { $0.questionID == composer.questionID }) {
+                composer.markClosed()
+            }
             let expanded = items.compactMap { outline.isItemExpanded($0) ? $0.section : nil }
             let sections = timeline.sections.map { section in
                 let children = section.entries.map { Item($0) }
@@ -139,23 +154,64 @@ final class TaskThreadContentView: NSView, NSOutlineViewDataSource, NSOutlineVie
         let cell = outlineView.makeView(withIdentifier: id, owner: self) as? ThreadLineCell ?? ThreadLineCell()
         cell.identifier = id
         cell.update(item.line, foldedPreview: item.section != nil)
+        if let id = item.line.questionID, onReply != nil, composer == nil {
+            cell.onReply = { [weak self] in self?.beginReply(to: id) }
+        } else {
+            cell.onReply = nil
+        }
         return cell
+    }
+
+    private func beginReply(to id: String) {
+        guard composer == nil, let line = displayed?.current.first(where: { $0.questionID == id }) else { return }
+        let editor = TaskThreadReplyView(questionID: id, question: line.text, width: bounds.width)
+        editor.onSend = { [weak self, weak editor] text in
+            guard let self, let editor, composer === editor else { return }
+            switch onReply?(id, text) {
+            case .sent: closeReply()
+            case .noLongerOpen: editor.markClosed()
+            case .retry, nil: break
+            }
+        }
+        editor.onCancel = { [weak self] in self?.closeReply() }
+        composer = editor
+        stack.addArrangedSubview(editor)
+        outline.reloadData()
+        window?.makeFirstResponder(editor.field)
+    }
+
+    private func closeReply() {
+        guard let composer else { return }
+        composer.removeFromSuperview()
+        self.composer = nil
+        outline.reloadData()
     }
 }
 
 @MainActor
 private final class ThreadLineCell: NSTableCellView {
     private let label = NSTextField(wrappingLabelWithString: "")
+    private let reply = NSButton(title: "Reply…", target: nil, action: nil)
+    var onReply: (() -> Void)? {
+        didSet { reply.isHidden = onReply == nil }
+    }
+
+    @objc private func replyClicked() { onReply?() }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
+        reply.target = self
+        reply.action = #selector(replyClicked)
+        reply.bezelStyle = .inline
+        let row = NSStackView(views: [label, reply])
+        row.alignment = .firstBaseline
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.Space.xs),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Theme.Space.sm),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: Theme.Space.xs),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Theme.Space.xs)
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.Space.xs),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Theme.Space.sm),
+            row.topAnchor.constraint(equalTo: topAnchor, constant: Theme.Space.xs),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Theme.Space.xs)
         ])
     }
 
