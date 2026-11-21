@@ -192,7 +192,7 @@ extension WorkspaceInfo {
             && ![.waiting, .error, .working].contains(cardState)
     }
 
-    /// The block under a row's two lines, top to bottom; empty hides it.
+    /// The block under a row's status, top to bottom; empty hides it.
     /// "Clean up" and a Mission question are the status line's
     /// (`rowSummary`) when it shows them; when it says something else first
     /// they get a line here, so every question opens and every clean-up
@@ -245,9 +245,8 @@ extension WorkspaceInfo {
         }
         // The blocker is the status line's, or waits behind what comes
         // first (the tooltip has it). The selected row adds the next step
-        // when its status line says something else; the Lead's row has no
-        // status line.
-        if isActive, let next = nextStepText, isLead || summary.status.text != Self.nextStepLine(next) {
+        // below its columns.
+        if isActive, let next = nextStepText {
             actions.append(.next(next))
         }
         if isLead, let leadLaunchIssue { actions.append(.leadRecovery(leadLaunchIssue)) }

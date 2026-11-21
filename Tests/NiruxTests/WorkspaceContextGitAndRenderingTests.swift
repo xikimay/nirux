@@ -558,14 +558,12 @@ extension WorkspaceContextTests {
         SidebarExpandedMetrics.workspaceHeight(for: workspace, sidebarWidth: 260)
     }
 
-    /// The card keeps three lines: the phase, the purpose and the last
-    /// summary move to the title's tooltip.
-    func testContextTextGoesToTheTitleTooltip() throws {
+    func testPurposeHasItsOwnLineAndTheTitleKeepsTheFullContext() throws {
         let workspace = makeWorkspaceInfo(
             purpose: "Explain why this exists",
             summary: "Persistence is complete"
         )
-        XCTAssertEqual(height(workspace), height(makeWorkspaceInfo()))
+        XCTAssertEqual(height(workspace) - height(makeWorkspaceInfo()), SidebarExpandedMetrics.statusRowHeight)
 
         let labels = render(workspace).views.compactMap { $0 as? NSTextField }
         let title = try XCTUnwrap(labels.first { $0.stringValue == "context" })
@@ -573,7 +571,7 @@ extension WorkspaceContextTests {
             title.toolTip,
             "context\nPhase: Active\nPurpose: Explain why this exists\nLast: Persistence is complete\nNo activity yet"
         )
-        XCTAssertFalse(labels.contains { $0.stringValue == "Explain why this exists" })
+        XCTAssertTrue(labels.contains { $0.stringValue == "Explain why this exists" })
     }
 
     /// A sub-task's row names the task it is under: its title's tooltip
@@ -605,18 +603,18 @@ extension WorkspaceContextTests {
         XCTAssertEqual(
             height(workspace) - height(makeWorkspaceInfo()),
             SidebarExpandedMetrics.actionBlockHeight([.next("Retry the deployment")], width: 224, textWidth: 208)
+                + status.frame.height - SidebarExpandedMetrics.statusRowHeight
         )
         let title = try XCTUnwrap(labels.first { $0.stringValue == "context" })
         XCTAssertTrue(title.toolTip?.contains("Blocker: Waiting for API access\nNext: Retry the deployment") == true)
     }
 
-    /// The next step alone takes the status line: no line under it.
-    func testSidebarContextRowFallsBackToNextStep() throws {
+    func testSelectedRowShowsItsNextStepOnceBelowTheChip() throws {
         let workspace = makeWorkspaceInfo(nextStep: "Retry the deployment")
         let labels = render(workspace).views.compactMap { $0 as? NSTextField }
 
-        XCTAssertEqual(labels.filter { $0.stringValue.hasSuffix("Retry the deployment") }.map(\.stringValue), ["Next · Retry the deployment"])
-        XCTAssertEqual(height(workspace), height(makeWorkspaceInfo()))
+        XCTAssertEqual(labels.filter { $0.stringValue.hasSuffix("Retry the deployment") }.count, 1)
+        XCTAssertGreaterThan(height(workspace), height(makeWorkspaceInfo()))
     }
 
     /// The next step under the status line is the selected card's.

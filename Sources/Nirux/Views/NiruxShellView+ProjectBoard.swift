@@ -218,7 +218,7 @@ extension NiruxShellView {
         guard noteTaskStations(of: board, content: stages.content) else { return }
         let infos = sidebar.lastInfos.map { info in
             var info = info
-            info.station = taskStations[info.id]
+            info.boardProgress = taskStations[info.id]
             return info
         }
         sidebar.update(profiles: sidebar.lastProfiles, workspaces: infos)
