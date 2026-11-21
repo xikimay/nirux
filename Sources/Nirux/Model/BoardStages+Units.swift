@@ -142,7 +142,7 @@ extension BoardStages {
         // merged line's is): the queue is through with it.
         let isThrough = facts.lines.indices.map { index -> Bool in
             guard let number = facts.lines[index].pullRequest?.number, mergedToday.contains(number) else { return false }
-            return lines[index].following.isEmpty && lines[index].rail?.marks.contains(.current) == false
+            return lines[index].state != .needsYou && lines[index].following.isEmpty && lines[index].rail?.marks.contains(.current) == false
         }
         // In the tree's order, sub-tasks before their task: one that is
         // through leaves, unless a sub-task of it stays.
@@ -158,6 +158,11 @@ extension BoardStages {
             }.map(\.element)
             return sorted.map(\.unit)
         }
+        var tasks = arranged(placed.filter(\.hasTask)) + orphans
+        if order == .progress {
+            let needsYou = { (unit: Unit) in unit.lines.contains { $0.state == .needsYou } }
+            tasks = tasks.filter(needsYou) + tasks.filter { !needsYou($0) }
+        }
         // Where each merged pull request's lines went.
         var left: [Int: [Int]] = [:]
         var listed = Set<Int>()
@@ -167,7 +172,7 @@ extension BoardStages {
         }
         return Section(
             id: facts.id,
-            units: arranged(placed.filter(\.hasTask)) + orphans,
+            units: tasks,
             withoutTask: arranged(placed.filter { !$0.hasTask }),
             merged: today.compactMap { pullRequest in
                 let gone = left[pullRequest.number] ?? []

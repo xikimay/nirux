@@ -170,7 +170,7 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual([shown.titleLabel.stringValue, shown.phraseLabel.stringValue, shown.pullRequestLabel.stringValue],
                        ["Asking", "Needs you · a question", "#52"])
         XCTAssertEqual(shown.phraseLabel.textColor, Theme.Color.waiting)
-        XCTAssertEqual(view.lineViews[1].phraseLabel.textColor, Theme.Color.textTertiary)
+        XCTAssertEqual(view.lineViews[1].phraseLabel.textColor, Theme.Color.textSecondary)
         let columns = BoardStagesView.Columns(width: 940)
         for line in view.lineViews {
             XCTAssertLessThanOrEqual(line.titleLabel.frame.maxX, columns.task.maxX, "the title stops before the rail")
@@ -535,11 +535,11 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual([said(shown.phraseLabel), said(shown.linkLabel)], ["", hint], "whole: the words add nothing, the link what its click does")
 
         // The widths where the phrase's column holds the link and some of the words, the link alone, less than the link.
-        let widths = (392...940).map { CGFloat($0) }
+        let widths = (150...940).map { CGFloat($0) }
         let column = { (width: CGFloat) in BoardStagesView.Columns(width: width).phrase }
         let cut = try XCTUnwrap(widths.first { column($0).width >= link + 30 && column($0).width < link + words })
         let alone = try XCTUnwrap(widths.last { column($0).width >= link && column($0).width < link + 30 })
-        let less = try XCTUnwrap(widths.first { column($0).width > 0 && column($0).width < link })
+        let less = try XCTUnwrap(widths.last { column($0).width > 0 && column($0).width < link })
         let resize = { (width: CGFloat) in
             view.setFrameSize(NSSize(width: width, height: 600))
             view.layoutSubtreeIfNeeded()
@@ -591,13 +591,10 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual([shown.phraseLabel.isHidden, shown.phraseLabel.frame.width == ColumnHeaderView.textWidth(shown.phraseLabel)], [false, true])
         view.show(content([section(units: tasks([based]))]))
 
-        // No column for a phrase: no link to click, or to say anything.
         resize(380)
-        XCTAssertEqual(column(380).width, 0)
-        XCTAssertTrue(shown.phraseLabel.isHidden && shown.linkLabel.isHidden)
-        XCTAssertTrue((0..<380).allSatisfy { shown.target(at: NSPoint(x: CGFloat($0), y: 17)) == .line })
-        XCTAssertEqual(shown.hints.map(\.text), [])
-        XCTAssertEqual(shown.handRects, [])
+        XCTAssertTrue(BoardStagesView.Columns(width: 380).stations.isEmpty)
+        XCTAssertFalse(shown.linkLabel.isHidden)
+        XCTAssertEqual(shown.target(at: NSPoint(x: shown.linkLabel.frame.midX, y: 17)), .link(retarget))
     }
 
     func testEachPlaceOfALineSaysItsOwnUnderThePointer() throws {
@@ -3560,7 +3557,7 @@ final class BoardStagesViewTests: XCTestCase {
         for width in stride(from: CGFloat(306), through: 2000, by: 1) {
             let columns = BoardStagesView.Columns(width: width)
             let steps = [columns.task.width - previous.task.width, columns.rail.width - previous.rail.width]
-            if width > 392, steps.contains(where: { $0 < 0 || $0 > 1 }) { jumps.append(width) }
+            if width > 392, previous.stations.isEmpty == columns.stations.isEmpty, steps.contains(where: { $0 < 0 || $0 > 1 }) { jumps.append(width) }
             let last = columns.time ?? columns.pullRequest ?? (columns.phrase.width > 0 ? columns.phrase : columns.rail)
             if last.maxX != width - BoardStagesView.Metrics.padding { overflows.append(width) }
             if width >= 392 { previous = columns }
@@ -3617,28 +3614,24 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(board(content([])).stationTitles.map(\.isHidden), [false, false, false, false])
     }
 
-    func testANarrowerBoardKeepsEachLinesDotAndTitle() throws {
-        // A phrase of a word says nothing: under 70 pt it goes, and the title takes its place.
-        let last = BoardStagesView.Columns(width: 392)
-        XCTAssertEqual([last.task.width, last.rail.width, last.phrase.width], [142, 116, 70])
-        let without = BoardStagesView.Columns(width: 391)
-        XCTAssertEqual([without.task.width, without.rail.width, without.phrase.width], [225, 116, 0])
-        // Then the rail, once a title would have less than 140 pt beside it.
-        let least = BoardStagesView.Columns(width: 306)
-        XCTAssertEqual([least.task.width, least.rail.width, least.phrase.width], [140, 116, 0])
-        let tiny = BoardStagesView.Columns(width: 305)
-        XCTAssertEqual([tiny.task.width, tiny.rail.width, tiny.phrase.width], [269, 0, 0], "the title takes the line")
-        XCTAssertEqual(tiny.stations, [])
-
+    func testANarrowerBoardKeepsEachLinesTaskAndNowColumns() throws {
+        for width: CGFloat in [300, 360, 392, 460] {
+            let columns = BoardStagesView.Columns(width: width)
+            XCTAssertTrue(columns.stations.isEmpty)
+            XCTAssertGreaterThan(columns.phrase.width, 130)
+            XCTAssertLessThan(columns.task.maxX, columns.phrase.minX)
+            XCTAssertEqual(columns.phrase.maxX, width - BoardStagesView.Metrics.padding)
+        }
         let merged = [BoardStages.Merged(lineID: nil, title: "Fix", number: 7, mergedAt: now - 60)]
         let view = board(content([section(
             units: [.task(line("task"), subtasks: []), .task(line("folder", rail: false), subtasks: [])], merged: merged
         )]), width: 300)
         XCTAssertEqual(view.stationTitles.map(\.isHidden), [true, true, true, true])
-        XCTAssertEqual(view.columnTitles.map(\.isHidden), [false, true, true])
+        XCTAssertEqual(view.columnTitles.map(\.isHidden), [false, false, true])
         for shown in view.lineViews {
-            XCTAssertTrue(shown.phraseLabel.isHidden && shown.noRailLabel.isHidden && shown.pullRequestLabel.isHidden)
-            XCTAssertEqual(shown.titleLabel.frame.maxX, 300 - BoardStagesView.Metrics.padding)
+            XCTAssertFalse(shown.phraseLabel.isHidden)
+            XCTAssertTrue(shown.noRailLabel.isHidden && shown.pullRequestLabel.isHidden)
+            XCTAssertEqual(shown.titleLabel.frame.maxX, BoardStagesView.Columns(width: 300).task.maxX)
         }
         // "Merged today" has no room beside its caption: its entries start under it.
         let closing = try XCTUnwrap(view.mergedView(section: "nirux"))

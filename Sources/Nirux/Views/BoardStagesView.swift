@@ -123,6 +123,7 @@ final class BoardStagesView: NSView {
         /// The wall clock the lines' times count to.
         var now: TimeInterval
         var runningQueues: [RunningQueue] = []
+        var inputStatus: String?
         /// In place of the sections: the space deleted, board.json unread
         /// or unreadable, no repository set. The running queues' lines stay.
         var message: Message?
@@ -334,6 +335,7 @@ final class BoardStagesView: NSView {
             title.font = Theme.Font.label
             title.textColor = Theme.Color.textTertiary
         }
+        columnTitles[1].textColor = Theme.Color.textSecondary
         separator.wantsLayer = true
         separator.layer?.backgroundColor = Theme.Color.line.cgColor
         scrollView.drawsBackground = false
@@ -380,13 +382,14 @@ final class BoardStagesView: NSView {
         guard content != self.content else { return }
         let previous = self.content
         self.content = content
-        guard content.header != previous?.header || content.order != previous?.order || content.sections != previous?.sections
+        guard content.inputStatus != previous?.inputStatus || content.header != previous?.header || content.order != previous?.order || content.sections != previous?.sections
             || content.runningQueues != previous?.runningQueues || content.message != previous?.message else { return showTimes() }
         let focus = viewsWillChange()
         defer { viewsChanged(focus: focus) }
         spaceDot.layer?.backgroundColor = content.header.color.cgColor
         nameLabel.stringValue = content.header.name
         summaryLabel.stringValue = content.header.summary
+        columnTitles[1].stringValue = content.inputStatus.map { "Now · " + $0 } ?? "Now"
         if let lead = content.header.lead {
             leadIcon.icon = StateIcon(state: lead.state, station: nil, reason: lead.reason)
         }
@@ -792,7 +795,7 @@ final class BoardStagesView: NSView {
         /// What the phrase keeps before the pull request, then the time,
         /// take their columns; and under what it isn't worth showing.
         static let minimumPhrase: CGFloat = 180
-        static let shortestPhrase: CGFloat = 70
+        static let shortestPhrase: CGFloat = 150
         /// The name is whole beside the order switch; a long one keeps
         /// this much.
         static let minimumName: CGFloat = 160
@@ -803,17 +806,7 @@ final class BoardStagesView: NSView {
 
     /// A line's columns for a width: task, rail, phrase, pull request,
     /// time.
-    /// - From where a phrase shows, the task's column and the rail grow
-    ///   with the Board, never by a jump: widening a column moves no rail
-    ///   back.
-    /// - Below about 760 pt the rail tightens, its stations closer, before
-    ///   any title is cut further.
-    /// - The phrase takes the rest. The pull request, then the time, show
-    ///   once the phrase keeps `minimumPhrase` beside them.
-    /// - A phrase under `shortestPhrase` says nothing: it goes, and the
-    ///   title takes its place (below about 390 pt).
-    /// - A Board too narrow for a rail beside a title (about 300 pt) keeps
-    ///   each line's icon and title.
+    /// The task and Now stay visible. The rail, PR and time fit around them.
     struct Columns: Equatable {
         var task: NSRect
         /// No width when the Board is too narrow for it.
@@ -828,15 +821,11 @@ final class BoardStagesView: NSView {
             let inner = max(0, width - 2 * Metrics.padding)
             let eased = (Metrics.compactRailWidth + 0.4 * (width - 600)).rounded(.down)
             let wholeRail = min(Metrics.railWidth, max(Metrics.compactRailWidth, eased))
-            let showsRail = inner - wholeRail - Metrics.gap >= Metrics.minimumTask
-            let railWidth = showsRail ? wholeRail : 0
             let wanted = min(Metrics.maximumTask, max(Metrics.minimumTask, (inner * 0.4).rounded(.down)))
-            var taskWidth = showsRail ? wanted : inner
-            var phraseWidth = max(0, inner - taskWidth - railWidth - 2 * Metrics.gap)
-            if phraseWidth < Metrics.shortestPhrase {
-                phraseWidth = 0
-                if showsRail { taskWidth = inner - railWidth - Metrics.gap }
-            }
+            let showsRail = inner - wanted - wholeRail - 2 * Metrics.gap >= Metrics.shortestPhrase
+            let railWidth = showsRail ? wholeRail : 0
+            let taskWidth = showsRail ? wanted : min(wanted, max(0, (inner * 0.42).rounded(.down)))
+            var phraseWidth = max(0, inner - taskWidth - railWidth - (showsRail ? 2 : 1) * Metrics.gap)
             let showsPullRequest = phraseWidth - Metrics.pullRequestWidth - Metrics.gap >= Metrics.minimumPhrase
             if showsPullRequest { phraseWidth -= Metrics.pullRequestWidth + Metrics.gap }
             let showsTime = showsPullRequest && phraseWidth - Metrics.timeWidth - Metrics.gap >= Metrics.minimumPhrase
@@ -847,7 +836,7 @@ final class BoardStagesView: NSView {
                 return NSRect(x: x, y: 0, width: width, height: height)
             }
             task = next(taskWidth)
-            rail = next(railWidth)
+            rail = showsRail ? next(railWidth) : .zero
             phrase = next(phraseWidth)
             pullRequest = showsPullRequest ? next(Metrics.pullRequestWidth) : nil
             time = showsTime ? next(Metrics.timeWidth) : nil

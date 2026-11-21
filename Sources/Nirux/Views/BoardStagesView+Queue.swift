@@ -14,7 +14,7 @@ extension BoardStagesView {
         let count = proposed > 0 ? " · \(proposed)" : ""
         switch state.run {
         case .running:
-            queue.status = state.status ?? "Running"
+            queue.status = runningStatus(state)
             queue.stop = stopButton(state)
             return queue
         case .elsewhere:
@@ -55,12 +55,17 @@ extension BoardStagesView {
         switch state.run {
         // Green, as its header says it.
         case .running:
-            return RunningQueue(id: id, title: title, tooltip: tooltip, status: state.status ?? "Running", stop: stopButton(state))
+            return RunningQueue(id: id, title: title, tooltip: tooltip, status: runningStatus(state), stop: stopButton(state))
         case .elsewhere:
             return RunningQueue(id: id, title: title, tooltip: tooltip, status: elsewhere(state))
         case .none, .ended:
             return nil
         }
+    }
+
+    private nonisolated static func runningStatus(_ state: ProjectBoard.QueueState) -> String {
+        let owner = state.run == .running(isStopping: true) ? "Stopping" : "Auto"
+        return [owner, state.status].compactMap { $0 }.joined(separator: " · ")
     }
 
     private nonisolated static func elsewhere(_ state: ProjectBoard.QueueState) -> String {
