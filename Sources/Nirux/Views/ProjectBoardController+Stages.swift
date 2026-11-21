@@ -19,6 +19,7 @@ extension ProjectBoardController {
         /// Lead left out.
         var tasks: [String]
         var waiting: [BoardStages.WaitingTask] = []
+        var missionStatusAvailable = true
         /// A sub-task's workspace id → the one it is listed under.
         var parents: [String: String] = [:]
         /// The space's Lead's workspace id.
@@ -35,6 +36,21 @@ extension ProjectBoardController {
         /// The worktrees and folders a clean-up of which runs, by path.
         var cleaningUp: Set<String> = []
         var order: BoardStages.Order = .sidebar
+
+        func inputStatus(repositoryStatusKnown: Bool) -> String {
+            let waits = Set(waiting.map(\.id))
+            let requests = Set(readings.compactMap { id, reading in
+                if case .needsYou = reading.activity { return id }
+                return nil
+            }).subtracting(waits).union(waiting.filter { $0.state == .needsYou }.map(\.id))
+            let needingInput = workspaces.filter { requests.contains($0.id) }
+            if let first = needingInput.first {
+                return needingInput.count == 1 ? "1 needs you · " + first.title : "\(needingInput.count) need you"
+            }
+            let covered = Set(readings.filter { $0.value.terminalStatusKnown }.keys).union(waits)
+            let complete = repositoryStatusKnown && missionStatusAvailable && workspaces.allSatisfy { covered.contains($0.id) }
+            return complete ? "No input requested" : "Status incomplete"
+        }
     }
 
     /// Everything the stages are built from: the shell's inputs, the day
@@ -133,6 +149,7 @@ extension ProjectBoardController {
             header: stagesHeader(inputs), order: inputs.order, sections: [], now: now.timeIntervalSince1970,
             runningQueues: inputs.runningQueues
         )
+        let waitingIDs = Set(inputs.waiting.map(\.id))
         for workspace in inputs.workspaces {
             targets.focus[workspace.id] = Self.focus(workspace.agent, workspaces: [workspace.id])
         }
@@ -141,6 +158,10 @@ extension ProjectBoardController {
         } else if local == nil {
             content.message = BoardStagesView.Message(text: Self.listingWorktrees)
         }
+        content.inputStatus = inputs.inputStatus(repositoryStatusKnown: content.message == nil && sections.allSatisfy { section in
+            guard let read = reads[section.id], read.mergedPullRequests != nil, read.errors[.mergedPullRequests] == nil else { return false }
+            return gitHubStatus(in: read, now: now) == .current
+        })
         guard content.message == nil, let local else {
             if !inputs.waiting.isEmpty {
                 let facts = BoardStages.SectionFacts(id: "waiting-tasks", lines: [], waiting: inputs.waiting)
@@ -155,7 +176,6 @@ extension ProjectBoardController {
             uniquingKeysWith: { first, _ in first }
         )
         // A section with no rows still shows: a read that failed says so in its pill.
-        let waitingIDs = Set(inputs.waiting.map(\.id))
         let listed = listedRows(local: local, workspaces: inputs.workspaces.filter { !waitingIDs.contains($0.id) })
         var locations = Dictionary(
             listed.bySection.flatMap { section, rows in rows.flatMap(\.workspaces).map { ($0.id, section) } },
@@ -245,7 +265,7 @@ extension ProjectBoardController {
         )
         let reading = BoardStages.RepositoryReading(
             id: section.id, rows: rows, readsPullRequests: reads?.openPullRequests != nil,
-            requiredChecks: required, baseBranch: base,
+            gitHubStatus: gitHubStatus(in: reads, now: now), requiredChecks: required, baseBranch: base,
             queue: inputs.queues[section.id], merged: reads?.mergedPullRequests ?? [], heads: heads, cleaningUp: inputs.cleaningUp,
             gitHub: reads?.gitHub, checkTimeout: timeout
         )
@@ -306,6 +326,11 @@ extension ProjectBoardController {
     private var isReadOnly: Bool {
         if let loaded, case .readOnly = loaded.status { return true }
         return false
+    }
+
+    private func gitHubStatus(in reads: RepositoryReads?, now: Date) -> BoardStages.GitHubStatus {
+        guard let reads, reads.openPullRequests != nil else { return .unavailable }
+        return reads.errors[.openPullRequests] == nil && reads.pullRequestsAreFresh(now: now) ? .current : .stale
     }
 
     /// The header's pill: what went wrong reading the repository, else why

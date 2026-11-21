@@ -1020,11 +1020,11 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             let now = Date().timeIntervalSince1970
             shell.drawProjectBoards(shell.readProjectBoards(snapshot: ProcessSnapshot(entries: []), now: now, pass: pass), now: now)
-            XCTAssertEqual(phrase(), "Asking Lead")
+            XCTAssertEqual(phrase(), "Awaiting Lead reply · Which base?")
             shell.renderProjectBoard(board)
-            XCTAssertEqual(phrase(), "Asking Lead", "between two passes: the last pass's reading")
+            XCTAssertEqual(phrase(), "Awaiting Lead reply · Which base?", "between two passes: the last pass's reading")
             shell.updateSidebar()
-            XCTAssertNotEqual(phrase(), "Asking Lead", "the next pass's")
+            XCTAssertNotEqual(phrase(), "Awaiting Lead reply · Which base?", "the next pass's")
         }
     }
 

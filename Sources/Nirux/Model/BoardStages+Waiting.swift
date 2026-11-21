@@ -5,6 +5,7 @@ extension BoardStages {
         let id: String
         let title: String
         let awaitedID: String
+        let pullRequestURL: String?
         let repositoryKey: String
         let state: State
         let phrase: String
@@ -14,6 +15,7 @@ extension BoardStages {
             self.id = id
             self.title = title
             awaitedID = wait.awaited.workspaceID
+            pullRequestURL = wait.awaited.pullRequest?.url
             repositoryKey = start.repositoryKey
             switch status {
             case .waits:
@@ -29,7 +31,8 @@ extension BoardStages {
         }
 
         var line: Line {
-            Line(id: id, title: title, station: .code, state: state, rail: nil, phrase: Phrase(text: phrase), pullRequest: "", since: nil)
+            let menu: [MenuItem] = pullRequestURL.flatMap { isGitHubAddress($0) ? [.openPullRequest(url: $0)] : nil } ?? []
+            return Line(id: id, title: title, station: .code, state: state, rail: nil, phrase: Phrase(text: phrase), pullRequest: "", since: nil, menu: menu)
         }
     }
 
