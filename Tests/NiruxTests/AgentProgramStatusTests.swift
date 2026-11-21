@@ -7,9 +7,9 @@ final class AgentProgramStatusTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_000)
 
     private func status(
-        _ state: AgentProgramStatus.State, kind: String? = nil, _ message: String? = nil, process: String = "agy"
+        _ state: AgentProgramStatus.State, kind: String? = nil, _ message: String? = nil, agent: CodingAgent = .agy
     ) -> AgentProgramStatus {
-        AgentProgramStatus(state: state, kind: kind, message: message, process: process)
+        AgentProgramStatus(state: state, kind: kind, message: message, agent: agent)
     }
 
     // MARK: - Reading
@@ -23,7 +23,7 @@ final class AgentProgramStatusTests: XCTestCase {
         XCTAssertEqual(scanner.statuses(in: output), [
             status(.blocked, kind: "permission", "Approve Bash: echo nirux-probe"),
             status(.done, "ok"),
-            status(.done, process: "codex")
+            status(.done, agent: .codex)
         ])
         XCTAssertFalse(scanner.isWaiting)
     }

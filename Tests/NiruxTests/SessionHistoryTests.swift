@@ -118,10 +118,10 @@ final class SessionHistoryTests: XCTestCase {
     }
 
     func testADeferredAgentResumesASessionOnlyWithItsID() {
-        XCTAssertEqual(DeferredAgentLaunch.Agent.claude(resume: .session("s1"), mode: .default).sessionID, "s1")
-        XCTAssertEqual(DeferredAgentLaunch.Agent.codex(resume: .session("t1"), mode: .default).sessionID, "t1")
-        XCTAssertNil(DeferredAgentLaunch.Agent.claude(resume: .picker, mode: .default).sessionID)
-        XCTAssertNil(DeferredAgentLaunch.Agent.claude(resume: nil, mode: .default).sessionID)
+        XCTAssertEqual(AgentLaunch.claude(resume: .session("s1"), mode: .default).sessionID, "s1")
+        XCTAssertEqual(AgentLaunch.codex(resume: .session("t1"), mode: .default).sessionID, "t1")
+        XCTAssertNil(AgentLaunch.claude(resume: .picker, mode: .default).sessionID)
+        XCTAssertNil(AgentLaunch.claude(resume: nil, mode: .default).sessionID)
     }
 
     @MainActor
@@ -142,7 +142,7 @@ final class SessionHistoryTests: XCTestCase {
 /// What the Session History panel lists and says it will do (see
 /// SessionHistoryPanel).
 final class SessionHistoryPanelModelTests: XCTestCase {
-    private func record(_ id: String, title: String, agent: AgentHookEvent.Kind = .claude, branch: String = "feat/x") -> AgentSessionRecord {
+    private func record(_ id: String, title: String, agent: CodingAgent = .claude, branch: String = "feat/x") -> AgentSessionRecord {
         var record = AgentSessionRecord(
             schemaVersion: 1, agent: agent, sessionID: id, startedAt: 0, lastStartAt: 0,
             lastActivityAt: 1, endedAt: 1, status: .idle, hasConversation: true

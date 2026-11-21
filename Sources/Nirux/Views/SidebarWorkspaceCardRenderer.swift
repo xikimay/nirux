@@ -642,7 +642,7 @@ final class SidebarWorkspaceCardRenderer {
         button.hoverFillColor = Theme.Color.accent.withAlphaComponent(0.14)
         button.toolTip = deferred.tooltip
         button.setAccessibilityRole(.button)
-        button.setAccessibilityLabel("Resume \(deferred.processName) here")
+        button.setAccessibilityLabel("Resume \(deferred.agent.rawValue) here")
         views.last?.setAccessibilityElement(false)
         append(button)
         approvalButtons[SidebarHoverTarget.deferredResumeButtonKey(columnID: deferred.columnID)] = button

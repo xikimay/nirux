@@ -240,13 +240,13 @@ extension NiruxShellView {
     /// An agent column back without its agent, which starts later (see
     /// NiruxShellView+LazyRestore.swift).
     private func addDeferredAgentColumn(
-        _ agent: DeferredAgentLaunch.Agent,
+        _ launch: AgentLaunch,
         restoring persistedColumn: PersistedColumn,
         in workspace: WorkspaceState
     ) {
         workspace.addColumn(
             deferredAgent: DeferredAgentLaunch(
-                agent: agent,
+                launch: launch,
                 // Hand-edited state shows like a title Nirux saved.
                 title: DeferredAgentLaunch.sessionTitle(fromTerminalTitle: persistedColumn.lastAgentTitle),
                 lastStatus: persistedColumn.lastAgentStatus
@@ -446,15 +446,15 @@ extension NiruxShellView {
             kind = .webView
             webURL = col.webViewColumn?.currentURL
         } else if let foregroundProcess {
-            switch foregroundProcess.name {
-            case "claude":
+            switch foregroundProcess.agent {
+            case .claude?:
                 kind = .claudeCode; webURL = nil
-                claudeMode = detectClaudeLaunchMode(process: foregroundProcess)
+                claudeMode = ClaudeLaunchMode.detect(arguments: foregroundProcess.arguments)
                 claudeRestore = col.persistedClaudeRestore(foregroundProcess: foregroundProcess)
-            case "codex":
+            case .codex?:
                 kind = .codex; webURL = nil
-                codexMode = detectCodexLaunchMode(process: foregroundProcess)
-            case AgentProgramStatus.agy where !AgentHookCenter.isHeadlessAgy(foregroundProcess):
+                codexMode = CodexLaunchMode.detect(arguments: foregroundProcess.arguments)
+            case .agy? where foregroundProcess.interactiveAgent == .agy:
                 kind = .agy; webURL = nil
             default: kind = .terminal; webURL = nil
             }
@@ -499,29 +499,5 @@ extension NiruxShellView {
 
     static func persistedWorkspaceCwd(for workspace: WorkspaceState) -> String {
         workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd
-    }
-
-    /// Map a running `claude` process's argv flags back to the launch mode it
-    /// was started with, so restore reproduces the column faithfully.
-    private func detectClaudeLaunchMode(process: ForegroundProcess) -> ClaudeLaunchMode? {
-        ClaudeLaunchMode.detect(arguments: process.arguments)
-    }
-
-    private func detectCodexLaunchMode(process: ForegroundProcess) -> CodexLaunchMode? {
-        CodexLaunchMode.detect(arguments: process.arguments)
-    }
-}
-
-extension ClaudeLaunchMode {
-    /// The mode a `claude` argv was launched in (see
-    /// `detectClaudeLaunchMode`); nil when it names none.
-    static func detect(arguments: [String]) -> ClaudeLaunchMode? {
-        if arguments.contains("--dangerously-skip-permissions") {
-            return .skipPermissions
-        }
-        guard let index = arguments.firstIndex(of: "--permission-mode"),
-              arguments.indices.contains(index + 1) else { return nil }
-        let mode = arguments[index + 1]
-        return mode == "default" ? .manual : ClaudeLaunchMode(rawValue: mode)
     }
 }

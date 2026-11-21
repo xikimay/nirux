@@ -76,8 +76,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     private func fillPopups() {
         let defaults = loaded.defaults
         agentPopup.removeAllItems()
-        for (agent, title) in NewTaskPanel.agents {
-            agentPopup.addItem(withTitle: title)
+        for agent in CodingAgent.launchable {
+            agentPopup.addItem(withTitle: agent.productName)
             agentPopup.lastItem?.representedObject = agent.rawValue
         }
         SettingsForm.select(defaults.taskAgent.rawValue, in: agentPopup)
@@ -111,7 +111,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
 
     @objc func agentChanged(_ sender: NSPopUpButton) {
         guard let raw = sender.selectedItem?.representedObject as? String,
-              let agent = NiruxApp.WorkspaceAgent(rawValue: raw)
+              let agent = CodingAgent(launchable: raw)
         else { return }
         var defaults = loaded.defaults
         defaults.agent = agent
