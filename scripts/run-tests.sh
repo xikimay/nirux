@@ -78,13 +78,15 @@ if [[ ! -s "$work/list" ]]; then
 fi
 sed -E 's#/.*##' "$work/list" | sort -u > "$work/classes"
 if [[ -n $only ]]; then
-    if [[ ! -s $only ]] || grep -vxF -f "$work/classes" "$only" > "$work/unknown"; then
+    sort -u "$only" > "$work/requested"
+    comm -23 "$work/requested" "$work/classes" > "$work/unknown"
+    if [[ ! -s "$work/requested" || -s "$work/unknown" ]]; then
         echo "Empty selection or unknown class. Running the whole suite."
     else
         awk -F/ 'FILENAME == ARGV[1] { selected[$0] = 1; next } $1 in selected' \
-            "$only" "$work/list" > "$work/selected"
+            "$work/requested" "$work/list" > "$work/selected"
         mv "$work/selected" "$work/list"
-        sed -E 's#/.*##' "$work/list" | sort -u > "$work/classes"
+        mv "$work/requested" "$work/classes"
     fi
 fi
 expected=$(wc -l < "$work/list" | tr -d ' ')
