@@ -29,7 +29,7 @@ final class TerminalEngineBehaviorTests: XCTestCase {
         // The column answers the terminal's confirmations; no shell runs in it.
         let column = ColumnState(
             cwd: "/tmp",
-            deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: nil, lastStatus: nil)
+            deferredAgent: DeferredAgentLaunch(launch: .claude(resume: .session("s1"), mode: .default), title: nil, lastStatus: nil)
         )
         let terminal = TerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         terminal.controller = TerminalAppearance.makeController()
@@ -87,7 +87,7 @@ final class TerminalEngineBehaviorTests: XCTestCase {
     func testDropsOnATerminalReachNiruxsDropView() throws {
         let column = ColumnState(
             cwd: "/tmp",
-            deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: nil, lastStatus: nil)
+            deferredAgent: DeferredAgentLaunch(launch: .claude(resume: .session("s1"), mode: .default), title: nil, lastStatus: nil)
         )
         let terminal = try XCTUnwrap(column.terminalView)
         XCTAssertEqual(terminal.registeredDraggedTypes, [])

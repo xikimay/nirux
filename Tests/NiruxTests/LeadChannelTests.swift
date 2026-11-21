@@ -167,6 +167,18 @@ final class LeadChannelTests: XCTestCase {
         for name in LeadTools.names { XCTAssertEqual(allowed?.contains("mcp__nirux__\(name)"), true) }
     }
 
+    func testOnlyTheLeadCanSetATasksDependency() throws {
+        let start = try XCTUnwrap(LeadTools.definitions.first { $0["name"] as? String == LeadTools.startTask })
+        let schema = try XCTUnwrap(start["inputSchema"] as? [String: Any])
+        XCTAssertNotNil((schema["properties"] as? [String: Any])?["after"])
+        XCTAssertEqual(schema["required"] as? [String], ["description"])
+        XCTAssertTrue(LeadTools.names.contains(LeadTools.setTaskAfter))
+        XCTAssertFalse(TaskTools.names.contains(LeadTools.setTaskAfter))
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.setTaskAfter, arguments: ["task": "Docs"]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.setTaskAfter, arguments: ["task": "Docs", "after": " "]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.startTask, arguments: ["description": "Docs", "after": false]))
+    }
+
     /// set_task_context needs one field at least, a string within the
     /// limit; "" clears one, null leaves it out. One line on the row.
     func testTaskContextArgumentsAreCheckedBeforeTheApp() {
