@@ -55,4 +55,8 @@ jobs:
         run: swift build --build-tests
 
       - name: Run tests
-        run: scripts/run-tests.sh
+        run: |
+          scripts/run-tests.sh --repeat 10 \
+            NiruxTests.ProjectBoardFlowTests NiruxTests.BoardStagesContentFlowTests \
+            NiruxTests.EditorUnsavedEditsFlowTests NiruxTests.RequestFlowTests \
+            NiruxTests.AgentLightShellTests NiruxTests.SpacePlanFlowTests
