@@ -124,7 +124,7 @@ final class ProjectBoardRowsTests: XCTestCase {
             worktree("/p/widgets", branch: "main"),
             worktree("/p/widgets/.claude/worktrees/fix", branch: "fix", prunable: true)
         ], remotes: [widgets])
-        var gone = workspace("gone", "/p/widgets/.claude/worktrees/fix", agent: .exitedMidTurn(processName: "claude"))
+        var gone = workspace("gone", "/p/widgets/.claude/worktrees/fix", agent: .exitedMidTurn(agent: .claude))
         gone.folderIsGone = true
         let result = rows(local: [repository], workspaces: [gone, workspace("main", "/p/widgets")])
         XCTAssertEqual(summary(result), ["main main [main]", "otherRepository gone [gone]"])
