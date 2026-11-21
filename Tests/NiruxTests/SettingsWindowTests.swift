@@ -100,6 +100,7 @@ final class SettingsWindowTests: XCTestCase {
                 }),
                 ("missionHandoffsEnabled", { try self.click(app.settingsMissionHandoffsCheckbox) }),
                 ("alertOnlyWhenClaudeAsks", { try self.click(app.settingsAlertOnlyWhenClaudeAsksCheckbox) }),
+                ("generateTaskNames", { try self.click(app.settingsTaskNamesCheckbox) }),
                 ("showTurnStatus", { try self.click(app.settingsTurnStatusCheckbox) }),
                 ("showCatchUp", { try self.click(app.settingsCatchUpCheckbox) }),
                 ("triageCIFailures", { try self.click(app.settingsTriageCIFailuresCheckbox) })

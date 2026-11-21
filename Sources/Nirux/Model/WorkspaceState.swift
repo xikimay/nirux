@@ -230,6 +230,8 @@ final class WorkspaceState {
     var onMetadataChanged: (() -> Void)?
     /// A column's agent reported its turn over (`ColumnState.onProgramTurnOver`).
     var onProgramTurnOver: (() -> Void)?
+    /// The user typed a prompt to a column's agent (`ColumnState.onUserPrompt`).
+    var onUserPrompt: ((ColumnState, TimeInterval) -> Void)?
     /// A column's terminal title changed (fires before onMetadataChanged).
     var onColumnTitleChanged: ((ColumnState) -> Void)?
     var onFocusedColumnChanged: (() -> Void)?
@@ -726,12 +728,19 @@ extension WorkspaceState {
     /// it waits on the parent, not on the user.
     func waitsOnParent(_ col: ColumnState) -> Bool {
         guard let uuid = col.agentUUID else { return false }
+        // A prompt the user typed since retires its question (`onUserPrompt`):
+        // its transcript line may be unread yet.
+        col.pty?.readTranscriptPrompts()
         return MissionStore.shared.waitingQuestion(childWorkspaceID: id, childAgentUUID: uuid) != nil
             || MissionStore.shared.pendingAnswer(childWorkspaceID: id, childAgentUUID: uuid) != nil
     }
 
     private func setupAgentAttentionTracking(for col: ColumnState) {
         col.onProgramTurnOver = { [weak self] in self?.onProgramTurnOver?() }
+        col.onUserPrompt = { [weak self, weak col] typedAt in
+            guard let self, let col else { return }
+            self.onUserPrompt?(col, typedAt)
+        }
         col.onAgentAttention = { [weak self, weak col] reason in
             guard let self else { return }
             // A Mission child ends its turn after asking (even in prose).
