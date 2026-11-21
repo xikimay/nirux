@@ -1,6 +1,26 @@
 import CryptoKit
 import Foundation
 
+/// What kind of input a waiting agent needs from the user.
+enum AgentInputReason: Hashable, Sendable {
+    /// A permission: a command or a tool to allow.
+    case command
+    /// A question: at the end of a turn, in a dialog or a message, or a
+    /// plan to approve.
+    case question
+
+    /// The reason of an attention signal that waits for the user; nil
+    /// for one that doesn't (a finished turn, an error).
+    init?(_ attention: AgentAttentionReason?) {
+        switch attention {
+        case .permission(let tool, _)?: self = tool == "ExitPlanMode" ? .question : .command
+        case .question?, .askedInReply?, .message?, nil: self = .question
+        case .stillWaiting(let dialog, _)?: self.init(dialog)
+        case .turnFinished?, .apiError?, .exitedMidTurn?, .silent?: return nil
+        }
+    }
+}
+
 /// Why an agent waits on the user — the "why" behind `.needsAttention`.
 enum AgentAttentionReason: Hashable, Sendable {
     /// A tool call waits for the user's approval: the tool and a short,
