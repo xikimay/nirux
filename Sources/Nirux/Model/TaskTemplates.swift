@@ -12,7 +12,7 @@ import Foundation
 enum TaskTemplates {
     static let fileName = "task-templates.md"
 
-    struct Template: Equatable, Sendable {
+    struct Template: Codable, Equatable, Sendable {
         let name: String
         /// The section's text, trimmed; may be empty.
         let body: String

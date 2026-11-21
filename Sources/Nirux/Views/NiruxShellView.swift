@@ -170,6 +170,7 @@ final class NiruxShellView: NSView {
     /// What merge waits looked up (NiruxShellView+MergeWaits).
     var mergeWaitTracking = MergeWaitTracking()
     /// How a merge wait asks GitHub about a pull request; tests answer for it.
+    var taskWorktreesBeingCreated = Set<String>()
     var mergeWaitLookUp: @Sendable (String) -> Result<MergeWait.LookedUp?, MergeWait.LookUpFailure> = MergeWait.lookUp
     /// How a workspace's pull request is read; tests answer for it.
     var fetchPullRequest: @MainActor (
@@ -498,6 +499,9 @@ final class NiruxShellView: NSView {
     /// sidebar refresh, terminal link opening. Used by init, addWorkspace
     /// and session restore.
     func wireWorkspace(_ workspace: WorkspaceState) {
+        workspace.columns.first?.waitingTask?.onStart = { [weak self, weak workspace] in
+            if let workspace { self?.startWaitingTask(workspace) }
+        }
         wireMetadataAndGitRefresh(workspace)
         workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url in
             self?.openWebView(url: url, in: targetWorkspace)
@@ -767,7 +771,7 @@ extension NiruxShellView {
     // MARK: - Columns
 
     func addColumn() {
-        guard let ws = activeWorkspace else { return }
+        guard let ws = activeWorkspace, !ws.isWaitingTask else { return }
         ws.addColumn()
         // The strip glides to its new place, a centred one aside; the new
         // column comes in at its own.

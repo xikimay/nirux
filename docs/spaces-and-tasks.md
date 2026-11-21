@@ -66,6 +66,12 @@ With the description empty, **Start** opens a plain workspace instead: a shell i
 
 **Existing Branch…** lists the repository's worktrees, then its local branches and origin's that have none. Picking a worktree opens it. Picking a branch creates its worktree and opens a shell there.
 
+### Waiting for another task
+
+With **Starts tasks without asking** enabled, the Lead can pass `after` to `start_task`. The sidebar shows the new task and the pull request it needs. When that request merges, Nirux fetches the repository’s base branch, creates the worktree and starts the agent in the same row. The description and template survive a relaunch. The Lead gets a stable `task:<id>` when it queues the task and can find it again in `list_tasks`. When a waiting task shares a name with another task, use this ID to change or close the intended task.
+
+If the dependency closes without a merge or the worktree cannot start, the row reads **Needs you** and gives the reason. Choose **Start Now** to fetch the base and try now, or ask the Lead to change the dependency with `set_task_after`. Closing the waiting task drops its scheduled start.
+
 ### Sub-tasks
 
 **New Sub-task…**, in a task's `⋯` menu and the Workspaces menu, opens the sheet under that task. The sub-task starts in the task's repository, from the same base branch as any task, or in a folder inside the task's own folder for a task without a repository. It lists right under its task in the sidebar.
