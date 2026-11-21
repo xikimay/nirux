@@ -43,7 +43,9 @@ nor a workspace in the main checkout.
 
 ## 2. What is joined at read
 
-`TaskThread.events(from:)` is pure (no AppKit); `Sources.load` reads the
+`TaskThread.swift` compiles with Foundation alone; the app-specific joins
+live in `TaskThread+Sources.swift`. The store requires an explicit state
+directory URL. `TaskThread.events(from:)` is pure (no AppKit); `Sources.load` reads the
 files by the task's workspace id, then by its pull requests' URLs, from
 `sessions.jsonl` in every space (the live pull request follows the focused
 column, which may be another checkout). Nothing is copied.
@@ -78,14 +80,15 @@ no sources): the files it was joined from drop the task in time.
 
 - `<state dir>/projects/<space id>/threads/<workspace id>.jsonl`, 0600,
   only appended to; it moves with its task into another space.
-- A request keeps 64 KB, any other text 8,000 characters; a file takes no
+- A request keeps 65,536 characters, any other text 8,000 characters; a file takes no
   more past 2 MB, but its close.
 - A line a crash cut is skipped, and the next one starts on its own line.
 - At launch and after each close, in every space's folder (a deleted
   space's too): a thread no open task owns goes six months after it was last
   written, and the oldest of them go first while they hold more than 20 MB.
   An open task's thread stays, under its own 2 MB.
-- What is queued is written before Nirux quits.
+- What is queued is written before Nirux quits. Closing workspaces are
+  omitted from saved state, even while their exit animation runs.
 - The thread never reads transcripts.
 
 ## 5. Not yet
@@ -93,8 +96,8 @@ no sources): the files it was joined from drop the task in time.
 - `read_thread` for the Lead and the daily pass's waits (PR 2).
 - The panel from the task's row, where the user answers (two PRs).
 - The Thread button in the browser column (after the panel).
-- Removing finished Missions from `missions.json`: it waits for the user's
-  explicit yes.
+- Removing completed Missions older than 30 days from `missions.json`: approved
+  only after their text is frozen, in a separate PR; open Missions stay.
 - A task's wait for another's merge (`MergeWait`), once task dependencies
   land.
 - A task handed over by a `nirux://` link records no request: it has no

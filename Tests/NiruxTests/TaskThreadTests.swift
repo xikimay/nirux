@@ -90,6 +90,7 @@ final class TaskThreadTests: XCTestCase {
         XCTAssertTrue(TaskThread.cites(rule("#12, #44"), any: urls, isSingleRepository: true))
         XCTAssertFalse(TaskThread.cites(rule("#12, #44"), any: urls, isSingleRepository: false), "#44 may be another repository's")
         XCTAssertTrue(TaskThread.cites(rule("see https://github.com/o/r/pull/44"), any: urls, isSingleRepository: false))
+        XCTAssertFalse(TaskThread.cites(rule("see https://github.com/o/r/pull/444"), any: urls, isSingleRepository: false))
         XCTAssertFalse(TaskThread.cites(rule("#4"), any: urls, isSingleRepository: true))
         XCTAssertEqual(TaskThread.citedPullRequests("#395, #417"), [395, 417])
         XCTAssertEqual(TaskThread.citedPullRequests("slider test (#589)"), [589])

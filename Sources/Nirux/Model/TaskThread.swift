@@ -113,22 +113,6 @@ enum TaskThread {
         }
     }
 
-    /// The thread as it reads, in time order: an open task's joins what the
-    /// files say of it now; a closed task's (`sources` nil) is its file
-    /// alone, frozen when it closed. An event read twice (a hook replayed, a
-    /// round both recorded and joined, a task closed twice) counts once, and
-    /// so does a status line that repeats the one before.
-    static func thread(recorded: [Event], joining sources: Sources?) -> [Event] {
-        ordered(recorded + (sources.map(events(from:)) ?? []))
-    }
-
-    /// What a closing task appends: what the files say of it, then the
-    /// close, which names its pull requests (their history comes after).
-    static func frozen(_ sources: Sources, closedAt: TimeInterval, pullRequests: Set<String>) -> [Event] {
-        let named = pullRequests.isEmpty ? nil : pullRequests.sorted().joined(separator: "\n")
-        return events(from: sources) + [Event(time: closedAt, kind: .closed, text: named)]
-    }
-
     static func ordered(_ events: [Event]) -> [Event] {
         var seen = Set<Event>()
         let unique = events.filter { seen.insert($0).inserted }

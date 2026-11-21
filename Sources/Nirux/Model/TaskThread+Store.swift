@@ -17,19 +17,19 @@ extension TaskThread {
         /// Appends, freezes and prunes, in order, off the main thread.
         static let queue = DispatchQueue(label: "nirux.task-thread")
 
-        static func folder(spaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> URL? {
+        static func folder(spaceID: String, stateDirectory: URL) -> URL? {
             SpaceBrief.directory(spaceID: spaceID, stateDirectory: stateDirectory)?.appendingPathComponent(folderName, isDirectory: true)
         }
 
         /// Nil for an id that could name another file: workspace ids are UUIDs.
-        static func fileURL(workspaceID: String, spaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> URL? {
+        static func fileURL(workspaceID: String, spaceID: String, stateDirectory: URL) -> URL? {
             let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
             guard !workspaceID.isEmpty, workspaceID.unicodeScalars.allSatisfy(allowed.contains) else { return nil }
             return folder(spaceID: spaceID, stateDirectory: stateDirectory)?.appendingPathComponent("\(workspaceID).jsonl")
         }
 
         /// The task's file, in whichever space holds it.
-        static func locate(workspaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> URL? {
+        static func locate(workspaceID: String, stateDirectory: URL) -> URL? {
             let projects = stateDirectory.appendingPathComponent("projects", isDirectory: true)
             let spaces = (try? FileManager.default.contentsOfDirectory(atPath: projects.path)) ?? []
             return spaces.lazy.compactMap { fileURL(workspaceID: workspaceID, spaceID: $0, stateDirectory: stateDirectory) }
@@ -37,7 +37,7 @@ extension TaskThread {
         }
 
         /// The lines it can read, in the order they came.
-        static func load(workspaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> [Event] {
+        static func load(workspaceID: String, stateDirectory: URL) -> [Event] {
             guard let url = locate(workspaceID: workspaceID, stateDirectory: stateDirectory),
                   case .data(let data) = BoardConfigStore.read(url, maxBytes: maxFileBytes + 65_536)
             else { return [] }
@@ -49,7 +49,7 @@ extension TaskThread {
         /// file from another space; returns how many it wrote.
         @discardableResult
         static func append(
-            _ events: [Event], workspaceID: String, spaceID: String, stateDirectory: URL = Persistence.stateDirectory
+            _ events: [Event], workspaceID: String, spaceID: String, stateDirectory: URL
         ) -> Int {
             guard !events.isEmpty, let url = fileURL(workspaceID: workspaceID, spaceID: spaceID, stateDirectory: stateDirectory) else { return 0 }
             let manager = FileManager.default
@@ -89,7 +89,7 @@ extension TaskThread {
         }
 
         /// `prune` in every space's folder, a deleted space's too.
-        static func pruneAll(keeping open: Set<String>, now: TimeInterval, stateDirectory: URL = Persistence.stateDirectory) {
+        static func pruneAll(keeping open: Set<String>, now: TimeInterval, stateDirectory: URL) {
             let projects = stateDirectory.appendingPathComponent("projects", isDirectory: true)
             for spaceID in (try? FileManager.default.contentsOfDirectory(atPath: projects.path)) ?? [] {
                 prune(spaceID: spaceID, keeping: open, now: now, stateDirectory: stateDirectory)
@@ -99,7 +99,7 @@ extension TaskThread {
         /// Removes the threads `open` doesn't list that were last written
         /// six months before `now`, then the oldest of them while they hold
         /// more than `maxSpaceBytes`.
-        static func prune(spaceID: String, keeping open: Set<String>, now: TimeInterval, stateDirectory: URL = Persistence.stateDirectory) {
+        static func prune(spaceID: String, keeping open: Set<String>, now: TimeInterval, stateDirectory: URL) {
             let manager = FileManager.default
             guard let folder = folder(spaceID: spaceID, stateDirectory: stateDirectory),
                   let names = try? manager.contentsOfDirectory(atPath: folder.path) else { return }

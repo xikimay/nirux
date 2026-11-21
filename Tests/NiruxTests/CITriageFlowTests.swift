@@ -231,7 +231,7 @@ final class CITriageFlowTests: XCTestCase {
             task.prInfo = Self.red
             shell.triageRedChecks(in: task)
             harness.waitUntil("the verdict in its thread") {
-                TaskThread.Store.load(workspaceID: id).contains { $0.kind == .ciFailure && $0.detail == "flaky" && $0.number == 52 }
+                TaskThread.Store.load(workspaceID: id, stateDirectory: URL(fileURLWithPath: harness.stateDirectory)).contains { $0.kind == .ciFailure && $0.detail == "flaky" && $0.number == 52 }
             }
         }
     }

@@ -166,9 +166,12 @@ final class LeadToolsFlowTests: XCTestCase {
             // Its worktree removed under it: it is still a task with a thread.
             try FileManager.default.removeItem(atPath: task.cwd)
             shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), refocusing: false)
+            let saved = shell.persistedState()
+            XCTAssertFalse(saved.workspaces.contains { $0.id == task.id }, "quitting during the exit must not restore the closed task")
+            XCTAssertEqual(saved.workspaces[saved.activeWorkspaceIndex].id, lead.workspace.id)
             var thread: [TaskThread.Event] = []
             harness.waitUntil("its thread frozen") {
-                thread = TaskThread.Store.load(workspaceID: task.id)
+                thread = TaskThread.Store.load(workspaceID: task.id, stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
                 return thread.contains { $0.kind == .closed }
             }
             let request = try XCTUnwrap(thread.first)

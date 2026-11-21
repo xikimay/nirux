@@ -1,6 +1,22 @@
 import Foundation
 
 extension TaskThread {
+    /// The thread as it reads, in time order: an open task's joins what the
+    /// files say of it now; a closed task's (`sources` nil) is its file
+    /// alone, frozen when it closed. An event read twice (a hook replayed, a
+    /// round both recorded and joined, a task closed twice) counts once, and
+    /// so does a status line that repeats the one before.
+    static func thread(recorded: [Event], joining sources: Sources?) -> [Event] {
+        ordered(recorded + (sources.map(events(from:)) ?? []))
+    }
+
+    /// What a closing task appends: what the files say of it, then the
+    /// close, which names its pull requests (their history comes after).
+    static func frozen(_ sources: Sources, closedAt: TimeInterval, pullRequests: Set<String>) -> [Event] {
+        let named = pullRequests.isEmpty ? nil : pullRequests.sorted().joined(separator: "\n")
+        return events(from: sources) + [Event(time: closedAt, kind: .closed, text: named)]
+    }
+
     /// What the files Nirux keeps already say of one task (`load`).
     struct Sources: Sendable {
         /// Those whose child is the task.
@@ -81,7 +97,9 @@ extension TaskThread {
     /// A rule cites a pull request by its URL, or by its number alone in a
     /// space of one repository, where the number can't be another's.
     static func cites(_ proposal: RuleProposal, any urls: Set<String>, isSingleRepository: Bool) -> Bool {
-        if urls.contains(where: proposal.evidence.contains) { return true }
+        if urls.contains(where: {
+            proposal.evidence.range(of: NSRegularExpression.escapedPattern(for: $0) + "(?![0-9])", options: .regularExpression) != nil
+        }) { return true }
         guard isSingleRepository else { return false }
         let numbers = Set(urls.compactMap { CIFailure.pullRequest(url: $0)?.number })
         return !citedPullRequests(proposal.evidence).isDisjoint(with: numbers)

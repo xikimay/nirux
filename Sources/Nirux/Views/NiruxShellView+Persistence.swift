@@ -348,8 +348,9 @@ extension NiruxShellView {
         // The shell is the source of truth for sidebar state and the Board's order — carry the rest.
         settings.sidebarExpanded = sidebarFold.chosenExpanded
         settings.boardOrder = boardOrder
+        let keptWorkspaces = workspaces.filter { !$0.isClosing }
         return PersistedState(
-            workspaces: workspaces.map { workspace in
+            workspaces: keptWorkspaces.map { workspace in
                 PersistedWorkspace(
                     id: workspace.id, title: workspace.title,
                     cwd: Self.persistedWorkspaceCwd(for: workspace),
@@ -377,14 +378,12 @@ extension NiruxShellView {
                     ),
                     startedOutsideNirux: workspace.startedOutsideNirux,
                     startedByAgent: workspace.startedByAgent,
-                    // One closing is no longer the Lead: a new one may
-                    // start before it goes.
-                    isLead: workspace.isLead && !workspace.isClosing,
+                    isLead: workspace.isLead,
                     reportsToLead: workspace.reportsToLead,
                     reportsToTask: workspace.reportsToTask,
                     taskFolder: workspace.taskFolder)
             },
-            activeWorkspaceIndex: activeWSIndex,
+            activeWorkspaceIndex: keptWorkspaces.firstIndex { $0 === activeWorkspace } ?? 0,
             settings: settings,
             workspaceProfiles: workspaceStore.profiles,
             activeProfileID: activeProfileID,
