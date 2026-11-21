@@ -470,12 +470,8 @@ extension NiruxShellView {
         _ request: NewTask.Request, target: NewTask.Target, branch: String, handoverFilename: String, routesByAnchor: Bool
     ) -> TaskResult {
         let start: NewTask.Start
-        if let remoteBranch = target.remoteBranch, let name = target.remoteBranchName {
-            if request.fetchesFirst {
-                start = .fetched(name)
-            } else {
-                start = .lastFetched(name)
-            }
+        if let name = target.remoteBranchName {
+            start = request.fetchesFirst ? .fetched(name) : .lastFetched(name)
         } else {
             start = .checkoutHead(repository: target.repository, branch: target.checkoutBranch)
         }
