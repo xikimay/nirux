@@ -506,7 +506,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             columns: columns,
             prInfo: ci.map {
                 PRInfo(
-                    number: 7, state: "OPEN", isDraft: false, ciStatus: $0, checks: [], reviewDecision: nil, mergeable: nil,
+                    number: 7, state: .open, isDraft: false, ciStatus: $0, checks: [], reviewDecision: nil, mergeable: nil,
                     url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil
                 )
             },

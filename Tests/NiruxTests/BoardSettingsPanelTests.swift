@@ -322,7 +322,7 @@ final class BoardSettingsPanelTests: XCTestCase {
     func testAPastedGitHubURLIsSavedAsOwnerAndName() throws {
         try withShell { shell, space in
             let form = try open(shell, space)
-            form.repositoryField.stringValue = "https://github.com/Acme/Widgets.git"
+            form.repositoryField.stringValue = "https://GitHub.com/Acme/Widgets.git"
             form.baseBranchField.stringValue = "main"
             try click(form.saveButton)
 

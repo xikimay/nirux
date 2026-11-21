@@ -34,7 +34,7 @@ extension WorkspaceContextTests {
     func makePullRequest() -> PRInfo {
         PRInfo(
             number: 42,
-            state: "OPEN",
+            state: .open,
             isDraft: false,
             ciStatus: nil,
             checks: [],

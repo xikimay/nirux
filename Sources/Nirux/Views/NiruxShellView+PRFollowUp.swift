@@ -105,7 +105,7 @@ extension NiruxShellView {
     func followUpPullRequest(of workspace: WorkspaceState, snapshot given: ProcessSnapshot? = nil) {
         guard let pullRequest = workspace.prInfo, !pullRequest.url.isEmpty else { return }
         let center = prFollowUpCenter
-        guard pullRequest.state.uppercased() == "OPEN" else {
+        guard pullRequest.state == .open else {
             // Merged or closed: nothing more to follow.
             if center.file.value.pullRequests[pullRequest.url] != nil {
                 center.file.update { $0.pullRequests[pullRequest.url] = nil }
@@ -147,7 +147,7 @@ extension NiruxShellView {
     private func typeFollowUpRound(of workspace: WorkspaceState, head: String?, hasTrackedChanges: Bool?) {
         // Hooks still in the queue may say the agent started working.
         AgentHookCenter.shared.drain()
-        guard let pullRequest = workspace.prInfo, pullRequest.state.uppercased() == "OPEN", isFollowedTask(workspace) else { return }
+        guard let pullRequest = workspace.prInfo, pullRequest.state == .open, isFollowedTask(workspace) else { return }
         let now = Date().timeIntervalSince1970
         let snapshot = ProcessSnapshot()
         let target = followUpTarget(in: workspace, pullRequest: pullRequest, snapshot: snapshot)
@@ -181,7 +181,7 @@ extension NiruxShellView {
     /// The pull requests open in a workspace, followed or not: their entries
     /// outlive a quiet month.
     private var openPullRequests: Set<String> {
-        Set(workspaces.compactMap { $0.isClosing || $0.prInfo?.state.uppercased() != "OPEN" ? nil : $0.prInfo?.url })
+        Set(workspaces.compactMap { $0.isClosing || $0.prInfo?.state != .open ? nil : $0.prInfo?.url })
     }
 
     /// A task of a space that follows its pull requests.
@@ -309,9 +309,9 @@ extension NiruxShellView {
     private func followUpBaseRemote(of workspace: WorkspaceState, pullRequest: PRInfo) -> String? {
         let center = prFollowUpCenter
         guard pullRequest.mergeable == "CONFLICTING", let root = workspace.gitContext?.identity.repositoryRoot,
-              let repository = Self.pullRequestRepository(pullRequest.url)
+              let repository = GitHubRepository(pullRequestURL: pullRequest.url)
         else { return nil }
-        let key = "\(repository.owner)/\(repository.name)"
+        let key = repository.ownerAndName
         if let read = center.remotes[root],
            read.byRepository[key] != nil || Date().timeIntervalSince1970 - read.readAt < PRFollowUpCenter.remotesLifetime {
             return read.byRepository[key]
@@ -335,7 +335,7 @@ extension NiruxShellView {
     /// merged or stopped; a queue running in another Nirux holds every pull
     /// request of its repository.
     private func mergeQueueHolds(_ pullRequest: PRInfo) -> Bool {
-        guard let repository = Self.pullRequestRepository(pullRequest.url) else { return false }
+        guard let repository = GitHubRepository(pullRequestURL: pullRequest.url) else { return false }
         return mergeQueues.values.contains { queue in
             guard queue.queueRepository == repository else { return false }
             if queue.runsElsewhere { return true }
@@ -347,14 +347,6 @@ extension NiruxShellView {
                 }
             }
         }
-    }
-
-    /// `https://<host>/<owner>/<name>/pull/<n>`'s repository.
-    nonisolated static func pullRequestRepository(_ url: String) -> GitHubRepository? {
-        guard let components = URLComponents(string: url), let host = components.host else { return nil }
-        let path = components.path.split(separator: "/").map(String.init)
-        guard path.count >= 3, path[2] == "pull" else { return nil }
-        return GitHubRepository(host: host, owner: path[0], name: path[1])
     }
 
     /// At most one round's turn runs across tasks, each may build and test:
@@ -371,7 +363,7 @@ extension NiruxShellView {
     /// The user's Address or Why Failed took that feedback, that failure:
     /// no round takes them, the setting on or not yet.
     func noteFollowUpTakenByUser(in workspace: WorkspaceState, feedback: [String] = [], failure: Bool = false) {
-        guard let pullRequest = workspace.prInfo, pullRequest.state.uppercased() == "OPEN" else { return }
+        guard let pullRequest = workspace.prInfo, pullRequest.state == .open else { return }
         let signature = PRFollowUp.failureSignature(pullRequest)
         prFollowUpCenter.updateEntry(
             pullRequest.url, space: workspace.profileID, now: Date().timeIntervalSince1970, open: openPullRequests
@@ -394,7 +386,7 @@ extension NiruxShellView {
     /// the pull request's head until the user takes it (a prompt of theirs
     /// into one of its agents).
     func followUpRow(of workspace: WorkspaceState) -> SidebarFollowUp? {
-        guard let pullRequest = workspace.prInfo, pullRequest.state.uppercased() == "OPEN", isFollowedTask(workspace),
+        guard let pullRequest = workspace.prInfo, pullRequest.state == .open, isFollowedTask(workspace),
               let entry = prFollowUpCenter.file.value.pullRequests[pullRequest.url]
         else { return nil }
         if let stop = entry.stop {

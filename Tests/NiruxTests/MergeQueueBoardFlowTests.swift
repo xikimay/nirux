@@ -172,12 +172,12 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             }
             XCTAssertEqual(try line("feat/api", in: board).line.phrase.text, "Base #10 merged · Retarget to main")
             // GitHub refuses: the repository's pill says why, until Refresh.
-            client.retargetFailure = .failed("HTTP 422: Validation Failed")
+            client.retargetFailure = .refused(status: 422, message: "Validation Failed")
             try BoardStagesClicks.pressLink(try line("feat/api", in: board))
             let header = try self.header(of: board)
-            waitUntil("the refusal shows") { header.pill.status?.toolTip?.contains("Retarget #14: gh: HTTP 422") == true }
+            waitUntil("the refusal shows") { header.pill.status?.toolTip?.contains("Retarget #14: Validation Failed (HTTP 422)") == true }
             XCTAssertEqual(header.pill.status?.tone, .error)
-            XCTAssertTrue(board.view.refreshButton.toolTip?.contains("Retarget #14: gh: HTTP 422") == true, "and under Refresh")
+            XCTAssertTrue(board.view.refreshButton.toolTip?.contains("Retarget #14: Validation Failed (HTTP 422)") == true, "and under Refresh")
             client.retargetFailure = nil
             try BoardStagesClicks.click(board.view.refreshButton)
             waitUntil("Refresh clears it") { header.pill.status?.tone != .error && BoardStagesClicks.wasUpdated(board) }
@@ -270,7 +270,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         shell.projectBoardClient = boardClient ?? ProjectBoardFlowTests.FakeGitHub(
             openPullRequests: Self.boardPullRequests, runs: ProjectBoardGitHubTests.postMergeRuns
         )
-        let queueClient = GitHubCLIQueueClient(run: world.run)
+        let queueClient = GitHubCLIQueueClient(gh: world.run)
         shell.mergeQueueClient = isDryRun ? DryRunQueueClient(wrapped: queueClient, reason: "NIRUX_STATE_DIR is set") : queueClient
         shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
         let window = NSWindow(

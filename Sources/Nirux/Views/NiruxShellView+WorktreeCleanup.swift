@@ -80,7 +80,7 @@ extension NiruxShellView {
     /// read only for a merged one.
     func mergedCleanupOffer(workspaceIndex: Int) -> MergedCleanupOffer? {
         guard let workspace = workspaces[safe: workspaceIndex],
-              let pullRequest = workspace.prInfo, pullRequest.state == "MERGED", !pullRequest.isDraft,
+              let pullRequest = workspace.prInfo, pullRequest.state == .merged, !pullRequest.isDraft,
               let repositoryRoot = workspace.gitContext?.identity.repositoryRoot,
               let path = worktreeCleanupPath(workspaceIndex: workspaceIndex),
               FileManager.default.fileExists(atPath: path)
