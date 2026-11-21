@@ -155,7 +155,8 @@ struct CITriageStore: Codable, Equatable {
 
     // MARK: - On disk
 
-    static var url: URL { Persistence.stateDirectory.appendingPathComponent("ci-triage.json") }
+    static let fileName = "ci-triage.json"
+    static var url: URL { Persistence.stateDirectory.appendingPathComponent(fileName) }
 
     /// Empty for a missing or unreadable file: the list is learned again.
     static func load(from url: URL = url) -> CITriageStore {
