@@ -44,17 +44,38 @@ extension NiruxShellView {
                     at: index, columns: columns, isActive: isActive, parentTitle: parents[index].map { workspaces[$0].title }
                 )
             }()
-            readings[workspace.id] = BoardStages.TaskReading(
+            var reading = BoardStages.TaskReading(
                 info,
                 summary: workspace.lastSummaryIsManual ? WorkspaceInfo.oneRunOfWords(workspace.lastSummary) : nil,
                 gitRoot: workspace.gitContext?.identity.resolvedRepositoryRoot,
                 reviewsInFlight: Set(workspace.reviewsRunning.map(\.pass)),
+                settledTurn: { column in
+                    guard let terminal = workspace.columns.first(where: { $0.id == column.id }) else { return false }
+                    if column.attentionReason == nil, column.openDialog == nil, column.questionAskedAt == nil,
+                       column.processName == AgentProgramStatus.codex, let pty = terminal.pty,
+                       pty.codexQueueRefusal(runningSince: now, snapshot: snapshot) == nil { return true }
+                    guard let agent = terminal.agentUUID, let ended = column.questionAskedAt ?? terminal.pty?.agentLastTurnEndedAt,
+                          ended > 0 else { return false }
+                    return MissionStore.shared.missions.contains { mission in
+                        mission.childWorkspaceID == workspace.id && mission.childAgentUUID == agent && mission.oneWay != true
+                            && Self.settledTurn(ended, events: mission.events)
+                    }
+                },
                 turnStartedAt: { id in
                     workspace.columns.first { $0.id == id }?.pty?.agentTurnStartedAt?.timeIntervalSince1970
                 }
             )
+            reading.terminalStatusKnown = !snapshot.isEmpty || workspace.openColumns.allSatisfy { $0.pty == nil }
+            readings[workspace.id] = reading
         }
         return readings
+    }
+
+    /// A completion supersedes earlier turn-end notices. A response settles only the turn that asked its question.
+    static func settledTurn(_ ended: TimeInterval, events: [MissionEvent]) -> Bool {
+        if events.contains(where: { $0.kind == .completed && $0.timestamp >= ended }) { return true }
+        guard let question = events.first(where: { $0.kind == .question && $0.timestamp == ended }) else { return false }
+        return events.contains { $0.kind == .response && $0.inReplyTo == question.id }
     }
 
     /// What the shell holds of a Board's space for its stages, beside what
@@ -77,6 +98,7 @@ extension NiruxShellView {
             waiting: members.compactMap { workspace in
                 workspace.waitingStart.flatMap { BoardStages.WaitingTask(id: workspace.id, title: workspace.title, wait: $0) }
             },
+            missionStatusAvailable: board.stagesReadings != nil && MissionStore.shared.hasLoadedLedger,
             // Ids as restored: two the same must not trap.
             parents: Dictionary(workspaceStore.activeParents(in: spaceID).map {
                 (self.workspaces[$0.key].id, self.workspaces[$0.value].id)

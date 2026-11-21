@@ -233,8 +233,10 @@ extension WorkspaceInfo {
         case answered(SidebarMissionQuestion)
     }
 
-    var agentStep: AgentStep? {
-        if let waiting = columns.first(where: { $0.attention == .waiting }) {
+    var agentStep: AgentStep? { agentStep(in: columns, includingWait: { _ in true }) }
+
+    func agentStep(in columns: [ColumnInfo], includingWait: (ColumnInfo) -> Bool) -> AgentStep? {
+        if let waiting = columns.first(where: { $0.attention == .waiting && includingWait($0) }) {
             if let question = waiting.missionQuestion, question.handOff != nil, !question.isAnswered {
                 return .needsYou(waiting, words: question.needsYouDetail, isHandedOff: true)
             }

@@ -150,6 +150,10 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // An hour without a read (a Board not shown doesn't read): its stations have aged, the rows drop them.
             let later = board.freshSections(now: Date().addingTimeInterval(3_600), clock: ProjectBoard.clock() + 3_600)
             XCTAssertEqual(later, [])
+            let aged = board.stagesContent(withAgent, now: Date().addingTimeInterval(3_600)).content
+            XCTAssertEqual(aged.inputStatus, "Status incomplete")
+            let loginLine = aged.sections.first?.lines.units.flatMap(\.lines).first { $0.id == ids("login") }
+            XCTAssertEqual(loginLine?.phrase.text, "GitHub status outdated")
             shell.noteTaskStations(of: board, content: try stages(of: board, in: shell), fresh: later)
             XCTAssertTrue(rows.allSatisfy { shell.taskStations[$0.id] == nil })
 

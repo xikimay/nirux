@@ -84,6 +84,8 @@ extension ProjectBoard {
         /// When it merged; nil for one that hasn't, and for one whose
         /// date gh didn't give.
         var mergedAt: Date?
+        var reviewDecision: String?
+        var autoMerges = false
 
         var isOpen: Bool { state == "OPEN" }
         var isConflicting: Bool { mergeable == "CONFLICTING" }

@@ -13,10 +13,12 @@ extension BoardStages.TaskReading {
     @MainActor
     init(
         _ info: WorkspaceInfo, summary: String?, gitRoot: String?, reviewsInFlight: Set<ReviewPass> = [],
+        settledTurn: (ColumnInfo) -> Bool = { _ in false },
         turnStartedAt: (UUID) -> TimeInterval? = { _ in nil }
     ) {
         self.init()
-        activity = Self.activity(of: info, turnStartedAt: turnStartedAt)
+        activity = Self.activity(of: info, settledTurn: settledTurn, turnStartedAt: turnStartedAt)
+        isParked = info.phase == .parked || info.isInactive
         reviews = info.reviewBadges
         self.reviewsInFlight = reviewsInFlight
         self.summary = summary
@@ -46,11 +48,35 @@ extension BoardStages.TaskReading {
     /// The agents' steps of the row's ladder (`WorkspaceInfo.agentStep`),
     /// in the Board's terms: red checks are the pull request's, read there.
     @MainActor
-    private static func activity(of info: WorkspaceInfo, turnStartedAt: (UUID) -> TimeInterval?) -> BoardStages.Activity {
-        switch info.agentStep {
-        case .needsYou(let column, let words, _)?: return .needsYou(words, reason: WorkspaceInfo.waitReason(of: column))
+    private static func activity(
+        of info: WorkspaceInfo, settledTurn: (ColumnInfo) -> Bool, turnStartedAt: (UUID) -> TimeInterval?
+    ) -> BoardStages.Activity {
+        let columns = info.columns.map { column in
+            guard column.missionQuestion?.isAnswered == true, column.questionAskedAt != nil,
+                  !settledTurn(column) else { return column }
+            var terminal = column
+            terminal.missionQuestion = nil
+            return terminal
+        }
+        let step = info.agentStep(in: columns) { column in
+            if column.permissionApproval != nil || column.stuck != nil || column.openDialog?.isBlockingDialog == true
+                || column.attentionReason?.isBlockingDialog == true { return true }
+            if let question = column.missionQuestion {
+                if question.handOff != nil && !question.isAnswered { return true }
+                if column.attentionReason == nil && column.openDialog == nil { return false }
+            }
+            guard column.attentionReason == nil || column.attentionReason?.isTurnEnd == true,
+                  column.openDialog == nil || column.openDialog?.isTurnEnd == true else { return true }
+            return !settledTurn(column)
+        }
+        switch step {
+        case .needsYou(let column, let words, let handedOff)?:
+            if handedOff { return .needsYou(words, action: column.missionQuestion?.kind == .decision ? .decide : .reply) }
+            if column.attentionLabel == "needs you" { return .needsYou("", action: .inspect) }
+            if column.attentionLabel == "plan" { return .needsYou("Proposed plan", action: .plan) }
+            return .needsYou(words, action: WorkspaceInfo.waitReason(of: column) == .command ? .permission : .reply)
         case .broken(_, let sentence)?: return .failed(sentence)
-        case .asking(_, let question)?: return .asking(question.parentTitle)
+        case .asking(_, let question)?: return .asking(question.parentTitle, question: question.text)
         case .working(let working)?:
             // The row's clock: the column that may be going in circles, else the first working one a minute in.
             let clocks = info.circlingColumn.map { [$0] } ?? working

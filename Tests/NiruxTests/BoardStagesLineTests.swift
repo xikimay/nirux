@@ -30,11 +30,12 @@ final class BoardStagesLineTests: XCTestCase {
         let failed = try line()
         XCTAssertEqual(failed.state, .needsYou)
         XCTAssertEqual(failed.phrase.text, "Needs you · Couldn’t fetch origin/main")
+        XCTAssertTrue(queued.menu.isEmpty)
+        XCTAssertEqual(failed.menu, [.openPullRequest(url: "https://github.com/acme/widgets/pull/42")])
         for row in [queued, failed] {
             XCTAssertNil(row.rail)
             XCTAssertNil(row.offer)
             XCTAssertNil(row.phrase.link)
-            XCTAssertTrue(row.menu.isEmpty)
             XCTAssertEqual(row.pullRequest, "")
         }
     }
@@ -131,14 +132,14 @@ final class BoardStagesLineTests: XCTestCase {
     /// glyph (the command's, as on the sidebar's row); a question, or a
     /// line that doesn't need the user, never says so.
     func testALineSaysWhenItsAgentWaitsOnACommand() {
-        XCTAssertEqual(line(facts(activity: .needsYou("Bash(swift test)", reason: .command))).reason, .command)
+        XCTAssertEqual(line(facts(activity: .needsYou("Bash(swift test)", action: .permission))).reason, .command)
         XCTAssertEqual(line(facts(activity: .needsYou("a question"))).reason, .question)
         XCTAssertTrue(line(facts(activity: .asking("Ship checkout"))).asksParent)
         XCTAssertFalse(line(facts(activity: .idle)).asksParent)
-        // The queue's phrase wins over the agent asking its parent: so does the icon.
+        // The parent still owns the reply while the queue runs.
         let queued = line(facts(pullRequest(), activity: .asking("Lead"), queue: Queue(step: .merge("Merging"))))
-        XCTAssertEqual(queued.phrase.text, "Merging")
-        XCTAssertFalse(queued.asksParent, "no asking ring beside the queue's words")
+        XCTAssertEqual(queued.phrase.text, "Awaiting Lead reply")
+        XCTAssertTrue(queued.asksParent)
     }
 
     func testReviewsStaysCurrentWhileTheReviewsTurnIsNotOver() {
@@ -170,7 +171,7 @@ final class BoardStagesLineTests: XCTestCase {
 
         let none = line(facts(pullRequest(), reviews: nil), rules: BoardStages.Rules(requiredReviews: []))
         XCTAssertEqual(none.rail?.marks, [.done, .skipped, .done, .current], "no review asked for: no Reviews station")
-        XCTAssertEqual(none.phrase.text, "Ready · checks green", "and none claimed")
+        XCTAssertEqual(none.phrase.text, "Merge manually · checks green", "and none claimed")
     }
 
     func testTheRulesMayAskForReviewsOnTheCurrentHead() {
@@ -201,11 +202,11 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertEqual(checking.rail, BoardStages.Rail(marks: [.done, .skipped, .current, .ahead], queueOrder: 2),
                        "the user confirmed its head at Start: its reviews don't hold it, and none is claimed")
         XCTAssertEqual(checking.state, .waiting, "the queue reruns a red check once: not a failure yet")
-        XCTAssertEqual(checking.phrase.text, "Updating branch")
+        XCTAssertEqual(checking.phrase.text, "Auto · Updating branch")
         XCTAssertNil(checking.since, "the queue's steps have no clock of the task's")
         updating.activity = .working(since: nil)
         XCTAssertEqual(line(updating).state, .working, "its agent's word comes first")
-        XCTAssertEqual(line(facts(pullRequest(), queue: Queue(step: .merge(" ")))).phrase.text, "In the queue")
+        XCTAssertEqual(line(facts(pullRequest(), queue: Queue(step: .merge(" ")))).phrase.text, "Auto · In the queue")
         let merging = line(facts(pullRequest(checks: .pending(since: nil)), reviews: nil, queue: Queue(step: .merge("Merging"))))
         XCTAssertEqual(merging.rail?.marks, [.done, .skipped, .done, .current], "merging, whatever the Board last read of it")
         updating.reviewsInFlight = [.codeReview]
@@ -219,7 +220,7 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertEqual(waiting.rail, BoardStages.Rail(marks: [.done, .done, .done, .current], queueOrder: 1),
                        "its number stays while the queue has it")
         XCTAssertEqual(waiting.state, .waiting)
-        XCTAssertEqual(waiting.phrase.text, "Waiting for nightly")
+        XCTAssertEqual(waiting.phrase.text, "Auto · Waiting for nightly")
         var stop = BoardStages.QueueStop(
             label: "nightly failed", message: "The nightly of #52 failed.", isProblem: true, isAfterMerge: true
         )
@@ -276,9 +277,12 @@ final class BoardStagesLineTests: XCTestCase {
         remote.hasTask = false
         XCTAssertEqual(line(remote).rail?.marks, [.done, .skipped, .current, .ahead], "no workspace here could have seen one")
         remote.pullRequest = pullRequest()
-        XCTAssertEqual(line(remote).phrase.text, "Ready · checks green", "no review to claim")
+        XCTAssertEqual(line(remote).phrase.text, "Merge manually · checks green", "no review to claim")
         remote.pullRequest = pullRequest(checks: .absent)
-        XCTAssertEqual(line(remote).phrase.text, "Ready", "nor any check")
+        XCTAssertEqual(line(remote).phrase.text, "Merge manually", "nor any check")
+        remote.pullRequest?.autoMerges = true
+        XCTAssertEqual(line(remote).phrase.text, "GitHub auto-merge")
+        XCTAssertEqual(line(remote).state, .waiting)
         remote.pullRequest = pullRequest(draft: true)
         XCTAssertEqual(line(remote).rail?.marks, [.current, .skipped, .ahead, .ahead])
         XCTAssertEqual(line(remote).phrase.text, "Draft")
@@ -309,22 +313,39 @@ final class BoardStagesLineTests: XCTestCase {
         let red = pullRequest(checks: .failed(["test"]))
         let cases: [(Facts, BoardStages.State, String, String)] = [
             (facts(red, activity: .needsYou(" swift test \\\n  --filter Board ")), .needsYou,
-             "Needs you · swift test \\ --filter Board", "the user before a red check, on one line"),
-            (facts(pullRequest(merged: true), activity: .needsYou("")), .needsYou, "Needs you", "amber is never hidden, even once merged"),
+             "Reply · swift test \\ --filter Board", "the user before a red check, on one line"),
+            (facts(pullRequest(merged: true), activity: .needsYou("", action: .inspect)), .needsYou, "Check terminal", "amber is never hidden, even once merged"),
             (facts(red, activity: .failed("Stopped on an API error")), .failed, "Stopped on an API error", "an agent that stopped"),
             (facts(pullRequest(), activity: .failed(" ")), .failed, "Stopped", "whatever it said"),
             (with(facts(red, activity: .working(since: nil))) { $0.statusLine = "Waits for the go-ahead"; $0.blocker = "upstream" },
-             .working, "Working", "work goes on, and the last turn's line is about the turn before"),
+             .working, "Agent working", "work goes on, and the last turn's line is about the turn before"),
             (with(facts(red, activity: .working(since: nil))) { $0.statusLine = "Waits for the go-ahead"; $0.summary = " Triage\nrules " },
-             .working, "Triage rules", "what the user wrote of the task still holds"),
-            (facts(pullRequest(merged: true), activity: .working(since: nil)), .working, "Working", "as on the sidebar"),
-            (facts(pullRequest(), activity: .asking("Lead"), queue: Queue(step: .merge("Merging"))), .waiting, "Merging",
-             "the queue's step before what its agent waits for")
+             .working, "Agent working · Triage rules", "what the user wrote of the task still holds"),
+            (facts(pullRequest(merged: true), activity: .working(since: nil)), .working, "Agent working", "as on the sidebar"),
+            (facts(pullRequest(), activity: .asking("Lead"), queue: Queue(step: .merge("Merging"))), .waiting, "Awaiting Lead reply",
+             "the current question names its owner")
         ]
         for (facts, state, text, why) in cases {
             XCTAssertEqual(line(facts).state, state, why)
             XCTAssertEqual(line(facts).phrase.text, text, why)
         }
+    }
+
+    func testUncertainGitHubDataCannotAnnounceAConflictOrManualMerge() {
+        for status in [BoardStages.GitHubStatus.stale, .unavailable] {
+            var cached = facts(pullRequest(conflicting: true))
+            cached.gitHubStatus = status
+            cached.nextStep = "Review the earlier revision."
+            XCTAssertEqual(line(cached).state, .idle)
+            XCTAssertEqual(line(cached).phrase.text, status.notice)
+            XCTAssertEqual(line(cached).phrase.detail, "Next step · Review the earlier revision.")
+            cached.pullRequest = pullRequest()
+            XCTAssertEqual(line(cached).state, .idle)
+            cached.activity = .needsYou("Allow git push?", action: .permission)
+            XCTAssertEqual(line(cached).phrase.text, "Review permission · Allow git push?")
+        }
+        let unknown = facts(with(pullRequest()) { $0.mergeabilityUnknown = true })
+        XCTAssertEqual(line(unknown).phrase.text, "GitHub checking mergeability")
     }
 
     func testWhatIsWrongNowComesBeforeTheLastQueuesStop() {
@@ -334,19 +355,19 @@ final class BoardStagesLineTests: XCTestCase {
         let flaky = with(facts(red)) { $0.flakyReason = "CatchUpTests timed out on a slow runner" }
         let cases: [(Facts, BoardStages.State, String, String)] = [
             (facts(pullRequest(checks: .failed([]), conflicting: true, base: "develop"), queue: Queue(stop: stop)), .failed,
-             "Conflicts with develop", "its own base; the conflict before the stop"),
+             "Resolve conflict with develop", "its own base; the conflict before the stop"),
             (facts(red, reviews: nil, queue: Queue(stop: stop)), .failed, "Checks failed: test, lint", "at any station, by name"),
             (facts(pullRequest(checks: .failed([]))), .failed, "Checks failed", "red checks without a name"),
             (flaky, .failed, "Checks failed · likely flaky", "only the triage's verdict says more"),
             (with(flaky) { $0.flakyReason = " \n" }, .failed, "Checks failed: test, lint", "an empty reason is none"),
             (facts(pullRequest(), queue: Queue(stop: stop)), .failed, "Queue stopped: changed", "nothing wrong now: the stop stands"),
-            (facts(pullRequest(), queue: Queue(stop: byUser)), .ready, "Ready · reviews done, checks green", "Stop pressed is no failure"),
-            (with(facts(red, activity: .asking("Lead"))) { $0.blocker = "upstream" }, .failed, "Checks failed: test, lint",
-             "red before what it waits for, as on the sidebar"),
-            (with(facts(pullRequest(), activity: .asking("Lead"), queue: Queue(stop: stop))) { $0.blocker = "upstream" }, .failed,
-             "Queue stopped: changed", "the stop before what it waits for"),
+            (facts(pullRequest(), queue: Queue(stop: byUser)), .ready, "Merge manually · reviews done, checks green", "Stop pressed is no failure"),
+            (with(facts(red, activity: .asking("Lead"))) { $0.blocker = "upstream" }, .waiting, "Awaiting Lead reply",
+             "the open question has an owner"),
+            (with(facts(pullRequest(), activity: .asking("Lead"), queue: Queue(stop: stop))) { $0.blocker = "upstream" }, .waiting,
+             "Awaiting Lead reply", "the stop predates the current wait"),
             (with(facts(pullRequest(checks: .failed(["test"]), conflicting: true))) { $0.flakyReason = "slow runner" }, .failed,
-             "Conflicts with main", "a conflict before its checks, flaky or not"),
+             "Resolve conflict with main", "a conflict before its checks, flaky or not"),
             (facts(pullRequest(checks: .failed(["te\u{1B}[31mst\u{202E}"]))), .failed, "Checks failed: te[31mst",
              "a check's name is whatever its author posted: nothing invisible reaches the line")
         ]
@@ -362,14 +383,14 @@ final class BoardStagesLineTests: XCTestCase {
         let pending = BoardStages.Checks.pending(since: nil)
         let blocked = with(facts(pullRequest(checks: pending))) { $0.blocker = "  waits for\nupstream " }
         let cases: [(Facts, BoardStages.State, String, String)] = [
-            (with(facts(pullRequest(), activity: .asking("Lead"))) { $0.blocker = "upstream" }, .waiting, "Asking Lead",
+            (with(facts(pullRequest(), activity: .asking("Lead"))) { $0.blocker = "upstream" }, .waiting, "Awaiting Lead reply",
              "its agent asked its parent: not ready, and before the blocker"),
-            (facts(pullRequest(), activity: .asking(" ")), .waiting, "Asking its parent", "whoever that is"),
-            (blocked, .blocked, "Blocked · waits for upstream", "a blocker before what the station waits for"),
-            (with(facts(reviews: nil)) { $0.blocker = "upstream" }, .blocked, "Blocked · upstream", "a blocker needs no pull request"),
-            (with(facts(pullRequest())) { $0.blocker = " \n " }, .ready, "Ready · reviews done, checks green", "an empty blocker is none"),
-            (with(facts(pullRequest(merged: true))) { $0.blocker = "upstream" }, .blocked, "Blocked · upstream", "as on the sidebar"),
-            (facts(pullRequest(merged: true), activity: .asking("Lead")), .waiting, "Asking Lead", "asked after the merge"),
+            (facts(pullRequest(), activity: .asking(" ")), .waiting, "Awaiting parent reply", "whoever that is"),
+            (blocked, .blocked, "waits for upstream", "a blocker before what the station waits for"),
+            (with(facts(reviews: nil)) { $0.blocker = "upstream" }, .blocked, "upstream", "a blocker needs no pull request"),
+            (with(facts(pullRequest())) { $0.blocker = " \n " }, .ready, "Merge manually · reviews done, checks green", "an empty blocker is none"),
+            (with(facts(pullRequest(merged: true))) { $0.blocker = "upstream" }, .merged, "Merged", "the merge supersedes the blocker"),
+            (facts(pullRequest(merged: true), activity: .asking("Lead")), .waiting, "Awaiting Lead reply", "asked after the merge"),
             (facts(pullRequest(merged: true)), .merged, "Merged", "merged"),
             (with(facts(pullRequest(merged: true))) { $0.cleanUp = .running }, .merged, "Merged · cleaning up…", "its clean-up runs"),
             (facts(pullRequest(53, checks: pending, base: "stack/a", stack: onMergedBase), queue: Queue(list: .open)), .idle,
@@ -383,18 +404,18 @@ final class BoardStagesLineTests: XCTestCase {
             (facts(pullRequest(checks: .pending(since: nil, missing: ["test", "lint"]))), .waiting, "No test, lint run yet",
              "a required check that hasn't reported isn't running"),
             (facts(pullRequest(53, checks: pending, base: "stack/a", stack: child)), .waiting,
-             "Checks running · lands after #52", "a stack says what it follows"),
+             "Lands after #52", "a stack says what it follows"),
             (facts(pullRequest(53, base: "stack/a", stack: child)), .waiting, "Lands after #52", "green, but not its turn"),
             (facts(with(pullRequest(53, draft: true, base: "stack/a", stack: child)) { $0.reviewRequest = .changesRequested }),
              .waiting, "Lands after #52", "what holds it, the furthest first: its place in the stack"),
             (facts(with(pullRequest(draft: true, base: "release")) { $0.reviewRequest = .changesRequested }), .idle,
-             "Draft · reviews done, checks green", "then a draft, which isn't ready"),
-            (facts(with(pullRequest(base: "release")) { $0.reviewRequest = .changesRequested }), .idle, "Targets release",
-             "then its base: the queue takes the base branch only"),
+             "Changes requested", "the requested changes on the draft"),
+            (facts(with(pullRequest(base: "release")) { $0.reviewRequest = .changesRequested }), .idle, "Changes requested",
+             "the current review request"),
             (facts(with(pullRequest()) { $0.reviewRequest = .changesRequested }), .idle, "Changes requested",
              "then GitHub's review, as the sidebar's Ready to merge counts it"),
             (facts(with(pullRequest()) { $0.reviewRequest = .feedback }), .idle, "Feedback to answer", "review comments wait"),
-            (facts(pullRequest(checks: .absent)), .ready, "Ready · reviews done", "no check to claim"),
+            (facts(pullRequest(checks: .absent)), .ready, "Merge manually · reviews done", "no check to claim"),
             (facts(pullRequest(checks: pending), reviews: nil), .idle, "No code review yet",
              "at Reviews, running checks aren't what it waits for")
         ]
@@ -442,7 +463,7 @@ final class BoardStagesLineTests: XCTestCase {
         let odd = BoardStages.Link.retarget(number: 53, onto: "ma\u{202E}in")
         XCTAssertEqual([odd.title, odd.hint], ["Retarget to main", "Bases #53 on main, as GitHub does when a merged branch is deleted"])
         XCTAssertEqual(line(facts(pullRequest(base: "rel\u{202E}ease"))).phrase.text, "Targets release")
-        XCTAssertEqual(line(facts(pullRequest(conflicting: true, base: "rel\u{202E}ease"))).phrase.text, "Conflicts with release")
+        XCTAssertEqual(line(facts(pullRequest(conflicting: true, base: "rel\u{202E}ease"))).phrase.text, "Resolve conflict with release")
     }
 
     // MARK: - The Merge station's click
@@ -509,7 +530,7 @@ final class BoardStagesLineTests: XCTestCase {
         var red = facts(based, activity: .needsYou("a question"), queue: Queue(list: .open, refusal: "base #52 merged"))
         red.folder = folder
         red.resume = stopped
-        XCTAssertEqual(line(red).phrase.text, "Needs you · a question")
+        XCTAssertEqual(line(red).phrase.text, "Reply · a question")
         XCTAssertEqual(line(red).menu, [
             .openPullRequest(url: url), .queue(BoardStages.QueueOffer(change: .add, number: 53, blocked: "Can’t join the queue: base #52 merged")),
             .retarget(retarget, blocked: nil), .resume(stopped), .cleanUp(path: "/p/widgets.x", blocked: nil)
@@ -671,9 +692,9 @@ final class BoardStagesLineTests: XCTestCase {
 
     func testAtRestTheLineSaysTheNextStepThenWhereTheTaskStands() {
         let unreviewed = facts(pullRequest(), reviews: nil)
-        let atRest = with(unreviewed) { $0.statusLine = " Fixes pushed,\nwaits for a review " }
+        let atRest = with(facts(reviews: nil)) { $0.statusLine = " Fixes pushed,\nwaits for a review " }
         let cases: [(Facts, String, String)] = [
-            (with(atRest) { $0.nextStep = "run the confirmation review" }, "Next · run the confirmation review", "the next step first"),
+            (with(atRest) { $0.nextStep = "run the confirmation review" }, "run the confirmation review", "the next step first"),
             (with(atRest) { $0.nextStep = " " }, "Fixes pushed, waits for a review", "then where the task stands, on one line"),
             (with(atRest) { $0.summary = "Triage rules" }, "Triage rules", "the user's own words before the last turn's line"),
             (with(atRest) { $0.summary = " \n" }, "Fixes pushed, waits for a review", "an empty summary is none"),

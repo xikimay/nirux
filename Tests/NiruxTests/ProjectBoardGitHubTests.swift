@@ -19,6 +19,8 @@ final class ProjectBoardGitHubTests: XCTestCase {
         "headRepositoryOwner": {"id": "MDQ6VXNlcjAwMDAwMDA=", "name": "Acme", "login": "acme"},
         "isDraft": false,
         "mergeable": "MERGEABLE",
+        "reviewDecision": "APPROVED",
+        "autoMergeRequest": {"mergeMethod": "SQUASH"},
         "number": 12,
         "state": "OPEN",
         "title": "Sign in with a password",
@@ -96,6 +98,8 @@ final class ProjectBoardGitHubTests: XCTestCase {
         XCTAssertEqual(pullRequests.map(\.title), ["Sign in with a password", "", ""])
         XCTAssertEqual(login.headOid, "9b57f5ab537bf3b5c0b22ea831b8d8c647ee2984")
         XCTAssertTrue(login.isOpen)
+        XCTAssertTrue(login.autoMerges)
+        XCTAssertEqual(login.reviewDecision, "APPROVED")
         XCTAssertFalse(login.isDraft)
         XCTAssertTrue(login.isFromConfiguredRepository)
         XCTAssertEqual(login.checks.map(\.name), ["Analyze (actions)", "test", "Analyze (swift)", "CodeQL", "ci/lint"])
@@ -255,7 +259,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
             GitHubCLIBoardClient.pullRequestArguments(repository: "acme/widgets", state: .open),
             ["pr", "list", "--repo", "github.com/acme/widgets", "--state", "open", "--limit", "100", "--json",
              "number,state,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,"
-                + "mergeable,statusCheckRollup,url,title"]
+                + "mergeable,reviewDecision,autoMergeRequest,statusCheckRollup,url,title"]
         )
         // The merged ones in one GraphQL query: those opened last, as `gh pr list` lists them, and
         // those updated last, which it can't ask for; the fields under the names it gives them.

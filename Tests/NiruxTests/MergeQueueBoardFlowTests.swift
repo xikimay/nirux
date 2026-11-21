@@ -141,7 +141,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
                 if case .waitingForChecks? = queue.engine?.currentEntry?.step { return true }
                 return false
             }
-            waitUntil("the line says so") { (BoardStagesClicks.shownLine("login", in: board)?.line.phrase.text) == "Waiting for checks" }
+            waitUntil("the line says so") { (BoardStagesClicks.shownLine("login", in: board)?.line.phrase.text) == "Auto · Waiting for checks" }
             BoardStagesClicks.layOut(header)
             XCTAssertTrue(header.startButton.isHidden)
             XCTAssertFalse(header.stopButton.isHidden, "Stop is in reach while it runs")
