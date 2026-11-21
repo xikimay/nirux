@@ -459,6 +459,7 @@ extension NiruxShellView {
           for example because the user answered it in Nirux, (for `reply --accept`) it has no
           recommendation to accept, or (for `tell`) no Mission on that branch came from this
           terminal, or its child runs none of Claude Code, Codex and Antigravity.
+        - 5: the question was retired while `ask` waited. Continue with the new prompt without retrying that ask.
         - 2: invalid usage, or not a Mission terminal; the error message says which.
         - 1: Nirux's state could not be read or written. If a sandbox blocks it, run the command
           outside the sandbox.

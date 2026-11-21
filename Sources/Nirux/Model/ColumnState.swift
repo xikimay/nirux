@@ -41,6 +41,8 @@ final class ColumnState {
     /// An agent that says its state (OSC 7501) reported its turn over:
     /// Codex done or idle, Antigravity done. A Mission message may go to it.
     var onProgramTurnOver: (() -> Void)?
+    /// The user typed a prompt to its agent (`PtySession.onUserPrompt`).
+    var onUserPrompt: ((TimeInterval) -> Void)?
 
     /// Fires when the user cmd-clicks an http(s) link in the terminal —
     /// the workspace opens it in a browser column.
@@ -442,6 +444,9 @@ final class ColumnState {
         }
         ptySession.onApprovalsAbandoned = { [weak self] requests in
             requests.forEach { AgentHookCenter.shared.release($0, agentUUID: self?.agentUUID) }
+        }
+        ptySession.onUserPrompt = { [weak self] typedAt in
+            self?.onUserPrompt?(typedAt)
         }
         // Only the agent's own, in front: any program can print the sequence.
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
