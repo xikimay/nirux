@@ -29,7 +29,7 @@ final class BoardLeadStatusTests: XCTestCase {
         }
 
         func report(_ state: AgentProgramStatus.State, message: String? = nil) {
-            codex.pty?.noteCodexStatus(.init(state: state, kind: nil, message: message, process: "codex"), from: codexProcess.instance)
+            codex.pty?.noteCodexStatus(.init(state: state, kind: nil, message: message, agent: .codex), from: codexProcess.instance)
         }
 
         func route(
