@@ -127,7 +127,9 @@ final class BoardStagesReadingsShellTests: XCTestCase {
             let resolution = AgentHookCenter.Resolution(
                 workspace: task, column: column, columnIndex: 0, isUserFocused: false, approvalHold: .never
             )
-            let turn = Date().timeIntervalSince1970 - 2 * 3600
+            // Half a minute past the hour: the ages read here and asserted
+            // just after show the same minute.
+            let turn = Date().timeIntervalSince1970 - 2 * 3600 - 30
             let event = { (name: AgentHookEvent.Name, source: String?, time: TimeInterval) in
                 AgentHookCenter.AppliedEvent(
                     event: AgentHookEvent(kind: .claude, name: name, emitterProcess: emitter, source: source, timestamp: time),
