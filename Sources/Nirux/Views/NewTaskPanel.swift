@@ -382,6 +382,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         guard panel != nil else { return }
         self.proposal = proposal
         descriptionView.string = proposal.sheetDescription
+        if let agent = proposal.agent, let index = CodingAgent.launchable.firstIndex(of: agent) { agentPopup.selectItem(at: index) }
         pickedTemplateName = proposal.templateName
         let branch = proposal.options.branch
         if let branch, namesFolder {
