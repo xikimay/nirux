@@ -7,34 +7,112 @@ final class NewTaskTests: XCTestCase {
     func testBranchIsAFeatureSlugOfTheFirstLine() {
         XCTAssertEqual(
             NewTask.suggestedBranch(description: "Add a dark mode toggle\nwith a shortcut", templateName: nil),
-            "feat/add-a-dark-mode-toggle"
+            "feat/add-dark-mode-toggle"
         )
         XCTAssertEqual(
             NewTask.suggestedBranch(description: "\n\n  Améliorer l’écran d’accueil (v2)!  ", templateName: "Feature (full review cycle)"),
-            "feat/ameliorer-l-ecran-d-accueil-v2"
+            "feat/ameliorer-ecran-accueil-v2"
         )
+    }
+
+    /// Stop words, repeats and an opening request leave the slug; "can't"
+    /// keeps its negation, a link its host.
+    func testBranchKeepsOnlyTheWordsThatSaySomething() {
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Can't type in the answer field", templateName: nil), "feat/cant-type-in-answer-field")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Sidebar rows: the sidebar rows go stale", templateName: nil), "feat/sidebar-rows-go-stale")
+        XCTAssertEqual(
+            NewTask.suggestedBranch(description: "Je veux que tu test ces trucs sur notre code base", templateName: nil), "feat/test-sur-code-base"
+        )
+        XCTAssertEqual(
+            NewTask.suggestedBranch(description: "check cette video https://www.youtube.com/watch?v=abc", templateName: nil),
+            "feat/check-video-youtube-com"
+        )
+        XCTAssertEqual(NewTask.suggestedBranch(description: "It is", templateName: nil), "feat/it", "nothing but stop words: the first")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Le menu n'est pas visible", templateName: nil), "feat/menu-pas-visible")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Fix N+1 queries on the board", templateName: nil), "fix/n-1-queries-on-board")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Je veux que tu corriges le crash", templateName: nil), "fix/crash")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Il faut que tu corriges le crash", templateName: nil), "fix/crash")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "Review https://GitHub.COM/a/b/issues/42"), "Review #42")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "Review https://notgithub.com/a/b/pull/42"), "Review notgithub.com")
+        let pullRequest = "Review https://github.com/xikimay/nirux/pull/657"
+        XCTAssertEqual(NewTask.workspaceTitle(description: pullRequest), "Review #657")
+        XCTAssertEqual(NewTask.suggestedBranch(description: pullRequest, templateName: nil), "feat/review-657")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "Answer \(pullRequest.dropFirst(7))."), "Answer #657.", "its period after it")
+    }
+
+    /// The branch a line asks for wins: a "(branch …)" note, or a leading
+    /// "type/name — " (not doubled as feat/feat-…). A leading short name of
+    /// another kind is the slug's words, and the title is what follows.
+    func testBranchIsTheOneTheLineAsksFor() {
+        let note = "Eval A: untangle-codebase skill (branch eval/untangle-codebase)\nmore"
+        XCTAssertEqual(NewTask.suggestedBranch(description: note, templateName: nil), "eval/untangle-codebase")
+        XCTAssertEqual(NewTask.workspaceTitle(description: note), "Eval A: untangle-codebase skill")
+        let trailing = "Terminal created with no display stays empty — branch fix/surface-without-display"
+        XCTAssertEqual(NewTask.suggestedBranch(description: trailing, templateName: nil), "fix/surface-without-display")
+        XCTAssertEqual(NewTask.workspaceTitle(description: trailing), "Terminal created with no display stays empty")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Rename the branch review panel", templateName: nil), "feat/rename-branch-review-panel")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Retry (branch p..q/r)", templateName: nil), "feat/retry-branch-p-q-r", "not a branch name")
+
+        let doubled = "feat/agent-subtasks — Any agent can start a task"
+        XCTAssertEqual(NewTask.suggestedBranch(description: doubled, templateName: nil), "feat/agent-subtasks")
+        XCTAssertEqual(NewTask.workspaceTitle(description: doubled), "Any agent can start a task")
+        let shortName = "daily-pass/forgotten-tasks — Forgotten tasks in the daily pass digest"
+        XCTAssertEqual(NewTask.suggestedBranch(description: shortName, templateName: nil), "feat/daily-pass-forgotten-tasks")
+        XCTAssertEqual(NewTask.workspaceTitle(description: shortName), "Forgotten tasks in the daily pass digest")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "docs(readme): the setup steps", templateName: nil), "docs/readme-setup-steps")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "Fix: crash on launch"), "Fix: crash on launch", "a typed prefix stays")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Rebase it (branch origin/main)", templateName: nil), "feat/rebase-branch-origin-main")
+        let longLine = String(repeating: "word ", count: 120) + "— branch fix/stale-labels"
+        XCTAssertEqual(NewTask.suggestedBranch(description: longLine, templateName: nil), "fix/stale-labels", "a note past the part read")
+        // Not a short name: a file, a counter. A short name without a slash.
+        XCTAssertEqual(NewTask.suggestedBranch(description: "src/app.ts: crashes when empty", templateName: nil), "feat/src-app-ts-crashes-when-empty")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "1/3 — Add the schema"), "1/3 — Add the schema")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "stale-labels — labels stay stale", templateName: nil), "feat/stale-labels")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "stale-labels — labels stay stale"), "Labels stay stale")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "fix/flaky — three tests fail"), "Three tests fail")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "Je veux que tu test ces trucs"), "Test ces trucs")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "Il faut que le menu reste ouvert"), "Le menu reste ouvert")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "Lets agents pick a model"), "Lets agents pick a model", "a verb, not a request")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "tu peux ?"), "tu peux ?", "only a request: kept")
+        XCTAssertEqual(NewTask.workspaceTitle(description: "please https://example.com/x"), "example.com", "a host as typed")
+    }
+
+    /// A title names the branch, unless the description's first line asks
+    /// for one; that line's type still counts. A title without a letter or
+    /// digit leaves it to the description.
+    func testATitleNamesTheBranchUnlessTheLineAsksForOne() {
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Labels stay stale after a rename", title: "Stale labels", templateName: nil), "feat/stale-labels")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "fix: labels stay stale", title: "Stale labels", templateName: nil), "fix/stale-labels")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Fix the labels after a rename", title: "Stale labels", templateName: nil), "fix/stale-labels")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Labels (branch fix/labels)", title: "Stale labels", templateName: nil), "fix/labels")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Add a CSV export", title: "🚀", templateName: nil), "feat/add-csv-export")
     }
 
     func testBranchIsAFixForABugTemplateOrAFixWordFirst() {
         XCTAssertEqual(NewTask.suggestedBranch(description: "Sidebar flickers", templateName: "Bugfix"), "fix/sidebar-flickers")
         XCTAssertEqual(NewTask.suggestedBranch(description: "Fix: crash on launch", templateName: nil), "fix/crash-on-launch")
-        XCTAssertEqual(NewTask.suggestedBranch(description: "Corriger le menu", templateName: nil), "fix/le-menu")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Corriger le menu", templateName: nil), "fix/menu")
         XCTAssertEqual(NewTask.suggestedBranch(description: "fix", templateName: nil), "fix/fix")
         // A word saying what is broken stays.
         XCTAssertEqual(NewTask.suggestedBranch(description: "Crash on launch", templateName: nil), "fix/crash-on-launch")
-        XCTAssertEqual(NewTask.suggestedBranch(description: "Bug in the parser", templateName: nil), "fix/bug-in-the-parser")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Bug in the parser", templateName: nil), "fix/bug-in-parser")
         // Only the first word counts.
-        XCTAssertEqual(NewTask.suggestedBranch(description: "Document the fix", templateName: nil), "feat/document-the-fix")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Document the fix", templateName: nil), "feat/document-fix")
+        // Other types, and a type word already said.
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Doc the setup script", templateName: nil), "docs/setup-script")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "README rewrite", templateName: nil), "docs/readme-rewrite")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Refactor the agent type", templateName: nil), "refactor/agent-type")
+        XCTAssertEqual(NewTask.suggestedBranch(description: "Feat agent subtasks", templateName: nil), "feat/agent-subtasks")
     }
 
     func testBranchStopsAtAWholeWord() {
         let branch = NewTask.suggestedBranch(
             description: "Make the merge queue retry flaky required checks once before it stops", templateName: nil
         )
-        XCTAssertEqual(branch, "feat/make-the-merge-queue-retry-flaky")
+        XCTAssertEqual(branch, "feat/make-merge-queue-retry-flaky")
         XCTAssertLessThanOrEqual(branch.count - "feat/".count, NewTask.maxSlugLength)
         let longWord = String(repeating: "x", count: 60)
-        XCTAssertEqual(NewTask.suggestedBranch(description: longWord, templateName: nil), "feat/" + String(repeating: "x", count: 40))
+        XCTAssertEqual(NewTask.suggestedBranch(description: longWord, templateName: nil), "feat/" + String(repeating: "x", count: NewTask.maxSlugLength))
     }
 
     func testBranchIsEmptyWithoutALetterOrDigit() {
@@ -46,7 +124,7 @@ final class NewTaskTests: XCTestCase {
         let repo = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
         try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: repo) }
-        for description in ["..lock", "a..b", "-rf /", "@{u}", "日本語のタスク", "x.lock", "~^:?*[\\"] {
+        for description in ["..lock", "a..b", "-rf /", "@{u}", "日本語のタスク", "x.lock", "~^:?*[\\", "x (branch a/b.lock)", "fix/x..y — z"] {
             let branch = NewTask.suggestedBranch(description: description, templateName: nil)
             XCTAssertTrue(branch.isEmpty || GitWorktree.isValidBranchName(branch, repoRoot: repo), "\(description) → \(branch)")
         }
@@ -56,8 +134,11 @@ final class NewTaskTests: XCTestCase {
         XCTAssertEqual(NewTask.workspaceTitle(description: "\n  Fix   the\tsidebar  \nmore"), "Fix the sidebar")
         XCTAssertNil(NewTask.workspaceTitle(description: " \n\t"))
         let long = NewTask.workspaceTitle(description: String(repeating: "word ", count: 20))
-        XCTAssertEqual(long?.count, NewTask.maxTitleLength)
-        XCTAssertEqual(long?.hasSuffix("…"), true)
+        XCTAssertEqual(long, Array(repeating: "word", count: 10).joined(separator: " ") + "…", "cut at a word")
+        let midWord = NewTask.workspaceTitle(description: String(repeating: "word ", count: 9) + "wordy and more words")
+        XCTAssertEqual(midWord, Array(repeating: "word", count: 9).joined(separator: " ") + "…", "never inside one")
+        let oneWord = NewTask.workspaceTitle(description: String(repeating: "x", count: 80))
+        XCTAssertEqual(oneWord, String(repeating: "x", count: NewTask.maxTitleLength - 1) + "…")
     }
 
     func testAPlainWorkspaceIsNamedAfterItsFolder() {
@@ -120,6 +201,7 @@ final class NewTaskTests: XCTestCase {
         // Finder shows ":" as "/"; a leading "." hides the folder.
         XCTAssertEqual(NewTask.suggestedFolderName(description: "Notes: Q3/Q4 plan"), "Notes- Q3-Q4 plan")
         XCTAssertEqual(NewTask.suggestedFolderName(description: "..hidden draft"), "hidden draft")
+        XCTAssertEqual(NewTask.suggestedFolderName(description: "Can you compare two libraries"), "Compare two libraries")
         XCTAssertEqual(NewTask.suggestedFolderName(description: "Café, “quoted” 日本"), "Café, “quoted” 日本")
         // Cut at a whole word, never past the limit.
         let long = NewTask.suggestedFolderName(description: String(repeating: "word ", count: 20))

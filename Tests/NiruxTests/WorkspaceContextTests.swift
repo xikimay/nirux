@@ -123,15 +123,19 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.lastSummary, "Keep the completed work summary")
     }
 
-    /// Claude's idle reminder and its compaction while idle are no work of
-    /// the agent's: the card's age stays its last turn.
-    func testIdleReminderAndIdleCompactionLeaveTheCardsAge() throws {
+    /// Claude's idle reminder, its compaction while idle, a session resumed
+    /// (as Nirux restores them at launch) or ended are no work of the
+    /// agent's: the card's age stays its last turn. A new session's start
+    /// is work beginning.
+    func testIdleReminderCompactionResumeAndEndLeaveTheCardsAge() throws {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let stop = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: ["hook_event_name": "Stop"], env: [:], now: 20))
         XCTAssertTrue(workspace.recordAgentHookActivity(stop))
         let idle: [[String: Any]] = [
             ["hook_event_name": "Notification", "notification_type": "idle_prompt", "message": "Claude is waiting for your input"],
-            ["hook_event_name": "SessionStart", "source": "compact"]
+            ["hook_event_name": "SessionStart", "source": "compact"],
+            ["hook_event_name": "SessionStart", "source": "resume"],
+            ["hook_event_name": "SessionEnd", "reason": "other"]
         ]
         for payload in idle {
             let event = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: [:], now: 3_000))
@@ -140,11 +144,13 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.lastActivityAt, 20)
         let real: [[String: Any]] = [
             ["hook_event_name": "Notification", "notification_type": "permission_prompt"],
-            ["hook_event_name": "SessionStart", "source": "clear"]
+            ["hook_event_name": "SessionStart", "source": "clear"],
+            ["hook_event_name": "SessionStart", "source": "startup"]
         ]
         for (index, payload) in real.enumerated() {
             let event = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: [:], now: 3_100 + Double(index)))
             XCTAssertTrue(workspace.recordAgentHookActivity(event))
+            XCTAssertEqual(workspace.lastActivityAt, 3_100 + Double(index))
         }
     }
 
