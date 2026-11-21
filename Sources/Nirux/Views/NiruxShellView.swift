@@ -4,7 +4,7 @@ import GhosttyTerminal
 /// Root AppKit view: sidebar + niri-style 2D scrolling viewport
 final class NiruxShellView: NSView {
     private static let collapsedSidebarWidth = SidebarView.foldedWidth
-    private static let expandedSidebarWidth: CGFloat = 260
+    let sidebarResizeHandle = HorizontalResizeHandle<CGFloat>()
     /// The requests waiting for the user, the inbox and the callout (see
     /// NiruxShellView+Requests).
     let requestsState = RequestsState()
@@ -47,7 +47,7 @@ final class NiruxShellView: NSView {
     var offScreenViewportSize = NSSize.zero
 
     private var sidebarWidth: CGFloat {
-        isSidebarExpanded ? Self.expandedSidebarWidth : Self.collapsedSidebarWidth
+        isSidebarExpanded ? sidebarFold.expandedWidth(in: bounds.width) : Self.collapsedSidebarWidth
     }
 
     let sidebar = SidebarView()
@@ -339,6 +339,7 @@ final class NiruxShellView: NSView {
         addSubview(viewport)
         // Over the work: the cards pass under the rail (NiruxShellView+UnderGlass).
         addSubview(sidebar)
+        wireSidebarResizeHandle()
         sidebar.onRailShownChange = { [weak self] in self?.railMayHaveChanged(animated: true) }
         addSubview(columnIndicator)
         addSubview(edgeGlowLeft)
