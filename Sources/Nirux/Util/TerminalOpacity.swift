@@ -1,5 +1,4 @@
-import AppKit
-import GhosttyTerminal
+import Foundation
 
 /// The terminals' background opacity (Settings › Appearance › Terminals,
 /// docs/design/glass-interface.md, 4.3): 60 to 100 %, by fives, apart from
@@ -19,23 +18,9 @@ enum TerminalOpacity {
         min(range.upperBound, max(range.lowerBound, (value * 20).rounded() / 20))
     }
 
-    /// The per-terminal override at `opacity`: none at 100 %. Cells a
-    /// program paints its own background in (a TUI's) take the opacity too.
-    static func configuration(_ opacity: Double, userSetsContrast: Bool) -> TerminalConfiguration {
-        guard opacity < 1 else { return TerminalConfiguration() }
-        let translucent = TerminalConfiguration().backgroundOpacity(opacity).custom("background-opacity-cells", "true")
-        return userSetsContrast ? translucent : translucent.minimumContrast(minimumContrast)
-    }
-
     /// Whether a rendered config sets `minimum-contrast` (the user's
     /// Ghostty config: Nirux's own lines never do).
     static func setsContrast(_ config: String) -> Bool {
         config.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces).hasPrefix("minimum-contrast") }
-    }
-
-    /// Whether the config a terminal opened with sets it.
-    static func setsContrast(_ source: TerminalController.ConfigSource) -> Bool {
-        if case .generated(let config) = source { return setsContrast(config) }
-        return false
     }
 }

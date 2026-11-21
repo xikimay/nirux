@@ -67,7 +67,7 @@ enum QuickSwitchAgentState: Equatable {
     case working
     /// An agent waits on a dialog, since this epoch time (the longest);
     /// `reason` is its row icon's glyph.
-    case waiting(since: TimeInterval, reason: StateIcon.Reason = .question)
+    case waiting(since: TimeInterval, reason: AgentInputReason = .question)
     /// An agent's turn failed, or it exited mid-turn.
     case failed(AgentAttentionReason)
 
@@ -96,7 +96,7 @@ enum QuickSwitchAgentState: Equatable {
     func label(now: TimeInterval) -> String {
         switch self {
         case .working: return "working"
-        case .waiting(let since, _): return "waiting \(SidebarRenderer.shortDuration(now - since))"
+        case .waiting(let since, _): return "waiting \((now - since).shortDuration)"
         case .failed(let reason): return reason.shortLabel
         }
     }

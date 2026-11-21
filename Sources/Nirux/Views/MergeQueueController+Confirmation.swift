@@ -134,7 +134,7 @@ extension MergeQueueController {
         // A pull request left out anyway needs nothing more.
         guard !cancellation.isCancelled, let pullRequest = candidate.pullRequest,
               MergeQueue.exclusionReason(pullRequest, settings: settings) == nil,
-              MergeQueueController.problem(with: [MergeQueue.ConfirmedEntry(
+              MergeQueue.ConfirmedEntry.problem(in: [MergeQueue.ConfirmedEntry(
                 number: number, head: pullRequest.headOid, branch: pullRequest.headRefName
               )]) == nil
         else { return (candidate, nil) }

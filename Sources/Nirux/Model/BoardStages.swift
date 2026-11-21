@@ -241,7 +241,7 @@ extension BoardStages {
         /// without a task.
         var hasTask = true
         /// Why its agent waits for the user, for its icon's glyph.
-        var reason: StateIcon.Reason = .question
+        var reason: AgentInputReason = .question
         /// Its agent asked the agent that started it, and the line says so
         /// (a grey ring and a question, as on the sidebar's row).
         var asksParent = false
@@ -695,7 +695,7 @@ extension BoardStages {
         var since: TimeInterval?
         /// Set by the branch that read it: why its agent waits, and whether
         /// it says the agent asks its parent.
-        var reason: StateIcon.Reason = .question
+        var reason: AgentInputReason = .question
         var asksParent = false
 
         init(_ state: State, _ text: String, since: TimeInterval? = nil, link: Link? = nil, detail: String? = nil) {
