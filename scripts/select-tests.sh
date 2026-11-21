@@ -41,16 +41,21 @@ while IFS= read -r -d '' path; do
                 /^  \(/ {
                     finish()
                     kind = $1; name = ""; localDecl = 0
-                    if (kind == "(class_decl" && match($0, /] "[A-Za-z_][A-Za-z0-9_]*"/))
-                        name = substr($0, RSTART + 3, RLENGTH - 4)
+                    if (kind == "(class_decl" || kind == "(extension_decl") {
+                        if (match($0, /] (unbound )?"[A-Za-z_][A-Za-z0-9_]*"/)) {
+                            name = substr($0, RSTART, RLENGTH)
+                            sub(/^[^"]*"/, "", name); sub(/"$/, "", name)
+                        }
+                    }
                 }
                 /^    \(access_control_attr .*access_level=(private|fileprivate)\)/ { localDecl = 1 }
-                END { finish(); if (shared) exit 1 }' "$discovered" -) ||
+                END { finish(); if (shared) exit 1 }' "$discovered" - | sort -u) ||
                 whole "$path contains shared test code"
             [[ -n $classes ]] || whole "$path declares no test class"
             while IFS= read -r class; do
-                references=$(git grep -lwF -e "$class" -- Tests) || whole "cannot locate $class"
-                if grep -vxF "$path" <<< "$references" > /dev/null; then
+                references=$(git grep -hwF -e "$class" -- Tests ":(exclude,literal)$path") ||
+                    [[ $? -eq 1 ]] || whole "cannot locate references to $class"
+                if grep -Ev '^[[:space:]]*(//|$)' <<< "$references" > /dev/null; then
                     whole "other files reference $class"
                 fi
                 echo "NiruxTests.$class" >> "$selected"
