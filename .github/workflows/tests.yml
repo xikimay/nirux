@@ -1,10 +1,9 @@
 name: Tests
 
-# Runs the suite on every PR into main so mergeStateStatus reflects it before
-# merge: an actor-isolation error in a test file once reached main red
-# (2026-07-19, ActivityStoreTests). Not on push to main: the nightly
-# (nightly.yml) already runs the tests there, and a second run held another
-# macOS runner on every merge.
+# DO NOT MERGE: A/B of the dependency build cache (PR 2). A seed job saves the
+# dependencies' products as the nightly will; each job then builds cold,
+# builds with them restored and runs the suite on that build, then builds
+# cold again.
 on:
   pull_request:
     branches: [main]
@@ -17,31 +16,20 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  seed:
     runs-on: macos-15
-    # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift
-    # 6.1): libghostty-spm 2.2 needs Swift tools 6.2.
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-    # A serial run took 13 minutes: a hung test fails the job instead of
-    # holding the runner for GitHub's six hours.
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with:
-          # The whole history, as the nightly has it: a test that reads a
-          # merged pull request's commits runs here, before merge, rather
-          # than first in the nightly.
           fetch-depth: 0
 
-      # The dependencies' clones and binaries (GhosttyKit's download sometimes
-      # fails to connect), per toolchain: a new runner image's SwiftPM starts
-      # afresh. A pull request reads the cache the nightly saves on main.
       - name: Toolchain
         id: toolchain
         run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/cache@v6
+      - uses: actions/cache/restore@v6
         with:
           path: |
             .build/artifacts
@@ -50,12 +38,16 @@ jobs:
             .build/workspace-state.json
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
-      # The dependencies' build products, which the nightly saves on main for
-      # this toolchain and Package.resolved, so they don't compile again
-      # (45 s of the build). This package's modules aren't in it and always
-      # build from scratch: a stale object of ours once crashed tests. A
-      # dependency left out here only builds, it can't go stale.
-      - uses: actions/cache/restore@v6
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Layout
+        run: |
+          ls .build/arm64-apple-macosx/debug | head -80
+          ls .build/arm64-apple-macosx/debug/Modules
+          du -sh .build/arm64-apple-macosx/debug/*.build | sort -h
+
+      - uses: actions/cache/save@v6
         with:
           path: |
             .build/arm64-apple-macosx/debug/GhosttyKit.build
@@ -64,10 +56,68 @@ jobs:
             .build/arm64-apple-macosx/debug/Modules/GhosttyKit.*
             .build/arm64-apple-macosx/debug/Modules/DisplayLink.*
             .build/arm64-apple-macosx/debug/Modules/GhosttyTerminal.*
-          key: deps-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+          key: deps-ab-${{ github.run_id }}
 
-      - name: Build
-        run: swift build --build-tests
+  ab:
+    needs: seed
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        rep: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
-      - name: Run tests
+      - name: Toolchain
+        id: toolchain
+        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+
+      - name: Cold build
+        run: |
+          start=$SECONDS
+          swift build --build-tests > "$RUNNER_TEMP/cold1.log" 2>&1 || { tail -50 "$RUNNER_TEMP/cold1.log"; exit 1; }
+          echo "=== AB cold1 $((SECONDS - start))s, $(grep -cE '\] Compiling (GhosttyKit|DisplayLink|GhosttyTerminal) ' "$RUNNER_TEMP/cold1.log" || true) dependency files compiled"
+          rm -rf .build/arm64-apple-macosx
+
+      - uses: actions/cache/restore@v6
+        with:
+          fail-on-cache-miss: true
+          path: |
+            .build/arm64-apple-macosx/debug/GhosttyKit.build
+            .build/arm64-apple-macosx/debug/DisplayLink.build
+            .build/arm64-apple-macosx/debug/GhosttyTerminal.build
+            .build/arm64-apple-macosx/debug/Modules/GhosttyKit.*
+            .build/arm64-apple-macosx/debug/Modules/DisplayLink.*
+            .build/arm64-apple-macosx/debug/Modules/GhosttyTerminal.*
+          key: deps-ab-${{ github.run_id }}
+
+      - name: Build with the dependencies' products
+        run: |
+          start=$SECONDS
+          swift build --build-tests > "$RUNNER_TEMP/cached.log" 2>&1 || { tail -50 "$RUNNER_TEMP/cached.log"; exit 1; }
+          echo "=== AB cached $((SECONDS - start))s, $(grep -cE '\] Compiling (GhosttyKit|DisplayLink|GhosttyTerminal) ' "$RUNNER_TEMP/cached.log" || true) dependency files compiled, $(grep -cE '\] Compiling Nirux ' "$RUNNER_TEMP/cached.log" || true) Nirux files"
+
+      - name: Run tests on that build
         run: scripts/run-tests.sh
+
+      - name: Cold build again
+        run: |
+          rm -rf .build/arm64-apple-macosx
+          start=$SECONDS
+          swift build --build-tests > "$RUNNER_TEMP/cold2.log" 2>&1 || { tail -50 "$RUNNER_TEMP/cold2.log"; exit 1; }
+          echo "=== AB cold2 $((SECONDS - start))s"
