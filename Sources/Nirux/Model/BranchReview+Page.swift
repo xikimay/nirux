@@ -39,6 +39,36 @@ extension BranchReview {
             let isDraft: Bool
         }
 
+        struct ReceiptRow: Encodable, Equatable, Sendable {
+            let title: String
+            let command: String?
+            let summary: String?
+            let status: String
+            let provenance: String
+            let url: String?
+            let freshness: String
+            let recordedAt: String
+
+            init(_ receipt: BranchReview.Receipt, freshness: BranchReview.Receipt.Freshness) {
+                title = receipt.title
+                command = receipt.command
+                summary = receipt.summary
+                status = receipt.status.rawValue.capitalized
+                recordedAt = receipt.recordedAt.formatted(.iso8601)
+                switch receipt.provenance {
+                case .ci(let link): (provenance, url) = ("CI", link)
+                case .local: (provenance, url) = ("Local", nil)
+                case .agent: (provenance, url) = ("Agent", nil)
+                }
+                switch freshness {
+                case .fresh: self.freshness = "Current"
+                case .stale(.localEdits): self.freshness = "Stale: local edits"
+                case .stale(.earlierCommit): self.freshness = "Stale: earlier commit"
+                case .unverified: self.freshness = "Unverified"
+                }
+            }
+        }
+
         /// One block of "What and why", labeled with where it comes from.
         struct Account: Encodable, Equatable, Sendable {
             enum Source: String, Encodable, Sendable {
@@ -137,6 +167,7 @@ extension BranchReview {
         /// with a row's id, so that an id is read against its own snapshot.
         let generation: Int
         let header: Header
+        var receipts: [ReceiptRow]?
         let accounts: [Account]
         let risks: [Risk]
         let tests: Tests
@@ -247,7 +278,7 @@ extension BranchReview {
     /// shows its summary.
     static func page(
         for snapshot: Snapshot, handover: Handover?, explanation: Explanation? = nil, explain: Page.ExplainBar = .init(),
-        generation: Int = 0, readAt: Date = Date(), review: Page.Review? = nil
+        generation: Int = 0, readAt: Date = Date(), review: Page.Review? = nil, receipts: [Receipt] = []
     ) -> Page {
         // One entry per path (`Snapshot.files`).
         let ids = Dictionary(snapshot.files.enumerated().map { ($1.path, $0) }) { first, _ in first }
@@ -255,6 +286,7 @@ extension BranchReview {
         return Page(
             generation: generation,
             header: header(of: snapshot, readAt: readAt),
+            receipts: pageReceipts(receipts, snapshot: snapshot),
             accounts: accounts(of: snapshot, handover: handover),
             risks: risks(of: snapshot.files),
             tests: tests(of: snapshot.testsAgainstCode),
@@ -276,6 +308,13 @@ extension BranchReview {
             explanation: pageExplanation(explanation, snapshot: snapshot),
             explain: explainBar(explain, snapshot: snapshot, explanation: explanation)
         )
+    }
+
+    private static func pageReceipts(_ stored: [Receipt], snapshot: Snapshot) -> [Page.ReceiptRow]? {
+        let receipts = stored + (snapshot.pullRequest.pullRequest?.checkReceipts ?? [])
+        guard !receipts.isEmpty else { return nil }
+        let tree = snapshot.workingTree
+        return receipts.map { Page.ReceiptRow($0, freshness: $0.freshness(head: snapshot.head, tree: tree)) }
     }
 
     static func diffKey(of file: FileChange) -> String? {
