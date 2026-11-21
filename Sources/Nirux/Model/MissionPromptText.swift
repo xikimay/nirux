@@ -52,8 +52,10 @@ enum MissionPromptText {
             let from = event.answeredByUser == true ? "the user"
                 : parentTitle.map { "\"\(String(String.UnicodeScalarView(quoted($0).unicodeScalars.prefix(maxNameScalars))))\"" }
                 ?? "the parent agent"
+            let retired = delivery.mission.events.contains { $0.id == event.inReplyTo && $0.retiredAt != nil }
             return "\(prefix) Answer from \(from): \(event.message)"
                 + (event.acceptedRecommendation == true ? "\n" + acceptedNote : "")
+                + (retired ? "\n" + lateNote : "")
         case .completed:
             return "\(prefix) \(child) completed: \(quoted(event.message))"
                 + neverTypedNote(questionsNeverTyped(retiredBy: event, in: delivery.mission))
@@ -64,6 +66,8 @@ enum MissionPromptText {
 
     /// Under an answer that is the child's own recommendation.
     static let acceptedNote = "It is the answer you recommended."
+    /// Under an answer to a question the child moved past (`MissionEvent.retiredAt`).
+    static let lateNote = "It answers a question you asked before your last prompt: weigh it against what came since."
 
     /// A question as Nirux types it: who asks, its words, its kind and
     /// recommendation, then how to answer, which names the question and

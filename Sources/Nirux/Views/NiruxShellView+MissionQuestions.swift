@@ -147,6 +147,18 @@ extension NiruxShellView {
         return result
     }
 
+    /// A column's agent took a prompt typed at its box, the user's or one
+    /// Nirux typed (a tell, an answer): the Mission questions it asked
+    /// before are behind it, and stop waiting on its parent or the user.
+    func retireMissionQuestions(
+        of column: ColumnState, in workspace: WorkspaceState, promptedAt: TimeInterval, store: MissionStore = .shared
+    ) {
+        guard let agentUUID = column.agentUUID,
+              store.retireQuestions(childWorkspaceID: workspace.id, childAgentUUID: agentUUID, before: promptedAt)
+        else { return }
+        scheduleMetadataRefresh()
+    }
+
     /// What a parent whose terminal runs can do with a question, from its
     /// foreground process (nil: a process-table miss, which `settle` reads
     /// as nothing new) and when Nirux typed the question into it, if it

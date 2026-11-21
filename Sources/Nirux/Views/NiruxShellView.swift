@@ -488,6 +488,10 @@ final class NiruxShellView: NSView {
     /// and session restore.
     func wireWorkspace(_ workspace: WorkspaceState) {
         wireMetadataAndGitRefresh(workspace)
+        workspace.onPromptTyped = { [weak self, weak workspace] column, typedAt in
+            guard let self, let workspace else { return }
+            self.retireMissionQuestions(of: column, in: workspace, promptedAt: typedAt)
+        }
         workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url in
             self?.openWebView(url: url, in: targetWorkspace)
         }

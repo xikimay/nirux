@@ -121,6 +121,9 @@ struct MissionEvent: Codable, Equatable {
     var handedToUserBecause: String?
     /// When, epoch seconds; nil on one an older build handed over.
     var handedToUserAt: TimeInterval?
+    /// On a question: when it stopped waiting because its child took a
+    /// prompt after it, unanswered (`MissionStore.retireQuestions`).
+    var retiredAt: TimeInterval?
     /// On an instruction: Nirux types it at the child's next free prompt
     /// until then (`MissionEventCLI.instructionLifetime` after it was sent).
     /// Nil on one an older build recorded, which had an hour.
@@ -578,9 +581,44 @@ final class MissionStore {
             updated[missionIndex].events[eventIndex].childConsumedAt = timestamp
             updated[missionIndex].status = .active
             updated[missionIndex].updatedAt = timestamp
-            return commit(updated)
+            let mission = updated[missionIndex]
+            return commit(Self.retiringQuestions(
+                in: updated, childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID, before: timestamp
+            ))
         }
         return false
+    }
+
+    /// The child took a prompt typed at `promptedAt` (the user's, or one
+    /// Nirux typed): the questions it asked before stop waiting. False when
+    /// none waited, or the ledger isn't written.
+    @discardableResult
+    func retireQuestions(childWorkspaceID: String, childAgentUUID: String, before promptedAt: TimeInterval) -> Bool {
+        guard ensureLoaded() else { return false }
+        let updated = Self.retiringQuestions(
+            in: missions, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: promptedAt
+        )
+        return updated != missions && commit(updated)
+    }
+
+    /// `missions` with the questions the child asked before `promptedAt`
+    /// and nobody answered retired, as its completion retires them: the
+    /// prompt it took since answered them or moved it on. Asked again, a
+    /// question starts a new exchange.
+    private static func retiringQuestions(
+        in missions: [Mission], childWorkspaceID: String, childAgentUUID: String, before promptedAt: TimeInterval
+    ) -> [Mission] {
+        missions.map { mission in
+            guard mission.childWorkspaceID == childWorkspaceID, mission.childAgentUUID == childAgentUUID else { return mission }
+            var mission = mission
+            // An answered one was consumed with its answer.
+            for index in mission.events.indices where mission.events[index].kind == .question
+                && mission.events[index].parentConsumedAt == nil && mission.events[index].timestamp < promptedAt {
+                mission.events[index].parentConsumedAt = promptedAt
+                mission.events[index].retiredAt = promptedAt
+            }
+            return mission
+        }
     }
 
     /// Messages Nirux may type into an agent's prompt, oldest first: a
@@ -659,6 +697,10 @@ final class MissionStore {
         case .response:
             guard updated[missionIndex].events[eventIndex].childConsumedAt == nil else { return false }
             updated[missionIndex].events[eventIndex].childConsumedAt = timestamp
+            updated = Self.retiringQuestions(
+                in: updated, childWorkspaceID: delivery.mission.childWorkspaceID, childAgentUUID: delivery.mission.childAgentUUID,
+                before: timestamp
+            )
         case .question, .completed:
             guard updated[missionIndex].events[eventIndex].parentTypedAt == nil else { return false }
             updated[missionIndex].events[eventIndex].parentTypedAt = timestamp

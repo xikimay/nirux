@@ -719,6 +719,51 @@ final class MissionTellTests: XCTestCase {
         XCTAssertFalse(pty.reviewSendHasDraft)
     }
 
+    /// A column says when its agent took a prompt typed at its box, with
+    /// that prompt's time: at its hook without a transcript, once its line
+    /// is read with one. Never for a prompt Claude took in by itself.
+    func testTheColumnSaysWhenItsAgentTookATypedPrompt() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-typed-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("task.jsonl")
+        try Data().write(to: transcript)
+        let pty = PtySession()
+        var typed: [TimeInterval] = []
+        pty.onPromptTyped = { typed.append($0) }
+        func submit(_ id: String? = nil, transcript: URL? = nil) -> TimeInterval {
+            let at = Date().timeIntervalSince1970
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .userPromptSubmit, sessionID: "s", promptID: id, transcriptPath: transcript?.path, timestamp: at
+            ), isUserFocused: false)
+            return at
+        }
+        func record(_ id: String, origin: String) throws {
+            let time = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+            let handle = try FileHandle(forWritingTo: transcript)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((#"{"type":"user","origin":{"kind":""# + origin + #""},"promptId":""# + id
+                + #"","timestamp":""# + time + #"","message":{"role":"user","content":"…"}}"# + "\n").utf8))
+        }
+        _ = submit()
+        XCTAssertEqual(typed, [], "no Enter sent it")
+        pty.sendRaw(": go\r")
+        let first = submit()
+        XCTAssertEqual(typed, [first])
+
+        _ = submit("peer", transcript: transcript)
+        try record("peer", origin: "peer")
+        pty.readTranscriptPrompts()
+        XCTAssertEqual(typed, [first], "a peer's message")
+        pty.sendRaw("\r")
+        let second = submit("typed", transcript: transcript)
+        XCTAssertEqual(typed, [first], "until its line says so")
+        try record("typed", origin: "human")
+        pty.readTranscriptPrompts()
+        XCTAssertEqual(typed, [first, second])
+    }
+
     /// Without a transcript, an Enter stands for the prompt whose hook
     /// follows it within moments: Claude runs the hook as the box sends. An
     /// older one sent nothing (a line added after a backslash), one that

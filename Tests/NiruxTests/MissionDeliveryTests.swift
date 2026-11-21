@@ -79,6 +79,64 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertTrue(store.pendingPromptDeliveries(now: 42).isEmpty)
     }
 
+    /// A question stops waiting once its child took a later prompt: a tell
+    /// typed into it, an answer to another of its questions, or the user's
+    /// (`retireQuestions`), handed to the user or not. Not one asked after
+    /// that prompt, nor another child's. A retired question isn't typed to
+    /// the parent any more.
+    func testAQuestionRetiresOnceItsChildTakesALaterPrompt() throws {
+        let store = makeStore()
+        let otherMissionID = "66666666-6666-4666-8666-666666666666"
+        let otherChild = "77777777-7777-4777-8777-777777777777"
+        XCTAssertNotNil(store.create(MissionCreationRequest(
+            id: otherMissionID, parentWorkspaceID: parentWorkspaceID, parentAgentUUID: parentAgentUUID,
+            childWorkspaceID: otherChild, childAgentUUID: otherChild, childAgentKind: "claude", branch: "feat/other"
+        ), enabled: true, now: 10))
+        let others = try XCTUnwrap(store.accept(MissionEvent(
+            id: UUID().uuidString, missionID: otherMissionID, childWorkspaceID: otherChild, childAgentUUID: otherChild,
+            kind: .question, message: "Which API?", timestamp: 20
+        ), enabled: true))
+        func waiting() -> String? {
+            store.waitingQuestion(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID)?.event.message
+        }
+
+        let report = try XCTUnwrap(store.accept(childEvent(.question, "P5 is built, waiting on #654.", at: 20), enabled: true))
+        XCTAssertNotNil(store.handToUser(questionID: report.event.id, because: "the Lead stopped without answering", now: 21))
+        let tell = try XCTUnwrap(store.accept(parentEvent(.instruction, "Open PR 2.", at: 30), enabled: true))
+        XCTAssertTrue(store.markInstructionTyped(eventID: tell.event.id, at: 31))
+        XCTAssertNil(waiting(), "behind the tell")
+
+        let later = try XCTUnwrap(store.accept(childEvent(.question, "Bench it too?", at: 40), enabled: true))
+        XCTAssertFalse(store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 35))
+        XCTAssertEqual(waiting(), "Bench it too?", "asked after that prompt")
+        XCTAssertTrue(store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 41))
+        XCTAssertNil(waiting(), "behind the user's prompt")
+        XCTAssertFalse(
+            store.pendingPromptDeliveries(now: 42).contains { $0.event.kind == .question && $0.event.childAgentUUID == childAgentUUID },
+            "not typed to the parent any more"
+        )
+        XCTAssertEqual(store.missions.flatMap(\.events).first { $0.id == later.event.id }?.retiredAt, 41)
+        // Its parent answers it late: typed all the same, saying so.
+        XCTAssertNotNil(store.accept(parentEvent(.response, "Yes, bench it.", at: 45, inReplyTo: later.event.id), enabled: true))
+        let late = try XCTUnwrap(store.pendingPromptDeliveries(now: 46).first { $0.event.inReplyTo == later.event.id })
+        XCTAssertEqual(
+            MissionPromptText.text(for: late, childTitle: nil, parentTitle: "Lead"),
+            "[Nirux Mission] Answer from \"Lead\": Yes, bench it.\n" + MissionPromptText.lateNote
+        )
+        XCTAssertTrue(store.markTyped(late, at: 46))
+
+        _ = try XCTUnwrap(store.accept(childEvent(.question, "Rebase or merge?", at: 50), enabled: true))
+        let asked = try XCTUnwrap(store.accept(childEvent(.question, "Squash?", at: 51), enabled: true))
+        XCTAssertNotNil(store.respond(to: asked.event.id, message: "No", enabled: true, now: 52))
+        let answer = try XCTUnwrap(store.pendingPromptDeliveries(now: 53).first { $0.event.kind == .response })
+        XCTAssertTrue(store.markTyped(answer, at: 53))
+        XCTAssertNil(waiting(), "behind the answer to the other one")
+        XCTAssertEqual(
+            store.waitingQuestion(childWorkspaceID: otherChild, childAgentUUID: otherChild)?.event.id, others.event.id,
+            "another child's waits"
+        )
+    }
+
     /// A Codex child's `ask` waits and prints the answer itself: nothing is
     /// typed for it, whatever its queued event claims.
     func testAnAnswerToAWaitingAskIsNotTyped() throws {
@@ -437,6 +495,37 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertNil(watch.hold(nil, typedAt: 300), "typed into its prompt")
         XCTAssertEqual(watch.hold(.parentDidNotAnswer, typedAt: 300), .parentDidNotAnswer)
         XCTAssertEqual(watch.hold(nil, typedAt: 300), .parentDidNotAnswer)
+    }
+
+    /// A prompt typed into a child's terminal reaches the shell, which
+    /// retires the questions it asked before.
+    func testAPromptTypedIntoTheChildRetiresItsQuestions() throws {
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 600))
+        shell.stopHeartbeat()
+        let workspace = try XCTUnwrap(shell.activeWorkspace)
+        let column = try XCTUnwrap(workspace.columns.first)
+        let pty = try XCTUnwrap(column.pty)
+        let agentUUID = try XCTUnwrap(column.agentUUID)
+        let store = MissionStore(persistsToDisk: false)
+        XCTAssertNotNil(store.create(MissionCreationRequest(
+            id: missionID, parentWorkspaceID: parentWorkspaceID, parentAgentUUID: parentAgentUUID,
+            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: "claude", branch: "feat/date-filter"
+        ), enabled: true))
+        XCTAssertNotNil(store.accept(MissionEvent(
+            id: UUID().uuidString, missionID: missionID, childWorkspaceID: workspace.id, childAgentUUID: agentUUID,
+            kind: .question, message: "P5 is built.", timestamp: Date().timeIntervalSince1970 - 60
+        ), enabled: true))
+        XCTAssertNotNil(workspace.onPromptTyped, "the shell listens")
+        // The shell's own handler, on the test's ledger.
+        workspace.onPromptTyped = { column, typedAt in
+            shell.retireMissionQuestions(of: column, in: workspace, promptedAt: typedAt, store: store)
+        }
+        pty.sendRaw(": go on\r")
+        _ = pty.applyAgentHook(
+            AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "s", timestamp: Date().timeIntervalSince1970),
+            isUserFocused: false
+        )
+        XCTAssertNil(store.waitingQuestion(childWorkspaceID: workspace.id, childAgentUUID: agentUUID))
     }
 
     // MARK: - Card row
