@@ -13,7 +13,7 @@ enum FuzzyMatch {
     static let wordSeparators: Set<Character> = [" ", "-", "_", "/", ".", "("]
 
     static func score(query: String, candidate: String) -> Int? {
-        if query.isEmpty { return 0 }
+        if query.isEmpty { return 1 }
         let queryChars = Array(query.lowercased())
         let candidateLower = Array(candidate.lowercased())
         let candidateOrig = Array(candidate)

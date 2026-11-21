@@ -1,6 +1,6 @@
 import AppKit
 
-/// What `Nirux` does with its arguments (see `NiruxApp.main`): a
+/// How `Nirux` handles its arguments (see `NiruxApp.main`): a
 /// command-line mode, or the app. The app opens with no argument, or with
 /// `-Key value` defaults only. Any other argument used to open it too: an
 /// agent trying `"$NIRUX_CLI_PATH" --help`, or a command it guessed to
