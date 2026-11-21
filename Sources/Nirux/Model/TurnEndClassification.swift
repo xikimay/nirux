@@ -180,6 +180,20 @@ enum TurnEndText {
         return head + "\n[…]\n" + tail
     }
 
+    /// What a turn's final message asks, as the child's question to its
+    /// parent: the sentence a verdict quoted, else the line it ends on, else
+    /// its last line, as the row showed it; its end when too long for a
+    /// question (`MissionEventCLI.maxMessageLength`), where the question is.
+    static func questionForParent(_ message: String, asking question: TurnEndQuestion?) -> String? {
+        // Bounded first: one line may be all of it.
+        guard let text = excerpt(message),
+              let line = question?.text ?? questionLine(of: text, maxLength: text.count) ?? lastLine(of: text, maxLength: text.count)
+        else { return nil }
+        let limit = MissionEventCLI.maxMessageLength
+        let asked = line.count <= limit ? line : "…" + line.suffix(limit - 1).trimmingCharacters(in: .whitespaces)
+        return MissionEventCLI.fits(asked, limit: limit) ? asked : nil
+    }
+
     /// The sentence of `message`'s prose that `quote` quotes, as the
     /// message writes it (cleaned for one line): `quote` may differ in
     /// whitespace, Markdown marks, typographic quotes and the quotation

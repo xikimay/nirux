@@ -10,6 +10,8 @@ import GhosttyTerminal
 /// a click or reaching GitHub.
 @MainActor
 struct ShellSideEffects {
+    var generateTaskNames: TaskNameSuggestion.Generator = TaskNameSuggestion.generate
+
     /// Types an agent's launch command into a new terminal column.
     var launchAgent: @MainActor (_ column: ColumnState, _ command: String) -> Void = { column, command in
         // After the column's shell has started (0.5 s, see ColumnState).

@@ -75,6 +75,10 @@ final class AgentHookCenter {
     /// the time the turn ended, for whoever shows it to check that it
     /// still stands by then.
     var onTurnDone: ((Resolution, TimeInterval) -> Void)?
+    /// A turn end that asks, in a Mission child whose parent sent its last
+    /// prompt: true when the question went to the parent, which answers it
+    /// (`NiruxShellView.askParent`). Its row then says so, not the user.
+    var asksParent: ((Resolution, TurnEndRequest, TurnEndQuestion?) -> Bool)?
     /// A turn end older than this is no news: a backlog replayed at
     /// launch, a verdict that took too long.
     static let turnDoneFreshness: TimeInterval = 30
@@ -358,8 +362,12 @@ final class AgentHookCenter {
             // backlog): no wait for it.
             guard let self, self.resolver?(agentUUID)?.column.pty?.isCurrentTurnEnd(event.timestamp) == true else { return }
             await self.waitBeforeAsking(delay)
-            guard self.turnEndClassifier != nil, let resolution = self.resolver?(agentUUID),
-                  resolution.column.pty?.noteAgentQuestion(question, in: message, endingTurnAt: event.timestamp, seen: seen) == true
+            guard self.turnEndClassifier != nil, let resolution = self.resolver?(agentUUID), let pty = resolution.column.pty,
+                  pty.mayNoteAgentQuestion(endingTurnAt: event.timestamp)
+            else { return }
+            let request = TurnEndRequest(message: message, turnEndedAt: event.timestamp)
+            guard self.asksParent?(resolution, request, question) == true
+                || pty.noteAgentQuestion(question, in: message, endingTurnAt: event.timestamp, seen: seen)
             else { return }
             // No alert refreshes the sidebar for it, and no heartbeat with
             // Nirux in the background.
@@ -405,13 +413,27 @@ final class AgentHookCenter {
             // behind first: the verdict then drops, as a late one does).
             if let endingQuestion {
                 await self.waitBeforeAsking(questionDelay)
-                self.applyTurnEndVerdict(.asks(endingQuestion), for: request, agentUUID: agentUUID)
+                self.settleAsking(endingQuestion, for: request, agentUUID: agentUUID)
                 return
             }
             let verdict = await classifier.classify(request.message)
             // Turned off meanwhile: every turn end alerts.
-            self.applyTurnEndVerdict(self.turnEndClassifier == nil ? .unknown : verdict, for: request, agentUUID: agentUUID)
+            switch self.turnEndClassifier == nil ? .unknown : verdict {
+            case .asks(let question): self.settleAsking(question, for: request, agentUUID: agentUUID)
+            case let settled: self.applyTurnEndVerdict(settled, for: request, agentUUID: agentUUID)
+            }
         }
+    }
+
+    /// A turn end that asks: its parent's question when the parent sent
+    /// its last prompt (`asksParent`), which then waits on the parent as a
+    /// child that asked; else the user's.
+    private func settleAsking(_ question: TurnEndQuestion?, for request: TurnEndRequest, agentUUID: String) {
+        if awaitsVerdict(request, agentUUID: agentUUID), let resolution = resolver?(agentUUID),
+           asksParent?(resolution, request, question) == true {
+            return applyTurnEndVerdict(.done, for: request, agentUUID: agentUUID, reportsDone: false)
+        }
+        applyTurnEndVerdict(.asks(question), for: request, agentUUID: agentUUID)
     }
 
     /// Asks for the status line of the turn that ended at `time` in
