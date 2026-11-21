@@ -62,6 +62,43 @@ final class BoardStagesViewTests: XCTestCase {
         return view
     }
 
+    func testWaitingLinesRenderInOrderAndFailuresAreAmber() throws {
+        var wait = BoardStagesLineTests.startWait(after: "login")
+        wait.awaited.pullRequest = .init(number: 42, url: "https://github.com/acme/widgets/pull/42")
+        let queued = try XCTUnwrap(BoardStages.WaitingTask(id: "docs", title: "Update the guide", wait: wait))
+        wait = BoardStagesLineTests.startWait(after: "changelog", title: "Changelog")
+        wait.failure = "#43 closed without merging"
+        let failed = try XCTUnwrap(BoardStages.WaitingTask(id: "release", title: "Publish release notes", wait: wait))
+        var login = BoardStages.Facts(id: "login", title: "Sign in")
+        login.pullRequest = .init(number: 42, base: "main", checks: .pending(since: nil))
+        let facts = BoardStages.SectionFacts(id: "widgets", lines: [login], waiting: [queued, failed])
+        let section = BoardStagesView.Section(id: "widgets", title: "Widgets", lines: BoardStages.section(facts, now: now))
+        let view = board(content([section], leadText: "Lead · reviewing sign-in changes", name: "Release"))
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["login", "docs", "release"])
+        let waitingRow = try XCTUnwrap(view.lineViews.first { $0.line.id == "docs" })
+        let failedRow = try XCTUnwrap(view.lineViews.first { $0.line.id == "release" })
+        XCTAssertEqual(waitingRow.accessibilityLabel(), "Update the guide, Starts after #42 merges")
+        XCTAssertEqual(failedRow.phraseLabel.textColor, Theme.Color.waiting)
+        XCTAssertEqual(failedRow.accessibilityLabel(), "Publish release notes, Needs you · #43 closed without merging")
+        XCTAssertNil(failedRow.line.rail)
+        XCTAssertTrue(failedRow.line.menu.isEmpty)
+        var released = BoardStages.Facts(id: "docs", title: "Update the guide")
+        released.activity = .working(since: nil)
+        let updated = BoardStages.SectionFacts(id: "widgets", lines: [released, login], waiting: [failed])
+        let current = BoardStagesView.Section(id: "widgets", title: "Widgets", lines: BoardStages.section(updated, now: now))
+        let held = BoardStagesView.holding([section], in: [current])
+        XCTAssertEqual(held.sections.first?.lines.units.flatMap(\.lines).map(\.id), ["login", "docs", "release"])
+        XCTAssertEqual(held.sections.first?.lines.units.first?.lines.last?.state, .working)
+        XCTAssertTrue(held.departed.isEmpty)
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        XCTAssertFalse(png.isEmpty)
+        if let path = ProcessInfo.processInfo.environment["NIRUX_BOARD_WAITING_RENDER"] {
+            try png.write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
+    }
+
     /// What is under `view`'s middle. A window that is never shown drops
     /// events sent with `sendEvent`, so the tests hit-test by hand.
     private func target(at view: NSView) throws -> (view: NSView, location: NSPoint) {

@@ -244,6 +244,8 @@ extension BoardStages {
         /// Its agent asked the agent that started it, and the line says so
         /// (a grey ring and a question, as on the sidebar's row).
         var asksParent = false
+        /// Waiting starts in dependency order, flat even when one waits for another.
+        var following: [Line] = []
     }
 }
 

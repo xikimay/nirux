@@ -77,7 +77,7 @@ extension BoardStages {
     /// a linked one, is listed first under "Other worktrees", with Focus.
     static func sectionFacts(
         _ repository: RepositoryReading, tasks: [String], readings: [String: TaskReading], parents: [String: String] = [:],
-        lead: String? = nil
+        lead: String? = nil, waiting: [WaitingTask] = []
     ) -> SectionFacts {
         var places: [String: (row: ProjectBoard.Row, workspace: ProjectBoard.WorkspaceRef)] = [:]
         for row in repository.rows where !isInOtherRepository(row) {
@@ -124,7 +124,7 @@ extension BoardStages {
             otherWorktrees: (lead.map { lead in repository.rows.compactMap { leadWorktree($0, lead: lead, in: repository) } } ?? [])
                 + repository.rows.compactMap { otherWorktree($0, in: repository) }
                     .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending },
-            knownMerged: merged.known
+            knownMerged: merged.known, waiting: waiting
         )
     }
 
