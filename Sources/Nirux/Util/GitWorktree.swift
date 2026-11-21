@@ -9,6 +9,12 @@ struct GitResult {
 // MARK: - Git Worktree Operations
 
 enum GitWorktree {
+    static func siblingPath(for branch: String, mainCheckout: String) -> String {
+        let main = URL(fileURLWithPath: mainCheckout)
+        let suffix = branch.replacingOccurrences(of: "/", with: "-")
+        return main.deletingLastPathComponent().appendingPathComponent(main.lastPathComponent + "." + suffix).path
+    }
+
     /// Create a worktree for the given branch. Auto-detects existing vs new branch.
     /// Returns (path, nil) on success or (nil, errorMessage) on failure.
     /// Both inputs can come from a `nirux://new-worktree` URL, so they are
@@ -48,14 +54,8 @@ enum GitWorktree {
             startCommit = commit
         }
 
-        // Sanitize branch name for directory path
-        let dirName = branch.replacingOccurrences(of: "/", with: "-")
         let mainRoot = mainWorktreeRoot(of: repoRoot)
-        let repoName = URL(fileURLWithPath: mainRoot).lastPathComponent
-        let worktreePath = URL(fileURLWithPath: mainRoot)
-            .deletingLastPathComponent()
-            .appendingPathComponent("\(repoName).\(dirName)")
-            .path
+        let worktreePath = siblingPath(for: branch, mainCheckout: mainRoot)
 
         // A branch is checked out in one worktree at most: open that one,
         // wherever it is (older versions named a worktree made from another

@@ -324,8 +324,10 @@ New flow, built on the guarded typing `tell` already uses
     too (the call stands in for the alert's click); a task without a
     repository has its folder moved to the Trash (for this tool only: Close
     and Archive keep it). Otherwise they stay and the answer says why: not
-    merged, uncommitted changes, another workspace open in it, a folder named
-    for another branch (a base reused across branches)… The task closes and
+    merged, uncommitted changes, another workspace open in it, or a reused
+    base folder. After a branch switch, the exact worktree path for the
+    starting branch recorded in this workspace’s Mission also qualifies.
+    The merged PR and the local branch removed are the current branch’s. The task closes and
     its shells hang up first; git runs, or the folder goes to the Trash,
     once all their processes ended (10 s at most, else the folder stays and
     the answer names them). A folder task's folder holding a git repository
