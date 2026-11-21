@@ -37,6 +37,7 @@ extension TaskThread {
             let text = failed.isEmpty ? "\(checks.count) checks" : "\(failed.count) of \(checks.count) failed: \(failed.joined(separator: ", "))"
             events.append(Event(time: last, kind: .checks, text: text, detail: !failed.isEmpty ? "failed" : pending ? "pending" : "passed"))
         }
+        events += checkRuns(checks, url: url)
         if let merged = time(json["mergedAt"]) {
             let commit = ((json["mergeCommit"] as? [String: Any])?["oid"] as? String)?.lowercased()
             events.append(Event(time: merged, kind: .merged, number: number, ref: commit))
@@ -46,7 +47,16 @@ extension TaskThread {
         return events
     }
 
-    private static func time(_ value: Any?) -> TimeInterval? {
+    static func checkRuns(_ checks: [GitHub.Check], url: String, observedAt: TimeInterval? = nil) -> [Event] {
+        checks.compactMap { check in
+            guard let start = time(GitHub.startTime(check.startedAt)) else { return nil }
+            let end = time(GitHub.startTime(check.completedAt)) ?? (check.result == .pending ? observedAt : nil)
+            guard end.map({ $0 >= start }) ?? (check.result == .pending) else { return nil }
+            return Event(time: start, kind: .checkRun, text: check.qualifiedName ?? check.name, ref: url, until: end)
+        }
+    }
+
+    static func time(_ value: Any?) -> TimeInterval? {
         (value as? String).flatMap { try? Date($0, strategy: .iso8601) }?.timeIntervalSince1970
     }
 }
