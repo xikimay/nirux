@@ -100,7 +100,7 @@ final class WorkspaceContextTests: XCTestCase {
 
     /// What a task's thread keeps reaches the shell as it happens, with
     /// who did it: the Lead's and the user's context, a merge clearing the
-    /// Lead's, the goal, each new status line, each turn end.
+    /// Lead's, the goal, each status line, each turn end.
     func testWhatTheThreadKeepsReachesItWithItsAuthor() throws {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         var events: [TaskThread.Event] = []
@@ -125,8 +125,8 @@ final class WorkspaceContextTests: XCTestCase {
             workspace.awaitTurnStatus(turnEndedAt: turn)
             workspace.settleTurnStatus(status, turnEndedAt: turn)
         }
-        XCTAssertEqual(events.map(\.time), [10], "at its turn's end")
-        XCTAssertEqual(took(), ["status nirux export half done"])
+        XCTAssertEqual(events.map(\.time), [10, 20], "at its turn's end; a repeat is dropped at read")
+        XCTAssertEqual(took(), ["status nirux export half done", "status nirux export half done"])
         workspace.setSummaryByHand("my own summary")
         workspace.awaitTurnStatus(turnEndedAt: 40)
         workspace.settleTurnStatus(.line("export done"), turnEndedAt: 40)

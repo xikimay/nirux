@@ -151,6 +151,20 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertFalse(try call(
                 LeadTools.setTaskContext, ["task": "Add a date filter", "next_step": "ship the filter"], lead: lead, in: harness
             ).isError)
+            // Merged: its follow-up rounds stay in its thread, and the Lead's
+            // next step goes.
+            let url = "https://github.com/acme/repo/pull/7"
+            shell.prFollowUpCenter.file.update {
+                $0.pullRequests[url] = PRFollowUp.Entry(rounds: [PRFollowUp.Round(kind: .ci, head: "abc", typedAt: 5)])
+            }
+            task.prInfo = PRInfo(
+                number: 7, state: "MERGED", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil, mergeable: nil, url: url,
+                additions: nil, deletions: nil, changedFiles: nil
+            )
+            shell.followUpPullRequest(of: task)
+            XCTAssertNil(shell.prFollowUpCenter.file.value.pullRequests[url])
+            // Its worktree removed under it: it is still a task with a thread.
+            try FileManager.default.removeItem(atPath: task.cwd)
             shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), refocusing: false)
             var thread: [TaskThread.Event] = []
             harness.waitUntil("its thread frozen") {
@@ -160,6 +174,9 @@ final class LeadToolsFlowTests: XCTestCase {
             let request = try XCTUnwrap(thread.first)
             XCTAssertEqual([request.kind.rawValue, request.by?.rawValue, request.text], ["request", "lead", "Add a date filter\nGET /orders?from=&to="])
             XCTAssertTrue(thread.contains { $0.kind == .nextStep && $0.by == .lead && $0.text == "ship the filter" })
+            XCTAssertTrue(thread.contains { $0.kind == .nextStep && $0.by == .nirux && $0.text == nil })
+            XCTAssertTrue(thread.contains { $0.kind == .followUp && $0.time == 5 && $0.detail == "ci" && $0.ref == url })
+            XCTAssertNil(thread.last { $0.kind == .closed }?.text, "the live pull request may be another checkout's: only the ledger's count")
             XCTAssertTrue(thread.contains { $0.kind == .answer && $0.by == .lead && $0.text == "UTC" && $0.detail == "accepted" })
             XCTAssertTrue(thread.contains { $0.kind == .handedToUser && $0.text == why })
             XCTAssertTrue(thread.contains { $0.kind == .answer && $0.by == .user && $0.text == "Yes, until v3" })

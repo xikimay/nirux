@@ -5,44 +5,61 @@ import AppKit
 extension NiruxShellView {
     func wireThread(_ workspace: WorkspaceState) {
         workspace.onThreadEvent = { [weak self, weak workspace] event in
-            guard let self, let workspace, !workspace.isClosing, !workspace.isLead, Self.isTask(workspace) else { return }
+            guard let self, let workspace, self.keepsThread(workspace) else { return }
             self.recordThread([event], of: workspace)
         }
     }
 
+    /// A task, or a workspace whose thread exists already: a worktree
+    /// removed under its task leaves it a task.
+    func keepsThread(_ workspace: WorkspaceState) -> Bool {
+        !workspace.isLead
+            && (Self.isTask(workspace) || TaskThread.Store.locate(workspaceID: workspace.id, stateDirectory: Persistence.stateDirectory) != nil)
+    }
+
     func recordThread(_ events: [TaskThread.Event], of workspace: WorkspaceState) {
+        guard !events.isEmpty else { return }
         let (id, space, directory) = (workspace.id, workspace.profileID, Persistence.stateDirectory)
         TaskThread.Store.queue.async {
             TaskThread.Store.append(events, workspaceID: id, spaceID: space, stateDirectory: directory)
         }
     }
 
-    /// What the task was asked, at its birth.
-    func recordRequest(_ request: NewTask.Request, of workspace: WorkspaceState) {
+    /// What the task was asked, at its birth (`bornAt`, before anything
+    /// else of it can be recorded).
+    func recordRequest(_ request: NewTask.Request, of workspace: WorkspaceState, bornAt: Date) {
         let author: TaskThread.Author = request.startedByLead ? .lead : request.startedByTaskAgent ? .parentTask : .user
         recordThread([TaskThread.Event(
-            time: Date().timeIntervalSince1970, kind: .request, by: author, text: request.description,
-            detail: request.template?.name
+            time: bornAt.timeIntervalSince1970, kind: .request, by: author, text: request.description, detail: request.template?.name
         )], of: workspace)
     }
 
     /// A closing task's thread takes what the files say of it, then its
-    /// pull requests' history once GitHub answers.
+    /// pull requests' history once GitHub answers. Not while the Missions
+    /// can't be read: its thread then stays open, joined at each read.
     func freezeThread(of workspace: WorkspaceState) {
-        guard !workspace.isLead, Self.isTask(workspace) else { return }
+        guard keepsThread(workspace) else { return }
+        guard MissionStore.shared.ensureLoaded() else {
+            return NiruxDebugLog.log("TaskThread: \(workspace.id) not frozen: the Missions can't be read")
+        }
         let (id, space, directory) = (workspace.id, workspace.profileID, Persistence.stateDirectory)
+        let spaceIDs = profiles.map(\.id)
+        // The ledger's, not the live pull request's: that one follows the
+        // focused column, which may be another checkout.
+        let urls = Set(spaceIDs.flatMap { sessionLedger.sessions(inSpace: $0) }.filter { $0.workspaceID == id }.compactMap(\.pullRequest?.url))
         let missions = MissionStore.shared.missions.filter { $0.childWorkspaceID == id }
         let reviewRuns = workspace.reviewRuns
-        let recordedURLs = sessionLedger.sessions(inSpace: space).filter { $0.workspaceID == id }.compactMap(\.pullRequest?.url)
-        let urls = Set(recordedURLs + [workspace.prInfo?.url].compactMap { $0 })
+        let isSingleRepository = (profiles.first { $0.id == space }?.anchors.count ?? 0) <= 1
         let open = Set(workspaces.filter { !$0.isClosing }.map(\.id))
         let now = Date().timeIntervalSince1970
         TaskThread.Store.queue.async {
             let sources = TaskThread.Sources.load(
-                workspaceID: id, spaceID: space, missions: missions, reviewRuns: reviewRuns, pullRequestURLs: urls
+                workspaceID: id, missions: missions, reviewRuns: reviewRuns, pullRequestURLs: urls,
+                spaceID: space, spaceIDs: spaceIDs, isSingleRepository: isSingleRepository, stateDirectory: directory
             )
-            TaskThread.Store.append(TaskThread.frozen(sources, closedAt: now), workspaceID: id, spaceID: space, stateDirectory: directory)
-            TaskThread.Store.prune(spaceID: space, keeping: open, now: now, stateDirectory: directory)
+            let frozen = TaskThread.frozen(sources, closedAt: now, pullRequests: urls)
+            TaskThread.Store.append(frozen, workspaceID: id, spaceID: space, stateDirectory: directory)
+            TaskThread.Store.pruneAll(keeping: open, now: now, stateDirectory: directory)
         }
         guard !urls.isEmpty, let gh = PRDetect.installedGHPath() else { return }
         DispatchQueue.global(qos: .utility).async {
@@ -56,12 +73,11 @@ extension NiruxShellView {
         }
     }
 
-    /// The threads no open task owns, past their time or the space's budget.
+    /// The threads no open task owns, past their time or their space's budget.
     func pruneThreads() {
-        let (spaces, open, directory) = (profiles.map(\.id), Set(workspaces.map(\.id)), Persistence.stateDirectory)
-        let now = Date().timeIntervalSince1970
+        let (open, directory, now) = (Set(workspaces.map(\.id)), Persistence.stateDirectory, Date().timeIntervalSince1970)
         TaskThread.Store.queue.async {
-            for space in spaces { TaskThread.Store.prune(spaceID: space, keeping: open, now: now, stateDirectory: directory) }
+            TaskThread.Store.pruneAll(keeping: open, now: now, stateDirectory: directory)
         }
     }
 }

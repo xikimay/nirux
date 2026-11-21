@@ -638,7 +638,7 @@ extension WorkspaceState {
         settledTurnStatus = turnEndedAt
         switch status {
         case .line(let line)? where !lastSummaryIsManual:
-            if line != lastSummary { noteThread(.status, by: .nirux, text: line, time: turnEndedAt) }
+            noteThread(.status, by: .nirux, text: line, time: turnEndedAt)
             lastSummary = line
             lastSummaryIsStatus = true
         case .unchanged?, .line?:

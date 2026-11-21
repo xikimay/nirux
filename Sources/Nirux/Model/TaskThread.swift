@@ -1,18 +1,19 @@
 import Foundation
 
 /// A task's story from its request to its merge (docs/design/task-thread.md).
-/// Nirux records only what nothing else keeps: the request, each status
-/// line and context change, each turn end. The rest is joined at read from
-/// the files that hold it already (`events(from:)`), and copied once, when
-/// the task closes, with its pull request's history.
+/// Nirux records what nothing else keeps, or keeps only for a while: the
+/// request, each status line and context change, each turn end, each
+/// follow-up round and triaged failure. The rest is joined at read from the
+/// files that hold it (`events(from:)`), and copied once, when the task
+/// closes, with its pull request's history.
 enum TaskThread {
-    struct Event: Codable, Equatable, Sendable {
+    struct Event: Codable, Hashable, Sendable {
         var time: TimeInterval
         var kind: Kind
         var by: Author?
         /// The request, a line, a message; nil for a field cleared.
         var text: String?
-        /// A recommendation, a reason, a pull request's title.
+        /// A recommendation, a reason, a rule's evidence.
         var note: String?
         /// A question's kind, a verdict, a review pass, an agent.
         var detail: String?
@@ -51,7 +52,11 @@ enum TaskThread {
         static let nextStep = Kind("nextStep")
         static let blocker = Kind("blocker")
         static let turnEnd = Kind("turnEnd")
+        /// Its text names the task's pull requests, one per line.
         static let closed = Kind("closed")
+        // Recorded as they happen, and joined while their file still has them.
+        static let followUp = Kind("followUp")
+        static let ciFailure = Kind("ciFailure")
         // Joined from the files that keep them.
         static let question = Kind("question")
         static let answer = Kind("answer")
@@ -60,8 +65,6 @@ enum TaskThread {
         static let handedToUser = Kind("handedToUser")
         static let review = Kind("review")
         static let findings = Kind("findings")
-        static let ciFailure = Kind("ciFailure")
-        static let followUp = Kind("followUp")
         static let rule = Kind("rule")
         // The pull request's history, read from GitHub at close.
         static let pullRequest = Kind("pullRequest")
@@ -110,24 +113,31 @@ enum TaskThread {
         }
     }
 
-    /// The thread as it reads now, in time order. A closed task's is its
-    /// file alone: it was frozen then, and the files it was joined from may
-    /// have dropped it since. A turn end replayed after a relaunch counts once.
-    static func thread(recorded: [Event], sources: Sources) -> [Event] {
-        let isClosed = recorded.contains { $0.kind == .closed }
-        return ordered(isClosed ? recorded : recorded + events(from: sources))
+    /// The thread as it reads, in time order: an open task's joins what the
+    /// files say of it now; a closed task's (`sources` nil) is its file
+    /// alone, frozen when it closed. An event read twice (a hook replayed, a
+    /// round both recorded and joined, a task closed twice) counts once, and
+    /// so does a status line that repeats the one before.
+    static func thread(recorded: [Event], joining sources: Sources?) -> [Event] {
+        ordered(recorded + (sources.map(events(from:)) ?? []))
     }
 
-    /// What a closing task appends: what the files say of it, then the close.
-    static func frozen(_ sources: Sources, closedAt: TimeInterval) -> [Event] {
-        events(from: sources) + [Event(time: closedAt, kind: .closed)]
+    /// What a closing task appends: what the files say of it, then the
+    /// close, which names its pull requests (their history comes after).
+    static func frozen(_ sources: Sources, closedAt: TimeInterval, pullRequests: Set<String>) -> [Event] {
+        let named = pullRequests.isEmpty ? nil : pullRequests.sorted().joined(separator: "\n")
+        return events(from: sources) + [Event(time: closedAt, kind: .closed, text: named)]
     }
 
     static func ordered(_ events: [Event]) -> [Event] {
-        var seenTurnEnds = Set<TimeInterval>()
-        let unique = events.filter { event in
-            event.kind != .turnEnd || seenTurnEnds.insert(event.time).inserted
-        }
+        var seen = Set<Event>()
+        let unique = events.filter { seen.insert($0).inserted }
+        var lastStatus: String?
         return unique.enumerated().sorted { ($0.element.time, $0.offset) < ($1.element.time, $1.offset) }.map(\.element)
+            .filter { event in
+                guard event.kind == .status else { return true }
+                defer { lastStatus = event.text }
+                return event.text != lastStatus
+            }
     }
 }

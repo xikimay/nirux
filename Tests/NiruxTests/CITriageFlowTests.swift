@@ -219,6 +219,23 @@ final class CITriageFlowTests: XCTestCase {
 
     /// A verdict on a failure the pull request has moved on from is
     /// dropped: it never shows, nor replaces what the later one kept.
+    /// A verdict reaches its task's thread as it is given: a rerun that
+    /// passes later takes it out of the store, not out of the thread.
+    func testAVerdictReachesItsTasksThread() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            _ = try triaging(harness)
+            let id = UUID().uuidString
+            shell.addWorkspace(title: "Widgets", cwd: harness.repo, workspaceID: id, taskFolder: harness.repo, activate: false)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.id == id })
+            task.prInfo = Self.red
+            shell.triageRedChecks(in: task)
+            harness.waitUntil("the verdict in its thread") {
+                TaskThread.Store.load(workspaceID: id).contains { $0.kind == .ciFailure && $0.detail == "flaky" && $0.number == 52 }
+            }
+        }
+    }
+
     func testAVerdictIsOfTheFailureItReadOnly() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

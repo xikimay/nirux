@@ -1,8 +1,7 @@
 import Foundation
 
 extension TaskThread {
-    /// What the files Nirux keeps already say of one task, read by its
-    /// workspace id, then by its pull requests' URLs (`load`).
+    /// What the files Nirux keeps already say of one task (`load`).
     struct Sources: Sendable {
         /// Those whose child is the task.
         var missions: [Mission] = []
@@ -25,19 +24,24 @@ extension TaskThread {
                 detail: entry.findings.map(\.kind).joined(separator: ", "), number: entry.round
             )
         }
-        let followUps = sources.followUps.flatMap { url, entry in
-            entry.rounds.map { Event(time: $0.typedAt, kind: .followUp, by: .nirux, detail: $0.kind.rawValue, number: $0.items.count, ref: url) }
-        }
-        let triage = sources.triage.map { record in
-            Event(
-                time: record.triagedAt, kind: .ciFailure, text: record.redChecks.joined(separator: ", "), note: record.reason,
-                detail: record.verdict, number: record.pullRequest
-            )
-        }
         let rules = sources.rules.compactMap { proposal in
             proposal.addedAt.map { Event(time: $0, kind: .rule, by: .user, text: proposal.addedRule ?? proposal.rule, note: proposal.evidence) }
         }
-        return sources.missions.flatMap(events(of:)) + reviews + findings + followUps + triage + rules
+        return sources.missions.flatMap(events(of:)) + reviews + findings
+            + sources.followUps.flatMap { followUpEvents($1, url: $0) } + sources.triage.map(event(of:)) + rules
+    }
+
+    /// A pull request's follow-up rounds, as its task's thread keeps them.
+    static func followUpEvents(_ entry: PRFollowUp.Entry, url: String) -> [Event] {
+        entry.rounds.map { Event(time: $0.typedAt, kind: .followUp, by: .nirux, detail: $0.kind.rawValue, number: $0.items.count, ref: url) }
+    }
+
+    /// A triaged failure, as its task's thread keeps it.
+    static func event(of record: CITriageStore.RunRecord) -> Event {
+        Event(
+            time: record.triagedAt, kind: .ciFailure, text: record.redChecks.joined(separator: ", "), note: record.reason,
+            detail: record.verdict, number: record.pullRequest
+        )
     }
 
     private static func events(of mission: Mission) -> [Event] {
@@ -73,28 +77,39 @@ extension TaskThread {
             Int(after.prefix { $0.isASCII && $0.isNumber })
         })
     }
+
+    /// A rule cites a pull request by its URL, or by its number alone in a
+    /// space of one repository, where the number can't be another's.
+    static func cites(_ proposal: RuleProposal, any urls: Set<String>, isSingleRepository: Bool) -> Bool {
+        if urls.contains(where: proposal.evidence.contains) { return true }
+        guard isSingleRepository else { return false }
+        let numbers = Set(urls.compactMap { CIFailure.pullRequest(url: $0)?.number })
+        return !citedPullRequests(proposal.evidence).isDisjoint(with: numbers)
+    }
 }
 
 extension TaskThread.Sources {
-    /// Reads the files; the task's Missions, review runs and pull requests
-    /// come from the app, which holds them.
+    /// Reads the files, by the task's workspace id, then by its pull
+    /// requests' URLs: the Lead's findings in every space (the task may have
+    /// moved), the rules of its own. Its Missions and review runs come from
+    /// the app, which holds them.
     static func load(
-        workspaceID: String, spaceID: String, missions: [Mission], reviewRuns: [ReviewPass: ReviewRun], pullRequestURLs: Set<String>
+        workspaceID: String, missions: [Mission], reviewRuns: [ReviewPass: ReviewRun], pullRequestURLs: Set<String>,
+        spaceID: String, spaceIDs: [String], isSingleRepository: Bool, stateDirectory: URL
     ) -> Self {
-        let pullRequests = pullRequestURLs.compactMap(CIFailure.pullRequest(url:))
-        let numbers = Set(pullRequests.map(\.number))
-        let triage = CITriageStore.load()
-        let followUps = PRFollowUpStore.load().pullRequests
+        let triage = CITriageStore.load(from: stateDirectory.appendingPathComponent(CITriageStore.fileName))
+        let followUps = PRFollowUpStore.load(from: stateDirectory.appendingPathComponent(PRFollowUpStore.fileName)).pullRequests
         return Self(
             missions: missions.filter { $0.childWorkspaceID == workspaceID },
             reviewRuns: reviewRuns,
-            findings: ReviewFindings.lines.load(spaceID: spaceID).filter { $0.workspace == workspaceID },
+            findings: spaceIDs.flatMap { ReviewFindings.lines.load(spaceID: $0, stateDirectory: stateDirectory) }
+                .filter { $0.workspace == workspaceID },
             followUps: followUps.filter { pullRequestURLs.contains($0.key) },
-            triage: pullRequests.flatMap { repository, number in
+            triage: pullRequestURLs.compactMap(CIFailure.pullRequest(url:)).flatMap { repository, number in
                 (triage.repositories[repository.lowercased()]?.runs.values).map { $0.filter { $0.pullRequest == number } } ?? []
             },
-            rules: (RuleProposalStore(spaceID: spaceID)?.load().proposals ?? []).filter { proposal in
-                proposal.addedAt != nil && !TaskThread.citedPullRequests(proposal.evidence).isDisjoint(with: numbers)
+            rules: (RuleProposalStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load().proposals ?? []).filter { proposal in
+                proposal.addedAt != nil && TaskThread.cites(proposal, any: pullRequestURLs, isSingleRepository: isSingleRepository)
             }
         )
     }

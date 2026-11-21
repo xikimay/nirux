@@ -30,7 +30,8 @@ extension TaskThread {
             }
         }
         let checks = ProjectBoard.latest((json["statusCheckRollup"] as? [[String: Any]] ?? []).compactMap(ProjectBoard.check(from:)))
-        if let last = checks.compactMap({ time($0.startedAt) }).max() {
+        // gh writes a queued run's start as year 1.
+        if let last = checks.compactMap({ $0.startedAt?.hasPrefix("0001-") == false ? time($0.startedAt) : nil }).max() {
             let failed = checks.filter { $0.result == .failure }.map(\.name)
             let pending = checks.contains { $0.result == .pending }
             let text = failed.isEmpty ? "\(checks.count) checks" : "\(failed.count) of \(checks.count) failed: \(failed.joined(separator: ", "))"

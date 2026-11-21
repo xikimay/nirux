@@ -251,6 +251,7 @@ extension NiruxShellView {
     /// space, else the sheet's, whatever space anchors a folder above it.
     @discardableResult
     private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTask) -> String {
+        let bornAt = Date()
         var decision = decideSpace(
             identity: created.identity, parentWorkspaceID: request.parentWorkspaceID ?? request.reportsTo?.workspaceID,
             startedFromSpaceID: request.projectID
@@ -300,7 +301,7 @@ extension NiruxShellView {
             fadesBackdrop: pendingTaskSheet != nil
         )
         if let born = workspaces.first(where: { $0.id == childWorkspaceID }) {
-            recordRequest(request, of: born)
+            recordRequest(request, of: born, bornAt: bornAt)
             playTaskBirth(of: born)
         }
         // The agent that proposed it hears what the user started.

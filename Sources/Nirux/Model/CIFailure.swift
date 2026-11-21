@@ -115,8 +115,6 @@ enum CIFailure {
         check.url.flatMap(run(checkURL:))
     }
 
-    /// `host/owner/name` and the rest of the path of
-    /// `https://<host>/<owner>/<name>/…`, from plain ASCII parts only.
     /// `https://<host>/<owner>/<name>/pull/<number>`.
     static func pullRequest(url: String) -> (repository: String, number: Int)? {
         guard let parsed = parse(url), parsed.rest.count >= 2, parsed.rest[0] == "pull",
@@ -125,6 +123,8 @@ enum CIFailure {
         return (parsed.repository, number)
     }
 
+    /// `host/owner/name` and the rest of the path of
+    /// `https://<host>/<owner>/<name>/…`, from plain ASCII parts only.
     private static func parse(_ string: String) -> (repository: String, rest: [String])? {
         guard let components = URLComponents(string: string), components.scheme == "https",
               let host = components.host?.lowercased(), host.allSatisfy(isHostCharacter)
