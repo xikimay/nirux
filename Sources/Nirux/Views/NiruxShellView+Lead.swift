@@ -156,8 +156,14 @@ extension NiruxShellView {
         if !column.isAwaitingResume, let pty = column.pty, pty.shellPID == nil, !pty.hasExited {
             return showToast("The Lead is starting: restart it in a moment.")
         }
+        if let sessionID {
+            guard !column.isRestartingShell, column.relaunchingLeadSessionID == nil, column.launchDirectory != nil,
+                  canRelaunchLeadSession(sessionID, in: column) else { return }
+            column.relaunchingLeadSessionID = sessionID
+        }
         refreshLaunch(of: column, in: lead)
         sideEffects.restartTerminal(column, command) { [weak self, weak lead, weak column] stillRunning in
+            defer { column?.relaunchingLeadSessionID = nil }
             // Turned off meanwhile: nothing starts in its column.
             guard let self, let lead, let column, self.leadWorkspace(inSpace: lead.profileID) === lead, column === lead.leadTerminal else { return false }
             guard stillRunning.isEmpty else {
@@ -168,11 +174,12 @@ extension NiruxShellView {
                 )
                 return false
             }
-            column.recordLeadSafety(file: file)
             if let sessionID {
+                guard self.canRelaunchLeadSession(sessionID, in: column) else { return false }
                 column.prepareClaudeResume(sessionID: sessionID)
                 self.sessionResume.noteLaunch(of: sessionID, in: column, now: ProcessInfo.processInfo.systemUptime)
             }
+            column.recordLeadSafety(file: file)
             return true
         }
     }

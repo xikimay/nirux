@@ -118,6 +118,7 @@ final class LeadRestartFlowTests: XCTestCase {
             XCTAssertIdentical(column, lead.workspace.leadTerminal)
             XCTAssertEqual(column.agentUUID, lead.agentUUID)
             let relaunched = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+            XCTAssertTrue(lead.workspace.runsRestartedLead(relaunched))
             shell.typeMissionMessages()
             XCTAssertTrue(MissionStore.shared.pendingPromptDeliveries().contains { $0.event.id == question.id })
             XCTAssertFalse(resumed.input.contains(question.message))
@@ -127,6 +128,99 @@ final class LeadRestartFlowTests: XCTestCase {
             XCTAssertEqual(column.persistedClaudeRestore(foregroundProcess: relaunched), .resume(sessionID))
             shell.updateSidebar()
             XCTAssertNil(shell.sidebar.lastInfos.first(where: \.isLead)?.leadLaunchIssue)
+        }
+    }
+
+    func testRelaunchProtectsTheTranscriptAndReservesItAcrossTheHangup() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let column = try XCTUnwrap(lead.workspace.leadTerminal)
+            let pty = try XCTUnwrap(column.pty)
+            let old = AgentStandIn(), resumed = AgentStandIn()
+            defer { old.remove(); resumed.remove() }
+            let flags = NiruxMCPServer.claudeArguments(executable: "/test/Nirux")
+            let original = try run(old.command(arguments: flags), in: column, harness: harness)
+            let sessionID = UUID().uuidString
+            let transcript = URL(fileURLWithPath: harness.root).appendingPathComponent(sessionID + ".jsonl")
+            try Data().write(to: transcript)
+            let snapshot = ProcessSnapshot()
+            let event = AgentHookEvent(kind: .claude, name: .userPromptSubmit, agentUUID: lead.agentUUID,
+                                       sessionID: sessionID, emitterProcess: original, timestamp: Date().timeIntervalSince1970)
+            _ = column.admitClaudeHook(event, foregroundProcess: pty.foregroundProcess(snapshot: snapshot), snapshot: snapshot)
+            @MainActor func record(_ event: AgentHookEvent.Name) {
+                shell.sessionLedger.record(AgentSessionObservation(
+                    agent: .claude, sessionID: sessionID, event: event, source: nil, timestamp: Date().timeIntervalSince1970,
+                    agentProcess: original, name: nil, cwd: harness.repo, transcriptPath: transcript.path, checkout: nil,
+                    pullRequest: nil, workspaceID: lead.workspace.id, workspaceTitle: "Lead", agentUUID: lead.agentUUID, columnIndex: 0
+                ), spaceID: lead.space)
+            }
+            record(.userPromptSubmit)
+            record(.stop)
+            let knownPath = try XCTUnwrap(shell.sessionLedger.session(agent: .claude, sessionID: sessionID)?.transcriptPath)
+            XCTAssertEqual(knownPath, transcript.path)
+            @MainActor func relaunch() {
+                harness.alertResponses = [.alertSecondButtonReturn]
+                shell.requestLeadRecovery(.olderOptions, in: lead.workspace)
+            }
+            try FileManager.default.removeItem(at: transcript)
+            relaunch()
+            XCTAssertEqual(shell.toast?.message, SessionHistory.message(.transcriptGone, agent: .claude))
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            XCTAssertEqual(ProcessInstance.running(pid: original.pid), original)
+            try Data().write(to: transcript)
+
+            let key = AgentSessionRecord.key(agent: "claude", sessionID: sessionID)
+            shell.sessionResume.inFlight.insert(key)
+            relaunch()
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            XCTAssertEqual(ProcessInstance.running(pid: original.pid), original)
+            shell.sessionResume.inFlight.remove(key)
+            lead.workspace.addColumn(cwd: harness.repo)
+            let other = try XCTUnwrap(lead.workspace.columns.last)
+            @MainActor func holdInOtherColumn(_ id: String) {
+                shell.sessionResume.noteLaunch(of: id, in: other, now: ProcessInfo.processInfo.systemUptime)
+            }
+            holdInOtherColumn(sessionID)
+            relaunch()
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            XCTAssertEqual(ProcessInstance.running(pid: original.pid), original)
+            holdInOtherColumn(UUID().uuidString)
+            shell.sideEffects.restartTerminal = { _, _, starts in
+                XCTAssertEqual(column.relaunchingLeadSessionID, sessionID)
+                XCTAssertFalse(starts(["claude"]))
+            }
+            relaunch()
+            XCTAssertNil(column.relaunchingLeadSessionID, "timeout releases the reservation")
+            shell.sideEffects.restartTerminal = { _, _, starts in
+                holdInOtherColumn(sessionID)
+                XCTAssertFalse(starts([]), "another holder appeared during the wait")
+            }
+            relaunch()
+            XCTAssertNil(column.relaunchingLeadSessionID)
+            holdInOtherColumn(UUID().uuidString)
+
+            let history = try XCTUnwrap(shell.sessionLedger.session(agent: .claude, sessionID: sessionID))
+            let columnCount = lead.workspace.columns.count
+            shell.sideEffects.restartTerminal = { target, _, starts in
+                target.restartTerminal(running: resumed.command(arguments: flags + ["--resume", sessionID])) { survivors in
+                    record(.sessionEnd)
+                    XCTAssertNotEqual(ProcessInstance.running(pid: original.pid), original)
+                    let holders = shell.agentSessionHolders(snapshot: ProcessSnapshot())
+                    XCTAssertEqual(HeldAgentSession.find(sessionID, in: holders)?.columnID, column.id)
+                    shell.resumeSession(history, spaceID: lead.space)
+                    XCTAssertFalse(shell.sessionResume.inFlight.contains(history.key))
+                    return starts(survivors)
+                }
+            }
+            relaunch()
+            harness.waitUntil("one resumed Claude in the Lead") {
+                pty.foregroundProcess(snapshot: ProcessSnapshot())?.arguments.last == sessionID
+            }
+            XCTAssertEqual(lead.workspace.columns.count, columnCount)
+            XCTAssertNil(column.relaunchingLeadSessionID)
+            let holders = shell.agentSessionHolders(snapshot: ProcessSnapshot()).filter { HeldAgentSession.find(sessionID, in: [$0]) != nil }
+            XCTAssertEqual(holders.map(\.columnID), [column.id])
         }
     }
 
