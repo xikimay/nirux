@@ -340,84 +340,32 @@ final class AgentHookCenter {
             classifyTurnEnd(request, agentUUID: agentUUID, waitsOnParent: waitsOnParent())
         } else if event.name == .turnComplete || event.name == .stop, !waitsOnParent() {
             reportTurnDone(endedAt: event.timestamp, in: resolution)
-            noteQuestionWithoutVerdict(event, seen: resolution.isUserFocused)
         }
     }
-
-    /// A Claude turn end that gets no verdict: nobody to alert (the user
-    /// looks at its column, `seen`), or a dialog still open waits on the
-    /// user first. When its final message ends on a question, it asks all
-    /// the same: its column keeps saying so (`AgentStatusMachine.noteQuestion`).
-    /// The message's own line, after the same moment's wait as a verdict
-    /// (`waitBeforeAsking`). Only with the option that reads final messages
-    /// on, at the end of that wait too. (A final message is the Stop's of
-    /// a Claude main thread: no other event carries one.)
-    private func noteQuestionWithoutVerdict(_ event: AgentHookEvent, seen: Bool) {
-        guard let agentUUID = event.agentUUID, let message = event.finalMessage,
-              let question = Self.endingQuestion(of: message)
-        else { return }
-        let delay = questionVerdictDelay
-        questionNote = Task { @MainActor [weak self] in
-            // Put behind already (a later Stop in the same drain, a replayed
-            // backlog): no wait for it.
-            guard let self, self.resolver?(agentUUID)?.column.pty?.isCurrentTurnEnd(event.timestamp) == true else { return }
-            await self.waitBeforeAsking(delay)
-            guard self.turnEndClassifier != nil, let resolution = self.resolver?(agentUUID), let pty = resolution.column.pty,
-                  pty.mayNoteAgentQuestion(endingTurnAt: event.timestamp)
-            else { return }
-            let request = TurnEndRequest(message: message, turnEndedAt: event.timestamp)
-            guard self.asksParent?(resolution, request, question) == true
-                || pty.noteAgentQuestion(question, in: message, endingTurnAt: event.timestamp, seen: seen)
-            else { return }
-            // No alert refreshes the sidebar for it, and no heartbeat with
-            // Nirux in the background.
-            resolution.workspace.onMetadataChanged?()
-        }
-    }
-
-    /// The last of those notes, on its way or done. Tests wait for it.
-    private(set) var questionNote: Task<Void, Never>?
-
-    /// The line a final message ends on when it is a question: the
-    /// message's own, a yes/no one when no "or" or question word says
-    /// otherwise.
-    static func endingQuestion(of message: String) -> TurnEndQuestion? {
-        TurnEndText.questionLine(of: message).map { TurnEndQuestion(text: $0, isYesNo: TurnEndText.isYesNoQuestion($0)) }
-    }
-
-    /// The moment a turn end that ends on a question waits before it asks,
-    /// as a model call would take: a Stop hook that blocked that end (a
-    /// review gate) keeps the turn going, and its continuation puts the
-    /// end behind first. Tests take the clock.
-    var waitBeforeAsking: @MainActor (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) }
 
     /// Asks the classifier about a turn end, then applies its verdict. A
     /// Mission child that asked its parent before ending its turn waits on
     /// it, not on the user: nothing to alert the user for, and the turn
     /// isn't done either.
     func classifyTurnEnd(_ request: TurnEndRequest, agentUUID: String, waitsOnParent: Bool) {
-        guard !waitsOnParent, let classifier = turnEndClassifier else {
-            applyTurnEndVerdict(
-                waitsOnParent ? .done : .unknown, for: request, agentUUID: agentUUID, reportsDone: !waitsOnParent
-            )
+        if waitsOnParent {
+            applyTurnEndVerdict(.done, for: request, agentUUID: agentUUID, reportsDone: false)
             return
         }
-        let endingQuestion = Self.endingQuestion(of: request.message)
-        let questionDelay = questionVerdictDelay
         Task { @MainActor [weak self] in
-            // Put behind already (a later Stop in the same drain, a replayed
-            // backlog): no run for it.
             guard let self, self.awaitsVerdict(request, agentUUID: agentUUID) else { return }
-            // Ends on a question: it asks, whatever a model would read,
-            // after the moment's wait (a continuation puts this turn end
-            // behind first: the verdict then drops, as a late one does).
-            if let endingQuestion {
-                await self.waitBeforeAsking(questionDelay)
-                self.settleAsking(endingQuestion, for: request, agentUUID: agentUUID)
-                return
+            guard let classifier = self.turnEndClassifier else {
+                return self.applyTurnEndVerdict(.unknown, for: request, agentUUID: agentUUID)
             }
-            let verdict = await classifier.classify(request.message)
-            // Turned off meanwhile: every turn end alerts.
+            // A Stop hook can send Claude back to work just after a closing question.
+            let earliestAlert = ContinuousClock.now.advanced(by: .seconds(self.questionVerdictDelay))
+            var verdict = await classifier.classify(request.message)
+            if verdict != .done, let line = TurnEndText.questionLine(of: request.message) {
+                if verdict == .unknown {
+                    verdict = .asks(TurnEndQuestion(text: line, isYesNo: TurnEndText.isYesNoQuestion(line)))
+                }
+                try? await Task.sleep(until: earliestAlert, clock: .continuous)
+            }
             switch self.turnEndClassifier == nil ? .unknown : verdict {
             case .asks(let question): self.settleAsking(question, for: request, agentUUID: agentUUID)
             case let settled: self.applyTurnEndVerdict(settled, for: request, agentUUID: agentUUID)

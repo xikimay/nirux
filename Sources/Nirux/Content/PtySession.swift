@@ -160,19 +160,6 @@ final class PtySession: @unchecked Sendable {
         state.machine.visibleQuestion(foreground: foreground)
     }
 
-    /// See `AgentStatusMachine.noteQuestion`.
-    @discardableResult
-    func noteAgentQuestion(
-        _ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval, seen: Bool
-    ) -> Bool {
-        state.machine.noteQuestion(question, in: message, endingTurnAt: turnEndedAt, seen: seen)
-    }
-
-    /// See `AgentStatusMachine.mayNoteQuestion`.
-    func mayNoteAgentQuestion(endingTurnAt turnEndedAt: TimeInterval) -> Bool {
-        state.machine.mayNoteQuestion(endingTurnAt: turnEndedAt)
-    }
-
     /// See `AgentStatusMachine.noteQuestionSeen`.
     func noteAgentQuestionSeen() {
         state.machine.noteQuestionSeen()
