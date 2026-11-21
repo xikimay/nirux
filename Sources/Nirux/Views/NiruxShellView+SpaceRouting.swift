@@ -16,11 +16,11 @@ extension NiruxShellView {
 
     /// A worktree may already exist in another space, or routing may have changed while the sheet was open.
     func withConfirmedCodexLaunch(
-        _ confirmed: ConfirmedCodexLaunch?, in spaceID: String, folder: String,
+        _ confirmed: ConfirmedCodexLaunch?, required: Bool, in spaceID: String, folder: String,
         ifDeclined: @escaping @MainActor () -> Void = {}, open: @escaping @MainActor (CodexLaunchMode?) -> Void
     ) {
-        guard let confirmed else { return open(nil) }
-        guard confirmed.spaceID != spaceID else { return open(confirmed.mode) }
+        guard required else { return open(nil) }
+        if let confirmed, confirmed.spaceID == spaceID { return open(confirmed.mode) }
         let destination = codexLaunchForConfirmation(in: spaceID)
         RunLoop.main.perform(inModes: [.default]) { [weak self] in
             MainActor.assumeIsolated {
@@ -131,7 +131,8 @@ extension NiruxShellView {
             guard let self else { return }
             let workspaceID = UUID().uuidString
             // From a Nirux terminal: an agent asked for it.
-            self.withConfirmedCodexLaunch(confirmedCodexLaunch, in: decision.spaceID, folder: folder) { mode in
+            self.withConfirmedCodexLaunch(confirmedCodexLaunch, required: startedOutsideNirux && agent == .codex,
+                                          in: decision.spaceID, folder: folder) { mode in
                 self.addWorkspace(
                     title: title, cwd: folder, agent: agent, profileID: decision.spaceID, workspaceID: workspaceID,
                     startedOutsideNirux: startedOutsideNirux, codexMode: mode, startedByAgent: !startedOutsideNirux

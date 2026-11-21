@@ -141,7 +141,8 @@ extension NiruxShellView {
                     }
                     // The first sheet approved the worktree and handover. Declining a different space's
                     // Codex mode leaves that work accessible in a plain terminal.
-                    self.withConfirmedCodexLaunch(confirmedCodexLaunch, in: decision.spaceID, folder: path, ifDeclined: {
+                    self.withConfirmedCodexLaunch(confirmedCodexLaunch, required: startedOutsideNirux && agent == .codex,
+                                                  in: decision.spaceID, folder: path, ifDeclined: {
                         openWorktree(agent: nil, mode: nil)
                     }) { mode in openWorktree(agent: agent, mode: mode) }
                     // Above the banner, when there is one.

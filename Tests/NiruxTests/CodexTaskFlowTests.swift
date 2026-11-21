@@ -72,6 +72,36 @@ final class CodexTaskFlowTests: XCTestCase {
         }
     }
 
+    func testOpeningCodexAndResumingFromHistoryInAnExternalWorkspaceUseTheCurrentSpaceMode() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let space = try NewTaskFlowTests.anchoredSpace(harness)
+            XCTAssertNil(Persistence.load()?.settings?.codexLaunchMode)
+            try setMode(.readOnly, in: space.id)
+            let confirmed = shell.codexLaunchForConfirmation(in: space.id)
+            try setMode(.bypass, in: space.id)
+            shell.openRequestedWorkspace(title: "External", cwd: harness.worktree, agent: .codex, requestedSpaceID: nil,
+                                         startedOutsideNirux: true, confirmedCodexLaunch: confirmed)
+            harness.waitUntil("the confirmed external launch") { harness.agentLaunches.count == 1 }
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertTrue(workspace.startedOutsideNirux)
+            XCTAssertEqual(try arguments(harness.agentLaunches.last, in: harness), CodexLaunchMode.readOnly.cliArgs)
+
+            harness.runPaletteCommand("Open Codex")
+            XCTAssertIdentical(shell.activeWorkspace, workspace)
+            XCTAssertEqual(try arguments(harness.agentLaunches.last, in: harness), CodexLaunchMode.bypass.cliArgs)
+
+            let record = SessionHistoryFlowTests.session(UUID().uuidString.lowercased(), title: "Resume this conversation",
+                                                         folder: harness.worktree, agent: .codex, workspaceID: workspace.id)
+            try SessionHistoryFlowTests.seed([record], in: harness)
+            harness.runPaletteCommand("Resume this conversation")
+            harness.waitUntil("Session History opens the third Codex column") { harness.agentLaunches.count == 3 }
+            XCTAssertIdentical(shell.activeWorkspace, workspace)
+            XCTAssertEqual(try arguments(harness.agentLaunches.last, in: harness),
+                           ["resume", record.sessionID, "-C", harness.worktree] + CodexLaunchMode.bypass.cliArgs)
+        }
+    }
+
     func testExternalWorkspaceConfirmsAChangedDestinationBeforeStarting() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -93,6 +123,20 @@ final class CodexTaskFlowTests: XCTestCase {
             harness.waitUntil("the confirmed destination opens") { shell.workspaces.contains { $0.title == "Moved" } }
             XCTAssertEqual(shell.activeWorkspace?.profileID, WorkspaceProfile.defaultID)
             XCTAssertEqual(try arguments(harness.agentLaunches.last, in: harness), CodexLaunchMode.readOnly.cliArgs)
+        }
+    }
+
+    func testExternalCodexRequestWithoutAConfirmedModeWaitsForConsent() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let space = try NewTaskFlowTests.anchoredSpace(harness)
+            try setMode(.bypass, in: space.id)
+            shell.openRequestedWorkspace(title: "External", cwd: harness.worktree, agent: .codex, requestedSpaceID: nil,
+                                         startedOutsideNirux: true)
+            harness.waitUntil("the destination mode confirmation") { !harness.alerts.isEmpty }
+            XCTAssertTrue(harness.alertDetails.last?.contains(CodexLaunchMode.bypass.displayName) == true)
+            XCTAssertTrue(harness.agentLaunches.isEmpty)
+            XCTAssertFalse(shell.workspaces.contains { $0.title == "External" })
         }
     }
 

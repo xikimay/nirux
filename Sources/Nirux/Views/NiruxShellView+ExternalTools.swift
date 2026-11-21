@@ -186,8 +186,7 @@ extension NiruxShellView {
     }
 
     static func codexLaunchMode(for workspace: WorkspaceState) -> CodexLaunchMode {
-        guard !workspace.startedOutsideNirux else { return currentCodexLaunchMode() }
-        return codexLaunchMode(inSpace: workspace.profileID)
+        codexLaunchMode(inSpace: workspace.profileID)
     }
 
     static func codexLaunchMode(inSpace id: String) -> CodexLaunchMode {
