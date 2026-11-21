@@ -85,6 +85,13 @@ jobs:
           cat "$RUNNER_TEMP/suite.log"
           echo "SUITE_SECONDS=$(( $(cat "$RUNNER_TEMP/suite.end") - $(cat "$RUNNER_TEMP/suite.start") ))"
           test "$(cat "$RUNNER_TEMP/suite.exit")" = 0
+      - name: Check combined release package
+        if: ${{ !cancelled() && steps.build.conclusion == 'success' }}
+        run: |
+          swift build -c release
+          scripts/bundle.sh 0.0.0 0
+          Nirux.app/Contents/MacOS/Nirux --check-terminal-runtime
+          scripts/launch-check.sh Nirux.app
       - name: Profile WaitingTaskFlowTests on a separate build
         if: ${{ !cancelled() && steps.build.conclusion == 'success' }}
         run: |
