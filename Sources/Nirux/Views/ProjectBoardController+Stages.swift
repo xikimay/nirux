@@ -24,7 +24,8 @@ extension ProjectBoardController {
         var parents: [String: String] = [:]
         /// The space's Lead's workspace id.
         var lead: String?
-        /// What each task's sidebar row reads, the Lead's too
+        var leadStatus: BoardStagesView.Lead?
+        /// What each task's sidebar row reads
         /// (`NiruxShellView.boardReadings`).
         var readings: [String: BoardStages.TaskReading] = [:]
         /// Each section's merge queue, by section id.
@@ -226,24 +227,10 @@ extension ProjectBoardController {
             repositories == 0 ? nil : "\(repositories) \(repositories == 1 ? "repository" : "repositories")",
             "\(tasks) \(tasks == 1 ? "task" : "tasks")"
         ]
-        var header = BoardStagesView.Header(
+        return BoardStagesView.Header(
             name: inputs.space?.name ?? "", color: inputs.space?.color ?? Theme.Color.textTertiary,
-            summary: held.compactMap { $0 }.joined(separator: " · ")
+            summary: held.compactMap { $0 }.joined(separator: " · "), lead: inputs.leadStatus
         )
-        if let lead = inputs.lead {
-            let reading = inputs.readings[lead] ?? BoardStages.TaskReading()
-            var facts = BoardStages.Facts(id: lead, title: "Lead")
-            facts.hasRepository = false
-            facts.activity = reading.activity
-            facts.summary = reading.summary
-            facts.statusLine = reading.statusLine
-            facts.nextStep = reading.nextStep
-            facts.blocker = reading.blocker
-            facts.lastActivityAt = reading.lastActivityAt
-            let line = BoardStages.line(facts)
-            header.lead = BoardStagesView.Lead(state: line.state, text: "Lead · \(line.phrase.text)", reason: line.reason)
-        }
-        return header
     }
 
     /// One repository: its lines from what it read and what the tasks
