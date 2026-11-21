@@ -820,9 +820,24 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(plain.isError)
             XCTAssertTrue(plain.text.contains("isn't a task"), plain.text)
 
+            let now = Date().timeIntervalSince1970
+            let rows = (0..<(DailyPass.maxItems + 2)).map { String(format: "wait-%03d", $0) }
+            let archived: [TaskThread.Event] = [.init(time: now - 90_000, kind: .question, ref: "q", recipient: .lead),
+                                                .init(time: now - 60, kind: .closed, detail: "local")]
+            for id in rows {
+                TaskThread.Store.append(archived, workspaceID: id, spaceID: lead.space, stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
+            }
             let day = try call(LeadTools.dailyPass, lead: lead, in: harness)
             XCTAssertFalse(day.isError, day.text)
             XCTAssertTrue(day.text.contains("- test-waits-on-sleep · 2 tasks: "), day.text)
+            XCTAssertNotNil(DailyPassState.load(spaceID: lead.space).nextWaitPage)
+            shell.dailyPassStates.removeValue(forKey: lead.space)
+            let remaining = try call(LeadTools.dailyPass, lead: lead, in: harness)
+            XCTAssertFalse(remaining.isError, remaining.text)
+            for id in rows {
+                XCTAssertEqual((day.text + "\n" + remaining.text).components(separatedBy: "id " + id + " ·").count - 1, 1, id)
+            }
+            XCTAssertNil(DailyPassState.load(spaceID: lead.space).nextWaitPage)
             let read = try XCTUnwrap(DailyPassState.load(spaceID: lead.space).end)
             XCTAssertEqual(read, Date().timeIntervalSince1970, accuracy: 60)
         }

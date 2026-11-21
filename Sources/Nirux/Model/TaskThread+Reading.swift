@@ -20,14 +20,15 @@ extension TaskThread {
         for event in ordered.reversed() {
             switch event.kind {
             case .closed: close = event.time
-            case .result: completions[event.missionID ?? ""] = event.time
+            case .result:
+                if let mission = event.missionID { completions[mission] = event.time }
             case .answer:
                 if let id = event.ref { answers[id] = event }
             case .handedToUser:
                 if let id = event.ref { handoffs[id] = event }
             case .question:
                 let id = event.ref ?? ""
-                questions.append(Question(asked: event, handoff: handoffs[id], answer: answers[id], retiredAt: completions[event.missionID ?? ""] ?? close))
+                questions.append(Question(asked: event, handoff: handoffs[id], answer: answers[id], retiredAt: event.missionID.flatMap { completions[$0] } ?? close))
             default: break
             }
         }

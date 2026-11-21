@@ -53,7 +53,7 @@ What happened since the last pass, at most 40,000 characters (Claude Code saves 
    - **the user's answers:** questions handed to the user (with the reason and the answer, the user's or the Lead's), dated by their answer, else by when they were handed over (`handedToUserAt`, new in the ledger); and questions the user answered in Nirux without being asked.
 
    Mission messages belong to the space through its workspaces, and those its session history names (closed since), unless they are open in another space now. Lines that look like a secret are withheld, as `read_task` withholds them.
-The pass also reports per-task waits, question and round counts and the time to the first recorded PR when available. Durations cover the portion of each wait within the window. Overlapping waits on the same recipient or concurrent CI jobs count once per task. See [Task thread](task-thread.md).
+The pass also reports per-task waits, question and round counts and the time to the first recorded PR when available. Durations cover the portion of each wait within the window. Overlapping waits on the same recipient or concurrent CI jobs count once per task. When the task rows fill a page, the space saves the wait window and the last workspace ID shown. The next call continues that window. After its last page, new durations begin at its end. See [Task thread](task-thread.md).
 
 5. **Rules:**
    - the rules decided since the last pass;
