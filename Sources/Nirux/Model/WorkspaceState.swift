@@ -197,6 +197,7 @@ final class WorkspaceState {
 
     /// The wait of a waiting task: no worktree, no agent until it starts.
     var waitingStart: MergeWait? { mergeWaits.first { $0.pendingStart != nil } }
+    var leadTaskReference: String { LeadTools.taskIDPrefix + id }
     var isWaitingTask: Bool { waitingStart != nil }
     var isStarting: Bool { waitingStart?.startingBranch != nil }
 

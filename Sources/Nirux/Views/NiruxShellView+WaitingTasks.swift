@@ -76,9 +76,9 @@ extension NiruxShellView {
         updateSidebar()
         if step == .release {
             startWaitingTask(holder)
-            answer("\(wait.awaitedLongName) is merged already. Follow “\(title)” with list_tasks.", false)
+            answer("\(wait.awaitedLongName) is merged already. Follow “\(title)” (\(holder.leadTaskReference)) with list_tasks.", false)
         } else {
-            answer("“\(title)” waits for \(wait.awaitedLongName) to merge before it starts.", false)
+            answer("“\(title)” (\(holder.leadTaskReference)) waits for \(wait.awaitedLongName) to merge before it starts.", false)
         }
     }
 
@@ -88,7 +88,7 @@ extension NiruxShellView {
         task.mergeWaits[index].startingBranch = nil
         saveState()
         updateSidebar()
-        noticeLead(of: task, "“\(task.title)” needs you: \(reason). Use set_task_after to start or re-point it, or close_task.")
+        noticeLead(of: task, "“\(task.title)” (\(task.leadTaskReference)) needs you: \(reason). Use set_task_after to start or re-point it, or close_task.")
     }
 
     func startWaitingTask(_ task: WorkspaceState) {
