@@ -36,10 +36,11 @@ final class LeadRestartFlowTests: XCTestCase {
             let pty = try XCTUnwrap(column.pty)
             let old = AgentStandIn()
             defer { old.remove() }
-            let oldClaude = try run(old.command(), in: column, harness: harness)
-            let before = ProcessSnapshot.environment(of: oldClaude.pid)
-            XCTAssertEqual(before[target], "old")
-            XCTAssertEqual(before[removed], "old")
+            let variables = harness.root + "/launch-environment"
+            let record = #"/bin/sh -c 'printf "%s\n" "$RESTART_FLOW_TARGET" "${RESTART_FLOW_OBSOLETE-unset}" "$NIRUX_LEAD" "$NIRUX_AGENT_UUID"'"#
+                + " > " + NiruxShellView.shellQuotedArgument(variables) + "; "
+            let oldClaude = try run(record + old.command(), in: column, harness: harness)
+            XCTAssertEqual(try String(contentsOfFile: variables, encoding: .utf8), "old\nold\n1\n\(lead.agentUUID)\n")
             shell.changeSpaceDefaults(spaceID: lead.space) {
                 $0.environment = [.init(name: target, value: "new")]
                 $0.claudeLaunchMode = .manual
@@ -64,7 +65,7 @@ final class LeadRestartFlowTests: XCTestCase {
             guard case .accepted = MissionStore.shared.process(question, enabled: false) else { return XCTFail("not asked") }
             let fresh = AgentStandIn()
             defer { fresh.remove() }
-            harness.restartedAgent = fresh.command(launchPrompt: NiruxShellView.leadRestartPrompt)
+            harness.restartedAgent = record + fresh.command(launchPrompt: NiruxShellView.leadRestartPrompt)
             harness.alertResponses = [.alertSecondButtonReturn]
             shell.requestRestartLead(spaceID: lead.space)
             let command = try XCTUnwrap(harness.terminalRestarts.last)
@@ -76,12 +77,7 @@ final class LeadRestartFlowTests: XCTestCase {
             harness.waitUntil("a fresh claude in its column") {
                 pty.foregroundProcess(snapshot: ProcessSnapshot()).map { $0.name == "claude" && $0.instance != oldClaude } == true
             }
-            let restarted = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
-            let after = ProcessSnapshot.environment(of: restarted.instance.pid)
-            XCTAssertEqual(after[target], "new")
-            XCTAssertNil(after[removed])
-            XCTAssertEqual(after["NIRUX_LEAD"], "1")
-            XCTAssertEqual(after["NIRUX_AGENT_UUID"], lead.agentUUID)
+            XCTAssertEqual(try String(contentsOfFile: variables, encoding: .utf8), "new\nunset\n1\n\(lead.agentUUID)\n")
             shell.typeMissionMessages()
             XCTAssertTrue(MissionStore.shared.pendingPromptDeliveries().contains { $0.event.id == question.id })
             XCTAssertFalse(fresh.input.contains(question.message))
