@@ -295,6 +295,43 @@ final class IconRailSidebarTests: XCTestCase {
         XCTAssertFalse(shell.sidebar.isExpanded)
     }
 
+    func testResizingTheDividerRemembersTheExpandedWidth() throws {
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 600))
+        shell.stopHeartbeat()
+        shell.isSidebarExpanded = true
+        shell.sidebar.isExpanded = true
+        shell.relayout(animated: false)
+        let handle = shell.sidebarResizeHandle
+        let start = try XCTUnwrap(handle.onDragStart?())
+        XCTAssertEqual(start, 260)
+        handle.onDrag?(start, 100)
+        XCTAssertEqual(shell.sidebar.frame.width, 360)
+        XCTAssertEqual(handle.frame.midX, shell.divider.frame.midX)
+
+        shell.isSidebarExpanded = false
+        shell.relayout(animated: false)
+        XCTAssertTrue(handle.isHidden)
+        XCTAssertEqual(shell.sidebar.frame.width, SidebarView.foldedWidth)
+        let saved = shell.persistedState()
+        let settings = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(try XCTUnwrap(saved.settings)))
+        XCTAssertEqual(settings.sidebarWidth, 360)
+        XCTAssertEqual(settings.sidebarExpanded, false)
+        let restored = NiruxShellView(frame: shell.frame)
+        restored.stopHeartbeat()
+        restored.restoreSidebarState(settings)
+        restored.isSidebarExpanded = true
+        restored.relayout(animated: false)
+        XCTAssertEqual(restored.sidebar.frame.width, 360)
+        var fold = restored.sidebarFold
+        fold.chooseWidth(1000)
+        XCTAssertEqual(fold.expandedWidth(in: 1200), 480)
+        XCTAssertEqual(fold.expandedWidth(in: 600), 300)
+        XCTAssertEqual(fold.expandedWidth(in: 1200), 480)
+        fold.chooseWidth(0)
+        XCTAssertEqual(fold.expandedWidth(in: 1200), 220)
+        XCTAssertNil(try JSONDecoder().decode(PersistedSettings.self, from: Data("{}".utf8)).sidebarWidth)
+    }
+
     func testInitialsDropTheBranchTypeAndNumberRepeats() {
         XCTAssertEqual(TaskInitials.initials(of: "Fix login rate limit"), "FL")
         XCTAssertEqual(TaskInitials.initials(of: "feat/crash-report"), "CR")

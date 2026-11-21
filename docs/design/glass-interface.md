@@ -249,7 +249,7 @@ migrate", "Stuck? · …"), or the icon's state where the row prints its
 branch. The archived button unfolds the sidebar with the
 Archived list open and its header in view (as View › Show Archived and ⌘P do
 while folded); its tooltip counts them. The space tile went: the command
-bar's space segment opens the same menu. The sidebar folds by itself below a
+bar's space segment opens the same menu. Drag the expanded sidebar’s right edge to resize it (220–480 pt); double-click the edge to restore 260 pt. Nirux remembers the width across folds and launches and limits it to half the window while space is tight. The sidebar folds by itself below a
 900 pt window (`SidebarFold`: 260 pt of sidebar would leave the columns less
 than about 640 pt) and unfolds back from 940 pt (a window dragged about the
 width doesn't make the columns jump) if the user's choice, which is what is
