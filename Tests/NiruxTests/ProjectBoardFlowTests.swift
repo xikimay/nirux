@@ -952,7 +952,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             // The Lead, in the space's header: its workspace.
             try select("login", in: shell)
-            XCTAssertEqual(board.view.stages.content?.header.lead?.text, "Lead · No activity yet")
+            XCTAssertEqual(board.view.stages.content?.header.lead?.text, "Lead · No identifiable session")
             try BoardStagesClicks.click(board.view.stages.leadButton)
             XCTAssertEqual(shell.activeWorkspace?.title, "Lead")
 
