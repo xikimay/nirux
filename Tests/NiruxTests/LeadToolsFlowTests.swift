@@ -145,6 +145,25 @@ final class LeadToolsFlowTests: XCTestCase {
             let instructions = MissionStore.shared.missions.first { $0.id == mission.id }?.events.filter { $0.kind == .instruction }
             XCTAssertEqual(instructions?.map(\.message), ["/code-review"])
             XCTAssertTrue(try call(LeadTools.tell, ["task": "nope", "message": "hi"], lead: lead, in: harness).isError)
+
+            // Its thread: the request, the Lead's next step, and what the Lead
+            // and the user said, frozen when it closes.
+            XCTAssertFalse(try call(
+                LeadTools.setTaskContext, ["task": "Add a date filter", "next_step": "ship the filter"], lead: lead, in: harness
+            ).isError)
+            shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), refocusing: false)
+            var thread: [TaskThread.Event] = []
+            harness.waitUntil("its thread frozen") {
+                thread = TaskThread.Store.load(workspaceID: task.id)
+                return thread.contains { $0.kind == .closed }
+            }
+            let request = try XCTUnwrap(thread.first)
+            XCTAssertEqual([request.kind.rawValue, request.by?.rawValue, request.text], ["request", "lead", "Add a date filter\nGET /orders?from=&to="])
+            XCTAssertTrue(thread.contains { $0.kind == .nextStep && $0.by == .lead && $0.text == "ship the filter" })
+            XCTAssertTrue(thread.contains { $0.kind == .answer && $0.by == .lead && $0.text == "UTC" && $0.detail == "accepted" })
+            XCTAssertTrue(thread.contains { $0.kind == .handedToUser && $0.text == why })
+            XCTAssertTrue(thread.contains { $0.kind == .answer && $0.by == .user && $0.text == "Yes, until v3" })
+            XCTAssertTrue(thread.contains { $0.kind == .tell && $0.by == .lead && $0.text == "/code-review" })
         }
     }
 

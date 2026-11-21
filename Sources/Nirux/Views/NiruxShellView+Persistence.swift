@@ -10,6 +10,8 @@ extension NiruxShellView {
             ReviewFindings.lines.trimInBackground(spaceIDs: profiles.map(\.id))
         }
         let persisted = Persistence.load()
+        // Not over a state it couldn't read: its tasks would look gone.
+        defer { if persisted != nil || !Persistence.hasStoredState { pruneThreads() } }
         circlingHintEnabled = PersistedSettings.effective(persisted?.settings).agentCirclingHint
         turnStatusEnabled = PersistedSettings.effective(persisted?.settings).showTurnStatus
         catchUpEnabled = PersistedSettings.effective(persisted?.settings).showCatchUp

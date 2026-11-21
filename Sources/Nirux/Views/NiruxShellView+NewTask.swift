@@ -299,7 +299,10 @@ extension NiruxShellView {
             activate: request.opensInFront,
             fadesBackdrop: pendingTaskSheet != nil
         )
-        if let born = workspaces.first(where: { $0.id == childWorkspaceID }) { playTaskBirth(of: born) }
+        if let born = workspaces.first(where: { $0.id == childWorkspaceID }) {
+            recordRequest(request, of: born)
+            playTaskBirth(of: born)
+        }
         // The agent that proposed it hears what the user started.
         if let proposer = request.proposedByTaskAgent {
             tellProposer(proposer, mission?.reportsToTask == true
