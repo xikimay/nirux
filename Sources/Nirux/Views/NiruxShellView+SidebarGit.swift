@@ -89,7 +89,7 @@ extension NiruxShellView {
         ))
         let infos = built.map { info in
             var info = info
-            info.station = taskStations[info.id]
+            info.boardProgress = taskStations[info.id]
             return info
         }
         updateColumnHeaders(infos: infos, blockedWaits: blockedWaits, now: now)
@@ -173,6 +173,7 @@ extension NiruxShellView {
             agentStatus: agentStatus,
             isEditor: col.isEditor,
             editorFileName: editorFile,
+            isPlanning: col.isPlanning(in: foregroundProcess),
             isProjectBoard: col.isProjectBoard,
             isBranchReview: col.isBranchReview,
             editorIsDirty: col.editorColumn?.isDirty ?? false,
@@ -214,7 +215,7 @@ extension NiruxShellView {
                       lastSummary: turnStatusEnabled || !workspace.lastSummaryIsStatus ? workspace.lastSummary : nil,
                       lastActivityAt: workspace.lastActivityAt,
                       reviewBadges: workspace.reviewBadges,
-                      station: taskStations[workspace.id],
+                      boardProgress: taskStations[workspace.id],
                       mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
                       isLead: workspace.isLead,
                       parentTitle: parentTitle,

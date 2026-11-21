@@ -26,6 +26,10 @@ extension SidebarView {
 
     func wireIconRail() {
         iconRail.isHidden = true
+        iconRail.onTaskHover = { [weak self] id, entered in
+            guard let self, showsRail else { return }
+            if entered { taskPreview.enter(id) } else { taskPreview.leave(id) }
+        }
         addSubview(iconRail)
         iconRail.onSelect = { [weak self] id in self?.selectFromRail(id) }
         // The task's request beside its icon (the shell's callout); with

@@ -225,6 +225,7 @@ extension BoardStages {
         var phrase: Phrase
         /// "#52", "#53 · 2/3", "no PR yet"; empty without a repository.
         var pullRequest: String
+        var pullRequestNumber: Int?
         /// What the line's clock counts from: its turn's start while an
         /// agent works, its checks' while it waits for them, else its last
         /// activity. Nil where no clock of its own runs: a line that is
@@ -510,6 +511,7 @@ extension BoardStages {
             rail: rail,
             phrase: reading.phrase,
             pullRequest: pullRequestText(facts),
+            pullRequestNumber: facts.pullRequest?.number,
             since: reading.since,
             offer: offer,
             tooltips: tooltips(of: facts, rail: rail, offer: offer, rules: rules),
