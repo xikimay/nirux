@@ -7,6 +7,8 @@ extension BoardStages {
     /// says the same thing of the task.
     struct TaskReading: Equatable, Sendable {
         var activity: Activity = .idle
+        var isParked = false
+        var terminalStatusKnown = true
         /// Each review pass's latest run, against the HEAD the sidebar reads.
         var reviews: ReviewBadges?
         var reviewsInFlight: Set<ReviewPass> = []
@@ -43,6 +45,7 @@ extension BoardStages {
         /// none: nothing says where their work stands, so their lines
         /// have no rail.
         var readsPullRequests = true
+        var gitHubStatus: GitHubStatus = .current
         var requiredChecks: [String] = []
         var baseBranch: String?
         var queue: ProjectBoard.QueueState?
@@ -108,6 +111,7 @@ extension BoardStages {
             var facts = Facts(id: "\(repository.id)#\(pullRequest.number)", title: text(pullRequest.title) ?? row.branch ?? "")
             facts.location = location(of: row)
             facts.hasTask = false
+            facts.gitHubStatus = repository.gitHubStatus
             facts.folder = folder(of: row, in: repository)
             facts.queue = queue(of: row, pullRequest, in: repository, merged: merged.known)
             facts.pullRequest = self.pullRequest(pullRequest, stack: row.stack, in: repository, merged: merged.read)
@@ -220,6 +224,8 @@ extension BoardStages {
         facts.hasRepository = repository.readsPullRequests && row.group != .otherRepository
         facts.isArchived = workspace.isInactive
         facts.activity = reading.activity
+        facts.isParked = reading.isParked
+        facts.gitHubStatus = repository.gitHubStatus
         facts.reviewsInFlight = reading.reviewsInFlight
         facts.summary = reading.summary
         facts.statusLine = reading.statusLine
@@ -325,11 +331,21 @@ extension BoardStages {
             || pullRequest.baseRefName == repository.baseBranch
         // Merged: its checks no longer hold anything, and none is named.
         let latest = isMerged ? [] : GitHub.latest(pullRequest.checks)
+        let request: ReviewRequest?
+        switch pullRequest.reviewDecision {
+        case "CHANGES_REQUESTED": request = .changesRequested
+        case "REVIEW_REQUIRED": request = .reviewRequired
+        case "APPROVED": request = reviewRequest == .feedback ? .feedback : nil
+        default: request = reviewRequest
+        }
         return PullRequest(
-            number: pullRequest.number, isMerged: isMerged, isDraft: pullRequest.isDraft, isConflicting: pullRequest.isConflicting,
+            number: pullRequest.number, isMerged: isMerged, isDraft: pullRequest.isDraft,
+            autoMerges: pullRequest.autoMerges, mergeIsBlocked: pullRequest.mergeIsBlocked,
+            mergeabilityUnknown: !isMerged && !pullRequest.isConflicting && pullRequest.mergeable != "MERGEABLE",
+            isConflicting: pullRequest.isConflicting,
             base: pullRequest.baseRefName ?? repository.baseBranch ?? "", isOnBaseBranch: isOnBaseBranch,
             checks: isMerged ? .passed : checks(latest: latest, required: repository.requiredChecks),
-            reviewRequest: reviewRequest, stack: stack, url: pullRequest.url,
+            reviewRequest: request, stack: stack, url: pullRequest.url,
             checkLines: isMerged ? [] : checkLines(latest: latest, required: repository.requiredChecks)
         )
     }
@@ -432,8 +448,8 @@ extension BoardStages {
         let isMerged = entry.mergeCommit != nil
         if state.isLocked { queue.order = entry.step == .done ? nil : index + 1 }
         switch entry.step {
-        case .waiting, .done:
-            break
+        case .waiting: queue.awaitsTurn = state.isLocked
+        case .done: break
         case .preflight, .updating, .waitingForChecks, .rerunning:
             queue.step = .checks(sentence(ProjectBoard.queueStepLabel(entry.step, workflow: state.workflow)))
         case .merging, .waitingForPostMerge:
@@ -472,6 +488,13 @@ extension BoardStages {
             else if queue.stop != nil { queue.stop?.message = timeout.status }
         }
         queue.refusal = pullRequest.isOpen ? ProjectBoard.queueRefusal(row, baseBranch: repository.baseBranch) : nil
+        if repository.queue?.isLocked == true, let entry = repository.queue?.entries.first(where: { $0.number == pullRequest.number }),
+           case .waitingForChecks(let head) = entry.step, head == pullRequest.headOid, repository.gitHubStatus == .current {
+            let names = GitHub.latest(pullRequest.checks).filter { check in
+                check.result == .pending && (repository.requiredChecks.isEmpty || repository.requiredChecks.contains(where: check.matches))
+            }.compactMap { text($0.name) }
+            if !names.isEmpty { queue.step = .checks(names.joined(separator: ", ")) }
+        }
         return queue
     }
 

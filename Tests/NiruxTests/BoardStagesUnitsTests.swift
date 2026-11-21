@@ -267,25 +267,23 @@ final class BoardStagesUnitsTests: XCTestCase {
         XCTAssertEqual(untitled.merged.map(\.title), ["#44"], "GitHub's text is whatever its author typed")
     }
 
-    func testAMergedLineDoesNotComeAndGoWithItsAgent() {
+    func testAMergedLineWithAnOpenRequestStaysVisible() {
         var asking = task("asking", 40, merged: true)
         asking.activity = .needsYou("a question")
         var working = task("working", 41, merged: true)
         working.activity = .working(since: nil)
         let result = section([asking, working], merged: [mergedToday(40), mergedToday(41, minutesAgo: 5)])
-        XCTAssertEqual(shape(result.units), [], "whatever their agents do next, turn after turn")
-        XCTAssertEqual(result.merged.map(\.lineID), ["working", "asking"])
-        XCTAssertEqual(result.merged.map(\.needsYou), [false, true], "amber is never hidden: the closing line carries it")
+        XCTAssertEqual(shape(result.units), ["asking"])
+        XCTAssertEqual(result.merged.map(\.lineID), ["working"])
+        XCTAssertEqual(result.merged.map(\.needsYou), [false])
     }
 
-    /// A merged entry's glyph and its amber come from one line, the one it
-    /// opens: a permission there shows the command's glyph.
-    func testAMergedEntrysGlyphComesFromTheLineItOpens() {
+    func testAMergedTasksPermissionStaysOnItsActionableLine() {
         var allowing = task("allowing", 40, merged: true)
-        allowing.activity = .needsYou("Bash(rm)", reason: .command)
+        allowing.activity = .needsYou("Bash(rm)", action: .permission)
         let result = section([allowing], merged: [mergedToday(40)])
-        XCTAssertEqual(result.merged.map(\.needsYou), [true])
-        XCTAssertEqual(result.merged.map(\.reason), [.command])
+        XCTAssertEqual(result.units.flatMap(\.lines).map(\.state), [.needsYou])
+        XCTAssertEqual(result.units.flatMap(\.lines).map(\.reason), [.command])
     }
 
     func testTheQueueKeepsItsLineUntilItIsThroughWithIt() {
