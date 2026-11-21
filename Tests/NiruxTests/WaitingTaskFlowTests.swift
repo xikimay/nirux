@@ -30,6 +30,9 @@ final class WaitingTaskFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let lead = try harness.makeLead()
             let upstream = try upstreamTask("Prepare catalog", lead: lead, in: harness)
+            harness.shell.refreshGitContextNow(for: upstream)
+            harness.waitUntil("the upstream branch") { upstream.gitBranch != nil }
+            upstream.prInfo = pullRequest(.open)
             let result = try harness.callLeadTool(LeadTools.startTask, [
                 "description": "Ship the updated catalog", "after": upstream.title,
                 "title": "Catalog release", "branch": "release/catalog", "goal": "Publish the catalog"
