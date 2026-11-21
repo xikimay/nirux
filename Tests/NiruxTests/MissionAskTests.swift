@@ -277,6 +277,47 @@ final class MissionAskTests: XCTestCase {
         XCTAssertEqual(printed, ["Use AuthService."])
     }
 
+    func testAskStopsWhenALaterPromptRetiresItsQuestion() async throws {
+        let fixture = try makeFixture()
+        let environment = childEnvironment()
+        let eventsURL = fixture.eventsURL
+        let missionsURL = fixture.missionsURL
+        let waiting = Task.detached {
+            var notices: [String] = []
+            let status = MissionEventCLI.ask(
+                arguments: ["--message", "Which API?", "--timeout", "10"],
+                environment: environment, now: { 20 }, eventsURL: eventsURL, missionsURL: missionsURL,
+                pollInterval: 0.01, notice: { notices.append($0) }
+            )
+            return (status, notices)
+        }
+
+        let question = try await drainUntilQuestionIsRecorded(fixture)
+        XCTAssertTrue(fixture.store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 21))
+        let (status, notices) = await waiting.value
+        XCTAssertEqual(status, 5)
+        XCTAssertTrue(notices.first?.contains("Continue with the new prompt") == true)
+        XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
+
+        XCTAssertEqual(ask("Which API?", in: fixture, at: 30), 3)
+        let next = try XCTUnwrap(try queuedEvents(in: fixture).first)
+        XCTAssertNotEqual(next.id, question.id)
+    }
+
+    func testAskPrintsAnAnswerAlreadySavedForARetiredQuestion() throws {
+        let fixture = try makeFixture()
+        XCTAssertEqual(ask("Which API?", in: fixture), 3)
+        fixture.center.drain()
+        let question = try XCTUnwrap(questions(in: fixture).first)
+        XCTAssertTrue(fixture.store.retireQuestions(childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, before: 21))
+        XCTAssertNotNil(fixture.store.respond(to: question.id, message: "Use AuthService.", enabled: true, now: 22))
+
+        var printed: [String] = []
+        XCTAssertEqual(ask("Which API?", in: fixture, at: 23) { printed.append($0) }, 0)
+        XCTAssertEqual(printed, ["Use AuthService."])
+        XCTAssertEqual(try queuedEvents(in: fixture).map(\.inReplyTo), [question.id])
+    }
+
     func testAskStopsWhenTheMissionCompletesWhileItWaits() async throws {
         let fixture = try makeFixture()
         let environment = childEnvironment()
@@ -592,6 +633,7 @@ final class MissionAskTests: XCTestCase {
             XCTAssertTrue(text.contains("exact same command again"))
             XCTAssertTrue(text.contains("status 3") || text.contains("- 3:"))
             XCTAssertTrue(text.contains("Status 4") || text.contains("- 4:"))
+            XCTAssertTrue(text.contains("Status 5") || text.contains("- 5:"))
         }
     }
 }
