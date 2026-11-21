@@ -107,7 +107,7 @@ extension NiruxShellView {
             }
             if isLead {
                 // Saved by a build before: the column its Claude resumes in, else its first terminal.
-                let claude = workspace.columns.first { $0.deferredAgent?.processName == "claude" } ?? workspace.columns.first { $0.pty != nil }
+                let claude = workspace.columns.first { $0.deferredAgent?.launch.agent == .claude } ?? workspace.columns.first { $0.pty != nil }
                 workspace.leadAgentUUID = persistedWS.leadAgentUUID ?? claude?.agentUUID
             }
             workspace.focusedIndex = min(persistedWS.focusedColumnIndex, max(workspace.columns.count - 1, 0))
