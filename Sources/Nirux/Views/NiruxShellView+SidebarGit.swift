@@ -161,6 +161,7 @@ extension NiruxShellView {
         return ColumnInfo(
             index: colIndex,
             processName: foregroundProcess?.name,
+            agentLabel: col.taskAgentSelection(foreground: foregroundProcess)?.label,
             abbreviatedCwd: col.pty?.childCwd?.abbreviatedPath(),
             isFocused: isUserFocused,
             isWebView: col.isWebView,

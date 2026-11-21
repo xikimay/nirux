@@ -109,6 +109,34 @@ final class WaitingTaskFlowTests: XCTestCase {
         }
     }
 
+    func testWaitingTaskKeepsAnExplicitAgentAndModelAfterItsDependencyMerges() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            shell.sideEffects.validateTaskAgent = { selection, _ in selection }
+            _ = try UIFlowHarness.git(["remote", "add", "origin", harness.repo], at: harness.repo)
+            _ = try UIFlowHarness.git(["fetch", "origin", "main:refs/remotes/origin/main"], at: harness.repo)
+            let upstream = try upstreamTask("Prepare release", lead: lead, in: harness)
+            shell.refreshGitContextNow(for: upstream)
+            harness.waitUntil("the dependency’s branch") { upstream.gitBranch != nil }
+            upstream.prInfo = pullRequest(.open)
+            let result = try harness.callLeadTool(LeadTools.startTask, [
+                "description": "Check release", "after": upstream.title, "agent": "codex", "model": "test-model"
+            ], lead: lead)
+            XCTAssertFalse(result.isError, result.text)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Check release" })
+            let wait = try XCTUnwrap(task.waitingStart)
+            let restored = try JSONDecoder().decode(MergeWait.self, from: JSONEncoder().encode(wait))
+            XCTAssertEqual(restored.pendingStart?.selection, TaskAgentSelection(agent: .codex, model: "test-model"))
+            shell.followMergeWaits(awaiting: upstream, read: pullRequest(.merged), now: 42)
+            harness.waitUntil("the model-specific launch", timeout: 30) { !task.isWaitingTask }
+            let command = try XCTUnwrap(harness.agentLaunches.last)
+            XCTAssertTrue(command.hasPrefix("command codex "), command)
+            XCTAssertTrue(command.contains("--model 'test-model'"), command)
+            XCTAssertTrue(command.contains(".codex-handover.md"), command)
+        }
+    }
+
     func testImmediateAndReleasedStartsDeliverTheSelectedAgentsHandover() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

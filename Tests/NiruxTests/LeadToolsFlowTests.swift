@@ -24,6 +24,75 @@ final class LeadToolsFlowTests: XCTestCase {
         try harness.callLeadTool(tool, arguments, lead: lead)
     }
 
+    func testTaskAndSubtaskLaunchWithTheChosenAgentAndModel() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            shell.sideEffects.validateTaskAgent = { selection, _ in selection }
+            let settings = URL(fileURLWithPath: harness.home + "/.gemini/antigravity-cli/settings.json")
+            try FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let bytes = try JSONEncoder().encode(["trustedWorkspaces": [try XCTUnwrap(harness.repo.realPath)]])
+            try bytes.write(to: settings)
+            let started = try call(LeadTools.startTask, ["description": "Compare parsers", "agent": "agy", "model": "neon-low"],
+                                   lead: lead, in: harness)
+            XCTAssertFalse(started.isError, started.text)
+            XCTAssertTrue(started.text.contains("with agy, model neon-low"))
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Compare parsers" })
+            let launch = try XCTUnwrap(harness.agentLaunches.last)
+            XCTAssertTrue(launch.hasPrefix("command agy --model 'neon-low' --settings "), launch)
+            XCTAssertTrue(launch.contains("Read .agy-handover.md"))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: task.cwd + "/.agy-handover.md"))
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            task.addColumn(command: standIn.command(named: "agy", arguments: ["--model", "neon-low"]), cwd: task.cwd)
+            let column = try XCTUnwrap(task.columns.last)
+            harness.waitUntil("the chosen model is running") {
+                column.pty?.foregroundProcess(snapshot: ProcessSnapshot())?.interactiveAgent == .agy
+            }
+            let list = try call(LeadTools.listTasks, lead: lead, in: harness)
+            XCTAssertTrue(list.text.contains("Antigravity (neon-low)"), list.text)
+            let saved = shell.persistedState().workspaces.first { $0.id == task.id }
+            XCTAssertEqual(saved?.columns.last?.agentModel, "neon-low")
+            let json = try XCTUnwrap(AgyWorktreeTrust.settings(for: task.cwd, home: harness.home))
+            XCTAssertEqual(try JSONDecoder().decode([String: [String]].self, from: Data(json.utf8)), ["trustedWorkspaces": [try XCTUnwrap(task.cwd.realPath)]])
+            let impostor = URL(fileURLWithPath: harness.root + "/impostor")
+            try FileManager.default.createDirectory(at: impostor, withIntermediateDirectories: false)
+            try FileManager.default.copyItem(atPath: task.cwd + "/.git", toPath: impostor.appendingPathComponent(".git").path)
+            XCTAssertNil(AgyWorktreeTrust.settings(for: impostor.path, home: harness.home))
+            XCTAssertEqual(try Data(contentsOf: settings), bytes)
+            try Data("invalid".utf8).write(to: settings)
+            XCTAssertNil(AgyWorktreeTrust.settings(for: task.cwd, home: harness.home))
+            try Data(#"{"trustedWorkspaces":[]}"#.utf8).write(to: settings)
+            let untrusted = try call(LeadTools.startTask, ["description": "Compare printers", "agent": "agy"], lead: lead, in: harness)
+            XCTAssertTrue(untrusted.text.contains("may ask the user to trust"), untrusted.text)
+            XCTAssertFalse(try XCTUnwrap(harness.agentLaunches.last).contains("--settings"))
+
+            let child = try call(LeadTools.startTask, ["description": "Time parser", "agent": "codex", "model": "fast"],
+                                 from: task, agentUUID: try XCTUnwrap(task.columns.first?.agentUUID), in: harness)
+            XCTAssertFalse(child.isError, child.text)
+            let command = try XCTUnwrap(harness.agentLaunches.last)
+            XCTAssertTrue(command.hasPrefix("command codex --model 'fast'"), command)
+            XCTAssertTrue(command.contains("Read .codex-handover.md"))
+        }
+    }
+
+    func testSelectionErrorsRefuseBeforeCreatingATask() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try makeLead(harness)
+            let count = harness.shell.workspaces.count
+            let agent = try call(LeadTools.startTask, ["description": "Compare parsers", "agent": "gemini"], lead: lead, in: harness)
+            XCTAssertTrue(agent.isError)
+            XCTAssertTrue(agent.text.contains("claude, codex, agy"))
+            harness.shell.sideEffects.validateTaskAgent = { selection, environment in
+                try AgentModels.validate(selection, environment: environment, installed: .init(claudePath: "claude"))
+            }
+            let model = try call(LeadTools.startTask, ["description": "Compare parsers", "model": "unknown"], lead: lead, in: harness)
+            XCTAssertTrue(model.isError)
+            XCTAssertTrue(model.text.contains("Unknown Claude model"), model.text)
+            XCTAssertEqual(harness.shell.workspaces.count, count)
+        }
+    }
+
     /// A question from `task`'s agent, as its `ask` records it.
     private func ask(
         _ text: String, from mission: Mission, kind: MissionEvent.QuestionKind? = nil, recommending recommendation: String? = nil
@@ -1355,12 +1424,15 @@ final class LeadToolsFlowTests: XCTestCase {
             shell.setLeadStartsTasks(false, spaceID: lead.space)
             XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: lead.space).leadStartsTasks, false)
             let tasksBefore = shell.workspaces.count
-            let proposed = try call(LeadTools.startTask, ["description": "Search page"], lead: lead, in: harness)
+            shell.sideEffects.validateTaskAgent = { selection, _ in selection }
+            let proposed = try call(LeadTools.startTask, ["description": "Search page", "agent": "codex", "model": "fast"], lead: lead, in: harness)
             XCTAssertFalse(proposed.isError, proposed.text)
             XCTAssertTrue(proposed.text.hasPrefix("Proposed to the user"))
             let sheet = try XCTUnwrap(shell.newTaskPanel)
             XCTAssertEqual(sheet.space.id, lead.space)
             XCTAssertEqual(sheet.descriptionView.string, "Search page")
+            XCTAssertEqual(sheet.selectedAgent, .codex)
+            XCTAssertTrue(proposed.text.contains("default model"))
             XCTAssertEqual(sheet.reportsTo, NewTask.MissionParent(workspaceID: lead.workspace.id, agentUUID: lead.agentUUID))
             XCTAssertEqual(shell.workspaces.count, tasksBefore, "nothing starts by itself")
             XCTAssertEqual(sheet.startButton.keyEquivalent, "", "a stray Return doesn't start it")

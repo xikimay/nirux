@@ -241,8 +241,8 @@ struct NiruxURLRequest: Equatable, Sendable {
         func agentLine(_ agent: CodingAgent?) -> String {
             guard let agent else { return "Agent: none (plain shell)" }
             let mode = switch AgentLaunch(agent, resume: nil, claudeMode: claudeMode, codexMode: codexMode) {
-            case .claude(_, let mode)?: mode.displayName
-            case .codex(_, let mode)?: mode.displayName
+            case .claude(_, let mode, _)?: mode.displayName
+            case .codex(_, let mode, _)?: mode.displayName
             case .agy?, nil: "its own permission settings (Nirux sets none)"
             }
             return "Agent: \(agent.productName) — \(mode)"

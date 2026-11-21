@@ -10,6 +10,9 @@ import GhosttyTerminal
 /// a click or reaching GitHub.
 @MainActor
 struct ShellSideEffects {
+    var validateTaskAgent: @Sendable (TaskAgentSelection, [String: String]) throws -> TaskAgentSelection = {
+        try AgentModels.validate($0, environment: $1)
+    }
     var generateTaskNames: TaskNameSuggestion.Generator = TaskNameSuggestion.generate
 
     /// Types an agent's launch command into a new terminal column.

@@ -45,6 +45,7 @@ struct MergeWait: Codable, Equatable, Sendable {
         let repository: String
         /// The template's name and text as they were.
         let template: TaskTemplates.Template?
+        var selection: TaskAgentSelection? = nil
         var options: NewTask.StartOptions? = nil
 
         var suggestedBranch: String {
