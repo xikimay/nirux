@@ -1030,7 +1030,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
         let ready = plan()
         XCTAssertEqual(candidate(ready).availability, .ready(ready, preselected: true))
         XCTAssertEqual(
-            candidate(ready, agents: [LiveAgent(processName: "claude", status: .idle)]).availability,
+            candidate(ready, agents: [LiveAgent(agent: .claude, status: .idle)]).availability,
             .ready(ready, preselected: true)
         )
     }
@@ -1039,7 +1039,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
         let ready = plan()
         for status in [AgentStatus.working, .needsAttention, nil] {
             XCTAssertEqual(
-                candidate(ready, agents: [LiveAgent(processName: "claude", status: status)]).availability,
+                candidate(ready, agents: [LiveAgent(agent: .claude, status: status)]).availability,
                 .ready(ready, preselected: false)
             )
         }
@@ -1105,7 +1105,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
     func testConfirmationListsExactlyWhatGoes() {
         let ignored = [".build/", ".env", "a/", "b/", "c/", "d/", "e/", "f/", "g/", "h/"]
         let ready = plan(disposable: [".claude-handover.md"], ignored: ignored)
-        let lines = candidate(ready, agents: [LiveAgent(processName: "claude", status: .idle)], titles: ["x", "x tests"])
+        let lines = candidate(ready, agents: [LiveAgent(agent: .claude, status: .idle)], titles: ["x", "x tests"])
             .confirmationLines(for: ready)
         XCTAssertEqual(lines, [
             "Pull request #12 is merged. This:",
@@ -1130,7 +1130,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
     func testSummaryRecapsEachCheckedWorktreeAndTheAgents() {
         let ready = plan(disposable: [".claude-handover.md"], ignored: [".build/"])
         let lines = WorktreeCleanupCandidate.summaryLines(for: [
-            candidate(ready, agents: [LiveAgent(processName: "claude", status: .idle)]),
+            candidate(ready, agents: [LiveAgent(agent: .claude, status: .idle)]),
             candidate(nil, titles: ["old"])
         ])
         XCTAssertEqual(lines, [

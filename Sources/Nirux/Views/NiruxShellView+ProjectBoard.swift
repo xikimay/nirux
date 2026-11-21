@@ -344,10 +344,10 @@ extension NiruxShellView {
     ) -> ProjectBoard.Agent {
         guard let pty = column.pty else { return ProjectBoard.Agent() }
         let stuck = sidebarStuckState(of: column, foregroundProcess: foreground, snapshot: snapshot, now: now)
-        let agentInFront = foreground.map { AgentStatusMachine.isRecognizedAgentProcess($0.name) } ?? false
+        let agentInFront = foreground?.agent != nil
         let state = ProjectBoard.agentState(
             stuck: stuck,
-            hasAgent: agentInFront || pty.agentProcessName(snapshot: snapshot) != nil,
+            hasAgent: agentInFront || pty.terminalAgent(snapshot: snapshot) != nil,
             agentInFront: agentInFront,
             status: pty.cachedAgentState,
             // A dialog only: the Merge Queue holds a pull request while its

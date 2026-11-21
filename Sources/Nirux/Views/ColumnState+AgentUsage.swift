@@ -31,7 +31,7 @@ struct ClaudeTranscriptFollow {
     ) -> Step {
         if foreground == process { return .read }
         guard isRunning else { return .stop }
-        return foregroundName() == "claude" ? .stop : .hide
+        return foregroundName().flatMap(CodingAgent.init(rawValue:)) == .claude ? .stop : .hide
     }
 }
 
