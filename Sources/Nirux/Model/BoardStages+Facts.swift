@@ -86,7 +86,7 @@ extension BoardStages {
         // Merged, as GitHub's lists say; and with what the tasks know of
         // their own, none of them has a place in the next Start's list.
         var merged = MergedNumbers()
-        merged.read = Set((repository.merged + repository.rows.compactMap(\.pullRequest)).filter { $0.state == "MERGED" }.map(\.number))
+        merged.read = Set((repository.merged + repository.rows.compactMap(\.pullRequest)).filter { $0.state == .merged }.map(\.number))
         merged.known = merged.read
         for id in tasks {
             guard let row = places[id]?.row else { continue }
@@ -118,7 +118,7 @@ extension BoardStages {
             // One whose merge date gh didn't give isn't in "Merged today":
             // nothing says it merged today.
             merged: repository.merged.compactMap { pullRequest in
-                guard pullRequest.state == "MERGED", let mergedAt = pullRequest.mergedAt else { return nil }
+                guard pullRequest.state == .merged, let mergedAt = pullRequest.mergedAt else { return nil }
                 return MergedFacts(number: pullRequest.number, title: pullRequest.title, mergedAt: mergedAt.timeIntervalSince1970)
             },
             otherWorktrees: (lead.map { lead in repository.rows.compactMap { leadWorktree($0, lead: lead, in: repository) } } ?? [])
@@ -271,7 +271,7 @@ extension BoardStages {
                // Merged as the queue saw it; or as GitHub's list says, at
                // a head the queue knew: its merge went unanswered.
                entry.branch == branch && entry.heads.contains(head) && (entry.mergeCommit != nil || repository.merged.contains {
-                   $0.number == entry.number && $0.state == "MERGED" && entry.heads.contains($0.headOid)
+                   $0.number == entry.number && $0.state == .merged && entry.heads.contains($0.headOid)
                })
            }) {
             return entry.number
@@ -318,12 +318,12 @@ extension BoardStages {
         // The queue merged it: GitHub's list says so a read later. Or
         // the merged list has it, read since the open one that still does.
         let mergedByQueue = repository.queue?.entries.contains { $0.number == pullRequest.number && $0.mergeCommit != nil } ?? false
-        let isMerged = pullRequest.state == "MERGED" || mergedByQueue || merged.contains(pullRequest.number)
+        let isMerged = pullRequest.state == .merged || mergedByQueue || merged.contains(pullRequest.number)
         // A base gh didn't name holds nothing back, as for the queue.
         let isOnBaseBranch = repository.baseBranch == nil || pullRequest.baseRefName == nil
             || pullRequest.baseRefName == repository.baseBranch
         // Merged: its checks no longer hold anything, and none is named.
-        let latest = isMerged ? [] : ProjectBoard.latest(pullRequest.checks)
+        let latest = isMerged ? [] : GitHub.latest(pullRequest.checks)
         return PullRequest(
             number: pullRequest.number, isMerged: isMerged, isDraft: pullRequest.isDraft, isConflicting: pullRequest.isConflicting,
             base: pullRequest.baseRefName ?? repository.baseBranch ?? "", isOnBaseBranch: isOnBaseBranch,
@@ -338,18 +338,18 @@ extension BoardStages {
     /// the pull request (the red ones, and a required one that ended
     /// skipped or neutral), the required ones no check reported, those
     /// it waits for, then the rest as the rollup lists them.
-    static func checkLines(_ checks: [ProjectBoard.Check], required: [String]) -> [CheckLine] {
-        checkLines(latest: ProjectBoard.latest(checks), required: required)
+    static func checkLines(_ checks: [GitHub.Check], required: [String]) -> [CheckLine] {
+        checkLines(latest: GitHub.latest(checks), required: required)
     }
 
-    private static func checkLines(latest: [ProjectBoard.Check], required: [String]) -> [CheckLine] {
-        let isRequired = { (check: ProjectBoard.Check) in required.contains { check.matches($0) } }
-        let holds = { (check: ProjectBoard.Check) in
+    private static func checkLines(latest: [GitHub.Check], required: [String]) -> [CheckLine] {
+        let isRequired = { (check: GitHub.Check) in required.contains { check.matches($0) } }
+        let holds = { (check: GitHub.Check) in
             check.result == .failure || (isRequired(check) && (check.result == .skipped || check.result == .neutral))
         }
         // Without a required check, every one counts.
-        let isWaitedFor = { (check: ProjectBoard.Check) in check.result == .pending && (required.isEmpty || isRequired(check)) }
-        let line = { (check: ProjectBoard.Check) in
+        let isWaitedFor = { (check: GitHub.Check) in check.result == .pending && (required.isEmpty || isRequired(check)) }
+        let line = { (check: GitHub.Check) in
             CheckLine(workflow: check.workflowName, name: check.name, result: ProjectBoard.glyph(check.result))
         }
         let missing = required.filter { name in !latest.contains { $0.matches(name) } }.map { CheckLine(name: $0, result: "no run yet") }
@@ -364,16 +364,16 @@ extension BoardStages {
     /// shows the worst of a name: there a success hides a skipped one.)
     /// As far as the rollup tells: it doesn't say a commit status from a
     /// check run, nor two workflows of one name apart (Known limits).
-    static func checks(_ checks: [ProjectBoard.Check], required: [String]) -> Checks {
-        self.checks(latest: ProjectBoard.latest(checks), required: required)
+    static func checks(_ checks: [GitHub.Check], required: [String]) -> Checks {
+        self.checks(latest: GitHub.latest(checks), required: required)
     }
 
-    static func checks(latest: [ProjectBoard.Check], required: [String]) -> Checks {
+    static func checks(latest: [GitHub.Check], required: [String]) -> Checks {
         guard !latest.isEmpty || !required.isEmpty else { return .absent }
-        let name = { (check: ProjectBoard.Check) in check.qualifiedName ?? check.name }
+        let name = { (check: GitHub.Check) in check.qualifiedName ?? check.name }
         var failed: [String] = []
         var missing: [String] = []
-        var running: [ProjectBoard.Check] = []
+        var running: [GitHub.Check] = []
         for requiredName in required {
             let matching = latest.filter { $0.matches(requiredName) }
             if matching.isEmpty {
@@ -393,9 +393,8 @@ extension BoardStages {
         if required.isEmpty { running += others.filter { $0.result == .pending } }
         if !failed.isEmpty { return .failed(failed) }
         guard running.isEmpty, missing.isEmpty else {
-            // gh writes a check not started yet as year 1. The oldest
-            // start is the least string: one date to read, not one a check.
-            let oldest = running.compactMap(\.startedAt).filter { !$0.hasPrefix("0001-") }.min()
+            // The oldest start is the least string: one date to read, not one a check.
+            let oldest = running.compactMap { GitHub.startTime($0.startedAt) }.min()
             return .pending(since: oldest.flatMap { try? Date($0, strategy: .iso8601) }?.timeIntervalSince1970, missing: missing)
         }
         return .passed

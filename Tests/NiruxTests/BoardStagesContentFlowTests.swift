@@ -265,7 +265,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             }
             XCTAssertEqual(try stages(of: board, in: shell).sections.map(\.id), ["legacy"], "no No repository, no Other workspaces: none")
             let failed = try XCTUnwrap(try stages(of: board, in: shell).sections.first?.status)
-            XCTAssertEqual([failed.text, failed.toolTip], ["GitHub error", ProjectBoard.FetchError.notSignedIn(nil).message])
+            XCTAssertEqual([failed.text, failed.toolTip], ["GitHub error", ProjectBoard.message(.notSignedIn(nil))])
             XCTAssertEqual(failed.tone, .error)
             // Nothing read, a pull request queued all the same: Start counts the list, as the table's.
             shell.addToMergeQueue(12, board: board, section: nil)
@@ -298,7 +298,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertNil(emptyContent.message)
             let emptyPill = try XCTUnwrap(emptyContent.sections.first?.status)
             XCTAssertEqual(emptyPill.tone, .error)
-            XCTAssertEqual(emptyPill.toolTip?.contains(ProjectBoard.FetchError.notSignedIn(nil).message), true, emptyPill.toolTip ?? "")
+            XCTAssertEqual(emptyPill.toolTip?.contains(ProjectBoard.message(.notSignedIn(nil))), true, emptyPill.toolTip ?? "")
 
             // Another space, its repository anchored but not saved in Board Settings: read from its remote, read-only.
             let other = shell.workspaceStore.createProfile(named: "Gadgets")

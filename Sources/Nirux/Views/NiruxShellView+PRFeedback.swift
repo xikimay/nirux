@@ -9,14 +9,14 @@ extension NiruxShellView {
     /// After each read of an open PR. A failed read keeps the last value;
     /// a read started before another one is dropped.
     func refreshPRFeedback(for workspace: WorkspaceState) {
-        guard let pullRequest = workspace.prInfo, pullRequest.state == "OPEN" else { return }
+        guard let pullRequest = workspace.prInfo, pullRequest.state == .open else { return }
         workspace.prFeedbackGeneration &+= 1
         let generation = workspace.prFeedbackGeneration
         let readStartedAt = Date().timeIntervalSince1970
         PRFeedbackReader.fetchAsync(pullRequestURL: pullRequest.url) { [weak self, weak workspace] feedback in
             guard let self, let workspace, let feedback,
                   workspace.prFeedbackGeneration == generation,
-                  workspace.prInfo?.url == pullRequest.url, workspace.prInfo?.state == "OPEN"
+                  workspace.prInfo?.url == pullRequest.url, workspace.prInfo?.state == .open
             else { return }
             prFollowUpCenter.feedbackReadAt[workspace.id] = readStartedAt
             if workspace.prFeedback != feedback {

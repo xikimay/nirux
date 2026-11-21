@@ -24,11 +24,11 @@ extension MergeQueue {
         settings: BoardConfig.QueueSettings,
         client: any MergeQueueGitHub,
         tools: WorktreeCleanup.Tools = .installed
-    ) -> Result<LocalInspection, ClientError> {
+    ) -> Result<LocalInspection, GitHub.CLI.Failure> {
         let snapshot = ProjectBoard.readLocal(folders: folders, tools: tools)
         let configured = settings.gitHubRepository
         let repositories = snapshot.repositories.filter { repository in
-            repository.remotes.contains { $0.owner == configured.owner && $0.name == configured.name }
+            repository.remotes.contains { $0.hasOwnerAndName(of: configured) }
         }
         var inspection = LocalInspection()
         // A folder in a checkout git couldn't list: its worktrees can't be
@@ -55,7 +55,7 @@ extension MergeQueue {
                 guard worktree.branch == branch else { continue }
                 let status = WorktreeCleanup.git(["status", "--porcelain", "--untracked-files=no"], in: worktree.path, tools: tools)
                 guard status.status == 0 else {
-                    let reason = WorktreeCleanup.firstLine(status.stderr) ?? "git status failed"
+                    let reason = status.stderr.firstLine ?? "git status failed"
                     inspection.worktrees.append(LocalWorktree(path: worktree.path, problem: .unreadable(reason)))
                     continue
                 }

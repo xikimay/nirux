@@ -35,7 +35,7 @@ enum MQ {
     static func pullRequest(
         _ number: Int,
         head: String,
-        state: String = "OPEN",
+        state: GitHub.PullRequestState = .open,
         isDraft: Bool = false,
         base: String = "main",
         repository: GitHubRepository? = widgets,
@@ -71,8 +71,8 @@ enum MQ {
     static func run(
         _ id: Int, head: String, status: String = "completed", conclusion: String? = "success", event: String = "push",
         title: String? = nil
-    ) -> MergeQueue.Run {
-        MergeQueue.Run(id: id, status: status, conclusion: conclusion, headSha: head, event: event, title: title,
+    ) -> GitHub.WorkflowRun {
+        GitHub.WorkflowRun(id: id, status: status, conclusion: conclusion, headSha: head, event: event, title: title,
                        url: "https://github.com/acme/widgets/actions/runs/\(id)")
     }
 
@@ -88,8 +88,8 @@ enum MQ {
         /// Answers for other compares, by read.
         var compares: [MergeQueue.Read: MergeQueue.Comparison?] = [:]
         var commits: [String: MergeQueue.CommitInfo] = [:]
-        var baseRuns: [MergeQueue.Run] = []
-        var pushRuns: [String: [MergeQueue.Run]] = [:]
+        var baseRuns: [GitHub.WorkflowRun] = []
+        var pushRuns: [String: [GitHub.WorkflowRun]] = [:]
         var local = MergeQueue.LocalState()
         var rateLimit = MergeQueue.RateLimit(
             coreRemaining: 5000, coreReset: Date(timeIntervalSince1970: 0),
@@ -128,7 +128,7 @@ enum MQ {
         /// A pull request `number` at `head`, merged as `commit` on `mainTip`.
         mutating func merge(_ number: Int, as commit: String) {
             guard let open = pullRequests[number] else { return }
-            pullRequests[number] = MQ.pullRequest(number, head: open.headOid, state: "MERGED", mergeCommit: commit,
+            pullRequests[number] = MQ.pullRequest(number, head: open.headOid, state: .merged, mergeCommit: commit,
                                                   parents: [mainTip, open.headOid])
             mainTip = commit
         }
@@ -252,7 +252,7 @@ final class FakeQueueClient: MergeQueueGitHub, @unchecked Sendable {
         lock.withLock { change(&world) }
     }
 
-    func read(_ read: MergeQueue.Read, settings: BoardConfig.QueueSettings) -> Result<MergeQueue.ReadResult, MergeQueue.ClientError> {
+    func read(_ read: MergeQueue.Read, settings: BoardConfig.QueueSettings) -> Result<MergeQueue.ReadResult, GitHub.CLI.Failure> {
         lock.withLock {
             recordedReads.append(read)
             return world.answer(read).map { .success($0) } ?? .failure(.noAnswer("unscripted \(read)"))

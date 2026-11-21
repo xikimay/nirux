@@ -128,9 +128,9 @@ struct CITriageStore: Codable, Equatable {
     /// workflow took over is not there: that run says nothing of this
     /// one.) Returns whether the store changed.
     mutating func learn(
-        fromPassedRunsOf checks: [(run: CIFailure.Run, name: String, result: ProjectBoard.CheckResult)], now: TimeInterval
+        fromPassedRunsOf checks: [(run: CIFailure.Run, name: String, result: GitHub.CheckResult)], now: TimeInterval
     ) -> Bool {
-        var results: [CIFailure.Run: [String: [ProjectBoard.CheckResult]]] = [:]
+        var results: [CIFailure.Run: [String: [GitHub.CheckResult]]] = [:]
         for check in checks { results[check.run, default: [:]][check.name, default: []].append(check.result) }
         var changed = false
         for (run, byName) in results {

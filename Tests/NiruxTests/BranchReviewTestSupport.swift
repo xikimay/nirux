@@ -96,7 +96,7 @@ class BranchReviewRepositoryTestCase: XCTestCase {
         try git(["rev-parse", "HEAD"], at: directory).trimmingCharacters(in: .newlines)
     }
 
-    func options(gitHub: BranchReview.GitHubCLI? = nil, fetchBase: Bool = false) -> BranchReview.Options {
+    func options(gitHub: GitHub.CLI.Runner? = nil, fetchBase: Bool = false) -> BranchReview.Options {
         BranchReview.Options(gitHub: gitHub, fetchBase: fetchBase, environment: environment)
     }
 

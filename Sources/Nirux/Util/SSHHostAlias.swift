@@ -13,7 +13,7 @@ enum SSHHostAlias {
     /// loose permissions) is a no, as git's ssh would fail there too.
     static func resolve(_ host: String, configFile: String? = nil, timeout: TimeInterval = 5) -> Bool? {
         let host = host.lowercased()
-        if host == "github.com" || host == "ssh.github.com" { return true }
+        if GitHub.isGitHubHost(host) { return true }
         // A name ssh can't read as an option.
         guard host.range(of: #"^[a-z0-9][a-z0-9._-]*$"#, options: .regularExpression) != nil else { return false }
         let key = (configFile ?? "") + "\u{0}" + host
@@ -29,7 +29,7 @@ enum SSHHostAlias {
         let output = String(decoding: result.standardOutput, as: UTF8.self)
         let hostName = output.split(separator: "\n").first { $0.hasPrefix("hostname ") }
             .map { $0.dropFirst("hostname ".count).trimmingCharacters(in: .whitespaces).lowercased() }
-        guard hostName == "github.com" || hostName == "ssh.github.com" else { return false }
+        guard let hostName, GitHub.isGitHubHost(hostName) else { return false }
         known.withLock { _ = $0.insert(key) }
         return true
     }
