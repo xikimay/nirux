@@ -83,6 +83,7 @@ extension TaskThread {
             case .tell: label = "Instruction"
             case .result: label = "Result"
             case .handedToUser: label = "Handed to you"
+            case .questionRetired: label = "Question retired"
             case .review: label = "Review"
             case .findings: label = "Findings"
             case .rule: label = "Rule added"

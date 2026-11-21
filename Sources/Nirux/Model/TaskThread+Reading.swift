@@ -14,6 +14,7 @@ extension TaskThread {
     static func questions(in ordered: [Event]) -> [Question] {
         var answers: [String: Event] = [:]
         var handoffs: [String: Event] = [:]
+        var retirements: [String: TimeInterval] = [:]
         var completions: [String: TimeInterval] = [:]
         var close: TimeInterval?
         var questions: [Question] = []
@@ -26,9 +27,12 @@ extension TaskThread {
                 if let id = event.ref { answers[id] = event }
             case .handedToUser:
                 if let id = event.ref { handoffs[id] = event }
+            case .questionRetired:
+                if let id = event.ref { retirements[id] = event.time }
             case .question:
                 let id = event.ref ?? ""
-                questions.append(Question(asked: event, handoff: handoffs[id], answer: answers[id], retiredAt: event.missionID.flatMap { completions[$0] } ?? close))
+                let end = [retirements[id], event.missionID.flatMap { completions[$0] }, close].compactMap { $0 }.min()
+                questions.append(Question(asked: event, handoff: handoffs[id], answer: answers[id], retiredAt: end))
             default: break
             }
         }

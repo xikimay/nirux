@@ -69,8 +69,14 @@ extension TaskThread {
                     time: event.timestamp, kind: .question, by: .agent, text: event.message, note: event.recommendation,
                     detail: event.questionKind?.rawValue, ref: event.id, recipient: parent, missionID: mission.id
                 )
-                guard let handedAt = event.handedToUserAt else { return [asked] }
-                return [asked, Event(time: handedAt, kind: .handedToUser, by: parent, text: event.handedToUserBecause, ref: event.id)]
+                var events = [asked]
+                if let at = event.handedToUserAt {
+                    events.append(Event(time: at, kind: .handedToUser, by: parent, text: event.handedToUserBecause, ref: event.id))
+                }
+                if let at = event.retiredAt {
+                    events.append(Event(time: at, kind: .questionRetired, ref: event.id))
+                }
+                return events
             case .response:
                 let by: Author = event.answeredByUser == true ? .user : parent
                 let accepted = event.acceptedRecommendation == true ? "accepted" : nil
