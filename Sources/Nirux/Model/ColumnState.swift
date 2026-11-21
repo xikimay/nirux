@@ -823,7 +823,7 @@ final class ColumnState {
     /// A restored column starts directly. A live terminal waits for its
     /// shell and jobs to exit before the caller can authorize the new launch.
     func restartTerminal(
-        running command: String, canStop: @MainActor () -> Bool, starts: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Bool
+        running command: String, canStop: @MainActor () -> Bool = { true }, starts: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Bool
     ) {
         guard !isRestartingShell, terminalSpec != nil else { return }
         let shellName = (PtySession.defaultShell as NSString).lastPathComponent

@@ -145,7 +145,7 @@ extension NiruxShellView {
             return showToast("The Lead is starting: restart it in a moment.")
         }
         refreshLaunch(of: column, in: lead)
-        sideEffects.restartTerminal(column, command, { true }) { [weak self, weak lead] stillRunning in
+        sideEffects.restartTerminal(column, command) { [weak self, weak lead] stillRunning in
             // Turned off meanwhile: nothing starts in its column.
             guard let self, lead?.isClosing == false else { return false }
             guard stillRunning.isEmpty else {

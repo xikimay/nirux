@@ -25,6 +25,13 @@ struct ShellSideEffects {
     /// Ends a terminal's shell and starts it again running an agent's
     /// launch command (Restart Lead, see `ColumnState.restartTerminal`).
     var restartTerminal: @MainActor (
+        _ column: ColumnState, _ command: String, _ starts: @escaping @MainActor @Sendable ([String]) -> Bool
+    ) -> Void = { column, command, starts in
+        column.restartTerminal(running: command, starts: starts)
+    }
+
+    /// Task switches can still be refused when a draft arrives during handover.
+    var restartTaskTerminal: @MainActor (
         _ column: ColumnState, _ command: String, _ canStop: @MainActor () -> Bool, _ starts: @escaping @MainActor @Sendable ([String]) -> Bool
     ) -> Void = { column, command, canStop, starts in
         column.restartTerminal(running: command, canStop: canStop, starts: starts)

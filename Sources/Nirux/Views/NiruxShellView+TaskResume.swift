@@ -104,7 +104,7 @@ extension NiruxShellView {
             let prompt = TaskResumeHandover.prompt(task: task, previous: previous, agent: choice.agent, missions: store.missions, thread: context)
             let launch = freshAgentCommand(choice.agent, in: task, directory: task.cwd, worktreeBranch: task.gitBranch)
             let command = choice.command([launch], prompt: prompt)
-            sideEffects.restartTerminal(column, command + " || exit 1", {
+            sideEffects.restartTaskTerminal(column, command + " || exit 1", {
                 if let draft = pty.taskResumeDraft(foreground: foreground?.instance), draft != approvedDraft {
                     finish(draftRefusal, true)
                     return false
