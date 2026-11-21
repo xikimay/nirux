@@ -143,6 +143,12 @@ struct AgentStatusMachine {
     private(set) var boxEmptiedAt: TimeInterval?
     /// When the last prompt typed at the box went in (its UserPromptSubmit).
     private(set) var lastUserPromptAt: TimeInterval?
+    /// That prompt was one Nirux typed (a Mission message, a notice): its
+    /// Enter is one of `niruxSubmitKeys`.
+    private var lastTypedPromptIsNiruxs = false
+    /// The Enters Nirux pressed after a message it typed, newest last (a
+    /// few).
+    private var niruxSubmitKeys: [TimeInterval] = []
     /// Enters that reached the prompt box, no dialog waiting for keys in
     /// front, newest last (a few): one of them sent each prompt typed there.
     private var submitKeys: [TimeInterval] = []
@@ -607,7 +613,9 @@ struct AgentStatusMachine {
         guard let enter = submitKeys.last(where: { $0 <= hook.at }), enter > (boxEmptiedAt ?? 0) else { return }
         boxEmptiedAt = enter
         lastUserPromptAt = hook.at
+        lastTypedPromptIsNiruxs = niruxSubmitKeys.contains(enter)
         submitKeys.removeAll { $0 <= enter }
+        niruxSubmitKeys.removeAll { $0 <= enter }
         closeDialogs { $0.sessionID == hook.sessionID && $0.requestedAt <= enter }
     }
 
@@ -792,11 +800,21 @@ struct AgentStatusMachine {
     mutating func noteQuestion(
         _ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval, seen: Bool
     ) -> Bool {
-        guard isCurrentTurnEnd(turnEndedAt), !turnEndQuestionIsBehind, turnFailure == nil,
-              quietTurnEnd == nil, askedQuestion == nil
-        else { return false }
+        guard mayNoteQuestion(endingTurnAt: turnEndedAt) else { return false }
         ask(question.text, isYesNo: question.isYesNo, endingTurnAt: turnEndedAt, in: message, seen: seen)
         return true
+    }
+
+    /// Whether the turn end of `turnEndedAt` may still ask (`noteQuestion`).
+    func mayNoteQuestion(endingTurnAt turnEndedAt: TimeInterval) -> Bool {
+        isCurrentTurnEnd(turnEndedAt) && !turnEndQuestionIsBehind && turnFailure == nil && quietTurnEnd == nil && askedQuestion == nil
+    }
+
+    /// The user typed the last prompt typed at the box: the agent answers
+    /// them. Not before any (a task's first prompt is Nirux's handover), nor
+    /// for one Nirux typed.
+    var lastPromptIsTheUsers: Bool {
+        lastUserPromptAt != nil && !lastTypedPromptIsNiruxs
     }
 
     /// The question asked at `turnEndedAt`, with the choices `message`
@@ -1426,7 +1444,8 @@ struct AgentStatusMachine {
 
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
     /// answered, which terminal replies and focus reports never do.
-    mutating func noteKeystroke(now: Date, keys: Data? = nil) {
+    /// `byNirux`: Nirux typed it itself, not for the user.
+    mutating func noteKeystroke(now: Date, keys: Data? = nil, byNirux: Bool = false) {
         let time = now.timeIntervalSince1970
         // A dialog takes the keys while it waits for one (`waitsForKeys`), and
         // none is a draft, nor becomes one when it closes: a question until its
@@ -1458,6 +1477,7 @@ struct AgentStatusMachine {
         if answersAgy, keys.map(Self.answersApproval) ?? true { agyTurn?.answering = false }
         if inFront == nil, !answersAgy, keys.map(Self.sendsPrompt) ?? true {
             submitKeys = Array((submitKeys + [time]).suffix(Self.promptMemory))
+            if byNirux { niruxSubmitKeys = Array((niruxSubmitKeys + [time]).suffix(Self.promptMemory)) }
         }
         if inFront == nil, !answersAgy, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
@@ -1839,7 +1859,9 @@ struct AgentStatusMachine {
         mainTurnMovedAt = nil
         boxEmptiedAt = nil
         lastUserPromptAt = nil
+        lastTypedPromptIsNiruxs = false
         submitKeys = []
+        niruxSubmitKeys = []
         readsTranscript = false
         unreadPrompts = []
         readPrompts = []

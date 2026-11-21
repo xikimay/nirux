@@ -439,6 +439,108 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertEqual(watch.hold(nil, typedAt: 300), .parentDidNotAnswer)
     }
 
+    /// A Mission child's turn ended on a question: its parent's while the
+    /// parent sent its last prompt (the task's first, then one Nirux typed),
+    /// sent as the child's question, its end when it is long, or as a
+    /// notice behind the result it completed with; the user's once they
+    /// typed the last prompt, or when the child reports to nobody (a Lead's
+    /// tells only).
+    func testATurnEndQuestionGoesToThePromptsSender() throws {
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 600))
+        shell.stopHeartbeat()
+        let parent = try XCTUnwrap(shell.activeWorkspace)
+        let parentAgentUUID = try XCTUnwrap(parent.columns.first?.agentUUID)
+        shell.addWorkspace(title: "Date filter API", cwd: NSTemporaryDirectory())
+        let workspace = try XCTUnwrap(shell.workspaces.last)
+        let column = try XCTUnwrap(workspace.columns.first)
+        let pty = try XCTUnwrap(column.pty)
+        let agentUUID = try XCTUnwrap(column.agentUUID)
+        /// Its Missions, oldest first: one it reports on, or a Lead's tells.
+        func store(_ oneWay: [Bool]) -> MissionStore {
+            let store = MissionStore(persistsToDisk: false)
+            for oneWay in oneWay {
+                var request = MissionCreationRequest(
+                    id: UUID().uuidString, parentWorkspaceID: parent.id, parentAgentUUID: parentAgentUUID,
+                    childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: "claude", branch: "feat/date-filter"
+                )
+                request.reportsToLead = !oneWay
+                request.oneWay = oneWay
+                XCTAssertNotNil(store.create(request, enabled: false))
+            }
+            return store
+        }
+        let resolution = AgentHookCenter.Resolution(
+            workspace: workspace, column: column, columnIndex: 1, isUserFocused: false, approvalHold: .never
+        )
+        func ask(_ message: String, in store: MissionStore) -> Bool {
+            shell.askParent(for: resolution, TurnEndRequest(message: message, turnEndedAt: Date().timeIntervalSince1970), store: store)
+        }
+        func questions(_ store: MissionStore) -> [String] {
+            store.missions.filter { $0.oneWay != true }.flatMap(\.events).filter { $0.kind == .question }.map(\.message)
+        }
+        // Its transcript says a prompt was typed at the box; the turn may
+        // end before Nirux read it.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-ask-parent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("task.jsonl")
+        try Data().write(to: transcript)
+        func takePrompt(_ id: String, typedByNirux: Bool) throws {
+            if typedByNirux {
+                shell.typeMissionPrompt("\u{1B}[200~:\u{1B}[201~", into: pty, keepingInFront: nil) { _ in }
+            } else {
+                pty.sendRaw(": which one\r")
+            }
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .userPromptSubmit, sessionID: "s", promptID: id, transcriptPath: transcript.path,
+                timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+            let time = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+            let handle = try FileHandle(forWritingTo: transcript)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((#"{"type":"user","origin":{"kind":"human"},"promptId":""# + id
+                + #"","timestamp":""# + time + #"","message":{"role":"user","content":"…"}}"# + "\n").utf8))
+        }
+
+        // The Lead told it something since, on a Mission of its own.
+        let lead = store([false, true])
+        XCTAssertTrue(ask("PR ready. Shall I open it?", in: lead), "its first prompt was its handover")
+        let long = String(repeating: "Checked. ", count: 80) + "Shall I merge?"
+        try takePrompt("nirux", typedByNirux: true)
+        XCTAssertTrue(ask(long, in: lead), "a prompt Nirux typed")
+        let asked = questions(lead)
+        XCTAssertEqual(asked.first, "PR ready. Shall I open it?")
+        XCTAssertEqual(asked.count, 2)
+        XCTAssertTrue(asked.last?.hasPrefix("…") == true && asked.last?.hasSuffix("Shall I merge?") == true, asked.last ?? "")
+        XCTAssertLessThanOrEqual(asked.last?.count ?? .max, MissionEventCLI.maxMessageLength)
+        XCTAssertNotNil(lead.waitingQuestion(childWorkspaceID: workspace.id, childAgentUUID: agentUUID), "it waits on its parent")
+
+        try takePrompt("user", typedByNirux: false)
+        XCTAssertFalse(ask("Rebase or merge?", in: lead), "the user typed its prompt")
+        XCTAssertEqual(questions(lead).count, 2)
+
+        // Completed: its result is with the parent, the question follows it.
+        let reporting = try XCTUnwrap(lead.missions.first { $0.oneWay != true })
+        XCTAssertNotNil(lead.accept(MissionEvent(
+            id: UUID().uuidString, missionID: reporting.id, childWorkspaceID: workspace.id, childAgentUUID: agentUUID,
+            kind: .completed, message: "PR #12 is green.", timestamp: Date().timeIntervalSince1970
+        ), enabled: false))
+        try takePrompt("round", typedByNirux: true)
+        XCTAssertTrue(ask("Shall I start the docs too?", in: lead))
+        XCTAssertEqual(questions(lead).count, 2, "a completed Mission takes no question")
+        XCTAssertEqual(shell.pendingLeadNotices.map(\.workspaceID), [parent.id])
+        XCTAssertEqual(
+            shell.pendingLeadNotices.last?.text,
+            "[Nirux Mission] “Date filter API” completed, then ended its turn on: Shall I start the docs too?"
+        )
+
+        let tells = store([true])
+        try takePrompt("told", typedByNirux: true)
+        XCTAssertFalse(ask("Rebase or merge?", in: tells), "a Lead's tells take no question")
+        XCTAssertEqual(tells.missions.flatMap(\.events).count, 0)
+    }
+
     // MARK: - Card row
 
     private func column(_ question: SidebarMissionQuestion?) -> ColumnInfo {

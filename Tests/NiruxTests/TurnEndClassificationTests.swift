@@ -1785,23 +1785,24 @@ final class TurnEndClassificationTests: XCTestCase {
     /// same: watched (nobody to alert, seen), or with a subagent's dialog
     /// open (not seen). After a verdict's moment: no alert, no model call,
     /// the sidebar told. Not for a turn end behind by then, a Mission child
-    /// that waits on its parent, or with the option gone off meanwhile.
+    /// that waits on its parent, or with the option gone off meanwhile; a
+    /// child whose parent sent its last prompt asks that parent instead.
     /// The centre's moment is the test's: no clock.
     func testQuestionWithoutVerdictReachesItsColumn() async throws {
         let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
         // Their shells started first: a shell's start resets its column.
-        let workspaces = (0..<5).map { _ in WorkspaceState(title: "ws", cwd: NSTemporaryDirectory()) }
+        let workspaces = (0..<6).map { _ in WorkspaceState(title: "ws", cwd: NSTemporaryDirectory()) }
         let deadline = Date().addingTimeInterval(10)
         while workspaces.contains(where: { $0.columns.first?.pty?.shellPID == nil }), Date() < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
         typealias Case = (
             center: AgentHookCenter, moment: Moment, alerts: LockedValue<[AgentAttentionReason?]>, classifier: FakeClassifier,
-            shown: LockedValue<AgentStatusMachine.AskedQuestion?>
+            shown: LockedValue<AgentStatusMachine.AskedQuestion?>, toParent: LockedValue<[TurnEndRequest]>
         )
         @MainActor func settle(
             _ workspace: WorkspaceState, focused: Bool = true, dialogOpen: Bool = false, waitsOnParent: Bool = false,
-            optionOn: Bool = true, answered: Bool = false
+            optionOn: Bool = true, answered: Bool = false, parentAsked: Bool = false
         ) throws -> Case {
             let column = try XCTUnwrap(workspace.columns.first)
             let pty = try XCTUnwrap(column.pty)
@@ -1832,21 +1833,29 @@ final class TurnEndClassificationTests: XCTestCase {
                 workspace: workspace, column: column, columnIndex: 0, isUserFocused: focused, approvalHold: .never
             )
             center.resolver = { _ in resolution }
+            let toParent = LockedValue<[TurnEndRequest]>([])
+            if parentAsked {
+                center.asksParent = { _, request in
+                    toParent.value.append(request)
+                    return true
+                }
+            }
             center.settleTurnEnd(of: stop, outcome: outcome, in: resolution, waitsOnParent: waitsOnParent)
             // Off within the wait: with it off before, no message comes.
             if !optionOn { center.turnEndClassifier = nil }
             // Answered before its note could start: behind already.
             if answered { _ = pty.applyAgentHook(event(.userPromptSubmit, at: 6), isUserFocused: focused) }
-            return (center, moment, alerts, classifier, shown)
+            return (center, moment, alerts, classifier, shown, toParent)
         }
         let asked = try settle(workspaces[0])
         let behindADialog = try settle(workspaces[1], focused: false, dialogOpen: true)
         let child = try settle(workspaces[2], waitsOnParent: true)
         let off = try settle(workspaces[3], optionOn: false)
         let answered = try settle(workspaces[4], answered: true)
+        let parentAsked = try settle(workspaces[5], parentAsked: true)
         // Each note starts, and waits its moment: nothing before it.
         var yields = 0
-        while [asked, behindADialog, off].contains(where: { $0.moment.waits.isEmpty }), yields < 100 {
+        while [asked, behindADialog, off, parentAsked].contains(where: { $0.moment.waits.isEmpty }), yields < 100 {
             await Task.yield()
             yields += 1
         }
@@ -1856,7 +1865,7 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertNil(child.center.questionNote, "it waits on its parent")
         XCTAssertEqual(answered.moment.waits, [], "answered already: no wait for it")
         XCTAssertNil(asked.shown.value, "not before its moment")
-        for each in [asked, behindADialog, child, off, answered] {
+        for each in [asked, behindADialog, child, off, answered, parentAsked] {
             each.moment.end()
             await each.center.questionNote?.value
         }
@@ -1870,7 +1879,10 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(behindADialog.classifier.messages.value, [])
         XCTAssertNil(off.shown.value, "final messages aren't read any more")
         XCTAssertNil(answered.shown.value)
-        withExtendedLifetime([asked, behindADialog, child, off, answered].map(\.center)) {}
+        XCTAssertEqual(parentAsked.toParent.value.map(\.turnEndedAt), [t0 + 5], "its parent's question")
+        XCTAssertNil(parentAsked.shown.value, "not the user's")
+        XCTAssertEqual(asked.toParent.value, [])
+        withExtendedLifetime([asked, behindADialog, child, off, answered, parentAsked].map(\.center)) {}
     }
 
     /// A Stop hook blocked that end (a review gate) and the turn went on:
@@ -1981,6 +1993,42 @@ final class TurnEndClassificationTests: XCTestCase {
         let uuid = try XCTUnwrap(column.agentUUID)
         center.dispatch(AgentHookEvent(kind: .codex, name: .turnComplete, agentUUID: uuid, timestamp: start + 5.8))
         XCTAssertEqual(done, 3)
+    }
+
+    /// A Mission child whose parent sent its last prompt asks that parent
+    /// (`asksParent`): a turn end that asks, read by the model or ending on
+    /// "?", then waits on the parent as a child that asked: quiet, no
+    /// question on its row, and not done. One the parent can't take asks
+    /// the user, as before.
+    func testATurnEndThatAsksTheParentAsksNotTheUser() async throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        for message in [offer, "Tests pass. Ready to push?"] {
+            let (center, _, column, request, alerts) = try turnEndColumn(message: message)
+            let pty = try XCTUnwrap(column.pty)
+            center.turnEndClassifier = FakeClassifier(verdict: .asks(nil))
+            center.questionVerdictDelay = 0
+            let done = Counter()
+            center.onTurnDone = { _, _ in done.increment() }
+            let asked = LockedValue<[TurnEndRequest]>([])
+            center.asksParent = { _, request in
+                asked.value.append(request)
+                return true
+            }
+            center.classifyTurnEnd(request, agentUUID: try XCTUnwrap(column.agentUUID), waitsOnParent: false)
+            try await waitUntil("its verdict settled: \(message)") { !pty.awaitsTurnEndVerdict(request) }
+            XCTAssertEqual(asked.value, [request], message)
+            XCTAssertEqual(alerts.value, [], message)
+            XCTAssertEqual(pty.isQuietTurnEnd, true, message)
+            XCTAssertNil(pty.agentQuestion(foreground: claude), message)
+            XCTAssertEqual(done.value, 0, "it waits on its parent: \(message)")
+        }
+        let (center, _, column, request, alerts) = try turnEndColumn(message: "Tests pass. Ready to push?")
+        center.turnEndClassifier = FakeClassifier(verdict: .done)
+        center.questionVerdictDelay = 0
+        center.asksParent = { _, _ in false }
+        center.classifyTurnEnd(request, agentUUID: try XCTUnwrap(column.agentUUID), waitsOnParent: false)
+        try await waitUntil("its alert") { !alerts.value.isEmpty }
+        XCTAssertEqual(alerts.value, [.askedInReply("Tests pass. Ready to push?")])
     }
 
     /// A Mission child that asked its parent waits on it: quiet, unread,

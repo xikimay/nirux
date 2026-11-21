@@ -180,6 +180,16 @@ enum TurnEndText {
         return head + "\n[…]\n" + tail
     }
 
+    /// A turn's final message as the child's question to its parent
+    /// (`MissionEventCLI.maxMessageLength`): whole when it fits, else its
+    /// end, where the question is. Nil when even that doesn't fit.
+    static func questionForParent(_ message: String) -> String? {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let limit = MissionEventCLI.maxMessageLength
+        let question = text.count <= limit ? text : "…" + text.suffix(limit - 1).trimmingCharacters(in: .whitespacesAndNewlines)
+        return MissionEventCLI.fits(question, limit: limit) ? question : nil
+    }
+
     /// The sentence of `message`'s prose that `quote` quotes, as the
     /// message writes it (cleaned for one line): `quote` may differ in
     /// whitespace, Markdown marks, typographic quotes and the quotation

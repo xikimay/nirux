@@ -525,7 +525,7 @@ extension NiruxShellView {
         done: @escaping @MainActor @Sendable (TypedMessage) -> Void
     ) {
         guard paste.utf8.count + 1 > PtySession.inputQueueBytes else {
-            pty.sendRaw(paste + "\r")
+            pty.sendRaw(paste + "\r", typedByNirux: true)
             return done(.sent)
         }
         pty.pasteInBackground(paste, keepingInFront: process, cancelled: { false }) { [weak self] result, typedAt in
@@ -568,7 +568,7 @@ extension NiruxShellView {
             guard rereads > 0 else { return done(.inPrompt(why: "Claude Code shows a screen of its own")) }
             return again(after: Self.recordRereadDelay, tries: tries, rereads: rereads - 1)
         }
-        pty.sendRaw("\r")
+        pty.sendRaw("\r", typedByNirux: true)
         done(.sent)
     }
 
