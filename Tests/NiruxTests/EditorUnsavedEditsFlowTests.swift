@@ -31,7 +31,6 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
                 // An app deactivation pauses the watcher.
                 editor.resumeFileWatch()
             }
-            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
             XCTAssertEqual(editor.unsavedPaths, [], "the reload left the tab unsaved")
 
             // An agent writes the file between two checks of the watcher.
@@ -230,11 +229,14 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
             try setBuffer("A\n", in: webView)
             harness.waitUntil("the edit") { editor.unsavedPaths == [notes] }
             waitForMonacoText(in: webView)
-            webView.evaluateJavaScript(try Self.saveTwiceWhileBusy(typing: "A\nB\n"))
-            harness.waitUntil("A written") { (try? read(notes)) == "A\n" }
+            try holdReply("markSaved", in: webView) {
+                UIFlowHarness.run(Self.commandS, in: webView)
+            }
+            XCTAssertEqual(try read(notes), "A\n")
             try write("agent\n", to: notes)
+            try setBuffer("A\nB\n", in: webView)
+            UIFlowHarness.run("\(Self.commandS) window.releaseEditorReplies()", in: webView)
             harness.waitUntil("the conflict") { !banner.isHidden }
-            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
             waitForBuffer("A\nB\n", in: webView)
             XCTAssertEqual(editor.unsavedPaths, [notes], "B passed for saved")
             XCTAssertEqual(try read(notes), "agent\n")
@@ -243,9 +245,12 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
 
             // Typed as the watcher reloads the buffer, clean when it looked:
             // the typing stays, the disk's version waits as a conflict.
-            webView.evaluateJavaScript(try Self.typeWhileBusy("typed\n"))
-            try write("agent 2\n", to: notes)
-            editor.resumeFileWatch()
+            try holdReply("openFile", in: webView) {
+                try write("agent 2\n", to: notes)
+                editor.resumeFileWatch()
+            }
+            try setBuffer("typed\n", in: webView)
+            UIFlowHarness.run("window.releaseEditorReplies()", in: webView)
             harness.waitUntil("the conflict") { !banner.isHidden }
             editor.pauseFileWatch()
             waitForBuffer("typed\n", in: webView)
@@ -257,12 +262,15 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
             // ⌘S of the clean text, sent as the watcher reloads it: the save
             // of a text since replaced writes nothing.
             waitForMonacoText(in: webView)
-            webView.evaluateJavaScript("(function () { \(Self.busy) \(Self.commandS) })()")
-            try write("agent 3\n", to: notes)
-            editor.resumeFileWatch()
+            let beforeSave = harness.shell.toastGeneration
+            try holdReply("openFile", in: webView) {
+                try write("agent 3\n", to: notes)
+                editor.resumeFileWatch()
+            }
+            UIFlowHarness.run("\(Self.commandS) window.releaseEditorReplies()", in: webView)
+            harness.waitUntil("the stale save refused") { harness.shell.toastGeneration > beforeSave }
             waitForBuffer("agent 3\n", in: webView)
             editor.pauseFileWatch()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
             XCTAssertEqual(try read(notes), "agent 3\n", "a save of the replaced text wrote over the change")
             XCTAssertEqual(editor.unsavedPaths, [])
 
@@ -355,18 +363,29 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
         + "Object.defineProperty(e, 'keyCode', { get: function () { return 83; } }); "
         + "document.activeElement.dispatchEvent(e); })();"
 
-    /// Three seconds of the page busy: what Swift sends meanwhile waits.
-    private static let busy = "var start = Date.now(); while (Date.now() - start < 3000) {}"
-
-    /// ⌘S, the page busy while Swift answers it, then `typing` and ⌘S
-    /// again, before the page hears the answer.
-    private static func saveTwiceWhileBusy(typing: String) throws -> String {
-        "(function () { \(commandS) \(busy) \(mainEditor).getModel().setValue(\(try literal(typing))); \(commandS) })()"
-    }
-
-    /// `text` typed once the page has been busy.
-    private static func typeWhileBusy(_ text: String) throws -> String {
-        "(function () { \(busy) \(mainEditor).getModel().setValue(\(try literal(text))); })()"
+    /// Stop Swift's replies at the requested message, keeping their delivery order.
+    private func holdReply(_ type: String, in webView: WKWebView, trigger: () throws -> Void) throws {
+        UIFlowHarness.run("""
+            (() => {
+                const bridge = window.niruxBridge;
+                const handle = bridge.handle;
+                bridge.handle = json => {
+                    const message = typeof json === 'string' ? JSON.parse(json) : json;
+                    if (message.type !== \(try Self.literal(type))) return handle(json);
+                    const held = [json];
+                    bridge.handle = next => { held.push(next); };
+                    window.releaseEditorReplies = () => {
+                        bridge.handle = handle;
+                        delete window.releaseEditorReplies;
+                        held.forEach(handle);
+                    };
+                };
+            })()
+            """, in: webView)
+        try trigger()
+        UIFlowHarness.waitForAnswer("the page to receive \(type)", to: "typeof window.releaseEditorReplies", in: webView) {
+            $0 == "function"
+        }
     }
 
     /// The page drops Save All requests, as a script that threw would.
