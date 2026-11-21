@@ -15,11 +15,12 @@ final class WaitingTaskFlowTests: XCTestCase {
     }
 
     private func start(
-        _ title: String, after: String, template: String? = nil, lead: UIFlowHarness.Lead, in harness: UIFlowHarness
+        _ title: String, after: String, template: String? = nil, repo: String? = nil, lead: UIFlowHarness.Lead, in harness: UIFlowHarness
     ) throws -> WorkspaceState {
         var arguments = ["description": title]
         arguments["after"] = after
         arguments["template"] = template
+        arguments["repo"] = repo
         let result = try harness.callLeadTool(LeadTools.startTask, arguments, lead: lead)
         XCTAssertFalse(result.isError, "\(title): \(result.text)")
         return try XCTUnwrap(harness.shell.workspaces.first { $0.title == title })
@@ -91,7 +92,11 @@ final class WaitingTaskFlowTests: XCTestCase {
             let shell = harness.shell
             let lead = try harness.makeLead()
             let upstream = try upstreamTask("Add accounts", lead: lead, in: harness)
-            let task = try start("List accounts", after: upstream.title, lead: lead, in: harness)
+            var spaces = shell.profiles
+            let space = try XCTUnwrap(spaces.firstIndex { $0.id == lead.space })
+            spaces[space].anchors.append(.init(kind: .gitRepository(commonDir: harness.root + "/offline/.git"), name: "offline"))
+            shell.workspaceStore.replaceProfiles(spaces, activeProfileID: lead.space)
+            let task = try start("List accounts", after: upstream.title, repo: "offline", lead: lead, in: harness)
             var state = try XCTUnwrap(Persistence.load())
             let index = try XCTUnwrap(state.workspaces.firstIndex { $0.id == task.id })
             state.workspaces[index].mergeWaits?[0].startingBranch = "feat/list-accounts"
@@ -102,9 +107,7 @@ final class WaitingTaskFlowTests: XCTestCase {
             XCTAssertTrue(restored.waitingStart?.failure?.contains("feat/list-accounts") == true)
             XCTAssertEqual(count, harness.agentLaunches.count)
             XCTAssertNotNil(try XCTUnwrap(Persistence.load()).workspaces.first { $0.id == task.id }?.mergeWaits?.first?.failure)
-            var spaces = shell.profiles
-            let space = try XCTUnwrap(spaces.firstIndex { $0.id == lead.space })
-            spaces[space].anchors = []
+            spaces[space].anchors.removeAll { $0.name == "offline" }
             shell.workspaceStore.replaceProfiles(spaces, activeProfileID: lead.space)
             shell.startWaitingTask(restored)
             XCTAssertTrue(restored.waitingStart?.failure?.contains("left the space") == true)

@@ -81,15 +81,17 @@ extension NiruxShellView {
             )
         }
         let agent = defaultTaskAgent(forSpace: space.id)
+        // A queued start needs only the template and anchor. A folder anchor must still be checked for a repository.
+        let folderToRead = after != nil && repository?.isFolder == false ? nil : repository?.folder
         Self.readNewTaskInfo(
-            spaceID: space.id, folder: repository?.folder, anchors: space.anchors, stateDirectory: Persistence.stateDirectory
+            spaceID: space.id, folder: folderToRead, anchors: space.anchors, stateDirectory: Persistence.stateDirectory
         ) { [weak self] info in
             guard let self else { return }
             if let after {
                 guard self.leadWorkspace(inSpace: space.id)?.id == parent.workspaceID else {
                     return answer("The space’s Lead changed before the task could be queued.", true)
                 }
-                guard let repository, info.target != nil else { return answer("A waiting task needs a repository.", true) }
+                guard let repository, !repository.isFolder || info.target != nil else { return answer("A waiting task needs a repository.", true) }
                 let template = info.templates.first { $0.name.caseInsensitiveCompare(templateName ?? "") == .orderedSame }
                 if let templateName, template == nil { return answer("No template named “\(templateName)”.", true) }
                 let pending = MergeWait.PendingStart(description: description, repositoryKey: repository.key,
