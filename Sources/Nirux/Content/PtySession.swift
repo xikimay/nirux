@@ -498,6 +498,11 @@ final class PtySession: @unchecked Sendable {
         state.machine.noteQuestion(question, in: message, endingTurnAt: turnEndedAt, seen: seen)
     }
 
+    /// See `AgentStatusMachine.mayNoteQuestion`.
+    func mayNoteAgentQuestion(endingTurnAt turnEndedAt: TimeInterval) -> Bool {
+        state.machine.mayNoteQuestion(endingTurnAt: turnEndedAt)
+    }
+
     /// See `AgentStatusMachine.noteQuestionSeen`.
     func noteAgentQuestionSeen() {
         state.machine.noteQuestionSeen()
@@ -519,6 +524,14 @@ final class PtySession: @unchecked Sendable {
     /// its agent: the user's, or a Mission message (2.1.328 sends no mark,
     /// so every prompt). Nil before one.
     var agentLastUserPromptAt: TimeInterval? { state.machine.lastUserPromptAt }
+
+    /// See `AgentStatusMachine.lastPromptTyper`.
+    var agentLastPromptTyper: AgentStatusMachine.PromptTyper { state.machine.lastPromptTyper }
+
+    /// See `AgentStatusMachine.mayAskParent`.
+    func mayAskParent(endingTurnAt turnEndedAt: TimeInterval) -> Bool {
+        state.machine.mayAskParent(endingTurnAt: turnEndedAt)
+    }
 
     /// See `AgentStatusMachine.isCurrentTurnEnd`.
     func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
@@ -1312,8 +1325,9 @@ final class PtySession: @unchecked Sendable {
     /// Send raw bytes directly to the PTY, bypassing ghostty.
     /// Used for keys that ghostty's inMemory backend doesn't route correctly
     /// (e.g. Enter when Claude Code enables kitty keyboard protocol).
-    func sendRaw(_ data: Data) {
-        state.noteTypedInput(data)
+    /// `typedByNirux`: a message Nirux types itself, not for the user.
+    func sendRaw(_ data: Data, typedByNirux: Bool = false) {
+        state.noteTypedInput(data, byNirux: typedByNirux)
         state.writeToPty(data)
     }
 
@@ -1325,9 +1339,9 @@ final class PtySession: @unchecked Sendable {
         return first != 0x1B || data.starts(with: [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]) // ESC[200~
     }
 
-    func sendRaw(_ string: String) {
+    func sendRaw(_ string: String, typedByNirux: Bool = false) {
         if let data = string.data(using: .utf8) {
-            sendRaw(data)
+            sendRaw(data, typedByNirux: typedByNirux)
         }
     }
 
@@ -1575,9 +1589,9 @@ private final class PtyState: @unchecked Sendable {
     /// an old URL — at most one proposal per port, and only if listening.
     private var hasTypedInput = false
 
-    func noteTypedInput(_ data: Data) {
+    func noteTypedInput(_ data: Data, byNirux: Bool = false) {
         guard data != Self.redrawNudge else { return }
-        machine.noteKeystroke(now: Date(), keys: data)
+        machine.noteKeystroke(now: Date(), keys: data, byNirux: byNirux)
         hasTypedInput = true
     }
 
