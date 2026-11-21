@@ -621,11 +621,12 @@ final class DailyPassTests: XCTestCase {
     func testAGreenMergeablePullRequestNobodyMergesIsWaiting() {
         var unnamed = task("Unnamed", lastTurn: now - day - 2 * hour, pullRequest: pullRequest(base: "feat/parent"))
         unnamed.repositoryBase = nil
-        let changes = PRInfo(
-            number: 640, state: "OPEN", isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: "CHANGES_REQUESTED",
-            mergeable: "MERGEABLE", url: "https://github.com/acme/app/pull/640", additions: nil, deletions: nil, changedFiles: nil,
-            autoMerges: true
-        )
+        let pull = { (review: String?, autoMerges: Bool) in
+            PRInfo(
+                number: 640, state: "OPEN", isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: review, mergeable: "MERGEABLE",
+                url: "https://github.com/acme/app/pull/640", additions: nil, deletions: nil, changedFiles: nil, autoMerges: autoMerges
+            )
+        }
         let tasks = [
             task("Green", lastTurn: now - day - hour, pullRequest: pullRequest()), unnamed,
             task("Unchecked", lastTurn: now - day - 3 * hour, pullRequest: pullRequest(checks: nil)),
@@ -635,7 +636,8 @@ final class DailyPassTests: XCTestCase {
             task("Draft", lastTurn: now - 3 * day - 60, pullRequest: pullRequest(draft: true)),
             task("Conflict", lastTurn: now - 3 * day - 120, pullRequest: pullRequest(mergeable: "CONFLICTING")),
             task("Stacked", lastTurn: now - 3 * day - 180, pullRequest: pullRequest(base: "feat/parent")),
-            task("Changes", lastTurn: now - 3 * day - 240, pullRequest: changes)
+            task("Changes", lastTurn: now - 3 * day - 240, pullRequest: pull("CHANGES_REQUESTED", false)),
+            task("Auto", lastTurn: now - 3 * day - 300, pullRequest: pull(nil, true))
         ]
         let move = "→ tell it what comes next, or close_task if it was dropped"
         let waiting = "green and mergeable, unmerged"
@@ -644,8 +646,10 @@ final class DailyPassTests: XCTestCase {
                 + "→ ask the user to merge it",
             "- “Unnamed” · branch feat/unnamed · PR #640 \(waiting) · last activity 01-14 06:00 (a turn), 1 d 2 h ago → ask the user to merge it",
             "- “Green” · branch feat/green · PR #640 \(waiting) · last activity 01-14 07:00 (a turn), 1 d 1 h ago → ask the user to merge it",
-            "- “Changes” · branch feat/changes · PR #640 open, checks green, changes requested, set to merge by itself · "
-                + "quiet: last activity 01-12 07:56 (a turn), 3 d ago \(move)",
+            "- “Auto” · branch feat/auto · PR #640 open, checks green, set to merge by itself · quiet: last activity 01-12 07:55 (a turn), "
+                + "3 d ago \(move)",
+            "- “Changes” · branch feat/changes · PR #640 open, checks green, changes requested · quiet: last activity 01-12 07:56 (a turn), "
+                + "3 d ago \(move)",
             "- “Stacked” · branch feat/stacked · PR #640 open, checks green, on feat/parent · quiet: last activity 01-12 07:57 (a turn), "
                 + "3 d ago \(move)",
             "- “Conflict” · branch feat/conflict · PR #640 open, checks green, conflicting · quiet: last activity 01-12 07:58 (a turn), "

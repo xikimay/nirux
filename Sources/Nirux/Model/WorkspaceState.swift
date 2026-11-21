@@ -640,15 +640,17 @@ extension WorkspaceState {
     @discardableResult
     func recordAgentHookActivity(_ event: AgentHookEvent) -> Bool {
         switch event.name {
-        // Claude's reminder of a turn already over, and its compactions
-        // (mostly its own, while idle): the card's age stays the agent's
-        // last real work.
+        // Claude's reminder of a turn already over, its compactions (mostly
+        // its own, while idle), a session resumed (as Nirux restores them
+        // at launch) or ended: the card's age stays the agent's last real
+        // work. A new session's start is work beginning.
         case .notification where event.notificationType == "idle_prompt",
-             .sessionStart where event.source == "compact":
+             .sessionStart where event.source == "compact" || event.source == "resume",
+             .sessionEnd:
             return false
         case .stop, .turnComplete:
             return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
-        case .notification, .permissionRequest, .sessionStart, .sessionEnd, .userPromptSubmit, .stopFailure:
+        case .notification, .permissionRequest, .sessionStart, .userPromptSubmit, .stopFailure:
             return recordAgentActivity(at: event.timestamp, automaticSummary: nil)
         case .preToolUse, .postToolUse, .permissionDenied, .subagentStop, .approvalResolved:
             return false

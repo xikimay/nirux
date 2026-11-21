@@ -98,8 +98,9 @@ worktree or a task folder). The Lead's own tasks always count.
 **Activity.** A task's last activity is the latest of these three. Each
 comes from a source Nirux already has:
 - a turn: `WorkspaceState.lastActivityAt`, the time of its last agent hook
-  event. It is saved with the workspace, and it is the age the sidebar row
-  shows;
+  event that is work. It is saved with the workspace, and it is the age the
+  sidebar row shows. A session resumed (Nirux restores them at launch) or
+  ended doesn't move it; a new session's start does;
 - a commit: the committer date of its newest commit that isn't on its
   repository's base branch (`git log -1 --format=%ct HEAD --not
   <remote>/<base>`), so the base's own commits don't count. HEAD's date
@@ -176,10 +177,12 @@ description gains "the tasks you may have forgotten".
 **Lane 2.** It changes when the daily line is typed into the Lead's terminal,
 and it adds git reads to the pass.
 
-**Not covered by a test.** Two pieces of glue in `dailyPassTasks` and
-`readDailyPassSources` have no test: the agent's wait on the user (read by
-list_tasks' `agentReadings`), and the base-branch read (the flow harness's
-repository has no GitHub remote). The functions they feed are tested.
+**Not covered by a test.** Some glue in `dailyPassTasks` and
+`readDailyPassSources` has no test of its own: the agent's wait on the user
+(list_tasks' `agentReadings`), the Mission question it waits on, its parent
+task, whether it has a folder of its own, and the base-branch read (the flow
+harness's repository has no GitHub remote). The functions they feed are
+tested.
 
 ## Later
 

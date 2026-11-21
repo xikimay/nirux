@@ -811,6 +811,8 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(exportLine.contains(finished) && exportLine.hasSuffix(" → close_task"), exportLine)
             for title in ["A shell", "Archived fix"] { XCTAssertFalse(day.text.contains("- “\(title)” ·"), day.text) }
             XCTAssertEqual(DailyPassState.load(spaceID: lead.space).listedTasks?.count, 2, "the next pass knows what this one listed")
+            let again = try call(LeadTools.dailyPass, lead: lead, in: harness).text
+            XCTAssertTrue(again.contains("Listed last time too, nothing changed since:\n- “"), again)
             let read = try XCTUnwrap(DailyPassState.load(spaceID: lead.space).end)
             XCTAssertEqual(read, Date().timeIntervalSince1970, accuracy: 60)
         }

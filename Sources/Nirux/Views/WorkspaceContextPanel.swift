@@ -49,7 +49,7 @@ final class WorkspaceContextPanel {
     private var nextStepField: NSTextField?
     private var blockerField: NSTextField?
     private var contextHelpLabel: NSTextField?
-    private var liveContextLabel: NSTextField?
+    private(set) var liveContextLabel: NSTextField?
     private var editorUndoStacks: [EditorUndoStack] = []
 
     private static let size = NSSize(width: 660, height: 640)
