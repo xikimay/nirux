@@ -637,10 +637,9 @@ final class BoardStagesFactsTests: XCTestCase {
         var green = check("test", .success)
         green.conclusion = "SUCCESS"
         func report(_ pr: ProjectBoard.PullRequest?, read: Date? = nil) throws -> BoardStages.CheckTimeout {
-            let repository = BoardStages.RepositoryReading(
-                id: "widgets", rows: [row(pullRequest: pr)], requiredChecks: ["test"], baseBranch: "main"
-            )
-            return try XCTUnwrap(BoardStages.checkTimeout(in: state, repository: repository, currentRead: read, now: now))
+            try XCTUnwrap(BoardStages.checkTimeout(
+                in: state, rows: [row(pullRequest: pr)], required: ["test"], baseBranch: "main", currentRead: read, now: now
+            ))
         }
         let pr = pullRequest(708, checks: [green], oid: updated)
         let passed = try report(pr, read: now)

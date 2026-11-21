@@ -218,16 +218,18 @@ extension ProjectBoardController {
         let readOnly = isExtra(section)
         let rows = readOnly ? rows.filter { !$0.workspaces.isEmpty } : rows
         let reads = reads[section.id]
-        var reading = BoardStages.RepositoryReading(
-            id: section.id, rows: rows, readsPullRequests: reads?.openPullRequests != nil,
-            requiredChecks: section.config?.requiredChecks ?? [], baseBranch: reads?.baseBranch ?? section.config?.baseBranch,
-            queue: inputs.queues[section.id], merged: reads?.mergedPullRequests ?? [], heads: heads, cleaningUp: inputs.cleaningUp,
-            gitHub: reads?.gitHub
+        let required = section.config?.requiredChecks ?? []
+        let base = reads?.baseBranch ?? section.config?.baseBranch
+        let timeout = BoardStages.checkTimeout(
+            in: inputs.queues[section.id], rows: rows, required: required, baseBranch: base,
+            currentRead: reads.flatMap { $0.errors[.openPullRequests] == nil && $0.pullRequestsAreFresh(now: now) ? $0.pullRequestsReadAt : nil }, now: now
         )
-        if let state = reading.queue {
-            let currentRead = reads.flatMap { $0.errors[.openPullRequests] == nil && $0.pullRequestsAreFresh(now: now) ? $0.pullRequestsReadAt : nil }
-            reading.checkTimeout = BoardStages.checkTimeout(in: state, repository: reading, currentRead: currentRead, now: now)
-        }
+        let reading = BoardStages.RepositoryReading(
+            id: section.id, rows: rows, readsPullRequests: reads?.openPullRequests != nil,
+            requiredChecks: required, baseBranch: base,
+            queue: inputs.queues[section.id], merged: reads?.mergedPullRequests ?? [], heads: heads, cleaningUp: inputs.cleaningUp,
+            gitHub: reads?.gitHub, checkTimeout: timeout
+        )
         let facts = BoardStages.sectionFacts(reading, tasks: inputs.tasks, readings: inputs.readings, parents: inputs.parents, lead: inputs.lead)
         Self.noteFolders(of: facts, in: &targets)
         var shown = BoardStagesView.Section(

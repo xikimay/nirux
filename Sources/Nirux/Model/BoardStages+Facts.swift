@@ -46,7 +46,6 @@ extension BoardStages {
         var requiredChecks: [String] = []
         var baseBranch: String?
         var queue: ProjectBoard.QueueState?
-        var checkTimeout: CheckTimeout?
         /// The merged pull requests read, with their title and merge date.
         var merged: [ProjectBoard.PullRequest] = []
         /// Each worktree's HEAD as last listed, by its path.
@@ -56,6 +55,7 @@ extension BoardStages {
         /// The GitHub repository its pull requests are read from; nil
         /// without one.
         var gitHub: GitHubRepository?
+        var checkTimeout: CheckTimeout?
     }
 
     /// The facts of a section's lines.
