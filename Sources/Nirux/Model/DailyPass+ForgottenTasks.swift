@@ -39,9 +39,10 @@ extension DailyPass {
         var pullRequest: PRInfo?
         /// When Nirux last read its pull request (or that it has none).
         var pullRequestReadAt: TimeInterval?
-        /// The window's merged list has its pull request: newer than the
-        /// sidebar's, which stops reading while Nirux is in the background.
-        var mergedInWindow = false
+        /// GitHub's merged list has its pull request (`RepositoryReport.mergedLately`):
+        /// newer than the sidebar's, which stops reading while Nirux is in
+        /// the background.
+        var mergedLately = false
         /// Its repository's base branch (`<remote>/HEAD`), when read.
         var repositoryBase: String?
         /// Its last agent hook event (`WorkspaceState.lastActivityAt`).
@@ -124,7 +125,7 @@ extension DailyPass {
         // Not its own to close: its parent's, else the user's.
         let owner = task.notYours.map { _ in task.parentTitle.map { "tell “\(MissionPromptText.quoted($0))”, the task that started it" } ?? "ask the user" }
         let pull = task.pullRequest
-        if let pull, task.mergedInWindow || pull.state == "MERGED" {
+        if let pull, task.mergedLately || pull.state == "MERGED" {
             return entry(.closable, "PR #\(pull.number) merged", "close_task")
         }
         if let pull, pull.state == "CLOSED" {
@@ -217,18 +218,28 @@ extension DailyPass {
         return times.withLock { found in folders.indices.map { found[$0] } }
     }
 
+    /// From when GitHub's merged list must reach for the tasks' pull
+    /// requests: the oldest read of an open one, when it came before the
+    /// window, a week back at most; nil when the window covers them.
+    static func mergedSince(_ tasks: [TaskActivity], window: Window) -> TimeInterval? {
+        guard let oldest = tasks.compactMap({ $0.pullRequest?.state == "OPEN" ? $0.pullRequestReadAt : nil }).min(),
+              oldest < window.start
+        else { return nil }
+        return max(oldest, window.end - DailyPassState.longestWindow)
+    }
+
     /// The tasks read on the main thread, with what was read of them off
     /// it: each one's last commit (`Reads.commits`, in order), its
-    /// repository's base branch, and whether the window's merged list has
-    /// its pull request.
+    /// repository's base branch, and whether GitHub's merged list has its
+    /// pull request.
     static func tasks(_ tasks: [(activity: TaskActivity, repository: String?)], with reads: Reads) -> [TaskActivity] {
         zip(tasks, reads.commits).map { task, commit in
             var activity = task.activity
             activity.lastCommitAt = commit
             activity.repositoryBase = task.repository.flatMap { reads.bases[$0]?.branch }
             if let pull = activity.pullRequest, let repository = BoardStages.TaskReading.repository(ofPullRequestAt: pull.url) {
-                activity.mergedInWindow = reads.repositories.contains { report in
-                    report.name.lowercased() == "\(repository.owner)/\(repository.name)" && report.merged.contains { $0.number == pull.number }
+                activity.mergedLately = reads.repositories.contains { report in
+                    report.name.lowercased() == "\(repository.owner)/\(repository.name)" && report.mergedLately.contains(pull.number)
                 }
             }
             return activity

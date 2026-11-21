@@ -579,7 +579,7 @@ final class DailyPassTests: XCTestCase {
         var merged = task("Glass", lastTurn: now - 2 * hour, pullRequest: pullRequest("MERGED"))
         merged.notYours = "not yours (started by the user)"
         var mergedOvernight = task("Overnight", lastTurn: now - 3 * hour, pullRequest: pullRequest())
-        mergedOvernight.mergedInWindow = true
+        mergedOvernight.mergedLately = true
         let closed = task("Dropped", lastTurn: nil, pullRequest: pullRequest("CLOSED"))
         var finished = task("Report", lastTurn: now - day - 10 * 60)
         finished.resultAt = now - day - 20 * 60
@@ -755,6 +755,8 @@ final class DailyPassTests: XCTestCase {
         let read = DailyPass.digest(busy, timeZone: utc)
         XCTAssertEqual(read.readUntil, now, "no fact of the window")
         XCTAssertEqual(read.listed.count, DailyPass.maxItems)
+        busy.reported = Set(DailyPass.forgottenTasks(busy.tasks, now: now).map(\.key))
+        XCTAssertEqual(DailyPass.digest(busy, timeZone: utc).listed.count, DailyPass.maxItems + 1, "left out for room, still known")
         let start = try XCTUnwrap(read.text.range(of: "## Tasks you may have forgotten"))
         let section = String(read.text[start.lowerBound...]).components(separatedBy: "\n\n")[0]
         XCTAssertTrue(section.contains("- “T0” ·") && !section.contains("“T\(DailyPass.maxItems)”"), section)
@@ -764,14 +766,13 @@ final class DailyPassTests: XCTestCase {
     }
 
     /// What is read off the main thread reaches its task: its last commit,
-    /// by order, its repository's base branch, and whether the window's
-    /// merged list of its repository has its pull request.
+    /// by order, its repository's base branch, and whether GitHub's merged
+    /// list of its repository has its pull request.
     func testWhatIsReadOffTheMainThreadReachesItsTask() {
         var report = DailyPass.RepositoryReport(name: "Acme/App")
-        report.merged = [DailyPass.MergedPullRequest(
-            number: 640, title: "T", branch: "feat/a", mergedAt: now - hour, why: nil, roundCommits: [], rounds: 0
-        )]
-        let other = DailyPass.RepositoryReport(name: "acme/other", merged: report.merged)
+        report.mergedLately = [640]
+        var other = DailyPass.RepositoryReport(name: "acme/other")
+        other.mergedLately = [640]
         let reads = DailyPass.Reads(
             repositories: [other, report], findings: [], commits: [now - day, nil],
             bases: ["/w/app": DailyPass.Base(remote: "origin", branch: "trunk")]
@@ -787,7 +788,41 @@ final class DailyPassTests: XCTestCase {
         XCTAssertEqual(read.map(\.id), ["A", "B"])
         XCTAssertEqual(read.map(\.lastCommitAt), [now - day, nil])
         XCTAssertEqual(read.map(\.repositoryBase), ["trunk", nil])
-        XCTAssertEqual(read.map(\.mergedInWindow), [true, false])
+        XCTAssertEqual(read.map(\.mergedLately), [true, false])
+    }
+
+    /// GitHub's merged list reaches back to the oldest read of a task's open
+    /// pull request when that came before the window (a week at most), by
+    /// numbers alone; the merged section keeps the window's.
+    func testTheMergedListReachesTheOldestReadOfAnOpenPullRequest() {
+        var open = task("Open", lastTurn: nil, pullRequest: pullRequest())
+        open.pullRequestReadAt = now - 3 * day
+        var merged = task("Merged", lastTurn: nil, pullRequest: pullRequest("MERGED"))
+        merged.pullRequestReadAt = now - 6 * day
+        XCTAssertEqual(DailyPass.mergedSince([open, merged], window: window), now - 3 * day)
+        open.pullRequestReadAt = now - 30 * day
+        XCTAssertEqual(DailyPass.mergedSince([open], window: window), now - 7 * day)
+        open.pullRequestReadAt = now - hour
+        XCTAssertNil(DailyPass.mergedSince([open], window: window), "the window covers it")
+
+        let pulls = Data("""
+            [{"number": 2, "title": "In", "headRefName": "b", "mergedAt": "2027-01-15T07:00:00Z"}]
+            """.utf8)
+        final class Calls: @unchecked Sendable { var numbers: [[String]] = [] }
+        let calls = Calls()
+        let read: DailyPass.GitHubRead = { arguments in
+            if arguments.contains("number") {
+                calls.numbers.append(arguments)
+                return .success(Data(#"[{"number": 7}, {"number": 2}]"#.utf8))
+            }
+            return .success(arguments.first == "pr" ? pulls : Data("[]".utf8))
+        }
+        let reached = DailyPass.readGitHub(["acme/app"], window: window, mergedSince: now - 3 * day, read: read)
+        XCTAssertEqual(reached.first?.merged.map(\.number), [2])
+        XCTAssertEqual(reached.first?.mergedLately, [2, 7])
+        XCTAssertEqual(calls.numbers.first?.contains("merged:>=\(DailyPass.isoTime(now - 3 * day)) sort:updated-desc"), true)
+        XCTAssertEqual(DailyPass.readGitHub(["acme/app"], window: window, read: read).first?.mergedLately, [2])
+        XCTAssertEqual(calls.numbers.count, 1, "no reach without a stale read")
     }
 
     /// A folder's newest commit off its base branch by its committer date

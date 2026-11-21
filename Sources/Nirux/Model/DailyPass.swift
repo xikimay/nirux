@@ -66,6 +66,10 @@ enum DailyPass {
         /// in one counts for its pull requests.
         var folders: [String] = []
         var merged: [MergedPullRequest] = []
+        /// Every pull request merged since the window's start, or since the
+        /// oldest read of a task's open one when that came first: what a
+        /// sidebar that stopped reading doesn't know yet.
+        var mergedLately: Set<Int> = []
         var reruns: [Rerun] = []
         /// Why part of it couldn't be read.
         var problems: [String] = []
@@ -142,6 +146,19 @@ enum DailyPass {
         ]
     }
 
+    /// Numbers only: a long reach costs GitHub little.
+    static func mergedNumbersArguments(repository: String, since: TimeInterval) -> [String] {
+        [
+            "pr", "list", "--repo", repository, "--state", "merged", "--search", "merged:>=\(isoTime(since)) sort:updated-desc",
+            "--json", "number", "--limit", "500"
+        ]
+    }
+
+    /// Nil when `data` isn't a JSON list.
+    static func mergedNumbers(_ data: Data) -> [Int]? {
+        ((try? JSONSerialization.jsonObject(with: data)) as? [Any]).map { list in list.compactMap { ($0 as? [String: Any])?["number"] as? Int } }
+    }
+
     static func runArguments(repository: String, since: TimeInterval) -> [String] {
         [
             "run", "list", "--repo", repository, "--created", ">=" + isoTime(since - rerunReach),
@@ -181,16 +198,18 @@ enum DailyPass {
     /// Each repository's pull requests merged and runs rerun in the
     /// window, the repositories read at once: the call's wait doesn't grow
     /// with their number. Never on the main thread.
-    static func readGitHub(_ repositories: [String], window: Window, read: GitHubRead) -> [RepositoryReport] {
+    static func readGitHub(
+        _ repositories: [String], window: Window, mergedSince: TimeInterval? = nil, read: GitHubRead
+    ) -> [RepositoryReport] {
         let reports = OSAllocatedUnfairLock(initialState: [Int: RepositoryReport]())
         DispatchQueue.concurrentPerform(iterations: repositories.count) { index in
-            let report = readGitHub(repositories[index], window: window, read: read)
+            let report = readGitHub(repositories[index], window: window, mergedSince: mergedSince, read: read)
             reports.withLock { $0[index] = report }
         }
         return reports.withLock { found in repositories.indices.compactMap { found[$0] } }
     }
 
-    private static func readGitHub(_ name: String, window: Window, read: GitHubRead) -> RepositoryReport {
+    private static func readGitHub(_ name: String, window: Window, mergedSince: TimeInterval?, read: GitHubRead) -> RepositoryReport {
         var report = RepositoryReport(name: name)
         func failed(_ what: String, _ failure: ReadFailure) {
             report.problems.append("\(what): \(failure.message)")
@@ -199,11 +218,19 @@ enum DailyPass {
         switch read(mergedArguments(repository: name, since: window.start)).map(mergedPullRequests) {
         case .success(let merged?):
             report.merged = merged.filter { window.contains($0.mergedAt) }
+            report.mergedLately = Set(merged.map(\.number))
             if merged.count >= mergedLimit {
                 report.problems.append("only the \(mergedLimit) most recently updated merged pull requests were read")
             }
         case .success(nil): failed("merged pull requests", ReadFailure(message: "gh’s answer wasn’t its JSON"))
         case .failure(let failure): failed("merged pull requests", failure)
+        }
+        if let mergedSince, mergedSince < window.start {
+            switch read(mergedNumbersArguments(repository: name, since: mergedSince)).map(mergedNumbers) {
+            case .success(let numbers?): report.mergedLately.formUnion(numbers)
+            case .success(nil): report.problems.append("pull requests merged before the window: gh’s answer wasn’t its JSON")
+            case .failure(let failure): report.problems.append("pull requests merged before the window: \(failure.message)")
+            }
         }
         switch read(runArguments(repository: name, since: window.start)).map(reruns) {
         case .success(let reruns?): report.reruns = reruns.filter { window.contains($0.startedAt) }
@@ -601,7 +628,9 @@ enum DailyPass {
         let again = shown.filter { !isNew($0) }.map(\.line)
         if !again.isEmpty { lines += ["Listed last time too, nothing changed since:"] + again }
         let text = section("Tasks you may have forgotten", lines, total: lines.count + forgotten.count - shown.count)
-        return Part(text: text, listed: shown.map(\.key))
+        // Listed last time and left out now for room: still known.
+        let shownKeys = Set(shown.map(\.key))
+        return Part(text: text, listed: shown.map(\.key) + forgotten.filter { !isNew($0) && !shownKeys.contains($0.key) }.map(\.key))
     }
 
     /// The kinds seen in the window, with where else they showed up in

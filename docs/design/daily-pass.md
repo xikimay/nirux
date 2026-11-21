@@ -111,7 +111,9 @@ comes from a source Nirux already has:
 
 **Pull request state.** The sidebar's `prInfo`. It stops refreshing while
 Nirux is in the background, which is when the pass runs, so a pull request
-the window's merged list (the pass's own gh read) has counts as merged.
+GitHub's merged list has counts as merged: the pass's own read of the
+window, reaching back by numbers alone to the oldest read of a task's open
+pull request when that came first (a week at most).
 "No pull request" needs a read that found none
 (`PRFollowUpCenter.readAt`); a task never read says so.
 
@@ -156,7 +158,8 @@ keeps the keys the last read listed (`listedTasks`: task, kind, last
 activity). So a task that stays forgotten doesn't bring a daily line every
 day. Every digest still lists all forgotten tasks, the "Nothing happened"
 one too; those listed last time come after the others, under "Listed last
-time too, nothing changed since". The section is a snapshot of now, not a
+time too, nothing changed since". One listed last time but left out now for
+room stays known. The section is a snapshot of now, not a
 fact of the window: it stays outside `readUntil`, and it lists the
 section limit's count at most.
 
@@ -182,7 +185,8 @@ and it adds git reads to the pass.
 (list_tasks' `agentReadings`), the Mission question it waits on, its parent
 task, whether it has a folder of its own, and the base-branch read (the flow
 harness's repository has no GitHub remote). The functions they feed are
-tested.
+tested. A session Nirux relaunches fresh (one never prompted) still counts
+its start as work.
 
 ## Later
 

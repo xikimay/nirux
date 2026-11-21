@@ -98,7 +98,8 @@ extension NiruxShellView {
         let tasks = dailyPassTasks(in: space, lead: lead)
         let reported = Set(dailyPassState(inSpace: space.id).listedTasks ?? [])
         let read = tasks.map { (folder: $0.folder, repository: $0.repository) }
-        Self.readDailyPassSources(folders: folders, tasks: read, spaceID: space.id, window: window) { reads in
+        let mergedSince = DailyPass.mergedSince(tasks.map(\.activity), window: window)
+        Self.readDailyPassSources(folders: folders, tasks: read, spaceID: space.id, window: window, mergedSince: mergedSince) { reads in
             var facts = base
             facts.findings = reads.findings
             facts.repositories = reads.repositories
@@ -302,12 +303,14 @@ extension NiruxShellView {
     /// repositories' base branches and its tasks' last commits off them.
     nonisolated private static func readDailyPassSources(
         folders: [String], tasks: [(folder: String, repository: String?)], spaceID: String, window: DailyPass.Window,
-        completion: @escaping @MainActor @Sendable (DailyPass.Reads) -> Void
+        mergedSince: TimeInterval?, completion: @escaping @MainActor @Sendable (DailyPass.Reads) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
             let reads = folders.map { ($0, GitHubBaseRemote.read(at: $0)) }
             let remotes = DailyPass.repositories(from: reads)
-            var reports = DailyPass.readGitHub(remotes.gitHub.map(\.name), window: window, read: DailyPass.installedGitHub)
+            var reports = DailyPass.readGitHub(
+                remotes.gitHub.map(\.name), window: window, mergedSince: mergedSince, read: DailyPass.installedGitHub
+            )
             for index in reports.indices { reports[index].folders = remotes.gitHub[index].folders }
             reports += remotes.unread
             let findings = ReviewFindings.lines.queue.sync {
