@@ -94,6 +94,7 @@ struct ColumnInfo: Hashable {
             && lhs.dialog == rhs.dialog
             && lhs.circling == rhs.circling
             && lhs.waitingMessages == rhs.waitingMessages
+            && lhs.isLeadTerminal == rhs.isLeadTerminal
     }
 
     func hash(into hasher: inout Hasher) {
@@ -121,6 +122,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(dialog)
         hasher.combine(circling)
         hasher.combine(waitingMessages)
+        hasher.combine(isLeadTerminal)
     }
 }
 

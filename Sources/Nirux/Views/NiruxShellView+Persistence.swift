@@ -101,6 +101,7 @@ extension NiruxShellView {
                     claimedSessionIDs: &claimedSessionIDs
                 )
             }
+            if isLead { workspace.leadAgentUUID = persistedWS.leadAgentUUID ?? workspace.columns.first { $0.pty != nil }?.agentUUID }
             workspace.focusedIndex = min(persistedWS.focusedColumnIndex, max(workspace.columns.count - 1, 0))
             wireWorkspace(workspace)
             workspaces.append(workspace)
@@ -378,6 +379,7 @@ extension NiruxShellView {
                     // One closing is no longer the Lead: a new one may
                     // start before it goes.
                     isLead: workspace.isLead && !workspace.isClosing,
+                    leadAgentUUID: workspace.isLead && !workspace.isClosing ? workspace.leadAgentUUID : nil,
                     reportsToLead: workspace.reportsToLead,
                     reportsToTask: workspace.reportsToTask,
                     taskFolder: workspace.taskFolder)

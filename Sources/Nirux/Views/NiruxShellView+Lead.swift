@@ -179,8 +179,9 @@ extension NiruxShellView {
 }
 
 extension WorkspaceState {
-    /// A Lead's first open terminal, where its Claude runs.
+    /// A Lead's Claude column, by its agent UUID.
     var leadTerminal: ColumnState? {
-        isLead ? columns.first { $0.pty != nil && !$0.isClosing } : nil
+        guard isLead, let leadAgentUUID else { return nil }
+        return columns.first { $0.agentUUID == leadAgentUUID && !$0.isClosing }
     }
 }

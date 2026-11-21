@@ -39,9 +39,44 @@ final class LeadStaysOpenFlowTests: XCTestCase {
             harness.waitUntil("its Board to close") { workspace.columns.count == 1 }
             refuses("⌘W on its last column", columns: 1) { shell.closeActiveColumn() }
 
-            harness.alertResponses = [.alertSecondButtonReturn]
             shell.stopLead(spaceID: lead.space)
             harness.waitUntil("turned off, the Lead to close") { !shell.workspaces.contains { $0 === workspace } }
+        }
+    }
+
+    /// The Lead's Claude column keeps its role wherever columns move, and
+    /// across a relaunch; a Lead saved before the role was kept takes its
+    /// first terminal.
+    func testTheLeadsClaudeColumnKeepsItsRoleWhenColumnsMove() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let claude = try XCTUnwrap(lead.workspace.leadTerminal)
+            lead.workspace.focusedIndex = 0
+            shell.addColumn()
+            shell.moveColumn(.left)
+            let terminal = try XCTUnwrap(lead.workspace.columns.first)
+            XCTAssertFalse(terminal === claude, "a shell moved before its Claude")
+            XCTAssertIdentical(lead.workspace.leadTerminal, claude)
+            lead.workspace.focusedIndex = 1
+            shell.closeActiveColumn()
+            XCTAssertEqual(shell.toast?.message, NiruxShellView.leadStaysText)
+            XCTAssertTrue(lead.workspace.columns.contains { $0 === claude })
+
+            shell.saveState()
+            shell.restoreState()
+            var restored = try XCTUnwrap(shell.leadWorkspace(inSpace: lead.space))
+            XCTAssertEqual(restored.leadTerminal?.agentUUID, lead.agentUUID)
+            XCTAssertEqual(restored.columns.first?.agentUUID, terminal.agentUUID)
+
+            var state = try XCTUnwrap(Persistence.load())
+            let saved = try XCTUnwrap(state.workspaces.firstIndex { $0.id == lead.workspace.id })
+            XCTAssertEqual(state.workspaces[saved].leadAgentUUID, lead.agentUUID)
+            state.workspaces[saved].leadAgentUUID = nil
+            XCTAssertTrue(Persistence.save(state))
+            shell.restoreState()
+            restored = try XCTUnwrap(shell.leadWorkspace(inSpace: lead.space))
+            XCTAssertEqual(restored.leadTerminal?.agentUUID, terminal.agentUUID)
         }
     }
 

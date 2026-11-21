@@ -655,6 +655,9 @@ struct PersistedWorkspace: Codable {
     /// See `WorkspaceState.isLead`. Written only when true: a build before
     /// the Lead restores it as a plain workspace.
     var isLead: Bool
+    /// See `WorkspaceState.leadAgentUUID`. A Lead saved without it takes
+    /// its first terminal.
+    var leadAgentUUID: String?
     /// See `WorkspaceState.reportsToLead`. Written only when true.
     var reportsToLead: Bool
     /// See `WorkspaceState.reportsToTask`. Written only when true.
@@ -689,6 +692,7 @@ struct PersistedWorkspace: Codable {
         startedOutsideNirux: Bool = false,
         startedByAgent: Bool = false,
         isLead: Bool = false,
+        leadAgentUUID: String? = nil,
         reportsToLead: Bool = false,
         reportsToTask: Bool = false,
         taskFolder: String? = nil
@@ -718,6 +722,7 @@ struct PersistedWorkspace: Codable {
         self.startedOutsideNirux = startedOutsideNirux
         self.startedByAgent = startedByAgent
         self.isLead = isLead
+        self.leadAgentUUID = leadAgentUUID
         self.reportsToLead = reportsToLead
         self.reportsToTask = reportsToTask
         self.taskFolder = taskFolder
@@ -727,6 +732,7 @@ struct PersistedWorkspace: Codable {
         case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID, parentWorkspaceID, parentIsSettled
         case purpose, phase, lastSummary, lastSummaryIsManual, lastSummaryIsStatus, lastActivityAt
         case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
+        case leadAgentUUID
         case reportsToLead, reportsToTask
         case taskFolder
     }
@@ -762,6 +768,7 @@ struct PersistedWorkspace: Codable {
         startedOutsideNirux = (try? container.decodeIfPresent(Bool.self, forKey: .startedOutsideNirux)) ?? false
         startedByAgent = (try? container.decodeIfPresent(Bool.self, forKey: .startedByAgent)) ?? false
         isLead = (try? container.decodeIfPresent(Bool.self, forKey: .isLead)) ?? false
+        leadAgentUUID = (try? container.decodeIfPresent(String.self, forKey: .leadAgentUUID)) ?? nil
         reportsToLead = (try? container.decodeIfPresent(Bool.self, forKey: .reportsToLead)) ?? false
         reportsToTask = (try? container.decodeIfPresent(Bool.self, forKey: .reportsToTask)) ?? false
         // Only an absolute path: anything else is no task folder.
@@ -799,6 +806,7 @@ struct PersistedWorkspace: Codable {
         if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }
         if startedByAgent { try container.encode(true, forKey: .startedByAgent) }
         if isLead { try container.encode(true, forKey: .isLead) }
+        try container.encodeIfPresent(leadAgentUUID, forKey: .leadAgentUUID)
         if reportsToLead { try container.encode(true, forKey: .reportsToLead) }
         if reportsToTask { try container.encode(true, forKey: .reportsToTask) }
         try container.encodeIfPresent(taskFolder, forKey: .taskFolder)
