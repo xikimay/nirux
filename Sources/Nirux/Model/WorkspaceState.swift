@@ -222,6 +222,9 @@ final class WorkspaceState {
 
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
+    /// Something its task's thread keeps happened (`TaskThread`): the shell
+    /// records it when the workspace is a task.
+    var onThreadEvent: ((TaskThread.Event) -> Void)?
     /// A column's agent reported its turn over (`ColumnState.onProgramTurnOver`).
     var onProgramTurnOver: (() -> Void)?
     /// A column's terminal title changed (fires before onMetadataChanged).
@@ -325,7 +328,8 @@ extension WorkspaceState {
         }
     }
 
-    private func setContext(_ field: ContextField, _ text: String?, fromLead: Bool) {
+    private func setContext(_ field: ContextField, _ text: String?, by author: TaskThread.Author) {
+        let fromLead = author == .lead
         switch field {
         case .nextStep:
             nextStep = text
@@ -334,6 +338,29 @@ extension WorkspaceState {
             blocker = text
             blockerIsFromLead = fromLead && text != nil
         }
+        noteThread(field == .nextStep ? .nextStep : .blocker, by: author, text: text)
+    }
+
+    /// The goal (`purpose`): what the task delivers.
+    func setPurpose(_ text: String?, by author: TaskThread.Author) {
+        let value = Self.normalizedContextText(text)
+        guard value != purpose else { return }
+        purpose = value
+        noteThread(.goal, by: author, text: value)
+    }
+
+    /// A summary saved from View/Edit Context…: it stays the user's until
+    /// they clear it.
+    func setSummaryByHand(_ text: String?) {
+        let value = Self.normalizedContextText(text)
+        lastSummary = value
+        lastSummaryIsManual = value != nil
+        lastSummaryIsStatus = false
+        noteThread(.status, by: .user, text: value)
+    }
+
+    private func noteThread(_ kind: TaskThread.Kind, by author: TaskThread.Author?, text: String?, time: TimeInterval? = nil) {
+        onThreadEvent?(TaskThread.Event(time: time ?? Date().timeIntervalSince1970, kind: kind, by: author, text: text))
     }
 
     /// A field saved from View/Edit Context…: one the user changed from
@@ -343,13 +370,13 @@ extension WorkspaceState {
     func setContextByHand(_ field: ContextField, _ text: String, presented: String?) {
         let value = Self.normalizedContextText(text)
         guard value != Self.normalizedContextText(presented) else { return }
-        setContext(field, value, fromLead: false)
+        setContext(field, value, by: .user)
     }
 
     /// Clears the next step and blocker the Lead wrote.
     func clearLeadContext() {
         for field in ContextField.allCases where contextIsFromLead(field) {
-            setContext(field, nil, fromLead: false)
+            setContext(field, nil, by: .nirux)
         }
     }
 
@@ -370,7 +397,7 @@ extension WorkspaceState {
             return value == current ? .unchanged : .keptUsers(current)
         }
         guard value != current else { return .unchanged }
-        setContext(field, value, fromLead: true)
+        setContext(field, value, by: .lead)
         return value.map { .set($0) } ?? .cleared
     }
 
@@ -636,6 +663,7 @@ extension WorkspaceState {
         settledTurnStatus = turnEndedAt
         switch status {
         case .line(let line)? where !lastSummaryIsManual:
+            noteThread(.status, by: .nirux, text: line, time: turnEndedAt)
             lastSummary = line
             lastSummaryIsStatus = true
         case .unchanged?, .line?:
@@ -672,6 +700,7 @@ extension WorkspaceState {
              .sessionStart where event.source == "compact":
             return false
         case .stop, .turnComplete:
+            onThreadEvent?(TaskThread.Event(time: event.timestamp, kind: .turnEnd, detail: event.kind.rawValue))
             return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
         case .notification, .permissionRequest, .sessionStart, .sessionEnd, .userPromptSubmit, .stopFailure:
             return recordAgentActivity(at: event.timestamp, automaticSummary: nil)
