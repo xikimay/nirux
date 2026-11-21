@@ -222,6 +222,10 @@ final class ProcessSnapshot {
         return found
     }
 
+    func ownsEmitter(_ emitter: ProcessInstance, foreground: ForegroundProcess) -> Bool {
+        emitter == foreground.instance || isProcess(emitter, childOf: foreground.instance.pid)
+    }
+
     func isProcess(_ process: ProcessInstance, childOf parentPID: pid_t) -> Bool {
         instanceMap[process.pid] == process && childrenMap[parentPID]?.contains(process.pid) == true
     }

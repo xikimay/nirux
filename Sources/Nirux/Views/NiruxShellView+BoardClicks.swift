@@ -39,7 +39,9 @@ extension NiruxShellView {
         stages.onLead = { [weak self, weak board] in
             guard let self, let board else { return }
             guard let lead = self.leadWorkspace(inSpace: board.projectID) else { return self.showToast("The Lead was closed") }
-            self.focusLead(lead)
+            let columnID = board.view.stages.content?.header.lead?.columnID
+            let index = columnID.flatMap { id in lead.columns.firstIndex { $0.id == id && !$0.isClosing } }
+            if let index { self.focusWorkspace(id: lead.id, column: index) } else { self.focusLead(lead) }
         }
         stages.onOpen = { [weak self, weak board] line in
             // A pull request without a task opens nothing: its menu has what it offers.

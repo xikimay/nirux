@@ -57,6 +57,11 @@ final class PtySession: @unchecked Sendable {
         state.machine.noteCodexStatus(status, from: process, now: Date().timeIntervalSince1970)
     }
 
+    func codexStatus(of process: ProcessInstance) -> AgentProgramStatus? {
+        guard let report = state.machine.codexStatus, report.isFrom(process) else { return nil }
+        return report.status
+    }
+
     /// Whether `status` says something new: the same again (a redraw) needs
     /// no look at the process table.
     func isNewProgramStatus(_ status: AgentProgramStatus) -> Bool {
@@ -163,6 +168,11 @@ final class PtySession: @unchecked Sendable {
         state.machine.noteQuestion(question, in: message, endingTurnAt: turnEndedAt, seen: seen)
     }
 
+    /// See `AgentStatusMachine.mayNoteQuestion`.
+    func mayNoteAgentQuestion(endingTurnAt turnEndedAt: TimeInterval) -> Bool {
+        state.machine.mayNoteQuestion(endingTurnAt: turnEndedAt)
+    }
+
     /// See `AgentStatusMachine.noteQuestionSeen`.
     func noteAgentQuestionSeen() {
         state.machine.noteQuestionSeen()
@@ -184,6 +194,14 @@ final class PtySession: @unchecked Sendable {
     /// its agent: the user's, or a Mission message (2.1.328 sends no mark,
     /// so every prompt). Nil before one.
     var agentLastUserPromptAt: TimeInterval? { state.machine.lastUserPromptAt }
+
+    /// See `AgentStatusMachine.lastPromptTyper`.
+    var agentLastPromptTyper: AgentStatusMachine.PromptTyper { state.machine.lastPromptTyper }
+
+    /// See `AgentStatusMachine.mayAskParent`.
+    func mayAskParent(endingTurnAt turnEndedAt: TimeInterval) -> Bool {
+        state.machine.mayAskParent(endingTurnAt: turnEndedAt)
+    }
 
     /// See `AgentStatusMachine.isCurrentTurnEnd`.
     func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
@@ -414,7 +432,7 @@ final class PtySession: @unchecked Sendable {
         readTranscriptPrompts()
         return state.machine.resumeRefusal(
             foreground: foreground,
-            ownsEmitter: { $0 == foreground.instance || snapshot.isProcess($0, childOf: foreground.instance.pid) },
+            ownsEmitter: { snapshot.ownsEmitter($0, foreground: foreground) },
             now: now
         )
     }
@@ -749,6 +767,11 @@ final class PtySession: @unchecked Sendable {
     /// Requests whose dialogs a prompt typed at the box closed, as its
     /// transcript told: their receivers wait for nothing (main queue).
     var onApprovalsAbandoned: (([AgentPermissionRequest]) -> Void)?
+    /// The user typed a prompt to its agent, at the box or elsewhere, as its
+    /// hook or its transcript line told, with its time
+    /// (`AgentStatusMachine.lastPromptByUserAt`). Not one Nirux typed, nor
+    /// one Claude took in by itself (main queue).
+    var onUserPrompt: ((TimeInterval) -> Void)?
 
     /// What the transcript of the `claude` in front gained since the last
     /// read: who sent its prompts (see
@@ -759,8 +782,15 @@ final class PtySession: @unchecked Sendable {
         _ = reader.readAppended(budget: Self.transcriptPromptBudget)
         let prompts = reader.takePrompts()
         state.transcriptPrompts = reader
+        let userPromptBefore = state.machine.lastPromptByUserAt
         let abandoned = prompts.flatMap { state.machine.noteTranscriptPrompt($0) }
         if !abandoned.isEmpty { onApprovalsAbandoned?(abandoned) }
+        noteUserPrompt(since: userPromptBefore)
+    }
+
+    private func noteUserPrompt(since before: TimeInterval?) {
+        guard let typedAt = state.machine.lastPromptByUserAt, typedAt != before else { return }
+        onUserPrompt?(typedAt)
     }
 
     /// A read on the main queue stays short; a long tool output takes a few.
@@ -825,7 +855,9 @@ final class PtySession: @unchecked Sendable {
             state.machine.readsTranscript = true
         }
         let dialogsBefore = state.machine.pendingDialogs.count
+        let userPromptBefore = state.machine.lastPromptByUserAt
         let outcome = state.machine.apply(event, isUserFocused: isUserFocused)
+        noteUserPrompt(since: userPromptBefore)
         state.lifeSigns.note(awake: awakeClock(), wall: event.timestamp)
         if event.agentID == nil, !state.promptWatchers.isEmpty { state.settlePromptWatchers(on: event) }
         let dialogs = state.machine.pendingDialogs
@@ -961,8 +993,9 @@ final class PtySession: @unchecked Sendable {
     /// Send raw bytes directly to the PTY, bypassing ghostty.
     /// Used for keys that ghostty's inMemory backend doesn't route correctly
     /// (e.g. Enter when Claude Code enables kitty keyboard protocol).
-    func sendRaw(_ data: Data) {
-        state.noteTypedInput(data)
+    /// `typedByNirux`: a message Nirux types itself, not for the user.
+    func sendRaw(_ data: Data, typedByNirux: Bool = false) {
+        state.noteTypedInput(data, byNirux: typedByNirux)
         state.writeToPty(data)
     }
 
@@ -974,9 +1007,9 @@ final class PtySession: @unchecked Sendable {
         return first != 0x1B || data.starts(with: [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]) // ESC[200~
     }
 
-    func sendRaw(_ string: String) {
+    func sendRaw(_ string: String, typedByNirux: Bool = false) {
         if let data = string.data(using: .utf8) {
-            sendRaw(data)
+            sendRaw(data, typedByNirux: typedByNirux)
         }
     }
 
@@ -1179,9 +1212,9 @@ private final class PtyState: @unchecked Sendable {
     /// an old URL — at most one proposal per port, and only if listening.
     private var hasTypedInput = false
 
-    func noteTypedInput(_ data: Data) {
+    func noteTypedInput(_ data: Data, byNirux: Bool = false) {
         guard data != Self.redrawNudge else { return }
-        machine.noteKeystroke(now: Date(), keys: data)
+        machine.noteKeystroke(now: Date(), keys: data, byNirux: byNirux)
         hasTypedInput = true
     }
 

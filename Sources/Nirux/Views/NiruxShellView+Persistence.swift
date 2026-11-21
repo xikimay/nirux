@@ -105,6 +105,11 @@ extension NiruxShellView {
                     claimedSessionIDs: &claimedSessionIDs
                 )
             }
+            if isLead {
+                // Saved by a build before: the column its Claude resumes in, else its first terminal.
+                let claude = workspace.columns.first { $0.deferredAgent?.launch.agent == .claude } ?? workspace.columns.first { $0.pty != nil }
+                workspace.leadAgentUUID = persistedWS.leadAgentUUID ?? claude?.agentUUID
+            }
             workspace.focusedIndex = min(persistedWS.focusedColumnIndex, max(workspace.columns.count - 1, 0))
             wireWorkspace(workspace)
             workspaces.append(workspace)
@@ -385,6 +390,7 @@ extension NiruxShellView {
                     // One closing is no longer the Lead: a new one may
                     // start before it goes.
                     isLead: workspace.isLead && !workspace.isClosing,
+                    leadAgentUUID: workspace.isLead && !workspace.isClosing ? workspace.leadAgentUUID : nil,
                     reportsToLead: workspace.reportsToLead,
                     reportsToTask: workspace.reportsToTask,
                     taskFolder: workspace.taskFolder,

@@ -288,7 +288,9 @@ enum MissionEventCLI {
                 return .answered(response)
             }
             guard mission.status == .active else { return .missionCompleted }
-            return typesAnswer && mission.events.contains(where: { $0.id == questionID }) ? .recorded : nil
+            guard let question = mission.events.first(where: { $0.id == questionID }) else { return nil }
+            if question.retiredAt != nil { return .retired }
+            return typesAnswer ? .recorded : nil
         }
         switch outcome {
         case let .answered(response):
@@ -300,6 +302,9 @@ enum MissionEventCLI {
         case .missionCompleted:
             writeStandardError("This Mission completed before the question was answered.")
             return 4
+        case .retired:
+            notice("This question was retired. Continue with the new prompt without retrying this ask.")
+            return 5
         case .recorded:
             let parent = workspaceTitle(mission.parentWorkspaceID).map { "\"\($0)\"" } ?? "the parent agent"
             output("Question sent to \(parent). End your turn now: Nirux will type the answer into your prompt.")
@@ -326,6 +331,7 @@ enum MissionEventCLI {
     private enum AskOutcome {
         case answered(MissionEvent)
         case missionCompleted
+        case retired
         /// Nirux has the question; it types the answer into the prompt.
         case recorded
     }

@@ -102,7 +102,9 @@ extension NiruxShellView {
                             childAgentUUID: childAgentUUID,
                             childAgentKind: agent?.rawValue ?? "agent",
                             branch: branch,
-                            reportsToLead: parent.isLead
+                            reportsToLead: parent.isLead,
+                            // The agent that asked wrote its handover.
+                            startedByParent: true
                         )
                         if MissionStore.shared.create(
                             request,
@@ -295,6 +297,7 @@ extension NiruxShellView {
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
             guard let agent = Self.recipientAgent(of: delivery) else { continue }
             if agent == .codex {
+                guard let delivery = MissionStore.shared.pendingPromptDelivery(delivery) else { continue }
                 queueForCodex(delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title, snapshot: snapshot, now: now)
                 continue
             }
@@ -307,6 +310,7 @@ extension NiruxShellView {
             )
             if recipient.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
             guard refusal == nil,
+                  let delivery = MissionStore.shared.pendingPromptDelivery(delivery),
                   let text = MissionPromptText.text(
                       for: delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title
                   ),
@@ -321,7 +325,7 @@ extension NiruxShellView {
             let recipientTitle = MissionPromptText.quoted((toChild ? childWorkspace : parentWorkspace)?.title ?? mission.branch)
             missionWaits.typing.insert(delivery.event.id)
             let front = pty.foregroundProcess(snapshot: snapshot)?.instance
-            typeMissionPrompt(paste, into: pty, keepingInFront: front) { [weak self] typed in
+            typeMissionPrompt(paste, into: pty, keepingInFront: front, typedByNirux: !byUser) { [weak self] typed in
                 guard let self else { return }
                 self.finishTyping(delivery, typed)
                 self.reportUnsent(typed, what: byUser ? "your answer" : "a Mission message", for: recipientTitle, telling: sender)
@@ -510,12 +514,14 @@ extension NiruxShellView {
     /// reads it (`PtySession.pasteInBackground`), Enter once it is all in,
     /// for the agent it went to, with no key since and no dialog. `done`
     /// says what became of it.
+    /// `typedByNirux` false: the user's own words (an answer from the
+    /// popover), their prompt.
     func typeMissionPrompt(
-        _ paste: String, into pty: PtySession, keepingInFront process: ProcessInstance?,
+        _ paste: String, into pty: PtySession, keepingInFront process: ProcessInstance?, typedByNirux: Bool = true,
         done: @escaping @MainActor @Sendable (TypedMessage) -> Void
     ) {
         guard paste.utf8.count + 1 > PtySession.inputQueueBytes else {
-            pty.sendRaw(paste + "\r")
+            pty.sendRaw(paste + "\r", typedByNirux: typedByNirux)
             return done(.sent)
         }
         pty.pasteInBackground(paste, keepingInFront: process, cancelled: { false }) { [weak self] result, typedAt in
@@ -523,7 +529,7 @@ extension NiruxShellView {
             // After the keys ghostty routed meanwhile, noted the same way.
             DispatchQueue.main.async {
                 guard let self else { return done(.inPrompt(why: "Nirux is closing")) }
-                self.pressEnter(after: typedAt, into: pty, for: process, done: done)
+                self.pressEnter(after: typedAt, into: pty, for: process, typedByNirux: typedByNirux, done: done)
             }
         }
     }
@@ -538,7 +544,7 @@ extension NiruxShellView {
     nonisolated static let recordRereadDelay: TimeInterval = 0.5
 
     private func pressEnter(
-        after typedAt: TimeInterval, into pty: PtySession, for process: ProcessInstance?, tries: Int = 3,
+        after typedAt: TimeInterval, into pty: PtySession, for process: ProcessInstance?, typedByNirux: Bool, tries: Int = 3,
         rereads: Int = recordRereads, done: @escaping @MainActor @Sendable (TypedMessage) -> Void
     ) {
         guard workspaces.contains(where: { !$0.isClosing && $0.columns.contains { $0.pty === pty } }) else { return done(.left) }
@@ -546,7 +552,9 @@ extension NiruxShellView {
         func again(after delay: TimeInterval, tries: Int, rereads: Int) {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self else { return done(.inPrompt(why: "Nirux is closing")) }
-                self.pressEnter(after: typedAt, into: pty, for: process, tries: tries, rereads: rereads, done: done)
+                self.pressEnter(
+                    after: typedAt, into: pty, for: process, typedByNirux: typedByNirux, tries: tries, rereads: rereads, done: done
+                )
             }
         }
         if snapshot.isEmpty, tries > 1 { return again(after: 0.5, tries: tries - 1, rereads: rereads) }
@@ -558,7 +566,7 @@ extension NiruxShellView {
             guard rereads > 0 else { return done(.inPrompt(why: "Claude Code shows a screen of its own")) }
             return again(after: Self.recordRereadDelay, tries: tries, rereads: rereads - 1)
         }
-        pty.sendRaw("\r")
+        pty.sendRaw("\r", typedByNirux: typedByNirux)
         done(.sent)
     }
 
@@ -656,7 +664,7 @@ extension NiruxShellView {
     /// and the setting doesn't matter; it must still be open, and no Lead's.
     func createMission(
         parent: NewTask.MissionParent, childWorkspaceID: String, childAgentUUID: String,
-        agent: CodingAgent, branch: String, reportsToTask: Bool = false
+        agent: CodingAgent, branch: String, reportsToTask: Bool = false, startedByParent: Bool = false
     ) -> Mission? {
         let valid = reportsToTask
             ? requestingTerminal(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID).flatMap { requester in
@@ -673,7 +681,8 @@ extension NiruxShellView {
             childAgentKind: agent.rawValue,
             branch: branch,
             reportsToLead: valid.isLead,
-            reportsToTask: reportsToTask
+            reportsToTask: reportsToTask,
+            startedByParent: startedByParent
         )
         return MissionStore.shared.create(request, enabled: Self.currentMissionHandoffsEnabled())
     }
