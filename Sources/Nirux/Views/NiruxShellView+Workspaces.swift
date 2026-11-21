@@ -280,7 +280,9 @@ extension NiruxShellView {
         let cmd: String
         switch agent {
         case .claude:
-            cmd = claudeLaunchCommand(in: workspace, worktreeBranch: worktreeBranch, handoverPrompt: handoverPrompt)
+            let file = claudeSpaceSettingsFile(for: workspace)
+            if col === workspace.leadTerminal { col.recordLeadSafety(file: file) }
+            cmd = claudeLaunchCommand(in: workspace, worktreeBranch: worktreeBranch, handoverPrompt: handoverPrompt, settingsFile: file)
         case .codex:
             cmd = NiruxShellView.codexCommand(
                 mode: NiruxShellView.codexLaunchMode(for: workspace),
@@ -297,16 +299,18 @@ extension NiruxShellView {
 
     /// A new Claude's launch line in `workspace`: its space's mode, brief
     /// and safety settings, and Nirux's tools.
-    func claudeLaunchCommand(in workspace: WorkspaceState, worktreeBranch: String?, handoverPrompt: String?) -> String {
+    func claudeLaunchCommand(
+        in workspace: WorkspaceState, worktreeBranch: String?, handoverPrompt: String?, settingsFile: String?, resume: AgentResumeTarget? = nil
+    ) -> String {
         NiruxShellView.claudeCommand(
-            mode: NiruxShellView.claudeLaunchMode(for: workspace),
+            resume: resume, mode: NiruxShellView.claudeLaunchMode(for: workspace),
             sessionName: SessionName.make(
                 worktreeBranch: worktreeBranch,
                 spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
                 isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
             ),
             briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
-            settingsFile: claudeSpaceSettingsFile(for: workspace),
+            settingsFile: settingsFile,
             handoverPrompt: handoverPrompt
         )
     }
@@ -463,6 +467,9 @@ extension NiruxShellView {
             return
         case .turnOffLead:
             showSpaceSettings(profileID: workspaces[workspaceIndex].profileID, tab: .lead)
+            return
+        case .recoverLead(let issue):
+            requestLeadRecovery(issue, in: workspaces[workspaceIndex])
             return
         case .restartLead:
             requestRestartLead(spaceID: workspaces[workspaceIndex].profileID)

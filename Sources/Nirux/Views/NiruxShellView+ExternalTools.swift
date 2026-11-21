@@ -159,10 +159,7 @@ extension NiruxShellView {
     /// a workspace opened from outside Nirux. A space whose file can't be
     /// written says so once, and its launches pass none.
     func claudeSpaceSettingsFiles(for workspaces: [WorkspaceState]) -> [String: String] {
-        var userEnvironment: [String]?
-        if case .parsed(let settings, _) = AgentHookInstaller.readClaudeSettings(home: FileManager.default.homeDirectoryForCurrentUser) {
-            userEnvironment = ClaudeSpaceSettings.userEnvironment(settings)
-        }
+        let userEnvironment = Self.claudeUserEnvironment()
         var files: [String: String] = [:]
         for spaceID in Set(workspaces.filter { !$0.startedOutsideNirux }.map(\.profileID)) {
             do {
@@ -176,6 +173,12 @@ extension NiruxShellView {
             }
         }
         return files
+    }
+
+    static func claudeUserEnvironment() -> [String]? {
+        guard case .parsed(let settings, _) = AgentHookInstaller.readClaudeSettings(home: FileManager.default.homeDirectoryForCurrentUser)
+        else { return nil }
+        return ClaudeSpaceSettings.userEnvironment(settings)
     }
 
     /// The file one launch in `workspace` passes: `prepared` for a batch

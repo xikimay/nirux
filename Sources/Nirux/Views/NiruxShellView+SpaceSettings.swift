@@ -113,7 +113,10 @@ extension NiruxShellView {
         var defaultsActions = SpaceSettingsDefaultsPane.Actions()
         defaultsActions.save = { [weak self] defaults, loaded in
             let saved = store.map { $0.save(defaults, replacing: loaded) } ?? .failure(.couldNotWrite("The space’s folder can’t be named."))
-            if case .success = saved { self?.spaceDefaultsSaved(defaults, replacing: loaded.defaults, spaceID: spaceID) }
+            if case .success = saved {
+                self?.leadWorkspace(inSpace: spaceID)?.leadOptionsCache = nil
+                self?.spaceDefaultsSaved(defaults, replacing: loaded.defaults, spaceID: spaceID)
+            }
             return saved
         }
         defaultsActions.reload = { store?.load() ?? unread }

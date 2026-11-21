@@ -296,9 +296,11 @@ extension NiruxShellView {
         switch agent {
         case .claude(let resume, let mode):
             if let sessionID = agent.sessionID { column.prepareClaudeResume(sessionID: sessionID) }
+            let file = claudeSpaceSettingsFile(for: workspace, prepared: settingsFiles)
+            if column === workspace.leadTerminal { column.recordLeadSafety(file: file) }
             return Self.claudeCommand(
                 resume: resume, mode: mode, briefFile: brief?.claudePromptFile,
-                settingsFile: claudeSpaceSettingsFile(for: workspace, prepared: settingsFiles)
+                settingsFile: file
             )
         case .codex(let resume, let mode):
             if let sessionID = agent.sessionID { column.prepareCodexResume(sessionID: sessionID) }

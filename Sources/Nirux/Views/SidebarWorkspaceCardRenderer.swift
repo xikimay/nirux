@@ -744,8 +744,18 @@ final class SidebarWorkspaceCardRenderer {
             let label = wrappedActionLine(Self.nextText(text), maxLines: Metrics.nextStepMaxLines, top: top)
             label.toolTip = "Next: \(text)"
             append(label)
+        case .leadRecovery(let issue):
+            let label = NSTextField.sidebarLine(Self.actionText(issue.title, link: issue.action))
+            label.toolTip = issue.title + " · " + issue.action
+            label.setAccessibilityLabel(label.toolTip)
+            label.frame = NSRect(x: layout.indentX, y: top - Metrics.actionLineHeight,
+                                 width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight)
+            append(label)
+            hitAreas.append(SidebarHitArea(frame: label.frame, region: .link(
+                url: SidebarView.leadRecoveryURL(issue, workspaceID: workspace.id), label: label
+            )))
         case .ruleProposals(let count):
-            let label = NSTextField.sidebarLine(Self.ruleProposalsText(count: count))
+            let label = NSTextField.sidebarLine(Self.actionText(Self.ruleProposalsTitle(count: count), link: "Review"))
             label.toolTip = "The Lead proposes \(count == 1 ? "a rule" : "\(count) rules") for the space brief, from a "
                 + "defect it found twice. Review: add, edit or dismiss \(count == 1 ? "it" : "them"). Nothing reaches the brief "
                 + "without you."
@@ -824,12 +834,12 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     /// "Rule proposed · Review": grey, the link in the accent.
-    private static func ruleProposalsText(count: Int) -> NSAttributedString {
+    private static func actionText(_ title: String, link: String) -> NSAttributedString {
         let font = Theme.Font.caption
-        let result = NSMutableAttributedString(string: ruleProposalsTitle(count: count) + " · ", attributes: [
+        let result = NSMutableAttributedString(string: title + " · ", attributes: [
             .font: font, .foregroundColor: Theme.Color.textSecondary
         ])
-        result.append(NSAttributedString(string: "Review", attributes: [.font: font, .foregroundColor: Theme.Color.accent]))
+        result.append(NSAttributedString(string: link, attributes: [.font: font, .foregroundColor: Theme.Color.accent]))
         return result
     }
 

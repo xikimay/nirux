@@ -251,6 +251,7 @@ extension WorkspaceInfo {
         if isActive, let next = nextStepText, isLead || summary.status.text != Self.nextStepLine(next) {
             actions.append(.next(next))
         }
+        if isLead, let leadLaunchIssue { actions.append(.leadRecovery(leadLaunchIssue)) }
         if isLead, ruleProposalCount > 0 {
             actions.append(.ruleProposals(count: ruleProposalCount))
         }
@@ -302,6 +303,7 @@ enum SidebarCardAction: Hashable {
     case ruleProposals(count: Int)
     /// The Lead's row: what its last daily pass read, for a day.
     case dailyPass(String)
+    case leadRecovery(LeadLaunchIssue)
     /// Mission messages that wait too long for an agent's prompt: a click
     /// shows its column.
     case waitingMessages(columnIndex: Int, SidebarWaitingMessages)
@@ -310,7 +312,7 @@ enum SidebarCardAction: Hashable {
     /// proposed rule waits on nothing: it stays as quiet.
     var isQuiet: Bool {
         switch self {
-        case .next, .reviewBadges, .ruleProposals, .dailyPass: return true
+        case .next, .reviewBadges, .ruleProposals, .dailyPass, .leadRecovery: return true
         case .missionQuestion(_, let question): return question.handOff == nil
         case .approval, .resume, .interrupt, .cleanup, .turnQuestion, .dialog, .waitingMessages, .missionRecommendation: return false
         }

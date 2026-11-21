@@ -113,6 +113,7 @@ final class ColumnState {
         header?.isFocused = isFocused
     }
 
+    var leadSafetyAtLaunch: ClaudeSpaceSettings.File?
     /// Spec needed to respawn the shell after it exits.
     private var terminalSpec: (cwd: String, shellArgs: [String], environment: [String: String])?
     /// The first shell start is on its way (or done): a column restored
