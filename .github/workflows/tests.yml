@@ -7,7 +7,7 @@ name: Tests
 # macOS runner on every merge.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/niruxcore-appkit-free-core]
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -24,6 +24,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v5
+      - run: scripts/test-core.sh
       - run: scripts/check-core-boundary.sh
 
   test:

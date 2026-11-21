@@ -6,8 +6,9 @@ name: Package
 # runtime, and runs the launch check.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/niruxcore-appkit-free-core]
     paths:
+      - NiruxCore/Package.swift
       - Package.swift
       - Package.resolved
       - scripts/bundle.sh

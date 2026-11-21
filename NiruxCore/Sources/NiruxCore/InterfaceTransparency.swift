@@ -7,24 +7,24 @@
 /// Not `Codable` on purpose: persist it as an optional raw string, so that a
 /// level from a newer build reads as no choice instead of making the whole
 /// state file undecodable (see `Persistence`).
-enum InterfaceTransparency: String, CaseIterable, Sendable {
+public enum InterfaceTransparency: String, CaseIterable, Sendable {
     case opaque, tinted, glass, clear
 
     /// Until the energy bench and the user say Tinted.
-    static let defaultValue = InterfaceTransparency.opaque
+    public static let defaultValue = InterfaceTransparency.opaque
 
     /// The level to draw: what the user picked, unless macOS asks for less
     /// transparency. Reduce transparency and Increase contrast make every
     /// level opaque.
-    func effective(reducesTransparency: Bool, increasesContrast: Bool) -> InterfaceTransparency {
+    public func effective(reducesTransparency: Bool, increasesContrast: Bool) -> InterfaceTransparency {
         reducesTransparency || increasesContrast ? .opaque : self
     }
 
     /// Opaque draws no glass at all: solid chrome, no blur, nothing of the
     /// desktop or the work behind it.
-    var usesGlass: Bool { self != .opaque }
+    public var usesGlass: Bool { self != .opaque }
 
     /// The clearer of the two glass styles (`NSGlassEffectView.Style.clear`
     /// on macOS 26), for the most transparent level only.
-    var usesClearGlass: Bool { self == .clear }
+    public var usesClearGlass: Bool { self == .clear }
 }

@@ -29,6 +29,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Test NiruxCore
+        run: scripts/test-core.sh
+
       - name: Validate signing and notarization secrets
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}

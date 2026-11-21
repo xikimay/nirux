@@ -1,6 +1,6 @@
 import Foundation
 
-extension String {
+public extension String {
     /// Abbreviate a file path: replace $HOME with ~, keep last N components.
     func abbreviatedPath(maxComponents: Int = 3) -> String {
         var path = self
