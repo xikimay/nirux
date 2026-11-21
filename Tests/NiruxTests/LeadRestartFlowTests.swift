@@ -10,8 +10,11 @@ final class LeadRestartFlowTests: XCTestCase {
     /// The Lead's shell running `command` as a child, `name`d: that process.
     private func run(_ command: String, named name: String = "claude", in column: ColumnState, harness: UIFlowHarness) throws -> ProcessInstance {
         let pty = try XCTUnwrap(column.pty)
+        // The login shell can still be in canonical mode when the full launch arguments exceed MAX_CANON.
+        let script = URL(fileURLWithPath: harness.root).appendingPathComponent("lead-worker-\(UUID().uuidString).sh")
+        try command.write(to: script, atomically: true, encoding: .utf8)
         harness.waitUntil("its shell") { pty.shellPID != nil }
-        pty.sendRaw("(\(command))\n")
+        pty.sendRaw("(. \(NiruxShellView.shellQuotedArgument(script.path)))\n")
         harness.waitUntil("its \(name)") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == name }
         return try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
     }
@@ -465,7 +468,7 @@ final class LeadRestartFlowTests: XCTestCase {
             let lead = try harness.makeLead()
             let column = try XCTUnwrap(lead.workspace.leadTerminal)
             // nohup: the shell ends on the hang-up, the program it runs doesn't.
-            let stuck = try run("nohup /bin/sleep 600 > /dev/null 2>&1", named: "sleep", in: column, harness: harness)
+            let stuck = try run("exec nohup /bin/sleep 600 > /dev/null 2>&1", named: "sleep", in: column, harness: harness)
             defer { if ProcessInstance.running(pid: stuck.pid) == stuck { kill(stuck.pid, SIGKILL) } }
             let fresh = AgentStandIn()
             defer { fresh.remove() }
@@ -561,7 +564,7 @@ final class LeadRestartFlowTests: XCTestCase {
             let shell = harness.shell
             let lead = try harness.makeLead()
             let column = try XCTUnwrap(lead.workspace.leadTerminal)
-            let stuck = try run("nohup /bin/sleep 600 > /dev/null 2>&1", named: "sleep", in: column, harness: harness)
+            let stuck = try run("exec nohup /bin/sleep 600 > /dev/null 2>&1", named: "sleep", in: column, harness: harness)
             defer { if ProcessInstance.running(pid: stuck.pid) == stuck { kill(stuck.pid, SIGKILL) } }
             harness.alertResponses = [.alertSecondButtonReturn]
             shell.requestRestartLead(spaceID: lead.space)
