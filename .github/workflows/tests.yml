@@ -1,7 +1,7 @@
 name: Tests
 
-# DO NOT MERGE: A/B of the dependency build cache (PR 2). A seed job saves the
-# dependencies' products as the nightly will; each job then builds cold,
+# DO NOT MERGE: A/B of the dependency build cache (PR 2). The pilot saved dependency products
+# in this PR cache namespace. Each new macOS runner builds cold,
 # builds with them restored and runs the suite on that build, then builds
 # cold again.
 on:
@@ -16,50 +16,7 @@ permissions:
   contents: read
 
 jobs:
-  seed:
-    runs-on: macos-15
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Toolchain
-        id: toolchain
-        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/cache/restore@v6
-        with:
-          path: |
-            .build/artifacts
-            .build/checkouts
-            .build/repositories
-            .build/workspace-state.json
-          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
-
-      - name: Build
-        run: swift build --build-tests
-
-      - name: Layout
-        run: |
-          ls .build/arm64-apple-macosx/debug
-          ls .build/arm64-apple-macosx/debug/Modules
-          du -sh .build/arm64-apple-macosx/debug/*.build | sort -h
-
-      - uses: actions/cache/save@v6
-        with:
-          path: |
-            .build/arm64-apple-macosx/debug/GhosttyKit.build
-            .build/arm64-apple-macosx/debug/DisplayLink.build
-            .build/arm64-apple-macosx/debug/GhosttyTerminal.build
-            .build/arm64-apple-macosx/debug/Modules/GhosttyKit.*
-            .build/arm64-apple-macosx/debug/Modules/DisplayLink.*
-            .build/arm64-apple-macosx/debug/Modules/GhosttyTerminal.*
-          key: deps-ab-${{ github.run_id }}
-
   ab:
-    needs: seed
     runs-on: macos-15
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
@@ -68,7 +25,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        rep: [1]
+        rep: [2, 3]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -104,9 +61,10 @@ jobs:
             .build/arm64-apple-macosx/debug/Modules/GhosttyKit.*
             .build/arm64-apple-macosx/debug/Modules/DisplayLink.*
             .build/arm64-apple-macosx/debug/Modules/GhosttyTerminal.*
-          key: deps-ab-${{ github.run_id }}
+          key: deps-ab-44894514896
 
       - name: Build with the dependencies' products
+        id: warm
         run: |
           start=$SECONDS
           swift build --build-tests > "$RUNNER_TEMP/cached.log" 2>&1 || { tail -50 "$RUNNER_TEMP/cached.log"; exit 1; }
@@ -116,8 +74,9 @@ jobs:
         run: scripts/run-tests.sh
 
       - name: Cold build again
+        if: ${{ !cancelled() && steps.warm.outcome == 'success' }}
         run: |
           rm -rf .build/arm64-apple-macosx
           start=$SECONDS
           swift build --build-tests > "$RUNNER_TEMP/cold2.log" 2>&1 || { tail -50 "$RUNNER_TEMP/cold2.log"; exit 1; }
-          echo "=== AB cold2 $((SECONDS - start))s"
+          echo "=== AB cold2 $((SECONDS - start))s, $(grep -cE '\] Compiling (GhosttyKit|DisplayLink|GhosttyTerminal) ' "$RUNNER_TEMP/cold2.log" || true) dependency files compiled"
