@@ -295,9 +295,9 @@ final class BranchReviewExplainTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(BranchReview.explain(try job()).ending, .explained)
         let kept = try XCTUnwrap(try stored())
         XCTAssertEqual(kept.files["Sources/Big.swift"]?.notSent, "diff larger than one run takes")
-        XCTAssertEqual(kept.pathsToExplain(in: try snapshot(), includeUntracked: false), [])
-
         var again = try job()
+        XCTAssertEqual(kept.pathsToExplain(in: again.snapshot, includeUntracked: false), [])
+
         again.copyParent = URL(fileURLWithPath: root + "/README.md/copies")
         XCTAssertEqual(BranchReview.explain(again).ending, .upToDate)
         XCTAssertEqual(try runCount(), 1)
@@ -540,12 +540,19 @@ final class BranchReviewExplainTests: BranchReviewRepositoryTestCase {
 
     // MARK: - Helpers
 
+    /// The review file of the branch checked out, named from its
+    /// repository and branch as a snapshot would, without taking one: that
+    /// takes seconds for a large branch.
+    private func store() throws -> BranchReview.Store {
+        let repository = try XCTUnwrap(BranchReview.repositoryIdentity(root: repo, options: options()))
+        let branch = try git(["symbolic-ref", "--short", "HEAD"]).trimmingCharacters(in: .newlines)
+        return try XCTUnwrap(BranchReview.Store(
+            repository: repository, branch: branch, stateDirectory: URL(fileURLWithPath: root + "/state")
+        ))
+    }
+
     private func storedRecord() throws -> BranchReview.Record? {
-        let snapshot = try snapshot()
-        let repository = try XCTUnwrap(BranchReview.repositoryIdentity(root: snapshot.root, options: options()))
-        return BranchReview.Store(
-            repository: repository, branch: snapshot.branch, stateDirectory: URL(fileURLWithPath: root + "/state")
-        )?.load().record
+        try store().load().record
     }
 
     private func twoLargeFiles() throws {
@@ -567,12 +574,7 @@ final class BranchReviewExplainTests: BranchReviewRepositoryTestCase {
     }
 
     private func stored() throws -> BranchReview.Explanation? {
-        let snapshot = try snapshot()
-        let repository = try XCTUnwrap(BranchReview.repositoryIdentity(root: snapshot.root, options: options()))
-        let store = try XCTUnwrap(BranchReview.Store(
-            repository: repository, branch: snapshot.branch, stateDirectory: URL(fileURLWithPath: root + "/state")
-        ))
-        return store.load().record.explanation
+        try store().load().record.explanation
     }
 
     private func runCount() throws -> Int {
