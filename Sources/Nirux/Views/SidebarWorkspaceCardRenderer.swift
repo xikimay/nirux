@@ -770,6 +770,16 @@ final class SidebarWorkspaceCardRenderer {
                 width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
             )
             append(label)
+        case .heldMessages(let held):
+            let label = NSTextField.sidebarLine(NSAttributedString(string: held.line, attributes: [
+                .font: Theme.Font.caption, .foregroundColor: Theme.Color.textSecondary
+            ]))
+            label.toolTip = held.tooltip
+            label.frame = NSRect(
+                x: layout.indentX, y: top - Metrics.actionLineHeight,
+                width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
+            )
+            append(label)
         case let .waitingMessages(columnIndex, waiting):
             let label = wrappedActionLine(Self.waitingText(waiting), maxLines: Metrics.waitingMessagesMaxLines, top: top)
             label.toolTip = waiting.tooltip

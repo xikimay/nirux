@@ -169,12 +169,13 @@ extension NiruxShellView {
     /// tool), which leaves the keyboard where it is.
     func closeWorkspace(at index: Int, refocusing: Bool = true) {
         guard workspaceStore.remainingWorkspaceCount > 1,
-              let wsToRemove = workspaces[safe: index], !wsToRemove.isClosing
+              let wsToRemove = workspaces[safe: index], !wsToRemove.isClosing, !wsToRemove.isStarting
         else { return }
         // The store keeps it until the exit animation ends — flag it so a
         // quick second ⌘W neither counts nor selects it meanwhile.
         wsToRemove.isClosing = true
         freezeThread(of: wsToRemove)
+        closeMergeWaits(of: wsToRemove, now: Date().timeIntervalSince1970)
         // Closing the Lead turns it off: Space Settings says so at once.
         if wsToRemove.isLead { refreshSpaceSettingsLead() }
         // Only move the selection when the *active* workspace is going away —
