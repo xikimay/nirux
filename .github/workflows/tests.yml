@@ -33,6 +33,7 @@ jobs:
           # merged pull request's commits runs here, before merge, rather
           # than first in the nightly.
           fetch-depth: 0
+          ref: 132b6cea349a729dbaed9e91b739baf153d3289e
 
       # The dependencies' clones and binaries (GhosttyKit's download sometimes
       # fails to connect), per toolchain: a new runner image's SwiftPM starts
@@ -56,3 +57,14 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      - name: Repeat the four New sheet flows ten times
+        shell: bash
+        run: |
+          set -eo pipefail
+          filter='NewTaskFlowTests/test(SwitchingAgentsDiscardsALateModelListAndDefaultStartsWithoutAModel|ATaskInAFolderOfTheRepositoryWithCodex)|LeadToolsFlowTests/test(AProposedTaskWaitsForTheUser|ATasksProposedSubtaskWaitsForTheUser)'
+          for pass in {1..10}; do
+            echo "UI repetition $pass"
+            swift test --skip-build --filter "$filter" 2>&1 | tee "$RUNNER_TEMP/ui-pass-$pass.log"
+            grep -Eq 'Executed 4 tests, with 0 failures' "$RUNNER_TEMP/ui-pass-$pass.log"
+          done
