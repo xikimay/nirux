@@ -26,8 +26,6 @@ final class WorkspaceSwitchState {
     /// applies.
     var switchGeneration = 0
     var cardGeneration = 0
-    /// Runs the delays; tests pass a clock they advance by hand.
-    var schedule: MainActorSchedule = mainQueueSchedule
 }
 
 // MARK: - A workspace switch (study N1, its floors from study P3)
@@ -86,6 +84,7 @@ extension NiruxShellView {
               workspaces.contains(where: { $0.id == floors.leaving && !$0.containerView.isHidden })
         else { return endWorkspaceSwitch() }
         placeFloorUnderneath()
+        keepUnderBar()
     }
 
     /// The floors of a switch from `leaving` to `arriving`, both in the
@@ -124,11 +123,12 @@ extension NiruxShellView {
             arrivingLayer.add(Self.floorMove(from: recede, to: 0, curve: rest), forKey: Self.floorsKey)
             shade.add(Self.floorShade(from: Self.floorsShade, to: 0, curve: rest), forKey: Self.floorsKey)
         }
+        passUnderBar([leaving, arriving])
         state.switchGeneration += 1
         let generation = state.switchGeneration
         // Not on the animation's completion, which a window out of view may
         // never report.
-        state.schedule(Self.workspaceSwitchDuration) { [weak self] in
+        sideEffects.afterCommit(Self.workspaceSwitchDuration) { [weak self] in
             guard let self, self.workspaceSwitch.switchGeneration == generation else { return }
             self.endWorkspaceSwitch()
         }
@@ -188,6 +188,7 @@ extension NiruxShellView {
 
     /// The floors back in the strip: no move, no offset, no plate, no shade.
     private func removeFloors() {
+        endUnderBar()
         guard let floors = workspaceSwitch.floors else { return }
         workspaceSwitch.floors = nil
         for workspace in workspaces where [floors.leaving, floors.arriving].contains(workspace.id) {
@@ -236,7 +237,7 @@ extension NiruxShellView {
         }
         state.cardGeneration += 1
         let generation = state.cardGeneration
-        state.schedule(Self.workspaceSwitchDuration + Self.workspaceCardHold) { [weak self] in
+        sideEffects.afterCommit(Self.workspaceSwitchDuration + Self.workspaceCardHold) { [weak self] in
             guard let self, self.workspaceSwitch.cardGeneration == generation else { return }
             self.hideWorkspaceCard(animated: self.agentLightsMayMove)
         }

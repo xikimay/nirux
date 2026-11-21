@@ -295,6 +295,51 @@ final class IconRailSidebarTests: XCTestCase {
         XCTAssertFalse(shell.sidebar.isExpanded)
     }
 
+    func testResizingTheDividerRemembersTheExpandedWidth() throws {
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 600))
+        shell.stopHeartbeat()
+        shell.isSidebarExpanded = true
+        shell.sidebar.isExpanded = true
+        shell.relayout(animated: false)
+        let handle = shell.sidebarResizeHandle
+        let start = try XCTUnwrap(handle.onDragStart?())
+        XCTAssertEqual(start, 260)
+        handle.onDrag?(start, -100)
+        XCTAssertEqual(shell.sidebar.frame.width, 240)
+        handle.onDrag?(start, 200)
+        XCTAssertEqual(shell.sidebar.frame.width, 360)
+        handle.onDrag?(start, 60)
+        XCTAssertEqual(shell.sidebar.frame.width, 320)
+        XCTAssertEqual(handle.frame.midX, shell.divider.frame.midX)
+
+        shell.isSidebarExpanded = false
+        shell.relayout(animated: false)
+        XCTAssertTrue(handle.isHidden)
+        XCTAssertEqual(shell.sidebar.frame.width, SidebarView.foldedWidth)
+        let saved = shell.persistedState()
+        let settings = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(try XCTUnwrap(saved.settings)))
+        XCTAssertEqual(settings.sidebarWidth, 320)
+        XCTAssertEqual(settings.sidebarExpanded, false)
+        let restored = NiruxShellView(frame: shell.frame)
+        restored.stopHeartbeat()
+        restored.restoreSidebarState(settings)
+        restored.isSidebarExpanded = true
+        restored.relayout(animated: false)
+        XCTAssertEqual(restored.sidebar.frame.width, 320)
+        XCTAssertEqual(restored.sidebarFold.expandedWidth(in: 600), 300)
+        XCTAssertEqual(restored.sidebarFold.preferredWidth, 320)
+
+        var oldSettings = settings
+        for (previousWidth, expectedWidth) in [(220.0, 240.0), (480.0, 360.0)] {
+            oldSettings.sidebarWidth = previousWidth
+            restored.restoreSidebarState(oldSettings)
+            XCTAssertEqual(restored.sidebarFold.preferredWidth, expectedWidth)
+        }
+        let withoutWidth = try JSONDecoder().decode(PersistedSettings.self, from: Data("{}".utf8))
+        restored.restoreSidebarState(withoutWidth)
+        XCTAssertEqual(restored.sidebarFold.preferredWidth, 260)
+    }
+
     func testInitialsDropTheBranchTypeAndNumberRepeats() {
         XCTAssertEqual(TaskInitials.initials(of: "Fix login rate limit"), "FL")
         XCTAssertEqual(TaskInitials.initials(of: "feat/crash-report"), "CR")
