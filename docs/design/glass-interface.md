@@ -249,7 +249,15 @@ migrate", "Stuck? · …"), or the icon's state where the row prints its
 branch. The archived button unfolds the sidebar with the
 Archived list open and its header in view (as View › Show Archived and ⌘P do
 while folded); its tooltip counts them. The space tile went: the command
-bar's space segment opens the same menu. The sidebar folds by itself below a
+bar's space segment opens the same menu.
+
+Drag the expanded sidebar’s right edge to choose a width from 240 to 360 pt.
+Double-click the edge to restore 260 pt. Nirux restores one main window,
+whose spaces share the same sidebar. The chosen width is saved with that
+window’s fold preference and restored on launch. A narrow window can limit
+the displayed width to half the window while keeping the chosen width.
+
+The sidebar folds by itself below a
 900 pt window (`SidebarFold`: 260 pt of sidebar would leave the columns less
 than about 640 pt) and unfolds back from 940 pt (a window dragged about the
 width doesn't make the columns jump) if the user's choice, which is what is
@@ -593,6 +601,17 @@ the text stays flat and sharp.
   own glass (26 and later, which refracts what passes under it; the rim of
   14 and 15 would show the cards plainly), above Opaque, while the
   interface may move.
+- **Under the bar (study P6, second part):** the command bar is an island
+  of the same glass over the work. While floors play (a workspace switch,
+  0.44 s), what moves passes under it: the viewport reaches up under the
+  title band (its frame alone; what it holds lays out from its bottom),
+  and a frost like the window's (`TitleBandCover`: its blur and tint)
+  covers the band but for the bar's capsule, so only the bar shows the
+  floor that steps back, through its glass. Every other row turns clear
+  meanwhile, so that nothing but the floors shows. It ends with the floors,
+  on their deadline after the commit, and at once where the bar stops
+  floating or movement turns off. At rest nothing lies under it. No
+  reflection is drawn: macOS's glass draws its own.
 
 ## Plan
 

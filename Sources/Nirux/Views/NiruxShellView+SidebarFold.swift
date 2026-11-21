@@ -13,6 +13,18 @@ struct SidebarFold: Equatable {
     static let narrowWidth: CGFloat = 900
     static let hysteresis: CGFloat = 40
 
+    static let defaultWidth: CGFloat = 260
+    private(set) var preferredWidth = defaultWidth
+
+    mutating func chooseWidth(_ width: CGFloat) {
+        guard width.isFinite else { return }
+        preferredWidth = min(360, max(240, width.rounded()))
+    }
+
+    func expandedWidth(in windowWidth: CGFloat) -> CGFloat {
+        min(preferredWidth, max(0, windowWidth / 2))
+    }
+
     /// The user's choice, saved.
     var chosenExpanded = false
     /// The window got narrow since the last choice.
@@ -44,6 +56,26 @@ struct SidebarFold: Equatable {
 // MARK: - The sidebar folds and unfolds
 
 extension NiruxShellView {
+    func wireSidebarResizeHandle() {
+        addSubview(sidebarResizeHandle)
+        sidebarResizeHandle.onDragStart = { [weak self] in
+            guard let self, isSidebarExpanded else { return nil }
+            return sidebarFold.expandedWidth(in: bounds.width)
+        }
+        sidebarResizeHandle.onDrag = { [weak self] start, delta in
+            guard let self, isSidebarExpanded else { return }
+            sidebarFold.chooseWidth(min(start + delta, bounds.width / 2))
+            relayout(animated: false)
+        }
+        sidebarResizeHandle.onDragEnd = { [weak self] in self?.saveState() }
+        sidebarResizeHandle.onReset = { [weak self] in
+            guard let self else { return }
+            sidebarFold.chooseWidth(SidebarFold.defaultWidth)
+            relayout(animated: false)
+            saveState()
+        }
+    }
+
     /// The shell's size changed (the window resized, full screen, launch):
     /// the sidebar folds or unfolds by itself, then everything is laid out.
     func relayoutForNewSize() {

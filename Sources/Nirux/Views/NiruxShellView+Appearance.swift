@@ -31,6 +31,9 @@ extension NiruxShellView {
         requestsState.calloutPanel?.invalidateShadowWhenDrawn()
         sidebar.show(level: level, resolveLevel: resolve)
         railMayHaveChanged(animated: false)
+        if let cover = titleBandCover {
+            if barFloats { cover.show(drawnTransparency) } else { endUnderBar() }
+        }
         layer?.backgroundColor = translucent ? NSColor.clear.cgColor : Theme.Color.canvas.cgColor
         applyTerminalOpacity()
     }
