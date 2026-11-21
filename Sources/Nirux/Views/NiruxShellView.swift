@@ -23,6 +23,9 @@ final class NiruxShellView: NSView {
     var underGlassGeneration = 0
     /// The workspace whose cards pass under the rail, until its edge closes.
     weak var passingUnderRail: WorkspaceState?
+    /// Over the title band while floors play, but for the command bar
+    /// (NiruxShellView+UnderBar).
+    var titleBandCover: TitleBandCover?
     /// Counts space crossings: a crossing's end acts only on its own, and
     /// its pictures over the viewport (NiruxShellView+SpaceCrossing).
     var spaceCrossingGeneration = 0
