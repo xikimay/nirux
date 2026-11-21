@@ -101,6 +101,124 @@ final class BoardStagesViewTests: XCTestCase {
 
     // MARK: - Lines
 
+    func testFrozenBoardKeepsTaskAndMergedRowsDrawn() throws {
+        let view = board(content([section(units: [.task(line("Task title"), subtasks: [])], merged: [
+            BoardStages.Merged(lineID: nil, title: "Merged title", number: 7, mergedAt: now)
+        ])], order: .progress))
+        let window = try XCTUnwrap(view.window)
+        let host = BoardStagesFlippedView(frame: view.bounds)
+        host.wantsLayer = true
+        window.contentView = host
+        host.addSubview(view)
+        host.layoutSubtreeIfNeeded()
+        window.display()
+        CATransaction.flush()
+
+        let row = try XCTUnwrap(view.lineViews.first)
+        let merged = try XCTUnwrap(view.mergedView(section: "nirux")?.entries.first)
+        let rail = BoardStagesView.Columns(width: row.bounds.width).rail
+        let areas = [
+            ("task title", host.convert(row.titleLabel.bounds, from: row.titleLabel)),
+            ("stations", host.convert(rail, from: row)),
+            ("Now", host.convert(row.phraseLabel.bounds, from: row.phraseLabel)),
+            ("merged title", host.convert(merged.titleLabel.bounds, from: merged.titleLabel))
+        ]
+        let live = try XCTUnwrap(host.layer)
+        try assertInk(areas, in: live, host: host, phase: "before freezing")
+        let picture = try XCTUnwrap(FrozenView.freeze(host))
+        // A discarded picture can purge mutable contents shared with a live label.
+        func drawingContents(of layer: CALayer) -> Set<ObjectIdentifier> {
+            var contents = Set((layer.sublayers ?? []).flatMap { drawingContents(of: $0) })
+            if let value = layer.contents as AnyObject?, CFGetTypeID(value) != CGImage.typeID {
+                contents.insert(ObjectIdentifier(value))
+            }
+            return contents
+        }
+        let boardLayer = try XCTUnwrap(view.layer)
+        XCTAssertTrue(drawingContents(of: boardLayer).isDisjoint(with: drawingContents(of: picture.content)),
+                      "discarding the picture must leave the Board's backing stores intact")
+        host.addSubview(picture)
+        CATransaction.flush()
+        try assertInk(areas, in: try XCTUnwrap(picture.layer), host: host, phase: "in the transition")
+        picture.removeFromSuperview()
+        CATransaction.flush()
+        try assertInk(areas, in: live, host: host, phase: "after the transition")
+    }
+
+    private func assertInk(_ areas: [(String, NSRect)], in layer: CALayer, host: NSView, phase: String) throws {
+        let pixel = try paint(width: Int(host.bounds.width), height: Int(host.bounds.height)) {
+            guard let context = NSGraphicsContext.current?.cgContext else { return }
+            context.translateBy(x: 0, y: host.bounds.height)
+            context.scaleBy(x: 1, y: -1)
+            layer.render(in: context)
+        }
+        for (name, area) in areas {
+            let hasInk = (Int(area.minY)..<Int(area.maxY)).contains { y in
+                (Int(area.minX)..<Int(area.maxX)).contains { x in
+                    (distance(pixel(CGFloat(x), CGFloat(y)), to: Theme.Color.canvas) ?? 0) > 0.3
+                }
+            }
+            XCTAssertTrue(hasInk, "\(name) \(phase)")
+        }
+    }
+
+    func testScrolledTitlesSurviveTransitionsRefreshAndBothOrders() throws {
+        let stack = BoardStages.Unit.stack(title: "Stack · 2 pull requests on main", [
+            line("dependencies", title: "Show waiting tasks", pullRequest: "#716"),
+            line("actor", title: "Clarify who needs to act", pullRequest: "#726")
+        ])
+        let fillers = (1...16).map { BoardStages.Unit.task(line("workspace-\($0)"), subtasks: []) }
+        func rows(_ order: BoardStages.Order, standalone: String) -> BoardStagesView.Content {
+            let task = BoardStages.Unit.task(line("queue", title: standalone, pullRequest: "#708"), subtasks: [])
+            return content([section(units: fillers + (order == .progress ? [stack, task] : [task, stack]))], order: order)
+        }
+        let view = board(rows(.progress, standalone: "Speed up tests"))
+        let window = try XCTUnwrap(view.window)
+        let host = BoardStagesFlippedView(frame: view.bounds)
+        host.wantsLayer = true
+        window.contentView = host
+        host.addSubview(view)
+        view.pointerLocation = { nil }
+        host.layoutSubtreeIfNeeded()
+        window.display()
+        let queue = try XCTUnwrap(view.lineViews.first { $0.line.id == "queue" })
+        XCTAssertTrue(queue.rectInSight.isEmpty)
+        var opened: [String] = []
+        view.onOpen = { opened.append($0) }
+        for order in [BoardStages.Order.progress, .sidebar] {
+            let title = order == .progress ? "Speed up tests" : "Speed up macOS tests"
+            view.show(rows(order, standalone: title))
+            let clip = view.scrollView.contentView
+            clip.scroll(to: NSPoint(x: 0, y: try XCTUnwrap(clip.documentView).bounds.height - clip.bounds.height))
+            view.scrollView.reflectScrolledClipView(clip)
+            host.layoutSubtreeIfNeeded()
+            window.display()
+            CATransaction.flush()
+            let ids = ["actor", "queue"]
+            let areas = try ids.map { id in
+                let row = try XCTUnwrap(view.lineViews.first { $0.line.id == id })
+                let area = host.convert(row.titleLabel.bounds, from: row.titleLabel)
+                XCTAssertTrue(host.bounds.contains(area))
+                return (id, area)
+            }
+            let picture = try XCTUnwrap(FrozenView.freeze(host))
+            host.addSubview(picture)
+            CATransaction.flush()
+            try assertInk(areas, in: try XCTUnwrap(picture.layer), host: host, phase: "in the \(order) transition")
+            picture.removeFromSuperview()
+            CATransaction.flush()
+            try assertInk(areas, in: try XCTUnwrap(host.layer), host: host, phase: "after the \(order) transition")
+            for (id, expected, pr) in [("actor", "Clarify who needs to act", "#726"), ("queue", title, "#708")] {
+                let row = try XCTUnwrap(view.lineViews.first { $0.line.id == id })
+                if id == "queue" { XCTAssertTrue(row === queue) }
+                XCTAssertEqual(row.titleLabel.stringValue, expected)
+                XCTAssertEqual(row.pullRequestLabel.stringValue, pr)
+                try click(row.titleLabel)
+                XCTAssertEqual(opened.last, id)
+            }
+        }
+    }
+
     func testTheLinesAreDrawnInOrderEachJoinedToItsOwn() throws {
         let view = board(content([section(units: [
             .task(line("task"), subtasks: [line("first"), line("last")]),
