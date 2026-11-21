@@ -629,7 +629,7 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         guard !snapshot.isEmpty else { return answer("Nirux couldn't read the running processes: call again in a moment.", true) }
         guard let (agentUUID, kind) = workspace.columns.lazy.compactMap({ column in
-            column.agentUUID.flatMap { uuid in column.missionAgent(foreground: column.pty?.foregroundProcess(snapshot: snapshot)).map { (uuid, $0) } }
+            column.agentUUID.flatMap { uuid in column.missionAgent(snapshot: snapshot).map { (uuid, $0) } }
         }).first
         else { return answer("Nirux delivers messages only to Claude Code, Codex or Antigravity, and “\(title)” runs none.", true) }
         guard let mission = oneWayMission(to: workspace, agentUUID: agentUUID, kind: kind, from: lead) else {
@@ -957,6 +957,10 @@ struct LeadProposal: Equatable {
 extension ColumnState {
     /// The agent Nirux delivers Mission messages to that this column runs,
     /// or will once restored.
+    func missionAgent(snapshot: ProcessSnapshot) -> CodingAgent? {
+        missionAgent(foreground: pty?.foregroundProcess(snapshot: snapshot))
+    }
+
     func missionAgent(foreground: ForegroundProcess?) -> CodingAgent? {
         let agent = foreground?.interactiveAgent
         if agent == .claude { return .claude }
