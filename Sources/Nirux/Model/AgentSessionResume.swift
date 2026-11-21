@@ -70,9 +70,14 @@ enum AgentSessionResume {
         var hasCommit: (_ mainCheckout: String, _ commit: String) -> Bool
     }
 
+    static func hasTranscript(for record: AgentSessionRecord, fileExists: (String) -> Bool = FileManager.default.fileExists(atPath:)) -> Bool {
+        guard record.agent == .claude, let path = record.transcriptPath else { return true }
+        return fileExists(path)
+    }
+
     static func plan(for record: AgentSessionRecord, probe: Probe) -> Result<Plan, Unavailable> {
         guard record.hasConversation else { return .failure(.noConversation) }
-        if record.agent == .claude, let transcriptPath = record.transcriptPath, !probe.fileExists(transcriptPath) {
+        if !hasTranscript(for: record, fileExists: probe.fileExists) {
             return .failure(.transcriptGone)
         }
         let checkout = record.checkout

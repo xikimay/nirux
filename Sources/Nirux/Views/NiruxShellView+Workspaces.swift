@@ -284,7 +284,7 @@ extension NiruxShellView {
         // A new agy says which conversation it runs through Nirux's hook.
         if agent == .agy { AgentHookInstaller.installAgyHooksIfInstalling() }
         let cmd = agentCommand(
-            launch, in: workspace, launchDirectory: workspace.cwd,
+            launch, in: workspace, column: col, launchDirectory: workspace.cwd,
             sessionName: SessionName.make(
                 worktreeBranch: worktreeBranch,
                 spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
@@ -295,6 +295,24 @@ extension NiruxShellView {
             )
         )
         sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
+    }
+
+    /// A new Claude's launch line in `workspace`: its space's mode, brief
+    /// and safety settings, and Nirux's tools.
+    func claudeLaunchCommand(
+        in workspace: WorkspaceState, worktreeBranch: String?, handoverPrompt: String?, settingsFile: String?, resume: AgentResumeTarget? = nil
+    ) -> String {
+        NiruxShellView.claudeCommand(
+            resume: resume, mode: NiruxShellView.claudeLaunchMode(for: workspace),
+            sessionName: SessionName.make(
+                worktreeBranch: worktreeBranch,
+                spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
+                isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
+            ),
+            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
+            settingsFile: settingsFile,
+            handoverPrompt: handoverPrompt
+        )
     }
 
     /// The setup script's line (see SpaceSetupScript), then `agentCommand`.
@@ -450,6 +468,12 @@ extension NiruxShellView {
             return
         case .turnOffLead:
             showSpaceSettings(profileID: workspaces[workspaceIndex].profileID, tab: .lead)
+            return
+        case .recoverLead(let issue):
+            requestLeadRecovery(issue, in: workspaces[workspaceIndex])
+            return
+        case .restartLead:
+            requestRestartLead(spaceID: workspaces[workspaceIndex].profileID)
             return
         case .editContext:
             showWorkspaceContextPanel(workspaceIndex: workspaceIndex)

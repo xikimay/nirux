@@ -80,13 +80,13 @@ enum ClaudeSpaceSettings {
         var remotes: [String]
     }
 
-    struct File: Encodable, Equatable {
-        struct AutoMode: Encodable, Equatable { var environment: [String] }
-        struct Permissions: Encodable, Equatable {
+    struct File: Codable, Equatable {
+        struct AutoMode: Codable, Equatable { var environment: [String] }
+        struct Permissions: Codable, Equatable {
             var allow: [String]?
             var deny: [String]?
         }
-        struct Sandbox: Encodable, Equatable { var enabled: Bool }
+        struct Sandbox: Codable, Equatable { var enabled: Bool }
 
         var autoMode: AutoMode?
         var permissions: Permissions?
