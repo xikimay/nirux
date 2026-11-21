@@ -684,9 +684,12 @@ extension MergeQueue {
         ) {
             let names = (verdict.failed.map { run in GitHub.qualifiedName(name: run.name, workflow: run.workflow) ?? run.name }
                 + verdict.failedStatuses).joined(separator: ", ")
+            let failedRunURL = verdict.failed.first?.workflowRunID.map {
+                "https://\(settings.gitHubRepository.host)/\(settings.repository)/actions/runs/\($0)"
+            }
             guard !entries[index].hasRerun else {
                 return stop(StopReason(kind: .checks, message: "Required check \(names) failed again on \(Self.short(head)) "
-                    + "after its rerun."))
+                    + "after its rerun.", url: failedRunURL))
             }
             let runIDs = Set(verdict.failed.compactMap(\.workflowRunID))
             guard verdict.failedStatuses.isEmpty, verdict.failed.allSatisfy({ $0.workflowRunID != nil }),
@@ -701,7 +704,7 @@ extension MergeQueue {
             }) {
                 guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else {
                     return stop(StopReason(kind: .checks, message: "Required check \(names) failed on \(Self.short(head)), "
-                        + "and its workflow run was still running after \(settings.checksTimeoutMinutes) minutes."))
+                        + "and its workflow run was still running after \(settings.checksTimeoutMinutes) minutes.", url: failedRunURL))
                 }
                 return read([.pullRequest(entries[index].number), .checks(head)], after: Limits.pollInterval,
                             for: .checks(head: head))

@@ -132,6 +132,7 @@ extension NiruxShellView {
         else { return nil }
         // Made once per repository: it reads the saved queue.
         let controller = mergeQueue(projectID: board.projectID, repository: repository)
+        controller.refreshJournalAvailabilityIfStale()
         var state = queueState(of: controller)
         state.startProblems = board.loaded(for: section)?.queueStartProblems ?? ["board.json isn’t read yet."]
         return state
@@ -161,6 +162,7 @@ extension NiruxShellView {
     /// The queue shown: running here, running elsewhere, or the last one.
     private func queueState(of controller: MergeQueueController) -> ProjectBoard.QueueState {
         var state = ProjectBoard.QueueState(isDryRun: controller.isDryRun, dryRunReason: controller.dryRunReason)
+        state.hasJournalFile = controller.hasJournalFile
         state.selection = controller.selection(for: controller.queueRepository)
         state.isConfirming = mergeQueueConfirmation != nil
         let shown: (entries: [MergeQueue.Entry], workflow: String?)?
