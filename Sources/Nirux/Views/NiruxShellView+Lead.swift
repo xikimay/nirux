@@ -265,7 +265,7 @@ extension WorkspaceState {
     /// The restart prompt belongs to the launched Claude. A later Claude
     /// started by hand in the same terminal has its own conversation.
     func runsRestartedLead(_ process: ForegroundProcess) -> Bool {
-        isLead && AgentHookCenter.isInteractiveClaude(process) && process.arguments.last == NiruxShellView.leadRestartPrompt
+        isLead && process.interactiveAgent == .claude && process.arguments.last == NiruxShellView.leadRestartPrompt
     }
 
     /// A Lead's Claude column, by its agent UUID.

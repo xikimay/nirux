@@ -626,7 +626,7 @@ extension NiruxShellView {
                   let column = workspace.columns.first(where: { $0.agentUUID == notice.agentUUID })
             else { return false }
             guard let pty = column.pty else { return true }
-            if let process = pty.foregroundProcess(snapshot: snapshot), AgentHookCenter.isInteractiveClaude(process),
+            if let process = pty.foregroundProcess(snapshot: snapshot), process.interactiveAgent == .claude,
                !notice.isFor(claudeStartedAt: process.instance.startedAt), !workspace.runsRestartedLead(process) { return false }
             let refusal = pty.missionPromptRefusal(runningSince: now, snapshot: snapshot, seenByUser: column.id == seenAtPrompt)
             if column.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
