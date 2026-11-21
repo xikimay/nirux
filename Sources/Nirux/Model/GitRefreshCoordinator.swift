@@ -114,12 +114,15 @@ final class GitRefreshCoordinator {
         reconcileWatcher(entry, workspace: workspace)
     }
 
+    /// `awaited`: the ids of workspaces a merge wait follows, read at the
+    /// hot cadence, archived or not (their tier is then the background's).
     func pullRequestsDue(
-        _ workspaces: [(workspace: WorkspaceState, tier: GitRefreshTier)]
+        _ workspaces: [(workspace: WorkspaceState, tier: GitRefreshTier)], awaited: Set<String> = []
     ) -> [WorkspaceState] {
         let now = clock()
         return workspaces.compactMap { workspace, tier in
-            guard PRDetect.shouldRefresh(isInactive: workspace.isInactive, branch: workspace.gitBranch)
+            let isAwaited = awaited.contains(workspace.id)
+            guard PRDetect.shouldRefresh(isInactive: workspace.isInactive && !isAwaited, branch: workspace.gitBranch)
             else { return nil }
             let entry = entries[ObjectIdentifier(workspace)]
             if let notBefore = entry?.pullRequestNotBefore, now < notBefore { return nil }
@@ -127,6 +130,7 @@ final class GitRefreshCoordinator {
                 tier: tier,
                 pullRequest: workspace.prInfo,
                 recentlyPushed: (entry?.pushFollowUpUntil ?? -.infinity) > now,
+                awaited: isAwaited,
                 lastRefresh: entry?.lastPullRequestRefresh,
                 now: now
             ) ? workspace : nil
