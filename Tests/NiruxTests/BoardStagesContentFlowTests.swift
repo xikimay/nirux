@@ -410,11 +410,12 @@ final class BoardStagesContentFlowTests: XCTestCase {
             try BoardConfigSuggestionsTests.makeRepository(at: docs, remote: "https://github.com/acme/docs.git")
             let widgets = try XCTUnwrap(FolderIdentity.identify(repo, timeout: 10)).anchor
             let guides = try XCTUnwrap(FolderIdentity.identify(docs, timeout: 10)).anchor
+            let widgetsID = try XCTUnwrap(widgets.key), guidesID = try XCTUnwrap(guides.key)
             XCTAssertTrue(shell.workspaceStore.setAnchors([widgets, guides], forProfile: space.id))
             shell.addWorkspace(title: "Sign in", cwd: repo, profileID: space.id, workspaceID: "login")
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.id == "login" }))
             let path = root + "/waiting/docs"
-            let wait = BoardStagesLineTests.startWait(after: "login", repo: guides.key)
+            let wait = BoardStagesLineTests.startWait(after: "login", repo: guidesID)
             shell.addWorkspace(title: "Write the guide", cwd: path, profileID: space.id, workspaceID: "guide",
                                waitingStart: wait, activate: false)
             let guide = try XCTUnwrap(shell.workspaces.first { $0.id == "guide" })
@@ -428,8 +429,8 @@ final class BoardStagesContentFlowTests: XCTestCase {
             }
             for order in [BoardStages.Order.sidebar, .progress] {
                 let content = try stages(of: board, in: shell, order: order)
-                XCTAssertEqual(ids(content, in: widgets.key), ["login", "guide"])
-                XCTAssertEqual(ids(content, in: guides.key), [])
+                XCTAssertEqual(ids(content, in: widgetsID), ["login", "guide"])
+                XCTAssertEqual(ids(content, in: guidesID), [])
                 XCTAssertFalse(content.sections.contains { $0.id == ProjectBoardController.noRepositoryID })
             }
             XCTAssertFalse(board.workspaceFolders().contains(path))
@@ -437,13 +438,13 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(board.stagesTargets.focus["guide"], .focus(workspaceID: "guide", columnID: nil))
             XCTAssertNil(board.stagesTargets.folders["guide"])
 
-            var failed = BoardStagesLineTests.startWait(after: "gone", repo: guides.key)
+            var failed = BoardStagesLineTests.startWait(after: "gone", repo: guidesID)
             failed.failure = "The dependency closed"
             guide.mergeWaits = [failed]
             let changed = try stages(of: board, in: shell)
-            XCTAssertEqual(ids(changed, in: widgets.key), ["login"])
-            XCTAssertEqual(ids(changed, in: guides.key), ["guide"])
-            let orphan = try XCTUnwrap(changed.sections.first { $0.id == guides.key }?.lines.units.first?.lines.first)
+            XCTAssertEqual(ids(changed, in: widgetsID), ["login"])
+            XCTAssertEqual(ids(changed, in: guidesID), ["guide"])
+            let orphan = try XCTUnwrap(changed.sections.first { $0.id == guidesID }?.lines.units.first?.lines.first)
             XCTAssertEqual(orphan.state, .needsYou)
             XCTAssertEqual(orphan.phrase.text, "Needs you · The dependency closed")
             XCTAssertTrue(orphan.menu.isEmpty)
@@ -458,7 +459,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             guide.mergeWaits = []
             guide.beginTask(at: docs, mission: nil)
             let released = try stages(of: board, in: shell)
-            XCTAssertEqual(ids(released, in: guides.key), ["guide"])
+            XCTAssertEqual(ids(released, in: guidesID), ["guide"])
             XCTAssertEqual(released.sections.flatMap { $0.lines.units.flatMap(\.lines) }.filter { $0.id == "guide" }.count, 1)
         }
     }
