@@ -72,9 +72,24 @@ final class UnderBarTests: XCTestCase {
             shell.relayout(animated: false)
             XCTAssertNotNil(shell.titleBandCover, "a layout keeps it")
             XCTAssertGreaterThan(shell.viewport.frame.maxY, rest.maxY)
+            shell.interfaceTransparency = .clear
+            let cover = try XCTUnwrap(shell.titleBandCover)
+            let tint = try XCTUnwrap(cover.subviews.last)
+            let bitmap = try XCTUnwrap(NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+            ))
+            let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            context.cgContext.clear(CGRect(x: 0, y: 0, width: 1, height: 1))
+            tint.draw(tint.bounds)
+            NSGraphicsContext.restoreGraphicsState()
+            let alpha = try XCTUnwrap(bitmap.colorAt(x: 0, y: 0)).alphaComponent
+            XCTAssertEqual(alpha, GlassView.tintAlpha(for: .clear, role: .chrome), accuracy: 0.01)
+
             shell.interfaceTransparency = .opaque
-            shell.relayout(animated: false)
-            XCTAssertNil(shell.titleBandCover, "at Opaque it ends")
+            XCTAssertNil(shell.titleBandCover, "at Opaque it ends without another layout")
             XCTAssertEqual(shell.viewport.frame, rest)
             clock.advance(by: 1)
 
@@ -83,10 +98,29 @@ final class UnderBarTests: XCTestCase {
             XCTAssertNotNil(shell.titleBandCover, "going up too")
             shell.sideEffects.reducesMotion = { true }
             shell.applyAgentLights()
+            XCTAssertFalse(shell.workspaceSwitch.isSwitching)
             XCTAssertNil(shell.titleBandCover, "movement turning off ends it at once")
             XCTAssertEqual(shell.viewport.frame, rest)
             XCTAssertTrue(shell.workspaces.allSatisfy { $0.containerView.alphaValue == 1 })
+
+            shell.sideEffects.reducesMotion = { false }
+            shell.focusWorkspace(.down)
+            XCTAssertNotNil(shell.titleBandCover)
+            shell.animatesInterface = false
+            XCTAssertNil(shell.titleBandCover)
+            XCTAssertFalse(shell.workspaceSwitch.isSwitching)
+            XCTAssertEqual(shell.viewport.frame, rest)
         }
+    }
+
+    func testResizingTheBandWithTheSameOpeningResizesItsMask() throws {
+        let cover = TitleBandCover(frame: NSRect(x: 0, y: 0, width: 400, height: 52), level: .tinted)
+        let bar = NSRect(x: 20, y: 8, width: 280, height: 36)
+        cover.open(bar)
+        cover.frame.size.width += 40
+        cover.open(bar)
+        let frost = try XCTUnwrap(cover.subviews.compactMap { $0 as? NSVisualEffectView }.first)
+        XCTAssertEqual(frost.maskImage?.size, cover.bounds.size)
     }
 
     /// A picture of the work taken during a pass (a new workspace's slide,
@@ -106,11 +140,11 @@ final class UnderBarTests: XCTestCase {
             shell.focusWorkspace(.up)
             XCTAssertNotNil(shell.titleBandCover)
             shell.toggleSpacePlan()
-            waitUntil("the plan", timeout: 5) { shell.spacePlan != nil }
+            clock.advance(by: NiruxShellView.arrivalDelay)
             XCTAssertEqual(shell.spacePlan?.frame.size, rest.size, "the plan")
             shell.toggleSpacePlan()
-            waitUntil("the plan gone", timeout: 5) { shell.spacePlan == nil }
-            clock.advance(by: 1)
+            clock.advance(by: SpacePlanView.diveDuration)
+            XCTAssertNil(shell.spacePlan)
 
             let first = shell.activeProfileID
             shell.workspaceStore.createProfile(named: "Second", select: true)
@@ -162,7 +196,7 @@ final class UnderBarTests: XCTestCase {
             shell.agentLights.isDisplayAsleep = false
             shell.animatesInterface = true
             let clock = ManualSchedule()
-            shell.workspaceSwitch.schedule = clock.schedule
+            shell.sideEffects.afterCommit = clock.schedule
             window.contentView = MainWindowContent(shell: shell)
             shell.installCommandBar(in: window)
             shell.interfaceTransparency = .tinted

@@ -36,7 +36,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             shell.sideEffects.reducesMotion = { reducesMotion }
             shell.agentLights.isDisplayAsleep = false
             let clock = ManualSchedule()
-            shell.workspaceSwitch.schedule = clock.schedule
+            shell.sideEffects.afterCommit = clock.schedule
             // Never a real event monitor in a test.
             shell.sideEffects.watchUserInput = { _ in nil }
             let window = NSWindow(

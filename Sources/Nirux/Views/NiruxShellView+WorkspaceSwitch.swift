@@ -26,8 +26,6 @@ final class WorkspaceSwitchState {
     /// applies.
     var switchGeneration = 0
     var cardGeneration = 0
-    /// Runs the delays; tests pass a clock they advance by hand.
-    var schedule: MainActorSchedule = mainQueueSchedule
 }
 
 // MARK: - A workspace switch (study N1, its floors from study P3)
@@ -130,7 +128,7 @@ extension NiruxShellView {
         let generation = state.switchGeneration
         // Not on the animation's completion, which a window out of view may
         // never report.
-        state.schedule(Self.workspaceSwitchDuration) { [weak self] in
+        sideEffects.afterCommit(Self.workspaceSwitchDuration) { [weak self] in
             guard let self, self.workspaceSwitch.switchGeneration == generation else { return }
             self.endWorkspaceSwitch()
         }
@@ -239,7 +237,7 @@ extension NiruxShellView {
         }
         state.cardGeneration += 1
         let generation = state.cardGeneration
-        state.schedule(Self.workspaceSwitchDuration + Self.workspaceCardHold) { [weak self] in
+        sideEffects.afterCommit(Self.workspaceSwitchDuration + Self.workspaceCardHold) { [weak self] in
             guard let self, self.workspaceSwitch.cardGeneration == generation else { return }
             self.hideWorkspaceCard(animated: self.agentLightsMayMove)
         }

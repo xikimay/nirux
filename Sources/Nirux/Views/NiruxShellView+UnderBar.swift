@@ -10,14 +10,14 @@ extension NiruxShellView {
     /// In macOS's own glass (26 and later, which refracts what passes under
     /// it), above Opaque.
     var barFloats: Bool {
-        sideEffects.drawsGlass() && sideEffects.drawnTransparency(interfaceTransparency).usesGlass
+        sideEffects.drawsGlass() && drawnTransparency.usesGlass
     }
 
     /// The title band over the shell and the bar in it, in the shell's
     /// coordinates; nil without the bar over the band (no toolbar, or full
     /// screen's own toolbar window).
     var titleBand: (band: NSRect, bar: NSRect)? {
-        guard let window, let content = window.contentView, let bar = commandBarToolbar?.bar, bar.window === window, !bar.isHidden else { return nil }
+        guard let window, let content = window.contentView, let bar = commandBarToolbar?.bar, bar.window === window, !bar.isHiddenOrHasHiddenAncestor else { return nil }
         let shell = convert(bounds, to: nil)
         let height = content.convert(content.bounds, to: nil).maxY - shell.maxY
         guard height > 0 else { return nil }
@@ -33,7 +33,7 @@ extension NiruxShellView {
     func passUnderBar(_ floors: [WorkspaceState]) {
         endUnderBar()
         guard barFloats, agentLightsMayMove, let place = titleBand else { return }
-        let cover = TitleBandCover(frame: place.band, level: sideEffects.drawnTransparency(interfaceTransparency))
+        let cover = TitleBandCover(frame: place.band, level: drawnTransparency)
         titleBandCover = cover
         addSubview(cover)
         for workspace in workspaces where !floors.contains(where: { $0 === workspace }) { workspace.containerView.alphaValue = 0 }
@@ -83,7 +83,7 @@ final class TitleBandCover: NSView {
         MainWindowContent.makeDesktopFrost(frost, in: bounds)
         tint.frame = bounds
         tint.autoresizingMask = [.width, .height]
-        tint.color = Theme.Color.canvas.withAlphaComponent(GlassView.tintAlpha(for: level, role: .chrome))
+        show(level)
         for view in [frost, tint] { addSubview(view) }
     }
 
@@ -91,9 +91,13 @@ final class TitleBandCover: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    func show(_ level: InterfaceTransparency) {
+        tint.color = Theme.Color.canvas.withAlphaComponent(GlassView.tintAlpha(for: level, role: .chrome))
+    }
+
     /// `bar`, in this view, left open: a capsule, as the bar is.
     func open(_ bar: NSRect) {
-        guard bar != opening else { return }
+        guard bar != opening || frost.maskImage?.size != bounds.size else { return }
         opening = bar
         let shape = Self.shape(of: bounds.size, open: bar)
         frost.maskImage = NSImage(size: bounds.size, flipped: false) { _ in
@@ -114,7 +118,7 @@ final class TitleBandCover: NSView {
 
     /// The canvas at the level's alpha, as the window's own tint.
     private final class Tint: NSView {
-        var color = NSColor.clear
+        var color = NSColor.clear { didSet { if color != oldValue { needsDisplay = true } } }
         var shape: NSBezierPath? { didSet { needsDisplay = true } }
 
         override func draw(_ dirtyRect: NSRect) {
