@@ -183,6 +183,9 @@ struct AgentStatusMachine {
         let at: TimeInterval
         let promptID: String?
         let sessionID: String?
+        /// The conversation's first prompt: one given at launch (a task's
+        /// handover) counts as typed by a person, with no key.
+        var opensConversation = false
     }
 
     private static let promptMemory = 8
@@ -564,8 +567,12 @@ struct AgentStatusMachine {
             settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
             askedQuestion = nil
             circling.reset()
+            let opensConversation = lastPromptAt.map { $0 < conversationChangedAt } ?? true
             lastPromptAt = now
-            notePromptHook(PromptHook(at: now, promptID: event.promptID, sessionID: event.sessionID), source: event.source)
+            notePromptHook(
+                PromptHook(at: now, promptID: event.promptID, sessionID: event.sessionID, opensConversation: opensConversation),
+                source: event.source
+            )
             // An Esc at a dialog since the main thread last moved ended its
             // call with no hook. (A prompt alone doesn't: Claude submits peer
             // messages and poll results as prompts while a call runs.)
@@ -625,10 +632,11 @@ struct AgentStatusMachine {
     /// left behind with no hook too. Typed elsewhere (Remote Control), or
     /// with an Enter Nirux didn't see, it leaves the box as it was.
     /// `saidByTranscript`: its transcript line says a person typed it, so
-    /// with no Enter Nirux saw it was the user, elsewhere.
+    /// with no Enter Nirux saw it was the user, elsewhere, unless it opened
+    /// the conversation.
     private mutating func noteTypedPrompt(_ hook: PromptHook, saidByTranscript: Bool = false) {
         guard let enter = submitKeys.last(where: { $0 <= hook.at }), enter > (boxEmptiedAt ?? 0) else {
-            if saidByTranscript { lastPromptByUserAt = hook.at }
+            if saidByTranscript, !hook.opensConversation { lastPromptByUserAt = hook.at }
             return
         }
         boxEmptiedAt = enter

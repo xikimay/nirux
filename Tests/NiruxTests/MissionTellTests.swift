@@ -1078,14 +1078,17 @@ final class MissionTellTests: XCTestCase {
     /// and its Enter in one write, or the Enter after a long paste), the
     /// user at the box, or elsewhere (Remote Control) when the transcript
     /// says a person typed one with no Enter at the box. Nobody before any:
-    /// a first prompt given at launch, Claude's own messages.
+    /// the first prompt given at launch, though its line says a person
+    /// typed it, and Claude's own messages.
     func testWhoTypedTheLastPrompt() {
         var machine = AgentStatusMachine()
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0))
         _ = machine.apply(hook(.sessionStart, at: 0), isUserFocused: false)
         machine.readsTranscript = true
+        // Its transcript says a person typed it, as Claude Code writes a
+        // prompt given at launch.
         _ = machine.apply(prompt("handover", at: 1), isUserFocused: false)
-        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "handover", at: t0 + 1.1, typed: false))
+        _ = machine.noteTranscriptPrompt(TranscriptPrompt(promptID: "handover", at: t0 + 1.1, typed: true))
         _ = machine.apply(hook(.stop, at: 5), isUserFocused: false)
         XCTAssertEqual(machine.lastPromptTyper, .nobody, "its handover came with its launch")
         machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 6), keys: Data("\u{1B}[200~Go on\u{1B}[201~\r".utf8), byNirux: true)
