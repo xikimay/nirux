@@ -24,9 +24,9 @@ jobs:
       matrix:
         include:
           - pr: 703
-            head: b333c134bd541a68bab5cfe7b9244a7abc0130ab
+            head: 6bd9990ea14f15a872cc578805431e69e8d85892
           - pr: 716
-            head: c27358afc31deed6d3d7b445cabd07bfef370942
+            head: 000da2656be3e755e18184bb584dc610486b3f60
     runs-on: macos-15
     # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift
     # 6.1): libghostty-spm 2.2 needs Swift tools 6.2.
@@ -73,7 +73,7 @@ jobs:
           NIRUX_BOARD_WAITING_RENDER: ${{ runner.temp }}/waiting-board.png
         run: |
           if [[ "$STACK_PR" == 703 ]]; then
-            git show c7ded7191fb7f7b6dd6d1f7faae2c5f06549f9e5:scripts/run-tests.sh > scripts/run-tests.sh
+            git show c7ded7191fb7f7b6dd6d1f7faae2c5f06549f9e5:scripts/run-tests.sh | sed 's/gated_count -eq 4/gated_count -eq 5/' > scripts/run-tests.sh
           fi
           scripts/run-tests.sh
 
@@ -87,18 +87,19 @@ jobs:
             git show b7c86c86d5b457d70a5f5255e16a7d317ee54bcc:scripts/prove-board-waits.py | python3
           fi
 
-      - name: Reproduce the two original fixture type errors
+      - name: Detect a missing waiting-task guard and an incorrect agent handover
         if: matrix.pr == 703
         run: |
-          for fixture in WaitingTaskFlowTests MergeWaitTests; do
-            path="Tests/NiruxTests/$fixture.swift"
-            if [[ "$fixture" == WaitingTaskFlowTests ]]; then
-              git show "b476bb4b:$path" > "$path"
+          method=testImmediateAndReleasedStartsDeliverTheSelectedAgentsHandover
+          for file in ExternalTools NewTask; do
+            path="Sources/Nirux/Views/NiruxShellView+$file.swift"
+            if [[ "$file" == ExternalTools ]]; then
+              sed -i '' 's/guard let workspace = activeWorkspace, !workspace.isWaitingTask,/guard let workspace = activeWorkspace,/' "$path"
             else
-              sed -i '' '/pending.step(after: .read(pullRequest(41, .merged)))/s/41, .merged/41, "MERGED"/' "$path"
+              sed -i '' 's/handoverFilename: HandoverFile.filename(for: request.agent)/handoverFilename: HandoverFile.filename(for: .claude)/' "$path"
             fi
-            if swift build --build-tests > "$RUNNER_TEMP/$fixture.log" 2>&1; then exit 1; fi
-            grep -m1 -E "$fixture.swift:[0-9]+:[0-9]+: error: .*String.*GitHub.PullRequestState" "$RUNNER_TEMP/$fixture.log"
+            if swift test --filter "WaitingTaskFlowTests/$method" > "$RUNNER_TEMP/$file.log" 2>&1; then exit 1; fi
+            grep -m1 -E ": error: .*$method.*XCTAssert" "$RUNNER_TEMP/$file.log"
             git restore "$path"
           done
 
