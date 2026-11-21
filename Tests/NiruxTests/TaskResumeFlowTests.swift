@@ -43,7 +43,7 @@ final class TaskResumeFlowTests: XCTestCase {
         XCTAssertNotNil(store.accept(response, enabled: false))
         let delivery = try XCTUnwrap(store.pendingAnswer(childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID))
         XCTAssertEqual(delivery.event.message, "Friday")
-        XCTAssertTrue(NiruxShellView.goesToCodex(delivery))
+        XCTAssertEqual(NiruxShellView.recipientAgent(of: delivery), .codex)
     }
 
     private func startWorker(
