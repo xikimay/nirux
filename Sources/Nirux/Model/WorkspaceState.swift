@@ -832,7 +832,7 @@ extension WorkspaceState {
         }
         // Blank elsewhere: a Nirux started from a Lead's shell must not
         // pass the role on to every terminal it opens.
-        environment[Self.leadEnvironmentKey] = isLead ? "1" : ""
+        environment[LeadChannel.environmentKey] = isLead ? "1" : ""
         // Nor from an SDK run's: its agents would read as headless
         // (`TurnEndText.isHeadless`). Blank, Claude Code sets its own.
         environment["CLAUDE_CODE_ENTRYPOINT"] = ""
@@ -846,9 +846,6 @@ extension WorkspaceState {
         // NIRUX_ one (SpaceDefaults refuses those names anyway).
         return environment.merging(SpaceDefaultsStore.defaults(forSpace: profileID).effectiveEnvironment) { nirux, _ in nirux }
     }
-
-    /// Set to "1" in the Lead's shells (see `isLead`).
-    nonisolated static let leadEnvironmentKey = "NIRUX_LEAD"
 
     // Pure builder so feature-gating of terminal metadata can be tested
     // without starting a PTY-backed WorkspaceState.

@@ -71,7 +71,7 @@ extension NiruxShellView {
         let now = Date().timeIntervalSince1970
         let isInside = { (folder: String?) -> Bool in
             guard let folder else { return false }
-            return MergeQueue.isInside(Self.comparablePath(folder), roots: worktrees, allWorktrees: allWorktrees)
+            return MergeQueue.isInside(folder.comparablePath, roots: worktrees, allWorktrees: allWorktrees)
         }
         var busy: [String] = []
         for workspace in workspaces where !workspace.isClosing {

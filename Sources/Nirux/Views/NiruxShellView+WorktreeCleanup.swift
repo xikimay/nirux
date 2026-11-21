@@ -85,8 +85,8 @@ extension NiruxShellView {
               let path = worktreeCleanupPath(workspaceIndex: workspaceIndex),
               FileManager.default.fileExists(atPath: path)
         else { return nil }
-        let key = Self.comparablePath(path)
-        guard Self.comparablePath(repositoryRoot) == key else { return nil }
+        let key = path.comparablePath
+        guard repositoryRoot.comparablePath == key else { return nil }
         return worktreeCleanupsInFlight.contains(key) ? .inProgress : .available
     }
 
@@ -155,17 +155,13 @@ extension NiruxShellView {
         return current
     }
 
-    nonisolated static func comparablePath(_ path: String) -> String {
-        path.realPath ?? URL(fileURLWithPath: path).standardizedFileURL.path
-    }
-
     /// Whether a path is `root` or inside it, symlinks resolved.
     nonisolated static func containment(in root: String) -> (String?) -> Bool {
-        let resolvedRoot = comparablePath(root)
+        let resolvedRoot = root.comparablePath
         return { candidate in
             guard let candidate else { return false }
             // The Project Board places workspaces by the same rule.
-            return ProjectBoard.contains(resolvedRoot, comparablePath(candidate))
+            return ProjectBoard.contains(resolvedRoot, candidate.comparablePath)
         }
     }
 
@@ -187,7 +183,7 @@ extension NiruxShellView {
     /// The same for a worktree named by its folder, which may have no
     /// workspace: the Project Board's "Clean Up…".
     func requestWorktreeCleanup(path: String) {
-        let key = Self.comparablePath(path)
+        let key = path.comparablePath
         guard worktreeCleanupsInFlight.insert(key).inserted else {
             return showToast("A clean-up of this worktree is already in progress")
         }
@@ -311,7 +307,7 @@ extension NiruxShellView {
         // Now, not when its terminals are freed: the wait needs them gone.
         terminals.forEach { $0.hangUp() }
         let closedAny = !open.isEmpty
-        Self.waitForExit(processes, workingIn: Self.comparablePath(candidate.path)) { [weak self] stillRunning in
+        Self.waitForExit(processes, workingIn: candidate.path.comparablePath) { [weak self] stillRunning in
             guard stillRunning.isEmpty else {
                 let names = stillRunning.joined(separator: ", ")
                 return then("Still running after \(Int(Self.exitTimeout)) s: \(names). Nothing was deleted.", closedAny)
@@ -447,13 +443,13 @@ extension NiruxShellView {
             // The first entry is the main checkout; a folder already gone
             // is for `git worktree prune`, not for this.
             let paths = listing.dropFirst().map(\.path).filter { $0.realPath != nil }
-            let repository = listing.first.map { Self.comparablePath($0.path) }
+            let repository = listing.first.map(\.path.comparablePath)
             DispatchQueue.main.async { @MainActor [weak self, weak panel] in
                 guard let self, let panel, panel.acceptsNewRows,
                       let repository, panel.markRepositoryScanned(repository)
                 else { return }
                 let snapshot = ProcessSnapshot()
-                for path in paths where !panel.contains(comparablePath: Self.comparablePath(path)) {
+                for path in paths where !panel.contains(comparablePath: path.comparablePath) {
                     let candidate = self.worktreeCleanupCandidate(path: path, snapshot: snapshot)
                     panel.append(candidate)
                     self.inspectForPanel(candidate, panel: panel, queue: queue)
@@ -515,7 +511,7 @@ extension NiruxShellView {
             runWorktreeCleanups(rest, in: panel, finished: finished)
         case .ready(let plan, _):
             // A "Clean Up Worktree…" of the same folder may still be running.
-            let key = Self.comparablePath(candidate.path)
+            let key = candidate.path.comparablePath
             guard worktreeCleanupsInFlight.insert(key).inserted else {
                 panel.setResult(.skipped("Not run: another clean-up of it is in progress"), for: candidate.path)
                 return runWorktreeCleanups(rest, in: panel, finished: finished)

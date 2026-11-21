@@ -52,7 +52,7 @@ extension ColumnHeaderView.Status {
         let detail = dialog.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
         let toolTip = [dialog.headline, detail].compactMap { $0 }.joined(separator: " — ")
         if dialog.isBlockingDialog {
-            let duration = waited.flatMap { $0 >= 60 ? SidebarRenderer.shortDuration($0) : nil }
+            let duration = waited.flatMap { $0 >= 60 ? $0.shortDuration : nil }
             return Self(
                 [dialog.shortLabel, duration].compactMap { $0 }.joined(separator: " · "),
                 tone: .waiting, icon: icon(.needsYou), toolTip: toolTip
