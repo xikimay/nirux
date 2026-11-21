@@ -1,4 +1,4 @@
-name: Tests
+name: Codex task flow stability
 
 # Runs the suite on every PR into main so mergeStateStatus reflects it before
 # merge: an actor-isolation error in a test file once reached main red
@@ -10,14 +10,15 @@ on:
     branches: [main]
 
 concurrency:
-  group: tests-${{ github.ref }}
+  group: codex-task-flow-gate-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  gate:
+    if: startsWith(github.head_ref, 'test/codex-task-flow-gate')
     runs-on: macos-15
     # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift
     # 6.1): libghostty-spm 2.2 needs Swift tools 6.2.
@@ -25,7 +26,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     # A serial run took 13 minutes: a hung test fails the job instead of
     # holding the runner for GitHub's six hours.
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
         with:
@@ -33,6 +34,7 @@ jobs:
           # merged pull request's commits runs here, before merge, rather
           # than first in the nightly.
           fetch-depth: 0
+          ref: 1fb6e37dea2033404e2741404c6fbb3ddb803f36
 
       # The dependencies' clones and binaries (GhosttyKit's download sometimes
       # fails to connect), per toolchain: a new runner image's SwiftPM starts
@@ -54,5 +56,53 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      - name: Repeat CodexTaskFlowTests ten times under contention
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GATE_WORK="$RUNNER_TEMP/codex-task-flow-gate"
+          mkdir -p "$GATE_WORK"
+          git rev-parse HEAD | tee "$GATE_WORK/source-sha"
+          test "$(cat "$GATE_WORK/source-sha")" = 1fb6e37dea2033404e2741404c6fbb3ddb803f36
+          swift test list --skip-build > "$GATE_WORK/listed"
+          platform="$(xcrun --sdk macosx --show-sdk-platform-path)/Developer"
+          export NIRUX_TESTS_FRAMEWORK_PATH="$platform/Library/Frameworks"
+          export NIRUX_TESTS_LIBRARY_PATH="$platform/usr/lib"
+          export NIRUX_TESTS_XCTEST="$(xcrun --sdk macosx --find xctest)"
+          export NIRUX_TESTS_BUNDLE="$(swift build --show-bin-path)/NiruxPackageTests.xctest"
+          export NIRUX_TESTS_CLASS_TIMEOUT=600
+          export NO_COLOR=1 SWIFT_TESTING_ENABLED=0
+          for attempt in $(seq 1 10); do
+            echo "$attempt NiruxTests.CodexTaskFlowTests"
+            case $((attempt % 3)) in
+              0) echo "$attempt NiruxTests.SettingsWindowTests" ;;
+              1) echo "$attempt NiruxTests.MenuBarFlowTests" ;;
+              2) echo "$attempt NiruxTests.LeadTaskToolsFlowTests" ;;
+            esac
+          done > "$GATE_WORK/jobs"
+          xargs -P 3 -n 2 bash -c '
+            set -euo pipefail
+            attempt="$1"
+            class="$2"
+            export NIRUX_TESTS_WORK="$GATE_WORK/$attempt-$class"
+            mkdir -p "$NIRUX_TESTS_WORK"
+            touch "$NIRUX_TESTS_WORK/failed" "$NIRUX_TESTS_WORK/times"
+            bash scripts/run-tests.sh --class "$class"
+            log="$NIRUX_TESTS_WORK/$class.log"
+            expected=$(grep -cF "$class/" "$GATE_WORK/listed")
+            executed=$(sed -nE "s/.*Executed ([0-9]+) tests?.*/\1/p" "$log" | tail -1)
+            if [[ -s "$NIRUX_TESTS_WORK/failed" || "$expected" -eq 0 || "${executed:-0}" -ne "$expected" ]]; then
+              cat "$log"
+              exit 1
+            fi
+            echo "Run $attempt: $class passed $executed/$expected tests"
+          ' _ < "$GATE_WORK/jobs"
+
+      - name: Release build
+        run: swift build -c release
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: codex-task-flow-gate-logs
+          path: ${{ runner.temp }}/codex-task-flow-gate
