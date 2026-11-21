@@ -683,7 +683,6 @@ extension NiruxShellView {
             guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
             gitRefresh.notePullRequestRefresh(workspace)
             if !workspace.isInactive { startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext) }
-            let readStartedAt = Date().timeIntervalSince1970
             fetchPullRequest(branch, cwd, workspace.cwd) { [weak self, weak workspace] result in
                 guard let workspace else { return }
                 guard self?.followsPullRequest(workspace) == true else {
@@ -701,7 +700,7 @@ extension NiruxShellView {
                     guard let workspace else { return }
                     guard self?.followsPullRequest(workspace) == true,
                           case .observed(let currentContext) = result,
-                          currentContext == queriedContext else {
+                          workspace.isCurrentPullRequestObservation(observation, for: currentContext) else {
                         workspace.finishPullRequestObservation(observation)
                         return
                     }
@@ -710,7 +709,7 @@ extension NiruxShellView {
                         for: queriedContext,
                         observation: observation
                     )
-                    self?.followMergeWaits(awaiting: workspace, read: info, now: readStartedAt)
+                    self?.followMergeWaits(awaiting: workspace, read: info, now: observation.startedAt)
                     // An archived task is read for the waits on it only.
                     guard !workspace.isInactive else {
                         if changed { self?.scheduleMetadataRefresh() }
@@ -725,7 +724,6 @@ extension NiruxShellView {
                     if workspace.prInfo == info { self?.refreshPRFeedback(for: workspace) }
                     self?.reportNewRedChecks(in: workspace)
                     if workspace.prInfo == info {
-                        self?.prFollowUpCenter.readAt[workspace.id] = readStartedAt
                         self?.followUpPullRequest(of: workspace)
                     }
                     guard changed else { return }

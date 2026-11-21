@@ -52,7 +52,7 @@ final class CodexTaskFlowTests: XCTestCase {
             var link = URLComponents()
             link.scheme = "nirux"
             link.host = "new-worktree"
-            link.queryItems = ["repo": harness.repo, "branch": harness.worktreeBranch, "agent": "codex",
+            link.queryItems = ["repo": harness.repo, "branch": harness.worktreeBranch, "agent": "codex", "title": "Check release notes",
                                "profile": "untrusted", "mode": "readOnly", "parentWorkspace": "untrusted"].map(URLQueryItem.init)
             app.application(NSApp, open: [try XCTUnwrap(link.url)])
             harness.waitUntil("the external worktree confirmation") { harness.window.attachedSheet != nil }
@@ -65,6 +65,7 @@ final class CodexTaskFlowTests: XCTestCase {
             harness.window.endSheet(sheet, returnCode: .alertFirstButtonReturn)
             harness.waitUntil("Codex launches in the approved worktree") { harness.agentLaunches.last?.hasPrefix("command codex") == true }
             let opened = try XCTUnwrap(harness.shell.activeWorkspace)
+            XCTAssertEqual(opened.title, "Check release notes")
             XCTAssertEqual(opened.profileID, space.id)
             XCTAssertTrue(opened.startedOutsideNirux)
             XCTAssertNil(opened.missionID)

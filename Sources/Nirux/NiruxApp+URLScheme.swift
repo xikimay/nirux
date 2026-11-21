@@ -119,6 +119,7 @@ extension NiruxApp {
         case .newWorktree(let worktree):
             shell?.createWorktreeWorkspace(
                 branch: worktree.branch,
+                title: worktree.title,
                 repoRoot: worktree.repo,
                 agent: worktree.agent,
                 handoverPath: worktree.handoverPath,
