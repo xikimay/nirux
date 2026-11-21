@@ -96,7 +96,7 @@ enum QuickSwitchAgentState: Equatable {
     func label(now: TimeInterval) -> String {
         switch self {
         case .working: return "working"
-        case .waiting(let since, _): return "waiting \(SidebarRenderer.shortDuration(now - since))"
+        case .waiting(let since, _): return "waiting \((now - since).shortDuration)"
         case .failed(let reason): return reason.shortLabel
         }
     }

@@ -11,6 +11,8 @@ import Foundation
 /// that proves nothing, so the app checks it against its own state (see
 /// `NiruxShellView.handleLeadRequest`) before acting.
 enum LeadChannel {
+    /// Set to "1" in the Lead's shells.
+    static let environmentKey = "NIRUX_LEAD"
     static let protocolVersion = 1
     /// A request nobody took within this long is dropped: its caller takes
     /// it back after `LeadTools.takeTimeout`, so one this old was left by a

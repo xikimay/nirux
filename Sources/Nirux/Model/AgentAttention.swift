@@ -78,9 +78,9 @@ enum AgentAttentionReason: Hashable, Sendable {
         case .message: return "needs you"
         case .apiError: return "API error"
         case .exitedMidTurn: return "exited mid-turn"
-        case .silent(let duration): return "silent \(SidebarRenderer.shortDuration(duration))"
+        case .silent(let duration): return "silent \(duration.shortDuration)"
         case .stillWaiting(let dialog, let waited):
-            return "waiting \(SidebarRenderer.shortDuration(waited)) · \(dialog.shortLabel)"
+            return "waiting \(waited.shortDuration) · \(dialog.shortLabel)"
         }
     }
 
@@ -94,9 +94,9 @@ enum AgentAttentionReason: Hashable, Sendable {
         case .message: return "needs you"
         case .apiError: return "stopped on an API error"
         case .exitedMidTurn: return "exited mid-turn"
-        case .silent(let duration): return "has been silent for \(SidebarRenderer.shortDuration(duration))"
+        case .silent(let duration): return "has been silent for \(duration.shortDuration)"
         case .stillWaiting(let dialog, let waited):
-            return "\(dialog.headline) — waiting \(SidebarRenderer.shortDuration(waited))"
+            return "\(dialog.headline) — waiting \(waited.shortDuration)"
         }
     }
 

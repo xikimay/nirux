@@ -631,7 +631,7 @@ private struct IsolatedEnvironment {
 
     init() {
         // Memoized from HOME on first use: let the real one set it.
-        _ = PtySession.effectivePath
+        _ = Shell.effectivePath
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-ui-flow-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         root = base.path.realPath ?? base.path

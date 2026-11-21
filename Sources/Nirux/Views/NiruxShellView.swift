@@ -922,7 +922,7 @@ extension NiruxShellView {
         let folder = repositoryFolder ?? activeWorkspace?.focusedWorkingDirectory
         guard let folder, let repoRoot = GitWorktree.repoRoot(at: folder)
         else { return showToast("Not in a git repository: \(folder?.abbreviatedPath() ?? "")") }
-        let excluded = repositoryFolder == nil ? Self.comparablePath(repoRoot) : nil
+        let excluded = repositoryFolder == nil ? repoRoot.comparablePath : nil
         // From the focused terminal, not the active workspace: its folder is
         // where it was opened, not where its terminal is now, and going back
         // to it would do nothing. From the sheet it counts, so picking its
@@ -935,11 +935,11 @@ extension NiruxShellView {
         DispatchQueue.global(qos: .userInitiated).async {
             let worktrees = GitWorktree.list(repoRoot: repoRoot)
             let branches = listsBranches ? GitWorktree.branchesWithoutWorktree(repoRoot: repoRoot, worktrees: worktrees) : []
-            let comparablePaths = worktrees.map { Self.comparablePath($0.path) }
+            let comparablePaths = worktrees.map(\.path.comparablePath)
             // The worktree each workspace is open in (the main checkout may
             // hold the others), and whether at its root.
             let workspaceWorktrees = openWorkspaces.compactMap { workspace in
-                let cwd = Self.comparablePath(workspace.cwd)
+                let cwd = workspace.cwd.comparablePath
                 return ProjectBoard.innermost(of: comparablePaths, holding: cwd).map {
                     (id: workspace.id, path: comparablePaths[$0], isAtRoot: cwd == comparablePaths[$0])
                 }

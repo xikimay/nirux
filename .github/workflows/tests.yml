@@ -17,6 +17,15 @@ permissions:
   contents: read
 
 jobs:
+  core:
+    runs-on: macos-15
+    timeout-minutes: 5
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v5
+      - run: scripts/check-core-boundary.sh
+
   test:
     runs-on: macos-15
     # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift

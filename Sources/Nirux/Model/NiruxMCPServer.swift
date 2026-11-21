@@ -109,7 +109,7 @@ enum NiruxMCPServer {
         /// it once, so after `/clear` or `/resume` it names the previous one.
         var sessionID: String? { nonEmpty("CLAUDE_CODE_SESSION_ID") }
         /// Launched in a space's Lead workspace (see `WorkspaceState.isLead`).
-        var isLead: Bool { environment[WorkspaceState.leadEnvironmentKey] == "1" }
+        var isLead: Bool { environment[LeadChannel.environmentKey] == "1" }
         /// Launched by a Nirux workspace's terminal, which names itself (the
         /// app can tell who calls) and carries this launch's id: one opened
         /// by a link from outside Nirux has none, and its agents get no task

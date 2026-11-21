@@ -55,11 +55,11 @@ final class MergedCleanupLinkTests: XCTestCase {
     }
 
     private func waitForGitContext(of workspace: WorkspaceState, at folder: String, shell: NiruxShellView, harness: UIFlowHarness) {
-        let expected = NiruxShellView.comparablePath(folder)
-        XCTAssertEqual(NiruxShellView.comparablePath(workspace.focusedWorkingDirectory), expected)
+        let expected = folder.comparablePath
+        XCTAssertEqual(workspace.focusedWorkingDirectory.comparablePath, expected)
         shell.refreshGitContextNow(for: workspace)
         harness.waitUntil("the git context of \(folder)") {
-            workspace.gitContext.map { NiruxShellView.comparablePath($0.identity.repositoryRoot) } == expected
+            workspace.gitContext.map(\.identity.repositoryRoot.comparablePath) == expected
         }
     }
 

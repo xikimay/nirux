@@ -82,11 +82,11 @@ extension NiruxShellView {
     /// what is live.
     func pullRequestAgent(in workspace: WorkspaceState, snapshot: ProcessSnapshot = ProcessSnapshot()) -> TypedPromptTarget? {
         guard let root = workspace.gitContext?.identity.repositoryRoot else { return nil }
-        let resolvedRoot = Self.comparablePath(root)
+        let resolvedRoot = root.comparablePath
         let sessions = typedPromptTargets(in: [workspace], snapshot: snapshot).filter {
             $0.workspaceID == workspace.id
                 && workspace.columns[$0.columnIndex].pty?.foregroundProcess(snapshot: snapshot)?.agent == .claude
-                && ProjectBoard.contains(resolvedRoot, Self.comparablePath($0.cwd))
+                && ProjectBoard.contains(resolvedRoot, $0.cwd.comparablePath)
         }
         return sessions.first { $0.columnIndex == workspace.focusedIndex } ?? sessions.first
     }

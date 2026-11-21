@@ -40,7 +40,7 @@ struct ClaudeCodeVersion: Comparable, CustomStringConvertible {
     /// all of them. Nil when none is found or any one's version can't be
     /// read.
     static func detect(
-        path: String = PtySession.effectivePath,
+        path: String = Shell.effectivePath,
         home: String = NSHomeDirectory(),
         systemDirectories: [String] = AgentCLILocator.systemInstallDirectories
     ) -> ClaudeCodeVersion? {

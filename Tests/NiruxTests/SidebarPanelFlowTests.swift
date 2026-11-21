@@ -197,8 +197,8 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let worktreeWorkspace = try XCTUnwrap(shell.activeWorkspace)
             shell.refreshGitContextNow(for: worktreeWorkspace)
             harness.waitUntil("the worktree's git context") {
-                worktreeWorkspace.gitContext.map { NiruxShellView.comparablePath($0.identity.repositoryRoot) }
-                    == NiruxShellView.comparablePath(harness.worktree)
+                worktreeWorkspace.gitContext.map(\.identity.repositoryRoot.comparablePath)
+                    == harness.worktree.comparablePath
             }
             XCTAssertEqual(try menu(for: worktreeWorkspace).items.suffix(2).map(\.title), ["Clean Up Worktree…", "Close Workspace"])
             // Set and read in one run-loop turn: a git refresh can't clear it

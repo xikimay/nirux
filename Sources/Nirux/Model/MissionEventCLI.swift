@@ -168,7 +168,7 @@ enum MissionEventCLI {
     /// sub-task a task's agent started with its tools): Nirux carries their
     /// Missions whatever the setting.
     static func isAlwaysCarried(environment: [String: String], missionsURL: URL) -> Bool {
-        if environment[WorkspaceState.leadEnvironmentKey] == "1" { return true }
+        if environment[LeadChannel.environmentKey] == "1" { return true }
         guard let missionID = environment["NIRUX_MISSION_ID"] else { return false }
         var ledger = MissionLedgerReader(url: missionsURL)
         ledger.refresh()

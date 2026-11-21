@@ -43,7 +43,7 @@ extension NiruxShellView {
             closeLeadTask(task)
             return answer("Closed “\(title)”. Nirux found no worktree of it to clean up.", false)
         }
-        let key = Self.comparablePath(path)
+        let key = path.comparablePath
         guard worktreeCleanupsInFlight.insert(key).inserted else {
             return answer("A clean-up of “\(title)”'s worktree is already running: call again in a minute.", true)
         }
@@ -66,7 +66,7 @@ extension NiruxShellView {
     private func finishLeadClose(
         taskID: String, spaceID: String, path: String, inspection: WorktreeCleanup.Inspection, answer: @escaping LeadAnswer
     ) {
-        let key = Self.comparablePath(path)
+        let key = path.comparablePath
         guard let task = workspaces.first(where: { $0.id == taskID && $0.profileID == spaceID && !$0.isClosing }) else {
             worktreeCleanupsInFlight.remove(key)
             return answer("The task was closed or moved to another space meanwhile: nothing was cleaned up.", true)

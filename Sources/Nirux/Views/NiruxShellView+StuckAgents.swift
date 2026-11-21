@@ -106,7 +106,7 @@ extension NiruxShellView {
         guard let pty = column.pty else { return nil }
         switch pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess) {
         case .waiting(let reason, let since)?:
-            return .waiting(reason, duration: SidebarRenderer.shortDuration(now - since))
+            return .waiting(reason, duration: (now - since).shortDuration)
         case .stoppedOnError(let failure)?:
             let resume = SidebarStuckState.Resume(
                 pty.agentResumeRefusal(foreground: foregroundProcess, snapshot: snapshot, now: now)
@@ -116,7 +116,7 @@ extension NiruxShellView {
             return .exitedMidTurn(agent: exit.agent)
         case .silent(let silence)?:
             return .silent(
-                duration: SidebarRenderer.shortDuration(now - silence.startedAt), since: silence.since,
+                duration: (now - silence.startedAt).shortDuration, since: silence.since,
                 interruptible: pty.silentInterruptPlan(foreground: foregroundProcess).offersEsc
             )
         case nil:

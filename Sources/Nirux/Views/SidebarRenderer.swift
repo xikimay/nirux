@@ -202,15 +202,6 @@ enum SidebarRenderer {
         guard let image = context.makeImage() else { return NSImage(size: size) }
         return NSImage(cgImage: image, size: size)
     }
-
-    /// Compact duration for sidebar chips: 42s, 12m, 1h05m. Pure —
-    /// nonisolated so ColumnInfo's display-granularity Hashable can use it.
-    nonisolated static func shortDuration(_ seconds: TimeInterval) -> String {
-        let total = max(0, Int(seconds))
-        if total < 60 { return "\(total)s" }
-        if total < 3600 { return "\(total / 60)m" }
-        return "\(total / 3600)h\(String(format: "%02d", (total % 3600) / 60))m"
-    }
 }
 
 extension NSTextField {
