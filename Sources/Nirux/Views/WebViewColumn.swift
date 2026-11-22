@@ -21,6 +21,13 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     }
     /// Fires when the displayed URL changes (navigation, redirects).
     var onURLChanged: (() -> Void)?
+    /// Explicit manual action from an isolated browser's capture or diagnostics sheet.
+    /// Completes with `true` when the workspace's Branch Review is already visible on screen.
+    var onAttachCaptureToBranchReview: (@MainActor (
+        BranchReview.BrowserReceipt.Input,
+        @escaping @MainActor (Result<Bool, Error>) -> Void
+    ) -> Void)?
+    var onOpenBranchReview: (@MainActor () -> Void)?
     private(set) var pageTitle: String = ""
     private var observations: [NSKeyValueObservation] = []
     /// Find in page (⌘F), driven by the column's find bar.

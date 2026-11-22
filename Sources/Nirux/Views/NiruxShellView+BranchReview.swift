@@ -37,7 +37,7 @@ extension NiruxShellView {
             focusBranchReview(existing)
             return
         }
-        let review = makeBranchReview(worktree: worktree, branch: nil)
+        let review = makeBranchReview(worktree: worktree, branch: nil, workspaceID: workspace.id)
         workspace.addBranchReviewColumn(review)
         workspace.columns[safe: workspace.focusedIndex]?.widthFraction = ColumnWidth.twoThirds.fraction
         if workspace === activeWorkspace {
@@ -73,9 +73,10 @@ extension NiruxShellView {
 
     /// A review for a new column or a restored one. It reads nothing before
     /// `start`.
-    func makeBranchReview(worktree: String, branch: String?) -> BranchReviewController {
+    func makeBranchReview(worktree: String, branch: String?, workspaceID: String? = nil) -> BranchReviewController {
         let review = BranchReviewController(
-            worktree: worktree, branch: branch, reader: branchReviewReader, reviewOpener: branchReviewOpener,
+            worktree: worktree, branch: branch, workspaceID: workspaceID, reader: branchReviewReader,
+            reviewOpener: branchReviewOpener, branchCheck: branchReviewBranchCheck,
             explainChecker: sideEffects.checkExplain
         )
         review.isOnScreen = { [weak self, weak review] in
@@ -127,6 +128,107 @@ extension NiruxShellView {
     /// refresh, several times a second, calls it too.
     func refreshStaleBranchReviewsOnScreen() {
         activeWorkspace?.columns.forEach { $0.branchReview?.becameVisible() }
+    }
+
+    /// Attaches an isolated browser capture to `workspace`'s Branch Review.
+    /// Completes with `true` when the review column is already visible on screen.
+    func attachBrowserCapture(
+        _ input: BranchReview.BrowserReceipt.Input,
+        in workspace: WorkspaceState,
+        completion: @escaping @MainActor (Result<Bool, Error>) -> Void
+    ) {
+        guard let targetID = UUID(uuidString: workspace.id),
+              let inputID = UUID(uuidString: input.workspaceID),
+              targetID == inputID else {
+            completion(.failure(BranchReview.BrowserReceipt.Problem.crossWorkspaceCapture))
+            return
+        }
+        if let review = workspace.columns.compactMap(\.branchReview).first(where: {
+            !$0.worktree.isEmpty && Self.isSameFolder($0.worktree, workspace.cwd)
+        }) ?? workspace.columns.compactMap(\.branchReview).first, review.snapshot != nil {
+            review.attachBrowserCapture(input) { [weak review] result in
+                completion(result.map { review?.isOnScreen() ?? false })
+            }
+            return
+        }
+        let worktree = workspace.cwd
+        let workspaceID = workspace.id
+        let stateDirectory = Persistence.stateDirectory
+        let reader = branchReviewReader
+        let opener = branchReviewOpener
+        let branchCheck = branchReviewBranchCheck
+        BranchReviewController.inBackground(on: .global(qos: .userInitiated), {
+            Self.attachBrowserCaptureInStore(
+                input, worktree: worktree, workspaceID: workspaceID,
+                stateDirectory: stateDirectory, reader: reader, opener: opener, branchCheck: branchCheck
+            )
+        }) { [weak workspace] result in
+            if case .success = result, let workspace {
+                workspace.columns.compactMap(\.branchReview).forEach { $0.reloadReview() }
+            }
+            completion(result.map { false })
+        }
+    }
+
+    private nonisolated static func attachBrowserCaptureInStore(
+        _ input: BranchReview.BrowserReceipt.Input,
+        worktree: String,
+        workspaceID: String,
+        stateDirectory: URL,
+        reader: BranchReviewController.Reader,
+        opener: BranchReviewController.ReviewOpener,
+        branchCheck: BranchReviewController.BranchCheck
+    ) -> Result<Void, Error> {
+        let (outcome, _) = reader(worktree, false, nil)
+        let snapshot: BranchReview.Snapshot
+        switch outcome {
+        case .snapshot(let found): snapshot = found
+        case .paused(let operation):
+            return .failure(BranchReview.BrowserReceipt.MessageError(message: BranchReviewController.pauseMessage(operation)))
+        case .unavailable(let message):
+            return .failure(BranchReview.BrowserReceipt.MessageError(message: message))
+        }
+        do {
+            let receipt = try BranchReview.BrowserReceipt.receipt(
+                from: input, for: snapshot, workspaceID: workspaceID, stateDirectory: stateDirectory
+            )
+            guard let (store, loaded) = opener(snapshot) else {
+                return .failure(BranchReview.BrowserReceipt.MessageError(
+                    message: "Nirux couldn’t open this branch’s review file: git couldn’t tell its repository."
+                ))
+            }
+            guard let access = loaded.access else {
+                let message: String
+                if case .readOnly(let reason) = loaded.status {
+                    message = reason.message
+                } else {
+                    message = "This review can’t be changed."
+                }
+                return .failure(BranchReview.BrowserReceipt.MessageError(message: message))
+            }
+            if access.createsReview {
+                switch branchCheck(store) {
+                case true?: break
+                case false?:
+                    return .failure(BranchReview.BrowserReceipt.MessageError(
+                        message: "\(store.branch) was deleted: Nirux won’t create its review."
+                    ))
+                case nil:
+                    return .failure(BranchReview.BrowserReceipt.MessageError(
+                        message: "Nirux couldn’t check that \(store.branch) still exists. Try again."
+                    ))
+                }
+            }
+            let written = try store.update(access, createsEmpty: false) { $0.addReceipt(receipt) }.get()
+            guard written.record.receipts.contains(where: { $0.id == receipt.id }) else {
+                return .failure(BranchReview.BrowserReceipt.MessageError(
+                    message: "This review’s receipt format cannot be updated by this version of Nirux."
+                ))
+            }
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
     }
 
     /// The same folder, whatever symlinks, case (APFS) or trailing slash
