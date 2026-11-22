@@ -291,6 +291,17 @@ final class MergeQueueController {
         return nil
     }
 
+    /// Keep a live Start in another Nirux out until the draft reaches its agent.
+    func lockForResolution(of conflict: MergeQueue.Conflict) -> Result<MergeQueueLock, StartRefusal> {
+        guard !isRunning, !runsElsewhere, !isRepositoryBusy(queueRepository) else { return .failure(.repositoryBusy) }
+        Self.waitForFiles()
+        guard let lock = MergeQueueLock.acquire(repository: queueRepository, folder: lockFolder) else { return .failure(.lockedElsewhere) }
+        guard MergeQueue.Conflict(saved: loadSaved(), repository: queueRepository, dryRun: isDryRun) == conflict else {
+            return .failure(.invalidEntry("The saved queue changed since this conflict. Check its current status before asking an agent."))
+        }
+        return .success(lock)
+    }
+
     /// Stops before the next command; a call already sent finishes.
     func stop() {
         driver?.stop()

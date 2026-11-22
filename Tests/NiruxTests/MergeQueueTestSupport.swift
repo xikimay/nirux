@@ -32,6 +32,17 @@ enum MQ {
         MergeQueue.ConfirmedEntry(number: number, head: head, branch: branch ?? "feat/\(number)")
     }
 
+    static func stoppedConflict(number: Int = 12, branch: String = "feat/login") -> MergeQueue.SavedQueue {
+        let engine = MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(number, head: MQ.sha("a"), branch: branch)])
+        var saved = MergeQueue.SavedQueue(engine: engine, dryRun: false, savedAt: Date())
+        let reason = MergeQueue.StopReason(kind: .conflict, message: "#\(number) conflicts with the base.")
+        saved.status = .stopped
+        saved.stopReason = reason
+        saved.current = 0
+        saved.entries[0].step = .stopped(reason)
+        return saved
+    }
+
     static func pullRequest(
         _ number: Int,
         head: String,
