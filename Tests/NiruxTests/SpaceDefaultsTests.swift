@@ -30,12 +30,15 @@ final class SpaceDefaultsTests: XCTestCase {
         var defaults = SpaceDefaults()
         XCTAssertEqual(defaults.claudeMode(settings: .acceptEdits), .acceptEdits)
         XCTAssertEqual(defaults.codexMode(settings: .fullAuto), .fullAuto)
+        XCTAssertEqual(defaults.agyMode(settings: .auto), .auto)
         XCTAssertEqual(defaults.taskAgent, .claude)
         defaults.claudeLaunchMode = .plan
         defaults.codexLaunchMode = .readOnly
+        defaults.agyLaunchMode = .default
         defaults.agent = .codex
         XCTAssertEqual(defaults.claudeMode(settings: .acceptEdits), .plan)
         XCTAssertEqual(defaults.codexMode(settings: .fullAuto), .readOnly)
+        XCTAssertEqual(defaults.agyMode(settings: .auto), .default)
         XCTAssertEqual(defaults.taskAgent, .codex)
     }
 
@@ -86,7 +89,7 @@ final class SpaceDefaultsTests: XCTestCase {
     func testSaveWritesAPrivateFileThatReadsBack() throws {
         let store = try store()
         let defaults = SpaceDefaults(
-            agent: .codex, claudeLaunchMode: .plan, codexLaunchMode: nil,
+            agent: .codex, claudeLaunchMode: .plan, codexLaunchMode: nil, agyLaunchMode: .acceptEdits,
             environment: [variable("TOKEN", "s3cr3t"), variable("URL", "https://example.com/a")]
         )
         let saved = try store.save(defaults, replacing: store.load()).get()
@@ -142,6 +145,7 @@ final class SpaceDefaultsTests: XCTestCase {
             (#"{"claudeLaunchMode": "plan", "leadAgent": "gemini"}"#, .unknownSettings(["leadAgent"])),
             (#"{"claudeLaunchMode": "plan", "setupTimeout": 30}"#, .unknownSettings(["setupTimeout"])),
             (#"{"claudeLaunchMode": "plan", "codexLaunchMode": "turbo"}"#, .unknownSettings(["codexLaunchMode"])),
+            (#"{"claudeLaunchMode": "plan", "agyLaunchMode": "turbo"}"#, .unknownSettings(["agyLaunchMode"])),
             (#"{"claudeLaunchMode": "plan", "environment": [{"name": "A", "value": "1", "secret": true}]}"#,
              .unknownSettings(["environment"]))
         ]

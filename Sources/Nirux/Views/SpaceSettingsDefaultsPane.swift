@@ -1,7 +1,7 @@
 import AppKit
 
 /// Space Settings › Defaults (docs/design/projects.md, section 5): the agent its
-/// tasks preselect, the Claude and Codex launch modes, the pull request
+/// tasks preselect, the agent launch modes, the pull request
 /// follow-up (docs/design/pr-follow-up.md), and environment variables for
 /// new shells. Each change is written at once
 /// (SpaceDefaultsStore); a variable list with a problem isn't, until it's
@@ -19,6 +19,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         /// Settings' modes, which "Same as Settings" stands for.
         var settingsClaudeMode: @MainActor () -> ClaudeLaunchMode = { .default }
         var settingsCodexMode: @MainActor () -> CodexLaunchMode = { .default }
+        var settingsAgyMode: @MainActor () -> AgyLaunchMode = { .auto }
     }
 
     static let width: CGFloat = 680
@@ -31,6 +32,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     let agentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let claudePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let codexPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    let agyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let followUpSwitch = NSSwitch()
     let tableView = NSTableView()
     let addButton = NSButton(title: "Add Variable", target: nil, action: nil)
@@ -60,7 +62,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fillPopups()
         tableView.reloadData()
         let writable = loaded.isWritable
-        for control in [agentPopup, claudePopup, codexPopup, followUpSwitch, addButton, tableView] as [NSControl] {
+        for control in [agentPopup, claudePopup, codexPopup, agyPopup, followUpSwitch, addButton, tableView] as [NSControl] {
             control.isEnabled = writable
         }
         followUpSwitch.state = loaded.defaults.followsUpPullRequests ? .on : .off
@@ -88,6 +90,9 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fill(codexPopup, settings: Self.shortName(actions.settingsCodexMode().displayName),
              modes: CodexLaunchMode.allCases.map { ($0.rawValue, $0.displayName) },
              selected: defaults.codexLaunchMode?.rawValue)
+        fill(agyPopup, settings: Self.shortName(actions.settingsAgyMode().displayName),
+             modes: AgyLaunchMode.allCases.map { ($0.rawValue, $0.displayName) },
+             selected: defaults.agyLaunchMode?.rawValue)
     }
 
     private func fill(_ popup: NSPopUpButton, settings: String, modes: [(String, String)], selected: String?) {
@@ -131,6 +136,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         guard let raw = sender.selectedItem?.representedObject as? String else { return }
         var defaults = loaded.defaults
         defaults.codexLaunchMode = CodexLaunchMode(rawValue: raw)
+        guard defaults != loaded.defaults else { return }
+        write(defaults)
+    }
+
+    @objc func agyModeChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String else { return }
+        var defaults = loaded.defaults
+        defaults.agyLaunchMode = AgyLaunchMode(rawValue: raw)
         guard defaults != loaded.defaults else { return }
         write(defaults)
     }
@@ -282,7 +295,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         for (popup, action, label) in [
             (agentPopup, #selector(agentChanged(_:)), "Agent for new tasks"),
             (claudePopup, #selector(claudeModeChanged(_:)), "Claude Code permission mode"),
-            (codexPopup, #selector(codexModeChanged(_:)), "Codex mode")
+            (codexPopup, #selector(codexModeChanged(_:)), "Codex mode"),
+            (agyPopup, #selector(agyModeChanged(_:)), "Antigravity mode")
         ] {
             popup.target = self
             popup.action = action
@@ -291,7 +305,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         let form = NSGridView(views: [
             [Self.formLabel("Agent for new tasks"), agentPopup],
             [Self.formLabel("Claude Code permissions"), claudePopup],
-            [Self.formLabel("Codex mode"), codexPopup]
+            [Self.formLabel("Codex mode"), codexPopup],
+            [Self.formLabel("Antigravity mode"), agyPopup]
         ])
         form.rowSpacing = 10
         form.columnSpacing = 10

@@ -239,7 +239,12 @@ New flow, built on the guarded typing `tell` already uses
   then ask the user, as for any parent gone, and a new Lead doesn't take them
   over. Deleting its space makes it a plain workspace in General (its running
   shells keep `NIRUX_LEAD=1` until they restart).
-- **Agent choice** in Space Settings › Lead applies the next time the Lead starts or restarts.
+- **Agent choice** in Space Settings › Lead sets the default for a stopped Lead.
+  Restart Lead… preselects the running agent when there is one. Choosing another agent
+  starts a fresh conversation for this restart and keeps the saved preference.
+  Relaunch resumes the current conversation with the space’s current options. The sidebar
+  offers it for a Claude Code or Codex Lead with older options. A running Antigravity Lead
+  offers it in the workspace menu.
   Claude Code is the default. Nirux launches Codex with a per-session MCP configuration and
   an initial prompt so it can establish which thread receives Mission messages. A manual
   Codex session can receive queued messages once its launch prompt or resume ID proves the

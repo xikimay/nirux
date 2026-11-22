@@ -20,6 +20,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testEditorCommands": ["Open Editor", "Toggle Editor Diff", "Search Workspace"],
             "testSearchEverywhere": ["Search Everywhere"],
             "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
+            "testOpenIsolatedTestBrowser": ["Open Isolated Test Browser"],
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex", "Open Antigravity", "Next Waiting Agent"],
             "testSessionHistoryCommand": ["Session History…"],
@@ -29,6 +30,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testWorkspaceCommands": ["Rename Workspace", "Show/Hide Sidebar", "Show/Hide Archived", "Open Board"],
             "testWorktreeCommands": ["Open Worktree", "Clean Up Merged Worktrees…"],
             "testNewCommand": ["New…"],
+            "testCheckpointCommands": ["Save Checkpoint…", "Checkpoints…"],
             "testReviewBranchCommand": ["Review Branch"],
             "testSetupCommands": ["Show Getting Started", "Install Agent Skills", "Open Settings"]
         ],
@@ -378,6 +380,21 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
+    func testOpenIsolatedTestBrowser() throws {
+        try UIFlowHarness.run { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            let terminal = try XCTUnwrap(workspace.columns.first)
+            let server = LocalServerURL(isSecure: false, host: "localhost", port: 5173, path: "/")
+            XCTAssertTrue(workspace.localServers.book.noteDetected(server, in: terminal.id, browserPorts: [], now: 0))
+            XCTAssertTrue(workspace.localServers.book.applyScan(listeningPorts: [server.port], browserPorts: [], liveColumns: [terminal.id], now: 1))
+
+            harness.runPaletteCommand("Open Isolated Test Browser")
+            let web = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.webViewColumn)
+            XCTAssertTrue(web.isIsolated)
+            XCTAssertEqual(web.currentURL, server.urlString)
+        }
+    }
+
     func testImportBrowserCookies() throws {
         try UIFlowHarness.run { harness in
             XCTAssertFalse(harness.paletteCommandTitles().contains("Import Browser Cookies"), "no Chromium browser to import from")
@@ -482,7 +499,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
             harness.runPaletteCommand("Open Antigravity")
             XCTAssertEqual(workspace.columns.count, columnCount + 3)
-            XCTAssertEqual(harness.agentLaunches.last, "command agy")
+            XCTAssertEqual(harness.agentLaunches.last, "command agy --mode auto")
 
             // Claude waits on the user (faked: a real one needs a `claude`
             // in front): the command goes to it. QuickSwitcherFlowTests
@@ -706,6 +723,35 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertTrue(launch.hasPrefix("command claude"), launch)
             XCTAssertTrue(launch.contains("'--name=fix/sidebar-flickers-on-resize · Repo'"), launch)
             XCTAssertTrue(launch.contains("Read .claude-handover.md for full context"), launch)
+        }
+    }
+
+    func testCheckpointCommands() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let store = try LocalCheckpoints(stateDirectory: Persistence.stateDirectory, workspaceID: workspace.id)
+            harness.runPaletteCommand("Save Checkpoint…")
+            let prompt = try XCTUnwrap(harness.window.attachedSheet?.contentView)
+            let field = try XCTUnwrap(UIFlowHarness.descendant(of: prompt, as: NSTextField.self) { $0.isEditable })
+            field.stringValue = "Before refactor"
+            try XCTUnwrap(UIFlowHarness.button(titled: "Save", in: prompt)).performClick(nil)
+            harness.waitUntil("the checkpoint confirmation") {
+                shell.toast?.message.hasPrefix("Saved checkpoint") == true && harness.window.attachedSheet == nil
+            }
+            XCTAssertEqual(try store.list().first?.manifest?.label, "Before refactor")
+
+            harness.runPaletteCommand("Checkpoints…")
+            let panel = try XCTUnwrap(harness.window.attachedSheet?.contentView)
+            harness.waitUntil("the saved row") {
+                UIFlowHarness.descendant(of: panel, as: NSTextField.self) { $0.stringValue.hasPrefix("Before refactor ·") } != nil
+            }
+            try XCTUnwrap(UIFlowHarness.button(titled: "Delete", in: panel)).performClick(nil)
+            harness.waitUntil("the empty history") {
+                UIFlowHarness.descendant(of: panel, as: NSTextField.self) { $0.stringValue == "No saved checkpoints" } != nil
+            }
+            XCTAssertTrue(try store.list().isEmpty)
+            try XCTUnwrap(UIFlowHarness.button(titled: "Done", in: panel)).performClick(nil)
         }
     }
 

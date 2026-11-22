@@ -160,7 +160,7 @@ extension NiruxShellView {
     ) {
         switch persistedColumn.resolvedType {
         case .webView:
-            workspace.addColumn(webViewURL: persistedColumn.webViewURL ?? "about:blank")
+            workspace.addColumn(webViewURL: persistedColumn.webViewURL ?? "about:blank", isIsolated: persistedColumn.isIsolatedBrowser == true)
         case .claudeCode:
             // Claimed now, for the whole layout: whenever each column
             // resumes (see NiruxShellView+LazyRestore.swift), two never
@@ -187,7 +187,8 @@ extension NiruxShellView {
             let resumeTarget = Self.agentRestoreTarget(
                 sessionID: persistedColumn.agySessionID, claimedSessionIDs: &claimedSessionIDs.agy
             )
-            addDeferredAgentColumn(.agy(resume: resumeTarget, model: persistedColumn.agentModel), restoring: persistedColumn, in: workspace)
+            let mode = persistedColumn.agyLaunchMode ?? Self.agyLaunchMode(for: workspace)
+            addDeferredAgentColumn(.agy(resume: resumeTarget, mode: mode, model: persistedColumn.agentModel), restoring: persistedColumn, in: workspace)
         case .editor:
             let openFiles = persistedColumn.editorOpenFiles ?? []
             // Non-interactive: a binary or huge file in the persisted tab set
@@ -449,6 +450,7 @@ extension NiruxShellView {
         var claudeMode: ClaudeLaunchMode?
         var claudeRestore: ClaudeSessionTracker.Restore?
         var codexMode: CodexLaunchMode?
+        var agyMode: AgyLaunchMode?
         if col.isEditor {
             kind = .editor
             webURL = nil
@@ -470,6 +472,7 @@ extension NiruxShellView {
                 codexMode = CodexLaunchMode.detect(arguments: foregroundProcess.arguments) ?? .default
             case .agy? where foregroundProcess.interactiveAgent == .agy:
                 kind = .agy; webURL = nil
+                agyMode = AgyLaunchMode.detect(arguments: foregroundProcess.arguments) ?? .default
             default: kind = .terminal; webURL = nil
             }
         } else {
@@ -482,10 +485,12 @@ extension NiruxShellView {
             cwd: col.editorColumn?.workspaceCwd ?? col.pty?.childCwd ?? workspace.cwd,
             columnType: kind,
             webViewURL: webURL,
+            isIsolatedBrowser: col.webViewColumn?.isIsolated,
             editorOpenFiles: editorOpenFiles,
             editorActiveFile: editorActiveFile,
             claudeLaunchMode: claudeMode,
             codexLaunchMode: codexMode,
+            agyLaunchMode: agyMode,
             agentModel: isAgent ? foregroundProcess.flatMap { AgentModels.launchModel(arguments: $0.arguments) } : nil,
             codexSessionID: kind == .codex
                 ? col.persistedCodexSessionID(foregroundProcess: foregroundProcess)
