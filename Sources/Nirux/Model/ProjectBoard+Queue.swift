@@ -37,6 +37,7 @@ extension ProjectBoard {
         var startProblems: [String] = []
         /// The confirmation sheet is open.
         var isConfirming = false
+        var selectionBusyReason: String?
 
         var isRunning: Bool {
             if case .running = run { return true }

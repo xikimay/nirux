@@ -165,6 +165,7 @@ extension NiruxShellView {
         state.hasJournalFile = controller.hasJournalFile
         state.selection = controller.selection(for: controller.queueRepository)
         state.isConfirming = mergeQueueConfirmation != nil
+        state.selectionBusyReason = mergeQueueSelectionBusy
         let shown: (entries: [MergeQueue.Entry], workflow: String?)?
         if let engine = controller.engine, controller.isRunning {
             state.run = .running(isStopping: engine.phase == .stopping)
@@ -236,7 +237,7 @@ extension NiruxShellView {
 
     /// Why the queue's list can't change now, if it can't; as the Board's
     /// Merge stations say it.
-    private var mergeQueueSelectionBusy: String? {
+    var mergeQueueSelectionBusy: String? {
         if mergeQueueQuit != nil { return "Nirux is stopping the merge queue to quit" }
         if mergeQueueConfirmation != nil { return "The confirmation sheet is open: change the list once it closes" }
         return nil

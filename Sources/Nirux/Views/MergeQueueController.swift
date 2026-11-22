@@ -183,8 +183,22 @@ final class MergeQueueController {
     }
 
     func removeFromSelection(_ number: Int) {
-        guard !isRunning, !runsElsewhere, selection.contains(number) else { return }
-        setSelection(selection.filter { $0 != number })
+        removeSelected { $0 == number }
+    }
+
+    func pruneSelection(keepingOpen openNumbers: Set<Int>) {
+        removeSelected { !openNumbers.contains($0) }
+    }
+
+    func clearSelection() {
+        pruneSelection(keepingOpen: [])
+    }
+
+    private func removeSelected(where shouldRemove: (Int) -> Bool) {
+        guard !isRunning, !runsElsewhere else { return }
+        let remaining = selection.filter { !shouldRemove($0) }
+        guard remaining.count != selection.count else { return }
+        setSelection(remaining)
         onChange?()
     }
 

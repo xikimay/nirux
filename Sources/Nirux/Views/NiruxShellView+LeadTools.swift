@@ -960,7 +960,8 @@ extension NiruxShellView {
             let problem = board.loaded(for: chosen.0)?.queueStartProblems.first ?? "Board Settings aren't set up for it yet."
             return answer("\(chosen.1.name)'s merge queue can't start: \(problem) Tell the user.", true)
         }
-        if let open = board.reads[chosen.0.id]?.openPullRequests.map({ Set($0.map(\.number)) }) {
+        let reads = board.reads[chosen.0.id]
+        if let open = reads?.openPullRequests.map({ Set($0.map(\.number)) }) {
             let unknown = numbers.filter { !open.contains($0) }
             guard unknown.isEmpty else {
                 return answer(unknown.map { "#\($0)" }.joined(separator: ", ") + " isn't an open pull request of \(chosen.1.name).", true)
@@ -970,6 +971,7 @@ extension NiruxShellView {
         guard !controller.isRunning, !controller.runsElsewhere else {
             return answer("\(chosen.1.name)'s merge queue is running: propose these once it ends.", true)
         }
+        if let open = reads?.completeOpenNumbers { controller.pruneSelection(keepingOpen: open) }
         // The user's own list stays theirs; a Lead's earlier one is its own.
         let current = controller.selection(for: chosen.1.gitHub)
         let proposalKey = space.id + " " + chosen.1.gitHub.ownerAndName
