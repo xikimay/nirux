@@ -101,10 +101,10 @@ private final class CheckpointList: NSScrollView {
             let title = checkpoint.label.map { "\($0) · \(timestamp)" } ?? timestamp
             label(title, x: 4, y: y, width: width - 90).font = .boldSystemFont(ofSize: NSFont.systemFontSize)
             let head = checkpoint.head.map { "HEAD \($0.prefix(8))" } ?? "No HEAD"
-            label("\(head) · \(checkpoint.files.count) files · \(Self.size(checkpoint.size))", x: 4, y: y + 22, width: width - 180)
+            label("\(head) · \(checkpoint.files.count) files · \(Self.size(checkpoint.size))", x: 4, y: y + 22, width: width - 200)
             if checkpoint.isIncomplete {
-                let badge = label("Incomplete", x: width - 170, y: y + 22, width: 85)
-                badge.textColor = .systemOrange
+                let badge = label("Incomplete".asWarning, x: width - 190, y: y + 22, width: 105)
+                badge.textColor = .niruxWarning
                 let reasons = checkpoint.omissions.map { "\(BranchReview.visible($0.path)) — \($0.reason)" }
                 badge.toolTip = ((checkpoint.timedOut ? ["Capture timed out"] : []) + reasons).joined(separator: "\n")
             }
