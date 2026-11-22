@@ -1,0 +1,10 @@
+(version 1)
+(allow default)
+(deny network-outbound (remote ip "*:*"))
+(deny file-read* file-write*
+    (subpath (param "CHECKOUT"))
+    (subpath (param "STATE"))
+    (subpath (param "CLAUDE"))
+    (subpath (param "CODEX")))
+; SwiftPM accessors can fall back to an absolute build-time path.
+(deny file-read* (regex #"/\.build/"))
