@@ -84,13 +84,16 @@ final class IsolatedBrowserTests: XCTestCase {
     func testCaptureAndDiagnosticsMenuActions() throws {
         try UIFlowHarness.run { harness in
             let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
-            workspace.addColumn(webViewURL: URL(fileURLWithPath: harness.repo + "/README.md").absoluteString, isIsolated: true)
+            let page = URL(fileURLWithPath: harness.repo + "/capture.html")
+            try "<body>Screenshot fixture<script>console.error('sample')</script></body>"
+                .write(to: page, atomically: true, encoding: .utf8)
+            harness.shell.openWebView(url: page.absoluteString, in: workspace, isIsolated: true)
             let column = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.webViewColumn)
             let diagnostics = try XCTUnwrap(column.diagnostics)
-            column.webView.loadHTMLString("<body>Screenshot fixture<script>console.error('sample')</script></body>", baseURL: nil)
-            harness.waitUntil("the test document and its viewport") {
-                diagnostics.buffer.consoleErrorCount == 1 && column.webView.bounds.width > 0 && !column.webView.isLoading
-            }
+            XCTAssertFalse(column.webView.bounds.isEmpty)
+            guard harness.waitUntil("the fixture to load and report its error", {
+                diagnostics.buffer.consoleErrorCount == 1 && !column.webView.isLoading
+            }) else { return }
             let menu = column.header.currentMenu()
             @MainActor func select(_ title: String) throws {
                 menu.performActionForItem(at: menu.index(of: try XCTUnwrap(menu.item(withTitle: title))))
