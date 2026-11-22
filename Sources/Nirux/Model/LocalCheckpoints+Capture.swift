@@ -67,7 +67,7 @@ extension LocalCheckpoints {
         func git(_ arguments: [String]) -> BranchReview.GitOutput? {
             let remaining = deadline - ProcessInfo.processInfo.systemUptime
             guard remaining > 0 else { return nil }
-            return BranchReview.git(["-c", "core.fsmonitor=false"] + arguments, in: root, options: options,
+            return BranchReview.git(arguments, in: root, options: options,
                                     timeout: remaining, maxOutputBytes: 8 << 20)
         }
         func value(_ arguments: [String]) -> String? {
@@ -86,27 +86,35 @@ extension LocalCheckpoints {
                 }
             }
         }
-        // A configured clean filter (e.g. LFS) can write objects as a side effect of status.
-        let filters = git(["config", "--null", "--name-only", "--get-regexp", #"^filter\..*\.(process|clean|required)$"#])
-        if let filters, [0, 1].contains(filters.status) {
-            let disabled = filters.stdout.split(separator: 0).flatMap { name -> [String] in
-                let key = String(decoding: name, as: UTF8.self)
-                return ["-c", key + (key.hasSuffix(".required") ? "=false" : "=")]
+        do {
+            let status = try Self.changedTrackedStatus(using: git)
+            try Self.visitStatus(status) { path, code, omission in
+                if let omission { capture.omit(path, omission) }
+                else { capturePath(path, code: code, root: descriptor, deadline: deadline, capture: &capture) }
             }
-            if let status = git(disabled + ["status", "--porcelain=v1", "-z", "--untracked-files=no", "--find-renames",
-                                            "--ignore-submodules=untracked"]), status.status == 0 {
-                try collect(status.stdout, root: descriptor, deadline: deadline, capture: &capture)
-            } else if ProcessInfo.processInfo.systemUptime < deadline {
-                throw Problem("Git could not list the changed tracked files within the status output limit.")
-            }
-        } else if ProcessInfo.processInfo.systemUptime < deadline {
-            throw Problem("Git could not read the workspace’s filter configuration.")
+        } catch {
+            if ProcessInfo.processInfo.systemUptime < deadline { throw error }
         }
         capture.manifest.timedOut = ProcessInfo.processInfo.systemUptime >= deadline
         return try persist(capture)
     }
 
-    private func collect(_ status: Data, root: Int32, deadline: TimeInterval, capture: inout Capture) throws {
+    static func changedTrackedStatus(using git: ([String]) -> BranchReview.GitOutput?) throws -> Data {
+        // Status can invoke clean filters that write objects, even with optional locks disabled.
+        guard let filters = git(["config", "--null", "--name-only", "--get-regexp", #"^filter\..*\.(process|clean|required)$"#]),
+              [0, 1].contains(filters.status) else { throw Problem("Git could not read the workspace’s filter configuration.") }
+        let disabled = filters.stdout.split(separator: 0).flatMap { name -> [String] in
+            let key = String(decoding: name, as: UTF8.self)
+            return ["-c", key + (key.hasSuffix(".required") ? "=false" : "=")]
+        }
+        guard let status = git(disabled + ["-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--untracked-files=no",
+                                           "--find-renames", "--ignore-submodules=untracked"]), status.status == 0 else {
+            throw Problem("Git could not list the changed tracked files within the status output limit.")
+        }
+        return status.stdout
+    }
+
+    static func visitStatus(_ status: Data, _ visit: (String, String, String?) -> Void) throws {
         var records = status.split(separator: 0).makeIterator()
         while let record = records.next() {
             guard record.count > 3 else { throw Problem("Invalid Git status entry.") }
@@ -117,22 +125,21 @@ extension LocalCheckpoints {
                 guard let source = records.next() else { throw Problem("Incomplete Git rename entry.") }
                 let sourcePath = String(decoding: source, as: UTF8.self)
                 oldPath = sourcePath
-                if code.contains("R") { capturePath(sourcePath, code: "D ", withheld: false, root: root, deadline: deadline, capture: &capture) }
+                if code.contains("R") { visit(sourcePath, "D ", nil) }
             }
             guard let path = String(data: pathBytes, encoding: .utf8) else {
-                capture.omit(String(decoding: pathBytes, as: UTF8.self), "Filename is not UTF-8")
+                visit(String(decoding: pathBytes, as: UTF8.self), code, "Filename is not UTF-8")
                 continue
             }
-            capturePath(path, code: code, withheld: oldPath.map(BranchReview.Secrets.isSecretPath) == true,
-                        root: root, deadline: deadline, capture: &capture)
+            visit(path, code, oldPath.map(BranchReview.Secrets.isSecretPath) == true ? "Secret path" : nil)
         }
     }
 
-    private func capturePath(_ path: String, code: String, withheld: Bool, root: Int32, deadline: TimeInterval, capture: inout Capture) {
+    private func capturePath(_ path: String, code: String, root: Int32, deadline: TimeInterval, capture: inout Capture) {
         guard Self.safeFilePath(path) else {
             return capture.omit(path, "Unsafe path")
         }
-        guard !withheld, !BranchReview.Secrets.isSecretPath(path) else { return capture.omit(path, "Secret path") }
+        guard !BranchReview.Secrets.isSecretPath(path) else { return capture.omit(path, "Secret path") }
         guard ProcessInfo.processInfo.systemUptime < deadline else { return capture.omit(path, "Capture timed out") }
         guard capture.manifest.files.count < limits.maxFilesPerCapture else { return capture.omit(path, "File count limit") }
         if code == "D " {

@@ -16,28 +16,54 @@ extension LocalCheckpoints {
     private func buildDiff(from id: UUID, to otherID: UUID?, worktree: String) throws -> Diff {
         let before = try manifest(id)
         let after = try otherID.map(manifest)
-        let root: Int32
-        if after == nil {
-            let path = try Self.repositoryPaths(in: worktree)[0]
-            root = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
-            guard root >= 0 else { throw Self.fileError }
-        } else { root = -1 }
+        let repository = after == nil ? try Self.repositoryPaths(in: worktree)[0] : worktree
+        let root = after == nil ? open(repository, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC) : -1
+        guard after != nil || root >= 0 else { throw Self.fileError }
         defer { if root >= 0 { close(root) } }
+        let git = DiffRepository(directory: repository)
         let original = try indexedFiles(before)
         let modified = try after.map(indexedFiles) ?? [:]
-        let omissions = Set((before.omissions + (after?.omissions ?? [])).map(\.path))
-        let paths = Set(original.keys).union(modified.keys)
+        var paths = Set(original.keys).union(modified.keys)
+        var omissions = Set((before.omissions + (after?.omissions ?? [])).map(\.path))
         var sections: [String] = [], skipped: [String] = []
+        var exceedsFileLimit = paths.count > limits.maxFilesPerCapture
+        func include(_ path: String) {
+            if paths.count < limits.maxFilesPerCapture { paths.insert(path) }
+            else if !paths.contains(path) { exceedsFileLimit = true }
+        }
+
+        var targetHead = after?.head
+        if after == nil {
+            do {
+                let status = try Self.changedTrackedStatus { git.run($0) }
+                try Self.visitStatus(status) { path, _, reason in
+                    include(path)
+                    if reason != nil, paths.contains(path) { omissions.insert(path) }
+                }
+            } catch { skipped.append(error.localizedDescription) }
+            targetHead = git.run(["rev-parse", "--verify", "HEAD"]).flatMap {
+                $0.status == 0 ? $0.text.trimmingCharacters(in: .newlines) : nil
+            }
+        }
+        do {
+            try git.visitChangedPaths(from: before.head, to: targetHead, include)
+        } catch { skipped.append(error.localizedDescription) }
+
         var budget = limits.maxWorkspaceBytes
         var remainingPatch = 4 << 20
-        for path in paths.sorted() {
+        if exceedsFileLimit { skipped.append("Comparison file count limit reached.") }
+        for path in paths.sorted().prefix(limits.maxFilesPerCapture) {
+            guard !git.expired else {
+                skipped.append("Comparison timed out. Additional changes may be missing.")
+                break
+            }
             do {
                 guard Self.safeFilePath(path), !BranchReview.Secrets.isSecretPath(path) else { throw Problem("Unsafe path") }
                 guard !omissions.contains(path) else { throw Problem("Omitted from checkpoint") }
-                let left = try savedBytes(original[path], in: before, budget: &budget)
+                let left = try savedBytes(path, file: original[path], in: before, git: git, budget: &budget)
                 let right: Data?
                 if let after {
-                    right = try savedBytes(modified[path], in: after, budget: &budget)
+                    right = try savedBytes(path, file: modified[path], in: after, git: git, budget: &budget)
                 } else {
                     switch BranchReview.ExplainCopy.readBytes(path, from: root, maxFileBytes: limits.maxSingleFileBytes, budget: budget) {
                     case let .success(bytes):
@@ -79,8 +105,60 @@ extension LocalCheckpoints {
         return files
     }
 
-    private func savedBytes(_ file: File?, in manifest: Manifest, budget: inout Int) throws -> Data? {
-        guard let file else { throw Problem("Path was not recorded in checkpoint") }
+    private struct DiffRepository {
+        let directory: String
+        let deadline = ProcessInfo.processInfo.systemUptime + 15
+        let options = BranchReview.Options(gitHub: nil, environment: ["GIT_NO_LAZY_FETCH": "1", "GIT_NO_REPLACE_OBJECTS": "1"])
+
+        var expired: Bool { ProcessInfo.processInfo.systemUptime >= deadline }
+
+        func run(_ arguments: [String], limit: Int = 8 << 20) -> BranchReview.GitOutput? {
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { return nil }
+            return BranchReview.git(arguments, in: directory, options: options, timeout: min(5, remaining), maxOutputBytes: limit)
+        }
+
+        func visitChangedPaths(from before: String?, to after: String?, _ include: (String) -> Void) throws {
+            let unavailable = Problem("Git baseline unavailable. Changes between commits may be missing.")
+            guard let left = GitHub.objectID(before), let right = GitHub.objectID(after) else { throw unavailable }
+            guard left != right else { return }
+            guard let changed = run(["diff-tree", "-r", "--name-only", "-z", "--no-renames", "--no-commit-id", left, right, "--"]),
+                  changed.status == 0 else { throw unavailable }
+            var validNames = true
+            for record in changed.stdout.split(separator: 0) {
+                if let path = String(data: record, encoding: .utf8) { include(path) }
+                else { validNames = false }
+            }
+            if !validNames { throw Problem("Skipped filenames that are not UTF-8.") }
+        }
+
+        func bytes(at path: String, head: String, limit: Int, budget: inout Int) throws -> Data? {
+            let unavailable = Problem("Recorded HEAD baseline unavailable")
+            guard let tree = run(["--literal-pathspecs", "ls-tree", "-z", "-l", "--full-tree", head, "--", path]),
+                  tree.status == 0 else { throw unavailable }
+            guard !tree.stdout.isEmpty else { return nil }
+            guard let tab = tree.stdout.firstIndex(of: 9),
+                  tree.stdout[(tab + 1)...].elementsEqual(Array(path.utf8) + [0]) else { throw unavailable }
+            let entry = String(decoding: tree.stdout[..<tab], as: UTF8.self).split(separator: " ")
+            guard entry.count == 4, ["100644", "100755"].contains(entry[0]), entry[1] == "blob",
+                  let hash = GitHub.objectID(String(entry[2])), let size = Int(entry[3]), size >= 0 else {
+                throw Problem("Baseline is not a regular file")
+            }
+            guard size <= limit else { throw Problem("Single-file size limit") }
+            guard size <= budget else { throw Problem("Comparison byte limit") }
+            guard let blob = run(["cat-file", "blob", hash], limit: size), blob.status == 0,
+                  blob.stdout.count == size else { throw unavailable }
+            budget -= size
+            return blob.stdout
+        }
+    }
+
+    private func savedBytes(_ path: String, file: File?, in manifest: Manifest, git: DiffRepository, budget: inout Int) throws -> Data? {
+        guard let file else {
+            guard !manifest.timedOut, !manifest.omissions.contains(where: { $0.path.isEmpty }),
+                  let head = GitHub.objectID(manifest.head) else { throw Problem("Recorded HEAD baseline unavailable") }
+            return try git.bytes(at: path, head: head, limit: limits.maxSingleFileBytes, budget: &budget)
+        }
         guard file.size <= limits.maxSingleFileBytes else { throw Problem("Single-file size limit") }
         guard file.size <= budget else { throw Problem("Comparison byte limit") }
         let data = try payload(for: file, in: manifest.id)

@@ -76,6 +76,43 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(try contents(of: repo), before)
     }
 
+    func testCleanPathsUseEachRecordedHeadAndIncludeNewTrackedEdits() async throws {
+        let store = try store()
+        let clean = try store.save(worktree: repo, label: nil)
+        XCTAssertTrue(clean.files.isEmpty)
+        try write("README.md", "edited after capture\n")
+        try write("new tracked", "added\n")
+        try git(["add", "new tracked"])
+        try write("untracked", "private")
+        let live = try await store.diff(from: clean.id, to: nil, worktree: repo)
+        XCTAssertTrue(live.text.contains("-widgets\n+edited after capture\n"))
+        XCTAssertTrue(live.text.contains("--- /dev/null\n+++ b/new tracked"))
+        XCTAssertFalse(live.text.contains("private"))
+        let dirty = try store.save(worktree: repo, label: nil)
+        let pair = try await store.diff(from: clean.id, to: dirty.id, worktree: repo + "/Sources")
+        XCTAssertEqual(pair.text, live.text)
+
+        try write("README.md", "committed later\n")
+        try git(["add", "README.md"])
+        try git(["commit", "-qm", "new baseline"])
+        let later = try store.save(worktree: repo, label: nil)
+        XCTAssertTrue(later.files.isEmpty)
+        let committed = try await store.diff(from: clean.id, to: later.id, worktree: repo)
+        XCTAssertTrue(committed.text.contains("-widgets\n+committed later\n"))
+        XCTAssertTrue(committed.text.contains("--- /dev/null\n+++ b/new tracked"))
+    }
+
+    func testUnavailableBaselineIsReportedWithoutInventingAnAddition() async throws {
+        let store = try store()
+        var missing = LocalCheckpoints.Manifest(label: nil)
+        missing.head = String(repeating: "a", count: 40)
+        _ = try store.persist(.init(manifest: missing))
+        try write("README.md", "changed\n")
+        let diff = try await store.diff(from: missing.id, to: nil, worktree: repo)
+        XCTAssertTrue(diff.text.contains("baseline unavailable"))
+        XCTAssertFalse(diff.text.contains("--- /dev/null"))
+    }
+
     func testDiffWarnsForEitherIncompleteCheckpointAndSkipsUnsafeInputs() async throws {
         let store = try store(.init(maxSingleFileBytes: 64))
         try write("README.md", "one")
