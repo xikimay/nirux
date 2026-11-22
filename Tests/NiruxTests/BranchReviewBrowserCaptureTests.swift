@@ -448,7 +448,10 @@ final class BranchReviewBrowserCaptureTests: XCTestCase {
         let page = try ReviewPage(
             snapshot: currentSnapshot, handover: nil, workspaceID: workspaceA, stateDirectory: state,
             reviewOpener: { snap in
-                (store, store.open(head: snap.head, pullRequest: snap.pullRequest, history: history))
+                (store, store.open(
+                    head: snap.head, pullRequest: snap.pullRequest,
+                    history: .init(isOwnCommit: { _ in true }, isInReflog: { _ in true })
+                ))
             }
         )
         defer { page.close() }
@@ -498,10 +501,12 @@ final class BranchReviewBrowserCaptureTests: XCTestCase {
             let state = URL(fileURLWithPath: harness.stateDirectory)
             let snapshot = BranchReviewPageTests.snapshot(hasUncommittedChanges: true)
             let store = try XCTUnwrap(BranchReview.Store(repository: harness.repo, branch: snapshot.branch, stateDirectory: state))
-            let history = BranchReview.History(isOwnCommit: { _ in true }, isInReflog: { _ in true })
             harness.shell.branchReviewReader = { _, _, _ in (.snapshot(snapshot), nil) }
             harness.shell.branchReviewOpener = { snap in
-                (store, store.open(head: snap.head, pullRequest: snap.pullRequest, history: history))
+                (store, store.open(
+                    head: snap.head, pullRequest: snap.pullRequest,
+                    history: .init(isOwnCommit: { _ in true }, isInReflog: { _ in true })
+                ))
             }
             harness.shell.branchReviewBranchCheck = { _ in true }
 
