@@ -164,7 +164,7 @@ extension WorkspaceInfo {
         if signals.contains(.waiting) { return .waiting }
         if signals.contains(.error) { return .error }
         if columns.contains(where: { $0.agentStatus == .working }) { return .working }
-        if prInfo?.state == .open, prInfo?.ciStatus == "FAILURE" { return .error }
+        if prInfo?.problem != nil { return .error }
         if prInfo?.state == .merged { return .done }
         return .idle
     }

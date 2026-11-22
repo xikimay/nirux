@@ -12,7 +12,10 @@ extension NiruxShellView {
             guard line.hasTask, let rail = line.rail else { return nil }
             let merged = rail.marks.last == .done || line.state == .merged
             let mergeStep: SidebarTaskStep? = merged ? .merged : (line.state == .ready ? .ready : nil)
-            return (line.id, SidebarBoardProgress(station: line.station, number: line.pullRequestNumber, mergeStep: mergeStep))
+            return (line.id, SidebarBoardProgress(
+                station: line.station, number: line.pullRequestNumber, mergeStep: mergeStep,
+                readyApartFromLocalReviews: line.readyApartFromLocalReviews
+            ))
         }, uniquingKeysWith: { first, _ in first })
     }
 

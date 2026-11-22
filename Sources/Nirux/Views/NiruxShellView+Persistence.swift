@@ -160,7 +160,7 @@ extension NiruxShellView {
     ) {
         switch persistedColumn.resolvedType {
         case .webView:
-            workspace.addColumn(webViewURL: persistedColumn.webViewURL ?? "about:blank")
+            workspace.addColumn(webViewURL: persistedColumn.webViewURL ?? "about:blank", isIsolated: persistedColumn.isIsolatedBrowser == true)
         case .claudeCode:
             // Claimed now, for the whole layout: whenever each column
             // resumes (see NiruxShellView+LazyRestore.swift), two never
@@ -485,6 +485,7 @@ extension NiruxShellView {
             cwd: col.editorColumn?.workspaceCwd ?? col.pty?.childCwd ?? workspace.cwd,
             columnType: kind,
             webViewURL: webURL,
+            isIsolatedBrowser: col.webViewColumn?.isIsolated,
             editorOpenFiles: editorOpenFiles,
             editorActiveFile: editorActiveFile,
             claudeLaunchMode: claudeMode,

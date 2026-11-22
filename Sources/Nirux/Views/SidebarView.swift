@@ -552,6 +552,9 @@ final class SidebarView: NSView {
         hasher.combine(animates)
         hasher.combine(navigation)
         for workspace in lastInfos {
+            if let question = WorkspaceInfo.questionColumn(in: workspace.columns)?.missionQuestion {
+                hasher.combine(question.waitAge)
+            }
             if let lastActivityAt = workspace.lastActivityAt {
                 hasher.combine(Self.cardAge(since: lastActivityAt))
             }
@@ -770,7 +773,7 @@ final class SidebarView: NSView {
         case .link(let url, let label):
             if let issue = LeadLaunchIssue.allCases.first(where: { url.hasPrefix(Self.leadRecoveryURL($0, workspaceID: "")) }) {
                 let id = String(url.dropFirst(Self.leadRecoveryURL(issue, workspaceID: "").count))
-                if let index = currentIndex(ofWorkspace: id) { onWorkspaceAction?(.recoverLead(issue), index) }
+                if let index = currentIndex(ofWorkspace: id) { onWorkspaceAction?(.recoverLead(.launchIssue(issue)), index) }
             } else if let target = Self.missionQuestionTarget(url) {
                 onMissionQuestionClicked?(target.workspaceIndex, target.columnIndex, label)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.diffActionPrefix) {
@@ -913,6 +916,8 @@ final class SidebarView: NSView {
             menu.addItem(organizeItem(workspaceIndex: workspaceIndex, workspace: workspace, act: act))
             menu.addItem(.separator())
         }
+        menu.addClosureItem(title: "Save Checkpoint…") { act(.saveCheckpoint) }
+        menu.addClosureItem(title: "Checkpoints…") { act(.showCheckpoints) }
         menu.addClosureItem(title: "Rename Workspace") { act(.rename) }
         menu.addClosureItem(title: "View/Edit Context…") { act(.editContext) }
         menu.addClosureItem(title: Self.addRuleTitle) { act(.addRuleToBrief) }
@@ -921,7 +926,9 @@ final class SidebarView: NSView {
         if cleanup == .available { addWorktreeCleanupItem(to: menu, act: act) }
         if workspace?.isLead == true {
             if workspace?.leadLaunchIssue == .olderOptions {
-                menu.addClosureItem(title: "Relaunch with New Options…") { act(.recoverLead(.olderOptions)) }
+                menu.addClosureItem(title: "Relaunch with New Options…") { act(.recoverLead(.launchIssue(.olderOptions))) }
+            } else if workspace?.offersAntigravityRelaunch == true {
+                menu.addClosureItem(title: "Relaunch with Current Options…") { act(.recoverLead(.relaunchAntigravity)) }
             }
             menu.addClosureItem(title: NiruxShellView.restartLeadTitle) { act(.restartLead) }
             menu.addClosureItem(title: Self.turnOffLeadTitle) { act(.turnOffLead) }

@@ -187,6 +187,11 @@ struct SidebarMissionQuestion: Hashable {
     /// When the child asked (epoch seconds): its place in ⌘J's queue and
     /// the inbox once handed to the user.
     var askedAt: TimeInterval = 0
+    var waitAge: String? {
+        guard askedAt > 0, handOff == nil, !isAnswered else { return nil }
+        return SidebarView.cardAge(since: askedAt)
+    }
+
     /// What blocks the child, and the answer it recommends (what it needs,
     /// for an access question): see `MissionEvent`.
     var kind: MissionEvent.QuestionKind?
@@ -348,6 +353,7 @@ struct WorkspaceInfo: Hashable {
     var turnStatusLine: String?
     /// The Lead's row: how many rules it proposed wait for the user.
     var leadLaunchIssue: LeadLaunchIssue?
+    var offersAntigravityRelaunch = false
     var ruleProposalCount = 0
     /// The Lead's row: its space's last daily pass, for a day after it.
     var dailyPassNote: String?
@@ -490,9 +496,10 @@ enum WorkspaceSidebarAction {
     /// "Turn Off Lead…": Space Settings › Lead, where the Lead closes.
     case turnOffLead
     case restartLead
-    case recoverLead(LeadLaunchIssue)
+    case recoverLead(LeadRecovery)
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
+    case saveCheckpoint, showCheckpoints
     case askWhyCIFailed, rerunFailedCI
     /// "Add a Rule to the Brief…" (see LearnedRules).
     case addRuleToBrief

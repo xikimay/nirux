@@ -301,6 +301,7 @@ extension NiruxShellView {
         if launch.agent == .agy { AgentHookInstaller.installAgyHooksIfInstalling() }
         return agentCommand(
             launch, in: workspace, column: column, launchDirectory: launchDirectory,
+            resumeDirectory: launch.sessionID == nil ? nil : launchDirectory,
             sessionName: SessionName.make(
                 worktreeBranch: worktreeBranch,
                 spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
@@ -464,8 +465,8 @@ extension NiruxShellView {
         case .turnOffLead:
             showSpaceSettings(profileID: workspaces[workspaceIndex].profileID, tab: .lead)
             return
-        case .recoverLead(let issue):
-            requestLeadRecovery(issue, in: workspaces[workspaceIndex])
+        case .recoverLead(let recovery):
+            requestLeadRecovery(recovery, in: workspaces[workspaceIndex])
             return
         case .restartLead:
             requestRestartLead(spaceID: workspaces[workspaceIndex].profileID)
@@ -475,6 +476,12 @@ extension NiruxShellView {
             return
         case .addRuleToBrief:
             showAddRuleSheet(for: workspaces[workspaceIndex])
+            return
+        case .saveCheckpoint:
+            requestCheckpoint(in: workspaces[workspaceIndex])
+            return
+        case .showCheckpoints:
+            showCheckpoints(in: workspaces[workspaceIndex])
             return
         case .reviewBranch:
             openBranchReview(in: workspaces[workspaceIndex])

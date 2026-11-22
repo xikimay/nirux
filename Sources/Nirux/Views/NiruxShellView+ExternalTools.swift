@@ -882,9 +882,14 @@ extension NiruxShellView {
         }
     }
 
-    func openWebView(url: String, in workspace: WorkspaceState? = nil) {
+    func openIsolatedTestBrowser() {
+        guard let workspace = activeWorkspace else { return }
+        openWebView(url: workspace.detectedLocalServerURLs.first ?? "http://localhost", in: workspace, isIsolated: true)
+    }
+
+    func openWebView(url: String, in workspace: WorkspaceState? = nil, isIsolated: Bool = false) {
         guard let workspace = workspace ?? activeWorkspace else { return }
-        workspace.addColumn(webViewURL: url)
+        workspace.addColumn(webViewURL: url, isIsolated: isIsolated)
         relayout(animated: false)
         updateSidebar()
         focusActiveTerminal(in: window)

@@ -63,7 +63,9 @@ extension NiruxShellView {
                 at: index, columns: colInfos, isActive: isActive, parentTitle: parents[index].map { workspaces[$0].title }
             )
             if workspace.isLead {
-                info.leadLaunchIssue = leadLaunchIssue(in: workspace, foreground: leadTerminal.flatMap { foregroundProcesses[ObjectIdentifier($0)] }, snapshot: snapshot)
+                let foreground = leadTerminal.flatMap { foregroundProcesses[ObjectIdentifier($0)] }
+                info.leadLaunchIssue = leadLaunchIssue(in: workspace, foreground: foreground, snapshot: snapshot)
+                info.offersAntigravityRelaunch = leadTerminal?.offersAntigravityRelaunch(foreground: foreground) == true
             }
             return info
         }
@@ -629,6 +631,7 @@ extension NiruxShellView {
         refreshStaleBranchReviewsOnScreen()
         let snapshot = snapshot ?? ProcessSnapshot()
         reviewSendPanel?.onRefresh?(snapshot)
+        (window?.attachedSheet as? MergeQueueJournalPanel)?.refreshResolution(snapshot: snapshot)
         for workspace in workspaces { for column in workspace.columns { column.pty?.settlePromptWatchers(snapshot: snapshot) } }
         refreshHeaderTitles(snapshot: snapshot)
         updateSidebar(snapshot: snapshot)

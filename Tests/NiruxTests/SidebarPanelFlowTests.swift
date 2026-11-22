@@ -25,6 +25,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             "testNewSubtaskMenuItem": [SidebarView.newSubtaskTitle],
             "testAddRuleMenuItem": [SidebarView.addRuleTitle],
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
+            "testCheckpointMenuItems": ["Save Checkpoint…", "Checkpoints…"],
             "testReviewBranchMenuItem": ["Review Branch"],
             "testLeadMenuItems": [NiruxShellView.restartLeadTitle, SidebarView.turnOffLeadTitle],
             "testSpaceMenuItems": ["New Space…", "Space Settings…", "Delete Space…"]
@@ -88,12 +89,37 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Focus Column", "Close Column", "",
                 "Review Branch", "Ask Agent Why CI Failed", "Rerun Failed CI Jobs…", "",
                 "Resume with…", "New Sub-task…", "Organize", "",
-                "Rename Workspace", "View/Edit Context…", SidebarView.addRuleTitle, "",
+                "Save Checkpoint…", "Checkpoints…", "Rename Workspace", "View/Edit Context…", SidebarView.addRuleTitle, "",
                 "Clean Up Worktree…", "Close Workspace"
             ])
             // The folder is gone: Clean Up comes up among the state actions,
             // and it is no task to start a sub-task of.
             XCTAssertEqual(menus[2].items.prefix(4).map(\.title), ["Review Branch", "Clean Up Worktree…", "", "Organize"])
+        }
+    }
+
+    func testCheckpointMenuItems() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let first = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "checkpoint target", cwd: harness.worktree)
+            let target = try XCTUnwrap(shell.activeWorkspace)
+            shell.focusWorkspace(id: first.id)
+            let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === target })
+            let menu = shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
+            harness.perform(["Save Checkpoint…"], in: menu)
+            let prompt = try XCTUnwrap(harness.window.attachedSheet?.contentView)
+            XCTAssertNotNil(UIFlowHarness.descendant(of: prompt, as: NSTextField.self) { $0.stringValue.contains(target.title) })
+            try XCTUnwrap(UIFlowHarness.button(titled: "Cancel", in: prompt)).performClick(nil)
+            harness.waitUntil("the save prompt to close") { harness.window.attachedSheet == nil }
+
+            harness.perform(["Checkpoints…"], in: menu)
+            let panel = try XCTUnwrap(harness.window.attachedSheet?.contentView)
+            XCTAssertNotNil(UIFlowHarness.descendant(of: panel, as: NSTextField.self) { $0.stringValue.contains(target.title) })
+            harness.waitUntil("the empty workspace history") {
+                UIFlowHarness.descendant(of: panel, as: NSTextField.self) { $0.stringValue == "No saved checkpoints" } != nil
+            }
+            try XCTUnwrap(UIFlowHarness.button(titled: "Done", in: panel)).performClick(nil)
         }
     }
 

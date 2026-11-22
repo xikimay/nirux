@@ -46,38 +46,35 @@ extension GitHub {
 
     /// A `CheckRun` or a `StatusContext` of the rollup.
     static func check(from json: [String: Any]) -> Check? {
-        let startedAt = json["startedAt"] as? String
-        // gh writes a missing URL as "".
-        let url = ((json["detailsUrl"] ?? json["targetUrl"]) as? String).flatMap { $0.isEmpty ? nil : $0 }
-        if let context = json["context"] as? String {
-            let result: CheckResult
-            switch (json["state"] as? String)?.uppercased() {
-            case "SUCCESS": result = .success
-            case "FAILURE", "ERROR": result = .failure
-            default: result = .pending
-            }
-            return Check(name: context, workflowName: nil, result: result, startedAt: startedAt, url: url, status: json["state"] as? String)
-        }
-        guard let name = json["name"] as? String else { return nil }
-        let status = (json["status"] as? String)?.uppercased() ?? ""
+        guard let name = (json["context"] ?? json["name"]) as? String else { return nil }
+        let result = checkResult(from: json)
         let conclusion = (json["conclusion"] as? String)?.uppercased() ?? ""
-        let result: CheckResult
-        if status != "COMPLETED" && !status.isEmpty {
-            result = .pending
-        } else {
-            switch conclusion {
-            case "SUCCESS": result = .success
-            case "NEUTRAL": result = .neutral
-            case "SKIPPED": result = .skipped
-            case _ where GitHub.isRedCheck(conclusion): result = .failure
-            default: result = .pending
+        let url = ((json["detailsUrl"] ?? json["targetUrl"]) as? String).flatMap { $0.isEmpty ? nil : $0 }
+        return Check(
+            name: name, workflowName: json["workflowName"] as? String, result: result, startedAt: json["startedAt"] as? String, url: url,
+            conclusion: result == .pending || conclusion.isEmpty ? nil : conclusion, completedAt: json["completedAt"] as? String,
+            status: (json["state"] ?? json["status"]) as? String
+        )
+    }
+
+    static func checkResult(from json: [String: Any]) -> CheckResult {
+        if json["context"] != nil || json["state"] != nil {
+            switch (json["state"] as? String)?.uppercased() {
+            case "SUCCESS": return .success
+            case "FAILURE", "ERROR": return .failure
+            default: return .pending
             }
         }
-        return Check(
-            name: name, workflowName: json["workflowName"] as? String, result: result, startedAt: startedAt, url: url,
-            conclusion: result == .pending || conclusion.isEmpty ? nil : conclusion, completedAt: json["completedAt"] as? String,
-            status: status
-        )
+        let status = (json["status"] as? String)?.uppercased() ?? ""
+        guard status.isEmpty || status == "COMPLETED" else { return .pending }
+        let conclusion = (json["conclusion"] as? String)?.uppercased() ?? ""
+        switch conclusion {
+        case "SUCCESS": return .success
+        case "NEUTRAL": return .neutral
+        case "SKIPPED": return .skipped
+        case _ where GitHub.isRedCheck(conclusion): return .failure
+        default: return .pending
+        }
     }
 
     /// The latest run of each check (by workflow and name), in first-seen

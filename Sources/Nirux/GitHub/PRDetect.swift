@@ -125,7 +125,7 @@ enum PRDetect {
         let fields = [
             "number", "state", "headRefOid", "headRepositoryOwner",
             "headRepository", "isDraft", "statusCheckRollup",
-            "reviewDecision", "mergeable", "url", "additions",
+            "reviewDecision", "mergeable", "mergeStateStatus", "url", "additions",
             "deletions", "changedFiles", "baseRefName", "autoMergeRequest", "createdAt"
         ].joined(separator: ",")
         let call = GitHub.CLI.Call(
@@ -146,30 +146,13 @@ enum PRDetect {
     static func pullRequestInfo(from candidate: [String: Any]) -> PRInfo? {
         guard let state = GitHub.PullRequestState(candidate["state"] as? String) else { return nil }
         let rollup = candidate["statusCheckRollup"] as? [[String: Any]] ?? []
-        let conclusions = rollup.compactMap { $0["conclusion"] as? String }
-        // One running check keeps the rollup pending: a CheckRun that has
-        // not completed (empty conclusion) or a pending commit status. A
-        // mix of finished and running checks is not a success yet.
-        let hasRunningCheck = rollup.contains { check in
-            if let state = check["state"] as? String {
-                return ["PENDING", "EXPECTED"].contains(state.uppercased())
-            }
-            if let status = check["status"] as? String, status.uppercased() != "COMPLETED" {
-                return true
-            }
-            return (check["conclusion"] as? String)?.isEmpty ?? false
-        }
-        let allChecksPending = !rollup.isEmpty && conclusions.allSatisfy({ $0.isEmpty })
         let checks = GitHub.latest(rollup.compactMap(GitHub.check(from:)))
-        let ciStatus: String?
-        if checks.contains(where: { $0.result == .failure }) {
-            ciStatus = "FAILURE"
-        } else if conclusions.contains("PENDING") || allChecksPending || hasRunningCheck {
-            ciStatus = "PENDING"
-        } else if !conclusions.isEmpty {
-            ciStatus = "SUCCESS"
-        } else {
-            ciStatus = nil
+        let unnamed = rollup.filter { $0["name"] == nil && $0["context"] == nil }
+        let ciStatus: String? = switch (checks.map(\.result) + unnamed.map(GitHub.checkResult(from:))).max() {
+        case .failure: "FAILURE"
+        case .pending: "PENDING"
+        case .success, .skipped, .neutral: "SUCCESS"
+        case nil: nil
         }
 
         return PRInfo(
@@ -180,6 +163,7 @@ enum PRDetect {
             checks: checks,
             reviewDecision: candidate["reviewDecision"] as? String,
             mergeable: candidate["mergeable"] as? String,
+            mergeStateStatus: candidate["mergeStateStatus"] as? String,
             url: candidate["url"] as? String ?? "",
             additions: candidate["additions"] as? Int,
             deletions: candidate["deletions"] as? Int,

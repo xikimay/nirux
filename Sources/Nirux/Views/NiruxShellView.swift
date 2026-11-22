@@ -534,8 +534,8 @@ final class NiruxShellView: NSView {
             guard let self, let workspace else { return }
             self.retireMissionQuestions(of: column, in: workspace, promptedAt: typedAt)
         }
-        workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url in
-            self?.openWebView(url: url, in: targetWorkspace)
+        workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url, isIsolated in
+            self?.openWebView(url: url, in: targetWorkspace, isIsolated: isIsolated)
         }
         workspace.onTerminalOpenFile = { [weak self] targetWorkspace, path, line in
             self?.openInEditorColumn(path: path, line: line, in: targetWorkspace)

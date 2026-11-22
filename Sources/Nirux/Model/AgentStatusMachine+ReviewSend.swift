@@ -38,7 +38,7 @@ enum ReviewSendRefusal: Equatable, Sendable {
             return "No agent waits at its prompt in this worktree."
         case .notClaude(let name):
             return "Only Claude Code tells Nirux when it waits at its prompt; \(name) doesn’t, "
-                + "so a question it asks would take the comments as its answer."
+                + "so a question it asks could take this text as its answer."
         case .notHeardFrom:
             return "Nirux hasn’t heard from this Claude at its prompt yet: send it a prompt first, "
                 + "or restart it if it started before Nirux’s hooks were installed."
@@ -47,16 +47,14 @@ enum ReviewSendRefusal: Equatable, Sendable {
         case .notInFront:
             return "The agent here is stopped or in the background: bring it back (fg) first."
         case .underLauncher(let name):
-            return "The agent here runs under \(name): Nirux can’t tell when it waits at its prompt. "
-                + "Copy Message, and paste it there yourself."
+            return "The agent here runs under \(name). Nirux can’t tell when it waits at its prompt."
         case .dialog:
             return "Claude may be asking something: answer it first."
         case .errorMenu:
-            return "Claude’s last turn ended on an error that needs you first (a usage limit, a login, a model), "
-                + "and a menu it shows would take the comments: deal with it in its terminal and send Claude a prompt, "
-                + "then send the comments."
+            return "Claude’s last turn ended on an error. Check its terminal for a usage limit, login or model menu, "
+                + "then send Claude a prompt before trying again."
         case .working:
-            return "Claude is working: send the comments once its turn is over."
+            return "Claude is working. Wait for its turn to end."
         }
     }
 }
