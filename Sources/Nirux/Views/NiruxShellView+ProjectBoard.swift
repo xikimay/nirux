@@ -73,6 +73,10 @@ extension NiruxShellView {
             guard let self, let board else { return false }
             return self.isProjectBoardShown(board)
         }
+        board.onOpenPullRequests = { [weak self, weak board] repository, numbers in
+            guard let self, let board, self.mergeQueueConfirmation == nil else { return }
+            self.mergeQueue(projectID: board.projectID, repository: repository).pruneSelection(keepingOpen: numbers)
+        }
         board.onRead = { [weak self, weak board] in
             guard let self, let board else { return }
             self.renderProjectBoard(board)
