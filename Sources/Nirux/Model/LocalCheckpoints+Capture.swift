@@ -34,16 +34,23 @@ extension LocalCheckpoints {
         }
     }
 
+    static func repositoryPaths(in worktree: String) throws -> [String] {
+        let queries = ["--show-toplevel", "--absolute-git-dir", "--git-common-dir"]
+        let paths = GitWorktree.absoluteGitPaths(queries, in: worktree, timeout: 5)?.compactMap(\.realPath)
+        guard let paths, paths.count == queries.count else { throw Problem("The workspace’s Git directories could not be identified.") }
+        return paths
+    }
+
+    static func safeFilePath(_ path: String) -> Bool {
+        guard !path.isEmpty, !path.utf8.contains(0) else { return false }
+        return path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy {
+            !$0.isEmpty && $0 != "." && $0 != ".." && $0.lowercased() != ".git"
+        }
+    }
+
     func save(worktree: String, label: String?) throws -> Manifest {
         let options = BranchReview.Options(gitHub: nil, environment: ["GIT_NO_LAZY_FETCH": "1"])
-        let location = BranchReview.git(
-            ["rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"],
-            in: worktree, options: options, timeout: 5
-        )
-        guard let location, location.status == 0 else { throw Problem("The workspace’s Git repository could not be opened.") }
-        let lines = location.text.split(separator: "\n")
-        let paths = lines.compactMap { String($0).realPath }
-        guard lines.count == 3, paths.count == 3 else { throw Problem("The workspace’s Git directories could not be identified.") }
+        let paths = try Self.repositoryPaths(in: worktree)
         let storePath = folder.path.lowercased()
         for path in paths {
             let protected = path.lowercased()
@@ -122,8 +129,7 @@ extension LocalCheckpoints {
     }
 
     private func capturePath(_ path: String, code: String, withheld: Bool, root: Int32, deadline: TimeInterval, capture: inout Capture) {
-        let components = path.split(separator: "/", omittingEmptySubsequences: false)
-        guard components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && $0.lowercased() != ".git" }) else {
+        guard Self.safeFilePath(path) else {
             return capture.omit(path, "Unsafe path")
         }
         guard !withheld, !BranchReview.Secrets.isSecretPath(path) else { return capture.omit(path, "Secret path") }

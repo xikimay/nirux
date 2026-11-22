@@ -117,7 +117,7 @@ enum ProjectMemory {
     /// it off the main thread.
     static func read(directory: URL, followingSymlinks: Bool = true) -> Contents? {
         if !followingSymlinks {
-            let directoryFD = open(expandingSystemAliases(directory.path), O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+            let directoryFD = open(directory.path.expandingSystemAliases, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
             guard directoryFD >= 0 else { return nil }
             close(directoryFD)
         }
@@ -188,7 +188,7 @@ enum ProjectMemory {
             if followingSymlinks { return !manager.fileExists(atPath: path) }
             guard !name.hasPrefix("/"), !name.contains("\0"), !name.split(separator: "/").contains("..") else { return false }
             var info = stat()
-            return fstatat(AT_FDCWD, expandingSystemAliases(path), &info, AT_SYMLINK_NOFOLLOW_ANY) != 0 && errno == ENOENT
+            return fstatat(AT_FDCWD, path.expandingSystemAliases, &info, AT_SYMLINK_NOFOLLOW_ANY) != 0 && errno == ENOENT
         }
         return Contents(
             directory: directory, memories: memories, missingFiles: missing, linesRead: indexText.map(linesRead(of:)),
@@ -225,7 +225,7 @@ enum ProjectMemory {
     static func readData(_ path: String, limit: Int, followingSymlinks: Bool = true) -> Data? {
         let flags = O_RDONLY | O_NONBLOCK | O_CLOEXEC | (followingSymlinks ? 0 : O_NOFOLLOW_ANY)
         guard !path.contains("\0") else { return nil }
-        let descriptor = open(followingSymlinks ? path : expandingSystemAliases(path), flags)
+        let descriptor = open(followingSymlinks ? path : path.expandingSystemAliases, flags)
         guard descriptor >= 0 else { return nil }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         var info = stat()
@@ -235,15 +235,6 @@ enum ProjectMemory {
         } catch {
             return nil
         }
-    }
-
-    /// Darwin's system aliases can prefix a workspace or state directory.
-    /// O_NOFOLLOW_ANY still checks every component of the path under them.
-    private static func expandingSystemAliases(_ path: String) -> String {
-        for alias in ["/tmp", "/var", "/etc"] where path == alias || path.hasPrefix(alias + "/") {
-            return "/private" + path
-        }
-        return path
     }
 
     // MARK: - Index

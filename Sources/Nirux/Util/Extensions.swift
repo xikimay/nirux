@@ -14,6 +14,15 @@ extension NSColor {
 }
 
 extension String {
+    /// Darwin's system aliases can prefix a workspace or state directory.
+    /// O_NOFOLLOW_ANY still checks every component of the path under them.
+    var expandingSystemAliases: String {
+        for alias in ["/tmp", "/var", "/etc"] where self == alias || hasPrefix(alias + "/") {
+            return "/private" + self
+        }
+        return self
+    }
+
     /// The words of a warning, as `NSColor.niruxWarning` draws them:
     /// "⚠︎ Couldn’t read the file."
     var asWarning: String { "⚠︎ " + self }
