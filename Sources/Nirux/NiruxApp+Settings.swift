@@ -212,6 +212,15 @@ extension NiruxApp {
         codexMode.setAccessibilityLabel("Codex launch mode")
         settingsCodexLaunchModePopup = codexMode
 
+        let agyMode = SettingsForm.popup(target: self, action: #selector(settingsAgyLaunchModeChanged(_:)))
+        for mode in AgyLaunchMode.allCases {
+            agyMode.addItem(withTitle: mode.displayName)
+            agyMode.lastItem?.representedObject = mode.rawValue
+        }
+        SettingsForm.select(NiruxShellView.currentAgyLaunchMode().rawValue, in: agyMode)
+        agyMode.setAccessibilityLabel("Antigravity launch mode")
+        settingsAgyLaunchModePopup = agyMode
+
         let stuck = SettingsForm.popup(target: self, action: #selector(settingsStuckAgentMinutesChanged(_:)))
         let current = NiruxShellView.currentStuckAgentMinutes()
         // A value set outside Settings stays selectable as it is.
@@ -248,12 +257,13 @@ extension NiruxApp {
                 SettingsForm.hint(Self.usageLimitsHint(for: claudeStatusLineStateReader()), under: usageLimits)
             ],
             [
-                SettingsForm.header("Codex"),
-                SettingsForm.row("Launch mode", codexMode),
+                SettingsForm.header("Launch modes"),
+                SettingsForm.row("Codex", codexMode),
                 SettingsForm.hint(
                     "Default = no flags; Codex's own config applies. "
                         + "Full Auto = no sandbox, never asks, web search. Workspace Write = sandboxed."
-                )
+                ),
+                SettingsForm.row("Antigravity", agyMode)
             ],
             [
                 SettingsForm.header("Stuck agents"),
@@ -564,6 +574,13 @@ extension NiruxApp {
         }
     }
 
+    @objc func settingsAgyLaunchModeChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String, let mode = AgyLaunchMode(rawValue: raw) else { return }
+        saveSetting(revert: { SettingsForm.select(NiruxShellView.currentAgyLaunchMode().rawValue, in: sender) }) {
+            $0.agyLaunchMode = mode
+        }
+    }
+
     @objc func settingsStuckAgentMinutesChanged(_ sender: NSPopUpButton) {
         guard let minutes = sender.selectedItem?.representedObject as? Int else { return }
         guard saveSetting(
@@ -754,6 +771,7 @@ extension NiruxApp {
         settingsNoFlickerCheckbox = nil
         settingsUsageLimitsCheckbox = nil
         settingsCodexLaunchModePopup = nil
+        settingsAgyLaunchModePopup = nil
         settingsMissionHandoffsCheckbox = nil
         settingsSidebarApprovalsCheckbox = nil
         settingsStuckAgentPopup = nil

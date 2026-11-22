@@ -129,18 +129,29 @@ extension NiruxShellView {
     /// `handoverPrompt` is its first prompt (`-i`), as in the worktree
     /// handover flow.
     static func agyCommand(
-        resume: AgentResumeTarget? = nil, model: String? = nil, settings: String? = nil, handoverPrompt: String? = nil
+        resume: AgentResumeTarget? = nil, mode: AgyLaunchMode = .auto, model: String? = nil,
+        settings: String? = nil, handoverPrompt: String? = nil
     ) -> String {
         var parts = ["command", "agy"]
         if case .session(let sessionID)? = resume {
             parts.append(contentsOf: ["--conversation", Self.shellQuotedArgument(sessionID)])
         }
+        parts.append(contentsOf: mode.cliArgs)
         if let model { parts += ["--model", Self.shellQuotedArgument(model)] }
         if let settings { parts += ["--settings", Self.shellQuotedArgument(settings)] }
         if let prompt = handoverPrompt {
             parts.append(contentsOf: ["-i", Self.shellQuotedArgument(prompt)])
         }
         return parts.joined(separator: " ")
+    }
+
+    static func currentAgyLaunchMode() -> AgyLaunchMode {
+        Persistence.load()?.settings?.agyLaunchMode ?? .auto
+    }
+
+    static func agyLaunchMode(for workspace: WorkspaceState) -> AgyLaunchMode {
+        guard !workspace.startedOutsideNirux else { return currentAgyLaunchMode() }
+        return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).agyMode(settings: currentAgyLaunchMode())
     }
 
     static func currentCodexLaunchMode() -> CodexLaunchMode {
@@ -202,7 +213,10 @@ extension NiruxShellView {
     /// `agent`'s launch in `workspace`, in the space's mode; nil for an
     /// agent Nirux doesn't start.
     static func launch(of agent: CodingAgent, resume: AgentResumeTarget?, model: String? = nil, in workspace: WorkspaceState, codexMode: CodexLaunchMode? = nil) -> AgentLaunch? {
-        AgentLaunch(agent, resume: resume, model: model, claudeMode: claudeLaunchMode(for: workspace), codexMode: codexMode ?? codexLaunchMode(for: workspace))
+        AgentLaunch(
+            agent, resume: resume, model: model, claudeMode: claudeLaunchMode(for: workspace),
+            codexMode: codexMode ?? codexLaunchMode(for: workspace), agyMode: agyLaunchMode(for: workspace)
+        )
     }
 
     /// The line that runs `launch` in `workspace`, with the space's brief
@@ -227,10 +241,10 @@ extension NiruxShellView {
                 briefFile: Self.codexBriefFile(from: spaceBriefInjection(for: workspace), launchDirectory: launchDirectory),
                 handoverPrompt: handoverPrompt
             )
-        case .agy(let resume, let model):
+        case .agy(let resume, let mode, let model):
             let settings = workspace.startedOutsideNirux || workspace.isFolderTask ? nil
                 : AgyWorktreeTrust.settings(for: launchDirectory, home: sideEffects.homeDirectory())
-            return Self.agyCommand(resume: resume, model: model, settings: settings, handoverPrompt: handoverPrompt)
+            return Self.agyCommand(resume: resume, mode: mode, model: model, settings: settings, handoverPrompt: handoverPrompt)
         }
     }
 
