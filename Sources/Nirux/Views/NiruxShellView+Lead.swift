@@ -107,6 +107,7 @@ extension NiruxShellView {
         let mode: String? = switch next {
         case .claude: Self.claudeLaunchMode(for: lead).displayName
         case .codex: Self.codexLaunchMode(for: lead).displayName
+        case .agy: Self.agyLaunchMode(for: lead).displayName
         default: nil
         }
         guard confirmDestructiveClose(

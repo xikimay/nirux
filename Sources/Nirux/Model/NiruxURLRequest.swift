@@ -227,7 +227,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// launch ID. Everything the action will do is spelled out, including
     /// the agent's permission mode: a request from a web page would inherit
     /// it. Call it on a request that went through `resolvingPaths()`.
-    func confirmation(claudeMode: ClaudeLaunchMode, codexMode: CodexLaunchMode, spaceName: String? = nil) -> Confirmation {
+    func confirmation(claudeMode: ClaudeLaunchMode, codexMode: CodexLaunchMode, agyMode: AgyLaunchMode = .auto, spaceName: String? = nil) -> Confirmation {
         // One wording whether the launch ID is missing or stale: a caller
         // could add a fake `launch=` to pick a more reassuring text.
         let intro = "This request didn’t come from a current Nirux terminal. That happens with an agent "
@@ -242,7 +242,8 @@ struct NiruxURLRequest: Equatable, Sendable {
             let mode = switch agent {
             case .claude: claudeMode.displayName
             case .codex: codexMode.displayName + (spaceName.map { "\nSpace: \(Self.displaySafe($0))" } ?? "")
-            case .agy, .gemini, .opencode: "its own permission settings (Nirux sets none)"
+            case .agy: agyMode.displayName
+            case .gemini, .opencode: "its own permission settings (Nirux sets none)"
             }
             return "Agent: \(agent.productName) — \(mode)"
         }

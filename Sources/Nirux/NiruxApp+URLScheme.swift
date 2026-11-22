@@ -167,7 +167,8 @@ extension NiruxApp {
         let settings = Persistence.load()?.settings
         let text = request.confirmation(
             claudeMode: settings?.claudeLaunchMode ?? .default,
-            codexMode: codexLaunch?.mode ?? settings?.codexLaunchMode ?? .default, spaceName: codexLaunch?.spaceName
+            codexMode: codexLaunch?.mode ?? settings?.codexLaunchMode ?? .default,
+            agyMode: settings?.agyLaunchMode ?? .auto, spaceName: codexLaunch?.spaceName
         )
 
         let alert = NSAlert()

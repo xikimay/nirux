@@ -122,6 +122,7 @@ extension NiruxShellView {
         defaultsActions.reload = { store?.load() ?? unread }
         defaultsActions.settingsClaudeMode = { Self.currentClaudeLaunchMode() }
         defaultsActions.settingsCodexMode = { Self.currentCodexLaunchMode() }
+        defaultsActions.settingsAgyMode = { Self.currentAgyLaunchMode() }
         // Read when its pane first shows (`onTabShown`), not for each ⌘,.
         let defaults = SpaceSettingsDefaultsPane(loaded: unread, actions: defaultsActions)
         let safety = SpaceSettingsSafetyPane(model: spaceSettingsSafetyModel(for: space))

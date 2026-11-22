@@ -180,6 +180,9 @@ struct SpaceDefaultsStore: Sendable {
         if top["codexLaunchMode"].map({ !($0 is NSNull) }) == true, decoded.codexLaunchMode == nil {
             unknown.insert("codexLaunchMode")
         }
+        if top["agyLaunchMode"].map({ !($0 is NSNull) }) == true, decoded.agyLaunchMode == nil {
+            unknown.insert("agyLaunchMode")
+        }
         for item in SpaceDefaults.switches where decoded[keyPath: item.key] == nil
             && top[item.name.rawValue].map({ !($0 is NSNull) }) == true {
             unknown.insert(item.name.rawValue)
