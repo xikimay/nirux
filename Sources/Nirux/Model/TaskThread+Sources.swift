@@ -77,8 +77,10 @@ extension TaskThread {
         }
         let findings = sources.findings.map { entry in
             Event(
-                time: entry.time, kind: .findings, by: .lead, text: entry.findings.map(\.text).joined(separator: "\n"),
-                detail: entry.findings.map(\.kind).joined(separator: ", "), number: entry.round
+                time: entry.time, kind: .findings, by: .lead,
+                text: entry.findings.isEmpty ? nil : entry.findings.map(\.text).joined(separator: "\n"),
+                detail: entry.findings.isEmpty ? "no findings" : entry.findings.map(\.kind).joined(separator: ", "),
+                number: entry.round
             )
         }
         let rules = sources.rules.compactMap { proposal in

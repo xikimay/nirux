@@ -158,6 +158,7 @@ struct SpaceDefaultsStore: Sendable {
             return Loaded(defaults: defaults, status: .loaded, contents: data)
         }
         defaults.leadStartsMergeQueue = nil
+        defaults.leadStartsMergeQueueWithoutLocalReview = nil
         return Loaded(defaults: defaults, status: .readOnly(readOnly), contents: data)
     }
 

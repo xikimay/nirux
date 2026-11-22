@@ -26,9 +26,22 @@ extension NiruxShellView {
             folderOrTitle: task.taskFolder ?? task.title, pullRequest: task.prInfo?.number,
             repository: repositoryAnchor(of: task, in: space)?.folder
         )
-        ReviewFindings.record(review, spaceID: space.id) { outcome in
+        ReviewFindings.record(review, spaceID: space.id) { [weak self, weak task] outcome in
             switch outcome {
-            case .recorded(let entry, let kinds): answer(ReviewFindings.answer(for: entry, title: title, kinds: kinds), false)
+            case .recorded(let entry, let kinds):
+                let reply = ReviewFindings.answer(for: entry, title: title, kinds: kinds)
+                guard findings.isEmpty, let self, let task else { return answer(reply, false) }
+                // Clean review: record a local code review pass on the task's
+                // current HEAD and branch, matching hook-based review detection.
+                GitDetect.contextAsync(at: task.cwd, startFolder: nil) { [weak self, weak task] result in
+                    if case .observed(let context) = result, let head = context.identity.head,
+                       let self, let task,
+                       task.recordReviewPasses([.codeReview], head: head, branch: context.branchName, at: entry.time) {
+                        self.updateSidebar()
+                        self.saveState()
+                    }
+                    answer(reply, false)
+                }
             case .notRecorded(let reason): answer("Nothing was recorded. " + reason, true)
             }
         }

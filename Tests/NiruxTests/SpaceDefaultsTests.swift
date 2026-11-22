@@ -124,6 +124,23 @@ final class SpaceDefaultsTests: XCTestCase {
         }
     }
 
+    func testLeadQueueWithoutLocalReviewRequiresAnExplicitReadableOptIn() throws {
+        let store = try store()
+        XCTAssertFalse(store.load().defaults.leadCanStartMergeQueueWithoutLocalReview)
+        _ = try store.save(SpaceDefaults(leadStartsMergeQueue: true, leadStartsMergeQueueWithoutLocalReview: true)).get()
+        XCTAssertTrue(store.load().defaults.leadCanStartMergeQueueWithoutLocalReview)
+        _ = try store.save(SpaceDefaults(leadStartsMergeQueue: true, leadStartsMergeQueueWithoutLocalReview: false)).get()
+        XCTAssertFalse(store.load().defaults.leadCanStartMergeQueueWithoutLocalReview)
+        XCTAssertFalse(try String(contentsOf: store.fileURL, encoding: .utf8).contains("leadStartsMergeQueueWithoutLocalReview"))
+        for contents in ["{", #"{"leadStartsMergeQueueWithoutLocalReview":"yes"}"#,
+                         #"{"schemaVersion":2,"leadStartsMergeQueueWithoutLocalReview":true}"#,
+                         #"{"schemaVersion":"2","leadStartsMergeQueueWithoutLocalReview":true}"#,
+                         #"{"futureQueuePolicy":true,"leadStartsMergeQueueWithoutLocalReview":true}"#] {
+            try Data(contents.utf8).write(to: store.fileURL)
+            XCTAssertFalse(store.load().defaults.leadCanStartMergeQueueWithoutLocalReview, contents)
+        }
+    }
+
     /// docs/design/pr-follow-up.md: on unless turned off; a value this build
     /// can't read is off, and never rewritten.
     func testTheFollowUpIsOnUnlessTurnedOff() throws {

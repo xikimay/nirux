@@ -465,7 +465,7 @@ enum DailyPass {
         /// Anything for the pass to read. What GitHub didn't say isn't: a
         /// signed-out gh would make every day one.
         var hasNews: Bool {
-            findings.contains { window.contains($0.time) }
+            findings.contains { !$0.findings.isEmpty && window.contains($0.time) }
                 || repositories.contains { !$0.merged.isEmpty || !$0.reruns.isEmpty }
                 || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty || !threadWaits.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }

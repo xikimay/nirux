@@ -26,10 +26,18 @@ final class SpaceSettingsFlowTests: XCTestCase {
             harness.shell.showSpaceSettings(profileID: space.id, tab: .lead)
             let pane = try XCTUnwrap(harness.shell.spaceSettings?.lead)
             let toggle = pane.startsMergeQueueSwitch
+            let withoutReview = pane.startsMergeQueueWithoutLocalReviewSwitch
             XCTAssertEqual(toggle.accessibilityLabel(), "Allow Lead to start the merge queue")
             let hint = try XCTUnwrap(toggle.accessibilityHelp())
             for term in ["Workflow changes", "conflicts", "dry-run"] { XCTAssertTrue(hint.contains(term)) }
+            XCTAssertEqual(withoutReview.accessibilityLabel(), "Allow without local code review")
+            let withoutReviewHint = try XCTUnwrap(withoutReview.accessibilityHelp())
+            for term in ["GitHub checks", "mergeability", "workflow safety", "post-merge health"] {
+                XCTAssertTrue(withoutReviewHint.contains(term), withoutReviewHint)
+            }
             XCTAssertEqual(toggle.state, .off)
+            XCTAssertEqual(withoutReview.state, .off)
+            XCTAssertFalse(withoutReview.isEnabled)
             XCTAssertFalse(pane.manualMergeRow.isHidden)
             for on in [true, false] {
                 toggle.state = on ? .on : .off
@@ -37,6 +45,15 @@ final class SpaceSettingsFlowTests: XCTestCase {
                 XCTAssertEqual(toggle.state, on ? .on : .off)
                 XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: space.id).leadCanStartMergeQueue, on)
                 XCTAssertEqual(pane.manualMergeRow.isHidden, on)
+                XCTAssertEqual(withoutReview.isEnabled, on)
+                if on {
+                    for allow in [true, false] {
+                        withoutReview.state = allow ? .on : .off
+                        XCTAssertTrue(withoutReview.sendAction(withoutReview.action, to: withoutReview.target))
+                        XCTAssertEqual(withoutReview.state, allow ? .on : .off)
+                        XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: space.id).leadCanStartMergeQueueWithoutLocalReview, allow)
+                    }
+                }
             }
         }
     }

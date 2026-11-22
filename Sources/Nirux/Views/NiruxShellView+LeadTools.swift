@@ -1005,9 +1005,10 @@ extension NiruxShellView {
         let folders = controller.local.folders()
         controller.readConfirmation(settings: settings, numbers: numbers) { [self] reading in
             defer { pendingLeadQueueStarts.remove(key) }
+            let spaceDefaults = SpaceDefaultsStore.defaults(forSpace: key.projectID)
             guard let caller = requestingTerminal(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID),
                   caller.workspace.isLead, caller.workspace.profileID == key.projectID, !caller.column.isClosing,
-                  SpaceDefaultsStore.defaults(forSpace: key.projectID).leadCanStartMergeQueue else {
+                  spaceDefaults.leadCanStartMergeQueue else {
                 return answer("The Lead no longer has permission to start this queue.", true)
             }
             guard projectBoardLocation(projectID: key.projectID)?.board === board,
@@ -1024,7 +1025,10 @@ extension NiruxShellView {
                   !controller.runsElsewhere, !controller.isRunning, controller.driver === previousDriver else {
                 return answer("The queue or its selection changed during preflight. Review it on the Board.", true)
             }
-            if let refusal = controller.startFromLead(reading, numbers: numbers, cadence: cadence) {
+            if let refusal = controller.startFromLead(
+                reading, numbers: numbers, cadence: cadence,
+                allowWithoutLocalReview: spaceDefaults.leadCanStartMergeQueueWithoutLocalReview
+            ) {
                 if replace, case .invalidSettings = refusal {
                     return presentLeadQueueProposal(controller, board: board, section: section, numbers: numbers, cadence: cadence) { text, error in
                         answer(refusal.message + " " + text, error)

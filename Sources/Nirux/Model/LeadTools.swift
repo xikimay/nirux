@@ -285,14 +285,15 @@ enum LeadTools {
                 description: """
                     Record what your review of a task found, once you send it: one call per review, with all its \
                     findings, each with its kind, a short class name you reuse whenever a finding is of the same class, \
-                    in any task ("animation-end-deadline", "test-waits-on-sleep"). Any task of this space. Nirux keeps them 30 days: the answer lists the kinds \
-                    the space uses, and says when one shows up in a second task, where propose_rule comes in. The daily \
-                    pass reads them.
+                    in any task ("animation-end-deadline", "test-waits-on-sleep"). Pass an empty findings list ([]) for \
+                    a clean review: Nirux marks the local code review pass on the task's current HEAD and branch. Any \
+                    task of this space. Nirux keeps them 30 days: the answer lists the kinds the space uses, and says \
+                    when one shows up in a second task, where propose_rule comes in. The daily pass reads them.
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],
                     "findings": [
-                        "type": "array", "minItems": 1, "maxItems": ReviewFindings.maxFindings,
+                        "type": "array", "minItems": 0, "maxItems": ReviewFindings.maxFindings,
                         "items": [
                             "type": "object",
                             "properties": [
