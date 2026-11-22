@@ -2,9 +2,8 @@ import Foundation
 
 /// `Nirux --hook claude --mcp`: the Model Context Protocol server Nirux
 /// gives the Claude agents it launches (`claudeArguments`), over stdin and
-/// stdout, one JSON-RPC message per line. Its tools are read-only views of
-/// the project: `history_search` (see HistorySearch) for now, room for
-/// more. Spelled as a hook, like the status line, so that an older build at
+/// stdout, one JSON-RPC message per line. Its searches read local project files.
+/// Spelled as a hook, like the status line, so that an older build at
 /// the same path (a rollback) takes the messages for a hook payload instead
 /// of launching its UI: it waits for the end of stdin, records nothing, and
 /// Claude reports the server as failed. See "Agent history search" in
@@ -16,9 +15,8 @@ enum NiruxMCPServer {
     static let maxLineBytes = 1_000_000
     /// What Claude adds to the system prompt for this server.
     static let instructions = """
-        Nirux keeps this project's past Claude conversations, across all its worktrees and sessions. \
-        Before starting a task, and before asking the user about a past decision, search them with \
-        history_search: a feature or branch name, a PR number, a distinctive word. \
+        Before starting a task or asking about a past decision, use history_search for this project's past \
+        Claude conversations (try a branch name or PR number). Use memory_search for project rules and notes. \
         Nirux's binary ($NIRUX_CLI_PATH) starts no task: run it only for the --mission commands Nirux \
         gives you, and never launch the app itself (open -a Nirux, open -n) to start work: that can open a \
         second Nirux.
@@ -97,10 +95,12 @@ enum NiruxMCPServer {
         return ["-c", config]
     }
 
+    private static let searchToolNames = [HistorySearchTool.name, MemorySearchTool.name]
+
     /// Every tool, pre-allowed for every Claude Nirux launches; the Lead's
     /// are listed to a Lead only, a task's (the same names) to the agent of
     /// any other Nirux workspace, and the app checks each call.
-    static let toolNames = [HistorySearchTool.name] + LeadTools.names
+    static let toolNames = searchToolNames + LeadTools.names
 
     /// Who runs the server, and where.
     struct Context: Sendable {
@@ -221,18 +221,20 @@ enum NiruxMCPServer {
         case "ping":
             return response(id: id, result: [:])
         case "tools/list":
-            return response(id: id, result: ["tools": [HistorySearchTool.definition] + context.appToolDefinitions])
+            return response(id: id, result: ["tools": [HistorySearchTool.definition, MemorySearchTool.definition] + context.appToolDefinitions])
         case "tools/call":
             let name = params["name"] as? String
-            guard let name, name == HistorySearchTool.name || context.appToolNames.contains(name) else {
+            guard let name, searchToolNames.contains(name) || context.appToolNames.contains(name) else {
                 return response(id: id, error: (-32602, "Unknown tool: \(name ?? "none")"))
             }
             guard let arguments = params["arguments"] as? [String: Any] ?? (params["arguments"] == nil ? [:] : nil) else {
                 return response(id: id, error: (-32602, "The arguments must be an object."))
             }
-            let result = name == HistorySearchTool.name
-                ? HistorySearchTool.call(arguments, context: context)
-                : callAppTool(name, arguments: arguments, context: context)
+            let result = switch name {
+            case HistorySearchTool.name: HistorySearchTool.call(arguments, context: context)
+            case MemorySearchTool.name: MemorySearchTool.call(arguments, context: context)
+            default: callAppTool(name, arguments: arguments, context: context)
+            }
             return response(id: id, result: [
                 "content": [["type": "text", "text": result.text]],
                 "isError": result.isError

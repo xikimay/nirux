@@ -337,14 +337,14 @@ extension AgentSessionRecord {
     /// checkout (`claude --worktree` puts them under `.claude/worktrees/`)
     /// is its own.
     static func checkoutRoot(containing path: String) -> String? {
-        var folder = URL(fileURLWithPath: path).standardizedFileURL
-        while true {
-            if FileManager.default.fileExists(atPath: folder.appendingPathComponent(".git").path) {
-                return folder.path
+        var folder = URL(fileURLWithPath: path).standardizedFileURL.path
+        while !folder.isEmpty {
+            if FileManager.default.fileExists(atPath: (folder as NSString).appendingPathComponent(".git")) {
+                return folder
             }
-            let parent = folder.deletingLastPathComponent()
-            guard parent.path != folder.path else { return nil }
-            folder = parent
+            if folder == "/" { break }
+            folder = (folder as NSString).deletingLastPathComponent
         }
+        return nil
     }
 }

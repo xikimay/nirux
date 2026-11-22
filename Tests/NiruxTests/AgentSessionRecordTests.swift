@@ -228,6 +228,7 @@ final class AgentSessionRecordTests: XCTestCase {
         XCTAssertNil(AgentSessionRecord.mainCheckout(ofWorktreeAt: root.path))
 
         XCTAssertEqual(AgentSessionRecord.checkoutRoot(containing: worktree.appendingPathComponent("Sources").path), worktree.path)
+        XCTAssertNil(AgentSessionRecord.checkoutRoot(containing: root.path))
         XCTAssertEqual(AgentSessionRecord.checkoutRoot(containing: nested.path), nested.path)
         XCTAssertEqual(AgentSessionRecord.checkoutRoot(containing: main.path), main.path)
     }

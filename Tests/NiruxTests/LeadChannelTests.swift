@@ -154,11 +154,11 @@ final class LeadChannelTests: XCTestCase {
         let names = { (context: NiruxMCPServer.Context) in
             ((try self.send(list, context: context)["result"] as? [String: Any])?["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
         }
-        XCTAssertEqual(try names(context(lead: true)), [HistorySearchTool.name] + LeadTools.names)
-        XCTAssertEqual(try names(context(lead: false)), [HistorySearchTool.name] + TaskTools.names)
-        XCTAssertEqual(try names(context(lead: false, inWorkspace: false)), [HistorySearchTool.name])
+        XCTAssertEqual(try names(context(lead: true)), [HistorySearchTool.name, MemorySearchTool.name] + LeadTools.names)
+        XCTAssertEqual(try names(context(lead: false)), [HistorySearchTool.name, MemorySearchTool.name] + TaskTools.names)
+        XCTAssertEqual(try names(context(lead: false, inWorkspace: false)), [HistorySearchTool.name, MemorySearchTool.name])
         // A workspace opened by a link from outside Nirux has no launch id.
-        XCTAssertEqual(try names(context(lead: false, launchID: "")), [HistorySearchTool.name])
+        XCTAssertEqual(try names(context(lead: false, launchID: "")), [HistorySearchTool.name, MemorySearchTool.name])
         XCTAssertNotNil(try call(LeadTools.readThread, ["task": "sample"], context: context(lead: false))["error"])
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.readThread, arguments: [:]))
         // Both roles expose the same start options.

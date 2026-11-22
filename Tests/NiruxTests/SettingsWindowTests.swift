@@ -580,9 +580,8 @@ final class SettingsWindowTests: XCTestCase {
 
     // MARK: - Window
 
-    /// A sidebar of panes, Nirux's then the space's; the window keeps its
-    /// width and fits each pane's height, top edge fixed, so nothing is cut
-    /// off whichever pane is picked.
+    /// The window keeps its width and top edge. Each pane fits vertically,
+    /// and a pane wider than the available screen keeps its left edge in view.
     @MainActor
     func testTheSidebarAndEachPaneFitTheWindow() throws {
         try withIsolatedState {
@@ -624,9 +623,15 @@ final class SettingsWindowTests: XCTestCase {
                 XCTAssertEqual(
                     content.bounds.height, max(pane.fittingSize.height, settings.sidebar.contentHeight), accuracy: 1, label
                 )
+                let host = try XCTUnwrap(pane.superview)
+                var controlArea = host.convert(host.bounds, to: content)
+                if pane.fittingSize.width > host.bounds.width {
+                    XCTAssertEqual(pane.frame.minX, host.bounds.minX, accuracy: 0.5, label)
+                    controlArea.size.width = pane.fittingSize.width
+                }
                 for control in Self.descendants(of: pane).compactMap({ $0 as? NSControl }) where !control.isHiddenOrHasHiddenAncestor {
                     let frame = control.convert(control.bounds, to: content)
-                    XCTAssertTrue(content.bounds.insetBy(dx: -0.5, dy: -0.5).contains(frame), "\(label): \(control) is cut off")
+                    XCTAssertTrue(controlArea.insetBy(dx: -0.5, dy: -0.5).contains(frame), "\(label): \(control) is cut off")
                 }
             }
         }
