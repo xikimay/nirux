@@ -305,6 +305,7 @@ final class NiruxShellView: NSView {
     lazy var branchReviewReader: BranchReviewController.Reader = BranchReviewController.readWorktree
     /// The review files Branch Review columns open: tests give theirs.
     lazy var branchReviewOpener: BranchReviewController.ReviewOpener = BranchReviewController.openReviewFile
+    lazy var branchReviewBranchCheck: BranchReviewController.BranchCheck = BranchReviewController.branchExists
     /// Reloads the boards whose board.json was saved.
     var boardConfigSaveObserver: NSObjectProtocol?
     /// The merge queue's `gh` client. Nil: each new queue gets
@@ -537,6 +538,12 @@ final class NiruxShellView: NSView {
         }
         workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url, isIsolated in
             self?.openWebView(url: url, in: targetWorkspace, isIsolated: isIsolated)
+        }
+        workspace.onAttachBrowserCapture = { [weak self] targetWorkspace, input, completion in
+            self?.attachBrowserCapture(input, in: targetWorkspace, completion: completion)
+        }
+        workspace.onOpenBranchReview = { [weak self] targetWorkspace in
+            self?.openBranchReview(in: targetWorkspace)
         }
         workspace.onTerminalOpenFile = { [weak self] targetWorkspace, path, line in
             self?.openInEditorColumn(path: path, line: line, in: targetWorkspace)

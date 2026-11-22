@@ -14,6 +14,7 @@ final class ReviewPage {
 
     convenience init(
         snapshot: BranchReview.Snapshot, handover: BranchReview.Handover?,
+        workspaceID: String? = nil, stateDirectory: URL? = nil,
         patchReader: @escaping BranchReviewController.PatchReader = { _, _ in nil },
         openLink: @escaping (URL) -> Void = { _ in },
         reviewOpener: @escaping BranchReviewController.ReviewOpener = { _ in nil },
@@ -21,7 +22,9 @@ final class ReviewPage {
         headOrder: @escaping BranchReviewController.HeadOrder = { _, ancestor, descendant in ancestor == descendant }
     ) throws {
         try self.init(
-            reader: { _, _, _ in (.snapshot(snapshot), handover) }, patchReader: patchReader, openLink: openLink,
+            reader: { _, _, _ in (.snapshot(snapshot), handover) },
+            workspaceID: workspaceID, stateDirectory: stateDirectory,
+            patchReader: patchReader, openLink: openLink,
             reviewOpener: reviewOpener, branchCheck: branchCheck, headOrder: headOrder
         )
     }
@@ -33,6 +36,7 @@ final class ReviewPage {
     /// otherwise; its runs wait in a queue of their own.
     init(
         reader: @escaping BranchReviewController.Reader,
+        workspaceID: String? = nil, stateDirectory: URL? = nil,
         patchReader: @escaping BranchReviewController.PatchReader = { _, _ in nil },
         openLink: @escaping (URL) -> Void = { _ in }, waitsForPage: Bool = true,
         makeWatcher: BranchReviewController.WatcherFactory? = nil, worktree: String = "/repo",
@@ -46,7 +50,8 @@ final class ReviewPage {
     ) throws {
         let watchers = watchers
         controller = BranchReviewController(
-            worktree: worktree, branch: nil, reader: reader, patchReader: patchReader,
+            worktree: worktree, branch: nil, workspaceID: workspaceID, stateDirectory: stateDirectory,
+            reader: reader, patchReader: patchReader,
             makeWatcher: makeWatcher ?? { layout, _, _ in
                 _ = watchers.append(layout.worktreeRoot)
                 return nil

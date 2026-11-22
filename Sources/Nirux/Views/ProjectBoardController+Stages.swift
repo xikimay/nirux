@@ -291,6 +291,9 @@ extension ProjectBoardController {
             targets.mainCheckouts[path] = Self.focus(main.agent, workspaces: main.workspaces.map(\.id))
                 ?? .open(path: path, title: main.branch ?? (path as NSString).lastPathComponent)
         }
+        if let state = inputs.queues[section.id], !state.isLocked, !state.selection.isEmpty, let repository = reads?.gitHub {
+            shown.menu.append(.clearQueue(repository: repository, blocked: state.selectionBusyReason))
+        }
         return shown
     }
 

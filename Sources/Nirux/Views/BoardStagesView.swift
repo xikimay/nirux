@@ -92,12 +92,19 @@ final class BoardStagesView: NSView {
 
     /// An item of a repository header's menu.
     enum SectionMenuItem: Equatable {
+        case clearQueue(repository: GitHubRepository, blocked: String?)
         case boardSettings
         /// Focuses the main checkout's workspace, or opens a shell there.
         case openMainCheckout(path: String)
 
+        var blocked: String? {
+            if case .clearQueue(_, let reason) = self { return reason }
+            return nil
+        }
+
         var title: String {
             switch self {
+            case .clearQueue: return "Clear Queue"
             case .boardSettings: return "Board Settings…"
             case .openMainCheckout: return "Open Main Checkout"
             }
@@ -1583,10 +1590,13 @@ final class BoardStagesSectionHeaderView: NSView {
     func contextMenu() -> NSMenu? {
         guard !menuItems.isEmpty else { return nil }
         let menu = NSMenu()
+        menu.autoenablesItems = false
         for item in menuItems {
             let menuItem = NSMenuItem(title: item.title, action: #selector(menuItemChosen(_:)), keyEquivalent: "")
             menuItem.target = self
             menuItem.representedObject = item
+            menuItem.isEnabled = item.blocked == nil
+            menuItem.toolTip = item.blocked
             menu.addItem(menuItem)
         }
         return menu

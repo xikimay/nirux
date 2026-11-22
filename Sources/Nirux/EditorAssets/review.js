@@ -189,6 +189,12 @@
       item.append(element("span", "receipt-meta", [row.status, row.provenance, row.freshness].map(P.visible).join(" · ")));
       if (row.command && row.command !== row.title) item.append(element("code", null, P.visible(row.command)));
       if (row.summary) item.append(element("span", null, P.visible(row.summary)));
+      if (row.artifactID && row.artifactLabel) {
+        const action = element("button", "more receipt-artifact", P.visible(row.artifactLabel));
+        action.type = "button";
+        action.addEventListener("click", () => post({ type: "openReceiptArtifact", id: row.artifactID }));
+        item.append(action);
+      }
       item.append(element("time", "receipt-time", P.visible(row.recordedAt)));
       list.append(item);
     }

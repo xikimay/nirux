@@ -50,6 +50,8 @@ final class BranchReviewController {
     ) -> BranchReview.ExplainResult
 
     var chooseReport: @MainActor (NSWindow, URL, @escaping @MainActor (URL) -> Void) -> Void = BranchReviewController.chooseJUnitReport
+    var revealArtifact: @MainActor ([URL]) -> Void = { NSWorkspace.shared.activateFileViewerSelecting($0) }
+    var presentReceiptArtifact: (@MainActor (BranchReview.Receipt, BranchReview.BrowserReceipt.ResolvedArtifacts) -> Void)?
 
     var reportGeneration: Int? {
         snapshot != nil && banner == nil && held == nil && status == nil ? snapshotCount : nil
@@ -74,6 +76,10 @@ final class BranchReviewController {
     let view: BranchReviewView
     /// The workspace's folder when the column opened.
     let worktree: String
+    /// The workspace that owns this review column, used to isolate private browser captures.
+    let workspaceID: String?
+    private let stateDirectoryOverride: URL?
+    var effectiveStateDirectory: URL { stateDirectoryOverride ?? Persistence.stateDirectory }
     /// The branch the column reviews: the one checked out at `worktree`
     /// when it first read it.
     private(set) var branch: String?
@@ -263,7 +269,8 @@ final class BranchReviewController {
     var explainSettings: @MainActor () -> BranchReview.ExplainSettings = { .saved() }
 
     init(
-        worktree: String, branch: String?, view: BranchReviewView = BranchReviewView(),
+        worktree: String, branch: String?, workspaceID: String? = nil, stateDirectory: URL? = nil,
+        view: BranchReviewView = BranchReviewView(),
         reader: @escaping Reader = BranchReviewController.readWorktree,
         patchReader: @escaping PatchReader = { BranchReview.filePatch($0, in: $1) },
         makeWatcher: @escaping WatcherFactory = BranchReviewController.watch,
@@ -277,6 +284,8 @@ final class BranchReviewController {
     ) {
         self.worktree = worktree
         self.branch = branch
+        self.workspaceID = workspaceID
+        self.stateDirectoryOverride = stateDirectory
         self.view = view
         self.reader = reader
         self.patchReader = patchReader
@@ -315,6 +324,7 @@ final class BranchReviewController {
             guard let self else { return }
             sendToAgent(self)
         }
+        view.onOpenReceiptArtifact = { [weak self] id in self?.openReceiptArtifact(id: id) }
         view.onReload = { [weak self] in self?.bannerClicked() }
         view.onStatusAction = { [weak self] in self?.statusAction?.perform() }
         view.onWindowChange = { [weak self] inWindow in
@@ -1000,7 +1010,8 @@ final class BranchReviewController {
         statusAction = nil
         var page = BranchReview.page(
             for: snapshot, handover: handover, explanation: explanation, explain: explainBar, generation: snapshotCount,
-            readAt: readAt, review: pageReview(), receipts: reviewRecord?.receipts ?? []
+            readAt: readAt, review: pageReview(), receipts: reviewRecord?.receipts ?? [],
+            workspaceID: workspaceID, stateDirectory: effectiveStateDirectory
         )
         page.notesVersion = explanationVersion
         pageNotesVersion = explanationVersion
@@ -1190,7 +1201,7 @@ final class BranchReviewController {
         }
     }
 
-    static func pauseMessage(_ operation: BranchReview.Operation) -> String {
+    nonisolated static func pauseMessage(_ operation: BranchReview.Operation) -> String {
         switch operation {
         case .conflicts:
             return "This worktree has conflicts to resolve. The review comes back once they’re resolved."

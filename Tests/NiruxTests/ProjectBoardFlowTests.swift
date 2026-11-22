@@ -95,6 +95,31 @@ final class ProjectBoardFlowTests: BoardRepositoryTestCase {
     // MARK: - Flows
 
     @MainActor
+    func testFailedOpenReadPreservesSelectionUntilACompleteEmptyRead() throws {
+        let client = FakeGitHub(openPullRequests: "[]", runs: "[]", failures: ["acme/widgets": .ghMissing])
+        try withShell(client: client) { shell, space in
+            let queue = shell.mergeQueue(projectID: space.id, repository: MQ.widgets)
+            queue.addToSelection(42, repository: MQ.widgets)
+            try writeConfig(for: space, workflow: "nightly.yml")
+            let board = shell.makeProjectBoard(projectID: space.id, offersSettings: false)
+            board.isShown = { true }
+            board.reload()
+            XCTAssertNil(board.reads.values.first?.openPullRequests)
+            XCTAssertEqual(queue.selection, [42])
+            waitUntil("the open read failed") { board.reads.values.first?.errors[.openPullRequests] != nil }
+            XCTAssertNil(board.reads.values.first?.openPullRequests)
+            XCTAssertEqual(queue.selection, [42])
+
+            shell.projectBoardClient = FakeGitHub(openPullRequests: "[]", runs: "[]")
+            let reopened = shell.makeProjectBoard(projectID: space.id, offersSettings: false)
+            reopened.isShown = { true }
+            reopened.reload()
+            waitUntil("GitHub returned an empty list") { reopened.reads.values.first?.openPullRequests == [] }
+            XCTAssertTrue(queue.selection.isEmpty)
+        }
+    }
+
+    @MainActor
     func testTheBoardOpensReadsOffTheMainThreadAndRunsItsButtons() throws {
         let client = makeClient()
         try withShell(client: client) { shell, space in

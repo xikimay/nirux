@@ -29,6 +29,8 @@ final class ProjectBoardController {
         /// The post-merge workflow file; nil when unset or none.
         var workflow: String?
         var openPullRequests: [ProjectBoard.PullRequest]?
+        /// Nil when the last open list failed, dropped a row, or reached the fetch limit.
+        var completeOpenNumbers: Set<Int>?
         var mergedPullRequests: [ProjectBoard.PullRequest]?
         /// The last post-merge run; `.some(nil)` when there is none yet.
         var postMergeRun: GitHub.WorkflowRun??
@@ -173,8 +175,7 @@ final class ProjectBoardController {
     /// Whether its workspace is shown in the window. Opening the board,
     /// Refresh and a saved board.json read at once when it is.
     var isShown: () -> Bool = { false }
-    /// Whether the board's project still exists: a deleted one's board
-    /// reads nothing.
+    var onOpenPullRequests: ((GitHubRepository, Set<Int>) -> Void)?
     /// Something was read: the shell renders the board again.
     var onRead: (() -> Void)?
     /// A board without a repository asks for Board Settings.
@@ -554,7 +555,11 @@ final class ProjectBoardController {
             }, then: { [weak self] result in
                 self?.finish(source, section: id, reads: repository, generation: current) { reads in
                     reads.errors[source] = result.failureValue
-                    guard case .success(let pullRequests) = result else { return }
+                    guard case .success(let parsed) = result else {
+                        if list == .open { reads.completeOpenNumbers = nil }
+                        return
+                    }
+                    let pullRequests = parsed.rows
                     if list == .open {
                         // A pull request no longer open was likely merged:
                         // its branch reads "merged" now, not in 10 minutes.
@@ -562,6 +567,7 @@ final class ProjectBoardController {
                         if reads.openPullRequests?.contains(where: { !numbers.contains($0.number) }) == true {
                             reads.schedule.expire(.mergedPullRequests)
                         }
+                        reads.completeOpenNumbers = parsed.completeOpenNumbers
                         reads.openPullRequests = pullRequests
                         reads.pullRequestsReadAt = Date()
                     } else {
@@ -615,6 +621,9 @@ final class ProjectBoardController {
         reads.schedule.finish(source)
         store(&reads)
         self.reads[id] = reads
+        if source == .openPullRequests, !reads.isFromRemote, let numbers = reads.completeOpenNumbers {
+            onOpenPullRequests?(reads.gitHub, numbers)
+        }
         scheduleRender()
     }
 

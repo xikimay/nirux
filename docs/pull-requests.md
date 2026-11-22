@@ -65,7 +65,7 @@ The row reads `Needs you · …` in amber with the reason when a fourth round wo
 
 A row opens into its diff. The column follows its worktree, and reads the branch again a moment after the agent stops writing. A new commit waits behind a **Reload** banner, so the page doesn't change while you read it.
 
-From the column’s **⋯** menu, choose **Attach Report…** to import a JUnit XML file up to 2 MB. Its test counts and result appear under **Verification receipts** with the source **Local**. **Current** means the commit and working tree match the snapshot shown when you attached the report. A later commit or local edit makes the receipt **Stale**.
+From the column’s **⋯** menu, choose **Attach Report…** to import a JUnit XML file up to 2 MB. Its test counts and result appear under **Verification receipts** with the source **Local**. From an isolated test browser’s **Screenshot Saved** or **Browser Diagnostics** sheet, choose **Attach to Branch Review** to attach that workspace’s capture as a **Local browser** receipt with its URL, timestamp, error counts, and a safe preview/reveal action. **Current** means the commit and working tree match the snapshot shown when you attached the report or capture. A later commit or local edit makes the receipt **Stale**.
 
 ### Explain
 
