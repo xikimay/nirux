@@ -246,6 +246,7 @@ enum MQ {
 /// records every call, never runs gh.
 final class FakeQueueClient: MergeQueueGitHub, @unchecked Sendable {
     let isDryRun: Bool
+    var allowsLeadStart: Bool { !isDryRun }
     private let lock = NSLock()
     private var world: MQ.World
     private var recordedReads: [MergeQueue.Read] = []

@@ -54,6 +54,8 @@ extension MergeQueue {
 
         let settings: BoardConfig.QueueSettings
         let cadence: Cadence
+        let startedByLead: Bool
+        private var stopMessage = "Stopped by the user."
         private(set) var entries: [Entry]
         private(set) var phase: Phase = .idle
         /// The entry being worked on.
@@ -71,7 +73,8 @@ extension MergeQueue {
         private var baseRunsFailedAtStart: Set<String> = []
         private var outbox = Output()
 
-        init(settings: BoardConfig.QueueSettings, entries: [ConfirmedEntry], cadence: Cadence = .standard) {
+        init(settings: BoardConfig.QueueSettings, entries: [ConfirmedEntry], cadence: Cadence = .standard, startedByLead: Bool = false) {
+            self.startedByLead = startedByLead
             self.cadence = cadence
             self.settings = settings
             self.entries = entries.map(Entry.init)
@@ -126,7 +129,9 @@ extension MergeQueue {
             case .start:
                 start()
             case .stop:
-                userStop()
+                userStop(message: "Stopped by the user.")
+            case .stopByLead:
+                userStop(message: "Stopped by Lead.")
             case .read(let id, let result):
                 guard let request, id == request.id, case .read(let reads, _) = request.action, let purpose else { break }
                 self.request = nil
@@ -144,7 +149,7 @@ extension MergeQueue {
                 guard let request, id == request.id, case .mutate(let mutation) = request.action, let purpose else { break }
                 self.request = nil
                 if phase == .stopping {
-                    var message = "Stopped by the user. The \(Self.describe(mutation)), already sent, answered: "
+                    var message = stopMessage + " The \(Self.describe(mutation)), already sent, answered: "
                         + "\(Self.describe(result))."
                     if case .merge(let number, _, _) = mutation, result == .sent || result.isUncertain {
                         message += " Check #\(number) on GitHub: it may be merged."
@@ -257,14 +262,15 @@ extension MergeQueue {
 
         /// Stop: at once, unless a mutating call runs. A read's late answer
         /// is ignored; a merge can't be taken back, so its answer is awaited.
-        private mutating func userStop() {
+        private mutating func userStop(message: String) {
             switch phase {
             case .running, .paused:
                 if request?.isMutation == true {
+                    stopMessage = message
                     phase = .stopping
-                    note("Stop pressed: stopping once the call already sent answers")
+                    note(message + " Stopping once the call already sent answers.")
                 } else {
-                    stop(StopReason(kind: .user, message: "Stopped by the user."))
+                    stop(StopReason(kind: .user, message: message))
                 }
             case .idle, .stopping, .stopped, .finished:
                 break

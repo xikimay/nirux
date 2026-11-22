@@ -287,6 +287,7 @@ extension MergeQueue {
     enum Event: Equatable, Sendable {
         case start
         case stop
+        case stopByLead
         case read(requestID: Int, Result<[Read: ReadResult], ReadFailure>)
         case mutated(requestID: Int, MutationResult)
     }

@@ -197,6 +197,7 @@ final class NiruxShellView: NSView {
     /// (`queue_merge`), by `<space id> <owner/name>`: a Lead may replace its
     /// own, never the user's.
     var leadQueueProposals: [String: [Int]] = [:]
+    var pendingLeadQueueStarts: Set<MergeQueueKey> = []
     /// The rules each space's Lead proposed, by space id, read from
     /// RuleProposalStore once and kept current by the app's own changes
     /// (the sidebar asks several times a second).

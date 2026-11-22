@@ -262,7 +262,7 @@ extension NiruxShellView {
 
     /// Start: the sheet reads the queued pull requests on GitHub as they
     /// are now, then shows what will happen. Every Start opens a new one.
-    func requestMergeQueueStart(board: ProjectBoardController, section id: String?) {
+    func requestMergeQueueStart(board: ProjectBoardController, section id: String?, cadence: MergeQueue.Cadence = .standard) {
         // Already open: in front, which says it.
         if let open = mergeQueueConfirmation { return open.focus() }
         guard mergeQueueQuit == nil else { return showToast("Nirux is stopping the merge queue to quit") }
@@ -298,7 +298,10 @@ extension NiruxShellView {
             for candidate in reading.candidates where candidate.pullRequest.map({ !$0.isOpen }) == true {
                 controller?.removeFromSelection(candidate.number)
             }
-            panel.update(MergeQueue.confirmation(reading))
+            var confirmation = MergeQueue.confirmation(reading)
+            confirmation.select(cadence)
+            panel.update(confirmation)
+            if let reason = confirmation.refusal(for: cadence) { panel.showError(reason) }
         }
         panel.onDismiss = { [weak self, weak panel] in
             // A sheet closed while it reads: the reads still to come don't run.
