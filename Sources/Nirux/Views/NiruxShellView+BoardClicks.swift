@@ -29,6 +29,10 @@ extension NiruxShellView {
         stages.onSectionMenu = { [weak self, weak board] section, item in
             guard let self, let board else { return }
             switch item {
+            case .clearQueue(let repository, let blocked):
+                guard blocked == nil, self.mergeQueueSelectionBusy == nil,
+                      let queue = self.boardQueue(board, section: section), queue.queueRepository == repository else { return }
+                queue.clearSelection()
             case .boardSettings:
                 self.showBoardSettings(of: board, repository: section)
             case .openMainCheckout(let path):

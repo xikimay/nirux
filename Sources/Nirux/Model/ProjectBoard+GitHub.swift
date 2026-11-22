@@ -19,6 +19,8 @@ protocol ProjectBoardGitHub: Sendable {
 }
 
 extension ProjectBoard {
+    static let openPullRequestLimit = 100
+
     enum PullRequestList: Sendable {
         /// Up to 100 open pull requests, with their checks.
         case open
@@ -96,7 +98,7 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
     static func pullRequestArguments(repository: String, state: ProjectBoard.PullRequestList) -> [String] {
         switch state {
         case .open:
-            return ["pr", "list", "--repo", "\(GitHub.host)/\(repository)", "--state", "open", "--limit", "100",
+            return ["pr", "list", "--repo", "\(GitHub.host)/\(repository)", "--state", "open", "--limit", String(ProjectBoard.openPullRequestLimit),
                     "--json", openFields]
         case .merged:
             return GitHub.CLI.graphQL(mergedQuery, strings: GitHub.CLI.repositoryVariables(repository))
@@ -166,15 +168,23 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
 // MARK: - Parsing
 
 extension ProjectBoard {
+    struct ParsedPullRequests: Sendable {
+        let rows: [PullRequest]
+        /// A capped list or one with unreadable rows cannot establish which PRs closed.
+        let completeOpenNumbers: Set<Int>?
+    }
+
     /// A list of pull requests as gh gives it (`gh pr list --json …`, or
     /// the merged query's two lists one after the other), each pull
     /// request once. An entry that isn't one, or misses a field it needs,
     /// is left out; nil when the output isn't a JSON list.
-    static func parsePullRequests(_ data: Data, repository: GitHubRepository) -> [PullRequest]? {
+    static func parsePullRequests(_ data: Data, repository: GitHubRepository) -> ParsedPullRequests? {
         guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else { return nil }
         var numbers = Set<Int>()
-        return json.compactMap { ($0 as? [String: Any]).flatMap { pullRequest(from: $0, repository: repository) } }
+        let rows = json.compactMap { ($0 as? [String: Any]).flatMap { pullRequest(from: $0, repository: repository) } }
             .filter { numbers.insert($0.number).inserted }
+        let complete = rows.count == json.count && rows.count < openPullRequestLimit && rows.allSatisfy(\.isOpen)
+        return ParsedPullRequests(rows: rows, completeOpenNumbers: complete ? numbers : nil)
     }
 
     static func pullRequest(from json: [String: Any], repository: GitHubRepository) -> PullRequest? {
