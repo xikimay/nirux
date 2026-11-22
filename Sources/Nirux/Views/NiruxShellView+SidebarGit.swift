@@ -461,7 +461,10 @@ extension NiruxShellView {
             if appliedEvent.claudeRestoreChanged { changed = true }
             if event.kind == .agy {
                 if appliedEvent.resolution.column.captureAgySession(
-                    sessionID: event.sessionID, emitterProcess: event.emitterProcess, snapshot: snapshot
+                    sessionID: event.sessionID,
+                    eventName: event.name,
+                    emitterProcess: event.emitterProcess,
+                    snapshot: snapshot
                 ) {
                     changed = true
                 }

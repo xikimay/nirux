@@ -637,8 +637,7 @@ extension NiruxShellView {
 
     /// The conversation `agy --conversation <id>` (or `=<id>`) resumes.
     nonisolated static func resumedConversation(ofAgy arguments: [String]) -> String? {
-        arguments.firstIndex(of: "--conversation").flatMap { arguments[safe: $0 + 1] }
-            ?? arguments.lazy.compactMap { $0.hasPrefix("--conversation=") ? String($0.dropFirst("--conversation=".count)) : nil }.first
+        AgyLaunch.resumedConversation(in: arguments)
     }
 
     /// Types each Lead notice whose Lead's prompt is free; the others wait

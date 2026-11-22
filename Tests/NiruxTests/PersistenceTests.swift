@@ -780,7 +780,7 @@ extension PersistedStateCodingTests {
     @MainActor
     func testAgyColumnResumesItsConversation() throws {
         XCTAssertEqual(NiruxShellView.agyCommand(resume: .session("c'1")), #"command agy --conversation 'c'\''1' --mode auto"#)
-        XCTAssertEqual(NiruxShellView.agyCommand(resume: .picker), "command agy --mode auto", "no picker flag: a fresh one")
+        XCTAssertEqual(NiruxShellView.agyCommand(resume: .picker), "command agy --continue --mode auto")
         var tracker = ForegroundSessionTracker.agy
         tracker.prepareResume(sessionID: "c1")
         let agy = ForegroundProcess(

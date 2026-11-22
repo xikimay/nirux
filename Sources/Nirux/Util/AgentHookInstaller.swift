@@ -386,14 +386,13 @@ enum AgentHookInstaller {
         return #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x \#(path) ]; then exec \#(path) --hook claude --agy; else /bin/cat >/dev/null; fi"#
     }
 
-    /// SessionStart says which conversation a column's agy runs, for its
-    /// resume after a restart: its process's first (a resumed agy sends none
-    /// and is known by its launch). Never PreToolUse, whose hooks must decide
-    /// on the tool call. agy's default timeout (30 s) covers a cold start of
-    /// the receiver.
+    /// SessionStart captures new conversations, and Stop captures conversations
+    /// continued with `--continue` or switched to with `/resume` (neither fires
+    /// SessionStart). Never PreToolUse, whose hooks must decide on the tool
+    /// call. agy's default timeout (30 s) covers a cold start of the receiver.
     static func agyHooks(executablePath: String) -> [String: Any] {
         let handler: [String: Any] = ["type": "command", "command": agyHookCommand(executablePath: executablePath)]
-        return ["SessionStart": [handler]]
+        return ["SessionStart": [handler], "Stop": [handler]]
     }
 
     /// `installAgyHooks` from a build that writes the hooks: run when Nirux

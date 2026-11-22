@@ -282,10 +282,17 @@ struct AgentHookEvent: Codable, Equatable {
             stopHookActive = nil
         case .agy:
             // Which conversation, and where: never its prompt (lastUserInput).
-            // A subagent's SessionStart looks the same (probed on agy 1.5.12):
-            // the column keeps its process's first (ForegroundSessionTracker).
-            guard payload["hookEventName"] as? String == "SessionStart" else { return nil }
-            name = .sessionStart
+            // A subagent's SessionStart/Stop look the same (probed on agy 1.5.12):
+            // ForegroundSessionTracker filters subagents while Stop captures
+            // --continue and /resume conversations.
+            guard let hookName = payload["hookEventName"] as? String,
+                  let name: Name = switch hookName {
+                  case "SessionStart": .sessionStart
+                  case "Stop": .stop
+                  default: nil
+                  }
+            else { return nil }
+            self.name = name
             sessionID = payload["conversationId"] as? String
             cwd = payload["cwd"] as? String
             source = nil

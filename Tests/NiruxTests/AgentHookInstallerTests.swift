@@ -383,7 +383,7 @@ final class AgentHookInstallerTests: XCTestCase {
         let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
         XCTAssertNotNil(root["lint"])
         let nirux = try XCTUnwrap(root["nirux"] as? [String: Any])
-        XCTAssertEqual(Set(nirux.keys), ["SessionStart", "enabled"], "never PreToolUse, which must decide")
+        XCTAssertEqual(Set(nirux.keys), ["SessionStart", "Stop", "enabled"], "never PreToolUse, which must decide")
         XCTAssertEqual(nirux["enabled"] as? Bool, false, "agy's own off switch stays")
         XCTAssertTrue(text.contains(#"exec '/Applications/Nirux.app/Contents/MacOS/Nirux' --hook claude --agy"#), text)
         write("{ not json", ".gemini/config/hooks.json")

@@ -150,6 +150,7 @@ extension NiruxShellView {
         var claude = Set<String>()
         var codex = Set<String>()
         var agy = Set<String>()
+        var agyContinueCwds = Set<String>()
     }
 
     private func restoreColumn(
@@ -184,8 +185,12 @@ extension NiruxShellView {
                 restoring: persistedColumn, in: workspace
             )
         case .agy:
-            let resumeTarget = Self.agentRestoreTarget(
-                sessionID: persistedColumn.agySessionID, claimedSessionIDs: &claimedSessionIDs.agy
+            let effectiveCwd = Self.existingDirectory(persistedColumn.cwd) ?? workspace.cwd
+            let resumeTarget = Self.agyRestoreTarget(
+                sessionID: persistedColumn.agySessionID,
+                cwd: effectiveCwd,
+                claimedSessionIDs: &claimedSessionIDs.agy,
+                claimedContinueCwds: &claimedSessionIDs.agyContinueCwds
             )
             let mode = persistedColumn.agyLaunchMode ?? Self.agyLaunchMode(for: workspace)
             addDeferredAgentColumn(.agy(resume: resumeTarget, mode: mode, model: persistedColumn.agentModel), restoring: persistedColumn, in: workspace)
@@ -306,6 +311,25 @@ extension NiruxShellView {
     ) -> AgentResumeTarget? {
         if sessionID == nil, sessionIsUnprompted { return nil }
         return agentRestoreTarget(sessionID: sessionID, claimedSessionIDs: &claimedSessionIDs)
+    }
+
+    /// Claim an exact Antigravity conversation once per restore pass. When no
+    /// exact UUID was stored, `.picker` (`agy --continue`) is claimed at most
+    /// once per working directory so duplicate un-ID'd columns in the same
+    /// folder don't attach to the same conversation; subsequent ones start
+    /// fresh (`nil`), as does a duplicate exact session ID.
+    static func agyRestoreTarget(
+        sessionID: String?,
+        cwd: String,
+        claimedSessionIDs: inout Set<String>,
+        claimedContinueCwds: inout Set<String>
+    ) -> AgentResumeTarget? {
+        if let sessionID, UUID(uuidString: sessionID) != nil {
+            return claimedSessionIDs.insert(sessionID).inserted ? .session(sessionID) : nil
+        }
+        let url = URL(fileURLWithPath: cwd).standardizedFileURL
+        let key = url.path.realPath ?? url.path
+        return claimedContinueCwds.insert(key).inserted ? .picker : nil
     }
 
     func saveState(snapshot: ProcessSnapshot? = nil) {
