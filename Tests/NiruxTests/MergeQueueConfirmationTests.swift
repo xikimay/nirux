@@ -120,7 +120,11 @@ final class MergeQueueConfirmationTests: XCTestCase {
             { $0.rateLimit = nil },
             { $0.rateLimit = .init(coreRemaining: 499, coreReset: Date(), graphQLRemaining: 500, graphQLReset: Date()) },
             { $0.baseMergeQueue = nil },
-            { $0.baseMergeQueue = true }
+            { $0.baseMergeQueue = true },
+            { $0.baseRuns = nil },
+            { $0.baseRuns = [] },
+            { $0.baseRuns = [MQ.run(1, head: self.c, conclusion: nil)] },
+            { $0.baseRuns = [MQ.run(1, head: self.c, conclusion: "cancelled")] }
         ]
         for (index, block) in blockers.enumerated() {
             var blocked = good

@@ -119,7 +119,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             queue.removeFromSelection(14)
             shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
 
-            func refused(_ args: String, _ reason: String, duringRead: () throws -> Void = {}) throws {
+            @MainActor func refused(_ args: String, _ reason: String, duringRead: () throws -> Void = {}) throws {
                 let reply = try callQueueMerge(args, shell: shell, duringRead: duringRead)
                 XCTAssertTrue(reply.isError, reply.text)
                 XCTAssertTrue(reply.text.localizedCaseInsensitiveContains(reason), reply.text)

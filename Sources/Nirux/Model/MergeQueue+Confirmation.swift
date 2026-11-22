@@ -54,6 +54,14 @@ extension MergeQueue {
                   confirmation.entries.map(\.number) == numbers, candidates.map(\.number) == numbers else {
                 return "The queue preflight was incomplete."
             }
+            if let workflow = settings.postMergeWorkflow {
+                guard let last = baseRuns?.first(where: \.isCompleted) else {
+                    return "No completed run of \(workflow) on \(settings.baseBranch) was found."
+                }
+                guard GitHub.isSucceededRun(last.conclusion) else {
+                    return "The last completed run of \(workflow) on \(settings.baseBranch) didn’t succeed."
+                }
+            }
             for (item, candidate) in zip(confirmation.items, candidates) {
                 if let warning = item.warnings.first { return "#\(candidate.number): \(warning)" }
                 guard case .some(.some) = candidate.comparison else {

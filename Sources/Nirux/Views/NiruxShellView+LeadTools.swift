@@ -987,8 +987,10 @@ extension NiruxShellView {
         guard mergeQueueConfirmation != nil else {
             return answer("Nirux couldn't open the merge queue's sheet (the Board may need its settings): tell the user.", true)
         }
+        let next = controller.isDryRun ? "The user can review it and click Start Dry Run. This build makes no merges."
+            : "Nothing merges until the user clicks Start."
         answer("The confirmation sheet of \(chosen.1.name)'s merge queue is open with "
-            + numbers.map { "#\($0)" }.joined(separator: ", ") + ". Nothing merges until the user clicks Start.", false)
+            + numbers.map { "#\($0)" }.joined(separator: ", ") + ". " + next, false)
     }
 
     private func readLeadQueueStart(
