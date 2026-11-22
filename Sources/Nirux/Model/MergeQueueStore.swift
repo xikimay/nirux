@@ -52,6 +52,8 @@ extension MergeQueue {
         var repository: String
         var baseBranch: String
         var postMergeWorkflow: String?
+        var cadence: Cadence?
+        var effectiveCadence: Cadence { cadence ?? .standard }
         var dryRun: Bool
         var savedAt: Date
         var status: Status
@@ -63,6 +65,7 @@ extension MergeQueue {
         var inFlight: String?
 
         init(engine: Engine, dryRun: Bool, savedAt: Date) {
+            cadence = engine.cadence
             repository = engine.settings.repository
             baseBranch = engine.settings.baseBranch
             postMergeWorkflow = engine.settings.postMergeWorkflow
