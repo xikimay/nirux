@@ -65,6 +65,8 @@ The row reads `Needs you · …` in amber with the reason when a fourth round wo
 
 A row opens into its diff. The column follows its worktree, and reads the branch again a moment after the agent stops writing. A new commit waits behind a **Reload** banner, so the page doesn't change while you read it.
 
+From the column’s **⋯** menu, choose **Attach Report…** to import a JUnit XML file up to 2 MB. Its test counts and result appear under **Verification receipts** with the source **Local**. **Current** means the commit and working tree match the snapshot shown when you attached the report. A later commit or local edit makes the receipt **Stale**.
+
 ### Explain
 
 **Explain** asks Claude Code, on your Claude account, to read the branch and a read-only copy of its files, with secrets and instruction files left out. The model and effort are set in **Settings › Agents › Branch Review**.

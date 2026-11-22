@@ -125,6 +125,40 @@ final class MergeQueueBoardFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testEverySheetOpensInStandardAndStartsOnlyTheSelectedCadenceAsADryRun() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
+        try withBoard(world: world) { shell, board in
+            try BoardStagesClicks.pressMerge(try line("login", in: board))
+            waitUntil("#12 is queued") { BoardStagesClicks.shownLine("login", in: board)?.line.offer?.change == .remove }
+            try BoardStagesClicks.pressMerge(try line("feat/api", in: board))
+            waitUntil("#14 is queued") { BoardStagesClicks.shownLine("feat/api", in: board)?.line.offer?.change == .remove }
+            let header = try self.header(of: board)
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
+                try BoardStagesClicks.click(header.startButton)
+                let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
+                waitUntil("the cadence picker is ready") { sheet.cadencePicker != nil }
+                let picker = try XCTUnwrap(sheet.cadencePicker)
+                XCTAssertEqual(sheet.confirmation?.cadence, .standard)
+                XCTAssertEqual(picker.titleOfSelectedItem, "Standard")
+                XCTAssertTrue(sheet.lines.contains { $0.contains("publish 2 nightlies") })
+                XCTAssertTrue(try XCTUnwrap(picker.item(withTitle: cadence.title)).isEnabled)
+                picker.selectItem(withTitle: cadence.title)
+                XCTAssertTrue(picker.sendAction(picker.action, to: picker.target))
+                XCTAssertEqual(sheet.confirmation?.cadence, cadence)
+                XCTAssertTrue(sheet.lines.contains("A real queue would verify nightly.yml once, on the final merge of 2 pull requests. This dry run publishes nothing."))
+                try click(try XCTUnwrap(sheet.startButton))
+                waitUntil("the dry run stops") { !queue.isRunning }
+                guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("queue did not stop") }
+                XCTAssertEqual(reason.kind, .dryRun)
+                XCTAssertEqual(queue.saved?.effectiveCadence, cadence)
+                XCTAssertEqual(world.mergedNumbers, [])
+                waitUntil("Start is ready again") { header.startButton.isEnabled && !header.startButton.isHidden }
+            }
+        }
+    }
+
+    @MainActor
     func testStopFromTheBoardEndsAWaitingQueue() throws {
         // Checks still running: the queue waits between looks.
         let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b], testConclusion: nil)
@@ -147,6 +181,13 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertTrue(header.startButton.isHidden)
             XCTAssertFalse(header.stopButton.isHidden, "Stop is in reach while it runs")
             XCTAssertEqual(board.view.stages.runningQueueViews.map(\.queue.title), ["acme/widgets"], "and at the Board's foot")
+            try BoardStagesClicks.click(header.journalButton)
+            let runningJournal = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
+            waitUntil("the running journal was read") { runningJournal.snapshot != nil }
+            XCTAssertFalse(runningJournal.resolveButton.isEnabled)
+            XCTAssertTrue(runningJournal.resolveButton.toolTip?.contains("queue is running") == true)
+            try click(runningJournal.doneButton)
+            waitUntil("the running journal closed") { board.view.window?.attachedSheet == nil }
             try BoardStagesClicks.click(header.stopButton)
             XCTAssertFalse(queue.isRunning)
             XCTAssertEqual(header.queueLabel.stringValue, "Stopped: Stopped by the user. · 1 pull request queued")
@@ -159,6 +200,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             let journal = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
             waitUntil("the journal includes Stop") { journal.snapshot?.entriesText.contains("Stopped by the user.") == true }
             let snapshot = try XCTUnwrap(journal.snapshot)
+            XCTAssertTrue(journal.resolveButton.isHidden)
             XCTAssertEqual(snapshot.status, "Stopped: Stopped by the user.")
             XCTAssertTrue(snapshot.title.contains("Dry Run"))
             XCTAssertEqual(snapshot.link?.absoluteString, "https://github.com/acme/widgets/pull/12")
@@ -353,6 +395,104 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             sheet.dismiss()
             XCTAssertEqual(world.mergedNumbers, [])
             XCTAssertEqual(world.forbiddenCalls, [])
+        }
+    }
+
+    @MainActor
+    func testJournalRefusesMissingWorktreeAndRechecksTheRepositoryLockAndSavedStop() throws {
+        let saved = MQ.stoppedConflict(number: 14, branch: "feat/api")
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [14: Self.b])
+        try withBoard(world: world, isDryRun: false, saved: saved) { shell, board in
+            let header = try self.header(of: board)
+            try BoardStagesClicks.click(header.journalButton)
+            let panel = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
+            waitUntil("the stopped journal was read") { panel.snapshot != nil }
+            XCTAssertFalse(panel.resolveButton.isEnabled)
+            XCTAssertTrue(panel.resolveButton.toolTip?.contains("No worktree") == true)
+
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            let conflict = try XCTUnwrap(MergeQueue.Conflict(saved: saved, repository: MQ.widgets, dryRun: false))
+            let lock = try XCTUnwrap(MergeQueueLock.acquire(repository: MQ.widgets, folder: shell.mergeQueueLockFolder))
+            guard case .failure(.lockedElsewhere) = queue.lockForResolution(of: conflict) else {
+                return XCTFail("Another Nirux holds the live repository lock")
+            }
+            lock.release()
+            var replaced = saved
+            replaced.status = .finished
+            replaced.save(to: try XCTUnwrap(queue.files?.state))
+            guard case .failure(.invalidEntry) = queue.lockForResolution(of: conflict) else {
+                return XCTFail("A newer queue replaced the conflict shown")
+            }
+            try click(panel.doneButton)
+        }
+    }
+
+    @MainActor
+    func testStoppedConflictPreparesOnlyTheChosenAgentsDraft() throws {
+        let saved = MQ.stoppedConflict()
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a])
+        try withBoard(world: world, isDryRun: false, saved: saved) { shell, board in
+            let login = try XCTUnwrap(shell.projectWorkspaces(of: board.projectID).first { $0.title == "login" })
+            let main = try XCTUnwrap(shell.projectWorkspaces(of: board.projectID).first { $0.title == "widgets" })
+            let header = try self.header(of: board)
+            try BoardStagesClicks.click(header.journalButton)
+            let panel = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
+            let id = try XCTUnwrap(board.view.stages.content?.sections.first?.id)
+            board.view.stages.onJournal?(id)
+            XCTAssertEqual(board.view.window?.sheets, [panel])
+            waitUntil("the stopped journal was read") { panel.snapshot != nil }
+            XCTAssertFalse(panel.resolveButton.isEnabled)
+            XCTAssertTrue(panel.resolveButton.toolTip?.contains("No agent") == true)
+
+            let agents = [AgentStandIn(), AgentStandIn(), AgentStandIn()]
+            defer { agents.forEach { $0.remove() } }
+            var columns: [ColumnState] = []
+            for (agent, space) in zip(agents, [main, login, login]) {
+                space.addColumn(command: agent.command(), cwd: space.cwd)
+                let column = try XCTUnwrap(space.columns.last)
+                let pty = try XCTUnwrap(column.pty)
+                waitUntil("Claude in the new terminal") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+                let process = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
+                for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit, .stop] {
+                    _ = pty.applyAgentHook(.init(kind: .claude, name: name, sessionID: "s", emitterProcess: process,
+                                                 timestamp: Date().timeIntervalSince1970), isUserFocused: false)
+                }
+                columns.append(column)
+            }
+            panel.refreshResolution(snapshot: ProcessSnapshot())
+            let menu = try XCTUnwrap(panel.resolveButton.menu)
+            XCTAssertEqual(menu.items.count, 2)
+            XCTAssertTrue(menu.items.allSatisfy { $0.title.contains("login") })
+            let selected = try XCTUnwrap(menu.items.last)
+            let pty = try XCTUnwrap(columns[2].pty)
+            // Keep the old menu item, then type a draft before choosing it.
+            pty.sendRaw("my draft")
+            try BoardStagesClicks.choose(selected.title, in: menu)
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            waitUntil("the remaining agent is offered") { panel.resolveButton.isEnabled && panel.resolveButton.menu == nil }
+            XCTAssertEqual(agents[2].input, "my draft")
+            XCTAssertIdentical(board.view.window?.attachedSheet, panel)
+
+            try BoardConfigSuggestionsTests.git(["switch", "-q", "-c", "another-branch"], at: login.cwd)
+            try click(panel.resolveButton)
+            waitUntil("the checkout change refused the paste") { panel.resolveButton.isEnabled && panel.sheetParent != nil }
+            XCTAssertEqual(agents[1].input, "")
+            try BoardConfigSuggestionsTests.git(["switch", "-q", "feat/login"], at: login.cwd)
+            try click(panel.resolveButton)
+            let expected = "PR #12 conflicts with `main`. Run `git pull`, then `git merge origin/main`, "
+                + "resolve the conflicts, run the tests, commit and push. Don't rebase or force-push."
+            waitUntil("the selected column is focused with the complete draft") {
+                shell.activeWorkspace === login && login.columns[login.focusedIndex] === columns[1]
+                    && agents[1].input.hasSuffix("\u{1b}[201~")
+            }
+            XCTAssertEqual(agents[1].input, "\u{1b}[200~" + expected + "\u{1b}[201~")
+            XCTAssertEqual(agents[0].input, "")
+            XCTAssertEqual(agents[2].input, "my draft")
+            XCTAssertFalse(queue.isRunning)
+            XCTAssertEqual(queue.saved?.stopReason, saved.stopReason)
+            XCTAssertEqual(queue.saved?.entries, saved.entries)
+            XCTAssertEqual(queue.selection, [12])
+            XCTAssertEqual(world.callCount, 0)
         }
     }
 

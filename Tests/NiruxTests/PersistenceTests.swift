@@ -104,7 +104,7 @@ final class PersistedStateCodingTests: XCTestCase {
             settings: PersistedSettings(
                 claudeLaunchMode: .acceptEdits,
                 claudeNoFlicker: false,
-                codexLaunchMode: .readOnly
+                codexLaunchMode: .readOnly, agyLaunchMode: .acceptEdits
             ),
             activeWorkspaceID: "workspace-main"
         )
@@ -126,6 +126,7 @@ final class PersistedStateCodingTests: XCTestCase {
         )
         XCTAssertEqual(decoded.settings?.claudeLaunchMode, .acceptEdits)
         XCTAssertEqual(decoded.settings?.codexLaunchMode, .readOnly)
+        XCTAssertEqual(decoded.settings?.agyLaunchMode, .acceptEdits)
         XCTAssertEqual(decoded.settings?.claudeNoFlicker, false)
         XCTAssertEqual(decoded.settings?.missionHandoffsEnabled, true)
         XCTAssertEqual(decoded.activeWorkspaceID, "workspace-main")
@@ -649,10 +650,11 @@ extension PersistedStateCodingTests {
     /// an explicit mode beats the Manual key.
     func testLaunchModesThisBuildCantReadCostOnlyThemselves() throws {
         let newer = try JSONDecoder().decode(
-            PersistedSettings.self, from: Data(#"{"claudeLaunchMode":"turbo","codexLaunchMode":"warp","claudeNoFlicker":false}"#.utf8)
+            PersistedSettings.self, from: Data(#"{"claudeLaunchMode":"turbo","codexLaunchMode":"warp","agyLaunchMode":"future","claudeNoFlicker":false}"#.utf8)
         )
         XCTAssertNil(newer.claudeLaunchMode)
         XCTAssertNil(newer.codexLaunchMode)
+        XCTAssertNil(newer.agyLaunchMode)
         XCTAssertEqual(newer.claudeNoFlicker, false, "the rest of the settings stays")
         let both = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeLaunchMode":"plan","claudeManualMode":true}"#.utf8))
         XCTAssertEqual(both.claudeLaunchMode, .plan)
@@ -752,11 +754,33 @@ extension PersistedStateCodingTests {
         )
     }
 
+    @MainActor
+    func testAgyModesOnFreshAndResumedLaunches() {
+        let cases: [(AgyLaunchMode, [String])] = [
+            (.auto, ["--mode", "auto"]), (.default, []), (.acceptEdits, ["--mode", "accept-edits"]),
+            (.plan, ["--mode", "plan"]), (.bypassPermissions, ["--dangerously-skip-permissions"])
+        ]
+        for (mode, flags) in cases {
+            XCTAssertEqual(mode.cliArgs, flags)
+            XCTAssertEqual(AgyLaunchMode.detect(arguments: ["agy"] + flags), mode == .default ? nil : mode)
+            XCTAssertEqual(NiruxShellView.agyCommand(mode: mode), (["command agy"] + flags).joined(separator: " "))
+            XCTAssertEqual(NiruxShellView.agyCommand(resume: .session("c1"), mode: mode),
+                           (["command agy --conversation 'c1'"] + flags).joined(separator: " "))
+        }
+        XCTAssertEqual(NiruxShellView.agyCommand(), "command agy --mode auto")
+        XCTAssertEqual(AgyLaunchMode.detect(arguments: ["agy", "--mode=accept-edits"]), .acceptEdits)
+        XCTAssertEqual(AgyLaunchMode.detect(arguments: ["agy", "--mode", "plan", "-i", "--dangerously-skip-permissions"]), .plan)
+        XCTAssertNil(AgyLaunchMode.detect(arguments: ["agy", "--", "--dangerously-skip-permissions"]))
+        XCTAssertNil(AgyLaunchMode.detect(arguments: ["agy", "--mode", "future"]))
+        XCTAssertNil(AgyLaunchMode.detect(arguments: ["agy", "--mode"]))
+    }
+
     /// An agy column comes back on its conversation: proved by its launch
     /// until its hooks say so, and kept through the state file.
+    @MainActor
     func testAgyColumnResumesItsConversation() throws {
-        XCTAssertEqual(NiruxShellView.agyCommand(resume: .session("c'1")), #"command agy --conversation 'c'\''1'"#)
-        XCTAssertEqual(NiruxShellView.agyCommand(resume: .picker), "command agy", "no picker flag: a fresh one")
+        XCTAssertEqual(NiruxShellView.agyCommand(resume: .session("c'1")), #"command agy --conversation 'c'\''1' --mode auto"#)
+        XCTAssertEqual(NiruxShellView.agyCommand(resume: .picker), "command agy --mode auto", "no picker flag: a fresh one")
         var tracker = ForegroundSessionTracker.agy
         tracker.prepareResume(sessionID: "c1")
         let agy = ForegroundProcess(
@@ -789,11 +813,12 @@ extension PersistedStateCodingTests {
         XCTAssertEqual(live.boundSessionID(for: resumed.instance), "c2")
         let column = PersistedColumn(
             widthPreset: 1, cwd: "/w", columnType: .agy, webViewURL: nil,
-            claudeLaunchMode: nil, codexLaunchMode: nil, agySessionID: "c1"
+            claudeLaunchMode: nil, codexLaunchMode: nil, agyLaunchMode: .plan, agySessionID: "c1"
         )
         let decoded = try JSONDecoder().decode(PersistedColumn.self, from: JSONEncoder().encode(column))
         XCTAssertEqual(decoded.resolvedType, .agy)
         XCTAssertEqual(decoded.agySessionID, "c1")
+        XCTAssertEqual(decoded.agyLaunchMode, .plan)
     }
 
     func testCodexSessionTrackerInvalidatesReplacementBeforeQuit() {

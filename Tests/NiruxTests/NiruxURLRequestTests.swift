@@ -219,6 +219,12 @@ final class NiruxURLRequestTests: XCTestCase {
         XCTAssertTrue(text.details.contains("Title: Demo"))
     }
 
+    func testAntigravityConfirmationNamesItsMode() throws {
+        let request = try XCTUnwrap(parse("nirux://new-workspace?agent=agy"))
+        let text = request.confirmation(claudeMode: .default, codexMode: .default, agyMode: .bypassPermissions)
+        XCTAssertTrue(text.details.contains("Antigravity — " + AgyLaunchMode.bypassPermissions.displayName))
+    }
+
     func testWorkspaceConfirmationWithoutAgentSaysPlainShell() throws {
         let request = try XCTUnwrap(parse("nirux://new-workspace?cwd=/Users/me"))
         let text = try XCTUnwrap(request.confirmation(claudeMode: .auto, codexMode: .fullAuto))

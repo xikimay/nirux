@@ -49,6 +49,12 @@ final class BranchReviewController {
         BranchReview.ExplainJob, BoundedProcess.Cancellation, @escaping @Sendable (BranchReview.ExplainJobProgress) -> Void
     ) -> BranchReview.ExplainResult
 
+    var chooseReport: @MainActor (NSWindow, URL, @escaping @MainActor (URL) -> Void) -> Void = BranchReviewController.chooseJUnitReport
+
+    var reportGeneration: Int? {
+        snapshot != nil && banner == nil && held == nil && status == nil ? snapshotCount : nil
+    }
+
     /// One read of the worktree: the branch, its handover, and what
     /// Explain kept for it.
     struct Read {
@@ -959,6 +965,7 @@ final class BranchReviewController {
             earlierFiles = []
         }
         self.snapshot = snapshot
+        view.onAttachReport = snapshot == nil ? nil : { [weak self] in self?.attachReport() }
         readFiles = [:]
         if sameBranch, let shown, let snapshot {
             placements.forget(BranchReview.PlacementCache.changedPaths(from: shown, to: snapshot.files))
