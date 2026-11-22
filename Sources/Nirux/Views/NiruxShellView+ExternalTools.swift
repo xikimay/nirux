@@ -95,6 +95,7 @@ extension NiruxShellView {
         mode: CodexLaunchMode,
         model: String? = nil,
         briefFile: String? = nil,
+        niruxExecutable: String? = NiruxShellView.niruxExecutable,
         shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
     ) -> String {
@@ -112,6 +113,9 @@ extension NiruxShellView {
         if let model { parts += ["--model", Self.shellQuotedArgument(model)] }
         if let briefFile, let override = Self.codexDeveloperInstructionsOverride(briefFile: briefFile, shell: shell) {
             parts.append(contentsOf: ["-c", override])
+        }
+        if let niruxExecutable {
+            parts += NiruxMCPServer.codexArguments(executable: niruxExecutable).map(Self.shellQuotedArgument)
         }
         if let prompt = handoverPrompt {
             parts.append(Self.shellQuotedArgument(prompt))

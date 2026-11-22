@@ -135,6 +135,10 @@ extension NiruxShellView {
             if on { self.startLead(spaceID: spaceID) } else { self.stopLead(spaceID: spaceID) }
         }
         lead.actions.restartLead = { [weak self] in self?.requestRestartLead(spaceID: spaceID) }
+        lead.actions.setAgent = { [weak self] agent in
+            self?.changeSpaceDefaults(spaceID: spaceID) { $0.leadAgent = agent == .claude ? nil : agent }
+            self?.refreshSpaceSettingsLead()
+        }
         lead.actions.setStartsTasks = { [weak self] on in self?.setLeadStartsTasks(on, spaceID: spaceID) }
         lead.actions.setDailyPass = { [weak self] on in self?.setDailyPass(on, spaceID: spaceID) }
         lead.actions.setDailyPassHour = { [weak self] hour in self?.setDailyPassHour(hour, spaceID: spaceID) }

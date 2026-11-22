@@ -274,8 +274,8 @@ extension NiruxShellView {
                 ?? Self.currentMissionHandoffsEnabled()
             missionWaits.handoffsEnabled = (deliveryIDs, handoffsEnabled)
             for delivery in deliveries where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
-                guard let agent = Self.recipientAgent(of: delivery) else { continue }
                 let recipient = missionRecipient(of: delivery)
+                guard let agent = Self.recipientAgent(of: delivery, foreground: recipient?.pty?.foregroundProcess(snapshot: snapshot)) else { continue }
                 add(recipient, WaitingMessage(
                     id: delivery.event.id, kind: delivery.event.kind.rawValue, sentAt: delivery.event.timestamp,
                     runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now),
@@ -284,8 +284,10 @@ extension NiruxShellView {
             }
         }
         for notice in pendingLeadNotices where now - notice.queuedAt < MissionEventCLI.parentMessageLifetime {
-            add(workspaces.first { $0.id == notice.workspaceID && !$0.isClosing }?.columns.first { $0.agentUUID == notice.agentUUID },
-                WaitingMessage(id: "notice-\(notice.queuedAt)", kind: "notice", sentAt: notice.queuedAt, runningSince: now))
+            guard let workspace = workspaces.first(where: { $0.id == notice.workspaceID && !$0.isClosing }),
+                  let column = workspace.columns.first(where: { $0.agentUUID == notice.agentUUID }),
+                  let agent = column.pty?.foregroundProcess(snapshot: snapshot)?.interactiveAgent, agent.isLaunchable else { continue }
+            add(column, WaitingMessage(id: notice.waitID, kind: "notice", sentAt: notice.queuedAt, runningSince: now, agent: agent))
         }
         var shown: [UUID: SidebarWaitingMessages] = [:]
         var retries: [String] = []

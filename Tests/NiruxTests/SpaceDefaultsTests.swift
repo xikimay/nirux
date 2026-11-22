@@ -138,6 +138,8 @@ final class SpaceDefaultsTests: XCTestCase {
         try FileManager.default.createDirectory(at: store.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let cases: [(String, SpaceDefaultsStore.ReadOnlyReason)] = [
             (#"{"schemaVersion": 2, "claudeLaunchMode": "plan", "environment": [{"name": "A", "value": "1"}]}"#, .newerSchema(2)),
+            (#"{"claudeLaunchMode": "plan", "leadAgent": "future"}"#, .unknownSettings(["leadAgent"])),
+            (#"{"claudeLaunchMode": "plan", "leadAgent": "gemini"}"#, .unknownSettings(["leadAgent"])),
             (#"{"claudeLaunchMode": "plan", "setupTimeout": 30}"#, .unknownSettings(["setupTimeout"])),
             (#"{"claudeLaunchMode": "plan", "codexLaunchMode": "turbo"}"#, .unknownSettings(["codexLaunchMode"])),
             (#"{"claudeLaunchMode": "plan", "environment": [{"name": "A", "value": "1", "secret": true}]}"#,

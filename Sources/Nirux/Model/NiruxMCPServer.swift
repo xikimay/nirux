@@ -85,6 +85,16 @@ enum NiruxMCPServer {
         return ["--mcp-config=" + config, "--allowedTools=" + allowed]
     }
 
+    /// Codex forwards only named environment variables to stdio servers.
+    static func codexArguments(executable: String) -> [String] {
+        let context = ["NIRUX_WORKSPACE_ID", "NIRUX_AGENT_UUID", "NIRUX_PROFILE_ID", "NIRUX_STATE_DIR",
+                       LeadChannel.environmentKey, NiruxLaunchAuthorization.environmentKey, "CLAUDE_CONFIG_DIR"]
+        let variables = context.map(SpaceBrief.tomlBasicString).joined(separator: ",")
+        let config = "mcp_servers.\(serverName)={command=\(SpaceBrief.tomlBasicString(executable)),"
+            + #"args=["--hook","claude","--mcp"],env_vars=["# + variables + "]}"
+        return ["-c", config]
+    }
+
     private static let searchToolNames = [HistorySearchTool.name, MemorySearchTool.name]
 
     /// Every tool, pre-allowed for every Claude Nirux launches; the Lead's

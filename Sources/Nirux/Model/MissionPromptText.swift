@@ -36,15 +36,10 @@ enum MissionPromptText {
         switch event.kind {
         case .instruction:
             return event.leadSender != nil || delivery.mission.oneWay == true ? oneWayHeader + "\n" + event.message : event.message
-        case .question where delivery.mission.reportsToLead == true:
-            // A space's Lead answers with its tools (see LeadTools).
-            return question(event, from: child, accept: toolAccept, trailer: "Answer with the reply tool, question \(event.id); "
-                + "if neither the brief, the code nor the user's words settle it, don't guess: hand it to the user with ask_user.")
-        case .question where delivery.mission.reportsToTask == true:
-            // A task's agent that started it with start_task answers with
-            // its tools too (see TaskTools).
-            return question(event, from: child, accept: toolAccept, trailer: "Answer with the reply tool, question \(event.id); "
-                + "if neither the code nor the user's words settle it, don't guess: hand it to the user with ask_user.")
+        case .question where delivery.mission.reportsToLead == true || delivery.mission.reportsToTask == true:
+            return question(event, from: child, accept: toolAccept, trailer: "Answer with the reply tool, question \(event.id). "
+                + "If you need the user’s decision, use ask_user. If the tools are unavailable, ask the user directly if needed "
+                + "and reply with \"$NIRUX_CLI_PATH\" --mission reply --event \(event.id) --message \"<answer>\".")
         case .question:
             return question(event, from: child, accept: cliAccept, trailer: "Reply with: \"$NIRUX_CLI_PATH\" --mission reply "
                 + "--event \(event.id) --message \"<answer>\" (if you can't tell, don't guess: ask the user)")
