@@ -62,10 +62,12 @@ final class LeadRestartFlowTests: XCTestCase {
     }
 
     func testLeadPickerControlsStartAndRestartIndependentlyOfTaskAgent() throws {
-        try UIFlowHarness.run { harness in
-            let shell = harness.shell
-            for agent in CodingAgent.launchable {
-                let space = shell.workspaceStore.createProfile(named: agent.name, select: true).id
+        for agent in CodingAgent.launchable {
+            try UIFlowHarness.run { harness in
+                let shell = harness.shell
+                shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+                let repo = SpaceAnchor(kind: .gitRepository(commonDir: harness.repo + "/.git"), name: "repo", isDefault: true)
+                let space = shell.workspaceStore.createProfile(named: agent.name, anchors: [repo], select: true).id
                 shell.changeSpaceDefaults(spaceID: space) { $0.agent = .agy }
                 shell.showSpaceSettings(profileID: space, tab: .lead)
                 let pane = try XCTUnwrap(shell.spaceSettings?.lead)

@@ -654,7 +654,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertTrue(waits(at: now + 32).isEmpty)
         let pastGrace = now + 31 + NiruxShellView.typedTextGrace
         XCTAssertEqual(waits(at: pastGrace)[column.id], waiting(at: pastGrace))
-        // Codex in front collects its own messages.
+        // The same questions now wait for the foreground Codex to report its state.
         let codex = ProcessSnapshot(entries: [
             ProcessSnapshot.Entry(
                 pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: claudePID,
@@ -665,18 +665,22 @@ final class StuckAgentSidebarTests: XCTestCase {
                 name: "codex", startedAt: now - 700, arguments: ["codex"]
             )
         ])
-        XCTAssertTrue(waits(at: now + 50, in: codex).isEmpty)
+        let codexWait = try XCTUnwrap(waits(at: now + 50, in: codex)[column.id])
+        XCTAssertEqual(codexWait.agent, .codex)
+        XCTAssertEqual(codexWait.refusal, .noPromptYet)
+        XCTAssertEqual(codexWait.count, 2)
+        XCTAssertEqual(lines.count, 3)
 
         pty.sendRaw(Data("\r".utf8))
         let promptAt = Date().timeIntervalSince1970
         pty.applyAgentHook(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "s", timestamp: promptAt), isUserFocused: true)
         XCTAssertTrue(waits(at: promptAt + 1).isEmpty, "its turn runs")
         // A turn at work holding a message says so too, past a stall's length.
-        XCTAssertEqual(lines.count, 3)
+        XCTAssertEqual(lines.count, 4)
         XCTAssertTrue(lines.last?.hasPrefix("untyped mission message id=\(first.id.prefix(8)) ") == true
             && lines.last?.contains(" reason=working messages=2 ") == true, lines.last ?? "")
         _ = waits(at: promptAt + NiruxShellView.missionMessageStallAge)
-        XCTAssertEqual(lines.count, 4)
+        XCTAssertEqual(lines.count, 5)
         XCTAssertTrue(lines.last?.hasPrefix("untyped mission message id=\(second.id.prefix(8)) ") == true
             && lines.last?.contains(" working=1 inFlight=1 turn=180s ") == true, lines.last ?? "")
 
