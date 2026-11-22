@@ -203,7 +203,7 @@ final class MergeQueueBoardTests: XCTestCase {
         let confirmation = MergeQueue.confirmation(read)
         XCTAssertEqual(confirmation.entries.map(\.number), [1])
         XCTAssertEqual(confirmation.excluded.map(\.reason), ["It is a draft."])
-        XCTAssertEqual(confirmation.items.first?.notes, ["Behind main by 2 commits: the queue merges main into it first."])
+        XCTAssertEqual(confirmation.items.first?.notes, ["Behind main by 2 commits."])
         XCTAssertEqual(confirmation.items.first?.warnings, ["No code review yet: Nirux saw none run on its branch."])
         // One recorded on its branch counts, whichever task ran it.
         tasks[1] = MergeQueue.ReviewTask(branch: "main", runs: [.codeReview: ReviewRun(head: MQ.sha("a"), at: 2, branch: "feat/1")])
@@ -305,6 +305,20 @@ final class MergeQueueBoardTests: XCTestCase {
     }
 
     // MARK: - The details read
+
+    func testFileEvidenceIncludesTheHeadAndRejectsRenamesMissingPathsAndShortPages() throws {
+        let head = MQ.sha("a")
+        for (type, count, known) in [("ADDED", 1, true), ("RENAMED", 1, false), ("", 1, false), ("MODIFIED", 2, false)] {
+            let json = """
+            {"data":{"repository":{"pullRequest":{"title":"Change","headRefOid":"\(head)","baseRefName":"main","changedFiles":\(count),
+            "files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"new.swift","changeType":"\(type)"}]}}}}}
+            """
+            let details = try XCTUnwrap(MergeQueue.parsePullRequestDetails(Data(json.utf8)))
+            XCTAssertEqual(details.head, head)
+            XCTAssertEqual(details.baseBranch, "main")
+            XCTAssertEqual(details.allPathsKnown, known)
+        }
+    }
 
     func testTheDetailsQueryReadsTheTitleAndFilesAndFailsClosed() throws {
         let json = """

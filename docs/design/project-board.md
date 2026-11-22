@@ -356,7 +356,22 @@ Definitions:
   GitHub recomputes it. The queue re-reads with back-off for up to 2 minutes.
   Only CONFLICTING is a conflict.
 
-For each PR, in order:
+The sheet opens in **Standard** every time. Two opt-in cadences apply to this Start only.
+
+- **Batch post-merge** keeps branch updates and required checks for each PR.
+  With a configured post-merge workflow, it waits for the push run on the final
+  merge commit. Intermediate pushes can still run the workflow and publish.
+- **Express disjoint** requires at least two mergeable PRs with green required
+  checks, no red checks, and complete changed-path lists for their confirmed
+  heads (at most 100 files per PR). Paths must be disjoint after case folding
+  and Unicode normalization. Workflow changes and renames with unknown source
+  paths rule it out. Express merges each confirmed head without updating it.
+  It rechecks mergeability, local worktrees, checks and the current base tip
+  before each merge, then verifies the final push run if configured.
+- Both fast cadences let pending push runs from earlier merges in this batch
+  continue. Other base runs and observed failures retain their usual guards.
+
+For each PR in Standard, in order:
 
 1. **Preflight.** Re-read the PR:
    - open, not a draft, based on the configured base branch, with the
@@ -505,7 +520,7 @@ Rejected:
 ### 3.4 Concurrency
 
 - **The post-merge workflow.** Nirux's nightly uses one concurrency group with
-  `cancel-in-progress: true`. That is why the queue merges the next PR only once
+  `cancel-in-progress: true`. That is why Standard merges the next PR only once
   the nightly of the previous merge has finished. Step 4's check (no unfinished
   run) extends this to the first merge after Start, and to merges made from
   outside.

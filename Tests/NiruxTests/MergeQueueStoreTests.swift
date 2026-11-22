@@ -18,6 +18,17 @@ final class MergeQueueStoreTests: XCTestCase {
         super.tearDown()
     }
 
+    func testCadenceRoundTripsAndLegacyStateReadsAsStandard() throws {
+        let url = root.appendingPathComponent("queue-state.json")
+        let engine = MergeQueue.Engine(settings: MQ.settings(), entries: [], cadence: .batchPostMerge)
+        MergeQueue.SavedQueue(engine: engine, dryRun: true, savedAt: Date()).save(to: url)
+        XCTAssertEqual(MergeQueue.SavedQueue.load(from: url)?.effectiveCadence, .batchPostMerge)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        XCTAssertEqual(json.removeValue(forKey: "cadence") as? String, "batchPostMerge")
+        try JSONSerialization.data(withJSONObject: json).write(to: url)
+        XCTAssertEqual(MergeQueue.SavedQueue.load(from: url)?.effectiveCadence, .standard)
+    }
+
     // MARK: Lock
 
     func testTheLockExcludesASecondHolderUntilReleased() throws {

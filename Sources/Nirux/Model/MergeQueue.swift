@@ -331,6 +331,9 @@ extension MergeQueue {
         let files: [String]
         /// It changes more files than `files` holds.
         let hasMoreFiles: Bool
+        var head: String?
+        var baseBranch: String?
+        var allPathsKnown = false
 
         static let maxFiles = 100
 
