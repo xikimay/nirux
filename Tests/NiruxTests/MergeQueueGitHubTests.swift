@@ -432,6 +432,12 @@ final class MergeQueueGitHubTests: XCTestCase {
         let dryRun = MergeQueue.client(environment: [:], bundleURL: installed, signature: .notRelease(errSecCSReqFailed),
                                        live: live)
         XCTAssertTrue(dryRun.isDryRun)
+        XCTAssertFalse(dryRun.allowsLeadStart)
+        let override = MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "1"], bundleURL: installed,
+                                         signature: adHoc(), live: live)
+        XCTAssertFalse(override.isDryRun)
+        XCTAssertFalse(override.allowsLeadStart)
+        XCTAssertTrue(MergeQueue.client(environment: [:], bundleURL: installed, signature: release(), live: live).allowsLeadStart)
         let mutation = MergeQueue.Mutation.merge(number: 52, head: MQ.sha("a"), method: .merge)
         guard case .dryRun(let command, let reason) = dryRun.mutate(mutation, settings: settings) else {
             return XCTFail("a dry run sent a mutation")

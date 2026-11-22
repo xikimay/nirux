@@ -1,4 +1,5 @@
 import AppKit
+import Security
 import XCTest
 @testable import Nirux
 
@@ -93,6 +94,23 @@ final class MergeQueueBoardFlowTests: XCTestCase {
                 XCTAssertNil(shell.boardQueue(board, section: nil)?.engine)
                 sheet.dismiss()
             }
+            XCTAssertTrue(world.mergedNumbers.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testDeveloperLiveOverrideStillNeedsManualConfirmation() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [14: Self.b])
+        let override = MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "1"], bundleURL: Bundle.main.bundleURL,
+                                         signature: .notRelease(errSecCSReqFailed), live: GitHubCLIQueueClient(gh: world.run))
+        try withBoard(queueClient: override) { shell, board in
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
+            let result = try callQueueMerge(#"{"prs":[14]}"#, shell: shell)
+            XCTAssertFalse(result.isError, result.text)
+            let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
+            waitUntil("the live override is ready for the user") { sheet.startButton?.isEnabled == true }
+            XCTAssertEqual(sheet.confirmation?.isDryRun, false)
+            XCTAssertNil(shell.boardQueue(board, section: nil)?.engine)
             XCTAssertTrue(world.mergedNumbers.isEmpty)
         }
     }

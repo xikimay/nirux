@@ -257,7 +257,7 @@ final class MergeQueueController {
     }
 
     func startFromLead(_ reading: MergeQueue.ConfirmationReading, numbers: [Int], cadence: MergeQueue.Cadence) -> StartRefusal? {
-        guard !isDryRun else { return .invalidSettings(["Dry runs need your confirmation."]) }
+        guard client.allowsLeadStart else { return .invalidSettings(["This build requires manual confirmation."]) }
         let confirmation = MergeQueue.confirmation(reading)
         if let reason = reading.leadStartRefusal(confirmation: confirmation, numbers: numbers, cadence: cadence) {
             return .invalidSettings([reason])

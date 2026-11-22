@@ -317,7 +317,8 @@ New flow, built on the guarded typing `tell` already uses
     for one repository. By default the user confirms in the sheet. **Allow Lead
     to start the merge queue** in Space Settings › Lead enables direct starts
     after a clean preflight of every requested PR. A warning or an incomplete
-    read requires manual review. Dry runs use the confirmation sheet.
+    read requires manual review. Dry runs and the developer live override
+    always use the confirmation sheet.
     `cadence` accepts `standard` (default), `batch_post_merge`, or
     `express_disjoint`. The Lead leaves the user's prepared list in place.
   - `set_task_context(task, next_step?, blocker?)` (shipped with S13): a task's

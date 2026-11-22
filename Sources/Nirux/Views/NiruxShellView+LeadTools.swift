@@ -972,7 +972,7 @@ extension NiruxShellView {
         // The user's own list stays theirs; a Lead's earlier one is its own.
         let current = controller.selection(for: chosen.1.gitHub)
         let proposalKey = space.id + " " + chosen.1.gitHub.ownerAndName
-        let automatic = !controller.isDryRun && SpaceDefaultsStore.defaults(forSpace: space.id).leadCanStartMergeQueue
+        let automatic = controller.client.allowsLeadStart && SpaceDefaultsStore.defaults(forSpace: space.id).leadCanStartMergeQueue
         guard current.isEmpty || (!automatic && (current == numbers || current == leadQueueProposals[proposalKey])) else {
             return answer("The user is preparing \(chosen.1.name)'s queue (" + current.map { "#\($0)" }.joined(separator: ", ")
                 + "): suggest yours to them in this conversation instead.", true)
