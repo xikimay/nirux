@@ -247,12 +247,19 @@ enum AgyLaunch {
         return nil
     }
 
-    /// Whether `arguments` includes `--continue` or `-c` before `--`.
+    /// Whether `arguments` includes `--continue`, or `-c` when not taking a
+    /// shell script argument (such as `exec -a agy /bin/sh -c '...'`).
     static func hasContinueFlag(_ arguments: [String]) -> Bool {
-        var args = arguments.makeIterator()
-        while let argument = args.next(), argument != "--" {
-            if argument == "--continue" || argument == "-c" { return true }
-            if optionsWithValue.contains(argument) { _ = args.next() }
+        var index = arguments.startIndex
+        while index < arguments.endIndex {
+            let argument = arguments[index]
+            if argument == "--" { return false }
+            if argument == "--continue" { return true }
+            if argument == "-c" {
+                let next = arguments[safe: index + 1]
+                if next == nil || next?.hasPrefix("-") == true { return true }
+            }
+            index += optionsWithValue.contains(argument) ? 2 : 1
         }
         return false
     }

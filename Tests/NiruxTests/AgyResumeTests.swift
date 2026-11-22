@@ -213,6 +213,12 @@ final class AgyResumeTests: XCTestCase {
         ))
 
         // Continued agy (`--continue` / `-c`) ignores subagent SessionStart & Stop, then binds main on Stop.
+        XCTAssertTrue(AgyLaunch.hasContinueFlag(["agy", "--continue"]))
+        XCTAssertTrue(AgyLaunch.hasContinueFlag(["agy", "-c"]))
+        XCTAssertTrue(AgyLaunch.hasContinueFlag(["agy", "-c", "--mode", "auto"]))
+        XCTAssertFalse(AgyLaunch.hasContinueFlag(["agy", "-c", "sleep 600; :"]))
+        XCTAssertFalse(AgyLaunch.hasContinueFlag(["agy", "-i", "--continue"]))
+        XCTAssertFalse(AgyLaunch.hasContinueFlag(["agy", "--", "--continue"]))
         for flag in ["--continue", "-c"] {
             var continuedTracker = ForegroundSessionTracker.agy
             let continued = agyProcess(["agy", flag, "--mode", "auto"], pid: 202)
