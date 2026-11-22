@@ -750,6 +750,24 @@ final class PtySession: @unchecked Sendable {
         state.machine.codexFacts(now: now)
     }
 
+    func hasAgyTurn(in process: ProcessInstance) -> Bool {
+        state.machine.agyTurn?.process == process
+    }
+
+    func finishedMissionTurn(in foreground: ForegroundProcess, after sentAt: TimeInterval) -> Bool {
+        switch foreground.interactiveAgent {
+        case .agy:
+            guard let turn = state.machine.agyTurn, turn.process == foreground.instance else { return false }
+            return turn.startedAt >= sentAt && turn.ended != nil
+        case .codex:
+            guard startedTurn(since: sentAt, by: foreground.instance),
+                  let report = state.machine.codexReport(foreground: foreground) else { return false }
+            return [.done, .idle, .error].contains(report.status.state)
+        case .claude: return finishedTurn(afterTypingAt: sentAt)
+        default: return false
+        }
+    }
+
     /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.
     func finishedTurn(afterTypingAt typedAt: TimeInterval) -> Bool {
         readTranscriptPrompts()

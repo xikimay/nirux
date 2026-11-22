@@ -402,7 +402,7 @@ final class MissionDeliveryTests: XCTestCase {
         ))
         XCTAssertLessThanOrEqual(typed.unicodeScalars.count, TypedPromptSanitizer.maxCharacters)
         let sent = try XCTUnwrap(TypedPromptSanitizer.sanitize(typed))
-        XCTAssertTrue(sent.hasSuffix("hand it to the user with ask_user."), String(sent.suffix(200)))
+        XCTAssertTrue(sent.hasSuffix("--event \(question.event.id) --message \"<answer>\"."), String(sent.suffix(200)))
         XCTAssertTrue(sent.contains("question \(question.event.id)"))
         XCTAssertTrue(sent.contains("Recommended (reply's accept: true sends it): \(recommendation)"), "the recommendation whole")
     }
@@ -489,11 +489,11 @@ final class MissionDeliveryTests: XCTestCase {
     func testAQuestionComesToTheUserWhenItsParentCantTakeIt() {
         typealias Question = SidebarMissionQuestion
         XCTAssertEqual(Question.handOff(parent: .closed, askedAt: 100, threshold: 600, now: 101), .parentClosed)
-        XCTAssertEqual(Question.handOff(parent: .notClaude, askedAt: 100, threshold: 600, now: 101), .parentNotClaude)
+        XCTAssertEqual(Question.handOff(parent: .unavailable, askedAt: 100, threshold: 600, now: 101), .parentUnavailable)
         XCTAssertEqual(Question.handOff(parent: .notAtPrompt, askedAt: 100, threshold: 600, now: 101), .parentNotAtPrompt)
         XCTAssertEqual(Question.handOff(parent: .restartedSinceTyped, askedAt: 100, threshold: 600, now: 101), .parentRestarted)
-        XCTAssertNil(Question.handOff(parent: .claude, askedAt: 100, threshold: 600, now: 699))
-        XCTAssertEqual(Question.handOff(parent: .claude, askedAt: 100, threshold: 600, now: 700), .unanswered(minutes: 10))
+        XCTAssertNil(Question.handOff(parent: .available, askedAt: 100, threshold: 600, now: 699))
+        XCTAssertEqual(Question.handOff(parent: .available, askedAt: 100, threshold: 600, now: 700), .unanswered(minutes: 10))
         XCTAssertEqual(Question.handOff(parent: .stoppedWithoutAnswer, askedAt: 100, threshold: 600, now: 101), .parentDidNotAnswer)
     }
 
@@ -504,14 +504,33 @@ final class MissionDeliveryTests: XCTestCase {
         let claude = ForegroundProcess(instance: ProcessInstance(pid: 7, startedAt: 100), name: "claude", arguments: ["claude"])
         func parent(_ foreground: ForegroundProcess?, typedAt: TimeInterval? = nil, tookPrompt: Bool?) -> SidebarMissionQuestion.Parent {
             NiruxShellView.missionParent(
-                foreground: foreground, typedAt: typedAt, finishedTurnAfterTyping: { _ in false }, tookPrompt: { _ in tookPrompt }
+                foreground: foreground, typedAt: typedAt, finishedTurnAfterTyping: { _, _ in false }, tookPrompt: { _ in tookPrompt }
             )
         }
         XCTAssertEqual(parent(claude, tookPrompt: false), .notAtPrompt)
-        XCTAssertEqual(parent(claude, tookPrompt: true), .claude)
-        XCTAssertEqual(parent(claude, tookPrompt: nil), .claude, "its hooks never reported: nothing tells")
-        XCTAssertEqual(parent(claude, typedAt: 150, tookPrompt: false), .claude, "typed into this claude")
+        XCTAssertEqual(parent(claude, tookPrompt: true), .available)
+        XCTAssertEqual(parent(claude, tookPrompt: nil), .available, "its hooks never reported: nothing tells")
+        XCTAssertEqual(parent(claude, typedAt: 150, tookPrompt: false), .available, "typed into this claude")
         XCTAssertEqual(parent(claude, typedAt: 50, tookPrompt: true), .restartedSinceTyped, "typed into an earlier one")
+    }
+
+    func testMissionParentFollowsTheInteractiveProcessForEveryLaunchableAgent() throws {
+        let delivery = try XCTUnwrap(makeStore().accept(childEvent(.question, "Which format?", at: 20), enabled: true))
+        let instance = ProcessInstance(pid: 7, startedAt: 10)
+        for agent in CodingAgent.launchable {
+            let process = ForegroundProcess(instance: instance, name: agent.rawValue, arguments: [agent.rawValue])
+            XCTAssertEqual(NiruxShellView.recipientAgent(of: delivery, foreground: process), agent)
+            XCTAssertEqual(NiruxShellView.missionParent(
+                foreground: process, typedAt: 9, finishedTurnAfterTyping: { _, _ in false }, tookPrompt: { _ in true }
+            ), .restartedSinceTyped)
+        }
+        for argv in [["claude", "-p"], ["codex", "exec"], ["agy", "--print"], ["zsh"], ["gemini"]] {
+            let process = ForegroundProcess(instance: instance, name: argv[0], arguments: argv)
+            XCTAssertNil(NiruxShellView.recipientAgent(of: delivery, foreground: process))
+            XCTAssertEqual(NiruxShellView.missionParent(
+                foreground: process, typedAt: nil, finishedTurnAfterTyping: { _, _ in false }, tookPrompt: { _ in true }
+            ), .unavailable)
+        }
     }
 
     /// A parent that can't take the question, whatever the reason (one
@@ -522,25 +541,25 @@ final class MissionDeliveryTests: XCTestCase {
     func testTheParentWatchWaitsOutTheGraceThenSticks() {
         let grace = NiruxShellView.missionParentGrace
         var watch = NiruxShellView.MissionParentWatch()
-        XCTAssertEqual(watch.settle(.notClaude, foregroundKnown: true, now: 100), .claude, "a claude restarting")
-        XCTAssertEqual(watch.settle(.claude, foregroundKnown: false, now: 105), .claude)
-        XCTAssertEqual(watch.settle(.notClaude, foregroundKnown: true, now: 100 + grace), .notClaude,
+        XCTAssertEqual(watch.settle(.unavailable, foregroundKnown: true, now: 100), .available, "a claude restarting")
+        XCTAssertEqual(watch.settle(.available, foregroundKnown: false, now: 105), .available)
+        XCTAssertEqual(watch.settle(.unavailable, foregroundKnown: true, now: 100 + grace), .unavailable,
                        "a process-table miss doesn't restart the clock")
-        XCTAssertEqual(watch.settle(.claude, foregroundKnown: true, now: 200), .claude, "back")
-        XCTAssertEqual(watch.settle(.notClaude, foregroundKnown: true, now: 201), .claude, "a new absence, a new grace")
+        XCTAssertEqual(watch.settle(.available, foregroundKnown: true, now: 200), .available, "back")
+        XCTAssertEqual(watch.settle(.unavailable, foregroundKnown: true, now: 201), .available, "a new absence, a new grace")
         XCTAssertEqual(watch.settle(.notAtPrompt, foregroundKnown: true, now: 201 + grace), .notAtPrompt,
                        "its claude came to the front: the same wait")
-        XCTAssertEqual(watch.settle(.claude, foregroundKnown: false, now: 230), .notAtPrompt, "a miss changes nothing")
-        XCTAssertEqual(watch.settle(.claude, foregroundKnown: true, now: 240), .claude, "it took a prompt")
+        XCTAssertEqual(watch.settle(.available, foregroundKnown: false, now: 230), .notAtPrompt, "a miss changes nothing")
+        XCTAssertEqual(watch.settle(.available, foregroundKnown: true, now: 240), .available, "it took a prompt")
 
         var stopped = NiruxShellView.MissionParentWatch()
-        XCTAssertEqual(stopped.settle(.stoppedWithoutAnswer, foregroundKnown: true, now: 300), .claude, "a reply may be queued")
+        XCTAssertEqual(stopped.settle(.stoppedWithoutAnswer, foregroundKnown: true, now: 300), .available, "a reply may be queued")
         XCTAssertEqual(stopped.settle(.stoppedWithoutAnswer, foregroundKnown: true, now: 300 + grace), .stoppedWithoutAnswer)
-        XCTAssertEqual(stopped.settle(.claude, foregroundKnown: true, now: 400), .stoppedWithoutAnswer, "its next turn changes nothing")
+        XCTAssertEqual(stopped.settle(.available, foregroundKnown: true, now: 400), .stoppedWithoutAnswer, "its next turn changes nothing")
         XCTAssertEqual(stopped.settle(.closed, foregroundKnown: true, now: 500), .closed)
 
         var restarted = NiruxShellView.MissionParentWatch()
-        XCTAssertEqual(restarted.settle(.restartedSinceTyped, foregroundKnown: true, now: 600), .claude)
+        XCTAssertEqual(restarted.settle(.restartedSinceTyped, foregroundKnown: true, now: 600), .available)
         XCTAssertEqual(restarted.settle(.restartedSinceTyped, foregroundKnown: true, now: 600 + grace), .restartedSinceTyped)
     }
 
@@ -550,7 +569,7 @@ final class MissionDeliveryTests: XCTestCase {
     func testAQuestionHandedOverStaysUntilTyped() {
         var watch = NiruxShellView.MissionParentWatch()
         XCTAssertNil(watch.hold(nil, typedAt: nil))
-        XCTAssertEqual(watch.hold(.parentNotClaude, typedAt: nil), .parentNotClaude)
+        XCTAssertEqual(watch.hold(.parentUnavailable, typedAt: nil), .parentUnavailable)
         XCTAssertEqual(watch.hold(.parentNotAtPrompt, typedAt: nil), .parentNotAtPrompt, "a new reason")
         XCTAssertEqual(watch.hold(nil, typedAt: nil), .parentNotAtPrompt, "back, but it hasn't got it")
         XCTAssertNil(watch.hold(nil, typedAt: 300), "typed into its prompt")
@@ -946,19 +965,19 @@ final class MissionDeliveryTests: XCTestCase {
     /// A user's answer goes to the parent's `claude` that saw the question,
     /// never to one started since, which knows nothing of it.
     func testANoticeGoesOnlyToTheClaudeThatSawItsQuestion() {
-        let notice = LeadNotice(workspaceID: "w", agentUUID: "a", text: "t", queuedAt: 100, forClaudeStartedBy: 50)
-        XCTAssertTrue(notice.isFor(claudeStartedAt: 40))
-        XCTAssertTrue(notice.isFor(claudeStartedAt: 50))
-        XCTAssertFalse(notice.isFor(claudeStartedAt: 60), "started since: it never saw the question")
-        XCTAssertTrue(notice.isFor(claudeStartedAt: nil), "not known: the prompt's own checks decide")
-        XCTAssertTrue(LeadNotice(workspaceID: "w", agentUUID: "a", text: "t", queuedAt: 100).isFor(claudeStartedAt: 60))
+        let notice = LeadNotice(workspaceID: "w", agentUUID: "a", text: "t", queuedAt: 100, forAgentStartedBy: 50)
+        XCTAssertTrue(notice.isFor(agentStartedAt: 40))
+        XCTAssertTrue(notice.isFor(agentStartedAt: 50))
+        XCTAssertFalse(notice.isFor(agentStartedAt: 60), "started since: it never saw the question")
+        XCTAssertTrue(notice.isFor(agentStartedAt: nil), "not known: the prompt's own checks decide")
+        XCTAssertTrue(LeadNotice(workspaceID: "w", agentUUID: "a", text: "t", queuedAt: 100).isFor(agentStartedAt: 60))
     }
 
     /// ⌘↩ in the answer field sends what it holds; Return makes a new line.
     func testCommandReturnSendsTheAnswer() throws {
         var sent: [String] = []
         let controller = MissionReplyViewController(
-            childTitle: "Date filter API", question: question(.parentNotClaude),
+            childTitle: "Date filter API", question: question(.parentUnavailable),
             onSend: { sent.append($0); return true }, onOpenTask: {}
         )
         _ = controller.view

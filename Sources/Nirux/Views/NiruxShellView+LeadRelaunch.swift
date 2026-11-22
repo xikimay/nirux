@@ -6,7 +6,7 @@ enum LeadLaunchIssue: String, CaseIterable {
     var title: String {
         switch self {
         case .olderOptions: "Launched with older options"
-        case .stopped: "Claude isn’t running"
+        case .stopped: "Lead agent isn’t running"
         case .missingTools: "Started without Nirux’s tools"
         }
     }
@@ -51,11 +51,12 @@ extension NiruxShellView {
         guard !column.isAwaitingResume, !column.isRestartingShell, column.relaunchingLeadSessionID == nil, let pty = column.pty else { return nil }
         if pty.hasExited { return .stopped }
         guard let process = foreground, !process.arguments.isEmpty else { return nil }
-        guard process.interactiveAgent == .claude else {
+        guard let agent = process.interactiveAgent, agent.isLaunchable else {
             guard let pid = pty.shellPID, !Self.isLaunchingRestoredAgent(foreground: process, shellPID: pid, hasExited: false),
-                  snapshot.firstDescendantName(of: pid, where: { $0 == "claude" }) == nil else { return nil }
+                  snapshot.firstDescendantName(of: pid, where: { CodingAgent(launchable: $0) != nil }) == nil else { return nil }
             return .stopped
         }
+        guard agent == .claude else { return nil }
         guard Self.hasNiruxTools(process.arguments) else { return .missingTools }
         let current = currentLeadOptions(in: lead)
         let mode = ClaudeLaunchMode.detect(arguments: process.arguments) ?? .default
@@ -119,7 +120,7 @@ extension NiruxShellView {
         }
         let space = profiles.first { $0.id == lead.profileID }?.name ?? lead.profileID
         var details = ["Claude Code will resume this conversation with the space’s current launch options and safety settings."]
-        if let warning = Self.leadTurnWarning(column.liveAgent(snapshot: snapshot)?.status) { details.append(warning) }
+        if let warning = Self.leadTurnWarning(column.liveAgent(snapshot: snapshot)) { details.append(warning) }
         guard confirmDestructiveClose(message: "Relaunch the Lead of “\(space)”?", details: details, confirmTitle: "Relaunch"),
               leadWorkspace(inSpace: lead.profileID) === lead, stillApplies(),
               column.persistedClaudeRestore(foregroundProcess: process) == .resume(sessionID) else { return }

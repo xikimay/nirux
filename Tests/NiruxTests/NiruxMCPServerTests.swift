@@ -217,6 +217,28 @@ final class NiruxMCPServerTests: XCTestCase {
 
     // MARK: - Launch
 
+    @MainActor
+    func testCodexLaunchCarriesNiruxMCPAndColumnContext() throws {
+        let executable = "/Applications/It's Nirux.app/Contents/MacOS/Nirux"
+        let command = NiruxShellView.codexCommand(mode: .default, niruxExecutable: executable, handoverPrompt: "Go")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "printf '%s\n' " + command.dropFirst("command codex ".count)]
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        let words = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .split(separator: "\n").map(String.init)
+        process.waitUntilExit()
+        XCTAssertEqual(Array(words.suffix(3)), NiruxMCPServer.codexArguments(executable: executable) + ["Go"])
+        let config = try XCTUnwrap(words.dropLast().last)
+        XCTAssertTrue(config.contains("mcp_servers.nirux={command=\"\(executable)\""))
+        XCTAssertTrue(config.contains(#"args=["--hook","claude","--mcp"]"#))
+        for key in ["NIRUX_WORKSPACE_ID", "NIRUX_AGENT_UUID", "NIRUX_PROFILE_ID", "NIRUX_STATE_DIR", "NIRUX_LAUNCH_ID", "NIRUX_LEAD"] {
+            XCTAssertTrue(config.contains("\"\(key)\""), key)
+        }
+    }
+
     /// The arguments survive the shell as one word each, the config parses,
     /// and the handover prompt stays a prompt.
     @MainActor

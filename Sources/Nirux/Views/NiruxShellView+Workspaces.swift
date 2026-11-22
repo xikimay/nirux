@@ -284,16 +284,19 @@ extension NiruxShellView {
     ) {
         guard let col = workspace.columns[safe: workspace.focusedIndex],
               let launch = Self.launch(of: agent, resume: nil, model: model, in: workspace, codexMode: codexMode) else { return }
+        let prompt = workspace.isLead && agent != .claude
+            ? (agent == .agy ? Self.agyLeadPrompt : "You are this space’s Lead. Read list_tasks and wait for the user.")
+            : Self.agentStartupPrompt(agent: agent, deliveredHandover: deliveredHandover, isMission: workspace.missionID != nil)
         let cmd = freshAgentCommand(
             launch, in: workspace, column: col, launchDirectory: workspace.cwd, worktreeBranch: worktreeBranch,
-            handoverPrompt: Self.agentStartupPrompt(agent: agent, deliveredHandover: deliveredHandover, isMission: workspace.missionID != nil)
+            handoverPrompt: prompt
         )
         sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
     }
 
     func freshAgentCommand(
-        _ launch: AgentLaunch, in workspace: WorkspaceState, column: ColumnState, launchDirectory: String,
-        worktreeBranch: String?, handoverPrompt: String? = nil
+        _ launch: AgentLaunch, in workspace: WorkspaceState, column: ColumnState? = nil, launchDirectory: String,
+        worktreeBranch: String?, handoverPrompt: String? = nil, settingsFiles: [String: String]? = nil
     ) -> String {
         if launch.agent == .agy { AgentHookInstaller.installAgyHooksIfInstalling() }
         return agentCommand(
@@ -303,25 +306,7 @@ extension NiruxShellView {
                 spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
                 isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
             ),
-            handoverPrompt: handoverPrompt
-        )
-    }
-
-    /// A new Claude's launch line in `workspace`: its space's mode, brief
-    /// and safety settings, and Nirux's tools.
-    func claudeLaunchCommand(
-        in workspace: WorkspaceState, worktreeBranch: String?, handoverPrompt: String?, settingsFile: String?, resume: AgentResumeTarget? = nil
-    ) -> String {
-        NiruxShellView.claudeCommand(
-            resume: resume, mode: NiruxShellView.claudeLaunchMode(for: workspace),
-            sessionName: SessionName.make(
-                worktreeBranch: worktreeBranch,
-                spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
-                isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
-            ),
-            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
-            settingsFile: settingsFile,
-            handoverPrompt: handoverPrompt
+            handoverPrompt: handoverPrompt, settingsFiles: settingsFiles
         )
     }
 

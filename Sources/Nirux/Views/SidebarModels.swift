@@ -139,11 +139,11 @@ struct SidebarMissionQuestion: Hashable {
     /// Why the question now waits on the user.
     enum HandOff: Hashable {
         case parentClosed
-        case parentNotClaude
-        /// The parent's `claude` took no prompt since it started, and doesn't
+        case parentUnavailable
+        /// The parent’s agent took no prompt since it started, and doesn't
         /// say it sits at its prompt.
         case parentNotAtPrompt
-        /// The parent's `claude` restarted after it took the question.
+        /// The parent’s agent restarted after it took the question.
         case parentRestarted
         /// The parent took the question and ended its turn without `reply`.
         case parentDidNotAnswer
@@ -158,20 +158,20 @@ struct SidebarMissionQuestion: Hashable {
     enum Parent {
         /// No workspace or column any more.
         case closed
-        /// Anything but an interactive `claude` in front, or no terminal yet
+        /// Anything but an interactive launchable agent in front, or no terminal yet
         /// (a restored agent that hasn't resumed).
-        case notClaude
-        /// Its `claude`, whose hooks report, took no prompt since it started
+        case unavailable
+        /// Its agent, whose hooks report, took no prompt since it started
         /// (resumed at a relaunch, say) and doesn't say it sits at its
         /// prompt, so Nirux types nothing into it: a screen no hook reports
         /// may be up (see `AgentStatusMachine.sitsAtFirstPrompt`).
         case notAtPrompt
-        /// Its `claude` started after the question was typed into it: the
+        /// Its agent started after the question was typed into it: the
         /// one that took it is gone, and a question is typed once.
         case restartedSinceTyped
-        /// Its `claude` took the question and ended its turn, no answer.
+        /// Its agent took the question and ended its turn, no answer.
         case stoppedWithoutAnswer
-        case claude
+        case available
     }
 
     let questionID: String
@@ -224,11 +224,11 @@ struct SidebarMissionQuestion: Hashable {
     ) -> HandOff? {
         switch parent {
         case .closed: return .parentClosed
-        case .notClaude: return .parentNotClaude
+        case .unavailable: return .parentUnavailable
         case .notAtPrompt: return .parentNotAtPrompt
         case .restartedSinceTyped: return .parentRestarted
         case .stoppedWithoutAnswer: return .parentDidNotAnswer
-        case .claude:
+        case .available:
             guard now - askedAt >= threshold else { return nil }
             return .unanswered(minutes: Int(threshold / 60))
         }
@@ -245,11 +245,9 @@ struct SidebarMissionQuestion: Hashable {
     var explanation: String {
         switch handOff {
         case .parentClosed: return "“\(parentTitle)” was closed, so the question comes to you."
-        case .parentNotClaude: return "“\(parentTitle)” isn’t running Claude Code, so the question comes to you."
+        case .parentUnavailable: return "“\(parentTitle)” isn’t running a supported agent, so the question comes to you."
         case .parentNotAtPrompt:
-            return "“\(parentTitle)” hasn’t taken a prompt since it started and may show a screen of its own, so the question "
-                + "comes to you. If you don’t answer, it gets the question once Claude Code says it’s at its prompt, or after its "
-                + "first prompt."
+            return "Nirux can’t deliver this question to “\(parentTitle)” yet. You can answer it here."
         case .parentRestarted:
             return "“\(parentTitle)” restarted after it got the question, so the question comes to you."
         case .parentDidNotAnswer: return "“\(parentTitle)” ended its turn without answering, so the question comes to you."
