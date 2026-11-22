@@ -318,9 +318,9 @@ final class BoardStagesLineTests: XCTestCase {
             (facts(red, activity: .failed("Stopped on an API error")), .failed, "Stopped on an API error", "an agent that stopped"),
             (facts(pullRequest(), activity: .failed(" ")), .failed, "Stopped", "whatever it said"),
             (with(facts(red, activity: .working(since: nil))) { $0.statusLine = "Waits for the go-ahead"; $0.blocker = "upstream" },
-             .working, "Agent working", "work goes on, and the last turn's line is about the turn before"),
+             .working, "Agent working · Checks failed", "work goes on, and the last turn's line is about the turn before"),
             (with(facts(red, activity: .working(since: nil))) { $0.statusLine = "Waits for the go-ahead"; $0.summary = " Triage\nrules " },
-             .working, "Agent working · Triage rules", "what the user wrote of the task still holds"),
+             .working, "Agent working · Checks failed", "the current check failure stays visible"),
             (facts(pullRequest(merged: true), activity: .working(since: nil)), .working, "Agent working", "as on the sidebar"),
             (facts(pullRequest(), activity: .asking("Lead"), queue: Queue(step: .merge("Merging"))), .waiting, "Awaiting Lead reply",
              "the current question names its owner")
@@ -328,6 +328,21 @@ final class BoardStagesLineTests: XCTestCase {
         for (facts, state, text, why) in cases {
             XCTAssertEqual(line(facts).state, state, why)
             XCTAssertEqual(line(facts).phrase.text, text, why)
+        }
+    }
+
+    func testLocalReviewCanBeTheOnlyRemainingStage() {
+        let idle = facts(pullRequest(), reviews: nil)
+        XCTAssertEqual(line(idle).station, .reviews)
+        XCTAssertTrue(line(idle).readyApartFromLocalReviews)
+        for held in [
+            with(idle) { $0.reviewsInFlight = [.codeReview] },
+            with(idle) { $0.pullRequest?.mergeIsBlocked = true },
+            with(idle) { $0.pullRequest?.isOnBaseBranch = false },
+            with(idle) { $0.pullRequest?.checks = .pending(since: nil, missing: ["test"]) },
+            with(idle) { $0.queue.order = 1 }
+        ] {
+            XCTAssertFalse(line(held).readyApartFromLocalReviews)
         }
     }
 

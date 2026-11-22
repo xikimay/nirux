@@ -552,6 +552,9 @@ final class SidebarView: NSView {
         hasher.combine(animates)
         hasher.combine(navigation)
         for workspace in lastInfos {
+            if let question = WorkspaceInfo.questionColumn(in: workspace.columns)?.missionQuestion {
+                hasher.combine(question.waitAge)
+            }
             if let lastActivityAt = workspace.lastActivityAt {
                 hasher.combine(Self.cardAge(since: lastActivityAt))
             }

@@ -127,6 +127,23 @@ final class SidebarCardStateTests: XCTestCase {
         XCTAssertEqual(workspace([column()], pullRequest: pullRequest(state: .merged, ci: "FAILURE")).cardState, .done)
     }
 
+    func testAskingLeadShowsTimeSinceTheQuestionAndKeepsItsReplyLink() throws {
+        var child = column(status: .working)
+        child.missionQuestion = SidebarMissionQuestion(
+            questionID: "q", parentTitle: "Lead", text: "Keep the old format?", handOff: nil,
+            askedAt: Date().timeIntervalSince1970 - 195
+        )
+        let row = workspace([child], pullRequest: pullRequest(ci: "FAILURE"))
+        XCTAssertEqual(row.rowSummary.mark, .asking)
+        XCTAssertEqual(row.rowSummary.status, SidebarStatusLine(
+            text: "Asking Lead · 3m", tone: .neutral, action: .missionQuestion(columnIndex: 0)
+        ))
+        let views = SidebarWorkspaceCardRenderer(workspace: row, sidebarWidth: 260, yOffset: 500).render().views
+        let label = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.stringValue == row.rowSummary.status.text })
+        XCTAssertTrue(label.toolTip?.contains("Keep the old format?") == true)
+        XCTAssertTrue(label.toolTip?.contains("Waiting for “Lead” to answer") == true)
+    }
+
     // MARK: - Project switcher ring
 
     func testRingTakesTheMostUrgentSignal() {

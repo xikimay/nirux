@@ -195,7 +195,7 @@ struct SidebarCardLayout {
         stepWidth = min(badgeWidth, max(0, rowWidth))
         let prefix = number.map { "#\($0) · " }
         var phrase = summary.lineText
-        if summary.mark == .readyToMerge { phrase = "Checks passed" }
+        if summary.mark == .readyToMerge && step == .ready { phrase = "Checks passed" }
         else if summary.status.tone == .branch || (step == .merged && phrase == "Merged") { phrase = "" }
         else if let prefix, phrase.hasPrefix(prefix) { phrase = String(phrase.dropFirst(prefix.count)) }
         statusText = SidebarWorkspaceCardRenderer.statusText(summary, shown: phrase)
