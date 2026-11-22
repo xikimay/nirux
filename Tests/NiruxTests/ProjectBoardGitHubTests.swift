@@ -91,7 +91,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
     // MARK: - Pull requests
 
     func testOpenPullRequestsAreReadWithTheirChecksAndHeadRepository() throws {
-        let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(Self.openPullRequests.utf8), repository: widgets))
+        let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(Self.openPullRequests.utf8), repository: widgets)?.rows)
         XCTAssertEqual(pullRequests.map(\.number), [12, 13, 14], "an entry missing its head commit is left out")
 
         let login = pullRequests[0]
@@ -144,7 +144,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
         }}}
         """
         let list = try XCTUnwrap(GitHubCLIBoardClient.mergedList(Data(answer.utf8)))
-        let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(list, repository: widgets))
+        let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(list, repository: widgets)?.rows)
         XCTAssertEqual(pullRequests.map(\.number), [52, 51, 50, 49],
                        "those opened last, then those updated last; each once, by its number; a node that isn't one is left out")
         XCTAssertEqual(pullRequests.map(\.isFromConfiguredRepository), [true, false, false, true], "by its head repository's owner and name")
@@ -168,21 +168,35 @@ final class ProjectBoardGitHubTests: XCTestCase {
         }
     }
 
+    func testOnlyACompleteOpenListCanRuleOutQueuedNumbers() throws {
+        func numbers(in rows: [String]) throws -> Set<Int>? {
+            let data = Data(("[" + rows.joined(separator: ",") + "]").utf8)
+            return try XCTUnwrap(ProjectBoard.parsePullRequests(data, repository: widgets)).completeOpenNumbers
+        }
+        let rows = (1...ProjectBoard.openPullRequestLimit).map { number in
+            #"{"number":\#(number),"state":"OPEN","headRefName":"a","headRefOid":"a","url":"u"}"#
+        }
+        XCTAssertEqual(try numbers(in: []), [])
+        XCTAssertEqual(try numbers(in: [rows[0]]), [1])
+        XCTAssertNil(try numbers(in: rows))
+        XCTAssertNil(try numbers(in: [rows[0], "{}"]))
+    }
+
     func testNotAListReadsAsNothing() {
         XCTAssertNil(ProjectBoard.parsePullRequests(Data("{\"message\": \"Bad credentials\"}".utf8), repository: widgets))
         XCTAssertNil(GitHub.parseWorkflowRuns(Data("not json".utf8)))
         let locked = #"[{"number": 1, "state": "LOCKED", "headRefName": "a", "headRefOid": "9b57f5ab537bf3b5c0b22ea831b8d8c647ee2984", "url": "u"}]"#
-        XCTAssertEqual(ProjectBoard.parsePullRequests(Data(locked.utf8), repository: widgets), [], "a state GitHub never sends")
-        XCTAssertEqual(ProjectBoard.parsePullRequests(Data(locked.replacingOccurrences(of: "LOCKED", with: "open").utf8), repository: widgets)?.count, 1)
+        XCTAssertEqual(ProjectBoard.parsePullRequests(Data(locked.utf8), repository: widgets)?.rows, [], "a state GitHub never sends")
+        XCTAssertEqual(ProjectBoard.parsePullRequests(Data(locked.replacingOccurrences(of: "LOCKED", with: "open").utf8), repository: widgets)?.rows.count, 1)
         XCTAssertNil(GitHub.parseWorkflowRuns(Data(Self.postMergeRuns.replacingOccurrences(of: #""databaseId":5,"#, with: "").utf8)),
                      "a run that can't be read fails the list: it might be the failed one")
-        XCTAssertEqual(ProjectBoard.parsePullRequests(Data("[]".utf8), repository: widgets), [])
+        XCTAssertEqual(ProjectBoard.parsePullRequests(Data("[]".utf8), repository: widgets)?.rows, [])
     }
 
     // MARK: - Checks
 
     func testRequiredChecksShowByNameAndTheOthersFold() throws {
-        let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(Self.openPullRequests.utf8), repository: widgets))
+        let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(Self.openPullRequests.utf8), repository: widgets)?.rows)
         let login = ProjectBoard.checkSummary(pullRequests[0].checks, required: ["test", "build"])
         XCTAssertEqual(login.required, [.init(name: "test", result: .pending), .init(name: "build", result: nil)])
         XCTAssertEqual(login.others, [.success, .pending, .neutral, .success])
@@ -218,7 +232,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
     }
 
     func testThePullRequestColumnSaysStateDraftConflictAndAnotherBase() throws {
-        let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(Self.openPullRequests.utf8), repository: widgets))
+        let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(Self.openPullRequests.utf8), repository: widgets)?.rows)
         XCTAssertEqual(ProjectBoard.pullRequestText(pullRequests[0], baseBranch: "main"), "#12 open")
         XCTAssertEqual(ProjectBoard.pullRequestText(pullRequests[1], baseBranch: "main"), "#13 draft · conflict → release")
         let merged = ProjectBoard.PullRequest(

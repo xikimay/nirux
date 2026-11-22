@@ -3,9 +3,9 @@ import Foundation
 /// The session a launch resumes.
 enum AgentResumeTarget: Equatable {
     /// No usable stored ID (state written by an older Nirux, a session
-    /// never bound, or one another column already claimed). Let the user
-    /// choose; `codex resume --last` / `claude --continue` would attach
-    /// several columns to the most recent conversation.
+    /// never bound, or one another column already claimed). Claude and Codex
+    /// open their interactive picker; Antigravity (which has no picker flag)
+    /// passes `--continue` at most once per working directory during restore.
     case picker
     case session(String)
 }
@@ -65,7 +65,9 @@ enum AgentLaunch: Equatable {
         switch self {
         case .claude(_, let mode, let model): return .claude(resume: .picker, mode: mode, model: model)
         case .codex(_, let mode, let model): return .codex(resume: .picker, mode: mode, model: model)
-        case .agy(_, let mode, let model): return .agy(resume: .picker, mode: mode, model: model)
+        // Another column already runs this conversation: start fresh instead
+        // of `--continue`, which could attach to the same conversation.
+        case .agy(_, let mode, let model): return .agy(resume: nil, mode: mode, model: model)
         }
     }
 }

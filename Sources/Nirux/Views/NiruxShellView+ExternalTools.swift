@@ -124,8 +124,10 @@ extension NiruxShellView {
     }
 
     /// Build an `agy …` shell command: Antigravity CLI with its own mode,
-    /// model and settings. A restore resumes the exact conversation, or
-    /// starts a fresh one (agy has no picker flag; `/resume` is in it).
+    /// model and settings. A restore resumes the exact conversation
+    /// (`--conversation <id>`), or continues the most recent conversation in
+    /// the folder (`--continue`) when no exact ID was recorded. A fresh launch
+    /// (`resume == nil`) starts a new conversation.
     /// `handoverPrompt` is its first prompt (`-i`), as in the worktree
     /// handover flow.
     static func agyCommand(
@@ -133,8 +135,13 @@ extension NiruxShellView {
         settings: String? = nil, handoverPrompt: String? = nil
     ) -> String {
         var parts = ["command", "agy"]
-        if case .session(let sessionID)? = resume {
+        switch resume {
+        case .session(let sessionID)?:
             parts.append(contentsOf: ["--conversation", Self.shellQuotedArgument(sessionID)])
+        case .picker?:
+            parts.append("--continue")
+        case nil:
+            break
         }
         parts.append(contentsOf: mode.cliArgs)
         if let model { parts += ["--model", Self.shellQuotedArgument(model)] }

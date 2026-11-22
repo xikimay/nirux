@@ -133,8 +133,8 @@ final class SpaceSettingsFlowTests: XCTestCase {
             shell.restoreState()
             let workspace = try XCTUnwrap(shell.workspaces.first { $0.id == "agy" })
             XCTAssertEqual(workspace.columns.compactMap { $0.deferredAgent?.launch }, [
-                .agy(resume: .picker, mode: .plan), .agy(resume: .picker, mode: .default),
-                .agy(resume: .picker, mode: .acceptEdits)
+                .agy(resume: .picker, mode: .plan), .agy(resume: nil, mode: .default),
+                .agy(resume: nil, mode: .acceptEdits)
             ])
         }
     }

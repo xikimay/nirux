@@ -617,11 +617,18 @@ final class ColumnState {
 
     /// Binds the conversation the column's `agy` reports in its hooks: its
     /// own, not a nested agy's that its shell tool started in its job.
-    func captureAgySession(sessionID: String?, emitterProcess: ProcessInstance?, snapshot: ProcessSnapshot) -> Bool {
+    func captureAgySession(
+        sessionID: String?,
+        eventName: AgentHookEvent.Name = .sessionStart,
+        emitterProcess: ProcessInstance?,
+        snapshot: ProcessSnapshot
+    ) -> Bool {
         guard let place = hookEmitterPlace(emitterProcess, snapshot: snapshot),
               place.foreground?.headlessAgent != .agy else { return false }
         return agySessionTracker.capture(
-            sessionID: sessionID, emitterBelongsToForegroundJob: emitterProcess == place.foreground?.instance,
+            sessionID: sessionID,
+            eventName: eventName,
+            emitterBelongsToForegroundJob: emitterProcess == place.foreground?.instance,
             foregroundProcess: place.foreground
         )
     }
@@ -645,7 +652,19 @@ final class ColumnState {
     }
 
     func persistedAgySessionID(foregroundProcess: ForegroundProcess?) -> String? {
-        agySessionTracker.sessionID(for: foregroundProcess)
+        if let sessionID = agySessionTracker.sessionID(for: foregroundProcess) {
+            return sessionID
+        }
+        if let foregroundProcess, foregroundProcess.interactiveAgent == .agy,
+           let resumed = NiruxShellView.resumedConversation(ofAgy: foregroundProcess.arguments),
+           UUID(uuidString: resumed) != nil {
+            agySessionTracker.bindIfUnbound(sessionID: resumed, process: foregroundProcess.instance)
+            return resumed
+        }
+        if foregroundProcess == nil, case .agy(.session(let sessionID)?, _, _)? = deferredAgent?.launch {
+            return sessionID
+        }
+        return nil
     }
 
     func persistedCodexSessionID(foregroundProcess: ForegroundProcess?) -> String? {

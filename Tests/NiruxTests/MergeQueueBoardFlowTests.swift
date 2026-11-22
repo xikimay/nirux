@@ -344,6 +344,73 @@ final class MergeQueueBoardFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testBoardPrunesClosedLeftoversFromAStoppedQueue() throws {
+        let engine = MergeQueue.Engine(settings: MQ.settings(), entries: [14, 99, 12].map { MQ.entry($0, head: Self.a) })
+        var saved = MergeQueue.SavedQueue(engine: engine, dryRun: true, savedAt: Date())
+        saved.status = .stopped
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
+        try withBoard(world: world, saved: saved) { shell, board in
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            XCTAssertEqual(queue.selection, [14, 12])
+            XCTAssertEqual(queue.saved?.entries.map(\.number), [14, 99, 12])
+        }
+    }
+
+    @MainActor
+    func testLeadQueueMergePrunesClosedNumbersAndProtectsAnOpenUserSelection() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
+        try withBoard(world: world) { shell, board in
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            let proposal = #"{"prs":[14]}"#
+            queue.proposeSelection([99, 12], repository: MQ.widgets)
+            let refused = try callQueueTool(proposal, shell: shell)
+            XCTAssertTrue(refused.isError)
+            XCTAssertTrue(refused.text.contains("queue (#12)"), refused.text)
+            XCTAssertEqual(queue.selection, [12])
+            XCTAssertNil(shell.mergeQueueConfirmation)
+
+            queue.proposeSelection([99], repository: MQ.widgets)
+            let accepted = try callQueueTool(proposal, shell: shell)
+            XCTAssertFalse(accepted.isError, accepted.text)
+            XCTAssertEqual(queue.selection, [14])
+            XCTAssertNotNil(shell.mergeQueueConfirmation)
+        }
+    }
+
+    @MainActor
+    func testClearQueueMenuWorksForInvisibleSelectionsAndRespectsConfirmationAndQuit() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a])
+        try withBoard(world: world) { shell, board in
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            let header = try self.header(of: board)
+            XCTAssertNil(header.contextMenu()?.item(withTitle: "Clear Queue"))
+            queue.addToSelection(99, repository: MQ.widgets)
+            try BoardStagesClicks.choose("Clear Queue", in: header.contextMenu())
+            XCTAssertTrue(queue.selection.isEmpty)
+            XCTAssertNil(header.contextMenu()?.item(withTitle: "Clear Queue"))
+
+            queue.addToSelection(12, repository: MQ.widgets)
+            try BoardStagesClicks.click(header.startButton)
+            let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
+            let blocked = try XCTUnwrap(header.contextMenu()?.item(withTitle: "Clear Queue"))
+            XCTAssertFalse(blocked.isEnabled)
+            XCTAssertTrue(blocked.toolTip?.contains("confirmation sheet") == true)
+            queue.addToSelection(99, repository: MQ.widgets)
+            let lastRead = board.reads.values.first?.pullRequestsReadAt
+            board.reload()
+            waitUntil("the Board refreshed with the sheet open") { board.reads.values.first?.pullRequestsReadAt != lastRead }
+            XCTAssertEqual(queue.selection, [12, 99])
+            sheet.dismiss()
+            shell.mergeQueueQuit = .init { _ in }
+            shell.renderProjectBoard(board)
+            let quitting = try XCTUnwrap(header.contextMenu()?.item(withTitle: "Clear Queue"))
+            XCTAssertFalse(quitting.isEnabled)
+            XCTAssertTrue(quitting.toolTip?.contains("quit") == true)
+            shell.mergeQueueQuit = nil
+        }
+    }
+
+    @MainActor
     func testAQueueStartsFromTheBoardThroughTheSheetInTheUsersOrder() throws {
         let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
         try withBoard(world: world) { shell, board in
@@ -461,6 +528,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertTrue(header.startButton.isHidden)
             XCTAssertFalse(header.stopButton.isHidden, "Stop is in reach while it runs")
             XCTAssertEqual(board.view.stages.runningQueueViews.map(\.queue.title), ["acme/widgets"], "and at the Board's foot")
+            XCTAssertNil(header.contextMenu()?.item(withTitle: "Clear Queue"))
             try BoardStagesClicks.click(header.journalButton)
             let runningJournal = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
             waitUntil("the running journal was read") { runningJournal.snapshot != nil }

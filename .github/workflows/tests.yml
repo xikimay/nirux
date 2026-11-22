@@ -32,6 +32,8 @@ jobs:
       - uses: actions/checkout@v5
       - run: scripts/test-core.sh
       - run: scripts/check-core-boundary.sh
+      - name: Test canary runner
+        run: /usr/bin/python3 -B -m unittest discover -s scripts/canary -v
 
   test:
     name: ${{ github.event.pull_request.draft && 'test (selected)' || 'test' }}
