@@ -21,7 +21,14 @@ extension NiruxShellView {
                 self?.importBrowserCookies()
             }
         ]
-        return [openBrowser] + importCookies + [
+        let openTestBrowser = PaletteAction(
+            icon: .symbol(Theme.Symbol.testBrowser), title: "Open Isolated Test Browser",
+            subtitle: "Test a local app with cookies and storage scoped to this task",
+            shortcut: nil
+        ) { [weak self] in
+            self?.openIsolatedTestBrowser()
+        }
+        return [openBrowser, openTestBrowser] + importCookies + [
             PaletteAction(
                 icon: .symbol("terminal"), title: "New Terminal", subtitle: "Open a new terminal column",
                 shortcut: .newTerminal

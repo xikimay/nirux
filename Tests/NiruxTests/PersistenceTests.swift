@@ -7,6 +7,25 @@ import XCTest
 /// on-disk store.
 final class PersistedStateCodingTests: XCTestCase {
 
+    func testBrowserIsolationRoundTripsOnlyWhenEnabled() throws {
+        let legacy = Data(#"{"widthPreset":0.5,"cwd":"/tmp","columnType":"webView","webViewURL":"http://localhost"}"#.utf8)
+        var column = try JSONDecoder().decode(PersistedColumn.self, from: legacy)
+        XCTAssertNil(column.isIsolatedBrowser)
+        for flag in [nil, false, true] as [Bool?] {
+            column.isIsolatedBrowser = flag
+            let data = try JSONEncoder().encode(column)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(json["columnType"] as? String, "webView")
+            if flag == true {
+                XCTAssertEqual(json["isIsolatedBrowser"] as? Bool, true)
+            } else {
+                XCTAssertNil(json["isIsolatedBrowser"])
+            }
+            let restored = try JSONDecoder().decode(PersistedColumn.self, from: data)
+            XCTAssertEqual(restored.isIsolatedBrowser, flag == true ? true : nil)
+        }
+    }
+
     func testPersistenceSaveReportsWriteFailure() throws {
         let invalidDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("nirux-persistence-\(UUID().uuidString)")

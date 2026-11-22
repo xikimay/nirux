@@ -10,6 +10,7 @@ struct PRInfo: Hashable, Sendable {
     let checks: [GitHub.Check]
     let reviewDecision: String?
     let mergeable: String?
+    var mergeStateStatus: String?
     let url: String
     let additions: Int?
     let deletions: Int?

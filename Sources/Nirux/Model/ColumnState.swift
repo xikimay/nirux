@@ -55,7 +55,7 @@ final class ColumnState {
     /// Fires (main queue) when the terminal prints a local dev-server URL.
     /// The workspace decides whether it becomes a proposal chip.
     var onLocalServerURLDetected: ((LocalServerURL) -> Void)?
-    var onLocalServerChipOpen: ((LocalServerURL) -> Void)?
+    var onLocalServerChipOpen: ((LocalServerURL, _ isIsolated: Bool) -> Void)?
     var onLocalServerChipDismiss: ((LocalServerURL) -> Void)?
     private var localServerChip: LocalServerChipView?
 
@@ -249,7 +249,7 @@ final class ColumnState {
         if localServerChip == nil {
             guard url != nil, let header = terminalHeader else { return }
             let chip = LocalServerChipView(frame: .zero)
-            chip.onOpen = { [weak self] url in self?.onLocalServerChipOpen?(url) }
+            chip.onOpen = { [weak self] url, isIsolated in self?.onLocalServerChipOpen?(url, isIsolated) }
             chip.onDismiss = { [weak self] url in self?.onLocalServerChipDismiss?(url) }
             header.accessories.append(chip)
             localServerChip = chip
@@ -455,9 +455,8 @@ final class ColumnState {
             guard status.agent != .codex else { return noteCodexStatus(status, in: ptySession) }
             // One read on an empty process table goes to the agy last seen in front.
             let snapshot = readsProcesses()
-            guard ptySession.isNewProgramStatus(status),
-                  let agy = snapshot.isEmpty ? lastForegroundAgent : ptySession.foregroundProcess(snapshot: snapshot),
-                  agy.agent == status.agent
+            guard let agy = snapshot.isEmpty ? lastForegroundAgent : ptySession.foregroundProcess(snapshot: snapshot),
+                  agy.agent == status.agent, ptySession.programStatus(of: agy) != status
             else { return }
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
@@ -525,11 +524,14 @@ final class ColumnState {
     }
 
     /// WebView column
-    init(url: String) {
+    convenience init(url: String) {
+        self.init(webView: WebViewColumn(url: url))
+    }
+
+    init(webView: WebViewColumn) {
         agentUUID = nil
         view = Self.filled(NSView())
 
-        let webView = WebViewColumn(url: url)
         webView.autoresizingMask = [.width, .height]
         view.addSubview(webView)
         webViewColumn = webView

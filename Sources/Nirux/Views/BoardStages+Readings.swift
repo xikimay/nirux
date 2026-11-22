@@ -27,7 +27,7 @@ extension BoardStages.TaskReading {
         blocker = info.blockerText
         lastActivityAt = info.lastActivityAt
         self.gitRoot = gitRoot
-        reviewRequest = Self.reviewRequest(info.prInfo, hasFeedback: info.prFeedback != nil)
+        reviewRequest = info.prInfo?.reviewRequest(hasFeedback: info.prFeedback != nil)
         flakyReason = info.ciFlakyReason
         cleanUp = info.mergedCleanup.map { $0 == .available ? .offered : .running }
         resume = Self.resume(of: info.columns)
@@ -76,15 +76,6 @@ extension BoardStages.TaskReading {
             return .working(since: clock.id.flatMap(turnStartedAt))
         case .answered?, nil: return .idle
         }
-    }
-
-    /// What GitHub still asks of the open pull request: changes, then
-    /// comments to answer, then a review.
-    private static func reviewRequest(_ pullRequest: PRInfo?, hasFeedback: Bool) -> BoardStages.ReviewRequest? {
-        guard let pullRequest, pullRequest.state == .open else { return nil }
-        if pullRequest.reviewDecision == "CHANGES_REQUESTED" { return .changesRequested }
-        if hasFeedback { return .feedback }
-        return pullRequest.reviewDecision == "REVIEW_REQUIRED" ? .reviewRequired : nil
     }
 
     /// The sidebar's Resume: an agent stopped on an error first (held back

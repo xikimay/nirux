@@ -187,6 +187,11 @@ struct SidebarMissionQuestion: Hashable {
     /// When the child asked (epoch seconds): its place in ⌘J's queue and
     /// the inbox once handed to the user.
     var askedAt: TimeInterval = 0
+    var waitAge: String? {
+        guard askedAt > 0, handOff == nil, !isAnswered else { return nil }
+        return SidebarView.cardAge(since: askedAt)
+    }
+
     /// What blocks the child, and the answer it recommends (what it needs,
     /// for an access question): see `MissionEvent`.
     var kind: MissionEvent.QuestionKind?
