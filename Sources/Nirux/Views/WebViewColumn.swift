@@ -5,7 +5,8 @@ import WebKit
 /// the Web Inspector), integrated into Nirux's niri scroll.
 @MainActor
 final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
-    let isIsolated: Bool
+    let diagnostics: IsolatedBrowserDiagnostics?
+    var isIsolated: Bool { diagnostics != nil }
     let webView: WKWebView
     let header = ColumnHeaderView()
     let backButton = ColumnHeaderButton(symbol: Theme.Symbol.back, toolTip: "Back")
@@ -34,15 +35,16 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     static let sharedDataStore = WKWebsiteDataStore.default()
 
     convenience init(url: String) {
-        self.init(url: url, dataStore: Self.sharedDataStore, isIsolated: false)
+        self.init(url: url, dataStore: Self.sharedDataStore, isolatedWorkspaceID: nil)
     }
 
-    init(url: String, dataStore: WKWebsiteDataStore, isIsolated: Bool) {
-        precondition(!isIsolated || !dataStore.isPersistent)
-        self.isIsolated = isIsolated
+    init(url: String, dataStore: WKWebsiteDataStore, isolatedWorkspaceID: String?) {
+        precondition(isolatedWorkspaceID == nil || !dataStore.isPersistent)
+        diagnostics = isolatedWorkspaceID.map(IsolatedBrowserDiagnostics.init(workspaceID:))
         let config = WKWebViewConfiguration()
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         config.websiteDataStore = dataStore
+        diagnostics?.install(in: config.userContentController)
 
         // Allow media playback
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -85,6 +87,8 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         header.menuProvider = { [weak self] in
             let menu = NSMenu()
             if let self, self.isIsolated {
+                menu.addItem(withTitle: "Capture Screenshot", action: #selector(captureScreenshot), keyEquivalent: "").target = self
+                menu.addItem(withTitle: "Diagnostics…", action: #selector(showDiagnostics), keyEquivalent: "").target = self
                 menu.addItem(withTitle: "Clear Session", action: #selector(clearSession), keyEquivalent: "").target = self
                 menu.addItem(.separator())
             }
@@ -196,7 +200,8 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     }
 
     @objc private func clearSession() {
-        guard isIsolated else { return }
+        guard let diagnostics else { return }
+        diagnostics.clear()
         webView.configuration.websiteDataStore.removeData(
             ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast, completionHandler: {}
         )
@@ -244,6 +249,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     /// A new document has none of the matches the find bar counted.
     @MainActor
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        diagnostics?.clear()
         pageFind.pageDidChange()
     }
 
