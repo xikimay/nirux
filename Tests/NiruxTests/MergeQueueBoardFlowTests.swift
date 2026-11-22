@@ -125,6 +125,40 @@ final class MergeQueueBoardFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testEverySheetOpensInStandardAndStartsOnlyTheSelectedCadenceAsADryRun() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
+        try withBoard(world: world) { shell, board in
+            try BoardStagesClicks.pressMerge(try line("login", in: board))
+            waitUntil("#12 is queued") { BoardStagesClicks.shownLine("login", in: board)?.line.offer?.change == .remove }
+            try BoardStagesClicks.pressMerge(try line("feat/api", in: board))
+            waitUntil("#14 is queued") { BoardStagesClicks.shownLine("feat/api", in: board)?.line.offer?.change == .remove }
+            let header = try self.header(of: board)
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
+                try BoardStagesClicks.click(header.startButton)
+                let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
+                waitUntil("the cadence picker is ready") { sheet.cadencePicker != nil }
+                let picker = try XCTUnwrap(sheet.cadencePicker)
+                XCTAssertEqual(sheet.confirmation?.cadence, .standard)
+                XCTAssertEqual(picker.titleOfSelectedItem, "Standard")
+                XCTAssertTrue(sheet.lines.contains { $0.contains("publish 2 nightlies") })
+                XCTAssertTrue(try XCTUnwrap(picker.item(withTitle: cadence.title)).isEnabled)
+                picker.selectItem(withTitle: cadence.title)
+                XCTAssertTrue(picker.sendAction(picker.action, to: picker.target))
+                XCTAssertEqual(sheet.confirmation?.cadence, cadence)
+                XCTAssertTrue(sheet.lines.contains("A real queue would verify nightly.yml once, on the final merge of 2 pull requests. This dry run publishes nothing."))
+                try click(try XCTUnwrap(sheet.startButton))
+                waitUntil("the dry run stops") { !queue.isRunning }
+                guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("queue did not stop") }
+                XCTAssertEqual(reason.kind, .dryRun)
+                XCTAssertEqual(queue.saved?.effectiveCadence, cadence)
+                XCTAssertEqual(world.mergedNumbers, [])
+                waitUntil("Start is ready again") { header.startButton.isEnabled && !header.startButton.isHidden }
+            }
+        }
+    }
+
+    @MainActor
     func testStopFromTheBoardEndsAWaitingQueue() throws {
         // Checks still running: the queue waits between looks.
         let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b], testConclusion: nil)
