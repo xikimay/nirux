@@ -366,6 +366,17 @@ extension BranchReview {
         private static func read(
             _ path: String, from rootDescriptor: Int32, limits: Limits, budget: Int
         ) -> Result<(Data, String), LeftOut> {
+            readBytes(path, from: rootDescriptor, maxFileBytes: limits.maxFileBytes, budget: budget).flatMap { data in
+                guard !data.prefix(8_000).contains(0), let text = String(data: data, encoding: .utf8) else {
+                    return .failure(.notText)
+                }
+                return .success((data, text))
+            }
+        }
+
+        static func readBytes(
+            _ path: String, from rootDescriptor: Int32, maxFileBytes: Int, budget: Int
+        ) -> Result<Data, LeftOut> {
             let descriptor = openat(rootDescriptor, path, O_RDONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)
             guard descriptor >= 0 else {
                 switch errno {
@@ -381,7 +392,7 @@ extension BranchReview {
                 return .failure(.notRegularFile)
             }
             let size = Int(info.st_size)
-            guard size <= limits.maxFileBytes else { return .failure(.tooLarge) }
+            guard size <= maxFileBytes else { return .failure(.tooLarge) }
             guard size <= budget else { return .failure(.overTotal) }
             // One byte more than its size says whether it grew meanwhile.
             var data = Data(count: size + 1)
@@ -401,10 +412,7 @@ extension BranchReview {
             // It grew while it was read: an agent is writing it.
             guard length <= size else { return .failure(.unreadable) }
             data.count = length
-            guard !data.prefix(8_000).contains(0), let text = String(data: data, encoding: .utf8) else {
-                return .failure(.notText)
-            }
-            return .success((data, text))
+            return .success(data)
         }
 
         /// Never executable: the model only reads, and a branch's `bin/git`

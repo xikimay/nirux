@@ -151,6 +151,18 @@ extension NiruxShellView {
                 self?.showWorktreeListPalette()
             },
             PaletteAction(
+                icon: .symbol("camera"), title: "Save Checkpoint…",
+                subtitle: "Save the current workspace’s tracked changes locally", shortcut: nil
+            ) { [weak self] in
+                self?.requestCheckpoint(in: self?.activeWorkspace)
+            },
+            PaletteAction(
+                icon: .symbol("clock"), title: "Checkpoints…",
+                subtitle: "View saved checkpoints for this workspace", shortcut: nil
+            ) { [weak self] in
+                self?.showCheckpoints(in: self?.activeWorkspace)
+            },
+            PaletteAction(
                 icon: .symbol("trash"), title: "Clean Up Merged Worktrees…",
                 subtitle: "Delete worktrees and local branches whose pull request is merged",
                 shortcut: nil

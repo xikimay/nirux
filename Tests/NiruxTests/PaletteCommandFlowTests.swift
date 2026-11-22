@@ -29,6 +29,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testWorkspaceCommands": ["Rename Workspace", "Show/Hide Sidebar", "Show/Hide Archived", "Open Board"],
             "testWorktreeCommands": ["Open Worktree", "Clean Up Merged Worktrees…"],
             "testNewCommand": ["New…"],
+            "testCheckpointCommands": ["Save Checkpoint…", "Checkpoints…"],
             "testReviewBranchCommand": ["Review Branch"],
             "testSetupCommands": ["Show Getting Started", "Install Agent Skills", "Open Settings"]
         ],
@@ -706,6 +707,35 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertTrue(launch.hasPrefix("command claude"), launch)
             XCTAssertTrue(launch.contains("'--name=fix/sidebar-flickers-on-resize · Repo'"), launch)
             XCTAssertTrue(launch.contains("Read .claude-handover.md for full context"), launch)
+        }
+    }
+
+    func testCheckpointCommands() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let store = try LocalCheckpoints(stateDirectory: Persistence.stateDirectory, workspaceID: workspace.id)
+            harness.runPaletteCommand("Save Checkpoint…")
+            let prompt = try XCTUnwrap(harness.window.attachedSheet?.contentView)
+            let field = try XCTUnwrap(UIFlowHarness.descendant(of: prompt, as: NSTextField.self) { $0.isEditable })
+            field.stringValue = "Before refactor"
+            try XCTUnwrap(UIFlowHarness.button(titled: "Save", in: prompt)).performClick(nil)
+            harness.waitUntil("the checkpoint confirmation") {
+                shell.toast?.message.hasPrefix("Saved checkpoint") == true && harness.window.attachedSheet == nil
+            }
+            XCTAssertEqual(try store.list().first?.manifest?.label, "Before refactor")
+
+            harness.runPaletteCommand("Checkpoints…")
+            let panel = try XCTUnwrap(harness.window.attachedSheet?.contentView)
+            harness.waitUntil("the saved row") {
+                UIFlowHarness.descendant(of: panel, as: NSTextField.self) { $0.stringValue.hasPrefix("Before refactor ·") } != nil
+            }
+            try XCTUnwrap(UIFlowHarness.button(titled: "Delete", in: panel)).performClick(nil)
+            harness.waitUntil("the empty history") {
+                UIFlowHarness.descendant(of: panel, as: NSTextField.self) { $0.stringValue == "No saved checkpoints" } != nil
+            }
+            XCTAssertTrue(try store.list().isEmpty)
+            try XCTUnwrap(UIFlowHarness.button(titled: "Done", in: panel)).performClick(nil)
         }
     }
 

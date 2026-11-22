@@ -493,6 +493,7 @@ enum WorkspaceSidebarAction {
     case recoverLead(LeadLaunchIssue)
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
+    case saveCheckpoint, showCheckpoints
     case askWhyCIFailed, rerunFailedCI
     /// "Add a Rule to the Brief…" (see LearnedRules).
     case addRuleToBrief

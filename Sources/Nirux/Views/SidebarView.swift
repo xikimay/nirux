@@ -913,6 +913,8 @@ final class SidebarView: NSView {
             menu.addItem(organizeItem(workspaceIndex: workspaceIndex, workspace: workspace, act: act))
             menu.addItem(.separator())
         }
+        menu.addClosureItem(title: "Save Checkpoint…") { act(.saveCheckpoint) }
+        menu.addClosureItem(title: "Checkpoints…") { act(.showCheckpoints) }
         menu.addClosureItem(title: "Rename Workspace") { act(.rename) }
         menu.addClosureItem(title: "View/Edit Context…") { act(.editContext) }
         menu.addClosureItem(title: Self.addRuleTitle) { act(.addRuleToBrief) }
