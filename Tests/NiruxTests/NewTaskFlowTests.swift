@@ -547,7 +547,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(shell.activeWorkspace.map(\.cwd.comparablePath), (folder + " 2").comparablePath)
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder + " 2"), [".agy-handover.md"])
             let agyLaunch = try XCTUnwrap(harness.agentLaunches.last)
-            XCTAssertTrue(agyLaunch.hasPrefix("command agy -i 'Read .agy-handover.md for full context"), agyLaunch)
+            XCTAssertTrue(agyLaunch.hasPrefix("command agy --mode auto -i 'Read .agy-handover.md for full context"), agyLaunch)
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder), [".claude-handover.md"], "the first one untouched")
 
             // Its folder gone: still nothing to clean up, and the folder
@@ -819,10 +819,11 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let saved = try XCTUnwrap(shell.persistedState().workspaces.first { $0.id == workspace.id }?.columns.last)
             XCTAssertEqual(saved.columnType, .agy)
             XCTAssertEqual(saved.agySessionID, conversation)
+            XCTAssertEqual(saved.agyLaunchMode, .default)
             shell.saveState()
             shell.restoreState()
             let restored = try XCTUnwrap(shell.workspaces.first { $0.id == workspace.id }?.columns.last)
-            XCTAssertEqual(restored.deferredAgent?.launch, .agy(resume: .session(conversation)))
+            XCTAssertEqual(restored.deferredAgent?.launch, .agy(resume: .session(conversation), mode: .default))
         }
     }
 

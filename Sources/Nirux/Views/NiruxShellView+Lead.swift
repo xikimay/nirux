@@ -112,8 +112,9 @@ extension NiruxShellView {
         let picker = NSPopUpButton(frame: .zero, pullsDown: false)
         for agent in agents {
             let mode: String? = switch agent {
-            case .claude: defaults.claudeMode(settings: Self.currentClaudeLaunchMode()).displayName
-            case .codex: defaults.codexMode(settings: Self.currentCodexLaunchMode()).displayName
+            case .claude: Self.claudeLaunchMode(for: lead).displayName
+            case .codex: Self.codexLaunchMode(for: lead).displayName
+            case .agy: Self.agyLaunchMode(for: lead).displayName
             default: nil
             }
             let suffix = mode.map { " — " + $0.components(separatedBy: " (")[0] } ?? ""

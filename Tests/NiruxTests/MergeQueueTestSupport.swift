@@ -142,8 +142,8 @@ enum MQ {
         /// Every mutation the engine asked for, in order.
         var mutations: [MergeQueue.Mutation] = []
 
-        init(settings: BoardConfig.QueueSettings = MQ.settings(), entries: [MergeQueue.ConfirmedEntry]) {
-            engine = MergeQueue.Engine(settings: settings, entries: entries)
+        init(settings: BoardConfig.QueueSettings = MQ.settings(), entries: [MergeQueue.ConfirmedEntry], cadence: MergeQueue.Cadence = .standard) {
+            engine = MergeQueue.Engine(settings: settings, entries: entries, cadence: cadence)
         }
 
         var phase: MergeQueue.Phase { engine.phase }

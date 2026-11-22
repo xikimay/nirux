@@ -100,6 +100,7 @@ final class LeadRestartFlowTests: XCTestCase {
             try UIFlowHarness.run { harness in
                 let shell = harness.shell
                 let lead = try harness.makeLead()
+                shell.changeSpaceDefaults(spaceID: lead.space) { $0.agyLaunchMode = .plan }
                 let column = try XCTUnwrap(lead.workspace.leadTerminal)
                 let standIn = AgentStandIn()
                 defer { standIn.remove() }
@@ -109,6 +110,7 @@ final class LeadRestartFlowTests: XCTestCase {
                 shell.sideEffects.runModal = { alert in
                     let picker = alert.accessoryView as? NSPopUpButton
                     XCTAssertEqual(picker?.indexOfSelectedItem, index)
+                    XCTAssertTrue(picker?.itemTitles.contains("Antigravity — Plan") == true)
                     return modal(alert)
                 }
                 harness.alertMenuChoices = [next, next]
@@ -121,6 +123,7 @@ final class LeadRestartFlowTests: XCTestCase {
                 let selected = CodingAgent.launchable[next]
                 let command = try XCTUnwrap(harness.terminalRestarts.last)
                 XCTAssertTrue(command.hasPrefix("command \(selected.rawValue) "), command)
+                if selected == .agy { XCTAssertTrue(command.contains("--mode plan"), command) }
                 XCTAssertTrue(command.contains(NiruxShellView.shellQuotedArgument(NiruxShellView.leadRestartPrompt(for: selected))))
                 XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: lead.space).preferredLeadAgent, .claude)
                 harness.waitUntil("the switch to finish") { !column.isRestartingShell }

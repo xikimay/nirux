@@ -81,7 +81,15 @@ extension MergeQueue {
         else { return nil }
         let files = nodes.compactMap { $0["path"] as? String }
         guard files.count == nodes.count else { return nil }
-        return PullRequestDetails(title: title, files: files, hasMoreFiles: hasMore)
+        let count = json["changedFiles"] as? Int
+        let allPathsKnown = count == files.count && nodes.allSatisfy { node in
+            guard let path = node["path"] as? String, !path.isEmpty, let type = node["changeType"] as? String else { return false }
+            // A rename includes its destination only.
+            return ["ADDED", "MODIFIED", "DELETED"].contains(type)
+        }
+        return PullRequestDetails(title: title, files: files, hasMoreFiles: hasMore || (count ?? 0) > PullRequestDetails.maxFiles,
+                                  head: GitHub.objectID(json["headRefOid"]), baseBranch: json["baseRefName"] as? String,
+                                  allPathsKnown: allPathsKnown)
     }
 
     /// The checks query: every suite's latest check runs, and the commit
