@@ -656,9 +656,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     }
 
     func toggleDiff(mode: EditorDiffMode) {
+        guard let path = activePath, !Self.isDiffGroupPath(path) else { return }
         selectedDiffMode = mode
         refreshTabBar()
-        guard let path = activePath else { return }
         if diffActivePath == path, diffActiveBase == .git(mode) {
             diffModeByPath.removeValue(forKey: path)
             exitDiff()
@@ -701,17 +701,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
         let load = UUID()
         let loadingGroup = DiffGroupTab(title: title, mode: mode, files: [], load: load)
-        diffGroupTabs[groupPath] = loadingGroup
-        if !tabPaths.contains(groupPath) {
-            tabPaths.append(groupPath)
-        }
-        activePath = groupPath
-        diffActivePath = nil
-        diffActiveBase = .git(mode)
-        refreshTabBar()
-        onPathChanged?()
-        onDirtyChanged?()
-        sendDiffGroup(loadingGroup)
+        openDiffGroup(loadingGroup, at: groupPath)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let files = absolutePaths.compactMap { path in
@@ -741,6 +731,25 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
     }
 
+    func showCheckpointDiff(_ diff: LocalCheckpoints.Diff, title: String) {
+        let group = DiffGroupTab(title: title, mode: nil, files: [], load: nil, checkpoint: diff)
+        openDiffGroup(group, at: Self.diffGroupPathPrefix + "checkpoint")
+    }
+
+    private func openDiffGroup(_ group: DiffGroupTab, at groupPath: String) {
+        diffGroupTabs[groupPath] = group
+        if !tabPaths.contains(groupPath) {
+            tabPaths.append(groupPath)
+        }
+        activePath = groupPath
+        diffActivePath = nil
+        diffActiveBase = group.mode.map(DiffBase.git)
+        refreshTabBar()
+        onPathChanged?()
+        onDirtyChanged?()
+        sendDiffGroup(group)
+    }
+
     private func exitDiff() {
         diffLoadGeneration += 1
         diffActivePath = nil
@@ -768,13 +777,18 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     }
 
     private func sendDiffGroup(_ group: DiffGroupTab) {
-        sendBridge([
+        var payload: [String: Any] = [
             "type": "enterDiffGroup",
             "title": group.title,
-            "mode": group.mode.rawValue,
+            "mode": group.mode?.rawValue ?? "checkpoint",
             "loading": group.isLoading,
             "files": group.files
-        ])
+        ]
+        if let diff = group.checkpoint {
+            payload["patch"] = diff.text
+            payload["warning"] = diff.warning
+        }
+        sendBridge(payload)
     }
 
     private func enterDiff(for path: String, mode: EditorDiffMode) {
@@ -1362,10 +1376,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
 struct DiffGroupTab {
     let title: String
-    let mode: EditorDiffMode
+    let mode: EditorDiffMode?
     let files: [[String: Any]]
     /// The read of its files, until they are in.
     let load: UUID?
+
+    var checkpoint: LocalCheckpoints.Diff?
 
     var isLoading: Bool { load != nil }
 }
