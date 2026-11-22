@@ -62,6 +62,16 @@ class CanaryTests(unittest.TestCase):
         self.assertEqual(report.data["verdict"], "infra_unavailable")
         self.assertEqual(report.data["failedStep"], "preflight")
 
+    def test_losing_focus_during_a_disk_assertion_is_infrastructure(self):
+        report = Report(manifest(self.seed, None))
+        app = App(self.work, self.work, report, lambda: None)
+        report.data["preflight"]["keyWindow"] = True
+        with patch.object(app, "drive", side_effect=[True, False]):
+            with self.assertRaises(InfrastructureError), report.step("ghostty"):
+                app.shell_marker("first", self.seed)
+        self.assertEqual(report.data["verdict"], "infra_unavailable")
+        self.assertFalse(report.data["preflight"]["keyWindow"])
+
     def test_restore_requires_an_editor_created_after_launch(self):
         for name in ("state", "home"):
             (self.work / name).mkdir()

@@ -167,7 +167,7 @@ class App:
             self.report.data["preflight"]["keyWindow"] = False
             raise InfrastructureError(str(error)) from error
         self.report.data["preflight"]["keyWindow"] = True
-        wait_for("zsh did not reach a prompt", (self.work / "state/prompt").is_file, self.alive)
+        wait_for("zsh did not reach a prompt", (self.work / "state/prompt").is_file, self.check_window)
 
     def alive(self):
         self.check_interrupt()
@@ -182,17 +182,23 @@ class App:
         if action != "quit" or result.returncode != 0:
             self.alive()
         if result.returncode == 3 and action != "window":
+            self.report.data["preflight"]["keyWindow"] = False
             raise InfrastructureError("the canary lost its key window")
         if not probe or result.returncode not in (0, 1, 3):
             result.check_returncode()
         return result.returncode == 0
+
+    def check_window(self):
+        if not self.drive("window", probe=True):
+            self.report.data["preflight"]["keyWindow"] = False
+            raise InfrastructureError("the canary lost its key window")
 
     def shell_marker(self, name, seed, inject=False):
         marker = self.tree / name
         sent = "injected" if inject else seed
         self.drive("command", f'[[ . -ef "$NIRUX_STATE_DIR/../worktree" ]] && echo {sent} > {name}')
         wait_for(f"missing terminal effect {name}", lambda: marker.is_file()
-                 and marker.read_text() == seed + "\n", self.alive)
+                 and marker.read_text() == seed + "\n", self.check_window)
 
     def edit(self, token, inject=False):
         wait_for("Monaco text area did not take focus", lambda: self.drive("editor-focus", probe=True))
@@ -205,7 +211,7 @@ class App:
             value = file.read_text()
             return token in value and value.replace(token, "", 1) == original
 
-        wait_for("Monaco save did not reach README.md", saved, self.alive)
+        wait_for("Monaco save did not reach README.md", saved, self.check_window)
 
     def holders(self):
         result = subprocess.run(["/usr/sbin/lsof", "-nP", "-t", "--", self.lease],
