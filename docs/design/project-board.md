@@ -1,14 +1,14 @@
 # Project Board
 
-> **Design record:** implemented through the B3b journal view. The board, its config and the merge queue are in the app.\
-> **Differs today:** Ask Agent to Resolve is pending, the text says "project" where the app says "space", and the Board shows the stages of [Board Stages](board-stages.md) in place of the table; the config and the merge queue are as here.\
+> **Design record:** implemented through B3b, including the Journal and Ask Agent to Resolve. The board, its config and the merge queue are in the app.\
+> **Differs today:** The app calls a project a space. The Board uses the layout in [Board Stages](board-stages.md).\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
 Status: design, validated by the user on 2026-09-27. B4 (the config), B1 (the
 read-only board), B2 (the merge queue's engine) and B3a (starting, following
-and stopping the queue) are implemented, along with B3b’s journal view. Ask
-Agent to Resolve is pending. What B1, B2 and B3a decided along the way is in sections
-2.1, 3.7 and 3.8. Since S12 ([spaces](spaces.md)), a space with several
+and stopping the queue) are implemented, along with B3b’s Journal and Ask Agent
+to Resolve. What B1, B2 and B3a decided along the way is in sections 2.1, 3.7
+and 3.8. Since S12 ([spaces](spaces.md)), a space with several
 repositories has a section, a config and a merge queue per repository
 (sections 2.2 and 5.1).
 
@@ -39,7 +39,7 @@ brought forward, and its "Finish" action is the worktree cleanup shipped in #46.
 
 - **A board column**, not an evolution of Pilot Mode (section 1). A running
   queue belongs to the app, not to the column (section 3.6).
-- **A conflict stops the queue**, and the row offers "Ask Agent to Resolve"
+- **A conflict stops the queue**, and the Journal offers "Ask Agent to Resolve"
   (section 3.3). The agent merges `main` into its branch: a rebase would need a
   force push.
 - **Checks that aren't required:** a red one blocks the merge; a pending one
@@ -356,7 +356,22 @@ Definitions:
   GitHub recomputes it. The queue re-reads with back-off for up to 2 minutes.
   Only CONFLICTING is a conflict.
 
-For each PR, in order:
+The sheet opens in **Standard** every time. Two opt-in cadences apply to this Start only.
+
+- **Batch post-merge** keeps branch updates and required checks for each PR.
+  With a configured post-merge workflow, it waits for the push run on the final
+  merge commit. Intermediate pushes can still run the workflow and publish.
+- **Express disjoint** requires at least two mergeable PRs with green required
+  checks, no red checks, and complete changed-path lists for their confirmed
+  heads (at most 100 files per PR). Paths must be disjoint after case folding
+  and Unicode normalization. Workflow changes and renames with unknown source
+  paths rule it out. Express merges each confirmed head without updating it.
+  It rechecks mergeability, local worktrees, checks and the current base tip
+  before each merge, then verifies the final push run if configured.
+- Both fast cadences let pending push runs from earlier merges in this batch
+  continue. Other base runs and observed failures retain their usual guards.
+
+For each PR in Standard, in order:
 
 1. **Preflight.** Re-read the PR:
    - open, not a draft, based on the configured base branch, with the
@@ -481,7 +496,7 @@ when the branch is behind.
 
 A PR conflicts when its update returns 422 and a re-read says CONFLICTING, or
 when preflight reads CONFLICTING. Nirux never resolves conflicts itself. The
-queue stops, the row reads "conflict", and it offers **Ask Agent to Resolve**:
+queue stops, and the repository’s Journal offers **Ask Agent to Resolve**, including after relaunch:
 
 - On click, Nirux focuses the agent's column and types a prepared prompt
   without pressing Return. The user reads it and submits it, so a half-typed
@@ -489,10 +504,10 @@ queue stops, the row reads "conflict", and it offers **Ask Agent to Resolve**:
 - The prompt, with the configured base branch: "PR #52 conflicts with `main`.
   Run `git pull`, then `git merge origin/main`, resolve the conflicts, run the
   tests, commit and push. Don't rebase or force-push."
-- It targets one column: the row's agent column when there is exactly one,
+- It targets one column: the PR worktree’s eligible agent column when there is exactly one,
   otherwise the one the user picks from a menu. The button is enabled only if
   that column's foreground process is the agent and it is back at its prompt,
-  the same rule as Resume. Otherwise it is disabled and says why.
+  with no open dialog or existing draft. Otherwise it is disabled and says why.
 - The next Start shows the PR's new head in the confirmation sheet, so the
   resolution is confirmed before it is merged.
 
@@ -505,7 +520,7 @@ Rejected:
 ### 3.4 Concurrency
 
 - **The post-merge workflow.** Nirux's nightly uses one concurrency group with
-  `cancel-in-progress: true`. That is why the queue merges the next PR only once
+  `cancel-in-progress: true`. That is why Standard merges the next PR only once
   the nightly of the previous merge has finished. Step 4's check (no unfinished
   run) extends this to the first merge after Start, and to merges made from
   outside.
@@ -782,8 +797,8 @@ pull request.
 
 - **Nothing without a click.** The board only reads, but for Retarget
   ([stacked pull requests](pr-stacks.md)). The queue runs after Start
-  and a confirmation. Resume, Clean Up and Ask Agent to Resolve are each one
-  click on one row, and the last one doesn't even submit.
+  and a confirmation. Resume, Clean Up and Ask Agent to Resolve each require
+  a click. Ask Agent to Resolve leaves submission to the user.
 - **The confirmation sheet** lists, in order, each PR with its head SHA and
   checks, and what will happen:
   - update if behind;

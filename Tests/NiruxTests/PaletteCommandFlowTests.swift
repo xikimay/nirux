@@ -483,7 +483,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
             harness.runPaletteCommand("Open Antigravity")
             XCTAssertEqual(workspace.columns.count, columnCount + 3)
-            XCTAssertEqual(harness.agentLaunches.last, "command agy")
+            XCTAssertEqual(harness.agentLaunches.last, "command agy --mode auto")
 
             // Claude waits on the user (faked: a real one needs a `claude`
             // in front): the command goes to it. QuickSwitcherFlowTests
