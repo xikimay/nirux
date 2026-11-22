@@ -82,7 +82,8 @@ extension NiruxShellView {
             )
         }
         session.columns = session.worktrees.map {
-            reviewSendColumns(root: send.root, allWorktrees: $0, snapshot: snapshot)
+            reviewSendColumns(in: workspaces, roots: [send.root.comparablePath],
+                            allWorktrees: $0.map(\.comparablePath), snapshot: snapshot)
         } ?? []
         var content = Self.reviewSendContent(send, columns: session.columns, queued: isQueued(send, of: review))
         if session.worktrees == nil {
@@ -149,22 +150,17 @@ extension NiruxShellView {
         }
     }
 
-    /// The agent columns of `root`: those whose agent, by its own folder
-    /// (where `claude --worktree` works) or else the shell's, runs inside
-    /// `root`, not inside a worktree nested in it (`allWorktrees`): opened
-    /// from the main checkout, the review never offers the agent of another
-    /// worktree. In sidebar order, each with why the comments can't go
-    /// there now. The label names the workspace, the agent, the column's
-    /// place and folder: a terminal title changes as the agent works.
-    func reviewSendColumns(root: String, allWorktrees: [String], snapshot: ProcessSnapshot) -> [ReviewSendColumn] {
-        let roots = [root.comparablePath]
-        let others = allWorktrees.map(\.comparablePath)
+    /// In sidebar order, using the agent’s own folder for `claude --worktree`
+    /// and excluding agents in nested worktrees. All paths are comparable.
+    func reviewSendColumns(
+        in workspaces: [WorkspaceState], roots: [String], allWorktrees: [String], snapshot: ProcessSnapshot
+    ) -> [ReviewSendColumn] {
         var columns: [ReviewSendColumn] = []
         for workspace in workspaces where !workspace.isClosing {
             for (index, column) in workspace.columns.enumerated() where !column.isClosing {
                 guard let pty = column.pty, let agent = pty.runningAgent(snapshot: snapshot),
                       let folder = pty.agentCwd(snapshot: snapshot),
-                      MergeQueue.isInside(folder.comparablePath, roots: roots, allWorktrees: others) else { continue }
+                      MergeQueue.isInside(folder.comparablePath, roots: roots, allWorktrees: allWorktrees) else { continue }
                 let foreground = pty.foregroundProcess(snapshot: snapshot)
                 let inFront = foreground?.agent != nil
                 let refusal = inFront ? pty.reviewSendRefusal(snapshot: snapshot) : Self.reviewSendRefusal(behind: foreground)

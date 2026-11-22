@@ -631,6 +631,7 @@ extension NiruxShellView {
         refreshStaleBranchReviewsOnScreen()
         let snapshot = snapshot ?? ProcessSnapshot()
         reviewSendPanel?.onRefresh?(snapshot)
+        (window?.attachedSheet as? MergeQueueJournalPanel)?.refreshResolution(snapshot: snapshot)
         for workspace in workspaces { for column in workspace.columns { column.pty?.settlePromptWatchers(snapshot: snapshot) } }
         refreshHeaderTitles(snapshot: snapshot)
         updateSidebar(snapshot: snapshot)
