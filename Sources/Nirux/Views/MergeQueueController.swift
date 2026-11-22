@@ -265,7 +265,17 @@ final class MergeQueueController {
     /// Starts the confirmed list with the settings the confirmation showed.
     /// Returns why not, if it can't.
     @discardableResult
+    func start(_ confirmation: MergeQueue.Confirmation) -> StartRefusal? {
+        guard confirmation.canStart else { return .invalidSettings(confirmation.refusals) }
+        return start(settings: confirmation.settings, entries: confirmation.entries, cadence: confirmation.cadence)
+    }
+
     func start(settings: BoardConfig.QueueSettings, entries: [MergeQueue.ConfirmedEntry]) -> StartRefusal? {
+        start(settings: settings, entries: entries, cadence: .standard)
+    }
+
+    private func start(settings: BoardConfig.QueueSettings, entries: [MergeQueue.ConfirmedEntry],
+                       cadence: MergeQueue.Cadence) -> StartRefusal? {
         guard !isRunning else { return .alreadyRunning }
         guard settings.gitHubRepository == queueRepository else { return .otherRepository }
         guard files != nil else { return .noProjectFolder }
@@ -291,7 +301,7 @@ final class MergeQueueController {
         }
         runsElsewhere = false
         let driver = MergeQueueDriver(
-            engine: MergeQueue.Engine(settings: settings, entries: entries), client: client, local: local, clock: clock
+            engine: MergeQueue.Engine(settings: settings, entries: entries, cadence: cadence), client: client, local: local, clock: clock
         )
         driver.onUpdate = { [weak self] engine, notes in self?.update(engine, notes: notes) }
         driver.onMutation = { [weak self] mutation, command, result in
@@ -303,6 +313,17 @@ final class MergeQueueController {
         activity = beginActivity()
         driver.start()
         return nil
+    }
+
+    /// Keep a live Start in another Nirux out until the draft reaches its agent.
+    func lockForResolution(of conflict: MergeQueue.Conflict) -> Result<MergeQueueLock, StartRefusal> {
+        guard !isRunning, !runsElsewhere, !isRepositoryBusy(queueRepository) else { return .failure(.repositoryBusy) }
+        Self.waitForFiles()
+        guard let lock = MergeQueueLock.acquire(repository: queueRepository, folder: lockFolder) else { return .failure(.lockedElsewhere) }
+        guard MergeQueue.Conflict(saved: loadSaved(), repository: queueRepository, dryRun: isDryRun) == conflict else {
+            return .failure(.invalidEntry("The saved queue changed since this conflict. Check its current status before asking an agent."))
+        }
+        return .success(lock)
     }
 
     /// Stops before the next command; a call already sent finishes.

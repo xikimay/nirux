@@ -53,6 +53,7 @@ extension MergeQueue {
         let title: String
         let status: String
         let link: URL?
+        let conflict: Conflict?
         let entriesText: String
         var copyText: String {
             [title, status, link?.absoluteString, entriesText].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
@@ -70,6 +71,7 @@ extension MergeQueue {
                 reason = saved?.status == .stopped ? saved?.stopReason : nil
                 number = saved?.current.flatMap { saved?.entries[safe: $0]?.number }
             }
+            conflict = reason?.kind == .conflict ? Conflict(saved: saved, repository: repository, dryRun: dryRun) : nil
             let lastStop = entries.last.flatMap { $0.result.hasPrefix("Stopped: ") ? $0 : nil }
             status = Self.displayText(engine?.statusText ?? saved?.statusText ?? lastStop?.result ?? "No saved queue status")
             if let reason {

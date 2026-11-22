@@ -7,7 +7,7 @@ final class LocalServerChipView: NSView, ColumnHeaderAccessory {
     static let height: CGFloat = 20
 
     /// Called with the URL the chip showed when clicked.
-    var onOpen: ((LocalServerURL) -> Void)?
+    var onOpen: ((LocalServerURL, _ isIsolated: Bool) -> Void)?
     var onDismiss: ((LocalServerURL) -> Void)?
 
     private(set) var url: LocalServerURL?
@@ -37,6 +37,10 @@ final class LocalServerChipView: NSView, ColumnHeaderAccessory {
         openButton.bezelStyle = .inline
         openButton.target = self
         openButton.action = #selector(openClicked)
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Open in Isolated Test Browser", action: #selector(openIsolated), keyEquivalent: "").target = self
+        self.menu = menu
+        openButton.menu = menu
         addSubview(openButton)
 
         dismissButton.isBordered = false
@@ -110,9 +114,12 @@ final class LocalServerChipView: NSView, ColumnHeaderAccessory {
     // Deferred one turn: both actions remove the proposal, which must not
     // happen inside the button's own mouse-tracking loop. The URL is the
     // one shown at click time, even if a scan swaps it meanwhile.
-    @objc private func openClicked() {
+    @objc private func openClicked() { open(isIsolated: false) }
+    @objc private func openIsolated() { open(isIsolated: true) }
+
+    private func open(isIsolated: Bool) {
         guard let url else { return }
-        DispatchQueue.main.async { [weak self] in self?.onOpen?(url) }
+        DispatchQueue.main.async { [weak self] in self?.onOpen?(url, isIsolated) }
     }
 
     @objc private func dismissClicked() {

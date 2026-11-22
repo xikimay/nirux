@@ -212,6 +212,15 @@ extension NiruxApp {
         codexMode.setAccessibilityLabel("Codex launch mode")
         settingsCodexLaunchModePopup = codexMode
 
+        let agyMode = SettingsForm.popup(target: self, action: #selector(settingsAgyLaunchModeChanged(_:)))
+        for mode in AgyLaunchMode.allCases {
+            agyMode.addItem(withTitle: mode.displayName)
+            agyMode.lastItem?.representedObject = mode.rawValue
+        }
+        SettingsForm.select(NiruxShellView.currentAgyLaunchMode().rawValue, in: agyMode)
+        agyMode.setAccessibilityLabel("Antigravity launch mode")
+        settingsAgyLaunchModePopup = agyMode
+
         let stuck = SettingsForm.popup(target: self, action: #selector(settingsStuckAgentMinutesChanged(_:)))
         let current = NiruxShellView.currentStuckAgentMinutes()
         // A value set outside Settings stays selectable as it is.
@@ -248,12 +257,13 @@ extension NiruxApp {
                 SettingsForm.hint(Self.usageLimitsHint(for: claudeStatusLineStateReader()), under: usageLimits)
             ],
             [
-                SettingsForm.header("Codex"),
-                SettingsForm.row("Launch mode", codexMode),
+                SettingsForm.header("Launch modes"),
+                SettingsForm.row("Codex", codexMode),
                 SettingsForm.hint(
                     "Default = no flags; Codex's own config applies. "
                         + "Full Auto = no sandbox, never asks, web search. Workspace Write = sandboxed."
-                )
+                ),
+                SettingsForm.row("Antigravity", agyMode)
             ],
             [
                 SettingsForm.header("Stuck agents"),
@@ -538,10 +548,13 @@ extension NiruxApp {
         guard let raw = sender.selectedItem?.representedObject as? String, let mode = ClaudeLaunchMode(rawValue: raw) else { return }
         if saveSetting(revert: { SettingsForm.select(NiruxShellView.currentClaudeLaunchMode().rawValue, in: sender) }, {
             $0.claudeLaunchMode = mode
-        }), let shell {
-            for lead in shell.workspaces where lead.isLead { lead.leadOptionsCache = nil }
-            shell.updateSidebar()
-        }
+        }) { refreshLeadLaunchOptions() }
+    }
+
+    private func refreshLeadLaunchOptions() {
+        guard let shell else { return }
+        for lead in shell.workspaces where lead.isLead { lead.leadOptionsCache = nil }
+        shell.updateSidebar()
     }
 
     @objc func settingsNoFlickerChanged(_ sender: NSButton) {
@@ -559,8 +572,15 @@ extension NiruxApp {
 
     @objc func settingsCodexLaunchModeChanged(_ sender: NSPopUpButton) {
         guard let raw = sender.selectedItem?.representedObject as? String, let mode = CodexLaunchMode(rawValue: raw) else { return }
-        saveSetting(revert: { SettingsForm.select(NiruxShellView.currentCodexLaunchMode().rawValue, in: sender) }) {
+        if saveSetting(revert: { SettingsForm.select(NiruxShellView.currentCodexLaunchMode().rawValue, in: sender) }, {
             $0.codexLaunchMode = mode
+        }) { refreshLeadLaunchOptions() }
+    }
+
+    @objc func settingsAgyLaunchModeChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String, let mode = AgyLaunchMode(rawValue: raw) else { return }
+        saveSetting(revert: { SettingsForm.select(NiruxShellView.currentAgyLaunchMode().rawValue, in: sender) }) {
+            $0.agyLaunchMode = mode
         }
     }
 
@@ -754,6 +774,7 @@ extension NiruxApp {
         settingsNoFlickerCheckbox = nil
         settingsUsageLimitsCheckbox = nil
         settingsCodexLaunchModePopup = nil
+        settingsAgyLaunchModePopup = nil
         settingsMissionHandoffsCheckbox = nil
         settingsSidebarApprovalsCheckbox = nil
         settingsStuckAgentPopup = nil

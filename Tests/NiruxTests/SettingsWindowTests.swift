@@ -16,8 +16,10 @@ final class SettingsWindowTests: XCTestCase {
 
             XCTAssertEqual(NiruxShellView.currentClaudeLaunchMode(), .default)
             XCTAssertEqual(NiruxShellView.currentCodexLaunchMode(), .default)
+            XCTAssertEqual(NiruxShellView.currentAgyLaunchMode(), .auto)
             XCTAssertEqual(selectedRawValue(app.settingsLaunchModePopup), ClaudeLaunchMode.default.rawValue)
             XCTAssertEqual(selectedRawValue(app.settingsCodexLaunchModePopup), CodexLaunchMode.default.rawValue)
+            XCTAssertEqual(selectedRawValue(app.settingsAgyLaunchModePopup), AgyLaunchMode.auto.rawValue)
         }
     }
 
@@ -40,7 +42,7 @@ final class SettingsWindowTests: XCTestCase {
     func testSettingsShowSavedLaunchModes() throws {
         try withIsolatedState {
             var state = PersistedState(workspaces: [], activeWorkspaceIndex: 0)
-            state.settings = PersistedSettings(claudeLaunchMode: .acceptEdits, codexLaunchMode: .fullAuto)
+            state.settings = PersistedSettings(claudeLaunchMode: .acceptEdits, codexLaunchMode: .fullAuto, agyLaunchMode: .plan)
             XCTAssertTrue(Persistence.save(state))
 
             let app = try openSettings()
@@ -48,6 +50,7 @@ final class SettingsWindowTests: XCTestCase {
 
             XCTAssertEqual(selectedRawValue(app.settingsLaunchModePopup), ClaudeLaunchMode.acceptEdits.rawValue)
             XCTAssertEqual(selectedRawValue(app.settingsCodexLaunchModePopup), CodexLaunchMode.fullAuto.rawValue)
+            XCTAssertEqual(selectedRawValue(app.settingsAgyLaunchModePopup), AgyLaunchMode.plan.rawValue)
         }
     }
 
@@ -89,6 +92,7 @@ final class SettingsWindowTests: XCTestCase {
                 ("claudeNoFlicker", { try self.click(app.settingsNoFlickerCheckbox) }),
                 ("showClaudeUsageLimits", { try self.click(app.settingsUsageLimitsCheckbox) }),
                 ("codexLaunchMode", { try self.choose(CodexLaunchMode.bypass.rawValue, in: app.settingsCodexLaunchModePopup) }),
+                ("agyLaunchMode", { try self.choose(AgyLaunchMode.acceptEdits.rawValue, in: app.settingsAgyLaunchModePopup) }),
                 ("stuckAgentMinutes", { try self.choose(30, in: app.settingsStuckAgentPopup) }),
                 ("agentCirclingHint", { try self.click(app.settingsCirclingHintCheckbox) }),
                 ("explainModel", { try self.choose("claude-sonnet-5-5", in: app.settingsExplainModelPopup) }),
@@ -112,6 +116,7 @@ final class SettingsWindowTests: XCTestCase {
             }
             XCTAssertEqual(NiruxShellView.currentClaudeLaunchMode(), .plan)
             XCTAssertEqual(NiruxShellView.currentCodexLaunchMode(), .bypass)
+            XCTAssertEqual(NiruxShellView.currentAgyLaunchMode(), .acceptEdits)
             XCTAssertEqual(NiruxShellView.currentStuckAgentMinutes(), 30)
             XCTAssertNil(app.settingsPanel?.attachedSheet)
         }

@@ -19,8 +19,8 @@ extension NiruxShellView {
             self.requestMergeQueueStart(board: board, section: id)
         }
         stages.onJournal = { [weak self, weak board] id in
-            guard let self, let board, let window = board.view.window, let queue = self.boardQueue(board, section: id) else { return }
-            MergeQueueJournalPanel(queue: queue, openURL: self.sideEffects.openURL).show(in: window)
+            guard let self, let board, let window = board.view.window, window.attachedSheet == nil else { return }
+            self.showQueueJournal(board: board, section: id, in: window)
         }
         stages.onStop = { [weak self, weak board] id in
             guard let self, let board else { return }
