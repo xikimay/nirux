@@ -229,10 +229,12 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             try BoardStagesClicks.click(board.view.refreshButton)
             waitUntil("Refresh clears it") { header.pill.status?.tone != .error && BoardStagesClicks.wasUpdated(board) }
 
-            let reads = client.calls.filter { $0.what == "pr open acme/widgets" }.count
+            let callsBeforeRetarget = client.calls.count
             try BoardStagesClicks.choose("Retarget to main", in: try line("feat/api", in: board).contextMenu())
-            waitUntil("the pull requests are read again") {
-                client.calls.filter { $0.what == "pr open acme/widgets" }.count > reads
+            waitUntil("the pull requests are read after retargeting") {
+                let calls = client.calls.dropFirst(callsBeforeRetarget).map(\.what)
+                guard let retarget = calls.firstIndex(of: "retarget acme/widgets #14 main") else { return false }
+                return calls[retarget...].contains("pr open acme/widgets")
             }
             XCTAssertEqual(client.calls.filter { $0.what.hasPrefix("retarget") }.map(\.what),
                            ["retarget acme/widgets #14 main", "retarget acme/widgets #14 main"])
