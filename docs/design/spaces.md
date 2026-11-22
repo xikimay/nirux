@@ -277,8 +277,9 @@ New flow, built on the guarded typing `tell` already uses
     off), it opens the New sheet filled in, titled "Proposed by the Lead",
     without taking the keyboard or Return; the task reports to the Lead if
     the user starts it. One sheet at a time: later proposals wait their turn.
-  - `list_tasks()`: the space's tasks (title, branch, agent state, pull request
-    and checks, the question waiting or the result) and repositories.
+  - `list_tasks(space?)`: the space's tasks (title, branch, agent state, pull request
+    and checks, the question waiting or the result) and repositories; optional `space`
+    (name or `space:<id>`) inspects another space before reorganizing tasks.
   - `tell(task, message)`, `reply(question, message | accept)`: Missions, 4,000
     characters at most (see mission-tell.md, "Longer messages"); `accept` sends
     the question's recommendation (docs/missions.md). A task is named
@@ -410,6 +411,18 @@ New flow, built on the guarded typing `tell` already uses
   - `record_review(task, findings)` and `daily_pass()`: what the Lead's
     reviews found, by kind, and what happened in the space since its last
     daily pass, for its rules (see daily-pass.md).
+  - `list_spaces()`, `create_space(name, color?, anchors?, move_anchors?)`,
+    `edit_space(space, name?, color?, add_anchors?, remove_anchors?, move_anchors?)`,
+    `delete_space(space, move_tasks_to?)`, and
+    `move_task_to_space(task, to_space, from_space?)`: space organization
+    without stealing focus or showing modal alerts. `create_space` and
+    `edit_space` validate `#RRGGBB` colors, reject case-insensitive duplicate
+    names and anchors owned by another space unless `move_anchors: true`, and
+    keep General anchor-free. `delete_space` refuses General, the caller's own
+    space, spaces with an active Lead or running merge queue, and non-empty
+    spaces unless `move_tasks_to` migrates their tasks first.
+    `move_task_to_space` refuses Lead or closing workspaces and reuses
+    `moveWorkspaceToSpace` without yanking focus.
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state
@@ -417,8 +430,12 @@ New flow, built on the guarded typing `tell` already uses
   nobody claims within 15 s is taken back: nothing happens. A claimed one the
   app hasn't finished within its wait may still happen, and the Lead is told
   not to call again. Calls are answered off the server's read loop.
-- **No tool merges or reaches another space.** Only `close_task` removes a
-  worktree and a branch, once Clean Up Worktree…'s checks pass.
+- **Task work stays in its space.** Only the explicit space management tools
+  (`list_spaces`, `create_space`, `edit_space`, `delete_space`,
+  `move_task_to_space`, and `list_tasks` with `space`) inspect or organize
+  other spaces; no tool merges without opt-in/confirmation, and only
+  `close_task` removes a worktree and a branch, once Clean Up Worktree…'s
+  checks pass.
 - **Sub-tasks under their task** (shipped with S11c for Mission children): a
   workspace keeps the task it is a sub-task of (`parentWorkspaceID`, saved
   with it) when it opens from ⌘N's "Sub-task of", or from the worktree skill

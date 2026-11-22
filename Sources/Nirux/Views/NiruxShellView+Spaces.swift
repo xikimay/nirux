@@ -44,12 +44,12 @@ extension NiruxShellView {
     }
 
     /// Its shells keep the old NIRUX_PROFILE_ID until they restart.
-    func moveWorkspaceToSpace(workspaceID: String, profileID: String) {
+    func moveWorkspaceToSpace(workspaceID: String, profileID: String, refocusing: Bool = true) {
         guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
         if let refusal = moveRefusal(workspaceID: workspaceID, profileID: profileID) { return showToast(refusal) }
         // Its Board follows (`boardsFollowTheirWorkspaces`, from the store).
         guard workspaceStore.moveWorkspace(at: index, toProfile: profileID) else { return }
-        refreshAfterWorkspaceMutation()
+        refreshAfterWorkspaceMutation(refocusing: refocusing)
     }
 
     /// Why the workspace can't move there now, for a toast: its Board would
@@ -67,16 +67,19 @@ extension NiruxShellView {
         return "The merge queue of \(name) is running: stop it before moving the workspace of its Board"
     }
 
-    func deleteSpace(profileID: String) {
+    @discardableResult
+    func deleteSpace(profileID: String, refocusing: Bool = true) -> Bool {
         // Asked while the confirmation was up: a queue started meanwhile.
         guard !mergeQueues(of: profileID).contains(where: \.isRunning) else {
-            return showToast("A merge queue started in this space: stop it before deleting the space")
+            if refocusing { showToast("A merge queue started in this space: stop it before deleting the space") }
+            return false
         }
-        guard workspaceStore.deleteProfile(id: profileID) else { return }
+        guard workspaceStore.deleteProfile(id: profileID) else { return false }
         projectStore.markDeleted(profileID)
         SpaceDefaultsStore.removeFiles(ofSpace: profileID)
-        refreshAfterWorkspaceMutation()
+        refreshAfterWorkspaceMutation(refocusing: refocusing)
         // Opened while the confirmation was up: its space is gone.
         spaceSettingsSpacesChanged()
+        return true
     }
 }

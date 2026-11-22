@@ -54,7 +54,8 @@ enum NiruxMCPServer {
         Lead auto-start enabled, a clean preflight starts the queue. Use stop_merge_queue to stop it locally. Pass replace: true only when \
         the user asks to replace an idle Board selection. Cadences: standard, batch_post_merge, express_disjoint. \
         Record reviews with record_review. When two tasks get the same kind of finding, use propose_rule for the user's decision. Close merged \
-        or abandoned tasks with close_task. Leave worktree and branch cleanup to Nirux. Stay in this space.
+        or abandoned tasks with close_task. Leave worktree and branch cleanup to Nirux. Manage spaces with list_spaces, create_space, \
+        edit_space, delete_space, move_task_to_space, and list_tasks(space); otherwise stay in this space.
         """
 
     /// The instructions for whoever launched the server: the Lead's role

@@ -27,9 +27,15 @@ enum LeadTools {
     static let interruptTask = "interrupt_task"
     static let recordReview = "record_review"
     static let dailyPass = "daily_pass"
+    static let listSpaces = "list_spaces"
+    static let createSpace = "create_space"
+    static let editSpace = "edit_space"
+    static let deleteSpace = "delete_space"
+    static let moveTaskToSpace = "move_task_to_space"
     static let names = [
         startTask, setTaskAfter, listTasks, tell, reply, askUser, mergeQueueStatus, stopMergeQueue, queueMerge, setTaskContext, proposeRule, recordReview, dailyPass,
-        closeTask, moveTask, renameTask, setTaskParent, readThread, readTask, resumeTask, interruptTask
+        closeTask, moveTask, renameTask, setTaskParent, readThread, readTask, resumeTask, interruptTask,
+        listSpaces, createSpace, editSpace, deleteSpace, moveTaskToSpace
     ]
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
@@ -39,6 +45,11 @@ enum LeadTools {
     static let queueRepoArgument = ["type": "string", "description": "The repository's name in this space, or owner/name; needed when the space has several."]
 
     static let taskIDPrefix = "task:"
+    static let spaceIDPrefix = "space:"
+    static let maxSpaceNameLength = 80
+
+    /// How a tool names a space.
+    static let spaceDescription = "The stable space:<id> from list_spaces, or the space's name."
 
     /// How a tool names one of the Lead's tasks.
     static let taskDescription = "The stable task:<id> from list_tasks, the task’s branch, its folder or folder name, or its title. "
@@ -162,15 +173,18 @@ enum LeadTools {
                 required: ["task"]
             ),
             definition(
-                listTasks, title: "List the space's tasks",
+                listTasks, title: "List a space's tasks",
                 description: """
-                    The space's tasks and repositories: each task's title, branch, repository, agent state (working, \
+                    A space's tasks and repositories: each task's title, branch, repository, agent state (working, \
                     needs the user, asking you, stopped on an API error, silent, exited mid-turn, idle, done), pull request and checks, the \
-                    last questions it got answered, and the question or result it sent you, its next step and blocker. Read it again after \
-                    a /clear: Nirux keeps the state, your \
+                    last questions it got answered, and the question or result it sent you, its next step and blocker. Defaults to your \
+                    space; pass space to inspect another space. Read it again after a /clear: Nirux keeps the state, your \
                     conversation doesn't.
                     """,
-                properties: [:], required: [], readOnly: true
+                properties: [
+                    "space": ["type": "string", "description": "Optional: another space to inspect. \(spaceDescription) Omit for your own space."]
+                ],
+                required: [], readOnly: true
             ),
             definition(
                 tell, title: "Tell a task",
@@ -404,6 +418,86 @@ enum LeadTools {
                     """,
                 properties: ["task": ["type": "string", "description": taskDescription]],
                 required: ["task"], destructive: true
+            ),
+            definition(
+                listSpaces, title: "List all spaces",
+                description: """
+                    List every Nirux space in sidebar order: name, space:<id>, color hex, default flag, repositories and \
+                    folders, open and archived task counts, whether a Lead is active, and whether a merge queue is running.
+                    """,
+                properties: [:], required: [], readOnly: true
+            ),
+            definition(
+                createSpace, title: "Create a space",
+                description: """
+                    Create a new Nirux space without switching away from the user's active space or workspace. Optional \
+                    anchors attach local git repositories or directories; anchors owned by another space are rejected \
+                    unless move_anchors is true.
+                    """,
+                properties: [
+                    "name": ["type": "string", "description": "Unique space name (trimmed, case-insensitively unique)."],
+                    "color": ["type": "string", "description": "Optional #RRGGBB hex color. Omit for Nirux's next palette color."],
+                    "anchors": [
+                        "type": "array", "items": ["type": "string"],
+                        "description": "Optional local directory or git repository paths to anchor to the space."
+                    ],
+                    "move_anchors": [
+                        "type": "boolean", "default": false,
+                        "description": "Set true to move an anchor that already belongs to another space."
+                    ]
+                ],
+                required: ["name"]
+            ),
+            definition(
+                editSpace, title: "Edit a space",
+                description: "Rename a space, change its color, or add/remove repository and folder anchors. Pass only what changes.",
+                properties: [
+                    "space": ["type": "string", "description": spaceDescription],
+                    "name": ["type": "string", "description": "Optional new space name (unique, non-empty)."],
+                    "color": ["type": "string", "description": "Optional new #RRGGBB hex color."],
+                    "add_anchors": [
+                        "type": "array", "items": ["type": "string"],
+                        "description": "Optional local directory or git repository paths to add."
+                    ],
+                    "remove_anchors": [
+                        "type": "array", "items": ["type": "string"],
+                        "description": "Optional anchor names or paths to remove from the space."
+                    ],
+                    "move_anchors": [
+                        "type": "boolean", "default": false,
+                        "description": "Set true to move an anchor in add_anchors that already belongs to another space."
+                    ]
+                ],
+                required: ["space"]
+            ),
+            definition(
+                deleteSpace, title: "Delete a space",
+                description: """
+                    Delete a space without showing a modal alert. Refuses the default space, your own space, spaces with \
+                    a running merge queue, spaces with an active Lead, or spaces with remaining tasks unless move_tasks_to \
+                    is provided to migrate them first.
+                    """,
+                properties: [
+                    "space": ["type": "string", "description": spaceDescription],
+                    "move_tasks_to": [
+                        "type": "string",
+                        "description": "Optional destination space (name or space:<id>) to move remaining tasks into before deleting."
+                    ]
+                ],
+                required: ["space"], destructive: true
+            ),
+            definition(
+                moveTaskToSpace, title: "Move a task to another space",
+                description: """
+                    Move a task workspace to another space while keeping hierarchy and persistence consistent. Resolves \
+                    the task in your space by default, or in from_space when organizing tasks between any two spaces.
+                    """,
+                properties: [
+                    "task": ["type": "string", "description": taskDescription],
+                    "to_space": ["type": "string", "description": "Destination space. \(spaceDescription)"],
+                    "from_space": ["type": "string", "description": "Optional source space. \(spaceDescription) Defaults to your space."]
+                ],
+                required: ["task", "to_space"]
             )
         ]
     }
@@ -496,6 +590,30 @@ enum LeadTools {
         return whole
     }
 
+    /// Validates a `#RRGGBB` hex color and returns its normalized uppercase form, or nil.
+    static func normalizedColorHex(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count == 7, trimmed.hasPrefix("#") else { return nil }
+        let hex = trimmed.dropFirst()
+        guard hex.allSatisfy(\.isHexDigit) else { return nil }
+        return "#" + hex.uppercased()
+    }
+
+    /// Optional JSON array of non-empty trimmed strings.
+    /// Returns `nil` when omitted or null, `.some(nil)` when malformed, `.some([String])` when valid.
+    static func stringArray(_ arguments: [String: Any], _ key: String) -> [String]?? {
+        guard let value = arguments[key], !(value is NSNull) else { return nil }
+        guard let items = value as? [Any] else { return .some(nil) }
+        var result: [String] = []
+        for item in items {
+            guard let text = item as? String else { return .some(nil) }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return .some(nil) }
+            result.append(trimmed)
+        }
+        return .some(result)
+    }
+
     /// What's wrong with a call's arguments before it reaches the app, or nil.
     /// `subtask`: a task's agent calls, for a sub-task.
     static func problem(tool: String, arguments: [String: Any], subtask: Bool = false) -> String? {
@@ -526,6 +644,10 @@ enum LeadTools {
             }
             return nil
         case listTasks:
+            if isGiven(arguments, "space") {
+                if subtask { return "Only the space's Lead can inspect another space." }
+                if string(arguments, "space") == nil { return "space must name a space (or omit it for your own space)." }
+            }
             return nil
         case tell, reply:
             let target = tool == tell ? "task" : "question"
@@ -587,8 +709,73 @@ enum LeadTools {
                 rule: LearnedRules.cleaned(rule, limit: LearnedRules.maxRuleLength),
                 evidence: LearnedRules.cleaned(evidence, limit: LearnedRules.maxEvidenceLength)
             )
+        case listSpaces, createSpace, editSpace, deleteSpace, moveTaskToSpace:
+            return spaceToolProblem(tool: tool, arguments: arguments)
         default:
             return "Unknown tool: \(tool)"
         }
+    }
+
+    private static func spaceToolProblem(tool: String, arguments: [String: Any]) -> String? {
+        switch tool {
+        case listSpaces:
+            return nil
+        case createSpace:
+            guard let name = string(arguments, "name"), !name.contains(where: \.isNewline), name.count <= maxSpaceNameLength else {
+                return "name must be a single line holding 1 to \(maxSpaceNameLength) characters."
+            }
+            if isGiven(arguments, "color"),
+               (arguments["color"] as? String).flatMap(normalizedColorHex) == nil {
+                return "color must be a valid #RRGGBB hex color."
+            }
+            if let anchors = stringArray(arguments, "anchors"), anchors == nil {
+                return "anchors must be an array of non-empty path strings."
+            }
+            if isGiven(arguments, "move_anchors"), optionalFlag(arguments, "move_anchors") == nil {
+                return "move_anchors must be true or false."
+            }
+            return nil
+        case editSpace:
+            return editSpaceProblem(arguments)
+        case deleteSpace:
+            guard string(arguments, "space") != nil else { return "space is missing." }
+            if isGiven(arguments, "move_tasks_to"), string(arguments, "move_tasks_to") == nil {
+                return "move_tasks_to must name a destination space."
+            }
+            return nil
+        case moveTaskToSpace:
+            guard string(arguments, "task") != nil else { return "task is missing." }
+            guard string(arguments, "to_space") != nil else { return "to_space is missing." }
+            if isGiven(arguments, "from_space"), string(arguments, "from_space") == nil {
+                return "from_space must name a source space."
+            }
+            return nil
+        default:
+            return "Unknown tool: \(tool)"
+        }
+    }
+
+    private static func editSpaceProblem(_ arguments: [String: Any]) -> String? {
+        guard string(arguments, "space") != nil else { return "space is missing." }
+        if isGiven(arguments, "name") {
+            guard let name = string(arguments, "name"), !name.contains(where: \.isNewline), name.count <= maxSpaceNameLength else {
+                return "name must be a single line holding 1 to \(maxSpaceNameLength) characters."
+            }
+        }
+        if isGiven(arguments, "color"),
+           (arguments["color"] as? String).flatMap(normalizedColorHex) == nil {
+            return "color must be a valid #RRGGBB hex color."
+        }
+        let add = stringArray(arguments, "add_anchors")
+        if let add, add == nil { return "add_anchors must be an array of non-empty path strings." }
+        let remove = stringArray(arguments, "remove_anchors")
+        if let remove, remove == nil { return "remove_anchors must be an array of non-empty path strings." }
+        if isGiven(arguments, "move_anchors"), optionalFlag(arguments, "move_anchors") == nil {
+            return "move_anchors must be true or false."
+        }
+        let hasChange = isGiven(arguments, "name") || isGiven(arguments, "color")
+            || (add?.map { !$0.isEmpty } == true) || (remove?.map { !$0.isEmpty } == true)
+        guard hasChange else { return "Pass at least one change: name, color, add_anchors, or remove_anchors." }
+        return nil
     }
 }
