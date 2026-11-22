@@ -101,6 +101,7 @@ final class LeadRestartFlowTests: XCTestCase {
             for agent in [CodingAgent.codex, .agy] {
                 let lead = try harness.makeLead()
                 let column = try XCTUnwrap(lead.workspace.leadTerminal)
+                column.onAgentAttention = { _ in }
                 let pty = try XCTUnwrap(column.pty)
                 let standIn = AgentStandIn()
                 defer { standIn.remove() }
