@@ -60,7 +60,7 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
     }
 
     func testUnsafeFilesAreOmittedWithReasons() throws {
-        for name in ["link", "pipe", "big", ".env", "config", "normal.bin"] { try write(name, "original") }
+        for name in ["link", "pipe", "big", ".env", "config", "utf16.txt", "normal.bin"] { try write(name, "original") }
         try commit("fixtures")
         let fm = FileManager.default
         try fm.removeItem(atPath: repo + "/link")
@@ -70,6 +70,7 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         try write("big", Data(repeating: 65, count: 256))
         try write(".env", "private")
         try write("config", "ghp_" + String(repeating: "x", count: 36))
+        try write("utf16.txt", try XCTUnwrap(("ghp_" + String(repeating: "z", count: 36)).data(using: .utf16)))
         try write("normal.bin", Data([0, 255, 2]))
         let saved = try store(.init(maxSingleFileBytes: 128)).save(worktree: repo, label: nil)
         XCTAssertTrue(saved.isIncomplete)
@@ -80,6 +81,7 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(omissions["big"], "Single-file size limit")
         XCTAssertEqual(omissions[".env"], "Secret path")
         XCTAssertEqual(omissions["config"], "Secret content")
+        XCTAssertEqual(omissions["utf16.txt"], "Secret content")
     }
 
     func testBudgetsAndTimeoutReportIncomplete() throws {
@@ -129,6 +131,18 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         _ = try store.save(worktree: repo, label: nil)
         XCTAssertEqual(try store.list().count, 2)
         XCTAssertEqual(try Data(contentsOf: url), future)
+    }
+
+    func testInterruptedEvictionFinishesOnNextOpen() throws {
+        let store = try store()
+        let older = try store.save(worktree: repo, label: "Older")
+        let saved = try store.save(worktree: repo, label: "Newer")
+        let staging = store.folder.appendingPathComponent(".saving")
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
+        let plan: [String: Any] = ["saved": saved.id.uuidString, "victims": [older.id.uuidString]]
+        try JSONSerialization.data(withJSONObject: plan).write(to: staging.appendingPathComponent("eviction.json"))
+        XCTAssertEqual(try store.list().map(\.id), [saved.id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staging.path))
     }
 
     func testStoreRefusesGitDirectoriesAndSymlinkedStore() throws {

@@ -409,8 +409,10 @@ extension BranchReview {
                     return .failure(.unreadable)
                 }
             }
-            // It grew while it was read: an agent is writing it.
-            guard length <= size else { return .failure(.unreadable) }
+            var after = stat()
+            guard length == size, fstat(descriptor, &after) == 0, after.st_size == info.st_size,
+                  after.st_ctimespec.tv_sec == info.st_ctimespec.tv_sec,
+                  after.st_ctimespec.tv_nsec == info.st_ctimespec.tv_nsec else { return .failure(.unreadable) }
             data.count = length
             return .success(data)
         }

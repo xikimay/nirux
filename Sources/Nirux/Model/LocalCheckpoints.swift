@@ -56,6 +56,11 @@ struct LocalCheckpoints: Sendable {
             head = try keys.decodeIfPresent(String.self, forKey: .head)
             mergeBase = try keys.decodeIfPresent(String.self, forKey: .mergeBase)
             files = try keys.decode([File].self, forKey: .files)
+            var size = 0
+            for file in files {
+                guard file.size >= 0, file.size <= Int.max - size else { throw Problem("Invalid checkpoint file size.") }
+                size += file.size
+            }
             omissions = try keys.decodeIfPresent([Omission].self, forKey: .omissions) ?? []
             timedOut = try keys.decodeIfPresent(Bool.self, forKey: .timedOut) ?? false
             if try keys.decodeIfPresent(Bool.self, forKey: .isIncomplete) == true && !isIncomplete {
@@ -159,7 +164,10 @@ struct LocalCheckpoints: Sendable {
         try locked(create: false) {
             let entry = try readEntry(id)
             guard entry.manifest != nil else { throw Problem("This checkpoint needs a newer Nirux.") }
-            try FileManager.default.removeItem(at: folder.appendingPathComponent(id.uuidString))
+            let fm = FileManager.default
+            guard mkdir(staging.path, 0o700) == 0 else { throw Self.fileError }
+            try fm.moveItem(at: folder.appendingPathComponent(id.uuidString), to: staging.appendingPathComponent(id.uuidString))
+            try fm.removeItem(at: staging)
         }
     }
 
@@ -208,7 +216,12 @@ struct LocalCheckpoints: Sendable {
     /// interrupted evictions and discards staging from an unpublished capture.
     private func finishSave() throws {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: staging.path) else { return }
+        var info = stat()
+        guard lstat(staging.path, &info) == 0 else {
+            if errno == ENOENT { return }
+            throw Self.fileError
+        }
+        guard info.st_mode & S_IFMT == S_IFDIR else { throw Problem("Invalid checkpoint staging directory.") }
         let journal = staging.appendingPathComponent("eviction.json")
         if fm.fileExists(atPath: journal.path) {
             let plan = try JSONDecoder().decode(Eviction.self, from: Data(contentsOf: journal))
@@ -216,7 +229,7 @@ struct LocalCheckpoints: Sendable {
                 for id in plan.victims {
                     let victim = folder.appendingPathComponent(id.uuidString)
                     if fm.fileExists(atPath: victim.path), try readEntry(id).manifest != nil {
-                        try fm.removeItem(at: victim)
+                        try fm.moveItem(at: victim, to: staging.appendingPathComponent(id.uuidString))
                     }
                 }
             }

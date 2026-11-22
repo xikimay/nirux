@@ -105,7 +105,7 @@ private final class CheckpointList: NSScrollView {
             if checkpoint.isIncomplete {
                 let badge = label("Incomplete", x: width - 170, y: y + 22, width: 85)
                 badge.textColor = .systemOrange
-                let reasons = checkpoint.omissions.map { "\($0.path) — \($0.reason)" }
+                let reasons = checkpoint.omissions.map { "\(BranchReview.visible($0.path)) — \($0.reason)" }
                 badge.toolTip = ((checkpoint.timedOut ? ["Capture timed out"] : []) + reasons).joined(separator: "\n")
             }
             let button = NSButton(title: "Delete", target: self, action: #selector(deleteCheckpoint(_:)))

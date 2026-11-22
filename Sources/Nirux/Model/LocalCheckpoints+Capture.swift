@@ -24,12 +24,12 @@ extension LocalCheckpoints {
                 let json = try JSONEncoder().encode(result.manifest)
                 var excess = json.count + payloadBytes - limit
                 if excess <= 0 { return (result.manifest, json) }
+                guard !result.manifest.files.isEmpty else { throw Problem("The workspace quota cannot hold the checkpoint manifest.") }
                 while excess > 0, let file = result.manifest.files.popLast() {
                     result.omit(file.path, "Workspace byte limit")
                     payloadBytes -= file.size
                     excess -= file.size
                 }
-                if excess > 0 { throw Problem("The workspace quota cannot hold the checkpoint manifest.") }
             }
         }
     }
@@ -41,8 +41,9 @@ extension LocalCheckpoints {
             in: worktree, options: options, timeout: 5
         )
         guard let location, location.status == 0 else { throw Problem("The workspace’s Git repository could not be opened.") }
-        let paths = location.text.split(separator: "\n").compactMap { String($0).realPath }
-        guard paths.count == 3 else { throw Problem("The workspace’s Git directories could not be identified.") }
+        let lines = location.text.split(separator: "\n")
+        let paths = lines.compactMap { String($0).realPath }
+        guard lines.count == 3, paths.count == 3 else { throw Problem("The workspace’s Git directories could not be identified.") }
         let storePath = folder.path.lowercased()
         for path in paths {
             let protected = path.lowercased()
@@ -71,7 +72,7 @@ extension LocalCheckpoints {
         capture.manifest.branch = value(["symbolic-ref", "-q", "--short", "HEAD"])
         capture.manifest.head = value(["rev-parse", "-q", "--verify", "HEAD"])
         if let head = capture.manifest.head {
-            for base in ["origin/HEAD", "main", "master"] {
+            for base in ["origin/HEAD", "origin/main", "main", "origin/master", "master"] {
                 if let base = value(["merge-base", head, base]) {
                     capture.manifest.mergeBase = base
                     break
@@ -142,7 +143,9 @@ extension LocalCheckpoints {
         case .failure(.overTotal): capture.omit(path, "Workspace byte limit")
         case .failure: capture.omit(path, "Could not read file")
         case .success(let data):
-            guard !BranchReview.Secrets.containsKey(String(decoding: data, as: UTF8.self)) else {
+            // Key shapes are ASCII. Removing NUL padding also screens UTF-16 and UTF-32 text.
+            let screened = data.contains(0) ? data.filter { $0 != 0 } : data
+            guard !BranchReview.Secrets.containsKey(String(decoding: screened, as: UTF8.self)) else {
                 return capture.omit(path, "Secret content")
             }
             let hash = Self.digest(data)
