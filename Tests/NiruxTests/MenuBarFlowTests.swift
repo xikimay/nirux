@@ -130,6 +130,11 @@ final class MenuBarFlowTests: XCTestCase {
             bar.run(["Agent", "Install Agent Skills"])
             XCTAssertEqual(harness.alerts, ["Agent Skills Installed"])
 
+            bar.run(["Columns", "Open Isolated Test Browser"])
+            let browser = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.webViewColumn)
+            XCTAssertTrue(browser.isIsolated)
+            XCTAssertEqual(URL(string: browser.currentURL)?.host, "localhost")
+
             bar.run(["Columns", "Open Editor"])
             let editor = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
             harness.waitUntil("the editor to open README.md") { editor.activePath == harness.repo + "/README.md" }

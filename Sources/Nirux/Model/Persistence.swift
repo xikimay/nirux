@@ -722,6 +722,7 @@ struct PersistedColumn: Codable {
     var cwd: String
     var columnType: ColumnKind?
     var webViewURL: String? // current URL for webView columns
+    var isIsolatedBrowser: Bool?
     /// Absolute paths of all open tabs in this editor column.
     var editorOpenFiles: [String]?
     /// Absolute path of the active tab. Must be present in `editorOpenFiles`.
@@ -760,6 +761,7 @@ struct PersistedColumn: Codable {
     init(
         widthPreset: Double, cwd: String, columnType: ColumnKind?,
         webViewURL: String?,
+        isIsolatedBrowser: Bool? = nil,
         editorOpenFiles: [String]? = nil,
         editorActiveFile: String? = nil,
         claudeLaunchMode: ClaudeLaunchMode?,
@@ -779,6 +781,7 @@ struct PersistedColumn: Codable {
         self.cwd = cwd
         self.columnType = columnType
         self.webViewURL = webViewURL
+        self.isIsolatedBrowser = isIsolatedBrowser
         self.editorOpenFiles = editorOpenFiles
         self.editorActiveFile = editorActiveFile
         self.claudeLaunchMode = claudeLaunchMode
@@ -796,7 +799,7 @@ struct PersistedColumn: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case widthPreset, cwd, columnType, webViewURL
+        case widthPreset, cwd, columnType, webViewURL, isIsolatedBrowser
         case editorOpenFiles, editorActiveFile
         case editorOpenFile // legacy single-file editor state
         case claudeLaunchMode
@@ -823,6 +826,7 @@ struct PersistedColumn: Codable {
         cwd = try container.decode(String.self, forKey: .cwd)
         columnType = try? container.decodeIfPresent(ColumnKind.self, forKey: .columnType)
         webViewURL = try container.decodeIfPresent(String.self, forKey: .webViewURL)
+        isIsolatedBrowser = try container.decodeIfPresent(Bool.self, forKey: .isIsolatedBrowser)
 
         if let openList = try? container.decodeIfPresent([String].self, forKey: .editorOpenFiles), !openList.isEmpty {
             editorOpenFiles = openList
@@ -866,6 +870,7 @@ struct PersistedColumn: Codable {
         try container.encode(cwd, forKey: .cwd)
         try container.encodeIfPresent(columnType, forKey: .columnType)
         try container.encodeIfPresent(webViewURL, forKey: .webViewURL)
+        if isIsolatedBrowser == true { try container.encode(true, forKey: .isIsolatedBrowser) }
         try container.encodeIfPresent(editorOpenFiles, forKey: .editorOpenFiles)
         try container.encodeIfPresent(editorActiveFile, forKey: .editorActiveFile)
         try container.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)

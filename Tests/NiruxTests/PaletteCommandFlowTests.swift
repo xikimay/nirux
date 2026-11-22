@@ -20,6 +20,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testEditorCommands": ["Open Editor", "Toggle Editor Diff", "Search Workspace"],
             "testSearchEverywhere": ["Search Everywhere"],
             "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
+            "testOpenIsolatedTestBrowser": ["Open Isolated Test Browser"],
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex", "Open Antigravity", "Next Waiting Agent"],
             "testSessionHistoryCommand": ["Session History…"],
@@ -375,6 +376,21 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             // doesn't open in a test process.
             harness.runPaletteCommand("Toggle Web Inspector")
             XCTAssertIdentical(workspace.columns[safe: workspace.focusedIndex]?.webViewColumn, web)
+        }
+    }
+
+    func testOpenIsolatedTestBrowser() throws {
+        try UIFlowHarness.run { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            let terminal = try XCTUnwrap(workspace.columns.first)
+            let server = LocalServerURL(isSecure: false, host: "localhost", port: 5173, path: "/")
+            XCTAssertTrue(workspace.localServers.book.noteDetected(server, in: terminal.id, browserPorts: [], now: 0))
+            XCTAssertTrue(workspace.localServers.book.applyScan(listeningPorts: [server.port], browserPorts: [], liveColumns: [terminal.id], now: 1))
+
+            harness.runPaletteCommand("Open Isolated Test Browser")
+            let web = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.webViewColumn)
+            XCTAssertTrue(web.isIsolated)
+            XCTAssertEqual(web.currentURL, server.urlString)
         }
     }
 

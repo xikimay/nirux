@@ -81,6 +81,10 @@ extension NiruxApp {
         shell?.showCommandPaletteURLMode()
     }
 
+    @objc func openIsolatedTestBrowser(_ sender: Any?) {
+        shell?.openIsolatedTestBrowser()
+    }
+
     @objc func showCommandPalette(_ sender: Any?) {
         shell?.showCommandPalette()
     }
@@ -332,6 +336,7 @@ extension NiruxApp {
         colMenu.addItem(NSMenuItem.separator())
         colMenu.addItem(withTitle: "New Terminal", action: #selector(newTerminalColumn(_:)), shortcut: .newTerminal)
         colMenu.addItem(withTitle: "Open Browser", action: #selector(openBrowser(_:)), shortcut: .openBrowser)
+        colMenu.addItem(withTitle: "Open Isolated Test Browser", action: #selector(openIsolatedTestBrowser(_:)), keyEquivalent: "")
         colMenu.addItem(withTitle: "Open Editor", action: #selector(openEditor(_:)), keyEquivalent: "")
         colMenu.addItem(withTitle: "Import Browser Cookies", action: #selector(importBrowserCookies(_:)), keyEquivalent: "")
 
