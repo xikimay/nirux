@@ -22,7 +22,10 @@ struct AgentSessionBinding {
 
     /// The session id a restore launch passes (`<resumeArgument> <id>`).
     func launchedSessionID(_ arguments: [String]) -> String? {
-        agent.resumeArgument.flatMap(arguments.firstIndex(of:)).flatMap { arguments[safe: $0 + 1] }
+        if agent == .agy {
+            return AgyLaunch.resumedConversation(in: arguments)
+        }
+        return agent.resumeArgument.flatMap(arguments.firstIndex(of:)).flatMap { arguments[safe: $0 + 1] }
     }
 
     /// Session bound to `process`, nil when none is or another process owns it.
@@ -102,6 +105,10 @@ struct ForegroundSessionTracker {
     private let provesThread: Bool
     /// The thread its launch prompt started, and that `codex`.
     private var launched: (sessionID: String, process: ProcessInstance)?
+    /// agy: subagent conversations that emitted `SessionStart` after this
+    /// process already owned a conversation (or was launched with `--continue`),
+    /// so their later `Stop` hooks never hijack the main conversation.
+    private var startedSubagents: (process: ProcessInstance, ids: Set<String>)?
 
     static var codex: Self { Self(agent: .codex, provesThread: true) }
     static var agy: Self { Self(agent: .agy, keepsProcessSession: true) }
@@ -116,11 +123,19 @@ struct ForegroundSessionTracker {
         session.prepareResume(sessionID: sessionID)
     }
 
+    /// Binds `sessionID` to `process` when no conversation is bound to it yet
+    /// (for example a manual `agy --conversation <uuid>` launch).
+    mutating func bindIfUnbound(sessionID: String, process: ProcessInstance) {
+        guard session.sessionID(boundTo: process) == nil else { return }
+        _ = session.bind(sessionID: sessionID, process: process)
+    }
+
     /// `soleInputDigest`: `CodexLaunch.promptDigest` of the thread's message,
     /// when it holds one.
     @discardableResult
     mutating func capture(
         sessionID: String?,
+        eventName: AgentHookEvent.Name = .sessionStart,
         soleInputDigest: String? = nil,
         emitterBelongsToForegroundJob: Bool,
         foregroundProcess: ForegroundProcess?
@@ -139,9 +154,45 @@ struct ForegroundSessionTracker {
             guard provenSessionID(for: foregroundProcess).map({ $0 == sessionID }) ?? (prompt == nil) else { return false }
         }
         guard keepsProcessSession else { return session.bind(sessionID: sessionID, process: foregroundProcess.instance) }
-        guard session.sessionID(boundTo: foregroundProcess.instance) == nil else { return false }
-        let launched = session.launchedSessionID(foregroundProcess.arguments)
-        return session.bind(sessionID: launched ?? sessionID, process: foregroundProcess.instance)
+        return captureAgy(sessionID: sessionID, eventName: eventName, foregroundProcess: foregroundProcess)
+    }
+
+    private mutating func captureAgy(
+        sessionID: String,
+        eventName: AgentHookEvent.Name,
+        foregroundProcess: ForegroundProcess
+    ) -> Bool {
+        let process = foregroundProcess.instance
+        if startedSubagents?.process != process {
+            startedSubagents = nil
+        }
+        if eventName == .stop {
+            guard startedSubagents?.ids.contains(sessionID) != true else { return false }
+            return session.bind(sessionID: sessionID, process: process)
+        }
+        if let bound = session.sessionID(boundTo: process) {
+            if sessionID != bound { noteStartedSubagent(sessionID, for: process) }
+            return false
+        }
+        if let launched = session.launchedSessionID(foregroundProcess.arguments) {
+            if sessionID != launched { noteStartedSubagent(sessionID, for: process) }
+            return session.bind(sessionID: launched, process: process)
+        }
+        if AgyLaunch.hasContinueFlag(foregroundProcess.arguments) {
+            // A continued conversation never fires SessionStart; one that fires
+            // before Stop belongs to a subagent.
+            noteStartedSubagent(sessionID, for: process)
+            return false
+        }
+        return session.bind(sessionID: sessionID, process: process)
+    }
+
+    private mutating func noteStartedSubagent(_ sessionID: String, for process: ProcessInstance) {
+        if startedSubagents?.process == process {
+            startedSubagents?.ids.insert(sessionID)
+        } else {
+            startedSubagents = (process, [sessionID])
+        }
     }
 
     /// The thread `process`, a `codex`, proved it runs, if it did.
@@ -163,7 +214,47 @@ struct ForegroundSessionTracker {
     @discardableResult
     mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
         if keepsProcessSession, foregroundProcess?.agent != session.agent { return false }
-        return session.invalidateBinding(ifProcessChangedTo: foregroundProcess)
+        let changed = session.invalidateBinding(ifProcessChangedTo: foregroundProcess)
+        if changed, let foregroundProcess, startedSubagents?.process != foregroundProcess.instance {
+            startedSubagents = nil
+        }
+        return changed
+    }
+}
+
+/// What an `agy` process's arguments say of the conversation it runs.
+enum AgyLaunch {
+    /// Options whose value is the next argument (`agy --help`).
+    static let optionsWithValue: Set<String> = [
+        "-i", "--prompt-interactive", "-p", "--print", "--prompt", "--settings", "--conversation", "--model",
+        "--mode", "--add-dir", "--agent", "--effort", "--project", "--input-format", "--output-format",
+        "--json-schema", "--log-file", "--print-timeout"
+    ]
+
+    /// The conversation `agy --conversation <id>` (or `=<id>`) resumes.
+    static func resumedConversation(in arguments: [String]) -> String? {
+        var args = arguments.makeIterator()
+        while let argument = args.next(), argument != "--" {
+            if argument == "--conversation" {
+                return args.next().flatMap { $0.isEmpty ? nil : $0 }
+            }
+            if argument.hasPrefix("--conversation=") {
+                let value = String(argument.dropFirst("--conversation=".count))
+                return value.isEmpty ? nil : value
+            }
+            if optionsWithValue.contains(argument) { _ = args.next() }
+        }
+        return nil
+    }
+
+    /// Whether `arguments` includes `--continue` or `-c` before `--`.
+    static func hasContinueFlag(_ arguments: [String]) -> Bool {
+        var args = arguments.makeIterator()
+        while let argument = args.next(), argument != "--" {
+            if argument == "--continue" || argument == "-c" { return true }
+            if optionsWithValue.contains(argument) { _ = args.next() }
+        }
+        return false
     }
 }
 
