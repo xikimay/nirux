@@ -71,8 +71,11 @@ class CanaryTests(unittest.TestCase):
         self.assertTrue((self.work / "worktree/.git").is_file())
         with self.assertRaises(RuntimeError):
             verify_layout(self.work, self.seed)
+        alias = self.work / "alias"
+        alias.symlink_to(self.work / "worktree", target_is_directory=True)
+        tab = str(alias / "README.md")
         state["workspaces"][0]["columns"].append({
-            "columnType": "editor", "editorActiveFile": str(self.work / "worktree/README.md"),
+            "columnType": "editor", "editorActiveFile": tab, "editorOpenFiles": [tab],
         })
         write_json(path, state)
         verify_layout(self.work, self.seed)

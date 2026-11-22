@@ -48,16 +48,18 @@ def fixture(work, env, seed):
     repo = work / "repo"
     repo.mkdir()
 
+    commit_date = "2000-01-01T00:00:00Z"
+    git_env = dict(env, GIT_AUTHOR_DATE=commit_date, GIT_COMMITTER_DATE=commit_date)
+
     def git(*args):
-        subprocess.run(["/usr/bin/git", "-c", "user.name=Nirux Canary", "-c",
-                        "user.email=canary@localhost", *args], env=dict(env, GIT_AUTHOR_DATE="2000-01-01T00:00:00Z",
-                       GIT_COMMITTER_DATE="2000-01-01T00:00:00Z"), cwd=repo,
+        subprocess.run(["/usr/bin/git", "-c", "user.name=Nirux Canary",
+                        "-c", "user.email=canary@localhost", *args], env=git_env, cwd=repo,
                        stdout=subprocess.DEVNULL, check=True, timeout=30)
 
     git("init", "-q", "-b", "main")
     (repo / "README.md").write_text("canary " + seed + "\n")
     git("add", "README.md")
-    git("-c", "commit.gpgsign=false", "commit", "-qm", "Synthetic canary fixture")
+    git("commit", "-qm", "Synthetic canary fixture")
     git("worktree", "add", "-qb", "canary", str(tree))
     workspace = {"id": seed, "title": "Canary", "cwd": str(tree), "focusedColumnIndex": 0,
                  "columns": [{"cwd": str(tree), "columnType": "terminal", "widthPreset": 0.5}]}
@@ -177,18 +179,18 @@ class App:
         self.alive()
         result = subprocess.run([self.driver, action, str(self.process.pid), *args],
                                 cwd=self.work, env=self.env, timeout=6)
-        if action != "quit":
+        if action != "quit" or result.returncode != 0:
             self.alive()
         if result.returncode == 3 and action != "window":
             raise InfrastructureError("the canary lost its key window")
-        if not probe:
+        if not probe or result.returncode not in (0, 1, 3):
             result.check_returncode()
         return result.returncode == 0
 
     def shell_marker(self, name, seed, inject=False):
         marker = self.tree / name
         sent = "injected" if inject else seed
-        self.drive("command", f"echo {sent} > {name}")
+        self.drive("command", f'[[ . -ef "$NIRUX_STATE_DIR/../worktree" ]] && echo {sent} > {name}')
         wait_for(f"missing terminal effect {name}", lambda: marker.is_file()
                  and marker.read_text() == seed + "\n", self.alive)
 
@@ -238,13 +240,19 @@ class App:
 
 def verify_layout(work, seed):
     state = json.loads((work / "state/state.json").read_text())
-    tree = str(work / "worktree")
+    tree = work / "worktree"
+    file = tree / "README.md"
+
+    def matches(path, expected):
+        return bool(path) and Path(path).resolve() == expected
+
     ws = next((ws for ws in state["workspaces"] if ws.get("id") == seed), {})
     columns = ws.get("columns", [])
-    if (state.get("activeWorkspaceID") != seed or ws.get("cwd") != tree or len(columns) != 2
-            or columns[0].get("columnType", "terminal") != "terminal"
-            or columns[0].get("cwd") != tree or columns[1].get("columnType") != "editor"
-            or columns[1].get("editorActiveFile") != str(work / "worktree/README.md")):
+    if (state.get("activeWorkspaceID") != seed or not matches(ws.get("cwd"), tree)
+            or len(columns) != 2 or columns[0].get("columnType") != "terminal"
+            or not matches(columns[0].get("cwd"), tree) or columns[1].get("columnType") != "editor"
+            or not matches(columns[1].get("editorActiveFile"), file)
+            or not any(matches(path, file) for path in columns[1].get("editorOpenFiles", []))):
         raise RuntimeError("quit did not persist the active fixture workspace, terminal and editor tab")
 
 
