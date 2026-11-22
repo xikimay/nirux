@@ -313,14 +313,25 @@ New flow, built on the guarded typing `tell` already uses
     (amber row at once, the popover saying why). The answer is typed into the
     task, and a line into the Lead ("[Nirux Mission] The user answered …").
     The question is the task's own: the Lead asks its own in its conversation.
-  - `queue_merge(prs, repo?, cadence?)` proposes open pull requests in merge order
+  - `queue_merge(prs, repo?, cadence?, replace?)` proposes open pull requests in merge order
     for one repository. By default the user confirms in the sheet. **Allow Lead
     to start the merge queue** in Space Settings › Lead enables direct starts
     after a clean preflight of every requested PR. A warning or an incomplete
     read requires manual review. Dry runs and the developer live override
     always use the confirmation sheet.
     `cadence` accepts `standard` (default), `batch_post_merge`, or
-    `express_disjoint`. The Lead leaves the user's prepared list in place.
+    `express_disjoint`. The default protects the user's prepared list. When the
+    user requests a replacement, an opted-in Lead can pass `replace: true`.
+    The same preflight checks the requested order and cadence. A proposal that
+    needs manual review opens the confirmation sheet. An open sheet, a running
+    queue or a selection changed during preflight prevents replacement.
+  - `merge_queue_status(repo?)` reports the phase, cadence, current step,
+    remaining PRs, Board selection, Lead setting, build eligibility and last
+    ten journal entries. It also reads a configured repository with the Board
+    closed. Selection freshness comes from the Board's last list of open PRs.
+  - `stop_merge_queue(repo?)` requires **Allow Lead to start the merge queue**.
+    It stops this instance’s queue before its next command and records
+    **Stopped by Lead**. Any GitHub command already sent finishes.
   - `set_task_context(task, next_step?, blocker?)` (shipped with S13): a task's
     next step and blocker (View/Edit Context…), one line each, at most 200
     characters; an empty string clears one. Its role says when: after a

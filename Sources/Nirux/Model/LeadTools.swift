@@ -12,6 +12,8 @@ enum LeadTools {
     static let tell = "tell"
     static let reply = "reply"
     static let askUser = "ask_user"
+    static let mergeQueueStatus = "merge_queue_status"
+    static let stopMergeQueue = "stop_merge_queue"
     static let queueMerge = "queue_merge"
     static let setTaskContext = "set_task_context"
     static let proposeRule = "propose_rule"
@@ -26,13 +28,15 @@ enum LeadTools {
     static let recordReview = "record_review"
     static let dailyPass = "daily_pass"
     static let names = [
-        startTask, setTaskAfter, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule, recordReview, dailyPass,
+        startTask, setTaskAfter, listTasks, tell, reply, askUser, mergeQueueStatus, stopMergeQueue, queueMerge, setTaskContext, proposeRule, recordReview, dailyPass,
         closeTask, moveTask, renameTask, setTaskParent, readThread, readTask, resumeTask, interruptTask
     ]
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
     /// of its own (unless a repository of the space has that name).
     static let noRepository = "none"
+
+    static let queueRepoArgument = ["type": "string", "description": "The repository's name in this space, or owner/name; needed when the space has several."]
 
     static let taskIDPrefix = "task:"
 
@@ -205,6 +209,16 @@ enum LeadTools {
                 required: ["task", "why"]
             ),
             definition(
+                mergeQueueStatus, title: "Inspect the merge queue",
+                description: "Read the queue phase, progress, selection, Lead settings and the last ten journal entries, even with the Board closed.",
+                properties: ["repo": queueRepoArgument], required: [], readOnly: true
+            ),
+            definition(
+                stopMergeQueue, title: "Stop the merge queue",
+                description: "With Lead auto-start enabled, stop this instance’s queue before its next command. An in-flight command finishes.",
+                properties: ["repo": queueRepoArgument], required: [], destructive: true
+            ),
+            definition(
                 queueMerge, title: "Queue pull requests",
                 description: """
                     Queue these pull requests of one repository in the given order. By default the user confirms in a sheet. \
@@ -213,7 +227,8 @@ enum LeadTools {
                 properties: [
                     "cadence": ["type": "string", "enum": MergeQueue.Cadence.allCases.map(\.toolArgument), "default": "standard"],
                     "prs": ["type": "array", "items": ["type": "integer", "minimum": 1], "minItems": 1, "description": "Pull request numbers, in merge order."],
-                    "repo": ["type": "string", "description": "The repository's name in this space, or owner/name; needed when the space has several."]
+                    "replace": ["type": "boolean", "default": false, "description": "Replace the idle Board selection only when the user asks. Requires Lead auto-start."],
+                    "repo": queueRepoArgument
                 ],
                 required: ["prs"]
             ),
@@ -428,7 +443,11 @@ enum LeadTools {
 
     /// reply's `accept`: false when left out, nil when not a JSON boolean.
     static func accepts(_ arguments: [String: Any]) -> Bool? {
-        guard let value = arguments["accept"], !(value is NSNull) else { return false }
+        optionalFlag(arguments, "accept")
+    }
+
+    static func optionalFlag(_ arguments: [String: Any], _ key: String) -> Bool? {
+        guard let value = arguments[key], !(value is NSNull) else { return false }
         guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else { return nil }
         return flag.boolValue
     }
@@ -483,6 +502,9 @@ enum LeadTools {
         let messageLimit = MissionEventCLI.maxInstructionLength
         if [startTask, setTaskAfter].contains(tool), arguments["after"] != nil, string(arguments, "after") == nil {
             return "after must name a task of this space."
+        }
+        if [queueMerge, mergeQueueStatus, stopMergeQueue].contains(tool), arguments["repo"] != nil, string(arguments, "repo") == nil {
+            return "repo must name a repository in this space."
         }
         switch tool {
         case startTask:
@@ -541,9 +563,10 @@ enum LeadTools {
             guard string(arguments, "task") != nil else { return "task is missing." }
             if case .failure(let refusal) = ReviewFindings.findings(arguments["findings"]) { return refusal.reason }
             return nil
-        case dailyPass:
+        case dailyPass, mergeQueueStatus, stopMergeQueue:
             return nil
         case queueMerge:
+            guard optionalFlag(arguments, "replace") != nil, !(arguments["replace"] is NSNull) else { return "replace must be true or false." }
             guard pullRequestNumbers(arguments) != nil else { return "prs must list pull request numbers." }
             return queueCadence(arguments) == nil ? "cadence must be standard, batch_post_merge or express_disjoint." : nil
         case setTaskContext:

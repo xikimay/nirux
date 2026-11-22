@@ -18,9 +18,9 @@ extension MergeQueue.Files {
 
     var hasJournal: Bool { journalFiles.contains { withJournalFile($0) { _, _ in true } == true } }
 
-    func recentEntries() -> [MergeQueue.Journal.Line] {
+    func recentEntries(limit: Int = 200) -> [MergeQueue.Journal.Line] {
         var bytesLeft = 256 * 1024
-        var linesLeft = 200
+        var linesLeft = limit
         var entries: [MergeQueue.Journal.Line] = []
         var currentInode: ino_t?
         let decoder = JSONDecoder()

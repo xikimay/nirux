@@ -34,6 +34,8 @@ extension NiruxShellView {
         case LeadTools.tell: leadTell(arguments, in: space, lead: parent, answer: answer)
         case LeadTools.reply: leadReply(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.askUser: leadAskUser(arguments, in: space, lead: lead.id, answer: answer)
+        case LeadTools.mergeQueueStatus, LeadTools.stopMergeQueue:
+            inspectOrStopLeadQueue(arguments, in: space, parent: parent, stop: request.tool == LeadTools.stopMergeQueue, answer: answer)
         case LeadTools.queueMerge: leadQueueMerge(arguments, in: space, parent: parent, answer: answer)
         case LeadTools.setTaskContext: leadSetTaskContext(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.proposeRule: leadProposeRule(arguments, in: space, parent: parent, answer: answer)
@@ -932,76 +934,73 @@ extension NiruxShellView {
             return answer("\(space.name)'s Board isn't open: ask the user to open it (⌃⌘B), then try again.", true)
         }
         guard board.loaded != nil else { return answer("The Board is still loading: try again in a moment.", true) }
-        let sections = board.sections.compactMap { section in board.repository(of: section).map { (section, $0) } }
-        guard !sections.isEmpty else {
-            return answer("The Board has no GitHub repository set up: ask the user to open Board Settings.", true)
-        }
-        let chosen: (BoardSections.Section, (name: String, gitHub: GitHubRepository))
-        if let name = LeadTools.string(arguments, "repo") {
-            guard let match = sections.first(where: { section in
-                section.1.name.caseInsensitiveCompare(name) == .orderedSame
-                    || section.1.gitHub.ownerAndName.caseInsensitiveCompare(name) == .orderedSame
-            }) else {
-                return answer("No repository “\(name)” on the Board: \(sections.map(\.1.name).joined(separator: ", ")).", true)
-            }
-            chosen = match
-        } else {
-            guard sections.count == 1 else {
-                return answer("Say which repository: \(sections.map(\.1.name).joined(separator: ", ")). One queue per repository.", true)
-            }
-            chosen = sections[0]
+        guard let chosen = leadQueueRepository(LeadTools.string(arguments, "repo"), sections: board.sections, answer: answer) else { return }
+        let replace = LeadTools.optionalFlag(arguments, "replace") == true
+        let enabled = SpaceDefaultsStore.defaults(forSpace: space.id).leadCanStartMergeQueue
+        guard !replace || enabled else {
+            return answer("Replacing the Board selection requires enabling Lead auto-start in Space Settings › Lead.", true)
         }
         if mergeQueueConfirmation != nil {
             return answer("A merge queue's confirmation sheet is already open: wait for the user.", true)
         }
         guard mergeQueueQuit == nil else { return answer("Nirux is quitting.", true) }
-        guard let settings = board.loaded(for: chosen.0)?.queueSettings, settings.gitHubRepository == chosen.1.gitHub else {
-            let problem = board.loaded(for: chosen.0)?.queueStartProblems.first ?? "Board Settings aren't set up for it yet."
-            return answer("\(chosen.1.name)'s merge queue can't start: \(problem) Tell the user.", true)
+        guard let settings = board.loaded(for: chosen.section)?.queueSettings, settings.gitHubRepository == chosen.gitHub else {
+            let problem = board.loaded(for: chosen.section)?.queueStartProblems.first ?? "Board Settings aren't set up for it yet."
+            return answer("\(chosen.name)'s merge queue can't start: \(problem) Tell the user.", true)
         }
-        if let open = board.reads[chosen.0.id]?.openPullRequests.map({ Set($0.map(\.number)) }) {
+        if let open = board.reads[chosen.section.id]?.openPullRequests.map({ Set($0.map(\.number)) }) {
             let unknown = numbers.filter { !open.contains($0) }
             guard unknown.isEmpty else {
-                return answer(unknown.map { "#\($0)" }.joined(separator: ", ") + " isn't an open pull request of \(chosen.1.name).", true)
+                return answer(unknown.map { "#\($0)" }.joined(separator: ", ") + " isn't an open pull request of \(chosen.name).", true)
             }
         }
-        let controller = mergeQueue(projectID: space.id, repository: chosen.1.gitHub)
-        guard !controller.isRunning, !controller.runsElsewhere else {
-            return answer("\(chosen.1.name)'s merge queue is running: propose these once it ends.", true)
+        let controller = mergeQueue(projectID: space.id, repository: chosen.gitHub)
+        controller.refreshSavedForLead()
+        guard !controller.isRunning, !controller.runsElsewhere, !controller.isRepositoryBusy(chosen.gitHub) else {
+            return answer("\(chosen.name)'s merge queue is running: propose these once it ends.", true)
         }
         // The user's own list stays theirs; a Lead's earlier one is its own.
-        let current = controller.selection(for: chosen.1.gitHub)
-        let proposalKey = space.id + " " + chosen.1.gitHub.ownerAndName
-        let automatic = controller.client.allowsLeadStart && SpaceDefaultsStore.defaults(forSpace: space.id).leadCanStartMergeQueue
-        guard current.isEmpty || (!automatic && (current == numbers || current == leadQueueProposals[proposalKey])) else {
-            return answer("The user is preparing \(chosen.1.name)'s queue (" + current.map { "#\($0)" }.joined(separator: ", ")
+        let current = controller.selection(for: chosen.gitHub)
+        let proposalKey = space.id + " " + chosen.gitHub.ownerAndName
+        let automatic = controller.client.allowsLeadStart && enabled
+        guard replace || current.isEmpty || (!automatic && (current == numbers || current == leadQueueProposals[proposalKey])) else {
+            return answer("The user is preparing \(chosen.name)'s queue (" + current.map { "#\($0)" }.joined(separator: ", ")
                 + "): suggest yours to them in this conversation instead.", true)
         }
         if automatic {
-            return readLeadQueueStart(controller, board: board, section: chosen.0, settings: settings,
-                                      numbers: numbers, cadence: cadence, parent: parent, answer: answer)
+            return readLeadQueueStart(controller, board: board, section: chosen.section, settings: settings,
+                                      numbers: numbers, cadence: cadence, replace: replace, parent: parent, answer: answer)
         }
-        controller.proposeSelection(numbers, repository: chosen.1.gitHub)
+        presentLeadQueueProposal(controller, board: board, section: chosen.section, numbers: numbers, cadence: cadence, answer: answer)
+    }
+
+    private func presentLeadQueueProposal(
+        _ controller: MergeQueueController, board: ProjectBoardController, section: BoardSections.Section,
+        numbers: [Int], cadence: MergeQueue.Cadence, answer: LeadAnswer
+    ) {
+        let proposalKey = board.projectID + " " + controller.queueRepository.ownerAndName
+        controller.proposeSelection(numbers, repository: controller.queueRepository)
         leadQueueProposals[proposalKey] = numbers
-        requestMergeQueueStart(board: board, section: chosen.0.id, cadence: cadence)
+        requestMergeQueueStart(board: board, section: section.id, cadence: cadence)
         guard mergeQueueConfirmation != nil else {
             return answer("Nirux couldn't open the merge queue's sheet (the Board may need its settings): tell the user.", true)
         }
         let next = controller.isDryRun ? "The user can review it and click Start Dry Run. This build makes no merges."
             : "Nothing merges until the user clicks Start."
-        answer("The confirmation sheet of \(chosen.1.name)'s merge queue is open with "
+        answer("The confirmation sheet of \(controller.queueRepository.ownerAndName)'s merge queue is open with "
             + numbers.map { "#\($0)" }.joined(separator: ", ") + ". " + next, false)
     }
 
     private func readLeadQueueStart(
         _ controller: MergeQueueController, board: ProjectBoardController, section: BoardSections.Section,
         settings: BoardConfig.QueueSettings, numbers: [Int], cadence: MergeQueue.Cadence,
-        parent: NewTask.MissionParent, answer: @escaping LeadAnswer
+        replace: Bool, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
         let key = controller.key
         guard pendingLeadQueueStarts.insert(key).inserted else {
             return answer("The Lead already has a merge queue preflight in progress for this repository.", true)
         }
+        let previousSelection = controller.selection
         let previousDriver = controller.driver
         let folders = controller.local.folders()
         controller.readConfirmation(settings: settings, numbers: numbers) { [self] reading in
@@ -1019,11 +1018,18 @@ extension NiruxShellView {
             guard Set(controller.local.folders()) == Set(folders) else {
                 return answer("The space’s worktrees changed during preflight. Review the queue on the Board.", true)
             }
-            guard mergeQueueQuit == nil, mergeQueueConfirmation == nil, controller.selection.isEmpty,
+            controller.refreshSavedForLead()
+            guard mergeQueueQuit == nil, mergeQueueConfirmation == nil, controller.selection == previousSelection,
+                  !controller.isRepositoryBusy(key.repository),
                   !controller.runsElsewhere, !controller.isRunning, controller.driver === previousDriver else {
                 return answer("The queue or its selection changed during preflight. Review it on the Board.", true)
             }
             if let refusal = controller.startFromLead(reading, numbers: numbers, cadence: cadence) {
+                if replace, case .invalidSettings = refusal {
+                    return presentLeadQueueProposal(controller, board: board, section: section, numbers: numbers, cadence: cadence) { text, error in
+                        answer(refusal.message + " " + text, error)
+                    }
+                }
                 return answer("The Lead couldn’t start the queue. " + refusal.message + " Review the queue on the Board.", true)
             }
             dismissedMergeQueueNotices.remove(key)

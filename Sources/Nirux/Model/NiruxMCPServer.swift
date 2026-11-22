@@ -56,7 +56,9 @@ enum NiruxMCPServer {
         conversation settles it; otherwise hand it over with ask_user and say why. Keep each task's next \
         step and blocker current with set_task_context (shown on its row): after its question is answered, \
         when it completes, and when you notice a blocker (clear it once it is gone). Use queue_merge for ready PRs. The user confirms by default. With Lead starts enabled, \
-        a clean preflight starts the queue. Optional cadence: standard, batch_post_merge or express_disjoint. \
+        a clean preflight starts the queue. Inspect progress and journal entries with merge_queue_status. With Lead starts enabled, \
+        stop_merge_queue stops this instance’s queue. Use replace: true only when the user asks to replace the idle Board selection. \
+        Optional cadence: standard, batch_post_merge or express_disjoint. \
         Record each review you send with record_review. When a second task gets the same kind of finding, \
         propose a rule for the space brief with propose_rule. The user decides. Close a merged or abandoned task \
         with close_task. Leave its worktree and branch cleanup to Nirux. Merge only via queue_merge. Stay in this space.

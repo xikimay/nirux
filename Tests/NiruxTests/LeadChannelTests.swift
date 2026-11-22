@@ -174,6 +174,20 @@ final class LeadChannelTests: XCTestCase {
         for name in LeadTools.names { XCTAssertEqual(allowed?.contains("mcp__nirux__\(name)"), true) }
     }
 
+    func testQueueControlsAreScopedToLeadsAndValidateArguments() throws {
+        for tool in [LeadTools.mergeQueueStatus, LeadTools.stopMergeQueue] {
+            let definition = try XCTUnwrap(LeadTools.definitions.first { $0["name"] as? String == tool })
+            let hints = try XCTUnwrap(definition["annotations"] as? [String: Bool])
+            XCTAssertEqual(hints["readOnlyHint"], tool == LeadTools.mergeQueueStatus)
+            XCTAssertFalse(TaskTools.names.contains(tool))
+            XCTAssertNil(LeadTools.problem(tool: tool, arguments: [:]))
+            XCTAssertNotNil(LeadTools.problem(tool: tool, arguments: ["repo": 1]))
+        }
+        for invalid: Any in [1, "true", NSNull()] {
+            XCTAssertNotNil(LeadTools.problem(tool: LeadTools.queueMerge, arguments: ["prs": [12], "replace": invalid]))
+        }
+    }
+
     func testOnlyTheLeadCanSetATasksDependency() throws {
         let start = try XCTUnwrap(LeadTools.definitions.first { $0["name"] as? String == LeadTools.startTask })
         let schema = try XCTUnwrap(start["inputSchema"] as? [String: Any])
