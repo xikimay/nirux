@@ -39,7 +39,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(started.text.contains("with agy, model neon-low"))
             let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Compare parsers" })
             let launch = try XCTUnwrap(harness.agentLaunches.last)
-            XCTAssertTrue(launch.hasPrefix("command agy --model 'neon-low' --settings "), launch)
+            XCTAssertTrue(launch.hasPrefix("command agy --mode auto --model 'neon-low' --settings "), launch)
             XCTAssertTrue(launch.contains("Read .agy-handover.md"))
             XCTAssertTrue(FileManager.default.fileExists(atPath: task.cwd + "/.agy-handover.md"))
             let standIn = AgentStandIn()
