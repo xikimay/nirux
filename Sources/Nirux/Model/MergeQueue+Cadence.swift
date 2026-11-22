@@ -4,6 +4,14 @@ extension MergeQueue {
     enum Cadence: String, CaseIterable, Codable, Equatable, Sendable {
         case standard, batchPostMerge, expressDisjoint
 
+        var toolArgument: String {
+            switch self {
+            case .standard: "standard"
+            case .batchPostMerge: "batch_post_merge"
+            case .expressDisjoint: "express_disjoint"
+            }
+        }
+
         var title: String {
             switch self {
             case .standard: "Standard"
@@ -13,8 +21,10 @@ extension MergeQueue {
         }
     }
 
-    static func expressRefusal(for candidates: [ConfirmationReading.Candidate], settings: BoardConfig.QueueSettings) -> String? {
-        guard candidates.count >= 2 else { return "Express needs at least two pull requests." }
+    static func strictCandidateRefusal(
+        for candidates: [ConfirmationReading.Candidate], settings: BoardConfig.QueueSettings, requireDisjoint: Bool
+    ) -> String? {
+        if requireDisjoint && candidates.count < 2 { return "Express needs at least two pull requests." }
         var owners: [String: Int] = [:]
         for candidate in candidates {
             let number = candidate.number
@@ -34,6 +44,7 @@ extension MergeQueue {
                 let key = path.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
                     .precomposedStringWithCanonicalMapping
                 if key.hasPrefix(".github/workflows/") { return "#\(number) changes \(path)." }
+                guard requireDisjoint else { continue }
                 if let owner = owners[key], owner != number { return "PR #\(owner) and #\(number) both touch \(path)." }
                 owners[key] = number
             }

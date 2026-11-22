@@ -115,7 +115,7 @@ enum LeadTools {
     /// deletes; the daily pass asks GitHub about each repository.
     static func workTimeout(for tool: String) -> TimeInterval {
         if tool == dailyPass { return 150 }
-        return [startTask, closeTask].contains(tool) ? 300 : 30
+        return [startTask, closeTask, queueMerge].contains(tool) ? 300 : 30
     }
 
     static var agentProperties: [String: Any] {
@@ -205,12 +205,13 @@ enum LeadTools {
                 required: ["task", "why"]
             ),
             definition(
-                queueMerge, title: "Propose a merge queue",
+                queueMerge, title: "Queue pull requests",
                 description: """
-                    Open the merge queue's confirmation sheet for these pull requests of one repository, in this order. \
-                    It never starts the queue: the user reviews it and clicks Start.
+                    Queue these pull requests of one repository in the given order. By default the user confirms in a sheet. \
+                    If this space allows the Lead to start the queue, it starts directly when every safety check passes.
                     """,
                 properties: [
+                    "cadence": ["type": "string", "enum": MergeQueue.Cadence.allCases.map(\.toolArgument), "default": "standard"],
                     "prs": ["type": "array", "items": ["type": "integer", "minimum": 1], "minItems": 1, "description": "Pull request numbers, in merge order."],
                     "repo": ["type": "string", "description": "The repository's name in this space, or owner/name; needed when the space has several."]
                 ],
@@ -432,6 +433,11 @@ enum LeadTools {
         return flag.boolValue
     }
 
+    static func queueCadence(_ arguments: [String: Any]) -> MergeQueue.Cadence? {
+        guard let value = arguments["cadence"] else { return .standard }
+        return MergeQueue.Cadence.allCases.first { $0.toolArgument == value as? String }
+    }
+
     /// Whole positive numbers, as JSON gives them; nil for anything else.
     static func pullRequestNumbers(_ arguments: [String: Any]) -> [Int]? {
         guard let values = arguments["prs"] as? [Any], !values.isEmpty else { return nil }
@@ -538,7 +544,8 @@ enum LeadTools {
         case dailyPass:
             return nil
         case queueMerge:
-            return pullRequestNumbers(arguments) == nil ? "prs must list pull request numbers." : nil
+            guard pullRequestNumbers(arguments) != nil else { return "prs must list pull request numbers." }
+            return queueCadence(arguments) == nil ? "cadence must be standard, batch_post_merge or express_disjoint." : nil
         case setTaskContext:
             guard string(arguments, "task") != nil else { return "task is missing." }
             let fields = ["next_step", "blocker"].map { ($0, contextText(arguments, $0)) }

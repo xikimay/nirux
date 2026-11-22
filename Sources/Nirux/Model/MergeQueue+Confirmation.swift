@@ -45,6 +45,25 @@ extension MergeQueue {
         var baseRuns: [GitHub.WorkflowRun]?
         /// In the order the next Start proposes.
         var candidates: [Candidate] = []
+
+        func leadStartRefusal(confirmation: Confirmation, numbers: [Int], cadence: Cadence) -> String? {
+            if isDryRun { return "Dry runs need your confirmation." }
+            if let exclusion = confirmation.excluded.first { return "#\(exclusion.number): \(exclusion.reason)" }
+            if let reason = confirmation.refusals.first ?? confirmation.warnings.first { return reason }
+            guard rateLimit != nil, baseMergeQueue == false,
+                  confirmation.entries.map(\.number) == numbers, candidates.map(\.number) == numbers else {
+                return "The queue preflight was incomplete."
+            }
+            for (item, candidate) in zip(confirmation.items, candidates) {
+                if let warning = item.warnings.first { return "#\(candidate.number): \(warning)" }
+                guard case .some(.some) = candidate.comparison else {
+                    return "GitHub couldn’t compare #\(candidate.number) with \(settings.baseBranch)."
+                }
+            }
+            if let reason = confirmation.refusal(for: cadence) { return reason }
+            if cadence == .expressDisjoint { return nil }
+            return MergeQueue.strictCandidateRefusal(for: candidates, settings: settings, requireDisjoint: false)
+        }
     }
 
     /// The sheet's content: the pull requests that join, in order, those
@@ -86,8 +105,13 @@ extension MergeQueue {
             Cadence.allCases.filter { $0 != .batchPostMerge || settings.postMergeWorkflow != nil }
         }
 
+        func refusal(for cadence: Cadence) -> String? {
+            if !offeredCadences.contains(cadence) { return "Batch post-merge needs a configured post-merge workflow." }
+            return cadence == .expressDisjoint ? expressRefusal : nil
+        }
+
         mutating func select(_ cadence: Cadence) {
-            guard offeredCadences.contains(cadence), cadence != .expressDisjoint || expressRefusal == nil else { return }
+            guard refusal(for: cadence) == nil else { return }
             self.cadence = cadence
         }
 
@@ -211,7 +235,7 @@ extension MergeQueue {
             excluded: excluded,
             warnings: reading.setupError == nil ? baseWarnings(reading.baseRuns, settings: settings) : [],
             refusals: refusals,
-            expressRefusal: expressRefusal(for: joining, settings: settings)
+            expressRefusal: strictCandidateRefusal(for: joining, settings: settings, requireDisjoint: true)
         )
     }
 

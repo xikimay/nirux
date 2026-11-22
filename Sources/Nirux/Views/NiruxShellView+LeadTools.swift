@@ -6,9 +6,7 @@ import AppKit
 /// the MCP server through LeadChannel. A request is checked against the
 /// app's own state first: it must come from a column of a space's Lead,
 /// and it acts in that space only. One from another workspace's column
-/// goes to that task's tools (NiruxShellView+TaskTools). Nothing here
-/// merges or starts a merge queue; close_task removes a worktree and a
-/// branch only once its pull request is merged (NiruxShellView+LeadTaskTools).
+/// goes to that task's tools (NiruxShellView+TaskTools).
 extension NiruxShellView {
     typealias LeadAnswer = @MainActor (_ text: String, _ isError: Bool) -> Void
 
@@ -36,7 +34,7 @@ extension NiruxShellView {
         case LeadTools.tell: leadTell(arguments, in: space, lead: parent, answer: answer)
         case LeadTools.reply: leadReply(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.askUser: leadAskUser(arguments, in: space, lead: lead.id, answer: answer)
-        case LeadTools.queueMerge: leadQueueMerge(arguments, in: space, answer: answer)
+        case LeadTools.queueMerge: leadQueueMerge(arguments, in: space, parent: parent, answer: answer)
         case LeadTools.setTaskContext: leadSetTaskContext(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.proposeRule: leadProposeRule(arguments, in: space, parent: parent, answer: answer)
         case LeadTools.closeTask: leadCloseTask(arguments, in: space, answer: answer)
@@ -924,10 +922,12 @@ extension NiruxShellView {
 
     // MARK: queue_merge
 
-    /// The confirmation sheet of one repository's merge queue, with these
-    /// pull requests in this order. Never starts it.
-    private func leadQueueMerge(_ arguments: [String: Any], in space: WorkspaceProfile, answer: @escaping LeadAnswer) {
-        let numbers = LeadTools.pullRequestNumbers(arguments) ?? []
+    private func leadQueueMerge(
+        _ arguments: [String: Any], in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
+    ) {
+        guard let numbers = LeadTools.pullRequestNumbers(arguments), let cadence = LeadTools.queueCadence(arguments) else {
+            return answer("Invalid pull requests or queue cadence.", true)
+        }
         guard let board = projectBoardLocation(projectID: space.id)?.board else {
             return answer("\(space.name)'s Board isn't open: ask the user to open it (⌃⌘B), then try again.", true)
         }
@@ -954,8 +954,7 @@ extension NiruxShellView {
         if mergeQueueConfirmation != nil {
             return answer("A merge queue's confirmation sheet is already open: wait for the user.", true)
         }
-        // Nothing changes before the sheet can open: Board Settings ready
-        // for this repository.
+        guard mergeQueueQuit == nil else { return answer("Nirux is quitting.", true) }
         guard let settings = board.loaded(for: chosen.0)?.queueSettings, settings.gitHubRepository == chosen.1.gitHub else {
             let problem = board.loaded(for: chosen.0)?.queueStartProblems.first ?? "Board Settings aren't set up for it yet."
             return answer("\(chosen.1.name)'s merge queue can't start: \(problem) Tell the user.", true)
@@ -973,18 +972,63 @@ extension NiruxShellView {
         // The user's own list stays theirs; a Lead's earlier one is its own.
         let current = controller.selection(for: chosen.1.gitHub)
         let proposalKey = space.id + " " + chosen.1.gitHub.ownerAndName
-        guard current.isEmpty || Set(current) == Set(numbers) || current == leadQueueProposals[proposalKey] else {
+        let automatic = !controller.isDryRun && SpaceDefaultsStore.defaults(forSpace: space.id).leadCanStartMergeQueue
+        guard current.isEmpty || (!automatic && (current == numbers || current == leadQueueProposals[proposalKey])) else {
             return answer("The user is preparing \(chosen.1.name)'s queue (" + current.map { "#\($0)" }.joined(separator: ", ")
                 + "): suggest yours to them in this conversation instead.", true)
         }
+        if automatic {
+            return readLeadQueueStart(controller, board: board, section: chosen.0, settings: settings,
+                                      numbers: numbers, cadence: cadence, parent: parent, answer: answer)
+        }
         controller.proposeSelection(numbers, repository: chosen.1.gitHub)
         leadQueueProposals[proposalKey] = numbers
-        requestMergeQueueStart(board: board, section: chosen.0.id)
+        requestMergeQueueStart(board: board, section: chosen.0.id, cadence: cadence)
         guard mergeQueueConfirmation != nil else {
             return answer("Nirux couldn't open the merge queue's sheet (the Board may need its settings): tell the user.", true)
         }
         answer("The confirmation sheet of \(chosen.1.name)'s merge queue is open with "
             + numbers.map { "#\($0)" }.joined(separator: ", ") + ". Nothing merges until the user clicks Start.", false)
+    }
+
+    private func readLeadQueueStart(
+        _ controller: MergeQueueController, board: ProjectBoardController, section: BoardSections.Section,
+        settings: BoardConfig.QueueSettings, numbers: [Int], cadence: MergeQueue.Cadence,
+        parent: NewTask.MissionParent, answer: @escaping LeadAnswer
+    ) {
+        let key = controller.key
+        guard pendingLeadQueueStarts.insert(key).inserted else {
+            return answer("The Lead already has a merge queue preflight in progress for this repository.", true)
+        }
+        let previousDriver = controller.driver
+        let folders = controller.local.folders()
+        controller.readConfirmation(settings: settings, numbers: numbers) { [self] reading in
+            defer { pendingLeadQueueStarts.remove(key) }
+            guard let caller = requestingTerminal(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID),
+                  caller.workspace.isLead, caller.workspace.profileID == key.projectID, !caller.column.isClosing,
+                  SpaceDefaultsStore.defaults(forSpace: key.projectID).leadCanStartMergeQueue else {
+                return answer("The Lead no longer has permission to start this queue.", true)
+            }
+            guard projectBoardLocation(projectID: key.projectID)?.board === board,
+                  board.section(id: section.id)?.slot == section.slot,
+                  BoardConfigStore(spaceID: key.projectID)?.load().view(for: section.slot).queueSettings == settings else {
+                return answer("The Board or its queue settings changed during preflight. Review the queue on the Board.", true)
+            }
+            guard Set(controller.local.folders()) == Set(folders) else {
+                return answer("The space’s worktrees changed during preflight. Review the queue on the Board.", true)
+            }
+            guard mergeQueueQuit == nil, mergeQueueConfirmation == nil, controller.selection.isEmpty,
+                  !controller.runsElsewhere, !controller.isRunning, controller.driver === previousDriver else {
+                return answer("The queue or its selection changed during preflight. Review it on the Board.", true)
+            }
+            if let refusal = controller.startFromLead(reading, numbers: numbers, cadence: cadence) {
+                return answer("The Lead couldn’t start the queue. " + refusal.message + " Review the queue on the Board.", true)
+            }
+            dismissedMergeQueueNotices.remove(key)
+            mergeQueueDidChange(projectID: key.projectID)
+            answer("Started the " + cadence.title + " merge queue for " + settings.repository + " with "
+                + numbers.map { "#\($0)" }.joined(separator: ", ") + ". Stop is available on the Board and status bar.", false)
+        }
     }
 }
 

@@ -147,15 +147,18 @@ struct SpaceDefaultsStore: Sendable {
         }
         // An hour it can't read: off, as a switch it can't read.
         if top["leadDailyPassHour"].map({ !($0 is NSNull) }) == true, defaults.leadDailyPassHour == nil { defaults.leadDailyPass = false }
+        let readOnly: ReadOnlyReason
         if let version = top["schemaVersion"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(),
            version.doubleValue > Double(schemaVersion) {
             let newer = Int(exactly: version.doubleValue.rounded(.down)) ?? Int.max
-            return Loaded(defaults: defaults, status: .readOnly(.newerSchema(newer)), contents: data)
+            readOnly = .newerSchema(newer)
+        } else if !unknown.isEmpty {
+            readOnly = .unknownSettings(unknown)
+        } else {
+            return Loaded(defaults: defaults, status: .loaded, contents: data)
         }
-        if !unknown.isEmpty {
-            return Loaded(defaults: defaults, status: .readOnly(.unknownSettings(unknown)), contents: data)
-        }
-        return Loaded(defaults: defaults, status: .loaded, contents: data)
+        defaults.leadStartsMergeQueue = nil
+        return Loaded(defaults: defaults, status: .readOnly(readOnly), contents: data)
     }
 
     /// What a rewrite would drop: unknown keys, a mode or agent this build
@@ -163,6 +166,12 @@ struct SpaceDefaultsStore: Sendable {
     private static func unknownSettings(in top: [String: Any], decoded: SpaceDefaults) -> [String] {
         let known = Set(SpaceDefaults.CodingKeys.allCases.map(\.rawValue))
         var unknown = Set(top.keys).subtracting(known)
+        if let value = top["schemaVersion"], !(value is NSNull) {
+            let number = value as? NSNumber
+            if number == nil || CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() || number?.doubleValue != Double(schemaVersion) {
+                unknown.insert("schemaVersion")
+            }
+        }
         if top["agent"].map({ !($0 is NSNull) }) == true, decoded.agent == nil { unknown.insert("agent") }
         if top["leadAgent"].map({ !($0 is NSNull) }) == true, decoded.leadAgent == nil { unknown.insert("leadAgent") }
         if top["claudeLaunchMode"].map({ !($0 is NSNull) }) == true, decoded.claudeLaunchMode == nil {

@@ -16,6 +16,7 @@ final class SpaceSettingsLeadPane: NSObject {
         var place: Place
         /// "Starts tasks without asking" (`SpaceDefaults.leadStartsTasks`).
         var startsTasks = true
+        var startsMergeQueue = false
         var agent = CodingAgent.claude
         /// "Daily pass" (`SpaceDefaults.leadDailyPass`) and the hour it is
         /// due after.
@@ -48,6 +49,7 @@ final class SpaceSettingsLeadPane: NSObject {
         var setAgent: @MainActor (CodingAgent) -> Void = { _ in }
         var restartLead: @MainActor () -> Void = {}
         var setStartsTasks: @MainActor (Bool) -> Void = { _ in }
+        var setStartsMergeQueue: @MainActor (Bool) -> Void = { _ in }
         var setDailyPass: @MainActor (Bool) -> Void = { _ in }
         var setDailyPassHour: @MainActor (Int) -> Void = { _ in }
     }
@@ -57,7 +59,6 @@ final class SpaceSettingsLeadPane: NSObject {
     private static var contentWidth: CGFloat { width - insets.left - insets.right }
     /// What the Lead never does alone, and how it reaches the user instead.
     static let alwaysYours: [(what: String, how: String)] = [
-        ("Merging a pull request", "your click in the merge queue"),
         ("Removing a worktree or a branch", "your click in Clean Up"),
         ("A task’s permission prompt it can’t judge", "sent to you, in amber")
     ]
@@ -71,6 +72,9 @@ final class SpaceSettingsLeadPane: NSObject {
     private let agentRow = NSStackView()
     let startsTasksSwitch = NSSwitch()
     private let startsTasksRow = NSStackView()
+    let startsMergeQueueSwitch = NSSwitch()
+    private let startsMergeQueueRow = NSStackView()
+    let manualMergeRow = alwaysRow("Merging a pull request", "your click in the merge queue")
     let dailyPassSwitch = NSSwitch()
     let dailyPassHourPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let lastPassLabel = NSTextField(labelWithString: "")
@@ -101,6 +105,10 @@ final class SpaceSettingsLeadPane: NSObject {
         startsTasksSwitch.state = model.startsTasks ? .on : .off
         startsTasksSwitch.isEnabled = model.canChangeDefaults
         startsTasksRow.isHidden = model.isGeneral
+        startsMergeQueueSwitch.state = model.startsMergeQueue ? .on : .off
+        startsMergeQueueSwitch.isEnabled = model.canChangeDefaults
+        startsMergeQueueRow.isHidden = model.isGeneral
+        manualMergeRow.isHidden = model.startsMergeQueue
         dailyPassSwitch.state = model.dailyPass ? .on : .off
         dailyPassSwitch.isEnabled = model.canChangeDefaults
         dailyPassHourPopup.selectItem(at: model.dailyPassHour)
@@ -155,6 +163,13 @@ final class SpaceSettingsLeadPane: NSObject {
         sender.state = model.startsTasks ? .on : .off
         guard wanted != model.startsTasks, model.canChangeDefaults else { return }
         actions.setStartsTasks(wanted)
+    }
+
+    @objc func startsMergeQueueChanged(_ sender: NSSwitch) {
+        let wanted = sender.state == .on
+        sender.state = model.startsMergeQueue ? .on : .off
+        guard !model.isGeneral, model.canChangeDefaults, wanted != model.startsMergeQueue else { return }
+        actions.setStartsMergeQueue(wanted)
     }
 
     @objc func dailyPassChanged(_ sender: NSSwitch) {
@@ -216,26 +231,11 @@ final class SpaceSettingsLeadPane: NSObject {
         switchRow.alignment = .top
         switchRow.spacing = 12
 
-        startsTasksSwitch.target = self
-        startsTasksSwitch.action = #selector(startsTasksChanged(_:))
-        startsTasksSwitch.setAccessibilityLabel("Starts tasks without asking")
-        let startsTitle = NSTextField(labelWithString: "Starts tasks without asking")
-        startsTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
-        startsTitle.setAccessibilityElement(false)
-        let startsHint = NSTextField(wrappingLabelWithString: "Off: it proposes each task and you click Start in a sheet like ⌘N.")
-        startsHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        startsHint.textColor = .secondaryLabelColor
-        startsHint.isSelectable = false
-        startsHint.setAccessibilityElement(false)
-        startsTasksSwitch.setAccessibilityHelp(startsHint.stringValue)
-        let startsTexts = NSStackView(views: [startsTitle, startsHint])
-        startsTexts.orientation = .vertical
-        startsTexts.alignment = .leading
-        startsTexts.spacing = 3
-        startsTasksRow.setViews([startsTasksSwitch, startsTexts], in: .leading)
-        startsTasksRow.orientation = .horizontal
-        startsTasksRow.alignment = .top
-        startsTasksRow.spacing = 12
+        buildSwitchRow(startsTasksRow, control: startsTasksSwitch, action: #selector(startsTasksChanged(_:)),
+                       title: "Starts tasks without asking", hint: "Off: it proposes each task and you click Start in a sheet like ⌘N.")
+        buildSwitchRow(startsMergeQueueRow, control: startsMergeQueueSwitch, action: #selector(startsMergeQueueChanged(_:)),
+                       title: "Allow Lead to start the merge queue",
+                       hint: "The Lead can start a queue when every check passes. Workflow changes, conflicts and dry-run builds still need your review and confirmation.")
         buildDailyPassRow()
         agentPopup.addItems(withTitles: CodingAgent.launchable.map(\.productName))
         agentPopup.target = self
@@ -243,7 +243,7 @@ final class SpaceSettingsLeadPane: NSObject {
         agentPopup.setAccessibilityLabel("Lead agent")
         agentPopup.toolTip = "Applies when you start or restart the Lead"
         agentRow.setViews([NSTextField(labelWithString: "Agent"), agentPopup], in: .leading)
-        let switches = NSStackView(views: [switchRow, agentRow, startsTasksRow, dailyPassRow])
+        let switches = NSStackView(views: [switchRow, agentRow, startsTasksRow, startsMergeQueueRow, dailyPassRow])
         switches.orientation = .vertical
         switches.alignment = .leading
         switches.spacing = 16
@@ -254,6 +254,7 @@ final class SpaceSettingsLeadPane: NSObject {
         alwaysSection.alignment = .leading
         alwaysSection.spacing = 8
         alwaysSection.addArrangedSubview(header)
+        alwaysSection.addArrangedSubview(manualMergeRow)
         for item in Self.alwaysYours {
             alwaysSection.addArrangedSubview(Self.alwaysRow(item.what, item.how))
         }
@@ -280,6 +281,30 @@ final class SpaceSettingsLeadPane: NSObject {
             view.widthAnchor.constraint(equalToConstant: Self.width),
             descriptionLabel.widthAnchor.constraint(equalToConstant: textWidth)
         ])
+    }
+
+    private func buildSwitchRow(_ row: NSStackView, control: NSSwitch, action: Selector, title: String, hint: String) {
+        control.target = self
+        control.action = action
+        control.setAccessibilityLabel(title)
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        titleLabel.setAccessibilityElement(false)
+        let hintLabel = NSTextField(wrappingLabelWithString: hint)
+        hintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        hintLabel.textColor = .secondaryLabelColor
+        hintLabel.preferredMaxLayoutWidth = Self.contentWidth - 60
+        hintLabel.isSelectable = false
+        hintLabel.setAccessibilityElement(false)
+        control.setAccessibilityHelp(hintLabel.stringValue)
+        let labels = NSStackView(views: [titleLabel, hintLabel])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 3
+        row.setViews([control, labels], in: .leading)
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = 12
     }
 
     /// "Daily pass", its hour, and when the last one ran.

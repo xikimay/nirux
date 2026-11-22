@@ -256,12 +256,21 @@ final class MergeQueueController {
         return start(settings: confirmation.settings, entries: confirmation.entries, cadence: confirmation.cadence)
     }
 
+    func startFromLead(_ reading: MergeQueue.ConfirmationReading, numbers: [Int], cadence: MergeQueue.Cadence) -> StartRefusal? {
+        guard !isDryRun else { return .invalidSettings(["Dry runs need your confirmation."]) }
+        let confirmation = MergeQueue.confirmation(reading)
+        if let reason = reading.leadStartRefusal(confirmation: confirmation, numbers: numbers, cadence: cadence) {
+            return .invalidSettings([reason])
+        }
+        return start(settings: confirmation.settings, entries: confirmation.entries, cadence: cadence, startedByLead: true)
+    }
+
     func start(settings: BoardConfig.QueueSettings, entries: [MergeQueue.ConfirmedEntry]) -> StartRefusal? {
         start(settings: settings, entries: entries, cadence: .standard)
     }
 
     private func start(settings: BoardConfig.QueueSettings, entries: [MergeQueue.ConfirmedEntry],
-                       cadence: MergeQueue.Cadence) -> StartRefusal? {
+                       cadence: MergeQueue.Cadence, startedByLead: Bool = false) -> StartRefusal? {
         guard !isRunning else { return .alreadyRunning }
         guard settings.gitHubRepository == queueRepository else { return .otherRepository }
         guard files != nil else { return .noProjectFolder }
@@ -297,6 +306,10 @@ final class MergeQueueController {
         // The list a sheet confirmed, in its order: what it left out leaves it.
         setSelection(entries.map(\.number), isNewOrder: true)
         activity = beginActivity()
+        if startedByLead {
+            let note = MergeQueue.Note(number: nil, step: "queue", message: "Started by Lead")
+            write(lines: [MergeQueue.Journal.line(note, at: clock.date())], saved: nil)
+        }
         driver.start()
         return nil
     }
