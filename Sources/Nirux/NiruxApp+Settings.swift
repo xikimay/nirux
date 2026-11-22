@@ -548,10 +548,13 @@ extension NiruxApp {
         guard let raw = sender.selectedItem?.representedObject as? String, let mode = ClaudeLaunchMode(rawValue: raw) else { return }
         if saveSetting(revert: { SettingsForm.select(NiruxShellView.currentClaudeLaunchMode().rawValue, in: sender) }, {
             $0.claudeLaunchMode = mode
-        }), let shell {
-            for lead in shell.workspaces where lead.isLead { lead.leadOptionsCache = nil }
-            shell.updateSidebar()
-        }
+        }) { refreshLeadLaunchOptions() }
+    }
+
+    private func refreshLeadLaunchOptions() {
+        guard let shell else { return }
+        for lead in shell.workspaces where lead.isLead { lead.leadOptionsCache = nil }
+        shell.updateSidebar()
     }
 
     @objc func settingsNoFlickerChanged(_ sender: NSButton) {
@@ -569,9 +572,9 @@ extension NiruxApp {
 
     @objc func settingsCodexLaunchModeChanged(_ sender: NSPopUpButton) {
         guard let raw = sender.selectedItem?.representedObject as? String, let mode = CodexLaunchMode(rawValue: raw) else { return }
-        saveSetting(revert: { SettingsForm.select(NiruxShellView.currentCodexLaunchMode().rawValue, in: sender) }) {
+        if saveSetting(revert: { SettingsForm.select(NiruxShellView.currentCodexLaunchMode().rawValue, in: sender) }, {
             $0.codexLaunchMode = mode
-        }
+        }) { refreshLeadLaunchOptions() }
     }
 
     @objc func settingsAgyLaunchModeChanged(_ sender: NSPopUpButton) {
