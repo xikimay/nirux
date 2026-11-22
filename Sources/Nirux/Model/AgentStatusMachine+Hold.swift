@@ -24,8 +24,8 @@ extension AgentStatusMachine {
         if hookWorking || turnStartedAt != nil || !pendingDialogs.isEmpty { return .working }
         if let askedQuestion { return .waitsOnUser(.askedInReply(askedQuestion.text)) }
         if let reason = attentionReason, reason != .turnFinished { return .waitsOnUser(reason) }
-        if hasDraft { return .draft }
         if awaitsAnyVerdict { return .verdict }
+        if hasDraft { return .draft }
         return nil
     }
 }

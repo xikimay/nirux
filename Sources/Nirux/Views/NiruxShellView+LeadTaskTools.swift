@@ -43,14 +43,19 @@ extension NiruxShellView {
                 + "ask the user to close it.", true)
         }
         let snapshot = ProcessSnapshot()
-        if let refusal = leadCloseRefusal(of: task, snapshot: snapshot) { return answer(refusal, true) }
+        let path = task.isWaitingTask || task.taskFolder != nil ? nil : Self.worktreeCleanupPath(forCwd: task.cwd)
+        let inspectDraft = path != nil && task.openColumns.contains { column in
+            guard let pty = column.pty, pty.agentHold == .draft else { return false }
+            return pty.runningAgent(snapshot: snapshot) != nil
+        }
+        if let refusal = leadCloseRefusal(of: task, snapshot: snapshot, allowsDraft: inspectDraft) { return answer(refusal, true) }
         if task.isWaitingTask {
             guard !task.isStarting else { return answer("The task is starting. Try again once it opens.", true) }
             closeLeadTask(task)
             return answer("Closed “\(title)”.", false)
         }
         if let folder = task.taskFolder { return closeFolderTask(task, folder: folder, snapshot: snapshot, answer: answer) }
-        guard let path = Self.worktreeCleanupPath(forCwd: task.cwd) else {
+        guard let path else {
             closeLeadTask(task)
             return answer("Closed “\(title)”. Nirux found no worktree of it to clean up.", false)
         }
@@ -59,7 +64,7 @@ extension NiruxShellView {
             return answer("A clean-up of “\(title)”'s worktree is already running: call again in a minute.", true)
         }
         let others = worktreeMembers(path).filter { $0 !== task }
-        guard others.isEmpty else {
+        guard others.isEmpty || inspectDraft else {
             worktreeCleanupsInFlight.remove(key)
             closeLeadTask(task)
             return answer(Self.closedKeeping(title, because: Self.openInIt(others)), false)
@@ -84,7 +89,8 @@ extension NiruxShellView {
         }
         // Its agent may have taken a prompt while GitHub answered.
         let snapshot = ProcessSnapshot()
-        if let refusal = leadCloseRefusal(of: task, snapshot: snapshot) {
+        let merged = if case .inspected(let report) = inspection { report.mergedHoldsTip } else { false }
+        if let refusal = leadCloseRefusal(of: task, snapshot: snapshot, allowsDraft: merged) {
             worktreeCleanupsInFlight.remove(key)
             return answer(refusal, true)
         }
@@ -229,7 +235,7 @@ extension NiruxShellView {
 
     /// Why the Lead may not close `task` now, nil when it may: closing
     /// would end work, or drop what the user hasn't settled.
-    func leadCloseRefusal(of task: WorkspaceState, snapshot: ProcessSnapshot) -> String? {
+    private func leadCloseRefusal(of task: WorkspaceState, snapshot: ProcessSnapshot, allowsDraft: Bool) -> String? {
         let title = MissionPromptText.quoted(task.title)
         // Closing it would move their selection and keyboard.
         if task === activeWorkspace, sideEffects.appIsActive() {
@@ -242,17 +248,25 @@ extension NiruxShellView {
         // launcher (npx) too. The screen adds what no hook reports.
         let dialog = agentReadings(of: task, snapshot: snapshot).lazy.compactMap(\.dialog).first
         for column in columns {
-            guard let pty = column.pty, pty.runningAgent(snapshot: snapshot) != nil, let hold = pty.agentHold else { continue }
-            return Self.closeRefusal(hold, title: title, dialog: dialog)
+            guard let pty = column.pty, let agent = column.liveAgent(snapshot: snapshot), !agent.isPaused else { continue }
+            let foreground = pty.foregroundProcess(snapshot: snapshot)
+            let report = foreground?.interactiveAgent == nil ? nil : pty.programStatus(of: foreground)
+            switch report?.state {
+            case .working: return Self.closeRefusal(.working, title: title, dialog: dialog)
+            case .blocked, .error: return Self.closeRefusal(.waitsOnUser(report?.attentionReason), title: title, dialog: dialog)
+            default: break
+            }
+            let idle = report?.state == .idle || report?.state == .done || agent.status == .idle || pty.agentAttentionReason == .turnFinished
+            if let hold = pty.agentHold, !(hold == .draft && allowsDraft && idle) {
+                return Self.closeRefusal(hold, title: title, dialog: dialog)
+            }
+            if agent.status == nil, report == nil {
+                return "Nirux can't tell whether “\(title)”'s \(agent.agent.name) is done: ask the user to close it."
+            }
         }
         if let dialog { return "“\(title)” waits for the user (\(dialog)): leave it to them." }
-        let agents = columns.compactMap { $0.liveAgent(snapshot: snapshot) }
         if let paused = columns.compactMap(\.deferredAgent).first(where: { [.working, .needsAttention].contains($0.lastStatus) }) {
             return "“\(title)” hasn't resumed since Nirux restarted, \(paused.lastStatusText ?? ""): leave it to the user."
-        }
-        // Idle is only known from Claude's hooks (see WorkspaceClosePolicy).
-        if let unknown = agents.first(where: { $0.status == nil }) {
-            return "Nirux can't tell whether “\(title)”'s \(unknown.agent.name) is done: ask the user to close it."
         }
         // A dev server or a test run in front of a terminal of its own (one
         // sent to the background isn't seen).
