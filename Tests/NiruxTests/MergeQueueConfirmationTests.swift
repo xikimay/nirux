@@ -90,6 +90,52 @@ final class MergeQueueConfirmationTests: XCTestCase {
         }
     }
 
+    func testLeadStartRequiresEveryRequestedPRAndEveryPreflightRead() {
+        let first = candidate(12, head: a)
+        let second = candidate(14, head: b)
+        let good = reading([first, second], baseRuns: [MQ.run(1, head: c)])
+        func refusal(_ read: MergeQueue.ConfirmationReading, _ cadence: MergeQueue.Cadence = .standard) -> String? {
+            read.leadStartRefusal(confirmation: MergeQueue.confirmation(read), numbers: [12, 14], cadence: cadence)
+        }
+        XCTAssertNil(refusal(good))
+        XCTAssertNil(refusal(good, .batchPostMerge))
+        XCTAssertNotNil(refusal(good, .expressDisjoint), "both PRs change the same path")
+        var distinct = good
+        distinct.candidates[1] = candidate(14, head: b, files: ["Other.swift"])
+        XCTAssertNil(refusal(distinct, .expressDisjoint))
+        let blockers: [(inout MergeQueue.ConfirmationReading) -> Void] = [
+            { $0.candidates.removeLast() },
+            { $0.candidates.reverse() },
+            { $0.candidates[1].pullRequest = MQ.pullRequest(14, head: self.b, isDraft: true) },
+            { $0.candidates[1].pullRequest = MQ.pullRequest(14, head: self.b, mergeable: "UNKNOWN") },
+            { $0.candidates[1].missingReviews = ["Code review"] },
+            { $0.candidates[1].local = nil },
+            { $0.candidates[1].checks = nil },
+            { $0.candidates[1].checks = MQ.checks(MQ.checkRun(id: 1, status: "QUEUED", conclusion: nil)) },
+            { $0.candidates[1].checks = MQ.checks(MQ.checkRun(id: 1), MQ.checkRun(id: 2, name: "lint", conclusion: "FAILURE")) },
+            { $0.candidates[1].comparison = nil },
+            { $0.candidates[1].details?.allPathsKnown = false },
+            { $0.candidates[1].details?.head = self.c },
+            { $0.candidates[1].details?.baseBranch = "other" },
+            { $0.rateLimit = nil },
+            { $0.rateLimit = .init(coreRemaining: 499, coreReset: Date(), graphQLRemaining: 500, graphQLReset: Date()) },
+            { $0.baseMergeQueue = nil },
+            { $0.baseMergeQueue = true },
+            { $0.baseRuns = nil },
+            { $0.baseRuns = [] },
+            { $0.baseRuns = [MQ.run(1, head: self.c, conclusion: nil)] },
+            { $0.baseRuns = [MQ.run(1, head: self.c, conclusion: "cancelled")] }
+        ]
+        for (index, block) in blockers.enumerated() {
+            var blocked = good
+            block(&blocked)
+            XCTAssertNotNil(refusal(blocked), "blocker \(index)")
+        }
+        let noWorkflow = reading([first, second], settings: MQ.settings(postMergeWorkflow: nil))
+        XCTAssertNil(refusal(noWorkflow))
+        XCTAssertNotNil(refusal(noWorkflow, .batchPostMerge))
+    }
+
     // MARK: - Who joins
 
     func testEveryReadyPullRequestJoinsInTheProposedOrderWithItsHeadAndChecks() {

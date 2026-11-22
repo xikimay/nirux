@@ -108,6 +108,22 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(leftovers, [SpaceDefaultsStore.fileName], "no temporary file left")
     }
 
+    func testLeadQueueStartRequiresAnExplicitReadableOptIn() throws {
+        let store = try store()
+        XCTAssertFalse(store.load().defaults.leadCanStartMergeQueue)
+        _ = try store.save(SpaceDefaults(leadStartsMergeQueue: true)).get()
+        XCTAssertTrue(store.load().defaults.leadCanStartMergeQueue)
+        _ = try store.save(SpaceDefaults(leadStartsMergeQueue: false)).get()
+        XCTAssertFalse(try String(contentsOf: store.fileURL, encoding: .utf8).contains("leadStartsMergeQueue"))
+        for contents in ["{", #"{"leadStartsMergeQueue":"yes"}"#,
+                         #"{"schemaVersion":2,"leadStartsMergeQueue":true}"#,
+                         #"{"schemaVersion":"2","leadStartsMergeQueue":true}"#,
+                         #"{"futureQueuePolicy":true,"leadStartsMergeQueue":true}"#] {
+            try Data(contents.utf8).write(to: store.fileURL)
+            XCTAssertFalse(store.load().defaults.leadCanStartMergeQueue, contents)
+        }
+    }
+
     /// docs/design/pr-follow-up.md: on unless turned off; a value this build
     /// can't read is off, and never rewritten.
     func testTheFollowUpIsOnUnlessTurnedOff() throws {

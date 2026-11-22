@@ -44,8 +44,9 @@ space, and strips the interface down to what is used.
 - **One Lead per space**, optional, seeing only its space. It starts tasks
   without asking (a switch turns that into "propose, you click").
 - **"Report to the Lead"** in ⌘N, checked by default when the space has a Lead.
-- **Always the user:** merging, removing a worktree or branch, and permissions
-  the Lead can't judge.
+- **Merge confirmation** belongs to the user by default. A space can opt into
+  Lead starts for queues that pass every safety check. Removing a worktree
+  or branch and permissions the Lead can't judge still need the user.
 - **Isolation by place and by view.** Each task has its own worktree and
   branch; a space shows only itself. No sandbox (out of scope).
 - **The sidebar Activity section goes.** Cards, native notifications, the Dock
@@ -317,10 +318,25 @@ New flow, built on the guarded typing `tell` already uses
     (amber row at once, the popover saying why). The answer is typed into the
     task, and a line into the Lead ("[Nirux Mission] The user answered …").
     The question is the task's own: the Lead asks its own in its conversation.
-  - `queue_merge(prs, repo?)`: opens one repository's merge queue confirmation
-    sheet with those pull requests, in that order (one queue per repository),
-    once Board Settings allow it; only open pull requests, and never over a
-    list the user is preparing. It never starts a queue.
+  - `queue_merge(prs, repo?, cadence?, replace?)` proposes open pull requests in merge order
+    for one repository. By default the user confirms in the sheet. **Allow Lead
+    to start the merge queue** in Space Settings › Lead enables direct starts
+    after a clean preflight of every requested PR. A warning or an incomplete
+    read requires manual review. Dry runs and the developer live override
+    always use the confirmation sheet.
+    `cadence` accepts `standard` (default), `batch_post_merge`, or
+    `express_disjoint`. The default protects the user's prepared list. When the
+    user requests a replacement, an opted-in Lead can pass `replace: true`.
+    The same preflight checks the requested order and cadence. A proposal that
+    needs manual review opens the confirmation sheet. An open sheet, a running
+    queue or a selection changed during preflight prevents replacement.
+  - `merge_queue_status(repo?)` reports the phase, cadence, current step,
+    remaining PRs, Board selection, Lead setting, build eligibility and last
+    ten journal entries. It also reads a configured repository with the Board
+    closed. Selection freshness comes from the Board's last list of open PRs.
+  - `stop_merge_queue(repo?)` requires **Allow Lead to start the merge queue**.
+    It stops this instance’s queue before its next command and records
+    **Stopped by Lead**. Any GitHub command already sent finishes.
   - `set_task_context(task, next_step?, blocker?)` (shipped with S13): a task's
     next step and blocker (View/Edit Context…), one line each, at most 200
     characters; an empty string clears one. Its role says when: after a

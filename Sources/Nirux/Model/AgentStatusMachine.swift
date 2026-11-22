@@ -1622,6 +1622,7 @@ struct AgentStatusMachine {
         _ status: AgentProgramStatus, from process: ProcessInstance? = nil, isUserFocused: Bool, now: Date
     ) -> AgentAttentionReason? {
         guard status != programStatus?.status || process != programStatus?.process else { return nil }
+        notePromptProcess(process)
         programStatus = ReportedStatus(status: status, at: now.timeIntervalSince1970, process: process)
         let time = now.timeIntervalSince1970
         // A prompt sent since its turn last said something starts a new one,
@@ -1630,6 +1631,7 @@ struct AgentStatusMachine {
         let turn = agyTurn?.process == process ? agyTurn : nil
         let enter = submitKeys.last { $0 > (turn?.saidAt ?? process?.startedAt ?? 0) && $0 <= time }
         if status.state == .working, turn?.ended != nil || turn == nil || enter != nil {
+            if let enter { boxEmptiedAt = max(boxEmptiedAt ?? 0, enter) }
             agyTurn = AgyTurn(startedAt: enter ?? time, process: process, saidAt: time)
         } else if turn != nil, turn?.ended == nil {
             agyTurn?.saidAt = time
@@ -1647,8 +1649,26 @@ struct AgentStatusMachine {
     /// again (a redraw) keeps the time it first came.
     mutating func noteCodexStatus(_ status: AgentProgramStatus, from process: ProcessInstance?, now: TimeInterval) {
         guard status != codexStatus?.status || process != codexStatus?.process else { return }
+        notePromptProcess(process)
+        let previous = codexStatus
         codexStatus = ReportedStatus(status: status, at: now, process: process)
-        if status.state == .working { codexWorked = (now, process) }
+        if status.state == .working {
+            // A dialog closing or a redraw resumes the same turn. A queued
+            // Mission can start a turn without submitting the user's draft.
+            let sameProcess = process.map { previous?.isFrom($0) == true } ?? (previous != nil)
+            let after = max(boxEmptiedAt ?? 0, codexWorked?.at ?? 0)
+            if !sameProcess || previous?.status.state != .working && previous?.status.state != .blocked,
+               let enter = submitKeys.last(where: { $0 > after && $0 <= now }) {
+                boxEmptiedAt = enter
+            }
+            codexWorked = (now, process)
+        }
+    }
+
+    private mutating func notePromptProcess(_ process: ProcessInstance?) {
+        if let process, process.startedAt > (boxEmptiedAt ?? 0) {
+            boxEmptiedAt = process.startedAt
+        }
     }
 
     /// Antigravity's status belongs to the process that sent it: an agy

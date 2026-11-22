@@ -1188,7 +1188,7 @@ extension WorkspaceState {
     func addColumn(webViewURL: String, isIsolated: Bool = false) {
         guard !isWaitingTask else { return }
         let store = isIsolated ? isolatedBrowserDataStore : WebViewColumn.sharedDataStore
-        let browser = WebViewColumn(url: webViewURL, dataStore: store, isIsolated: isIsolated)
+        let browser = WebViewColumn(url: webViewURL, dataStore: store, isolatedWorkspaceID: isIsolated ? id : nil)
         let col = ColumnState(webView: browser)
         insertColumn(col)
         // A browser column on a proposed port makes that proposal moot.
