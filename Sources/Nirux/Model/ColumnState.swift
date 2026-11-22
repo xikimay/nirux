@@ -455,9 +455,8 @@ final class ColumnState {
             guard status.agent != .codex else { return noteCodexStatus(status, in: ptySession) }
             // One read on an empty process table goes to the agy last seen in front.
             let snapshot = readsProcesses()
-            guard ptySession.isNewProgramStatus(status),
-                  let agy = snapshot.isEmpty ? lastForegroundAgent : ptySession.foregroundProcess(snapshot: snapshot),
-                  agy.agent == status.agent
+            guard let agy = snapshot.isEmpty ? lastForegroundAgent : ptySession.foregroundProcess(snapshot: snapshot),
+                  agy.agent == status.agent, ptySession.programStatus(of: agy) != status
             else { return }
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
