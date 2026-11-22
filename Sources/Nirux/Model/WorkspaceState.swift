@@ -247,6 +247,12 @@ final class WorkspaceState {
     /// A terminal link was cmd-clicked — the shell opens a browser column
     /// in this workspace.
     var onTerminalOpenURL: ((WorkspaceState, String, _ isIsolated: Bool) -> Void)?
+    var onAttachBrowserCapture: ((
+        WorkspaceState,
+        BranchReview.BrowserReceipt.Input,
+        @escaping @MainActor (Result<Bool, Error>) -> Void
+    ) -> Void)?
+    var onOpenBranchReview: ((WorkspaceState) -> Void)?
     /// A terminal file: link was cmd-clicked — the shell opens it in an
     /// editor column in this workspace, at the optional line.
     var onTerminalOpenFile: ((WorkspaceState, String, Int?) -> Void)?
@@ -1189,6 +1195,18 @@ extension WorkspaceState {
         guard !isWaitingTask else { return }
         let store = isIsolated ? isolatedBrowserDataStore : WebViewColumn.sharedDataStore
         let browser = WebViewColumn(url: webViewURL, dataStore: store, isolatedWorkspaceID: isIsolated ? id : nil)
+        if isIsolated {
+            browser.onAttachCaptureToBranchReview = { [weak self] input, completion in
+                guard let self, let attach = self.onAttachBrowserCapture else {
+                    return completion(.failure(BranchReview.BrowserReceipt.Problem.invalidWorkspace))
+                }
+                attach(self, input, completion)
+            }
+            browser.onOpenBranchReview = { [weak self] in
+                guard let self else { return }
+                self.onOpenBranchReview?(self)
+            }
+        }
         let col = ColumnState(webView: browser)
         insertColumn(col)
         // A browser column on a proposed port makes that proposal moot.

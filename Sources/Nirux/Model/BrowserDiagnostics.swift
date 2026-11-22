@@ -1,11 +1,11 @@
 import Foundation
 
-struct BrowserDiagnostics {
-    enum Kind: String {
+struct BrowserDiagnostics: Equatable, Sendable {
+    enum Kind: String, Codable, Equatable, Sendable {
         case error, warn, exception, rejection, fetch, xhr
     }
 
-    struct Event {
+    struct Event: Codable, Equatable, Sendable {
         let kind: Kind
         let message: String
     }
@@ -15,7 +15,12 @@ struct BrowserDiagnostics {
     private var oldest = 0
 
     var events: [Event] { Array(storage[oldest...] + storage[..<oldest]) }
-    var consoleErrorCount: Int { storage.count { $0.kind == .error } }
+    var consoleErrorCount: Int {
+        storage.count { $0.kind == .error || $0.kind == .exception || $0.kind == .rejection }
+    }
+    var networkErrorCount: Int {
+        storage.count { $0.kind == .fetch || $0.kind == .xhr }
+    }
 
     mutating func append(kind: Kind, message: String) {
         let event = Event(kind: kind, message: Self.sanitized(message))

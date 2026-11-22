@@ -235,7 +235,9 @@ extension NiruxShellView {
             } else {
                 // It loads its page and reads the branch once its
                 // workspace shows (`scheduleBranchReviewsOnScreen`).
-                workspace.addBranchReviewColumn(makeBranchReview(worktree: persistedColumn.cwd, branch: persistedColumn.reviewBranch))
+                workspace.addBranchReviewColumn(makeBranchReview(
+                    worktree: persistedColumn.cwd, branch: persistedColumn.reviewBranch, workspaceID: workspace.id
+                ))
             }
         case .terminal:
             workspace.addColumn(agentUUID: persistedColumn.agentUUID ?? UUID().uuidString)

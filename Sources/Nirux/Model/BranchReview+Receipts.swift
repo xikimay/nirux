@@ -21,6 +21,26 @@ extension BranchReview {
             case unverified
         }
 
+        struct BrowserArtifact: Codable, Equatable, Sendable {
+            let workspaceID: String
+            let url: String
+            let capturedAt: Date
+            let consoleErrorCount: Int
+            let networkErrorCount: Int
+            let screenshotPath: String?
+            let diagnosticsPath: String?
+
+            var fitsStorage: Bool {
+                guard UUID(uuidString: workspaceID) != nil,
+                      url.utf8.count <= 2048,
+                      consoleErrorCount >= 0,
+                      networkErrorCount >= 0,
+                      (screenshotPath?.utf8.count ?? 0) <= 4096,
+                      (diagnosticsPath?.utf8.count ?? 0) <= 4096 else { return false }
+                return true
+            }
+        }
+
         let id: String
         let title: String
         let command: String?
@@ -30,6 +50,31 @@ extension BranchReview {
         let recordedAt: Date
         let head: String
         let workingTreeDigest: String?
+        let browserCapture: BrowserArtifact?
+
+        init(
+            id: String,
+            title: String,
+            command: String?,
+            status: Status,
+            summary: String?,
+            provenance: Provenance,
+            recordedAt: Date,
+            head: String,
+            workingTreeDigest: String?,
+            browserCapture: BrowserArtifact? = nil
+        ) {
+            self.id = id
+            self.title = title
+            self.command = command
+            self.status = status
+            self.summary = summary
+            self.provenance = provenance
+            self.recordedAt = recordedAt
+            self.head = head
+            self.workingTreeDigest = workingTreeDigest
+            self.browserCapture = browserCapture
+        }
 
         func freshness(head currentHead: String, tree: WorkingTree) -> Freshness {
             guard tree != .incomplete else { return .unverified }
@@ -42,7 +87,10 @@ extension BranchReview {
                   (command?.utf8.count ?? 0) <= 4096, (summary?.utf8.count ?? 0) <= 4096,
                   BranchReview.isCommitID(head) else { return false }
             if let workingTreeDigest, workingTreeDigest.utf8.count != 64 || !BranchReview.isCommitID(workingTreeDigest) { return false }
-            if case .ci(let url) = provenance { return (url?.utf8.count ?? 0) <= 4096 }
+            if case .ci(let url) = provenance { return (url?.utf8.count ?? 0) <= 4096 && browserCapture == nil }
+            if let browserCapture {
+                guard provenance == .local, browserCapture.fitsStorage else { return false }
+            }
             return true
         }
     }

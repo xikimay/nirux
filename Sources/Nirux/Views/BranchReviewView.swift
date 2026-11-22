@@ -38,6 +38,7 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
     var onLoadFile: ((_ id: Int, _ generation: Int) -> Void)?
     var onRefresh: (() -> Void)?
     var onAttachReport: (() -> Void)?
+    var onOpenReceiptArtifact: ((_ id: String) -> Void)?
     /// The Reload banner's button: show the branch as it is now.
     var onReload: (() -> Void)?
     /// The button a status offers (`showStatus(_:action:)`).
@@ -320,6 +321,9 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         case "openLink":
             guard let text = body["url"] as? String, let url = Self.webLink(text) else { return }
             openLink(url)
+        case "openReceiptArtifact":
+            guard let id = body["id"] as? String, !id.isEmpty, id.utf8.count <= 256 else { return }
+            onOpenReceiptArtifact?(id)
         default:
             break
         }
