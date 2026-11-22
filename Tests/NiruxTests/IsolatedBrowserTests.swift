@@ -16,10 +16,19 @@ final class IsolatedBrowserTests: XCTestCase {
 
             let regular = try browser(in: first, isolated: false)
             XCTAssertIdentical(regular.webView.configuration.websiteDataStore, WKWebsiteDataStore.default())
+            XCTAssertNil(regular.diagnostics)
+            XCTAssertNil(regular.header.currentMenu().item(withTitle: "Capture Screenshot"))
+            XCTAssertNil(regular.header.currentMenu().item(withTitle: "Diagnostics…"))
+            XCTAssertFalse(regular.webView.configuration.userContentController.userScripts.contains {
+                $0.source.contains(IsolatedBrowserDiagnostics.channel)
+            })
             XCTAssertNil(regular.header.status)
             XCTAssertNil(regular.header.currentMenu().item(withTitle: "Clear Session"))
 
             let one = try browser(in: first, isolated: true)
+            XCTAssertEqual(one.diagnostics?.workspaceID, first.id)
+            XCTAssertNotNil(one.header.currentMenu().item(withTitle: "Capture Screenshot"))
+            XCTAssertNotNil(one.header.currentMenu().item(withTitle: "Diagnostics…"))
             let store = one.webView.configuration.websiteDataStore
             XCTAssertFalse(store.isPersistent)
             XCTAssertNotIdentical(store, WKWebsiteDataStore.default())
@@ -48,10 +57,63 @@ final class IsolatedBrowserTests: XCTestCase {
         }
     }
 
+    func testPageErrorsReachOnlyTheIsolatedBufferAndClearOnNavigation() throws {
+        let column = WebViewColumn(url: "file:///dev/null", dataStore: .nonPersistent(), isolatedWorkspaceID: UUID().uuidString)
+        let diagnostics = try XCTUnwrap(column.diagnostics)
+        column.webView.loadHTMLString("""
+            <script>
+            console.error("page error");
+            console.warn(typeof window.webkit?.messageHandlers?.niruxDiagnostics);
+            Promise.reject(new Error("unhandled promise"));
+            setTimeout(() => { throw new Error("uncaught error"); }, 0);
+            </script>
+            """, baseURL: URL(string: "https://fixture.test/"))
+        waitUntil("console, runtime, and promise errors to reach the isolated handler") {
+            let events = diagnostics.buffer.events
+            return events.contains { $0.kind == .error && $0.message == "page error" }
+                && events.contains { $0.kind == .warn && $0.message == "undefined" }
+                && events.contains { $0.kind == .rejection && $0.message.contains("unhandled promise") }
+                && events.contains { $0.kind == .exception && $0.message.contains("uncaught error") }
+        }
+        column.webView.loadHTMLString("<script>console.warn('new document')</script>", baseURL: nil)
+        waitUntil("only the new document's warning") {
+            diagnostics.buffer.events.map(\.message) == ["new document"]
+        }
+    }
+
+    func testCaptureAndDiagnosticsMenuActions() throws {
+        try UIFlowHarness.run { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            workspace.addColumn(webViewURL: URL(fileURLWithPath: harness.repo + "/README.md").absoluteString, isIsolated: true)
+            let column = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.webViewColumn)
+            let diagnostics = try XCTUnwrap(column.diagnostics)
+            column.webView.loadHTMLString("<body>Screenshot fixture<script>console.error('sample')</script></body>", baseURL: nil)
+            harness.waitUntil("the test document and its viewport") {
+                diagnostics.buffer.consoleErrorCount == 1 && column.webView.bounds.width > 0 && !column.webView.isLoading
+            }
+            let menu = column.header.currentMenu()
+            @MainActor func select(_ title: String) throws {
+                menu.performActionForItem(at: menu.index(of: try XCTUnwrap(menu.item(withTitle: title))))
+            }
+            try select("Capture Screenshot")
+            let folder = URL(fileURLWithPath: harness.stateDirectory).appendingPathComponent("captures").appendingPathComponent(workspace.id)
+            harness.waitUntil("a saved screenshot and its confirmation") {
+                let files = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
+                return files?.first?.hasSuffix(".png") == true && harness.window.attachedSheet != nil
+            }
+            harness.window.endSheet(try XCTUnwrap(harness.window.attachedSheet), returnCode: .alertFirstButtonReturn)
+            harness.waitUntil("the confirmation to close") { harness.window.attachedSheet == nil }
+            try select("Diagnostics…")
+            XCTAssertEqual(diagnostics.display?.string, "[error] sample")
+            harness.window.endSheet(try XCTUnwrap(harness.window.attachedSheet), returnCode: .alertThirdButtonReturn)
+            harness.waitUntil("Clear to empty the diagnostics") { diagnostics.buffer.events.isEmpty }
+        }
+    }
+
     func testHeaderClearsOnlyItsSessionsWebsiteData() throws {
         let store = WKWebsiteDataStore.nonPersistent()
         let other = WKWebsiteDataStore.nonPersistent()
-        let column = WebViewColumn(url: "http://localhost", dataStore: store, isIsolated: true)
+        let column = WebViewColumn(url: "http://localhost", dataStore: store, isolatedWorkspaceID: UUID().uuidString)
         column.header.frame.size = NSSize(width: 600, height: ColumnHeaderView.height)
         column.header.layoutNow()
         let badge = column.header.statusPill
@@ -76,10 +138,13 @@ final class IsolatedBrowserTests: XCTestCase {
         }
 
         XCTAssertTrue(hasCookie(in: store))
+        column.webView.loadHTMLString("<script>console.warn('before clearing')</script>", baseURL: nil)
+        waitUntil("an event before Clear Session") { column.diagnostics?.buffer.events.last?.message == "before clearing" }
         let menu = column.header.currentMenu()
         let clear = try XCTUnwrap(menu.item(withTitle: "Clear Session"))
         menu.performActionForItem(at: menu.index(of: clear))
         waitUntil("Clear Session to remove the cookie") { !hasCookie(in: store) }
+        XCTAssertEqual(column.diagnostics?.buffer.events.count, 0)
         XCTAssertTrue(hasCookie(in: other))
     }
 
