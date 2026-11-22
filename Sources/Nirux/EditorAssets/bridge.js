@@ -685,6 +685,24 @@
   function renderPierreDiffGroup() {
     if (diffMode !== "pierre-group" || !pierreGroupPayload) return;
     showPierreDiffSurface();
+    if (typeof pierreGroupPayload.patch === "string") {
+      window.NiruxPierreDiff.destroy(pierreDiffRoot);
+      var header = document.createElement("div");
+      header.className = "nirux-pierre-summary";
+      header.textContent = pierreGroupPayload.title;
+      if (pierreGroupPayload.warning) {
+        var warning = document.createElement("strong");
+        warning.textContent = pierreGroupPayload.warning;
+        header.appendChild(warning);
+      }
+      var patch = document.createElement("pre");
+      patch.className = "checkpoint-patch";
+      patch.textContent = pierreGroupPayload.patch;
+      pierreDiffRoot.replaceChildren(header, patch);
+      pierreDiffRoot.scrollTop = 0;
+      hideStatus();
+      return;
+    }
     if (pierreGroupPayload.loading) {
       if (window.NiruxPierreDiff && pierreDiffRoot) {
         window.NiruxPierreDiff.destroy(pierreDiffRoot);
@@ -792,7 +810,7 @@
   }
 
   function requestSave() {
-    if (!currentPath) return;
+    if (!currentPath || diffMode === "pierre-group") return;
     var entry = models[currentPath];
     if (!entry) return;
     postSave(currentPath, entry);

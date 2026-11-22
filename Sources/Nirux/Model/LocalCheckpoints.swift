@@ -145,19 +145,25 @@ struct LocalCheckpoints: Sendable {
                   let file = manifest.files.first(where: { $0.path == path }) else {
                 throw Problem("The file is unavailable in this checkpoint.")
             }
-            guard let hash = file.sha256 else { return nil }
-            guard hash.utf8.count == 64, hash.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
-                throw Problem("Invalid checkpoint digest.")
-            }
-            let directory = folder.appendingPathComponent(id.uuidString)
-            let root = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
-            guard root >= 0 else { throw Self.fileError }
-            defer { close(root) }
-            let data = try BranchReview.ExplainCopy.readBytes(hash, from: root, maxFileBytes: Limits().maxWorkspaceBytes,
-                                                              budget: file.size).get()
-            guard data.count == file.size, Self.digest(data) == hash else { throw Problem("The stored file failed its checksum.") }
-            return data
+            return try payload(for: file, in: id)
         }
+    }
+
+    func payload(for file: File, in id: UUID) throws -> Data? {
+        guard let hash = file.sha256 else { return nil }
+        guard hash.utf8.count == 64, hash.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
+            throw Problem("Invalid checkpoint digest.")
+        }
+        let path = id.uuidString + "/" + hash
+        let root = open(folder.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+        guard root >= 0 else { throw Self.fileError }
+        defer { close(root) }
+        guard case let .success(data) = BranchReview.ExplainCopy.readBytes(path, from: root, maxFileBytes: Limits().maxWorkspaceBytes,
+                                                                           budget: file.size) else {
+            throw Problem("The stored file is unavailable or exceeds its size limit.")
+        }
+        guard data.count == file.size, Self.digest(data) == hash else { throw Problem("The stored file failed its checksum.") }
+        return data
     }
 
     func delete(_ id: UUID) throws {
@@ -178,21 +184,31 @@ struct LocalCheckpoints: Sendable {
     }
 
     private func readEntry(_ id: UUID) throws -> Entry {
-        struct Version: Decodable { let schemaVersion: Int }
+        let (version, manifest) = try readManifest(id)
         let directory = folder.appendingPathComponent(id.uuidString)
-        let url = directory.appendingPathComponent("manifest.json")
-        let fd = open(url.path, O_RDONLY | O_NOFOLLOW_ANY | O_CLOEXEC | O_NONBLOCK)
-        guard fd >= 0 else { throw Self.fileError }
-        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        var info = stat()
-        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
-              info.st_size <= Limits().maxWorkspaceBytes else { throw Problem("Unreadable checkpoint manifest.") }
-        let data = try handle.readToEnd() ?? Data()
+        return Entry(id: id, version: version, manifest: manifest, storedBytes: try Self.diskBytes(in: directory))
+    }
+
+    func manifest(_ id: UUID) throws -> Manifest {
+        guard let manifest = try readManifest(id).1 else { throw Problem("This checkpoint needs a newer Nirux.") }
+        return manifest
+    }
+
+    private func readManifest(_ id: UUID) throws -> (Int, Manifest?) {
+        struct Version: Decodable { let schemaVersion: Int }
+        let root = open(folder.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+        guard root >= 0 else { throw Self.fileError }
+        defer { close(root) }
+        let limit = Limits().maxWorkspaceBytes
+        guard case let .success(data) = BranchReview.ExplainCopy.readBytes(id.uuidString + "/manifest.json", from: root,
+                                                                           maxFileBytes: limit, budget: limit) else {
+            throw Problem("The checkpoint manifest is unavailable or exceeds its size limit.")
+        }
         let decoder = JSONDecoder()
         let version = try decoder.decode(Version.self, from: data).schemaVersion
         let manifest = version == 1 ? try decoder.decode(Manifest.self, from: data) : nil
         if let manifest, manifest.id != id { throw Problem("Checkpoint identifier mismatch.") }
-        return Entry(id: id, version: version, manifest: manifest, storedBytes: try Self.diskBytes(in: directory))
+        return (version, manifest)
     }
 
     private static func diskBytes(in directory: URL) throws -> Int {

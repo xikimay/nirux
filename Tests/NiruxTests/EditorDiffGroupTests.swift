@@ -5,6 +5,21 @@ import XCTest
 /// The editor's tab of several files' diff ("Uncommitted Changes", "Full
 /// Branch Diff"), on a real, temporary repository.
 final class EditorDiffGroupTests: BranchReviewRepositoryTestCase {
+    @MainActor
+    func testCheckpointDiffIsAVirtualTabAndRetainsItsWarning() throws {
+        let editor = EditorColumn(workspaceCwd: repo)
+        editor.showCheckpointDiff(.init(warning: "Incomplete checkpoint", text: "No changes."), title: "Saved → Working Tree")
+        let tab = try XCTUnwrap(editor.activePath)
+        XCTAssertNil(editor.currentPath)
+        XCTAssertTrue(editor.openPaths.isEmpty)
+        XCTAssertTrue(editor.unsavedPaths.isEmpty)
+        editor.showDiff(path: "README.md")
+        editor.switchTo(path: tab)
+        XCTAssertEqual(editor.diffGroupTabs[tab]?.checkpoint?.warning, "Incomplete checkpoint")
+        editor.close(path: tab)
+        XCTAssertEqual(editor.currentPath, repo + "/README.md")
+    }
+
     /// A file's diff opened while the tab reads its files doesn't stop that
     /// read: back on the tab, they show.
     @MainActor
