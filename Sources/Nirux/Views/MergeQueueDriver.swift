@@ -59,7 +59,7 @@ final class MergeQueueDriver {
 
     func start() { send(.start) }
 
-    func stop() { send(.stop) }
+    func stop(byLead: Bool = false) { send(byLead ? .stopByLead : .stop) }
 
     func send(_ event: MergeQueue.Event) {
         let output = engine.handle(event, now: clock.now())

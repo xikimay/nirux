@@ -11,12 +11,17 @@ import Security
 protocol MergeQueueGitHub: Sendable {
     /// Mutations go to the journal only (a dev build).
     var isDryRun: Bool { get }
+    var allowsLeadStart: Bool { get }
     /// One GitHub read. `.local` isn't one: the driver reads it.
     func read(_ read: MergeQueue.Read, settings: BoardConfig.QueueSettings) -> Result<MergeQueue.ReadResult, GitHub.CLI.Failure>
     /// Sent once: the engine never sends a mutation again.
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult
     /// What a mutation runs, for the journal.
     func commandLine(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> String
+}
+
+extension MergeQueueGitHub {
+    var allowsLeadStart: Bool { false }
 }
 
 extension MergeQueue {
@@ -46,6 +51,23 @@ extension MergeQueue {
         }
     }
 
+    enum LiveDecision: Equatable {
+        case release, manualOverride, dryRun(String)
+
+        var isLive: Bool {
+            if case .dryRun = self { return false }
+            return true
+        }
+
+        var reason: String {
+            switch self {
+            case .release: "the notarized release on the real state"
+            case .manualOverride: "NIRUX_MERGE_QUEUE_LIVE=1"
+            case .dryRun(let reason): reason
+            }
+        }
+    }
+
     /// Whether this build may change GitHub, and why, for the log and a dry
     /// run's stop: the notarized release run on the real state, or any
     /// build with `NIRUX_MERGE_QUEUE_LIVE=1`. Agents build and click through
@@ -57,21 +79,21 @@ extension MergeQueue {
     /// asked for when the rest doesn't decide.
     static func liveDecision(
         environment: [String: String], bundleURL: URL, signature: () -> ReleaseSignature
-    ) -> (isLive: Bool, reason: String) {
+    ) -> LiveDecision {
         if let decided = decisionWithoutSignature(environment: environment, bundleURL: bundleURL) { return decided }
         let result = signature()
         return result == .release
-            ? (true, "the notarized release on the real state")
-            : (false, "not the notarized release (\(result.detail))")
+            ? .release
+            : .dryRun("not the notarized release (\(result.detail))")
     }
 
     /// The decision when it doesn't need the signature; nil when it does.
-    static func decisionWithoutSignature(environment: [String: String], bundleURL: URL) -> (isLive: Bool, reason: String)? {
-        if environment["NIRUX_MERGE_QUEUE_LIVE"] == "1" { return (true, "NIRUX_MERGE_QUEUE_LIVE=1") }
-        guard (environment["NIRUX_STATE_DIR"] ?? "").isEmpty else { return (false, "NIRUX_STATE_DIR is set") }
-        guard bundleURL.pathExtension == "app" else { return (false, "not an app bundle") }
+    static func decisionWithoutSignature(environment: [String: String], bundleURL: URL) -> LiveDecision? {
+        if environment["NIRUX_MERGE_QUEUE_LIVE"] == "1" { return .manualOverride }
+        guard (environment["NIRUX_STATE_DIR"] ?? "").isEmpty else { return .dryRun("NIRUX_STATE_DIR is set") }
+        guard bundleURL.pathExtension == "app" else { return .dryRun("not an app bundle") }
         let checkoutManifest = bundleURL.deletingLastPathComponent().appendingPathComponent("Package.swift").path
-        guard !FileManager.default.fileExists(atPath: checkoutManifest) else { return (false, "a build inside a checkout") }
+        guard !FileManager.default.fileExists(atPath: checkoutManifest) else { return .dryRun("a build inside a checkout") }
         return nil
     }
 
@@ -197,12 +219,14 @@ extension MergeQueue {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         bundleURL: URL = Bundle.main.bundleURL,
         signature: @autoclosure () -> ReleaseSignature = currentSignature(),
-        live: @autoclosure () -> any MergeQueueGitHub = GitHubCLIQueueClient.installed
+        live: @autoclosure () -> GitHubCLIQueueClient = GitHubCLIQueueClient.installed
     ) -> any MergeQueueGitHub {
-        let client = live()
+        var client = live()
         let decision = liveDecision(environment: environment, bundleURL: bundleURL, signature: signature)
         NSLog("[MergeQueue] %@: %@", decision.isLive ? "live" : "dry run", decision.reason)
-        return decision.isLive ? client : DryRunQueueClient(wrapped: client, reason: decision.reason)
+        if case .dryRun(let reason) = decision { return DryRunQueueClient(wrapped: client, reason: reason) }
+        client.allowsLeadStart = decision == .release
+        return client
     }
 }
 
@@ -232,6 +256,11 @@ struct DryRunQueueClient: MergeQueueGitHub {
 /// `GH_HOST` would otherwise send it to another server.
 struct GitHubCLIQueueClient: MergeQueueGitHub {
     let gh: GitHub.CLI.Runner
+    fileprivate(set) var allowsLeadStart = false
+
+    init(gh: @escaping GitHub.CLI.Runner) {
+        self.gh = gh
+    }
 
     var isDryRun: Bool { false }
 

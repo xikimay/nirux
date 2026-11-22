@@ -20,6 +20,27 @@ final class SpaceSettingsFlowTests: XCTestCase {
         harness.shell.workspaces.first { $0.title == title && !$0.isClosing }
     }
 
+    func testLeadMergeQueueSwitchUpdatesTheSpaceAndManualMergeCopy() throws {
+        try UIFlowHarness.run { harness in
+            let space = try anchoredSpace(harness)
+            harness.shell.showSpaceSettings(profileID: space.id, tab: .lead)
+            let pane = try XCTUnwrap(harness.shell.spaceSettings?.lead)
+            let toggle = pane.startsMergeQueueSwitch
+            XCTAssertEqual(toggle.accessibilityLabel(), "Allow Lead to start the merge queue")
+            let hint = try XCTUnwrap(toggle.accessibilityHelp())
+            for term in ["Workflow changes", "conflicts", "dry-run"] { XCTAssertTrue(hint.contains(term)) }
+            XCTAssertEqual(toggle.state, .off)
+            XCTAssertFalse(pane.manualMergeRow.isHidden)
+            for on in [true, false] {
+                toggle.state = on ? .on : .off
+                XCTAssertTrue(toggle.sendAction(toggle.action, to: toggle.target))
+                XCTAssertEqual(toggle.state, on ? .on : .off)
+                XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: space.id).leadCanStartMergeQueue, on)
+                XCTAssertEqual(pane.manualMergeRow.isHidden, on)
+            }
+        }
+    }
+
     // MARK: - Launches and shells
 
     /// The space's modes beat Settings' for a fresh launch; its variables
