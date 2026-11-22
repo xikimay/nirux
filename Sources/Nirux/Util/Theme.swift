@@ -203,6 +203,7 @@ enum Theme {
         static let terminal = "terminal"
         static let editor = "chevron.left.forwardslash.chevron.right"
         static let browser = "globe"
+        static let testBrowser = "testtube.2"
         static let projectBoard = "tablecells"
         static let branchReview = "checklist.checked"
         static let newWorkspace = "plus.rectangle.on.rectangle"

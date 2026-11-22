@@ -26,6 +26,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsLaunchModePopup: NSPopUpButton?
     weak var settingsNoFlickerCheckbox: NSButton?
     weak var settingsCodexLaunchModePopup: NSPopUpButton?
+    weak var settingsAgyLaunchModePopup: NSPopUpButton?
     weak var settingsMissionHandoffsCheckbox: NSButton?
     weak var settingsSidebarApprovalsCheckbox: NSButton?
     weak var settingsStuckAgentPopup: NSPopUpButton?

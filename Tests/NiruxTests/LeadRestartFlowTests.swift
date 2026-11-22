@@ -88,11 +88,58 @@ final class LeadRestartFlowTests: XCTestCase {
                 harness.waitUntil("the selected agent to restart") {
                     harness.terminalRestarts.last?.hasPrefix("command \(next.rawValue)") == true && !column.isRestartingShell
                 }
-                XCTAssertTrue(try XCTUnwrap(harness.alertDetails.last).contains(next.productName))
+                XCTAssertTrue(try XCTUnwrap(harness.alertMenuTitles.last).contains { $0.hasPrefix(next.productName) })
                 XCTAssertEqual(lead.leadAgentUUID, column.agentUUID)
                 XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: space).taskAgent, .agy)
             }
         }
+    }
+
+    func testRestartDefaultsToTheLiveAgentAndHonorsAnExplicitSwitch() throws {
+        for (index, agent) in CodingAgent.launchable.enumerated() {
+            try UIFlowHarness.run { harness in
+                let shell = harness.shell
+                let lead = try harness.makeLead()
+                shell.changeSpaceDefaults(spaceID: lead.space) { $0.agyLaunchMode = .plan }
+                let column = try XCTUnwrap(lead.workspace.leadTerminal)
+                let standIn = AgentStandIn()
+                defer { standIn.remove() }
+                let original = try run(standIn.command(named: agent.rawValue), named: agent.rawValue, in: column, harness: harness)
+                let next = (index + 1) % CodingAgent.launchable.count
+                let modal = shell.sideEffects.runModal
+                shell.sideEffects.runModal = { alert in
+                    let picker = alert.accessoryView as? NSPopUpButton
+                    XCTAssertEqual(picker?.indexOfSelectedItem, index)
+                    XCTAssertTrue(picker?.itemTitles.contains("Antigravity — Plan") == true)
+                    return modal(alert)
+                }
+                harness.alertMenuChoices = [next, next]
+                shell.requestRestartLead(spaceID: lead.space)
+                XCTAssertTrue(harness.terminalRestarts.isEmpty)
+                XCTAssertEqual(ProcessInstance.running(pid: original.pid), original)
+
+                harness.alertResponses = [.alertSecondButtonReturn]
+                shell.requestRestartLead(spaceID: lead.space)
+                let selected = CodingAgent.launchable[next]
+                let command = try XCTUnwrap(harness.terminalRestarts.last)
+                XCTAssertTrue(command.hasPrefix("command \(selected.rawValue) "), command)
+                if selected == .agy { XCTAssertTrue(command.contains("--mode plan"), command) }
+                XCTAssertTrue(command.contains(NiruxShellView.shellQuotedArgument(NiruxShellView.leadRestartPrompt(for: selected))))
+                XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: lead.space).preferredLeadAgent, .claude)
+                harness.waitUntil("the switch to finish") { !column.isRestartingShell }
+                XCTAssertEqual(column.agentUUID, lead.agentUUID)
+            }
+        }
+    }
+
+    func testAntigravityLeadPromptOffersMCPAndTheMissionFallback() {
+        let prompt = NiruxShellView.agyLeadPrompt
+        for tool in ["list_tasks", "start_task", "tell", "reply", "ask_user", "queue_merge"] {
+            XCTAssertTrue(prompt.contains(tool), tool)
+        }
+        XCTAssertTrue(prompt.contains(#"If the tools are unavailable, answer Mission questions with "$NIRUX_CLI_PATH" --mission reply"#))
+        XCTAssertTrue(NiruxShellView.leadRestartPrompt(for: .agy).contains(prompt))
+        XCTAssertTrue(NiruxShellView.leadRelaunchPrompt(for: .agy).contains(prompt))
     }
 
     func testManualCodexAndAntigravityLeadReceiveQuestionsResultsAndNotices() throws {
@@ -163,6 +210,98 @@ final class LeadRestartFlowTests: XCTestCase {
                 harness.waitUntil("the Lead's notice") { received("Notice for the Lead.") }
                 if agent == .codex { XCTAssertEqual(standIn.input, "") }
             }
+        }
+    }
+
+    func testCodexRecoveryChecksToolsAndResumesTheProvenThreadWithCurrentOptions() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let column = try XCTUnwrap(lead.workspace.leadTerminal)
+            let pty = try XCTUnwrap(column.pty)
+            let old = AgentStandIn(), resumed = AgentStandIn()
+            defer { old.remove(); resumed.remove() }
+            let flags = NiruxMCPServer.codexArguments(executable: "/test/Nirux")
+            let prompt = "Check the space."
+            let original = try run(old.command(named: "codex", arguments: flags, launchPrompt: prompt),
+                                   named: "codex", in: column, harness: harness)
+            let snapshot = ProcessSnapshot()
+            let process = try XCTUnwrap(pty.foregroundProcess(snapshot: snapshot))
+            @MainActor func issue(_ arguments: [String]) -> LeadLaunchIssue? {
+                let foreground = ForegroundProcess(instance: original, name: "codex", arguments: ["codex"] + arguments)
+                return shell.leadLaunchIssue(in: lead.workspace, foreground: foreground, snapshot: snapshot)
+            }
+            XCTAssertEqual(issue([]), .missingTools)
+            XCTAssertEqual(issue(["-c", "mcp_servers.other={}"]), .missingTools)
+            XCTAssertNil(issue(flags))
+            shell.changeSpaceDefaults(spaceID: lead.space) { $0.codexLaunchMode = .readOnly }
+            XCTAssertEqual(issue(flags), .olderOptions)
+            XCTAssertNil(issue(flags + CodexLaunchMode.readOnly.cliArgs))
+            shell.requestLeadRecovery(.launchIssue(.olderOptions), in: lead.workspace)
+            XCTAssertEqual(shell.toast?.message, "Codex hasn’t recorded a conversation to resume yet.")
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+
+            let id = UUID().uuidString
+            XCTAssertTrue(column.captureCodexSession(sessionID: id, soleInputDigest: CodexLaunch.promptDigest(prompt),
+                                                     emitterProcess: original, snapshot: snapshot))
+            XCTAssertEqual(column.leadSessionID(for: process), id)
+            harness.restartedAgent = resumed.command(named: "codex", arguments: ["resume", id] + flags + CodexLaunchMode.readOnly.cliArgs,
+                                                     launchPrompt: NiruxShellView.leadRelaunchPrompt)
+            let key = AgentSessionRecord.key(agent: "codex", sessionID: id)
+            shell.sessionResume.inFlight.insert(key)
+            harness.alertResponses = [.alertSecondButtonReturn, .alertSecondButtonReturn]
+            shell.requestLeadRecovery(.launchIssue(.olderOptions), in: lead.workspace)
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            shell.sessionResume.inFlight.remove(key)
+            shell.requestLeadRecovery(.launchIssue(.olderOptions), in: lead.workspace)
+            let command = try XCTUnwrap(harness.terminalRestarts.last)
+            XCTAssertTrue(command.hasPrefix("command codex resume " + NiruxShellView.shellQuotedArgument(id)), command)
+            XCTAssertTrue(command.contains("--sandbox read-only"), command)
+            XCTAssertTrue(try XCTUnwrap(harness.alertDetails.last).contains("Codex will resume"))
+            harness.waitUntil("the same Codex thread") {
+                guard let process = pty.foregroundProcess(snapshot: ProcessSnapshot()) else { return false }
+                return process.instance != original && column.leadSessionID(for: process) == id
+            }
+        }
+    }
+
+    func testAntigravityRelaunchKeepsTheConversationAndLeadColumn() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let column = try XCTUnwrap(lead.workspace.leadTerminal)
+            let pty = try XCTUnwrap(column.pty)
+            let old = AgentStandIn(), resumed = AgentStandIn()
+            defer { old.remove(); resumed.remove() }
+            let original = try run(old.command(named: "agy"), named: "agy", in: column, harness: harness)
+            let snapshot = ProcessSnapshot()
+            let process = try XCTUnwrap(pty.foregroundProcess(snapshot: snapshot))
+            let id = UUID().uuidString
+            XCTAssertNil(column.leadSessionID(for: process))
+            shell.updateSidebar()
+            let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === lead.workspace })
+            let menu = shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
+            let action = "Relaunch with Current Options…"
+            XCTAssertNotNil(menu.item(withTitle: action))
+            XCTAssertNil(shell.sidebar.lastInfos.first(where: \.isLead)?.leadLaunchIssue)
+            harness.perform([action], in: menu)
+            XCTAssertEqual(shell.toast?.message, "Antigravity hasn’t recorded a conversation to resume yet.")
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            XCTAssertTrue(column.captureAgySession(sessionID: id, emitterProcess: original, snapshot: snapshot))
+            XCTAssertEqual(column.leadSessionID(for: process), id)
+            let prompt = NiruxShellView.leadRelaunchPrompt(for: .agy)
+            harness.restartedAgent = resumed.command(named: "agy", arguments: ["--conversation", id, "-i"], launchPrompt: prompt)
+            harness.alertResponses = [.alertSecondButtonReturn]
+            harness.perform([action], in: menu)
+            XCTAssertTrue(try XCTUnwrap(harness.alertDetails.last).contains("Antigravity will resume"))
+            let command = try XCTUnwrap(harness.terminalRestarts.last)
+            XCTAssertTrue(command.hasPrefix("command agy --conversation " + NiruxShellView.shellQuotedArgument(id)), command)
+            XCTAssertTrue(command.hasSuffix("-i " + NiruxShellView.shellQuotedArgument(prompt)), command)
+            harness.waitUntil("the resumed Antigravity conversation") {
+                guard let current = pty.foregroundProcess(snapshot: ProcessSnapshot()) else { return false }
+                return current.instance != original && lead.workspace.runsRestartedLead(current) && column.leadSessionID(for: current) == id
+            }
+            XCTAssertEqual(lead.workspace.leadTerminal?.agentUUID, lead.agentUUID)
         }
     }
 
@@ -269,7 +408,7 @@ final class LeadRestartFlowTests: XCTestCase {
             XCTAssertEqual(knownPath, transcript.path)
             @MainActor func relaunch() {
                 harness.alertResponses = [.alertSecondButtonReturn]
-                shell.requestLeadRecovery(.olderOptions, in: lead.workspace)
+                shell.requestLeadRecovery(.launchIssue(.olderOptions), in: lead.workspace)
             }
             try FileManager.default.removeItem(at: transcript)
             relaunch()
@@ -390,7 +529,7 @@ final class LeadRestartFlowTests: XCTestCase {
 
             shell.requestRestartLead(spaceID: lead.space)
             XCTAssertEqual(harness.alerts.last, "Restart the Lead of “Tools”?")
-            XCTAssertTrue(harness.alertDetails.last?.contains("launch mode (Manual)") == true, harness.alertDetails.last ?? "")
+            XCTAssertTrue(try XCTUnwrap(harness.alertMenuTitles.last).contains("Claude Code — Manual"))
             XCTAssertEqual(harness.terminalRestarts, [], "cancelled")
 
             let question = try askLead(lead)
@@ -426,16 +565,15 @@ final class LeadRestartFlowTests: XCTestCase {
     func testTheConfirmationSaysWhatStops() {
         func details(_ status: AgentStatus?) -> [String] {
             NiruxShellView.leadRestartDetails(
-                next: .claude, mode: ClaudeLaunchMode.auto.displayName, agent: status.map { WorkspaceClosePolicy.LiveAgent(agent: .claude, status: $0) }
+                agent: status.map { WorkspaceClosePolicy.LiveAgent(agent: .claude, status: $0) }
             )
         }
-        XCTAssertTrue(details(nil)[0].contains("launch mode (Auto)"), details(nil)[0])
         XCTAssertEqual(details(nil).count, 2)
         XCTAssertEqual(details(.idle).count, 2)
         XCTAssertEqual(details(.working).last, "Claude is working: its turn stops.")
         XCTAssertEqual(details(.needsAttention).last, "Claude is waiting for you: that goes unanswered.")
         XCTAssertEqual(
-            NiruxShellView.leadRestartDetails(next: .claude, mode: ClaudeLaunchMode.auto.displayName, agent: nil, otherProgram: "vim").last, "vim runs in its terminal: it ends too."
+            NiruxShellView.leadRestartDetails(agent: nil, otherProgram: "vim").last, "vim runs in its terminal: it ends too."
         )
     }
 

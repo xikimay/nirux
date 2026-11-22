@@ -326,7 +326,7 @@ extension NiruxShellView {
         }
         let controller = mergeQueue(projectID: panel.projectID, repository: panel.repository)
         guard controller.isDryRun == confirmation.isDryRun else { return panel.showError("Cancel, then Start again.") }
-        if let refusal = controller.start(settings: confirmation.settings, entries: confirmation.entries) {
+        if let refusal = controller.start(confirmation) {
             return panel.showError(refusal.message)
         }
         dismissedMergeQueueNotices.remove(MergeQueueKey(projectID: panel.projectID, repository: panel.repository))
