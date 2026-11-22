@@ -454,8 +454,8 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
     query($owner: String!, $name: String!, $number: Int!) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
-          title
-          files(first: \(MergeQueue.PullRequestDetails.maxFiles)) { pageInfo { hasNextPage } nodes { path } }
+          title headRefOid baseRefName changedFiles
+          files(first: \(MergeQueue.PullRequestDetails.maxFiles)) { pageInfo { hasNextPage } nodes { path changeType } }
         }
       }
     }

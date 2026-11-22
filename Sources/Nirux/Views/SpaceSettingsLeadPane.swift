@@ -241,7 +241,7 @@ final class SpaceSettingsLeadPane: NSObject {
         agentPopup.target = self
         agentPopup.action = #selector(agentChanged(_:))
         agentPopup.setAccessibilityLabel("Lead agent")
-        agentPopup.toolTip = "Applies when you start or restart the Lead"
+        agentPopup.toolTip = "Default agent when the Lead is stopped"
         agentRow.setViews([NSTextField(labelWithString: "Agent"), agentPopup], in: .leading)
         let switches = NSStackView(views: [switchRow, agentRow, startsTasksRow, dailyPassRow])
         switches.orientation = .vertical

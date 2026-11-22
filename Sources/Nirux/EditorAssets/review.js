@@ -1662,6 +1662,7 @@
   }
 
   function render(page) {
+    if (state.page?.generation !== page.generation) showReportProblem(null);
     const samebranch = state.page && state.page.header.branch === page.header.branch;
     if (!samebranch) {
       state.risk = null;
@@ -1962,6 +1963,14 @@
     bannerElement.hidden = false;
   }
 
+  function showReportProblem(message) {
+    const notice = document.getElementById("report-problem");
+    notice.hidden = !message;
+    if (message) {
+      notice.replaceChildren(element("span", null, message), button("Dismiss", false, () => showReportProblem(null)));
+    }
+  }
+
   function hideReload() {
     bannerElement.hidden = true;
   }
@@ -1980,6 +1989,7 @@
   // with a button when Swift offers something to do. What the user opened
   // stays, for the page that comes back.
   function showStatus(message, action) {
+    showReportProblem(null);
     statusElement.replaceChildren(element("div", null, String(message ?? "")));
     if (action) {
       const button = element("button", "action", String(action));
@@ -1992,6 +2002,6 @@
     pageElement.hidden = true;
   }
 
-  window.NiruxReview = Object.freeze({ show, showDiff, showExplain, showStatus, showReload, hideReload, showReview, markNote });
+  window.NiruxReview = Object.freeze({ show, showDiff, showExplain, showStatus, showReload, hideReload, showReportProblem, showReview, markNote });
   post({ type: "ready" });
 })();

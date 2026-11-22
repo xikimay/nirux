@@ -24,6 +24,7 @@ final class MergeQueueConfirmationPanel: NSObject {
     private weak var parentWindow: NSWindow?
     private var documentView: FlippedView?
     private(set) var startButton: NSButton?
+    private(set) var cadencePicker: NSPopUpButton?
     private(set) var cancelButton: NSButton?
     private(set) var statusLabel: NSTextField?
     /// ↑ and ↓ of each item, in list order.
@@ -113,6 +114,14 @@ final class MergeQueueConfirmationPanel: NSObject {
         panel?.makeFirstResponder(next)
     }
 
+    @objc private func chooseCadence(_ sender: NSPopUpButton) {
+        guard let value = sender.selectedItem?.representedObject as? String,
+              let cadence = MergeQueue.Cadence(rawValue: value) else { return }
+        confirmation?.select(cadence)
+        render()
+        panel?.makeFirstResponder(cadencePicker)
+    }
+
     @objc private func cancelAction() {
         dismiss()
     }
@@ -127,6 +136,7 @@ final class MergeQueueConfirmationPanel: NSObject {
     private func render() {
         guard let documentView, let scroll = documentView.enclosingScrollView else { return }
         documentView.subviews.forEach { $0.removeFromSuperview() }
+        cadencePicker = nil
         moveButtons = []
         lines = []
         let width = scroll.contentSize.width
@@ -169,6 +179,30 @@ final class MergeQueueConfirmationPanel: NSObject {
             add(warning.asWarning, color: Self.warningColor)
         }
         if !confirmation.items.isEmpty {
+            heading("MERGE CADENCE")
+            let picker = NSPopUpButton(frame: .zero, pullsDown: false)
+            picker.setAccessibilityLabel("Merge cadence")
+            picker.autoenablesItems = false
+            for cadence in confirmation.offeredCadences {
+                picker.addItem(withTitle: cadence.title)
+                picker.lastItem?.representedObject = cadence.rawValue
+                picker.lastItem?.isEnabled = cadence != .expressDisjoint || confirmation.expressRefusal == nil
+            }
+            picker.selectItem(withTitle: confirmation.cadence.title)
+            picker.target = self
+            picker.action = #selector(chooseCadence(_:))
+            picker.sizeToFit()
+            picker.setFrameOrigin(NSPoint(x: 16, y: y))
+            documentView.addSubview(picker)
+            cadencePicker = picker
+            y += picker.frame.height + 4
+            add(confirmation.summary, color: Self.primaryText)
+            if confirmation.cadence != .standard, confirmation.settings.postMergeWorkflow != nil, confirmation.items.count > 1 {
+                add("Intermediate pushes can still trigger workflows and publish releases.", color: Self.secondaryText, font: Theme.Font.caption)
+            }
+            if let reason = confirmation.expressRefusal {
+                add("Express disjoint unavailable. " + reason, color: Self.secondaryText, font: Theme.Font.caption)
+            }
             heading("MERGES, IN THIS ORDER")
             for (index, item) in confirmation.items.enumerated() {
                 let top = y
