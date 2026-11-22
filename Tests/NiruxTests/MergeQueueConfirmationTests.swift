@@ -136,6 +136,61 @@ final class MergeQueueConfirmationTests: XCTestCase {
         XCTAssertNotNil(refusal(noWorkflow, .batchPostMerge))
     }
 
+    func testLeadStartCanOptOutOfLocalReviewWithoutWeakeningOtherChecks() {
+        let first = candidate(12, head: a)
+        var unreviewed = candidate(14, head: b)
+        unreviewed.missingReviews = ["Code review"]
+        let read = reading([first, unreviewed], baseRuns: [MQ.run(1, head: c)])
+        let confirmation = MergeQueue.confirmation(read)
+        XCTAssertEqual(confirmation.items[1].warnings, ["No code review yet: Nirux saw none run on its branch."])
+        XCTAssertEqual(
+            read.leadStartRefusal(confirmation: confirmation, numbers: [12, 14], cadence: .standard, allowWithoutLocalReview: false),
+            "#14: No code review yet: Nirux saw none run on its branch."
+        )
+        XCTAssertNil(
+            read.leadStartRefusal(confirmation: confirmation, numbers: [12, 14], cadence: .standard, allowWithoutLocalReview: true)
+        )
+
+        let stillBlocked: [(String, (inout MergeQueue.ConfirmationReading) -> Void)] = [
+            ("workflow change", {
+                $0.candidates[1].details = MergeQueue.PullRequestDetails(
+                    title: "Change 14", files: [".github/workflows/ci.yml"], hasMoreFiles: false,
+                    head: self.b, baseBranch: "main", allPathsKnown: true
+                )
+            }),
+            ("incomplete file list", {
+                $0.candidates[1].details = MergeQueue.PullRequestDetails(
+                    title: "Change 14", files: ["Sources/app.swift"], hasMoreFiles: true,
+                    head: self.b, baseBranch: "main", allPathsKnown: true
+                )
+            }),
+            ("unreadable file list", { $0.candidates[1].details = nil; $0.candidates[1].detailsError = "HTTP 502" }),
+            ("red non-required check", { $0.candidates[1].checks = MQ.checks(MQ.checkRun(id: 1), MQ.checkRun(id: 2, name: "lint", conclusion: "FAILURE")) }),
+            ("skipped required check", { $0.candidates[1].checks = MQ.checks(MQ.checkRun(id: 1, conclusion: "SKIPPED")) }),
+            ("unknown checks", { $0.candidates[1].checks = nil; $0.candidates[1].checksError = "HTTP 502" }),
+            ("failed post-merge run", { $0.baseRuns = [MQ.run(1, head: self.c, conclusion: "failure")] }),
+            ("missing post-merge run", { $0.baseRuns = [] }),
+            ("conflicting PR", { $0.candidates[1].pullRequest = MQ.pullRequest(14, head: self.b, mergeable: "CONFLICTING") }),
+            ("dirty worktree", {
+                $0.candidates[1].local = MergeQueue.LocalState(worktrees: [
+                    MergeQueue.LocalWorktree(path: "/tmp/x/app.feat-14", problem: .trackedChanges)
+                ])
+            })
+        ]
+        for (label, mutate) in stillBlocked {
+            var blocked = read
+            mutate(&blocked)
+            XCTAssertNotNil(
+                blocked.leadStartRefusal(confirmation: MergeQueue.confirmation(blocked), numbers: [12, 14], cadence: .standard, allowWithoutLocalReview: true),
+                label
+            )
+        }
+        let dryRun = reading([first, unreviewed], isDryRun: true, baseRuns: [MQ.run(1, head: c)])
+        XCTAssertNotNil(
+            dryRun.leadStartRefusal(confirmation: MergeQueue.confirmation(dryRun), numbers: [12, 14], cadence: .standard, allowWithoutLocalReview: true)
+        )
+    }
+
     // MARK: - Who joins
 
     func testEveryReadyPullRequestJoinsInTheProposedOrderWithItsHeadAndChecks() {

@@ -46,6 +46,7 @@ enum MQ {
     static func pullRequest(
         _ number: Int,
         head: String,
+        branch: String? = nil,
         state: GitHub.PullRequestState = .open,
         isDraft: Bool = false,
         base: String = "main",
@@ -57,7 +58,7 @@ enum MQ {
         parents: [String] = []
     ) -> MergeQueue.PullRequestSnapshot {
         MergeQueue.PullRequestSnapshot(
-            number: number, state: state, isDraft: isDraft, headRefName: "feat/\(number)", headOid: head,
+            number: number, state: state, isDraft: isDraft, headRefName: branch ?? "feat/\(number)", headOid: head,
             baseRefName: base, headRepository: repository, mergeable: mergeable, hasAutoMerge: autoMerge,
             isInMergeQueue: inMergeQueue, mergeCommit: mergeCommit, mergeCommitParents: parents,
             url: "https://github.com/acme/widgets/pull/\(number)"

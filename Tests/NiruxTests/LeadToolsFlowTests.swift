@@ -996,6 +996,65 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    func testRecordReviewMarksCodeReviewOnlyOnCleanReviews() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            shell.addWorkspace(title: "Codex fix", cwd: harness.worktree, profileID: lead.space)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Codex fix" })
+            shell.refreshGitContextNow(for: task)
+            harness.waitUntil("the task's branch and head") {
+                task.gitBranch == harness.worktreeBranch && task.gitContext?.identity.head != nil
+            }
+            let head = try XCTUnwrap(task.gitContext?.identity.head)
+            let branch = harness.worktreeBranch
+
+            @MainActor func missingReviews() -> [String] {
+                MergeQueue.missingReviews(
+                    branch: branch, tasks: NiruxShellView.reviewTasks(of: [task]), required: BoardStages.Rules().requiredReviews
+                )
+            }
+            @MainActor func leadRefusal() -> String? {
+                var candidate = MergeQueue.ConfirmationReading.Candidate(number: 14)
+                candidate.pullRequest = MQ.pullRequest(14, head: head, branch: branch)
+                candidate.details = MergeQueue.PullRequestDetails(
+                    title: "Codex fix", files: ["Sources/app.swift"], hasMoreFiles: false, head: head, baseBranch: "main", allPathsKnown: true
+                )
+                candidate.checks = MQ.checks(MQ.checkRun(id: 1))
+                candidate.comparison = .some(MergeQueue.Comparison(status: "ahead", aheadBy: 1, behindBy: 0, baseCommit: MQ.sha("0")))
+                candidate.local = MergeQueue.LocalState()
+                candidate.missingReviews = missingReviews()
+                var reading = MergeQueue.ConfirmationReading(settings: MQ.settings(), isDryRun: false)
+                reading.rateLimit = MergeQueue.RateLimit(
+                    coreRemaining: 5000, coreReset: Date(timeIntervalSince1970: 0),
+                    graphQLRemaining: 5000, graphQLReset: Date(timeIntervalSince1970: 0)
+                )
+                reading.baseMergeQueue = false
+                reading.baseRuns = [MQ.run(1, head: MQ.sha("c"))]
+                reading.candidates = [candidate]
+                return reading.leadStartRefusal(confirmation: MergeQueue.confirmation(reading), numbers: [14], cadence: .standard)
+            }
+
+            // Issues found: must NOT record .codeReview or clear missingReviews.
+            let blocking = ["kind": "missing-test", "text": "Cover the error branch."]
+            let withFindings = try call(LeadTools.recordReview, ["task": "Codex fix", "findings": [blocking]], lead: lead, in: harness)
+            XCTAssertFalse(withFindings.isError, withFindings.text)
+            XCTAssertNil(task.reviewRuns[.codeReview])
+            XCTAssertEqual(missingReviews(), ["Code review"])
+            XCTAssertNotNil(leadRefusal())
+
+            // Clean review (zero findings): records .codeReview on current HEAD/branch and clears missingReviews.
+            let clean = try call(LeadTools.recordReview, ["task": "Codex fix", "findings": [] as [Any]], lead: lead, in: harness)
+            XCTAssertFalse(clean.isError, clean.text)
+            XCTAssertTrue(clean.text.hasPrefix("Recorded round 2 of “Codex fix”: 0 findings."), clean.text)
+            let recorded = try XCTUnwrap(task.reviewRuns[.codeReview])
+            XCTAssertEqual(recorded.head, head)
+            XCTAssertEqual(recorded.branch, branch)
+            XCTAssertEqual(missingReviews(), [])
+            XCTAssertNil(leadRefusal())
+        }
+    }
+
     func testUnreadableMissionsLeaveTheFirstDailyWindowForRecovery() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

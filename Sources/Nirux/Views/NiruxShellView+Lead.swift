@@ -245,6 +245,7 @@ extension NiruxShellView {
             place: leadPlace(in: space, leadFolder: lead?.cwd),
             startsTasks: leadStartsTasksWithoutAsking(spaceID: space.id),
             startsMergeQueue: defaults?.defaults.leadCanStartMergeQueue ?? false,
+            startsMergeQueueWithoutLocalReview: defaults?.defaults.leadCanStartMergeQueueWithoutLocalReview ?? false,
             agent: defaults?.defaults.preferredLeadAgent ?? .claude,
             dailyPass: defaults?.defaults.dailyPassIsOn ?? false,
             dailyPassHour: defaults?.defaults.dailyPassHour ?? DailyPass.defaultHour,

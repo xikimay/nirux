@@ -66,9 +66,10 @@ enum ReviewFindings {
     }
 
     /// A call's `findings`, their kinds slugged and texts on one line.
+    /// An empty list records a clean review with no findings.
     static func findings(_ value: Any?) -> Result<[Finding], Refusal> {
-        guard let items = value as? [Any], !items.isEmpty else {
-            return .failure(Refusal(reason: "findings must list 1 to \(maxFindings) findings, each {kind, text}."))
+        guard let items = value as? [Any] else {
+            return .failure(Refusal(reason: "findings must be a list of 0 to \(maxFindings) findings, each {kind, text}."))
         }
         guard items.count <= maxFindings else {
             return .failure(Refusal(reason: "At most \(maxFindings) findings per review: record the ones a rule could prevent."))

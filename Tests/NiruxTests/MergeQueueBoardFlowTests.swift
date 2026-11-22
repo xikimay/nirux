@@ -202,6 +202,53 @@ final class MergeQueueBoardFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testLeadAutoStartOptInIgnoresOnlyMissingLocalReview() throws {
+        let client = FakeQueueClient()
+        try withBoard(queueClient: client) { shell, board in
+            let login = try XCTUnwrap(shell.projectWorkspaces(of: board.projectID).first { $0.title == "login" })
+            shell.refreshGitContextNow(for: login)
+            waitUntil("login git context") { login.gitBranch == "feat/login" && login.gitContext?.identity.head != nil }
+            let loginHead = try XCTUnwrap(login.gitContext?.identity.head)
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+
+            var green = MQ.World()
+            green.pullRequests[12] = MQ.pullRequest(12, head: loginHead, branch: "feat/login")
+            green.details[12] = MergeQueue.PullRequestDetails(
+                title: "Login", files: ["Login.swift"], hasMoreFiles: false, head: loginHead, baseBranch: "main", allPathsKnown: true
+            )
+            green.checks[loginHead] = MQ.checks(MQ.checkRun(id: 1))
+            green.baseRuns = [MQ.run(1, head: Self.a)]
+            client.update { $0 = green }
+
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
+            let refused = try callQueueTool(#"{"prs":[12]}"#, shell: shell)
+            XCTAssertTrue(refused.isError, refused.text)
+            XCTAssertTrue(refused.text.contains("No code review yet"), refused.text)
+            XCTAssertNil(queue.engine)
+
+            // Turning on the opt-in still enforces other warnings like workflow edits.
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueueWithoutLocalReview = true }
+            client.update {
+                $0.details[12] = .init(
+                    title: "Login CI", files: [".github/workflows/test.yml"], hasMoreFiles: false,
+                    head: loginHead, baseBranch: "main", allPathsKnown: true
+                )
+            }
+            let workflowBlocked = try callQueueTool(#"{"prs":[12]}"#, shell: shell)
+            XCTAssertTrue(workflowBlocked.isError, workflowBlocked.text)
+            XCTAssertTrue(workflowBlocked.text.contains(".github/workflows/"), workflowBlocked.text)
+            XCTAssertNil(queue.engine)
+
+            // With only missing local review remaining, opt-in allows Lead auto-start.
+            client.update { $0 = green }
+            let started = try callQueueTool(#"{"prs":[12]}"#, shell: shell)
+            XCTAssertFalse(started.isError, started.text)
+            XCTAssertEqual(queue.engine?.entries.map(\.number), [12])
+            shell.stopMergeQueue(board: board, section: nil)
+        }
+    }
+
+    @MainActor
     func testLeadStatusAndStopFollowAnInFlightMergeThroughItsJournal() throws {
         var world = MQ.World()
         world.pullRequests[14] = MQ.pullRequest(14, head: Self.b)
@@ -217,6 +264,12 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertTrue(idle.contains("#90 (closed or stale)"), idle)
             XCTAssertTrue(idle.contains("Lead auto-start: disabled"), idle)
             shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
+            let enabledStatus = try status()
+            XCTAssertTrue(enabledStatus.contains("Lead auto-start: enabled\n"), enabledStatus)
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueueWithoutLocalReview = true }
+            let withoutReviewStatus = try status()
+            XCTAssertTrue(withoutReviewStatus.contains("Lead auto-start: enabled (without local review required)\n"), withoutReviewStatus)
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueueWithoutLocalReview = nil }
             let noRun = try stop()
             XCTAssertTrue(noRun.isError)
             XCTAssertTrue(noRun.text.contains("No queue is running here"), noRun.text)
