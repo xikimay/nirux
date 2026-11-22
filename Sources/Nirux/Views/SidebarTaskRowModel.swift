@@ -73,7 +73,7 @@ struct SidebarRowSummary: Hashable {
         case request
         /// A turn's question over its buttons, a dialog's over its
         /// options: the line says "Needs you · a question".
-        case question
+        case question(String)
     }
 
     let mark: SidebarRowMark
@@ -90,7 +90,8 @@ struct SidebarRowSummary: Hashable {
     /// has it whole. `status.text` stays what the row says where no block
     /// follows (the catch-up card, a tooltip).
     var lineText: String {
-        saidBelow == .question ? "Needs you · a question" : status.text
+        if case .question(let text) = saidBelow { return text }
+        return status.text
     }
 
     /// How many lines the status may take before "…". What stops a task
@@ -127,18 +128,24 @@ extension WorkspaceInfo {
         }
         let step = agentStep
         if case .needsYou(let waiting, let words, let isHandedOff)? = step {
+            let problem = prInfo?.problem
+            let concurrentWork = columns.contains {
+                $0.index != waiting.index && $0.agentStatus == .working && $0.attention == nil && $0.missionQuestion?.isAnswered != false
+            }
+            let context = ["Needs you", concurrentWork && problem != nil ? "working" : nil, problem]
+                .compactMap { $0 }.joined(separator: " · ")
             var summary: SidebarRowSummary
             if isHandedOff {
                 // The question itself: a click on it opens the reply popover.
-                summary = row(.needsYou, "Needs you · \(words)", .needsYou, .missionQuestion(columnIndex: waiting.index))
+                summary = row(.needsYou, "\(context) · \(words)", .needsYou, .missionQuestion(columnIndex: waiting.index))
             } else {
-                summary = row(.needsYou, "Needs you · \(words)", .needsYou)
+                summary = row(.needsYou, "\(context) · \(words)", .needsYou)
                 // Its block has it whole: the command in its box, the
                 // question over its buttons.
                 if waiting.permissionApproval != nil {
                     summary.saidBelow = .request
                 } else if waiting.turnQuestion != nil || waiting.dialog != nil {
-                    summary.saidBelow = .question
+                    summary.saidBelow = .question(problem == nil ? "Needs you · a question" : context)
                 }
             }
             summary.focusColumn = waiting.index
@@ -153,30 +160,31 @@ extension WorkspaceInfo {
         if case .stopped(let words)? = followUp, !columns.contains(where: { $0.agentStatus == .working }) {
             return row(.needsYou, "Needs you · \(words)", .needsYou)
         }
-        if let pullRequest = prInfo, pullRequest.state == .open, pullRequest.ciStatus == "FAILURE",
-           !columns.contains(where: { $0.agentStatus == .working }) {
-            // Only a likely flake says more (docs/design/ci-failure-triage.md).
-            return row(.error, "#\(pullRequest.number) · checks failed" + (ciFlakyReason == nil ? "" : " · likely flaky"), .error)
-        }
         // A child that asked ended its turn to wait (a Codex one blocks):
         // asking comes before work. An answer waiting to be typed comes
         // after: a Claude restarted since works through the user's prompt.
         if case .asking(let asking, let pending)? = step {
-            return row(.asking, "Asking \(pending.parentTitle)", .neutral, .missionQuestion(columnIndex: asking.index))
+            let wait = pending.waitAge.map { " · " + $0 } ?? ""
+            return row(.asking, "Asking \(pending.parentTitle)" + wait, .neutral, .missionQuestion(columnIndex: asking.index))
         }
         if case .working(let working)? = step {
             // The one that may be going in circles: its hint, its turn's
             // time, and a click on the row brings it up.
             let circling = circlingColumn
+            let activity = circling?.circling?.statusText ?? followUp?.roundText
+            let problem = prInfo?.problem
+            let words = problem.map { "Working · " + $0 } ?? activity ?? "Working"
+            let detail = circling?.circling?.detail ?? (problem == nil ? nil : followUp?.roundText)
             return SidebarRowSummary(
                 mark: .working,
-                status: SidebarStatusLine(
-                    text: circling?.circling?.statusText ?? followUp?.roundText ?? "Working", tone: .neutral,
-                    detail: circling?.circling?.detail
-                ),
+                status: SidebarStatusLine(text: words, tone: .neutral, detail: detail),
                 trailing: (circling.map { [$0] } ?? working).compactMap(\.elapsedDisplay).first.map { .turn($0) } ?? age,
                 focusColumn: circling?.index
             )
+        }
+        if let prInfo, let problem = prInfo.problem {
+            let flaky = prInfo.mergeable != "CONFLICTING" && ciFlakyReason != nil ? " · likely flaky" : ""
+            return row(.error, "#\(prInfo.number) · \(problem)" + flaky, .error)
         }
         if case .answered(let answered)? = step {
             return row(.asking, SidebarWorkspaceCardRenderer.answeredText(answered), .neutral)
@@ -196,16 +204,12 @@ extension WorkspaceInfo {
         if let blocker = blockerText {
             return row(.blocked, "Blocked · \(blocker)", .neutral)
         }
-        // A finished turn the user hasn't looked at yet: until then, before
-        // the pull request's lasting line. Its own status line says it with
-        // a grey check, else "Done".
+        let pullRequest = prInfo.flatMap { pullRequestRow($0, age: age) }
+        if let pullRequest, [.readyToMerge, .checksRunning].contains(pullRequest.mark) { return pullRequest }
         if columns.contains(where: { $0.attention == .finished }) {
             return turnStatusLine.map { row(.finished, $0, .neutral) } ?? row(.idle, "Done", .neutral)
         }
-        if let pullRequest = prInfo,
-           let summary = pullRequestRow(pullRequest, age: age) {
-            return summary
-        }
+        if let pullRequest { return pullRequest }
         if includesNextStep, let next = nextStepText {
             return row(.idle, Self.nextStepLine(next), .neutral)
         }
@@ -315,13 +319,20 @@ extension WorkspaceInfo {
             case nil: return row(.merged, "Merged", nil, trailing: number)
             }
         case .open:
+            if pullRequest.ciStatus == "PENDING" { return row(.checksRunning, "#\(pullRequest.number) · checks running", nil, trailing: age) }
             if pullRequest.isDraft { return row(.idle, "#\(pullRequest.number) · draft", nil, trailing: age) }
             switch pullRequest.ciStatus {
-            case "PENDING"?: return row(.checksRunning, "#\(pullRequest.number) · checks running", nil, trailing: age)
             case "SUCCESS"?:
-                let ready = currentBoardProgress.map { $0.mergeStep == .ready } ?? pullRequest.isReadyToMerge(hasFeedback: prFeedback != nil)
-                guard ready else {
-                    return row(.idle, "#\(pullRequest.number) · checks passed", nil, trailing: age)
+                let boardAllowsMerge = currentBoardProgress.map {
+                    $0.mergeStep == .ready || ($0.readyApartFromLocalReviews && pullRequest.mergeStateStatus == "CLEAN")
+                } ?? true
+                guard boardAllowsMerge, pullRequest.isReadyToMerge(hasFeedback: prFeedback != nil) else {
+                    let reason: String
+                    if let review = pullRequest.reviewRequest(hasFeedback: prFeedback != nil) { reason = review.text.lowercased() }
+                    else if pullRequest.mergeStateStatus == "BLOCKED" { reason = "merge blocked by GitHub" }
+                    else if pullRequest.autoMerges { reason = "auto-merge enabled" }
+                    else { reason = "checks passed" }
+                    return row(.idle, "#\(pullRequest.number) · " + reason, nil, trailing: age)
                 }
                 return row(.readyToMerge, "Ready to merge", nil, trailing: number)
             default:
@@ -334,10 +345,24 @@ extension WorkspaceInfo {
 }
 
 extension PRInfo {
-    var requiresReview: Bool { ["REVIEW_REQUIRED", "CHANGES_REQUESTED"].contains(reviewDecision ?? "") }
+    var problem: String? {
+        guard state == .open else { return nil }
+        if mergeable == "CONFLICTING" { return "conflict" }
+        return ciStatus == "FAILURE" ? "checks failed" : nil
+    }
+
+    func reviewRequest(hasFeedback: Bool) -> BoardStages.ReviewRequest? {
+        guard state == .open else { return nil }
+        if reviewDecision == "CHANGES_REQUESTED" { return .changesRequested }
+        if hasFeedback { return .feedback }
+        return reviewDecision == "REVIEW_REQUIRED" ? .reviewRequired : nil
+    }
+
+    var requiresReview: Bool { reviewRequest(hasFeedback: false) != nil }
 
     func blocksMerge(hasFeedback: Bool) -> Bool {
         isDraft || ["FAILURE", "PENDING"].contains(ciStatus) || mergeable == "CONFLICTING" || requiresReview || hasFeedback
+            || autoMerges || (mergeStateStatus.map { $0 != "CLEAN" } ?? false)
     }
 
     func isReadyToMerge(hasFeedback: Bool) -> Bool {
@@ -349,6 +374,7 @@ struct SidebarBoardProgress: Hashable {
     let station: BoardStages.Station
     var number: Int?
     var mergeStep: SidebarTaskStep?
+    var readyApartFromLocalReviews = false
 }
 
 enum SidebarTaskStep: String {
