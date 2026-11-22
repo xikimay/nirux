@@ -28,7 +28,7 @@ final class LeadChannelTests: XCTestCase {
     /// times, from another thread.
     private func answerRequests(_ answers: Int, with text: String) -> Thread {
         let directory = stateDirectory!
-        let thread = Thread {
+        let respond: @Sendable () -> Void = {
             var answered = 0
             let deadline = Date().addingTimeInterval(10)
             while answered < answers, Date() < deadline {
@@ -39,6 +39,7 @@ final class LeadChannelTests: XCTestCase {
                 Thread.sleep(forTimeInterval: 0.02)
             }
         }
+        let thread = Thread(block: respond)
         thread.start()
         return thread
     }
@@ -63,13 +64,13 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(LeadChannel.takeRequests(stateDirectory: stateDirectory), [])
 
         let directory = stateDirectory!
-        let taker = Thread {
+        let take: @Sendable () -> Void = {
             let deadline = Date().addingTimeInterval(5)
             while Date() < deadline, LeadChannel.takeRequests(stateDirectory: directory).isEmpty {
                 Thread.sleep(forTimeInterval: 0.02)
             }
         }
-        taker.start()
+        Thread(block: take).start()
         XCTAssertEqual(LeadChannel.send(request(), stateDirectory: stateDirectory, takeTimeout: 2, workTimeout: 0.3), .stillWorking)
     }
 
