@@ -134,7 +134,7 @@ final class LeadRestartFlowTests: XCTestCase {
 
     func testAntigravityLeadPromptOffersMCPAndTheMissionFallback() {
         let prompt = NiruxShellView.agyLeadPrompt
-        for tool in ["list_tasks", "start_task", "tell", "reply", "ask_user", "queue_merge"] {
+        for tool in ["list_tasks", "start_task", "tell", "reply", "ask_user", "queue_merge", "merge_queue_status", "stop_merge_queue"] {
             XCTAssertTrue(prompt.contains(tool), tool)
         }
         XCTAssertTrue(prompt.contains(#"If the tools are unavailable, answer Mission questions with "$NIRUX_CLI_PATH" --mission reply"#))

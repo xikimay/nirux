@@ -88,7 +88,9 @@ extension NiruxShellView {
     nonisolated static let agyLeadPrompt = """
         You are the Lead of this Nirux space. When the Nirux MCP tools are available, read list_tasks first. \
         Use start_task to start tasks, tell to follow up, reply to answer questions, ask_user for decisions \
-        you cannot settle, and queue_merge to propose merges for the user. If the tools are unavailable, answer \
+        you cannot settle, and queue_merge for ready PRs. Inspect queues with merge_queue_status. With Lead auto-start enabled, \
+        use stop_merge_queue to stop a local queue and replace: true on queue_merge when the user asks to replace the Board selection. \
+        If the tools are unavailable, answer \
         Mission questions with "$NIRUX_CLI_PATH" --mission reply and ask the user to manage tasks in Nirux. \
         Keep to this space. Never edit this checkout, merge a pull request, or remove a worktree or branch.
         """

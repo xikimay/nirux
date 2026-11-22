@@ -443,11 +443,11 @@ enum LeadTools {
 
     /// reply's `accept`: false when left out, nil when not a JSON boolean.
     static func accepts(_ arguments: [String: Any]) -> Bool? {
-        optionalFlag(arguments, "accept")
+        arguments["accept"] is NSNull ? false : optionalFlag(arguments, "accept")
     }
 
     static func optionalFlag(_ arguments: [String: Any], _ key: String) -> Bool? {
-        guard let value = arguments[key], !(value is NSNull) else { return false }
+        guard let value = arguments[key] else { return false }
         guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else { return nil }
         return flag.boolValue
     }
@@ -566,7 +566,7 @@ enum LeadTools {
         case dailyPass, mergeQueueStatus, stopMergeQueue:
             return nil
         case queueMerge:
-            guard optionalFlag(arguments, "replace") != nil, !(arguments["replace"] is NSNull) else { return "replace must be true or false." }
+            guard optionalFlag(arguments, "replace") != nil else { return "replace must be true or false." }
             guard pullRequestNumbers(arguments) != nil else { return "prs must list pull request numbers." }
             return queueCadence(arguments) == nil ? "cadence must be standard, batch_post_merge or express_disjoint." : nil
         case setTaskContext:
