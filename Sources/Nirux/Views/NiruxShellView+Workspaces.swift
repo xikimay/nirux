@@ -477,6 +477,12 @@ extension NiruxShellView {
         case .addRuleToBrief:
             showAddRuleSheet(for: workspaces[workspaceIndex])
             return
+        case .saveCheckpoint:
+            requestCheckpoint(in: workspaces[workspaceIndex])
+            return
+        case .showCheckpoints:
+            showCheckpoints(in: workspaces[workspaceIndex])
+            return
         case .reviewBranch:
             openBranchReview(in: workspaces[workspaceIndex])
             return
