@@ -62,10 +62,15 @@ final class PtySession: @unchecked Sendable {
         return report.status
     }
 
-    /// Whether `status` says something new: the same again (a redraw) needs
-    /// no look at the process table.
-    func isNewProgramStatus(_ status: AgentProgramStatus) -> Bool {
-        state.machine.programStatus?.status != status
+    func programStatus(of foreground: ForegroundProcess?) -> AgentProgramStatus? {
+        guard let foreground else { return nil }
+        switch foreground.agent {
+        case .codex: return codexStatus(of: foreground.instance)
+        case .agy:
+            guard let report = state.machine.programStatus, report.isFrom(foreground.instance) else { return nil }
+            return report.status
+        default: return nil
+        }
     }
 
     /// Called on the main queue when the output shows a local dev-server
@@ -144,7 +149,10 @@ final class PtySession: @unchecked Sendable {
     var lastDraftInputAt: TimeInterval { state.machine.lastDraftInputAt }
 
     /// See `AgentStatusMachine.hold`.
-    var agentHold: AgentHold? { state.machine.hold }
+    var agentHold: AgentHold? {
+        state.recordPendingTerminalInput()
+        return state.machine.hold
+    }
 
     /// A dialog that keys would answer is open.
     var dialogWaitsForKeys: Bool { state.machine.pendingDialogs.contains(where: state.machine.waitsForKeys) }

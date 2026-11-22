@@ -65,8 +65,7 @@ final class SidebarTaskRowTests: XCTestCase {
         answered.missionQuestion?.isAnswered = true
         XCTAssertEqual(status(workspace([working, answered])), "Working", "a restarted Claude works through the user's prompt")
         XCTAssertEqual(status(workspace([answered])), "Answer ready · from the Lead")
-        XCTAssertEqual(status(workspace([column(1, .needsAttention, reason: .turnFinished)], pr: pullRequest(ci: "SUCCESS"))), "Done",
-                       "until the user looks, before the pull request's line")
+        XCTAssertEqual(status(workspace([column(1, .needsAttention, reason: .turnFinished)], pr: pullRequest(ci: "SUCCESS"))), "Ready to merge")
         XCTAssertEqual(needsYou.rowSummary.focusColumn, 0, "a click brings up the asking column")
         XCTAssertEqual(workspace([working, failed]).rowSummary.focusColumn, 2)
         XCTAssertNil(workspace([working]).rowSummary.focusColumn)
@@ -83,12 +82,14 @@ final class SidebarTaskRowTests: XCTestCase {
     func testTheFollowUpSaysItsRoundAndHandsOverInAmber() {
         var round = workspace([column(0, .working)], pr: pullRequest(ci: "FAILURE"))
         round.followUp = .round("Auto follow-up 1/3 · failed checks")
-        XCTAssertEqual(round.rowSummary.status, SidebarStatusLine(text: "Auto follow-up 1/3 · failed checks", tone: .neutral))
+        XCTAssertEqual(round.rowSummary.status, SidebarStatusLine(
+            text: "Working · checks failed", tone: .neutral, detail: "Auto follow-up 1/3 · failed checks"
+        ))
         let words = "#39 still fails its checks: the automatic round pushed nothing"
         for (columns, expected) in [
             ([column()], SidebarStatusLine(text: "Needs you · " + words, tone: .needsYou)),
-            ([column(0, .working)], SidebarStatusLine(text: "Working", tone: .neutral)),
-            ([column(0, .needsAttention, reason: .question("Which?"))], SidebarStatusLine(text: "Needs you · Which?", tone: .needsYou))
+            ([column(0, .working)], SidebarStatusLine(text: "Working · checks failed", tone: .neutral)),
+            ([column(0, .needsAttention, reason: .question("Which?"))], SidebarStatusLine(text: "Needs you · checks failed · Which?", tone: .needsYou))
         ] {
             var stopped = workspace(columns, pr: pullRequest(ci: "FAILURE"))
             stopped.followUp = .stopped(words)
@@ -149,7 +150,7 @@ final class SidebarTaskRowTests: XCTestCase {
             info.turnStatusLine = line
             return info
         }
-        let unseen = standing(workspace([finished], pr: pullRequest(ci: "SUCCESS"), nextStep: "merge it")).rowSummary
+        let unseen = standing(workspace([finished], nextStep: "merge it")).rowSummary
         XCTAssertEqual(unseen.status, SidebarStatusLine(text: line, tone: .neutral))
         XCTAssertEqual(unseen.mark, .finished)
         let seen = standing(workspace([column()])).rowSummary
@@ -178,8 +179,8 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(failed.status, SidebarStatusLine(text: "#39 · checks failed", tone: .error), "no link: a click selects the row")
         XCTAssertEqual(failed.mark, .error)
         XCTAssertEqual(line(pullRequest(ci: "PENDING")).status, SidebarStatusLine(text: "#39 · checks running", tone: .neutral))
-        XCTAssertEqual(line(pullRequest(ci: "SUCCESS", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE")).status.text, "#39 · checks passed")
-        XCTAssertEqual(line(pullRequest(ci: "SUCCESS", mergeable: "CONFLICTING")).status.text, "#39 · checks passed")
+        XCTAssertEqual(line(pullRequest(ci: "SUCCESS", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE")).status.text, "#39 · review required")
+        XCTAssertEqual(line(pullRequest(ci: "SUCCESS", mergeable: "CONFLICTING")).status.text, "#39 · conflict")
         XCTAssertEqual(line(pullRequest(draft: true)).status.text, "#39 · draft")
 
         let ready = line(pullRequest(ci: "SUCCESS", review: "APPROVED", mergeable: "MERGEABLE"))
@@ -189,7 +190,7 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(line(pullRequest(ci: "SUCCESS", mergeable: "UNKNOWN")).status.text, "Ready to merge", "no flicker while GitHub recomputes")
         var commented = workspace([column()], pr: pullRequest(ci: "SUCCESS", review: "APPROVED", mergeable: "MERGEABLE"))
         commented.prFeedback = PRFeedback.Counts(humans: 1, bots: 0)
-        XCTAssertEqual(commented.rowSummary.status.text, "#39 · checks passed", "feedback nobody dealt with")
+        XCTAssertEqual(commented.rowSummary.status.text, "#39 · feedback to answer", "feedback nobody dealt with")
 
         let merged = line(pullRequest(.merged), cleanup: .available)
         XCTAssertEqual(merged.status, SidebarStatusLine(text: "Merged · Clean up", tone: .neutral, action: .cleanUp, linkText: "Clean up"))
@@ -259,11 +260,52 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(try shown(ready, pullRequest(ci: "FAILURE")), ["Checks #39", "checks failed"])
         XCTAssertEqual(try shown(ready, pullRequest(ci: "PENDING")), ["Checks #39", "checks running"])
         XCTAssertEqual(try shown(ready, pullRequest(ci: "SUCCESS", draft: true)), ["Code #39", "draft"])
-        XCTAssertEqual(try shown(ready, pullRequest(ci: "SUCCESS", review: "CHANGES_REQUESTED")), ["Review #39", "checks passed"])
+        XCTAssertEqual(try shown(ready, pullRequest(ci: "SUCCESS", review: "CHANGES_REQUESTED")), ["Review #39", "changes requested"])
         XCTAssertEqual(try shown(beforePR, nil), ["Code", ""])
         XCTAssertEqual(try shown(beforePR, pullRequest(ci: "SUCCESS")), ["Ready #39", "Checks passed"])
         XCTAssertEqual(try shown(.init(station: .reviews, number: 39), pullRequest(ci: "SUCCESS")), ["Review #39", "checks passed"])
         XCTAssertEqual(try shown(ready, nil), ["Ready #39", ""])
+    }
+
+    func testCleanGitHubPullRequestShowsReadyBesideItsLocalReviewStage() throws {
+        let pr = try XCTUnwrap(PRDetect.pullRequestInfo(from: [
+            "number": 39, "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+            "statusCheckRollup": [["name": "test", "conclusion": "SUCCESS"]]
+        ]))
+        var task = workspace([column()], pr: pr)
+        task.boardProgress = SidebarBoardProgress(station: .reviews, number: 39, readyApartFromLocalReviews: true)
+        let layout = SidebarCardLayout(workspace: task, sidebarWidth: 260)
+        XCTAssertEqual(layout.summary.mark, .readyToMerge)
+        XCTAssertEqual(layout.stepTitle, "Review #39")
+        XCTAssertEqual(layout.statusText.string, "Ready to merge")
+        XCTAssertEqual(layout.statusLineCount, 1)
+        XCTAssertFalse(layout.statusBelowStep)
+
+        var blocked = pr
+        blocked.mergeStateStatus = "BLOCKED"
+        var held = workspace([column()], pr: blocked)
+        held.boardProgress = task.boardProgress
+        XCTAssertEqual(held.rowSummary.status.text, "#39 · merge blocked by GitHub")
+        task.boardProgress?.readyApartFromLocalReviews = false
+        XCTAssertEqual(task.rowSummary.mark, .idle)
+    }
+
+    func testWorkingRowsKeepTheirPullRequestProblemVisible() {
+        for agent in ["codex", "claude"] {
+            let working = column(0, .working, process: agent)
+            for (pr, problem) in [(pullRequest(ci: "FAILURE"), "checks failed"), (pullRequest(mergeable: "CONFLICTING"), "conflict")] {
+                let row = workspace([working], pr: pr).rowSummary
+                XCTAssertEqual(row.mark, .working)
+                XCTAssertEqual(row.status, SidebarStatusLine(text: "Working · " + problem, tone: .neutral))
+                let question = column(1, .needsAttention, reason: .question("Which?"))
+                let mixed = workspace([working, question], pr: pr).rowSummary
+                XCTAssertEqual(mixed.mark, .needsYou)
+                XCTAssertEqual(mixed.status.text, "Needs you · working · " + problem + " · Which?")
+                XCTAssertEqual(mixed.focusColumn, 1)
+            }
+        }
+        XCTAssertEqual(workspace([column(0, .needsAttention, reason: .turnFinished)], pr: pullRequest(ci: "PENDING")).rowSummary.mark,
+                       .checksRunning)
     }
 
     func testOnlyTheSelectedRowShowsItsColumns() throws {

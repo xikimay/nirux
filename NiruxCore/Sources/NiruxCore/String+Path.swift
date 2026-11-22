@@ -27,6 +27,15 @@ public extension String {
         return String(cString: resolved)
     }
 
+    /// Darwin's system aliases can prefix a workspace or state directory.
+    /// O_NOFOLLOW_ANY still checks every component of the path under them.
+    var expandingSystemAliases: String {
+        for alias in ["/tmp", "/var", "/etc"] where self == alias || hasPrefix(alias + "/") {
+            return "/private" + self
+        }
+        return self
+    }
+
     var comparablePath: String {
         realPath ?? URL(fileURLWithPath: self).standardizedFileURL.path
     }

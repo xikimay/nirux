@@ -72,6 +72,54 @@ final class AgentProgramStatusTests: XCTestCase {
 
     // MARK: - Status
 
+    func testReportedTurnsClearOnlyTheSubmittedDraft() {
+        for agent in [CodingAgent.codex, .agy] {
+            var machine = AgentStatusMachine()
+            let process = ProcessInstance(pid: 7, startedAt: (t0 + 1).timeIntervalSince1970)
+            func report(_ state: AgentProgramStatus.State, at offset: TimeInterval, from sender: ProcessInstance? = nil) {
+                let value = status(state, agent: agent)
+                let at = t0 + offset
+                if agent == .codex {
+                    machine.noteCodexStatus(value, from: sender ?? process, now: at.timeIntervalSince1970)
+                } else {
+                    _ = machine.noteProgramStatus(value, from: sender ?? process, isUserFocused: true, now: at)
+                }
+            }
+            func type(_ text: String, at offset: TimeInterval) {
+                machine.noteKeystroke(now: t0 + offset, keys: Data(text.utf8))
+            }
+
+            type(agent.rawValue + "\n", at: 0)
+            XCTAssertTrue(machine.hasDraft)
+            report(.idle, at: 2)
+            XCTAssertFalse(machine.hasDraft, "the launch command went to the shell")
+            type("first prompt\r", at: 3)
+            report(.working, at: 4)
+            report(.done, at: 5)
+            XCTAssertFalse(machine.hasDraft)
+            XCTAssertNil(machine.hold)
+
+            type("second prompt\r", at: 6)
+            type("next draft", at: 7)
+            report(.working, at: 8)
+            report(.working, at: 9)
+            report(.done, at: 10)
+            XCTAssertTrue(machine.hasDraft, "keys after Enter preceded the working report")
+            XCTAssertEqual(machine.hold, .draft)
+
+            type("\r", at: 11)
+            report(.working, at: 12)
+            type("while working", at: 13)
+            report(.done, at: 14)
+            XCTAssertEqual(machine.hold, .draft)
+            let restarted = ProcessInstance(pid: 8, startedAt: (t0 + 15).timeIntervalSince1970)
+            type("in the new process", at: 16)
+            report(.idle, at: 17, from: restarted)
+            XCTAssertTrue(machine.hasDraft)
+            XCTAssertEqual(machine.hold, .draft)
+        }
+    }
+
     func testAgySaysWhatItDoesAndWhyItWaits() {
         var machine = AgentStatusMachine()
         _ = machine.tick(fgName: "agy", isUserFocused: false, now: t0)

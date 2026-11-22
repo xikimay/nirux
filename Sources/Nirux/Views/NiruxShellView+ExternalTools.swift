@@ -291,18 +291,20 @@ extension NiruxShellView {
                 mode: .head
             )
 
-            if let columnIndex = workspace.columns.firstIndex(where: { $0.editorColumn === editor }) {
-                workspace.focusedIndex = columnIndex
-            }
-            if let workspaceIndex = self.workspaces.firstIndex(where: { $0 === workspace }) {
-                self.activeWSIndex = workspaceIndex
-            }
-            self.relayout(animated: false)
-            self.updateSidebar()
+            self.focusEditor(editor, in: workspace)
         }
     }
 
-    private func editorColumn(in workspace: WorkspaceState, cwd: String) -> EditorColumn? {
+    func focusEditor(_ editor: EditorColumn, in workspace: WorkspaceState) {
+        guard let column = workspace.columns.firstIndex(where: { $0.editorColumn === editor }),
+              let index = workspaces.firstIndex(where: { $0 === workspace }) else { return }
+        workspace.focusedIndex = column
+        activeWSIndex = index
+        relayout(animated: false)
+        updateSidebar()
+    }
+
+    func editorColumn(in workspace: WorkspaceState, cwd: String) -> EditorColumn? {
         if let existing = workspace.columns.compactMap({ $0.editorColumn }).first(where: { $0.workspaceCwd == cwd }) {
             return existing
         }

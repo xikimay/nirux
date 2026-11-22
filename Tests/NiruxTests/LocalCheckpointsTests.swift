@@ -59,6 +59,158 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         }
     }
 
+    func testReadOnlyDiffAgainstWorkingTreeAndCheckpoint() async throws {
+        let store = try store()
+        try write("README.md", "first\n")
+        let first = try store.save(worktree: repo, label: nil)
+        try write("README.md", "second\n")
+        let second = try store.save(worktree: repo, label: nil)
+        try write("README.md", "third")
+        let before = try contents(of: repo)
+        let live = try await store.diff(from: first.id, to: nil, worktree: repo + "/Sources")
+        XCTAssertNil(live.warning)
+        XCTAssertTrue(live.text.contains("--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,1 @@\n-first\n+third\n\\ No newline at end of file"))
+        let saved = try await store.diff(from: first.id, to: second.id, worktree: repo)
+        XCTAssertTrue(saved.text.contains("-first\n+second\n"))
+        XCTAssertFalse(saved.text.contains("third"))
+        XCTAssertEqual(try contents(of: repo), before)
+    }
+
+    func testCleanPathsUseEachRecordedHeadAndIncludeNewTrackedEdits() async throws {
+        let store = try store()
+        let clean = try store.save(worktree: repo, label: nil)
+        XCTAssertTrue(clean.files.isEmpty)
+        try write("README.md", "edited after capture\n")
+        try write("new tracked", "added\n")
+        try git(["add", "new tracked"])
+        try write("untracked", "private")
+        let live = try await store.diff(from: clean.id, to: nil, worktree: repo)
+        XCTAssertTrue(live.text.contains("-widgets\n+edited after capture\n"))
+        XCTAssertTrue(live.text.contains("--- /dev/null\n+++ b/new tracked"))
+        XCTAssertFalse(live.text.contains("private"))
+        let dirty = try store.save(worktree: repo, label: nil)
+        let pair = try await store.diff(from: clean.id, to: dirty.id, worktree: repo + "/Sources")
+        XCTAssertEqual(pair.text, live.text)
+
+        try write("README.md", "committed later\n")
+        try git(["add", "README.md"])
+        try git(["commit", "-qm", "new baseline"])
+        let later = try store.save(worktree: repo, label: nil)
+        XCTAssertTrue(later.files.isEmpty)
+        let committed = try await store.diff(from: clean.id, to: later.id, worktree: repo)
+        XCTAssertTrue(committed.text.contains("-widgets\n+committed later\n"))
+        XCTAssertTrue(committed.text.contains("--- /dev/null\n+++ b/new tracked"))
+    }
+
+    func testUnavailableBaselineIsReportedWithoutInventingAnAddition() async throws {
+        let store = try store()
+        var missing = LocalCheckpoints.Manifest(label: nil)
+        missing.head = String(repeating: "a", count: 40)
+        _ = try store.persist(.init(manifest: missing))
+        try write("README.md", "changed\n")
+        let diff = try await store.diff(from: missing.id, to: nil, worktree: repo)
+        XCTAssertTrue(diff.text.contains("baseline unavailable"))
+        XCTAssertFalse(diff.text.contains("--- /dev/null"))
+    }
+
+    func testDiffWarnsForEitherIncompleteCheckpointAndSkipsUnsafeInputs() async throws {
+        let store = try store(.init(maxSingleFileBytes: 64))
+        try write("README.md", "one")
+        let complete = try store.save(worktree: repo, label: nil)
+        try write("Sources/App.swift", Data(repeating: 65, count: 65))
+        let incomplete = try store.save(worktree: repo, label: nil)
+        let toIncomplete = try await store.diff(from: complete.id, to: incomplete.id, worktree: repo)
+        XCTAssertNotNil(toIncomplete.warning)
+        let fromIncomplete = try await store.diff(from: incomplete.id, to: complete.id, worktree: repo)
+        XCTAssertNotNil(fromIncomplete.warning)
+        try write("README.md", Data([0, 255, 2]))
+        let binary = try await store.diff(from: incomplete.id, to: nil, worktree: repo)
+        XCTAssertNotNil(binary.warning)
+        XCTAssertTrue(binary.text.contains("Binary"))
+        XCTAssertFalse(binary.text.contains("@@"))
+        try write("README.md", Data(repeating: 65, count: 65))
+        let large = try await store.diff(from: complete.id, to: nil, worktree: repo)
+        XCTAssertTrue(large.text.localizedCaseInsensitiveContains("size limit"))
+        XCTAssertFalse(large.text.contains("@@"))
+    }
+
+    func testWorkingDiffDistinguishesRecordedDeletionFromUnreadableFile() async throws {
+        let store = try store()
+        let fm = FileManager.default
+        try fm.removeItem(atPath: repo + "/README.md")
+        try write("Sources/App.swift", "saved\n")
+        let saved = try store.save(worktree: repo, label: nil)
+        try write("README.md", "restored\n")
+        try fm.removeItem(atPath: repo + "/Sources")
+        let missing = try await store.diff(from: saved.id, to: nil, worktree: repo)
+        XCTAssertTrue(missing.text.contains("--- /dev/null\n+++ b/README.md"))
+        XCTAssertTrue(missing.text.contains("--- a/Sources/App.swift\n+++ /dev/null"))
+        try write("outside/App.swift", "external content", at: root)
+        try fm.createSymbolicLink(atPath: repo + "/Sources", withDestinationPath: root + "/outside")
+        let linked = try await store.diff(from: saved.id, to: nil, worktree: repo)
+        XCTAssertTrue(linked.text.contains("Skipped Sources/App.swift"))
+        XCTAssertFalse(linked.text.contains("external content"))
+    }
+
+    func testExportPublishesStoredBytesAndRefusesOccupiedOrProtectedFolders() throws {
+        let fm = FileManager.default
+        let store = try store()
+        try fm.removeItem(atPath: repo + "/README.md")
+        let bytes = Data([0, 255, 2])
+        try write("Sources/App.swift", bytes)
+        let saved = try store.save(worktree: repo, label: nil)
+        func directory(_ path: String) throws -> URL {
+            let url = URL(fileURLWithPath: path)
+            try fm.createDirectory(at: url, withIntermediateDirectories: false)
+            return url
+        }
+        let export = try directory(root + "/export")
+        let occupied = try directory(root + "/occupied")
+        try Data([42]).write(to: occupied.appendingPathComponent(".hidden"))
+        let nested = try directory(repo + "/empty")
+        let git = try directory(repo + "/.git/empty")
+        let alias = URL(fileURLWithPath: root + "/alias")
+        try fm.createSymbolicLink(at: alias, withDestinationURL: export)
+        let before = try contents(of: repo)
+        for refused in [occupied, nested, git, alias] {
+            XCTAssertThrowsError(try store.exportCopy(saved.id, to: refused, worktree: repo + "/Sources"))
+        }
+        XCTAssertEqual(try contents(of: occupied.path), [".hidden": Data([42])])
+        try store.exportCopy(saved.id, to: export, worktree: repo)
+        XCTAssertEqual(try contents(of: export.path), ["Sources": Data(), "Sources/App.swift": bytes])
+        let mode = try fm.attributesOfItem(atPath: export.path + "/Sources/App.swift")[.posixPermissions] as? Int
+        XCTAssertEqual(mode, 0o400)
+        XCTAssertEqual(try contents(of: repo), before)
+    }
+
+    func testFailedExportRemovesOnlyTheFilesItCreated() throws {
+        let store = try store()
+        try write("README.md", "readme")
+        try write("Sources/App.swift", "code")
+        let saved = try store.save(worktree: repo, label: nil)
+        let last = try XCTUnwrap(saved.files.last?.sha256)
+        let fm = FileManager.default
+        let payload = store.folder.appendingPathComponent(saved.id.uuidString).appendingPathComponent(last)
+        try fm.removeItem(at: payload)
+        try fm.createSymbolicLink(at: payload, withDestinationURL: URL(fileURLWithPath: repo + "/README.md"))
+        let export = URL(fileURLWithPath: root + "/empty-export")
+        try fm.createDirectory(at: export, withIntermediateDirectories: false)
+        XCTAssertThrowsError(try store.exportCopy(saved.id, to: export, worktree: repo))
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: export.path), [])
+    }
+
+    func testUnifiedDiffPreservesLineEndingsAndSeparatesDistantEdits() throws {
+        let middle = (1...10).map { "line \($0)\n" }.joined()
+        let old = Data(("first\r\n" + middle + "last").utf8)
+        let new = Data(("first\n" + middle + "last\n").utf8)
+        let patch = try XCTUnwrap(LocalCheckpoints.unifiedDiff(path: "note", before: old, after: new))
+        XCTAssertTrue(patch.contains("@@ -1,4 +1,4 @@\n-first\r\n+first\n"))
+        XCTAssertTrue(patch.contains("@@ -9,4 +9,4 @@\n"))
+        XCTAssertTrue(patch.hasSuffix("-last\n\\ No newline at end of file\n+last\n"))
+        let empty = try LocalCheckpoints.unifiedDiff(path: "empty", before: nil, after: Data())
+        XCTAssertEqual(empty, "--- /dev/null\n+++ b/empty\n")
+    }
+
     func testUnsafeFilesAreOmittedWithReasons() throws {
         for name in ["link", "pipe", "big", ".env", "config", "utf16.txt", "normal.bin"] { try write(name, "original") }
         try commit("fixtures")
