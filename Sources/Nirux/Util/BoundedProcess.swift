@@ -130,10 +130,11 @@ enum BoundedProcess {
         process.currentDirectoryURL = currentDirectoryURL
         switch environment {
         case .inherited(let adding):
-            if !adding.isEmpty {
-                process.environment = ProcessInfo.processInfo.environment
-                    .merging(adding) { _, override in override }
-            }
+            // Never the canary's token (CanaryChannel): only its runner may
+            // drive the app. Nirux's own environment stays as it is.
+            process.environment = ProcessInfo.processInfo.environment
+                .merging(adding) { _, override in override }
+                .filter { $0.key != CanaryChannel.tokenKey }
         case .replaced(let variables):
             process.environment = variables
         }

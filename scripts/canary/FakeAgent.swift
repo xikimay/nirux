@@ -166,9 +166,11 @@ while true {
     log(["event": "input", "text": chunk])
     for character in chunk.replacingOccurrences(of: "\u{1b}[200~", with: "").replacingOccurrences(of: "\u{1b}[201~", with: "") {
         switch character {
-        case "\r", "\n", "\r\n":
+        case "\r", "\r\n":
             if !line.isEmpty { play(line) }
             line = ""
+        // Ctrl-J: a new line in the prompt, as in Claude Code.
+        case "\n": line.append("\n")
         case "\u{7f}": if !line.isEmpty { line.removeLast() }
         default: line.append(character)
         }

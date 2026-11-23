@@ -10,6 +10,8 @@ final class WorkspaceStore {
     enum SpaceChange: Equatable {
         /// The user moved one.
         case moved
+        /// A Lead's tool moved one: nothing comes to the front.
+        case movedByLead
         /// Their space was deleted: they went to General.
         case spaceDeleted
     }
@@ -370,7 +372,7 @@ final class WorkspaceStore {
     /// workspace selects its neighbour in the space it leaves, or follows it
     /// when that space is left empty.
     @discardableResult
-    func moveWorkspace(at index: Int, toProfile profileID: String) -> Bool {
+    func moveWorkspace(at index: Int, toProfile profileID: String, byLead: Bool = false) -> Bool {
         guard canMoveWorkspace(at: index, toProfile: profileID) else { return false }
         let workspace = workspaces[index]
         let wasActive = workspace.id == activeWorkspaceID
@@ -388,7 +390,7 @@ final class WorkspaceStore {
         keepTreeOrder(in: profileID)
         if wasActive { selectWorkspace(id: neighbourID ?? workspace.id) }
         reconcileSelection(preferActiveProfile: true)
-        onWorkspacesChangedSpace?(.moved)
+        onWorkspacesChangedSpace?(byLead ? .movedByLead : .moved)
         return true
     }
 

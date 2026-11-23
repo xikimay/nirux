@@ -2,10 +2,17 @@ import Foundation
 
 /// The app's side of `LeadChannel`: watches the requests folder, hands each
 /// request to `handler` (the shell, which checks and acts), and writes the
-/// answer it gives back, now or once its work ends.
+/// answer it gives back, now or once its work ends. `root` picks the
+/// channel: the Lead's, or the canary's (CanaryChannel).
 @MainActor
 final class LeadRequestCenter {
     static let shared = LeadRequestCenter()
+
+    let root: String
+
+    init(root: String = LeadChannel.root) {
+        self.root = root
+    }
 
     typealias Handler = @MainActor (LeadChannel.Request, @escaping @MainActor (_ text: String, _ isError: Bool) -> Void) -> Void
 
@@ -20,14 +27,14 @@ final class LeadRequestCenter {
     /// one, which quit with it: nobody waits for them.
     private var startedAt: TimeInterval = 0
 
-    /// Starts watching `<state dir>/lead/requests/`, after sweeping what an
-    /// earlier run left behind and taking what waits.
+    /// Starts watching `<state dir>/<root>/requests/`, after sweeping what
+    /// an earlier run left behind and taking what waits.
     func start(stateDirectory: URL = Persistence.stateDirectory) {
         guard source == nil else { return }
         self.stateDirectory = stateDirectory
         startedAt = Date().timeIntervalSince1970
-        LeadChannel.sweep(stateDirectory: stateDirectory)
-        let folder = LeadChannel.requestsFolder(stateDirectory: stateDirectory)
+        LeadChannel.sweep(stateDirectory: stateDirectory, root: root)
+        let folder = LeadChannel.requestsFolder(stateDirectory: stateDirectory, root: root)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let descriptor = open(folder.path, O_RDONLY | O_DIRECTORY)
         if descriptor >= 0 {
@@ -39,7 +46,7 @@ final class LeadRequestCenter {
             source.resume()
             self.source = source
         } else {
-            NSLog("[Lead] cannot watch %@", folder.path)
+            NSLog("[%@] cannot watch %@", root, folder.path)
         }
         drain()
     }
@@ -64,11 +71,15 @@ final class LeadRequestCenter {
     /// Hands every waiting request over; one nobody handles is answered so.
     func drain() {
         guard let stateDirectory else { return }
-        for request in LeadChannel.waitingRequests(stateDirectory: stateDirectory)
-        where owns(request) && LeadChannel.claim(request, stateDirectory: stateDirectory) {
-            guard request.createdAt >= startedAt else { continue }
-            let answer: @MainActor (String, Bool) -> Void = { text, isError in
-                LeadChannel.respond(LeadChannel.Response(id: request.id, text: text, isError: isError), stateDirectory: stateDirectory)
+        for request in LeadChannel.waitingRequests(stateDirectory: stateDirectory, root: root)
+        where owns(request) && LeadChannel.claim(request, stateDirectory: stateDirectory, root: root) {
+            let answer: @MainActor (String, Bool) -> Void = { [root] text, isError in
+                let response = LeadChannel.Response(id: request.id, text: text, isError: isError)
+                LeadChannel.respond(response, stateDirectory: stateDirectory, root: root)
+            }
+            guard request.createdAt >= startedAt else {
+                answer("Written before this Nirux started: nothing was done.", true)
+                continue
             }
             guard let handler else {
                 answer("Nirux isn't ready yet: try again in a moment.", true)
