@@ -24,6 +24,10 @@ extension MergeQueue {
         /// After `gh pr merge`, the pull request must read MERGED within this.
         static let mergeConfirm: TimeInterval = 60
         static let mergeConfirmInterval: TimeInterval = 5
+        /// A red train's rerun waits this long at most for its run's other jobs.
+        static let rerunJobsWait: TimeInterval = 10 * 60
+        /// The CI triage's answer on a red train, at most this long after it is asked.
+        static let triageTimeout: TimeInterval = 3 * 60
         /// After a train lands, each of its pull requests must read MERGED within this.
         static let trainMarkedMerged: TimeInterval = 3 * 60
         /// The post-merge run must show within this after the merge.
@@ -231,6 +235,8 @@ extension MergeQueue {
             var unknownReads = 0
             var baseRunsSince: TimeInterval?
             var awaitedBaseRuns: Set<Int> = []
+            /// A red train's checks were first seen red, waiting for its run's other jobs.
+            var redSince: TimeInterval?
             /// Failed check runs a rerun replaces: pending until their new run shows.
             var replacedChecks: Set<Int> = []
             var readFailingSince: TimeInterval?

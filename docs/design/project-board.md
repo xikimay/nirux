@@ -390,7 +390,9 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   came in GitHub's wait) runs again, once, after its run's other jobs end.
   Other failures of one workflow run go to the CI triage (ci-failure-triage.md,
   rules only, no model) when it was on at Start: likely flaky, the run's failed
-  jobs run again, once; anything else stops the train. Each look at the train's
+  jobs run again, once; anything else stops the train, saying what the triage
+  did (a verdict, a run it couldn't read twice, the triage turned off). The
+  triage gets 3 minutes; the run's other jobs, 10 minutes. Each look at the train's
   checks reads the PRs again: a
   push to one stops the train at once. A stop the train finds itself (red
   checks, the base moved, a push) closes the train's PR first; a user Stop or

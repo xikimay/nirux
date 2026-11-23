@@ -114,8 +114,8 @@ enum MQ {
             graphQLRemaining: 5000, graphQLReset: Date(timeIntervalSince1970: 0)
         )
         var baseMergeQueue = false
-        /// The CI triage's verdict on any failed run.
-        var triage = CITriage.Verdict.unsure
+        /// The CI triage's answer on any failed run.
+        var triage = MergeQueue.TriageAnswer.off
 
         func answer(_ read: MergeQueue.Read) -> MergeQueue.ReadResult? {
             switch read {

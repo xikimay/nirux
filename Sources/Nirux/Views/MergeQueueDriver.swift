@@ -21,8 +21,8 @@ struct MergeQueueLocalAccess {
     var reviewTasks: @MainActor () -> [MergeQueue.ReviewTask]
     /// The CI triage's verdict on a failed run (docs/design/ci-failure-triage.md):
     /// unsure where the app gives none.
-    var triage: @MainActor (_ run: CIFailure.Run, _ pullRequest: Int, _ checks: Set<String>) async -> CITriage.Verdict = { _, _, _ in
-        .unsure
+    var triage: @MainActor (_ run: CIFailure.Run, _ pullRequest: Int, _ checks: Set<String>) async -> MergeQueue.TriageAnswer = { _, _, _ in
+        .off
     }
     /// Whether the CI triage is on: off, a red train stops at once.
     var isTriageOn: @MainActor () -> Bool = { false }
