@@ -39,7 +39,8 @@ extension NiruxShellView {
                     )
                     let center = self.ciTriageCenter
                     return await self.sideEffects.investigateCIFailure(request) { await MainActor.run { center.isEnabled } }.verdict
-                }
+                },
+                isTriageOn: { [weak self] in self?.ciTriageCenter.isEnabled ?? false }
             ),
             lockFolder: mergeQueueLockFolder
         )

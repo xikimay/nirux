@@ -59,6 +59,8 @@ extension MergeQueue {
         let startedByLead: Bool
         /// The branch a Train cadence composes its batch on: new for each Start.
         let trainBranch: String
+        /// The CI triage was on at Start: a red train may be rerun once.
+        let triagesFlakes: Bool
         private var stopMessage = "Stopped by the user."
         // The train's flow (MergeQueue+Train) writes the state below too.
         var entries: [Entry]
@@ -81,11 +83,12 @@ extension MergeQueue {
 
         init(
             settings: BoardConfig.QueueSettings, entries: [ConfirmedEntry], cadence: Cadence = .standard, startedByLead: Bool = false,
-            trainBranch: String = "nirux-train/queue"
+            trainBranch: String = "nirux-train/queue", triagesFlakes: Bool = false
         ) {
             self.startedByLead = startedByLead
             self.cadence = cadence
             self.trainBranch = trainBranch
+            self.triagesFlakes = triagesFlakes
             self.settings = settings
             self.entries = entries.map(Entry.init)
         }

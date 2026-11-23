@@ -24,6 +24,8 @@ struct MergeQueueLocalAccess {
     var triage: @MainActor (_ run: CIFailure.Run, _ pullRequest: Int, _ checks: Set<String>) async -> CITriage.Verdict = { _, _, _ in
         .unsure
     }
+    /// Whether the CI triage is on: off, a red train stops at once.
+    var isTriageOn: @MainActor () -> Bool = { false }
 }
 
 /// The queue's clocks: `systemUptime` for every wait and timeout (it stops

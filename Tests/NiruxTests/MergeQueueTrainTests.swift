@@ -18,8 +18,10 @@ final class MergeQueueTrainTests: XCTestCase {
         return world
     }
 
-    private func queue() -> MQ.Harness {
-        var queue = MQ.Harness(entries: [MQ.entry(12, head: a), MQ.entry(14, head: b)], cadence: .train)
+    private func queue(triagesFlakes: Bool = false) -> MQ.Harness {
+        var queue = MQ.Harness(entries: [], cadence: .train)
+        queue.engine = MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(12, head: a), MQ.entry(14, head: b)],
+                                         cadence: .train, triagesFlakes: triagesFlakes)
         queue.start()
         return queue
     }
@@ -294,14 +296,16 @@ final class MergeQueueTrainTests: XCTestCase {
         world.triage = .flaky(reason: "a runner lost its connection")
         var flaky = TrainGitHub(world: world)
         flaky.rerunsGreen = [head]
-        var first = queue()
+        flaky.rerunAnswer = .uncertain("gh timed out")
+        var first = queue(triagesFlakes: true)
         first.drive(&flaky)
         XCTAssertEqual(first.phase, .finished)
         XCTAssertEqual(first.mutations.filter { if case .rerun = $0 { true } else { false } }, [.rerun(runID: 900)])
         XCTAssertTrue(first.noted("Likely flaky (a runner lost its connection): rerunning the failed jobs of run 900, once"))
+        XCTAssertTrue(first.noted("The rerun started despite the error"))
 
         var stillRed = TrainGitHub(world: world)
-        var second = queue()
+        var second = queue(triagesFlakes: true)
         second.drive(&stillRed)
         XCTAssertTrue(second.stopReason?.message.hasPrefix("Required check Tests / test failed on train #900 at 0000002 again after "
             + "its rerun.") == true, second.stopReason?.message ?? "")
@@ -309,10 +313,21 @@ final class MergeQueueTrainTests: XCTestCase {
 
         world.triage = .real
         var real = TrainGitHub(world: world)
-        var third = queue()
+        var third = queue(triagesFlakes: true)
         third.drive(&real)
         XCTAssertEqual(third.stopReason?.kind, .checks)
+        XCTAssertTrue(third.stopReason?.message.contains("The CI triage found a real failure.") == true)
         XCTAssertFalse(third.mutations.contains { if case .rerun = $0 { true } else { false } })
+
+        // Triage off: no wait for the run's other jobs, no rerun.
+        world.checks[head] = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"),
+                                       MQ.checkRun(id: 11, name: "lint", status: "IN_PROGRESS", conclusion: nil))
+        var off = TrainGitHub(world: world)
+        var fourth = queue()
+        let start = fourth.now
+        fourth.drive(&off)
+        XCTAssertEqual(fourth.stopReason?.kind, .checks)
+        XCTAssertLessThan(fourth.now - start, MergeQueue.Limits.pollInterval * 3, "it stopped at the first red look")
     }
 
     @MainActor
@@ -330,7 +345,8 @@ final class MergeQueueTrainTests: XCTestCase {
             return .flaky(reason: "a runner went away")
         }
         let driver = MergeQueueDriver(
-            engine: MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(12, head: a), MQ.entry(14, head: b)], cadence: .train),
+            engine: MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(12, head: a), MQ.entry(14, head: b)], cadence: .train,
+                                      triagesFlakes: true),
             client: client, local: local, clock: MergeQueueFlowTests.VirtualClock().queueClock
         )
         driver.start()
@@ -454,6 +470,8 @@ private struct TrainGitHub {
     var refusesClose = false
     /// Heads whose rerun of failed jobs passes; any other's fails again.
     var rerunsGreen: Set<String> = []
+    /// What gh answers a rerun it sent.
+    var rerunAnswer = MergeQueue.MutationResult.sent
     /// Agents' pushes between the last check and the train's merge.
     var pushesAfterLanding: [Int: String] = [:]
     /// The first read of the train's pull request misses it.
@@ -517,6 +535,7 @@ private struct TrainGitHub {
             guard let head = lastMerge else { return .refused(status: 404, message: "Not Found") }
             world.checks[head] = rerunsGreen.contains(head) ? MQ.checks(MQ.checkRun(id: 10))
                 : MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"), MQ.checkRun(id: 10, conclusion: "FAILURE"))
+            return rerunAnswer
         case .updateBranch:
             return .refused(status: 422, message: "not a train's call")
         }

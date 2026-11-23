@@ -38,8 +38,8 @@ extension MergeQueue {
         /// Its pull request into the base, once open.
         var number: Int?
         var mergeCommit: String?
-        /// Its one rerun of a flaky failure was used.
-        var hasRerun: Bool?
+        /// The workflow run its one rerun of a flaky failure went to.
+        var rerunOf: Int?
         var step = Step.composing
 
         /// "train #781", or its branch until it has a pull request.
@@ -100,7 +100,8 @@ extension MergeQueue.Engine {
         case close(MergeQueue.StopReason)
         /// The CI triage asked about a failed run: `red` stops unless it is flaky.
         case triage(head: String, runID: Int, replaced: Set<Int>, red: MergeQueue.StopReason)
-        case rerun(head: String, replaced: Set<Int>)
+        case rerun(head: String, runID: Int, replaced: Set<Int>)
+        case rerunCheck(head: String, replaced: Set<Int>, message: String)
     }
 
     /// "waiting for the checks of train #781 (#12, #14)".
@@ -365,8 +366,9 @@ extension MergeQueue.Engine {
             let url = verdict.failed.first?.workflowRunID.map {
                 "https://\(settings.gitHubRepository.host)/\(settings.repository)/actions/runs/\($0)"
             }
+            let again = train.rerunOf.map { run in verdict.failed.contains { $0.workflowRunID == run } } ?? false
             let stopRed = MergeQueue.StopReason(kind: .checks, message: "Required check \(red.joined(separator: ", ")) failed on "
-                + "\(train.name) at \(Self.short(head))" + (train.hasRerun == true ? " again after its rerun." : "."), url: url)
+                + "\(train.name) at \(Self.short(head))" + (again ? " again after its rerun." : "."), url: url)
             return triageOrStop(stopRed, verdict: verdict, checks: checks, head: head, now: now)
         }
         if !verdict.notGreen.isEmpty {
@@ -390,17 +392,27 @@ extension MergeQueue.Engine {
         _ red: MergeQueue.StopReason, verdict: MergeQueue.ChecksVerdict, checks: MergeQueue.CommitChecks, head: String, now: TimeInterval
     ) {
         let runIDs = Set(verdict.failed.compactMap(\.workflowRunID))
-        guard train?.hasRerun != true, let number = train?.number, verdict.failedStatuses.isEmpty,
+        guard triagesFlakes, train?.rerunOf == nil, let number = train?.number, verdict.failedStatuses.isEmpty,
               verdict.failed.allSatisfy({ $0.workflowRunID != nil }), runIDs.count == 1, let runID = runIDs.first
         else { return stop(red) }
         // GitHub reruns a run's failed jobs once all its jobs are done.
         if MergeQueue.latestRuns(checks.runs).contains(where: { $0.workflowRunID == runID && $0.status.uppercased() != "COMPLETED" }) {
             guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else { return stop(red) }
+            train?.step = .waitingForChecks
             return waitForTrainChecks(head: head, after: MergeQueue.Limits.pollInterval)
         }
         let replaced = MergeQueue.runsReplaced(byRerunOf: runID, in: checks, required: settings.requiredChecks)
-        read([.triage(run: runID, pullRequest: number, checks: verdict.failed.map(\.name))],
+        // The triage reads every red job of the run, required or not.
+        let redJobs = MergeQueue.latestRuns(checks.runs).filter { $0.workflowRunID == runID && GitHub.isRedCheck($0.conclusion) }
+        read([.triage(run: runID, pullRequest: number, checks: redJobs.map(\.name))],
              for: .train(.triage(head: head, runID: runID, replaced: replaced, red: red)))
+    }
+
+    private mutating func rerunStarted(head: String, replaced: Set<Int>, now: TimeInterval) {
+        clocks.replacedChecks.formUnion(replaced)
+        // The rerun takes the checks' whole time again.
+        clocks.step = now
+        waitForTrainChecks(head: head, after: MergeQueue.Limits.pollInterval)
     }
 
     private mutating func trainMergeChecks(head: String, after delay: TimeInterval = 0) {
@@ -641,10 +653,23 @@ extension MergeQueue.Engine {
             trainMergeChecksRead(answers, head: head, now: now)
         case .triage(let head, let runID, let replaced, let red):
             guard case .triage(let verdict)? = answers.values.first else { return missingAnswer() }
-            guard let reason = verdict.flakyReason else { return stop(red) }
+            guard let reason = verdict.flakyReason else {
+                return stop(red.appending(verdict == .real ? " The CI triage found a real failure."
+                    : " The CI triage couldn’t tell it from a flake."))
+            }
             note("Likely flaky (\(reason)): rerunning the failed jobs of run \(runID), once")
-            self.train?.hasRerun = true
-            mutate(.rerun(runID: runID), for: .train(.rerun(head: head, replaced: replaced)))
+            self.train?.rerunOf = runID
+            self.train?.step = .waitingForChecks
+            mutate(.rerun(runID: runID), for: .train(.rerun(head: head, runID: runID, replaced: replaced)))
+        case .rerunCheck(let head, let replaced, let message):
+            guard let checks = answers.checks(head) else { return missingAnswer() }
+            let latest = Set(MergeQueue.latestRuns(checks.runs).map(\.id))
+            guard replaced.contains(where: { !latest.contains($0) }) else {
+                return stop(MergeQueue.StopReason(kind: .checks, message: "Nirux couldn’t rerun the failed checks of \(train.name): "
+                    + "\(message)"))
+            }
+            note("The rerun started despite the error")
+            rerunStarted(head: head, replaced: replaced, now: now)
         case .baseRunWait(let head):
             guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
             if !waitForTrainBaseRuns(runs, head: head, now: now) { trainMergeChecks(head: head) }
@@ -693,15 +718,13 @@ extension MergeQueue.Engine {
             if result == .sent { self.train?.step = .closed }
             stop(reason.appending(result == .sent ? " Nirux closed train #\(number)."
                 : " Nirux couldn’t close train #\(number): \(Self.describe(result))."))
-        case .rerun(let head, let replaced):
-            guard result == .sent || result.isUncertain else {
-                return stop(MergeQueue.StopReason(kind: .checks, message: "Nirux couldn’t rerun the failed checks of \(train.name): "
-                    + "\(Self.describe(result))."))
+        case .rerun(let head, _, let replaced):
+            guard result == .sent else {
+                // It may have started all the same: the checks say.
+                return read([.checks(head)], after: result.isUncertain ? MergeQueue.Limits.pollInterval : 0,
+                            for: .train(.rerunCheck(head: head, replaced: replaced, message: Self.describe(result))))
             }
-            clocks.replacedChecks.formUnion(replaced)
-            // The rerun takes the checks' whole time again.
-            clocks.step = now
-            waitForTrainChecks(head: head, after: MergeQueue.Limits.pollInterval)
+            rerunStarted(head: head, replaced: replaced, now: now)
         case .land(let head, let baseTip):
             guard let number = train.number else { return missingAnswer() }
             clocks.step = now
