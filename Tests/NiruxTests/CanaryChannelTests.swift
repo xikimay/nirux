@@ -11,6 +11,8 @@ final class CanaryChannelTests: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
+        // NSApp, which the menu and window code reads, exists once this runs.
+        _ = NSApplication.shared
         stateDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-canary-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
     }
@@ -63,13 +65,16 @@ final class CanaryChannelTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: stateDirectory.path), [])
     }
 
-    /// Nothing the app starts inherits the token: it leaves the process's
-    /// environment at launch.
-    func testTheTokenLeavesTheProcessEnvironment() {
-        setenv(CanaryChannel.tokenKey, token, 1)
-        defer { unsetenv(CanaryChannel.tokenKey) }
-        XCTAssertEqual(CanaryChannel.takeLaunchEnvironment()[CanaryChannel.tokenKey], token)
-        XCTAssertNil(getenv(CanaryChannel.tokenKey))
+    /// What the app runs never gets the token, while the app's own
+    /// environment stays as it is (Ghostty reads it).
+    func testChildProcessesNeverGetTheToken() throws {
+        let result = try XCTUnwrap(BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/env"), arguments: [], currentDirectoryURL: stateDirectory,
+            environment: [CanaryChannel.tokenKey: token, "CANARY_PROBE": "1"]
+        ))
+        let output = String(decoding: result.standardOutput, as: UTF8.self)
+        XCTAssertTrue(output.contains("CANARY_PROBE=1"), output)
+        XCTAssertFalse(output.contains(CanaryChannel.tokenKey), output)
     }
 
     @MainActor
@@ -98,7 +103,6 @@ final class CanaryChannelTests: XCTestCase {
     /// next request: it runs inside that loop.
     @MainActor
     func testAModalActionDoesntHoldBackTheNextRequest() throws {
-        _ = NSApplication.shared
         var released = false
         var finished: [String] = []
         let next = request(token: token, tool: "menu")
