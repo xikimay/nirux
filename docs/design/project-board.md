@@ -384,7 +384,10 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   required checks once, on a commit up to date by construction, so the strict
   "up to date" rule stays. Before merging it, the queue checks the base still
   sits at the train's tip and every PR is still at its head, then merges it
-  pinned to its head. Each look at the train's checks reads the PRs again: a
+  pinned to its head. A red train whose failures are one workflow run's goes
+  to the CI triage (ci-failure-triage.md, rules only, no model) once: when it
+  says likely flaky, the run's failed jobs run again, once; anything else stops
+  the train. Each look at the train's checks reads the PRs again: a
   push to one stops the train at once. A stop the train finds itself (red
   checks, the base moved, a push) closes the train's PR first; a user Stop or
   GitHub not answering leaves it open, and the stop names it. The PRs' heads

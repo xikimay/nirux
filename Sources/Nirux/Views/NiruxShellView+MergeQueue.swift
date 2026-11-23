@@ -29,7 +29,17 @@ extension NiruxShellView {
                 busyAgents: { [weak self] worktrees, allWorktrees in
                     self?.mergeQueueBusyAgents(in: worktrees, allWorktrees: allWorktrees) ?? []
                 },
-                reviewTasks: { [weak self] in Self.reviewTasks(of: self?.projectWorkspaces(of: projectID) ?? []) }
+                reviewTasks: { [weak self] in Self.reviewTasks(of: self?.projectWorkspaces(of: projectID) ?? []) },
+                triage: { [weak self] run, pullRequest, checks in
+                    guard let self, self.ciTriageCenter.isEnabled else { return .unsure }
+                    let request = CITriageInvestigation.Request(
+                        run: run, pullRequest: pullRequest, repositoryRoot: nil, isModelAllowed: false,
+                        knownFlaky: self.ciTriageCenter.store.knownFlaky(in: run.repository, now: Date().timeIntervalSince1970),
+                        redChecks: checks
+                    )
+                    let center = self.ciTriageCenter
+                    return await self.sideEffects.investigateCIFailure(request) { await MainActor.run { center.isEnabled } }.verdict
+                }
             ),
             lockFolder: mergeQueueLockFolder
         )

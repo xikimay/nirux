@@ -225,6 +225,9 @@ extension MergeQueue {
         case branch(String)
         /// The pull requests from this head branch, newest first.
         case pullRequests(head: String)
+        /// The CI triage's verdict on a failed run of a pull request: not a
+        /// GitHub read, the driver asks the app.
+        case triage(run: Int, pullRequest: Int, checks: [String])
     }
 
     enum ReadResult: Equatable, Sendable {
@@ -242,6 +245,7 @@ extension MergeQueue {
         /// Nil: no such branch.
         case branch(String?)
         case pullRequests([PullRequestSnapshot])
+        case triage(CITriage.Verdict)
     }
 
     /// Why a batch of reads failed.

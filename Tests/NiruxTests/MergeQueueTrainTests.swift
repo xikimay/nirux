@@ -287,6 +287,59 @@ final class MergeQueueTrainTests: XCTestCase {
             + "train. #16 left the train too. Train #900 landed #12.")
     }
 
+    func testARedTrainTheTriageCallsFlakyIsRerunOnceAndOnlyThen() throws {
+        let head = TrainGitHub.commit(2)
+        var world = world()
+        world.checks[head] = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"))
+        world.triage = .flaky(reason: "a runner lost its connection")
+        var flaky = TrainGitHub(world: world)
+        flaky.rerunsGreen = [head]
+        var first = queue()
+        first.drive(&flaky)
+        XCTAssertEqual(first.phase, .finished)
+        XCTAssertEqual(first.mutations.filter { if case .rerun = $0 { true } else { false } }, [.rerun(runID: 900)])
+        XCTAssertTrue(first.noted("Likely flaky (a runner lost its connection): rerunning the failed jobs of run 900, once"))
+
+        var stillRed = TrainGitHub(world: world)
+        var second = queue()
+        second.drive(&stillRed)
+        XCTAssertTrue(second.stopReason?.message.hasPrefix("Required check Tests / test failed on train #900 at 0000002 again after "
+            + "its rerun.") == true, second.stopReason?.message ?? "")
+        XCTAssertEqual(second.mutations.filter { if case .rerun = $0 { true } else { false } }.count, 1)
+
+        world.triage = .real
+        var real = TrainGitHub(world: world)
+        var third = queue()
+        third.drive(&real)
+        XCTAssertEqual(third.stopReason?.kind, .checks)
+        XCTAssertFalse(third.mutations.contains { if case .rerun = $0 { true } else { false } })
+    }
+
+    @MainActor
+    func testTheDriverAsksTheAppsCITriageAboutARedTrain() {
+        let head = TrainGitHub.commit(2)
+        var world = world()
+        world.checks[head] = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"))
+        var github = TrainGitHub(world: world)
+        github.rerunsGreen = [head]
+        let client = TrainClient(github)
+        let asked = Asked()
+        var local = MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }, reviewTasks: { [] })
+        local.triage = { run, pullRequest, checks in
+            asked.add("\(run.repository) \(run.id) #\(pullRequest) \(checks.sorted())")
+            return .flaky(reason: "a runner went away")
+        }
+        let driver = MergeQueueDriver(
+            engine: MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(12, head: a), MQ.entry(14, head: b)], cadence: .train),
+            client: client, local: local, clock: MergeQueueFlowTests.VirtualClock().queueClock
+        )
+        driver.start()
+        waitUntil("the train ends") { !driver.engine.phase.isActive }
+        XCTAssertEqual(driver.engine.phase, .finished)
+        XCTAssertEqual(asked.all, ["github.com/acme/widgets 900 #900 [\"test\"]"])
+        XCTAssertEqual(client.mutations.filter { if case .rerun = $0 { true } else { false } }, [.rerun(runID: 900)])
+    }
+
     func testARefusedMergeOfTheTrainClosesIt() throws {
         var github = TrainGitHub(world: world())
         github.refusesMerge = true
@@ -399,6 +452,8 @@ private struct TrainGitHub {
     /// Branch protection refuses the train's merge.
     var refusesMerge = false
     var refusesClose = false
+    /// Heads whose rerun of failed jobs passes; any other's fails again.
+    var rerunsGreen: Set<String> = []
     /// Agents' pushes between the last check and the train's merge.
     var pushesAfterLanding: [Int: String] = [:]
     /// The first read of the train's pull request misses it.
@@ -407,6 +462,7 @@ private struct TrainGitHub {
     var committer = "web-flow"
     /// Each head's merge commit in the train.
     private(set) var partCommits: [String: String] = [:]
+    private var lastMerge: String?
     private var made = 0
 
     /// The `n`th commit GitHub makes: "0000001eee…".
@@ -431,6 +487,7 @@ private struct TrainGitHub {
             world.commits[commit] = MergeQueue.CommitInfo(sha: commit, committerLogin: committer, parents: [tip, head])
             world.branches[branch] = commit
             partCommits[head] = commit
+            lastMerge = commit
         case .openPullRequest(_, let head, _, _):
             guard let tip = world.branches[head] else { return .refused(status: 422, message: "No commits between main and \(head)") }
             world.pullRequests[900] = MQ.pullRequest(900, head: pushToTrainAfterOpen ?? tip, branch: head)
@@ -452,11 +509,50 @@ private struct TrainGitHub {
             if refusesClose { return .refused(status: 403, message: "Resource not accessible") }
             guard let open = world.pullRequests[number] else { return .refused(status: 404, message: "Not Found") }
             world.pullRequests[number] = MQ.pullRequest(number, head: open.headOid, branch: open.headRefName, state: .closed)
-        case .updateBranch, .rerun:
+        case .rerun:
+            guard let head = lastMerge else { return .refused(status: 404, message: "Not Found") }
+            world.checks[head] = rerunsGreen.contains(head) ? MQ.checks(MQ.checkRun(id: 10))
+                : MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"), MQ.checkRun(id: 10, conclusion: "FAILURE"))
+        case .updateBranch:
             return .refused(status: 422, message: "not a train's call")
         }
         return .sent
     }
+}
+
+/// The same GitHub behind the driver, as the queue's client.
+private final class TrainClient: MergeQueueGitHub, @unchecked Sendable {
+    let isDryRun = false
+    private let lock = NSLock()
+    private var github: TrainGitHub
+    private var made: [MergeQueue.Mutation] = []
+
+    init(_ github: TrainGitHub) { self.github = github }
+
+    var mutations: [MergeQueue.Mutation] { lock.withLock { made } }
+
+    func read(_ read: MergeQueue.Read, settings: BoardConfig.QueueSettings) -> Result<MergeQueue.ReadResult, GitHub.CLI.Failure> {
+        lock.withLock {
+            if case .triage = read { return .failure(.unreadable("the CI triage isn’t a GitHub read")) }
+            return github.world.answer(read).map { .success($0) } ?? .failure(.noAnswer("unscripted \(read)"))
+        }
+    }
+
+    func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
+        lock.withLock {
+            made.append(mutation)
+            return github.apply(mutation)
+        }
+    }
+
+    func commandLine(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> String { "gh \(mutation)" }
+}
+
+private final class Asked: @unchecked Sendable {
+    private let lock = NSLock()
+    private var asked: [String] = []
+    var all: [String] { lock.withLock { asked } }
+    func add(_ question: String) { lock.withLock { asked.append(question) } }
 }
 
 extension MQ.Harness {

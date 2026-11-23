@@ -38,6 +38,8 @@ extension MergeQueue {
         /// Its pull request into the base, once open.
         var number: Int?
         var mergeCommit: String?
+        /// Its one rerun of a flaky failure was used.
+        var hasRerun: Bool?
         var step = Step.composing
 
         /// "train #781", or its branch until it has a pull request.
@@ -96,6 +98,9 @@ extension MergeQueue.Engine {
         case postMergeOutcome(commit: String, run: GitHub.WorkflowRun)
         /// The train's pull request closed before the queue stops for this.
         case close(MergeQueue.StopReason)
+        /// The CI triage asked about a failed run: `red` stops unless it is flaky.
+        case triage(head: String, runID: Int, replaced: Set<Int>, red: MergeQueue.StopReason)
+        case rerun(head: String, replaced: Set<Int>)
     }
 
     /// "waiting for the checks of train #781 (#12, #14)".
@@ -354,14 +359,15 @@ extension MergeQueue.Engine {
 
     private mutating func decideOnTrain(_ checks: MergeQueue.CommitChecks, head: String, now: TimeInterval) {
         guard let train else { return missingAnswer() }
-        let verdict = MergeQueue.judge(checks, required: settings.requiredChecks)
+        let verdict = MergeQueue.judge(checks, required: settings.requiredChecks, replaced: clocks.replacedChecks)
         let red = verdict.failed.map { GitHub.qualifiedName(name: $0.name, workflow: $0.workflow) ?? $0.name } + verdict.failedStatuses
         if !red.isEmpty {
             let url = verdict.failed.first?.workflowRunID.map {
                 "https://\(settings.gitHubRepository.host)/\(settings.repository)/actions/runs/\($0)"
             }
-            return stop(MergeQueue.StopReason(kind: .checks, message: "Required check \(red.joined(separator: ", ")) failed on "
-                + "\(train.name) at \(Self.short(head)).", url: url))
+            let stopRed = MergeQueue.StopReason(kind: .checks, message: "Required check \(red.joined(separator: ", ")) failed on "
+                + "\(train.name) at \(Self.short(head))" + (train.hasRerun == true ? " again after its rerun." : "."), url: url)
+            return triageOrStop(stopRed, verdict: verdict, checks: checks, head: head, now: now)
         }
         if !verdict.notGreen.isEmpty {
             return stop(MergeQueue.StopReason(kind: .checks, message: "Required check \(verdict.notGreen.joined(separator: ", ")) "
@@ -376,6 +382,25 @@ extension MergeQueue.Engine {
             return waitForTrainChecks(head: head, after: MergeQueue.Limits.pollInterval)
         }
         trainMergeChecks(head: head)
+    }
+
+    /// A red train whose failures are one workflow run's: once, the CI
+    /// triage says whether a rerun would pass; anything else stops.
+    private mutating func triageOrStop(
+        _ red: MergeQueue.StopReason, verdict: MergeQueue.ChecksVerdict, checks: MergeQueue.CommitChecks, head: String, now: TimeInterval
+    ) {
+        let runIDs = Set(verdict.failed.compactMap(\.workflowRunID))
+        guard train?.hasRerun != true, let number = train?.number, verdict.failedStatuses.isEmpty,
+              verdict.failed.allSatisfy({ $0.workflowRunID != nil }), runIDs.count == 1, let runID = runIDs.first
+        else { return stop(red) }
+        // GitHub reruns a run's failed jobs once all its jobs are done.
+        if MergeQueue.latestRuns(checks.runs).contains(where: { $0.workflowRunID == runID && $0.status.uppercased() != "COMPLETED" }) {
+            guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else { return stop(red) }
+            return waitForTrainChecks(head: head, after: MergeQueue.Limits.pollInterval)
+        }
+        let replaced = MergeQueue.runsReplaced(byRerunOf: runID, in: checks, required: settings.requiredChecks)
+        read([.triage(run: runID, pullRequest: number, checks: verdict.failed.map(\.name))],
+             for: .train(.triage(head: head, runID: runID, replaced: replaced, red: red)))
     }
 
     private mutating func trainMergeChecks(head: String, after delay: TimeInterval = 0) {
@@ -404,12 +429,12 @@ extension MergeQueue.Engine {
                 + "\(settings.baseBranch).", url: pullRequest.url))
         }
         guard let comparison else { return cannotCompare(head) }
+        let verdict = MergeQueue.judge(checks, required: settings.requiredChecks, replaced: clocks.replacedChecks)
         guard comparison.behindBy == 0 else {
             return stop(MergeQueue.StopReason(kind: .train, message: "\(settings.baseBranch) moved to "
                 + "\(Self.short(comparison.baseCommit)) while \(train.name) ran: something else merged into it. A train lands "
                 + "only on the tip it was tested on: start again.", url: pullRequest.url))
         }
-        let verdict = MergeQueue.judge(checks, required: settings.requiredChecks)
         guard verdict.allRequiredGreen else {
             if verdict.failed.isEmpty, verdict.failedStatuses.isEmpty, verdict.notGreen.isEmpty {
                 note("A required check runs again: waiting for it")
@@ -614,6 +639,12 @@ extension MergeQueue.Engine {
             decideOnTrain(checks, head: head, now: now)
         case .mergeChecks(let head):
             trainMergeChecksRead(answers, head: head, now: now)
+        case .triage(let head, let runID, let replaced, let red):
+            guard case .triage(let verdict)? = answers.values.first else { return missingAnswer() }
+            guard let reason = verdict.flakyReason else { return stop(red) }
+            note("Likely flaky (\(reason)): rerunning the failed jobs of run \(runID), once")
+            self.train?.hasRerun = true
+            mutate(.rerun(runID: runID), for: .train(.rerun(head: head, replaced: replaced)))
         case .baseRunWait(let head):
             guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
             if !waitForTrainBaseRuns(runs, head: head, now: now) { trainMergeChecks(head: head) }
@@ -635,7 +666,7 @@ extension MergeQueue.Engine {
                   let comparison = answers.comparison(base: commit, head: settings.baseBranch)
             else { return missingAnswer() }
             postMergeFailed(run, commit: commit, baseRuns: runs, comparison: comparison, subject: train.name)
-        case .preflight, .base, .create, .part, .open, .land, .close:
+        case .preflight, .base, .create, .part, .open, .land, .close, .rerun:
             missingAnswer()
         }
     }
@@ -662,6 +693,15 @@ extension MergeQueue.Engine {
             if result == .sent { self.train?.step = .closed }
             stop(reason.appending(result == .sent ? " Nirux closed train #\(number)."
                 : " Nirux couldn’t close train #\(number): \(Self.describe(result))."))
+        case .rerun(let head, let replaced):
+            guard result == .sent || result.isUncertain else {
+                return stop(MergeQueue.StopReason(kind: .checks, message: "Nirux couldn’t rerun the failed checks of \(train.name): "
+                    + "\(Self.describe(result))."))
+            }
+            clocks.replacedChecks.formUnion(replaced)
+            // The rerun takes the checks' whole time again.
+            clocks.step = now
+            waitForTrainChecks(head: head, after: MergeQueue.Limits.pollInterval)
         case .land(let head, let baseTip):
             guard let number = train.number else { return missingAnswer() }
             clocks.step = now
