@@ -7,6 +7,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var mainWindow: NSWindow?
     /// Open for a canary run only (see CanaryChannel).
     var canaryRequests: LeadRequestCenter?
+    /// A canary run: the app stays hidden and never activates (CanaryPresentation).
+    var drivenByCanary = false
+    var canaryObservers: [NSObjectProtocol] = []
     var shell: NiruxShellView? {
         // Its Settings window holds Nirux's panes too.
         didSet { if let shell, shell !== oldValue { wireSettings(shell.settingsWindow) } }
@@ -158,7 +161,11 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // A canary run drives this copy through its channel: behind the
         // user's windows, never taking the focus.
         let launchEnvironment = CanaryChannel.takeLaunchEnvironment()
-        let drivenByCanary = CanaryChannel.token(in: launchEnvironment) != nil
+        drivenByCanary = CanaryChannel.token(in: launchEnvironment) != nil
+        if drivenByCanary {
+            canaryObservers = CanaryPresentation.keepHidden(on: .default) { NSApp.hide(nil) }
+            NSApp.hide(nil)
+        }
         setupKeyInterceptor()
         setupClickToFocus()
         setupMenus()

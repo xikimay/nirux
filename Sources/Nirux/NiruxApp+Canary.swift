@@ -232,6 +232,16 @@ extension NiruxApp {
     }
 }
 
+/// A canary copy stays hidden: whatever unhides or activates it (an alert, a
+/// panel, a link) is undone at once, so nothing it shows reaches the screen.
+enum CanaryPresentation {
+    static func keepHidden(on center: NotificationCenter, hide: @escaping @MainActor () -> Void) -> [NSObjectProtocol] {
+        [NSApplication.didUnhideNotification, NSApplication.didBecomeActiveNotification].map { name in
+            center.addObserver(forName: name, object: nil, queue: .main) { _ in MainActor.assumeIsolated { hide() } }
+        }
+    }
+}
+
 extension NSEvent.ModifierFlags {
     /// "command", "control", "option", "shift": the canary's names.
     init(canaryNames names: [String]) {

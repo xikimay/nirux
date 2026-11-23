@@ -194,6 +194,18 @@ final class CanaryChannelTests: XCTestCase {
         XCTAssertEqual(target.picked, ["Board"])
     }
 
+    /// Whatever unhides or activates a canary copy hides it again.
+    @MainActor
+    func testACanaryCopyHidesAgainWhenUnhiddenOrActivated() {
+        let center = NotificationCenter()
+        var hides = 0
+        let observers = CanaryPresentation.keepHidden(on: center) { hides += 1 }
+        defer { observers.forEach(center.removeObserver) }
+        center.post(name: NSApplication.didUnhideNotification, object: nil)
+        center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        waitUntil("hidden again twice", timeout: 5) { hides == 2 }
+    }
+
     /// An element off every screen has no frame rather than breaking the JSON.
     @MainActor
     func testAnElementWithoutAFiniteFrameStillSnapshots() throws {
