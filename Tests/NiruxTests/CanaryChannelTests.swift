@@ -98,6 +98,7 @@ final class CanaryChannelTests: XCTestCase {
     /// next request: it runs inside that loop.
     @MainActor
     func testAModalActionDoesntHoldBackTheNextRequest() throws {
+        _ = NSApplication.shared
         var released = false
         var finished: [String] = []
         let next = request(token: token, tool: "menu")
@@ -227,9 +228,49 @@ final class CanaryChannelTests: XCTestCase {
         XCTAssertNil(NiruxApp.keyRoute(interceptorTakesKeys: false, in: window), "nothing focused")
 
         XCTAssertTrue(window.makeFirstResponder(text))
-        let route = try XCTUnwrap(NiruxApp.keyRoute(interceptorTakesKeys: false, in: window))
-        NiruxApp().send(NiruxApp.keys(typing: "aB"), via: route, to: window)
+        guard case .responder? = NiruxApp.keyRoute(interceptorTakesKeys: false, in: window) else { return XCTFail("the text view") }
+        // No shell: the interceptor hands every key back, and the view with the keyboard gets it.
+        NiruxApp().send(NiruxApp.keys(typing: "aB"), to: window)
         XCTAssertEqual(text.string, "aB")
+    }
+
+    /// Text answers "sent, unconfirmed" before any key is sent, so a key
+    /// that opens an alert can't hold the answer back.
+    @MainActor
+    func testTextAnswersBeforeItTypes() {
+        let window = window()
+        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        window.contentView?.addSubview(text)
+        XCTAssertTrue(window.makeFirstResponder(text))
+        let app = NiruxApp()
+        app.mainWindow = window
+        var answered: [(text: String, isError: Bool, typedSoFar: String)] = []
+        app.performCanaryRequest(request(token: token, tool: "text", arguments: ["text": "hi"])) { answered.append(($0, $1, text.string)) }
+        XCTAssertEqual(answered.count, 1)
+        XCTAssertTrue(answered.first?.text.hasPrefix("Sent, unconfirmed, to NSTextView") == true, answered.first?.text ?? "")
+        XCTAssertEqual(answered.first?.isError, false)
+        XCTAssertEqual(answered.first?.typedSoFar, "", "answered before typing")
+        XCTAssertEqual(text.string, "hi")
+    }
+
+    /// A canary launch never comes forward: not for a link, a question of
+    /// the shell's, nor a notification; a normal launch does.
+    @MainActor
+    func testACanaryLaunchNeverComesForward() {
+        for (environment, comesForward) in [(canaryEnvironment, false), ([:], true)] {
+            var brought = 0
+            let app = NiruxApp()
+            app.presence = AppPresence(launchEnvironment: environment)
+            app.presence.bringForward = { brought += 1 }
+            app.mainWindow = window()
+            var effects = ShellSideEffects()
+            app.installPresence(on: &effects, notifier: nil)
+            effects.comeToFront()
+            app.bringMainWindowForward()
+            XCTAssertEqual(brought, comesForward ? 2 : 0, "\(environment)")
+            XCTAssertEqual(app.mainWindow?.isVisible, comesForward, "\(environment)")
+            app.mainWindow?.orderOut(nil)
+        }
     }
 
     /// Text is typed with each character's US key code and Shift, as KeyMapper expects.

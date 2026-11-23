@@ -501,6 +501,8 @@ extension NiruxShellView {
                 + "\(Int(Self.mergeQueueQuitTimeout)) seconds at most. Nothing resumes by itself at the "
                 + "next launch: the board shows where \(one ? "it" : "each") stopped.")
         let confirm = one ? "Stop Queue and Quit" : "Stop Queues and Quit"
+        // Quit from the Dock while Nirux is hidden: the question must show.
+        sideEffects.comeToFront()
         sideEffects.confirmQuitWithMergeQueue(message, details.joined(separator: "\n"), confirm, window) { [weak self] confirmed in
             guard let self, self.mergeQueueQuit === quit else { return }
             guard confirmed else {

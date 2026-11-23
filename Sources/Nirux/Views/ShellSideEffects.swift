@@ -274,9 +274,6 @@ struct ShellSideEffects {
         _ message: String, _ details: String, _ confirm: String, _ window: NSWindow?,
         _ answer: @escaping @MainActor (Bool) -> Void
     ) -> Void = { message, details, confirm, window, answer in
-        // Quit from the Dock while Nirux is hidden: the question must show.
-        NSApp.unhide(nil)
-        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = message

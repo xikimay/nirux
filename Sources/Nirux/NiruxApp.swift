@@ -7,8 +7,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var mainWindow: NSWindow?
     /// Open for a canary run only (see CanaryChannel).
     var canaryRequests: LeadRequestCenter?
-    /// A canary run: the app stays hidden and never activates (CanaryPresentation).
-    var drivenByCanary = false
+    /// A canary run's copy never comes forward (CanaryPresentation).
+    var presence = AppPresence(launchEnvironment: [:])
+    var drivenByCanary: Bool { !presence.mayComeForward }
     var canaryObservers: [NSObjectProtocol] = []
     var shell: NiruxShellView? {
         // Its Settings window holds Nirux's panes too.
@@ -161,7 +162,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // A canary run drives this copy through its channel: behind the
         // user's windows, never taking the focus.
         let launchEnvironment = CanaryChannel.takeLaunchEnvironment()
-        drivenByCanary = CanaryChannel.token(in: launchEnvironment) != nil
+        presence = AppPresence(launchEnvironment: launchEnvironment)
         if drivenByCanary {
             canaryObservers = CanaryPresentation.keepHidden(on: .default) { NSApp.hide(nil) }
             NSApp.hide(nil)
@@ -178,6 +179,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         let shellView = NiruxShellView(frame: rect)
         window.contentView = MainWindowContent(shell: shellView)
         shell = shellView
+        installPresence(on: &shellView.sideEffects, notifier: NiruxNotifier.shared)
         shellView.applyInterfaceTransparency()
         shellView.installCommandBar(in: window)
         // The frame the screen leaves, now that the toolbar set the title
@@ -281,7 +283,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // check window.firstResponder === self and set focus accordingly.
         NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
 
-        if !drivenByCanary { NSApp.activate(ignoringOtherApps: true) }
+        presence.comeForward()
         startTrackingFrontmostApp()
         drainLaunchURLBacklog()
     }

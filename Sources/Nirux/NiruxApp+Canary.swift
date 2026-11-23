@@ -38,7 +38,7 @@ extension NiruxApp {
             }
             // Whether the view used them shows in what it does next, not here.
             answer("Sent, unconfirmed, to \(route).", false)
-            send(keys, via: route, to: window)
+            send(keys, to: window)
         case "snapshot":
             answer(Self.snapshotJSON(of: windows), false)
         case "render":
@@ -105,17 +105,18 @@ extension NiruxApp {
         NSApp.sendAction(action, to: item.target, from: item)
     }
 
+    /// Where the window's keys land, told before they're sent.
     enum KeyRoute: CustomStringConvertible {
-        /// A terminal column: the key interceptor maps keys to its PTY, as for typed keys.
+        /// A terminal column: the key interceptor maps keys to its PTY.
         case interceptor
-        /// Anything else: AppKit would send keys to the key window, which the
-        /// canary copy never has, so they go to the view with the keyboard.
+        /// Anything else: what the interceptor hands back goes to the view
+        /// with the keyboard, as AppKit sends it to the key window.
         case responder(NSResponder)
 
         var description: String {
             switch self {
             case .interceptor: "the terminal through the key interceptor"
-            case .responder(let responder): String(describing: type(of: responder))
+            case .responder(let responder): String(describing: type(of: responder)) + " (through the key interceptor)"
             }
         }
     }
@@ -135,8 +136,11 @@ extension NiruxApp {
         return .responder(responder)
     }
 
-    /// Command chords off a terminal go to the menus first, as AppKit sends them.
-    func send(_ keys: [CanaryKey], via route: KeyRoute, to window: NSWindow) {
+    /// Every key goes through the interceptor's routing, as a typed key does.
+    /// What it hands back goes where AppKit would send it: command chords to
+    /// the menus, then the view with the keyboard (the canary's window is
+    /// never key, so AppKit itself would drop it).
+    func send(_ keys: [CanaryKey], to window: NSWindow) {
         for key in keys {
             let events = [NSEvent.EventType.keyDown, .keyUp].compactMap { type in
                 NSEvent.keyEvent(
@@ -145,17 +149,11 @@ extension NiruxApp {
                     characters: key.characters, charactersIgnoringModifiers: key.characters, isARepeat: false, keyCode: key.keyCode
                 )
             }
-            guard events.count == 2 else { continue }
-            switch route {
-            case .interceptor:
-                // Straight to the interceptor's routing: a synthesized event
-                // for a hidden window may not resolve to it.
-                _ = routeMainWindowKey(events[0])
-            case .responder(let responder):
-                if key.modifiers.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: events[0]) == true { continue }
-                responder.keyDown(with: events[0])
-                responder.keyUp(with: events[1])
-            }
+            guard events.count == 2, let handedBack = routeMainWindowKey(events[0]) else { continue }
+            if key.modifiers.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: handedBack) == true { continue }
+            guard let responder = window.firstResponder, responder !== window else { continue }
+            responder.keyDown(with: handedBack)
+            responder.keyUp(with: events[1])
         }
     }
 
@@ -241,6 +239,22 @@ extension NiruxApp {
               let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: bitmap)
         return bitmap.representation(using: .png, properties: [:])
+    }
+}
+
+extension NiruxApp {
+    /// What brings Nirux forward goes through `presence`: the shell's
+    /// questions, quick answers, notifications.
+    func installPresence(on sideEffects: inout ShellSideEffects, notifier: NiruxNotifier?) {
+        sideEffects.comeToFront = { [presence] in presence.comeForward() }
+        notifier?.comeForward = { [presence] in presence.comeForward() }
+    }
+
+    /// Nirux and its window come forward, unless a canary run drives it.
+    func bringMainWindowForward() {
+        guard presence.mayComeForward else { return }
+        presence.comeForward()
+        mainWindow?.makeKeyAndOrderFront(nil)
     }
 }
 

@@ -11,6 +11,8 @@ import UserNotifications
 @MainActor
 final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NiruxNotifier()
+    /// Brings Nirux forward for a clicked notification (AppPresence).
+    var comeForward: @MainActor () -> Void = { NSApp.activate(ignoringOtherApps: true) }
 
     /// (workspaceID, columnIndex?) — set by the app delegate at launch.
     var onActivate: ((String, Int?) -> Void)?
@@ -271,7 +273,7 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
                 self.onQuickReply?(quickReplyTarget, quickReply, workspaceID, columnIndex)
                 return
             }
-            NSApp.activate(ignoringOtherApps: true)
+            self.comeForward()
             if let workspaceID, let ciFailureAction {
                 self.onCIFailureAction?(workspaceID, ciFailureAction)
             } else if let workspaceID {
