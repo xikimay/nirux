@@ -181,17 +181,23 @@ public struct ClaudeSessionReader: Sendable {
 
     /// The session's responses, then each subagent's.
     public var events: [UsageEvent] {
-        main.parser.events + subagents.values.flatMap(\.parser.events)
+        main.parser.events + subagents.sorted { $0.key < $1.key }.flatMap(\.value.parser.events)
     }
 
     /// Returns false when more is left to read.
     public mutating func readAppended(budget: Int = TranscriptLineReader<ClaudeTranscriptUsageParser>.defaultReadBudget) -> Bool {
+        var budget = budget
+        return readAppended(budget: &budget)
+    }
+
+    /// Takes the bytes it reads off `budget`.
+    public mutating func readAppended(budget: inout Int) -> Bool {
         listSubagents()
-        var caughtUp = main.readAppended(budget: budget)
+        var caughtUp = main.readAppended(budget: &budget)
         // Keys copied: a view of them would keep the old storage, and each
         // read would copy its reader's events.
         for id in Array(subagents.keys) {
-            caughtUp = subagents[id]!.readAppended(budget: budget) && caughtUp
+            caughtUp = subagents[id]!.readAppended(budget: &budget) && caughtUp
         }
         return caughtUp
     }

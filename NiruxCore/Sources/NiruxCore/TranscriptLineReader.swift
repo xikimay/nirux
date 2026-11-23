@@ -57,6 +57,13 @@ public struct TranscriptLineReader<Parser: TranscriptLineParser> {
     /// bytes. Returns false when more is left to read. A missing or
     /// unreadable file leaves the parser as it was.
     public mutating func readAppended(budget: Int = defaultReadBudget) -> Bool {
+        var budget = budget
+        return readAppended(budget: &budget)
+    }
+
+    /// The same, taking the bytes it reads off `budget`: readers that share
+    /// one stop together.
+    public mutating func readAppended(budget: inout Int) -> Bool {
         let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         guard fd >= 0 else { return true }
         defer { close(fd) }
@@ -76,6 +83,8 @@ public struct TranscriptLineReader<Parser: TranscriptLineParser> {
             }
         }
 
+        let start = offset
+        defer { budget -= Int(offset - start) }
         let end = min(info.st_size, offset + off_t(max(0, budget)))
         guard offset < end else { return offset >= info.st_size }
         var chunk = Data(count: chunkSize)
@@ -86,7 +95,9 @@ public struct TranscriptLineReader<Parser: TranscriptLineParser> {
             }
             guard count > 0 else { return true } // shrank under us, or EIO: retry next read
             offset += off_t(count)
-            consume(chunk.prefix(count))
+            // Frees what JSONSerialization autoreleased: a catch-up would
+            // otherwise hold every parsed line until its read ends.
+            autoreleasepool { consume(chunk.prefix(count)) }
         }
         return offset >= info.st_size
     }

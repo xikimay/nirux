@@ -73,7 +73,8 @@ public struct CodexRateLimits: Equatable, Sendable {
         public var resetsAt: TimeInterval?
     }
 
-    /// The short window (5 hours) and the long one (a week).
+    /// As Codex names them: `minutes` says which window each is (a plan
+    /// can report the week as `primary`).
     public var primary: Window?
     public var secondary: Window?
     public var reportedAt: TimeInterval

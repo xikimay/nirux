@@ -15,6 +15,12 @@ struct UsageLedgerTests {
         try UsageFixture.write([
             UsageFixture.claudeResponse(id: "s1", time: "2026-11-21T10:01:00.000Z", cacheRead: 9_000, sidechain: true)
         ], to: project + "/claude-1/subagents/agent-a.jsonl")
+        let waiting = project + "/claude-waiting.jsonl"
+        try UsageFixture.write([UsageFixture.claudeResponse(id: "w1", time: "2026-11-01T10:00:00.000Z", cacheRead: 9_000)], to: waiting)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -30 * 86_400)], ofItemAtPath: waiting)
+        try UsageFixture.write([
+            UsageFixture.claudeResponse(id: "ws1", time: "2026-11-21T10:02:00.000Z", cacheRead: 3_000, sidechain: true)
+        ], to: project + "/claude-waiting/subagents/agent-b.jsonl")
         let old = project + "/claude-old.jsonl"
         try UsageFixture.write([UsageFixture.claudeResponse(id: "o1", time: "2026-10-01T10:00:00.000Z", cacheRead: 9_000)], to: old)
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -30 * 86_400)], ofItemAtPath: old)
@@ -30,17 +36,20 @@ struct UsageLedgerTests {
 
         var ledger = UsageLedger(sources: sources, catalog: UsageCatalog(spaces: [.init(id: "space", repositories: ["/Users/dev/app"])]))
         let weekAgo = Date().timeIntervalSince1970 - 7 * 86_400
-        var caughtUp = ledger.refresh(since: weekAgo)
-        #expect(caughtUp)
+        // A budget smaller than any file: one read at a time, every file in turn.
+        var refreshes = 1
+        while !ledger.refresh(since: weekAgo, budget: 200) { refreshes += 1 }
+        #expect(refreshes > 3)
         let sessions = ledger.sessions.sorted { $0.key.id < $1.key.id }
         #expect(sessions.map(\.key) == [
-            UsageSessionKey(.agy, "agy-1"), UsageSessionKey(.claude, "claude-1"), UsageSessionKey(.codex, "codex-1")
+            UsageSessionKey(.agy, "agy-1"), UsageSessionKey(.claude, "claude-1"),
+            UsageSessionKey(.claude, "claude-waiting"), UsageSessionKey(.codex, "codex-1")
         ])
-        #expect(sessions.map(\.attribution.spaceID) == [nil, "space", "space"])
-        #expect(sessions.map(\.subagents) == [0, 1, 0])
-        #expect(sessions.map(\.contextTokens) == [80_000, 40_002, 20_000])
+        #expect(sessions.map(\.attribution.spaceID) == [nil, "space", nil, "space"])
+        #expect(sessions.map(\.subagents) == [0, 1, 1, 0])
+        #expect(sessions.map(\.contextTokens) == [80_000, 40_002, 9_002, 20_000])
 
-        caughtUp = ledger.refresh(since: weekAgo)
+        var caughtUp = ledger.refresh(since: weekAgo)
         #expect(caughtUp)
         #expect(ledger.sessions.sorted { $0.key.id < $1.key.id } == sessions)
         caughtUp = ledger.refresh(since: Date().timeIntervalSince1970 + 60)
@@ -50,7 +59,10 @@ struct UsageLedgerTests {
 
     @Test func aSessionGoesToItsRecordedTaskElseToTheInnermostTaskOrSpaceFolder() {
         let catalog = UsageCatalog(
-            spaces: [.init(id: "space", repositories: ["/repos/app"], folders: ["/sites/web"])],
+            spaces: [
+                .init(id: "space", repositories: ["/repos/app"], folders: ["/sites/web"]),
+                .init(id: "ios", repositories: ["/repos/app.ios"])
+            ],
             tasks: [
                 .init(id: "lead", spaceID: "space", folder: "/repos/app"),
                 .init(id: "feature", spaceID: "space", folder: "/repos/app.feat-a"),
@@ -67,6 +79,7 @@ struct UsageLedgerTests {
         #expect(attribution("/repos/app/Sources") == UsageAttribution(spaceID: "space", taskID: "lead"))
         #expect(attribution("/repos/app.feat-a/Sources") == UsageAttribution(spaceID: "space", taskID: "feature"))
         #expect(attribution("/repos/app.feat-gone") == UsageAttribution(spaceID: "space"))
+        #expect(attribution("/repos/app.ios.feat-b/Sources") == UsageAttribution(spaceID: "ios"))
         #expect(attribution("/sites/web/blog") == UsageAttribution(spaceID: "space"))
         #expect(attribution("/repos/app2") == UsageAttribution())
         #expect(attribution(nil) == UsageAttribution())
@@ -85,7 +98,7 @@ struct UsageLedgerTests {
         )
         let codex = UsageSession(key: UsageSessionKey(.codex, "x"), events: [event(500, input: 40_000), event(900, input: 40_000)])
 
-        let total = [claude, codex].summary()
+        let total = [claude, codex].summary(since: 0)
         #expect(total.calls == 7)
         #expect(total.sessions.count == 2)
         #expect(total.subagents == ["c/x"])

@@ -66,17 +66,26 @@ struct UsageAttributor: Sendable {
     init(_ catalog: UsageCatalog) {
         tasksByID = Dictionary(catalog.tasks.map { ($0.id, $0) }) { first, _ in first }
         sessionTasks = catalog.sessionTasks
-        tasksByFolder = Dictionary(catalog.tasks.compactMap { task in task.folder.map { ($0.comparablePath, task) } }) { first, _ in first }
-        repositories = catalog.spaces.flatMap { space in space.repositories.map { ($0.comparablePath, space.id) } }
-        let folders = catalog.spaces.flatMap { space in space.folders.map { ($0.comparablePath, space.id) } }
+        tasksByFolder = Dictionary(catalog.tasks.compactMap { task in task.folder.map { (Self.normalized($0), task) } }) { first, _ in first }
+        // Longest first: `/x/app.ios.feat` is a worktree of `/x/app.ios`, not of `/x/app`.
+        repositories = catalog.spaces
+            .flatMap { space in space.repositories.map { (Self.normalized($0), space.id) } }
+            .sorted { $0.checkout.count > $1.checkout.count }
+        let folders = catalog.spaces.flatMap { space in space.folders.map { (Self.normalized($0), space.id) } }
         spacesByFolder = Dictionary(repositories + folders) { first, _ in first }
+    }
+
+    /// A deleted folder, which realpath can't resolve, still matches its
+    /// recorded form through `/tmp` → `/private/tmp`.
+    private static func normalized(_ path: String) -> String {
+        path.realPath ?? URL(fileURLWithPath: path).standardizedFileURL.path.expandingSystemAliases
     }
 
     func attribution(_ key: UsageSessionKey, cwd: String?) -> UsageAttribution {
         if let task = sessionTasks[key].flatMap({ tasksByID[$0] }) {
             return UsageAttribution(spaceID: task.spaceID, taskID: task.id)
         }
-        var path = cwd?.comparablePath
+        var path = cwd.map(Self.normalized)
         while let folder = path, folder.count > 1 {
             if let task = tasksByFolder[folder] { return UsageAttribution(spaceID: task.spaceID, taskID: task.id) }
             if let spaceID = spacesByFolder[folder] ?? worktreeSpace(folder) { return UsageAttribution(spaceID: spaceID) }
@@ -157,7 +166,7 @@ extension Sequence where Element == UsageSession {
     /// The responses made since `since`, summed by `key`; a nil key leaves
     /// a response out.
     public func summaries<Key: Hashable>(
-        since: TimeInterval = 0,
+        since: TimeInterval,
         by key: (UsageSession, UsageEvent) -> Key?
     ) -> [Key: UsageSummary] {
         var summaries: [Key: UsageSummary] = [:]
@@ -175,7 +184,7 @@ extension Sequence where Element == UsageSession {
         return summaries
     }
 
-    public func summary(since: TimeInterval = 0) -> UsageSummary {
+    public func summary(since: TimeInterval) -> UsageSummary {
         summaries(since: since) { _, _ in true }[true] ?? UsageSummary()
     }
 }
@@ -212,29 +221,38 @@ public struct UsageLedger: Sendable {
         attributor = UsageAttributor(catalog)
     }
 
-    /// Follows the transcripts written since `since`, forgetting the
-    /// others, then reads what each gained: at most `budget` bytes a file.
-    /// Returns false when more is left to read.
-    public mutating func refresh(since: TimeInterval, budget: Int = TranscriptLineReader<AgyTranscriptUsageParser>.defaultReadBudget) -> Bool {
+    /// Follows the transcripts written since `since` (the widest window
+    /// summaries will ask for: widening it later reads them all again),
+    /// forgetting the others, then reads what they gained, `budget` bytes
+    /// at most. Returns false when more is left to read: refresh again at
+    /// once, and show `sessions` only once caught up, or they miss recent
+    /// responses.
+    public mutating func refresh(since: TimeInterval, budget: Int = 128 << 20) -> Bool {
         let claudeFiles = Self.entries(of: sources.claudeProjects).flatMap(Self.entries(of:)).filter { $0.hasSuffix(".jsonl") }
         let codexFiles = (FileManager.default.subpaths(atPath: sources.codexSessions) ?? [])
             .filter { ($0 as NSString).lastPathComponent.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") }
             .map { sources.codexSessions + "/" + $0 }
         let agyFiles = Self.entries(of: sources.agyBrain).map { $0 + "/.system_generated/logs/transcript_full.jsonl" }
         let isRecent = { (path: String) in FileStatus(path).map { $0.isFile && $0.modifiedAt >= since } ?? false }
+        // A subagent can run on while its session's own transcript waits.
+        let isRecentSession = { (path: String) in
+            isRecent(path) || Self.entries(of: String(path.dropLast(".jsonl".count)) + "/subagents").contains(where: isRecent)
+        }
 
-        claude = Self.follow(claudeFiles.filter(isRecent), readers: claude, make: ClaudeSessionReader.init(path:))
+        claude = Self.follow(claudeFiles.filter(isRecentSession), readers: claude, make: ClaudeSessionReader.init(path:))
         codex = Self.follow(codexFiles.filter(isRecent), readers: codex) { TranscriptLineReader(path: $0) }
         agy = Self.follow(agyFiles.filter(isRecent), readers: agy) { TranscriptLineReader(path: $0) }
+        var budget = budget
         let caughtUp = [
-            Self.read(&claude) { $0.readAppended(budget: budget) },
-            Self.read(&codex) { $0.readAppended(budget: budget) },
-            Self.read(&agy) { $0.readAppended(budget: budget) }
+            Self.read(&claude) { $0.readAppended(budget: &budget) },
+            Self.read(&codex) { $0.readAppended(budget: &budget) },
+            Self.read(&agy) { $0.readAppended(budget: &budget) }
         ]
         return !caughtUp.contains(false)
     }
 
-    /// Sessions with one response at least.
+    /// Sessions with one response at least. Built on each call: take it
+    /// once per refresh, off the main thread.
     public var sessions: [UsageSession] {
         let claudeSessions = claude.values.map { reader in
             let usage = reader.main.parser.usage
