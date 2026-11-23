@@ -142,8 +142,8 @@ extension AgentStatusMachine {
         guard let agy, agy.interactiveAgent == .agy else { return .noClaude }
         guard agy.instance.startedAt <= time else { return .restarted }
         guard let turn = agyTurn, turn.process == agy.instance else { return agyFirstPromptRefusal(agy) }
-        // Its last word, else how its turn ended (another process in front, or
-        // a silence, drops the status, not the turn).
+        // Its last word, else how its turn ended (another process in front
+        // drops the status, not the turn).
         switch programStatus.flatMap({ $0.process == agy.instance ? $0.status.state : nil }) ?? turn.ended {
         case .working?, nil: return .working
         case .blocked?: return .dialog
