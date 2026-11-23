@@ -70,6 +70,22 @@ final class MergeQueueEngineTests: XCTestCase {
         return queue
     }
 
+    /// #782: marking it ready cancelled its "test (selected)" run while the
+    /// required `test` ran green on the same head.
+    func testACancelledCheckThatIsntRequiredDoesntBlockTheMerge() {
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1), MQ.checkRun(id: 2, name: "test (selected)", runID: 899, conclusion: "CANCELLED"))
+        var queue = MQ.Harness(entries: [MQ.entry(52, head: a)])
+        queue.start()
+        XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
+
+        let red = MQ.checks(MQ.checkRun(id: 1), MQ.checkRun(id: 2, name: "lint", runID: 899, conclusion: "FAILURE"))
+        XCTAssertEqual(MergeQueue.judge(red, required: ["test"]).otherFailures, ["Tests / lint"], "a real failure still blocks")
+        let cancelledRequired = MQ.checks(MQ.checkRun(id: 1, conclusion: "CANCELLED"))
+        XCTAssertEqual(MergeQueue.judge(cancelledRequired, required: ["test"]).failed.map(\.id), [1], "a required one still counts")
+    }
+
     func testFastCadencesVerifyOnlyTheLastMergeAndStillRespectExternalRuns() {
         for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
             var world = readyWorld()
