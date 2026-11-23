@@ -794,8 +794,9 @@ final class NewTaskFlowTests: UIFlowTestCase {
 
     /// agy waiting on its own background task (a build, CI checks) says
     /// working and goes quiet until the task ends: through ten minutes of
-    /// that silence its row says Working, never Needs you, and only its
-    /// turn's end alerts.
+    /// that silence its row says Working, never Needs you, past twenty
+    /// minutes it adds how long agy said nothing, and only its turn's end
+    /// alerts.
     func testAgyWaitingOnItsBackgroundTaskNeverNeedsTheUser() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -826,6 +827,8 @@ final class NewTaskFlowTests: UIFlowTestCase {
             pty.sendRaw("x")
             skew.withLock { $0 = 600 }
             XCTAssertEqual(status(), "Working")
+            skew.withLock { $0 = 1530 }
+            XCTAssertEqual(status(), "Working · no word for 25m")
             XCTAssertEqual(alerts, [])
             FileManager.default.createFile(atPath: taskEnded, contents: nil)
             UIFlowHarness.waitUntil("its turn ended") { pty.agentAttentionReason == .turnFinished }

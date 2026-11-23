@@ -273,6 +273,9 @@ struct AgentStatusMachine {
     private(set) var codexWorked: (at: TimeInterval, process: ProcessInstance?)?
     /// Antigravity's current or last turn (`promptRefusal`).
     private(set) var agyTurn: AgyTurn?
+    /// The process in front at the last read of the process table
+    /// (`keepProgramStatus`).
+    private var frontProcess: ProcessInstance?
 
     /// A turn of the `agy` `process`, from its first `working` (another
     /// after a dialog, or redrawn, is the same turn's) to `done`, `idle` or
@@ -1557,7 +1560,7 @@ struct AgentStatusMachine {
                 // approval prompt: no reason to claim. An agy heard in this
                 // terminal says itself when it waits (its status went with
                 // a ^Z or a failed read).
-                state = isUserFocused || agent == .agy && agyTurn != nil ? .idle : .needsAttention
+                state = isUserFocused || frontAgyReportsItsWaits ? .idle : .needsAttention
                 lastAttentionReason = nil
                 turnStartedAt = nil
             }
@@ -1678,7 +1681,25 @@ struct AgentStatusMachine {
     /// once): a Ctrl-G editor or a ^Z shell in front doesn't end it, and
     /// its process is checked where it is read (`ReportedStatus.isFrom`).
     mutating func keepProgramStatus(of process: ProcessInstance?) {
+        frontProcess = process
         if let reported = programStatus, reported.process != process { programStatus = nil }
+    }
+
+    /// The agy in front ran a turn it reported (OSC 7501): it says itself
+    /// when it waits, even once a ^Z or a failed read dropped its status.
+    private var frontAgyReportsItsWaits: Bool {
+        guard let turn = agyTurn, lastForegroundName == CodingAgent.agy.rawValue else { return false }
+        return turn.process == frontProcess
+    }
+
+    /// How long the agy at work has said nothing, once past
+    /// `AgentProgramStatus.quietNotice`. Its status's time, not its output:
+    /// it redraws while it waits on a background task.
+    func agyQuietFor(now: TimeInterval) -> TimeInterval? {
+        guard state == .working, let reported = programStatus, reported.status.state == .working,
+              now - reported.at >= AgentProgramStatus.quietNotice
+        else { return nil }
+        return now - reported.at
     }
 
     /// A sign-in wait that outlasted every launch's moment of it, said once
@@ -1834,6 +1855,7 @@ struct AgentStatusMachine {
         codexStatus = nil
         codexWorked = nil
         agyTurn = nil
+        frontProcess = nil
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false
