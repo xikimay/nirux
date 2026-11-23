@@ -24,6 +24,16 @@ extension NiruxApp {
             }
             for character in text { Self.sendKey(String(character), keyCode: 0, modifiers: [], to: window) }
             answer("ok", false)
+        case "snapshot":
+            guard let window = mainWindow else { return answer("No main window.", true) }
+            let snapshot = Self.accessibilitySnapshot(of: window)
+            answer(String(decoding: (try? JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys])) ?? Data(), as: UTF8.self), false)
+        case "press":
+            guard let window = mainWindow, let label = arguments["label"] as? String else {
+                return answer("A press needs a label and the main window.", true)
+            }
+            let (text, isError) = Self.press(label: label, in: window)
+            answer(text, isError)
         case "render":
             guard let view = mainWindow?.contentView, let png = Self.renderPNG(of: view) else {
                 return answer("The main window didn't render.", true)
@@ -84,6 +94,48 @@ extension NiruxApp {
             ) else { continue }
             NSApp.sendEvent(event)
         }
+    }
+
+    /// The window's accessibility elements as an assistive app reads them,
+    /// depth first, at most `limit`, with what has the keyboard.
+    static func accessibilitySnapshot(of window: NSWindow, limit: Int = 800) -> [String: Any] {
+        var elements: [[String: Any]] = []
+        var stack: [NSAccessibilityProtocol] = [window]
+        while let element = stack.popLast(), elements.count < limit {
+            if element.isAccessibilityElement() {
+                let frame = element.accessibilityFrame()
+                elements.append([
+                    "role": element.accessibilityRole()?.rawValue ?? "",
+                    "label": element.accessibilityLabel() ?? "",
+                    "title": element.accessibilityTitle() ?? "",
+                    "value": (element.accessibilityValue() as? CustomStringConvertible)?.description ?? "",
+                    "enabled": element.isAccessibilityEnabled(),
+                    "frame": [frame.origin.x, frame.origin.y, frame.width, frame.height].map { Double($0) },
+                ])
+            }
+            let children = (element.accessibilityChildren() ?? []).compactMap { $0 as? NSAccessibilityProtocol }
+            stack.append(contentsOf: children.reversed())
+        }
+        return [
+            "elements": elements,
+            "truncated": elements.count >= limit,
+            "isKey": window.isKeyWindow,
+            "firstResponder": window.firstResponder.map { String(describing: type(of: $0)) } ?? "",
+        ]
+    }
+
+    /// Presses the first enabled element labelled or titled `label`, as
+    /// VoiceOver does.
+    static func press(label: String, in window: NSWindow) -> (text: String, isError: Bool) {
+        var stack: [NSAccessibilityProtocol] = [window]
+        while let element = stack.popLast() {
+            if element.isAccessibilityElement(), element.isAccessibilityEnabled(),
+               element.accessibilityLabel() == label || element.accessibilityTitle() == label {
+                return element.accessibilityPerformPress() ? ("ok", false) : (label + " doesn't press.", true)
+            }
+            stack.append(contentsOf: (element.accessibilityChildren() ?? []).compactMap { $0 as? NSAccessibilityProtocol }.reversed())
+        }
+        return ("Nothing enabled is labelled " + label + ".", true)
     }
 
     /// The view as the app draws it; layers drawn by Metal may come out empty.

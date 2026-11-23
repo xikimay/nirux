@@ -6,6 +6,7 @@ import unittest
 import uuid
 from pathlib import Path
 
+import canaryctl
 import channel
 
 
@@ -76,6 +77,25 @@ class ChannelTest(unittest.TestCase):
             client.key("1", key_code=18, modifiers=["command"])
         self.assertEqual(list((self.state / "canary/requests").iterdir()), [])
         self.assertGreaterEqual(clock.now, 2)
+
+    def test_canaryctl_sends_each_action_with_its_arguments(self):
+        environ = {"NIRUX_STATE_DIR": str(self.state), "NIRUX_CANARY_TOKEN": self.token}
+        cases = [
+            (["menu", "Space", "Next Space"], "menu", {"path": ["Space", "Next Space"]}),
+            (["key", "1", "--code", "18", "--mod", "command"], "key", {"characters": "1", "keyCode": 18, "modifiers": ["command"]}),
+            (["press", "Board"], "press", {"label": "Board"}),
+            (["snapshot"], "snapshot", {}),
+        ]
+        for argv, tool, arguments in cases:
+            seen, thread = self.answer_next()
+            self.assertEqual(canaryctl.main(argv, environ), 0, argv)
+            thread.join(5)
+            request = seen[0][0]
+            self.assertEqual(request["tool"], tool)
+            self.assertEqual(json.loads(request["arguments"]), dict(arguments, token=self.token))
+
+    def test_canaryctl_needs_the_runs_environment(self):
+        self.assertEqual(canaryctl.main(["snapshot"], {}), 2)
 
     def test_files_are_private_and_whole(self):
         channel.write_whole(self.state / "canary/requests", "x.json", {"a": 1})

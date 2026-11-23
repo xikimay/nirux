@@ -89,13 +89,13 @@ final class CanaryChannelTests: XCTestCase {
     /// disabled, missing or submenu item says so and does nothing.
     @MainActor
     func testAMenuPathPicksItsItem() {
-        let target = MenuTarget()
+        let target = Target()
         let bar = NSMenu()
         let space = NSMenu(title: "Space")
         space.autoenablesItems = false
         bar.addItem(withTitle: "Space", action: nil, keyEquivalent: "").submenu = space
         for (title, enabled) in [("Previous Space", true), ("Next Space", false)] {
-            let item = space.addItem(withTitle: title, action: #selector(MenuTarget.pick(_:)), keyEquivalent: "")
+            let item = space.addItem(withTitle: title, action: #selector(Target.pick(_:)), keyEquivalent: "")
             item.target = target
             item.isEnabled = enabled
         }
@@ -107,10 +107,36 @@ final class CanaryChannelTests: XCTestCase {
         }
         XCTAssertEqual(target.picked, ["Previous Space"])
     }
+
+    /// The snapshot lists what an assistive app reads, disabled controls
+    /// included; a press clicks only an enabled control with that label.
+    @MainActor
+    func testASnapshotShowsTheControlsAndAPressClicksOne() {
+        let target = Target()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 120), styleMask: [.titled], backing: .buffered, defer: true)
+        for (index, (title, enabled)) in [("Board", true), ("Merge", false)].enumerated() {
+            let button = NSButton(title: title, target: target, action: #selector(Target.pick(_:)))
+            button.frame = NSRect(x: 20 + index * 120, y: 40, width: 100, height: 30)
+            button.isEnabled = enabled
+            window.contentView?.addSubview(button)
+        }
+
+        let elements = NiruxApp.accessibilitySnapshot(of: window)["elements"] as? [[String: Any]] ?? []
+        let buttons = elements.filter { $0["role"] as? String == NSAccessibility.Role.button.rawValue }
+        XCTAssertEqual(buttons.map { $0["title"] as? String }, ["Board", "Merge"])
+        XCTAssertEqual(buttons.map { $0["enabled"] as? Bool }, [true, false])
+
+        XCTAssertEqual(NiruxApp.press(label: "Board", in: window).isError, false)
+        XCTAssertTrue(NiruxApp.press(label: "Merge", in: window).isError, "disabled")
+        XCTAssertTrue(NiruxApp.press(label: "Missing", in: window).isError)
+        XCTAssertEqual(target.picked, ["Board"])
+    }
 }
 
-private final class MenuTarget: NSObject {
+private final class Target: NSObject {
     var picked: [String] = []
 
-    @objc func pick(_ sender: NSMenuItem) { picked.append(sender.title) }
+    @objc func pick(_ sender: Any) {
+        picked.append((sender as? NSMenuItem)?.title ?? (sender as? NSButton)?.title ?? "")
+    }
 }
