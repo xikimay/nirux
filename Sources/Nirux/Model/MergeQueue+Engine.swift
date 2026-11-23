@@ -162,16 +162,28 @@ extension MergeQueue {
             case .mutated(let id, let result):
                 guard let request, id == request.id, case .mutate(let mutation) = request.action, let purpose else { break }
                 self.request = nil
-                let closesTrain: Bool
-                if case .train(.close) = purpose { closesTrain = true } else { closesTrain = false }
-                // Closing the train ends in its own stop, whose reason a Stop mustn't hide.
-                if phase == .stopping, !closesTrain {
+                let endsInItsStop: Bool
+                switch purpose {
+                case .train(.close), .train(.cleanup): endsInItsStop = true
+                default: endsInItsStop = false
+                }
+                // Closing or deleting the train ends in its own stop, whose reason a Stop mustn't hide.
+                if phase == .stopping, !endsInItsStop {
                     var message = stopMessage + " The \(Self.describe(mutation)), already sent, answered: "
                         + "\(Self.describe(result))."
                     if case .merge(let number, _, _) = mutation, result == .sent || result.isUncertain {
                         message += " Check #\(number) on GitHub: it may be merged."
                     }
-                    stop(StopReason(kind: .user, message: message))
+                    // A train's pull request left open is named: its merge's answer is kept, and one just opened is looked up.
+                    switch purpose {
+                    case .train(.open):
+                        read([.pullRequests(head: trainBranch)], for: .train(.openedWhileStopping(message: message)))
+                    case .train(.land(let head, let baseTip)):
+                        self.purpose = .train(.landConfirm(head: head, baseTip: baseTip, result: result))
+                        stop(StopReason(kind: .user, message: message))
+                    default:
+                        stop(StopReason(kind: .user, message: message))
+                    }
                 } else {
                     mutated(result, purpose: purpose, now: now)
                 }
@@ -276,6 +288,9 @@ extension MergeQueue {
                 note("Closing train #\(number)")
                 train?.step = .closing(reason)
                 return mutate(.closePullRequest(number: number), for: .train(.close(reason)))
+            }
+            if cadence == .train, let cleanup = trainCleanup(for: reason) {
+                return mutate(cleanup, for: .train(.cleanup(reason)))
             }
             var reason = reason
             if reason.kind == .github || reason.kind == .setup, let mutation = unconfirmedMutation,
@@ -1147,6 +1162,7 @@ extension MergeQueue {
             case .mergeIntoBranch(let branch, let head, _): return "merge of \(short(head)) into \(branch)"
             case .openPullRequest(let base, let head, _, _): return "pull request of \(head) into \(base)"
             case .closePullRequest(let number): return "close of #\(number)"
+            case .deleteBranch(let name): return "deletion of branch \(name)"
             }
         }
 

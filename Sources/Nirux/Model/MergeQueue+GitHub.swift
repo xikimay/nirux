@@ -480,6 +480,8 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
                     "-f", "base=\(base)", "-f", "head=\(head)", "-f", "title=\(title)", "-f", "body=\(body)"]
         case .closePullRequest(let number):
             return ["api", "--hostname", GitHub.host, "--method", "PATCH", "repos/\(repository)/pulls/\(number)", "-f", "state=closed"]
+        case .deleteBranch(let name):
+            return ["api", "--hostname", GitHub.host, "--method", "DELETE", "repos/\(repository)/git/refs/heads/\(name)"]
         }
     }
 

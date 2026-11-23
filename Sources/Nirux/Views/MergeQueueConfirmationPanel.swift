@@ -201,11 +201,8 @@ final class MergeQueueConfirmationPanel: NSObject {
                confirmation.items.count > 1 {
                 add("Intermediate pushes can still trigger workflows and publish releases.", color: Self.secondaryText, font: Theme.Font.caption)
             }
-            if let reason = confirmation.expressRefusal {
-                add("Express disjoint unavailable. " + reason, color: Self.secondaryText, font: Theme.Font.caption)
-            }
-            if let reason = confirmation.trainRefusal {
-                add("Train unavailable. " + reason, color: Self.secondaryText, font: Theme.Font.caption)
+            for note in confirmation.unavailableNotes {
+                add(note, color: Self.secondaryText, font: Theme.Font.caption)
             }
             heading("MERGES, IN THIS ORDER")
             for (index, item) in confirmation.items.enumerated() {

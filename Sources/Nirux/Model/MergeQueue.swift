@@ -277,6 +277,8 @@ extension MergeQueue {
         case openPullRequest(base: String, head: String, title: String, body: String)
         /// `PATCH pulls/{n}` to `closed`: a train's pull request left behind by a stop.
         case closePullRequest(number: Int)
+        /// `DELETE git/refs/heads/{name}`: a train's own branch, once it landed or stopped.
+        case deleteBranch(name: String)
     }
 
     enum MutationResult: Equatable, Sendable {
