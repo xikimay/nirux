@@ -17,6 +17,7 @@ final class SpaceSettingsLeadPane: NSObject {
         /// "Starts tasks without asking" (`SpaceDefaults.leadStartsTasks`).
         var startsTasks = true
         var startsMergeQueue = false
+        var startsMergeQueueWithoutLocalReview = false
         var agent = CodingAgent.claude
         /// "Daily pass" (`SpaceDefaults.leadDailyPass`) and the hour it is
         /// due after.
@@ -50,6 +51,7 @@ final class SpaceSettingsLeadPane: NSObject {
         var restartLead: @MainActor () -> Void = {}
         var setStartsTasks: @MainActor (Bool) -> Void = { _ in }
         var setStartsMergeQueue: @MainActor (Bool) -> Void = { _ in }
+        var setStartsMergeQueueWithoutLocalReview: @MainActor (Bool) -> Void = { _ in }
         var setDailyPass: @MainActor (Bool) -> Void = { _ in }
         var setDailyPassHour: @MainActor (Int) -> Void = { _ in }
     }
@@ -74,6 +76,9 @@ final class SpaceSettingsLeadPane: NSObject {
     private let startsTasksRow = NSStackView()
     let startsMergeQueueSwitch = NSSwitch()
     private let startsMergeQueueRow = NSStackView()
+    let startsMergeQueueWithoutLocalReviewSwitch = NSSwitch()
+    private let startsMergeQueueWithoutLocalReviewRow = NSStackView()
+    private let mergeQueueSection = NSStackView()
     let manualMergeRow = alwaysRow("Merging a pull request", "your click in the merge queue")
     let dailyPassSwitch = NSSwitch()
     let dailyPassHourPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -107,7 +112,9 @@ final class SpaceSettingsLeadPane: NSObject {
         startsTasksRow.isHidden = model.isGeneral
         startsMergeQueueSwitch.state = model.startsMergeQueue ? .on : .off
         startsMergeQueueSwitch.isEnabled = model.canChangeDefaults
-        startsMergeQueueRow.isHidden = model.isGeneral
+        startsMergeQueueWithoutLocalReviewSwitch.state = model.startsMergeQueueWithoutLocalReview ? .on : .off
+        startsMergeQueueWithoutLocalReviewSwitch.isEnabled = model.canChangeDefaults && model.startsMergeQueue
+        mergeQueueSection.isHidden = model.isGeneral
         manualMergeRow.isHidden = model.startsMergeQueue
         dailyPassSwitch.state = model.dailyPass ? .on : .off
         dailyPassSwitch.isEnabled = model.canChangeDefaults
@@ -170,6 +177,14 @@ final class SpaceSettingsLeadPane: NSObject {
         sender.state = model.startsMergeQueue ? .on : .off
         guard !model.isGeneral, model.canChangeDefaults, wanted != model.startsMergeQueue else { return }
         actions.setStartsMergeQueue(wanted)
+    }
+
+    @objc func startsMergeQueueWithoutLocalReviewChanged(_ sender: NSSwitch) {
+        let wanted = sender.state == .on
+        sender.state = model.startsMergeQueueWithoutLocalReview ? .on : .off
+        guard !model.isGeneral, model.canChangeDefaults, model.startsMergeQueue,
+              wanted != model.startsMergeQueueWithoutLocalReview else { return }
+        actions.setStartsMergeQueueWithoutLocalReview(wanted)
     }
 
     @objc func dailyPassChanged(_ sender: NSSwitch) {
@@ -236,6 +251,15 @@ final class SpaceSettingsLeadPane: NSObject {
         buildSwitchRow(startsMergeQueueRow, control: startsMergeQueueSwitch, action: #selector(startsMergeQueueChanged(_:)),
                        title: "Allow Lead to start the merge queue",
                        hint: "The Lead can start a queue when every check passes. Workflow changes, conflicts and dry-run builds still need your review and confirmation.")
+        buildSwitchRow(startsMergeQueueWithoutLocalReviewRow, control: startsMergeQueueWithoutLocalReviewSwitch,
+                       action: #selector(startsMergeQueueWithoutLocalReviewChanged(_:)),
+                       title: "Allow without local code review",
+                       hint: "Skip the local /code-review requirement for Lead auto-start. GitHub checks, mergeability, workflow safety and post-merge health still apply.",
+                       indent: 28)
+        mergeQueueSection.setViews([startsMergeQueueRow, startsMergeQueueWithoutLocalReviewRow], in: .leading)
+        mergeQueueSection.orientation = .vertical
+        mergeQueueSection.alignment = .leading
+        mergeQueueSection.spacing = 10
         buildDailyPassRow()
         agentPopup.addItems(withTitles: CodingAgent.launchable.map(\.productName))
         agentPopup.target = self
@@ -243,7 +267,7 @@ final class SpaceSettingsLeadPane: NSObject {
         agentPopup.setAccessibilityLabel("Lead agent")
         agentPopup.toolTip = "Default agent when the Lead is stopped"
         agentRow.setViews([NSTextField(labelWithString: "Agent"), agentPopup], in: .leading)
-        let switches = NSStackView(views: [switchRow, agentRow, startsTasksRow, startsMergeQueueRow, dailyPassRow])
+        let switches = NSStackView(views: [switchRow, agentRow, startsTasksRow, mergeQueueSection, dailyPassRow])
         switches.orientation = .vertical
         switches.alignment = .leading
         switches.spacing = 16
@@ -283,7 +307,9 @@ final class SpaceSettingsLeadPane: NSObject {
         ])
     }
 
-    private func buildSwitchRow(_ row: NSStackView, control: NSSwitch, action: Selector, title: String, hint: String) {
+    private func buildSwitchRow(
+        _ row: NSStackView, control: NSSwitch, action: Selector, title: String, hint: String, indent: CGFloat = 0
+    ) {
         control.target = self
         control.action = action
         control.setAccessibilityLabel(title)
@@ -293,7 +319,7 @@ final class SpaceSettingsLeadPane: NSObject {
         let hintLabel = NSTextField(wrappingLabelWithString: hint)
         hintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         hintLabel.textColor = .secondaryLabelColor
-        hintLabel.preferredMaxLayoutWidth = Self.contentWidth - 60
+        hintLabel.preferredMaxLayoutWidth = Self.contentWidth - 60 - indent
         hintLabel.isSelectable = false
         hintLabel.setAccessibilityElement(false)
         control.setAccessibilityHelp(hintLabel.stringValue)
@@ -305,6 +331,7 @@ final class SpaceSettingsLeadPane: NSObject {
         row.orientation = .horizontal
         row.alignment = .top
         row.spacing = 12
+        if indent > 0 { row.edgeInsets = NSEdgeInsets(top: 0, left: indent, bottom: 0, right: 0) }
     }
 
     /// "Daily pass", its hour, and when the last one ran.

@@ -47,7 +47,8 @@ extension NiruxShellView {
                   caller.workspace.isLead, caller.workspace.profileID == space.id, !caller.column.isClosing else {
                 return answer("This terminal no longer belongs to the space’s Lead.", true)
             }
-            let enabled = SpaceDefaultsStore.defaults(forSpace: space.id).leadCanStartMergeQueue
+            let defaults = SpaceDefaultsStore.defaults(forSpace: space.id)
+            let enabled = defaults.leadCanStartMergeQueue
             if stop && !enabled {
                 return answer("Lead auto-start is off. Click Stop on the Board or enable it in Space Settings › Lead.", true)
             }
@@ -63,8 +64,11 @@ extension NiruxShellView {
             }
             let openPRs = board?.reads[repo.section.id]?.openPullRequests.map { Set($0.map(\.number)) }
             let problem = loaded.view(for: repo.section.slot).queueStartProblems.first
+            let allowWithoutLocalReview = defaults.leadCanStartMergeQueueWithoutLocalReview
             Task { @MainActor in
-                let summary = await queue.leadStatus(openPRs: openPRs, enabled: enabled, settingsProblem: problem)
+                let summary = await queue.leadStatus(
+                    openPRs: openPRs, enabled: enabled, allowWithoutLocalReview: allowWithoutLocalReview, settingsProblem: problem
+                )
                 answer(summary, false)
             }
         }

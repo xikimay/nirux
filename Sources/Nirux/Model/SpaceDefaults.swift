@@ -27,6 +27,8 @@ struct SpaceDefaults: Equatable, Sendable {
     var leadStartsTasks: Bool?
     var leadStartsMergeQueue: Bool?
     var leadCanStartMergeQueue: Bool { leadStartsMergeQueue ?? false }
+    var leadStartsMergeQueueWithoutLocalReview: Bool?
+    var leadCanStartMergeQueueWithoutLocalReview: Bool { leadStartsMergeQueueWithoutLocalReview ?? false }
     /// Space Settings › Lead, "Daily pass" (docs/design/daily-pass.md). Nil:
     /// on, after `DailyPass.defaultHour`.
     var leadDailyPass: Bool?
@@ -84,6 +86,7 @@ struct SpaceDefaults: Equatable, Sendable {
         [
             (\.leadStartsTasks, .leadStartsTasks, false),
             (\.leadStartsMergeQueue, .leadStartsMergeQueue, false),
+            (\.leadStartsMergeQueueWithoutLocalReview, .leadStartsMergeQueueWithoutLocalReview, false),
             (\.leadDailyPass, .leadDailyPass, false),
             (\.prFollowUp, .prFollowUp, false),
             (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
@@ -198,7 +201,7 @@ struct SpaceDefaults: Equatable, Sendable {
 extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion, agent, leadAgent, claudeLaunchMode, codexLaunchMode, agyLaunchMode, environment
-        case leadStartsTasks, leadStartsMergeQueue, leadDailyPass, leadDailyPassHour, prFollowUp
+        case leadStartsTasks, leadStartsMergeQueue, leadStartsMergeQueueWithoutLocalReview, leadDailyPass, leadDailyPassHour, prFollowUp
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
 
@@ -220,6 +223,7 @@ extension SpaceDefaults: Codable {
             .map { EnvironmentVariable(name: $0.name, value: $0.value) } ?? []
         leadStartsTasks = (try? container.decodeIfPresent(Bool.self, forKey: .leadStartsTasks)) ?? nil
         leadStartsMergeQueue = try? container.decodeIfPresent(Bool.self, forKey: .leadStartsMergeQueue)
+        leadStartsMergeQueueWithoutLocalReview = try? container.decodeIfPresent(Bool.self, forKey: .leadStartsMergeQueueWithoutLocalReview)
         leadDailyPass = (try? container.decodeIfPresent(Bool.self, forKey: .leadDailyPass)) ?? nil
         leadDailyPassHour = ((try? container.decodeIfPresent(Int.self, forKey: .leadDailyPassHour)) ?? nil).flatMap { (0...23).contains($0) ? $0 : nil }
         prFollowUp = (try? container.decodeIfPresent(Bool.self, forKey: .prFollowUp)) ?? nil
@@ -243,6 +247,9 @@ extension SpaceDefaults: Codable {
         }
         try container.encodeIfPresent(leadStartsTasks, forKey: .leadStartsTasks)
         if leadCanStartMergeQueue { try container.encode(true, forKey: .leadStartsMergeQueue) }
+        if leadCanStartMergeQueueWithoutLocalReview {
+            try container.encode(true, forKey: .leadStartsMergeQueueWithoutLocalReview)
+        }
         try container.encodeIfPresent(leadDailyPass, forKey: .leadDailyPass)
         try container.encodeIfPresent(leadDailyPassHour, forKey: .leadDailyPassHour)
         try container.encodeIfPresent(prFollowUp, forKey: .prFollowUp)

@@ -323,8 +323,12 @@ New flow, built on the guarded typing `tell` already uses
     for one repository. By default the user confirms in the sheet. **Allow Lead
     to start the merge queue** in Space Settings › Lead enables direct starts
     after a clean preflight of every requested PR. A warning or an incomplete
-    read requires manual review. Dry runs and the developer live override
-    always use the confirmation sheet.
+    read requires manual review. Enabling **Allow without local code review**
+    under that switch lets Lead auto-start ignore only the missing local review
+    pass (`No code review yet`), while continuing to enforce GitHub checks,
+    mergeability, workflow safety, local worktree cleanliness and post-merge
+    health (the Board and manual confirmation sheets still show the warning).
+    Dry runs and the developer live override always use the confirmation sheet.
     `cadence` accepts `standard` (default), `batch_post_merge`, or
     `express_disjoint`. The default protects the user's prepared list. When the
     user requests a replacement, an opted-in Lead can pass `replace: true`.
@@ -332,7 +336,8 @@ New flow, built on the guarded typing `tell` already uses
     needs manual review opens the confirmation sheet. An open sheet, a running
     queue or a selection changed during preflight prevents replacement.
   - `merge_queue_status(repo?)` reports the phase, cadence, current step,
-    remaining PRs, Board selection, Lead setting, build eligibility and last
+    remaining PRs, Board selection, Lead setting (including whether local
+    review is required for auto-start), build eligibility and last
     ten journal entries. It also reads a configured repository with the Board
     closed. Selection freshness comes from the Board's last list of open PRs.
   - `stop_merge_queue(repo?)` requires **Allow Lead to start the merge queue**.
@@ -410,7 +415,9 @@ New flow, built on the guarded typing `tell` already uses
     like a secret are withheld.
   - `record_review(task, findings)` and `daily_pass()`: what the Lead's
     reviews found, by kind, and what happened in the space since its last
-    daily pass, for its rules (see daily-pass.md).
+    daily pass, for its rules (see daily-pass.md). Recording a clean review
+    (empty `findings`) also marks `.codeReview` on the task's current HEAD and
+    branch, satisfying the Board's local review pass.
   - `list_spaces()`, `create_space(name, color?, anchors?, move_anchors?)`,
     `edit_space(space, name?, color?, add_anchors?, remove_anchors?, move_anchors?)`,
     `delete_space(space, move_tasks_to?)`, and

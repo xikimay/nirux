@@ -46,7 +46,9 @@ extension MergeQueue {
         /// In the order the next Start proposes.
         var candidates: [Candidate] = []
 
-        func leadStartRefusal(confirmation: Confirmation, numbers: [Int], cadence: Cadence) -> String? {
+        func leadStartRefusal(
+            confirmation: Confirmation, numbers: [Int], cadence: Cadence, allowWithoutLocalReview: Bool = false
+        ) -> String? {
             if isDryRun { return "Dry runs need your confirmation." }
             if let exclusion = confirmation.excluded.first { return "#\(exclusion.number): \(exclusion.reason)" }
             if let reason = confirmation.refusals.first ?? confirmation.warnings.first { return reason }
@@ -63,7 +65,8 @@ extension MergeQueue {
                 }
             }
             for (item, candidate) in zip(confirmation.items, candidates) {
-                if let warning = item.warnings.first { return "#\(candidate.number): \(warning)" }
+                let itemWarnings = allowWithoutLocalReview ? item.otherWarnings : item.warnings
+                if let warning = itemWarnings.first { return "#\(candidate.number): \(warning)" }
                 guard case .some(.some) = candidate.comparison else {
                     return "GitHub couldn’t compare #\(candidate.number) with \(settings.baseBranch)."
                 }
@@ -86,8 +89,14 @@ extension MergeQueue {
             let checks: String
             /// What the queue will do with it: "Behind main by 3 commits…".
             var notes: [String] = []
+            /// Missing local review passes on its branch ("No code review yet…"),
+            /// kept separate so Lead auto-start can opt out of it without
+            /// suppressing any other warning.
+            var missingReviewWarning: String?
+            /// Warnings other than missing local review passes.
+            var otherWarnings: [String] = []
             /// What may stop the queue, or deserves a look.
-            var warnings: [String] = []
+            var warnings: [String] { (missingReviewWarning.map { [$0] } ?? []) + otherWarnings }
         }
 
         struct Excluded: Equatable, Sendable {
@@ -293,9 +302,8 @@ extension MergeQueue {
         }
         if let reason = local.worktrees.lazy.compactMap(localProblem).first { return leftOut(reason) }
         // What the Board's Reviews station says of it, the sheet says too: a click on its Merge station lists it for Start.
-        let unreviewed = candidate.missingReviews.isEmpty ? [] : [
-            "No \(spoken(candidate.missingReviews.map { $0.lowercased() })) yet: Nirux saw none run on its branch."
-        ]
+        let unreviewed: String? = candidate.missingReviews.isEmpty ? nil
+            : "No \(spoken(candidate.missingReviews.map { $0.lowercased() })) yet: Nirux saw none run on its branch."
 
         var item = Confirmation.Item(
             entry: entry,
@@ -303,7 +311,7 @@ extension MergeQueue {
             url: pullRequest.url,
             checks: candidate.checks.map { checksText($0, required: settings.requiredChecks) }
                 ?? "checks unknown" + (candidate.checksError.map { ": \($0)" } ?? ""),
-            warnings: unreviewed
+            missingReviewWarning: unreviewed
         )
         if case .some(.some(let comparison)) = candidate.comparison, comparison.behindBy > 0 {
             item.notes.append("Behind \(settings.baseBranch) by \(comparison.behindBy) "
@@ -323,23 +331,23 @@ extension MergeQueue {
                     + "if it fails again.")
             }
             if !verdict.notGreen.isEmpty {
-                item.warnings.append("\(verdict.notGreen.joined(separator: ", ")): only a new run can turn it green, so "
+                item.otherWarnings.append("\(verdict.notGreen.joined(separator: ", ")): only a new run can turn it green, so "
                     + "the queue will stop on it.")
             }
             if !verdict.otherFailures.isEmpty {
-                item.warnings.append("Red, though not required: \(verdict.otherFailures.joined(separator: ", ")). The "
+                item.otherWarnings.append("Red, though not required: \(verdict.otherFailures.joined(separator: ", ")). The "
                     + "queue never merges with a check red.")
             }
         }
         if let details = candidate.details {
             if details.changesWorkflows {
-                item.warnings.append("It changes .github/workflows/: its checks ran its own version of the workflows.")
+                item.otherWarnings.append("It changes .github/workflows/: its checks ran its own version of the workflows.")
             } else if details.hasMoreFiles {
-                item.warnings.append("It changes more than \(PullRequestDetails.maxFiles) files: Nirux didn’t check them "
+                item.otherWarnings.append("It changes more than \(PullRequestDetails.maxFiles) files: Nirux didn’t check them "
                     + "all for .github/workflows/.")
             }
         } else {
-            item.warnings.append("Nirux couldn’t read the files it changes"
+            item.otherWarnings.append("Nirux couldn’t read the files it changes"
                 + (candidate.detailsError.map { " (\($0))" } ?? "") + ": check .github/workflows/ yourself.")
         }
         return .joins(item)

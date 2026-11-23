@@ -35,8 +35,9 @@ final class ReviewFindingsTests: XCTestCase {
         return refusal.reason
     }
 
-    /// Kinds become slugs, texts one line; an empty list, too many, a kind
-    /// with nothing left, or a text too long are refused.
+    /// Kinds become slugs, texts one line; an empty list records a clean
+    /// review; non-arrays, too many, a kind with nothing left, or a text too
+    /// long are refused.
     func testAReviewGivesKindsAndTexts() throws {
         let given: [Any] = [["kind": " Animation end_deadline! ", "text": "Ends ran\non  a timer."], ["kind": "Réduire-Motion", "text": "x"]]
         guard case .success(let findings) = ReviewFindings.findings(given) else { return XCTFail("refused") }
@@ -44,7 +45,14 @@ final class ReviewFindingsTests: XCTestCase {
             ReviewFindings.Finding(kind: "animation-end-deadline", text: "Ends ran on a timer."),
             ReviewFindings.Finding(kind: "reduire-motion", text: "x")
         ])
-        XCTAssertNotNil(refusal([]))
+        guard case .success(let clean) = ReviewFindings.findings([] as [Any]) else { return XCTFail("empty findings should record a clean review") }
+        XCTAssertTrue(clean.isEmpty)
+        guard case .recorded(let cleanEntry, let cleanKinds) = record([], workspace: "W-clean", branch: "feat/clean", pullRequest: 42, at: now) else {
+            return XCTFail("clean review not recorded")
+        }
+        XCTAssertEqual(ReviewFindings.answer(for: cleanEntry, title: "Clean", kinds: cleanKinds), "Recorded round 1 of “Clean” (#42): 0 findings.")
+        XCTAssertNotNil(refusal(nil))
+        XCTAssertNotNil(refusal("none"))
         XCTAssertNotNil(refusal(Array(repeating: ["kind": "a", "text": "b"], count: ReviewFindings.maxFindings + 1)))
         XCTAssertNotNil(refusal([["kind": "!!!", "text": "b"]]))
         XCTAssertNotNil(refusal([["kind": "a", "text": String(repeating: "b", count: ReviewFindings.maxTextLength + 1)]]))

@@ -277,10 +277,15 @@ final class MergeQueueController {
         return start(settings: confirmation.settings, entries: confirmation.entries, cadence: confirmation.cadence)
     }
 
-    func startFromLead(_ reading: MergeQueue.ConfirmationReading, numbers: [Int], cadence: MergeQueue.Cadence) -> StartRefusal? {
+    func startFromLead(
+        _ reading: MergeQueue.ConfirmationReading, numbers: [Int], cadence: MergeQueue.Cadence,
+        allowWithoutLocalReview: Bool = false
+    ) -> StartRefusal? {
         guard client.allowsLeadStart else { return .invalidSettings(["This build requires manual confirmation."]) }
         let confirmation = MergeQueue.confirmation(reading)
-        if let reason = reading.leadStartRefusal(confirmation: confirmation, numbers: numbers, cadence: cadence) {
+        if let reason = reading.leadStartRefusal(
+            confirmation: confirmation, numbers: numbers, cadence: cadence, allowWithoutLocalReview: allowWithoutLocalReview
+        ) {
             return .invalidSettings([reason])
         }
         return start(settings: confirmation.settings, entries: confirmation.entries, cadence: cadence, startedByLead: true)
@@ -421,12 +426,15 @@ final class MergeQueueController {
     /// The journal and the state are written in order, off the main thread.
     nonisolated private static let fileQueue = DispatchQueue(label: "MergeQueue.files", qos: .utility)
 
-    func leadStatus(openPRs: Set<Int>?, enabled: Bool, settingsProblem: String?) async -> String {
+    func leadStatus(
+        openPRs: Set<Int>?, enabled: Bool, allowWithoutLocalReview: Bool = false, settingsProblem: String?
+    ) async -> String {
         let build = client.allowsLeadStart ? "eligible for Lead auto-start"
             : isDryRun ? "dry run; manual confirmation required" : "live override; manual confirmation required"
         return await MergeQueue.leadStatus(
             repository: queueRepository, saved: saved, runsElsewhere: runsElsewhere, selection: selection,
-            openPRs: openPRs, leadEnabled: enabled, build: build, settingsProblem: settingsProblem,
+            openPRs: openPRs, leadEnabled: enabled, allowWithoutLocalReview: allowWithoutLocalReview,
+            build: build, settingsProblem: settingsProblem,
             journal: journalSnapshot(entryLimit: 10)
         )
     }
