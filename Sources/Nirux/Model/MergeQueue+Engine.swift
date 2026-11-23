@@ -159,7 +159,13 @@ extension MergeQueue {
             case .mutated(let id, let result):
                 guard let request, id == request.id, case .mutate(let mutation) = request.action, let purpose else { break }
                 self.request = nil
-                if phase == .stopping {
+                let endsInItsStop: Bool
+                switch purpose {
+                case .train(.close), .train(.cleanup): endsInItsStop = true
+                default: endsInItsStop = false
+                }
+                // Closing or deleting the train ends in its own stop, whose reason a Stop mustn't hide.
+                if phase == .stopping, !endsInItsStop {
                     var message = stopMessage + " The \(Self.describe(mutation)), already sent, answered: "
                         + "\(Self.describe(result))."
                     if case .merge(let number, _, _) = mutation, result == .sent || result.isUncertain {
@@ -168,6 +174,7 @@ extension MergeQueue {
                     // A train's pull request left open is named: its merge's answer is kept, and one just opened is looked up.
                     switch purpose {
                     case .train(.open):
+                        clocks.step = now
                         read([.pullRequests(head: trainBranch)], for: .train(.openedWhileStopping(message: message)))
                     case .train(.land(let head, let baseTip)):
                         self.purpose = .train(.landConfirm(head: head, baseTip: baseTip, result: result))
@@ -275,12 +282,17 @@ extension MergeQueue {
         /// reads stop it while GitHub hasn't shown the effect of a call
         /// sent, the reason says so.
         mutating func stop(_ reason: StopReason) {
+            if cadence == .train, let number = trainToClose(for: reason) {
+                note("Closing train #\(number)")
+                train?.step = .closing(reason)
+                return mutate(.closePullRequest(number: number), for: .train(.close(reason)))
+            }
             if cadence == .train, let cleanup = trainCleanup(for: reason) {
                 return mutate(cleanup, for: .train(.cleanup(reason)))
             }
             var reason = reason
             if reason.kind == .github || reason.kind == .setup, let mutation = unconfirmedMutation,
-               let shown = train?.name ?? currentEntry.map({ "#\($0.number)" }) {
+               case let shown = train?.name ?? currentEntry.map({ "#\($0.number)" }) ?? "it" {
                 reason = StopReason(kind: reason.kind, message: reason.message + " The \(Self.describe(mutation)) was sent "
                     + "and GitHub didn’t show its effect yet: check \(shown) on GitHub.", url: reason.url)
             }
@@ -340,6 +352,8 @@ extension MergeQueue {
         // MARK: Read failures (section 4)
 
         private mutating func readFailed(_ failure: ReadFailure, reads: [Read], purpose: Purpose, now: TimeInterval) {
+            // A Stop waited for this read only to name the train's pull request: the stop stays the user's.
+            if case .train(.openedWhileStopping(let message)) = purpose { return stop(StopReason(kind: .user, message: message)) }
             switch failure {
             case .ghMissing:
                 stop(StopReason(kind: .setup, message: "\(GitHub.CLI.missing): the queue can’t read GitHub."))
@@ -1147,6 +1161,7 @@ extension MergeQueue {
             case .createBranch(let name, let commit): return "creation of branch \(name) at \(short(commit))"
             case .mergeIntoBranch(let branch, let head, _): return "merge of \(short(head)) into \(branch)"
             case .openPullRequest(let base, let head, _, _): return "pull request of \(head) into \(base)"
+            case .closePullRequest(let number): return "close of #\(number)"
             case .deleteBranch(let name): return "deletion of branch \(name)"
             }
         }
