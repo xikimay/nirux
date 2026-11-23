@@ -391,7 +391,9 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   Each look at the train's checks reads the PRs again: a
   push to one stops the train at once. A stop the train finds itself (red
   checks, the base moved, a push) closes the train's PR first; a user Stop or
-  GitHub not answering leaves it open, and the stop names it. The PRs' heads
+  GitHub not answering leaves it open, and the stop names it (by its branch
+  while GitHub hasn't shown its number). A Stop while the train is still being
+  composed deletes its branch; when GitHub doesn't answer, the stop names it. The PRs' heads
   never change. GitHub marks each PR merged
   once its head lands, with the train's merge commit for it: observed on a
   throwaway base (#779–#792), not documented. So the queue reads every PR and

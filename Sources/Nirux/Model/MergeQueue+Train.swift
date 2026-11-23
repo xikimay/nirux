@@ -50,10 +50,13 @@ extension MergeQueue {
         /// "train #781", or its branch until it has a pull request.
         var name: String { number.map { "train #\($0)" } ?? "the train \(branch)" }
 
-        /// Its pull request, open and never merged: named in a stop, so nobody merges it later.
-        var leftOpen: String? {
-            guard let number, mergeCommit == nil, step != .closed else { return nil }
-            return " Train #\(number) stays open on GitHub: close it rather than merge it."
+        /// What a stop leaves on GitHub, named so nobody merges it later: its
+        /// open pull request, one that may have opened, or its branch.
+        var leftBehind: String? {
+            guard mergeCommit == nil, step != .closed else { return nil }
+            if let number { return " Train #\(number) stays open on GitHub: close it rather than merge it." }
+            if step == .composing { return " The train’s branch \(branch) stays on GitHub." }
+            return " A pull request of the train may be open from \(branch): close it rather than merge it."
         }
 
         func stepDescription(workflow: String?) -> String {
@@ -148,8 +151,10 @@ extension MergeQueue.Engine {
         }
         // A push to the train's own branch: its head isn't the queue's any more.
         if reason.kind == .changed, current == nil { return nil }
-        guard ![.user, .interrupted, .dryRun, .setup, .github].contains(reason.kind), let train,
-              train.number == nil || train.step == .closed else { return nil }
+        guard ![.interrupted, .dryRun, .setup, .github].contains(reason.kind), let train else { return nil }
+        // A Stop deletes only a branch no pull request was opened from yet.
+        if reason.kind == .user { return train.number == nil && train.step == .composing ? .deleteBranch(name: train.branch) : nil }
+        guard train.number == nil || train.step == .closed else { return nil }
         return .deleteBranch(name: train.branch)
     }
 
@@ -159,7 +164,7 @@ extension MergeQueue.Engine {
         // The merge may have landed.
         case .train(.land)?: return nil
         case .train(.landConfirm(_, _, let result))? where result == .sent || result.isUncertain: return nil
-        default: return train?.leftOpen
+        default: return train?.leftBehind
         }
     }
 
@@ -648,7 +653,14 @@ extension MergeQueue.Engine {
         case .openedWhileStopping(let message):
             guard case .pullRequests(let found)? = answers[.pullRequests(head: trainBranch)] else { return missingAnswer() }
             let base = settings.baseBranch
-            let opened = found.first { $0.isOpen && $0.baseRefName == base }?.number
+            guard let opened = found.first(where: { $0.isOpen && $0.baseRefName == base })?.number else {
+                // A pull request just opened may take a moment to show.
+                guard now - clocks.step >= MergeQueue.Limits.mergeConfirm else {
+                    return read([.pullRequests(head: trainBranch)], after: MergeQueue.Limits.mergeConfirmInterval,
+                                for: .train(.openedWhileStopping(message: message)))
+                }
+                return stop(MergeQueue.StopReason(kind: .user, message: message))
+            }
             train?.number = opened
             return stop(MergeQueue.StopReason(kind: .user, message: message))
         default: break
@@ -758,6 +770,7 @@ extension MergeQueue.Engine {
         guard let train else { return missingAnswer() }
         switch step {
         case .cleanup(let reason):
+            if result == .sent { self.train?.step = .closed }
             stop(reason.appending(result == .sent ? " Nirux deleted the train’s branch \(train.branch)."
                 : " Nirux couldn’t delete the train’s branch \(train.branch): \(Self.describe(result))."))
         case .deleteLanded(let commit):
