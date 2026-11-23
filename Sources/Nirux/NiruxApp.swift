@@ -160,7 +160,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         NSApp.setActivationPolicy(.regular)
         // A canary run drives this copy through its channel: behind the
         // user's windows, never taking the focus.
-        let launchEnvironment = CanaryChannel.takeLaunchEnvironment()
+        let launchEnvironment = ProcessInfo.processInfo.environment
         drivenByCanary = CanaryChannel.token(in: launchEnvironment) != nil
         if drivenByCanary {
             canaryObservers = CanaryPresentation.keepHidden(on: .default) { NSApp.hide(nil) }

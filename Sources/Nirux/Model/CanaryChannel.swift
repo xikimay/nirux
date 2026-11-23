@@ -20,14 +20,6 @@ enum CanaryChannel {
         return token
     }
 
-    /// The environment this launch started with. The token leaves the
-    /// process's own, so nothing Nirux starts (git, hooks, helpers) inherits it.
-    static func takeLaunchEnvironment() -> [String: String] {
-        let environment = ProcessInfo.processInfo.environment
-        unsetenv(tokenKey)
-        return environment
-    }
-
     /// Whether `request` carries `token` (its `token` argument), compared
     /// in constant time.
     static func isAuthorized(_ request: LeadChannel.Request, token: String) -> Bool {
