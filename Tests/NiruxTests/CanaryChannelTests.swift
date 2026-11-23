@@ -234,6 +234,7 @@ final class CanaryChannelTests: XCTestCase {
     }
 
     /// Text is typed with each character's US key code and Shift, as KeyMapper expects.
+    @MainActor
     func testTextTypesEachCharactersKey() {
         let keys = NiruxApp.keys(typing: "aB1!\r é")
         XCTAssertEqual(keys.map { $0.keyCode }, [0, 11, 18, 18, 36, 49, 0])
