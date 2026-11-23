@@ -40,9 +40,28 @@ if [[ "${1:-}" == --class ]]; then
             "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$filter" "$NIRUX_TESTS_BUNDLE"
     }
     if [[ ${NIRUX_STREAM_TEST_ERRORS:-} == 1 ]]; then
-        NSUnbufferedIO=YES run_xctest 2>&1 | tee "$log" | perl -ne '
-            BEGIN { $| = 1 } print if /:\d+(?::\d+)?: error: / && !$seen++
-        ' || status=$?
+        # xctest writes to the log, not a pipe: a process a test leaves running
+        # inherits its output and would hold a pipe, and so the class, open. A
+        # follower prints the class's first source error as it lands.
+        : > "$log" # before the follower opens it
+        NSUnbufferedIO=YES run_xctest > "$log" 2>&1 &
+        xctest=$!
+        perl -e '
+            my ($log, $xctest) = @ARGV;
+            open my $in, "<", $log or die "open $log: $!\n";
+            while (1) {
+                my $running = kill 0, $xctest;
+                while (<$in>) {
+                    if (!/\n\z/ && $running) { seek $in, -length $_, 1; last }
+                    if (/:\d+(?::\d+)?: error: /) { chomp; print "$_\n"; exit }
+                }
+                exit unless $running;
+                seek $in, 0, 1;
+                select undef, undef, undef, 0.1;
+            }' "$log" "$xctest" &
+        follower=$!
+        wait "$xctest" || status=$?
+        wait "$follower" || true
     else
         run_xctest > "$log" 2>&1 || status=$?
     fi

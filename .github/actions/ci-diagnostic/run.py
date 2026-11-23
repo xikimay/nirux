@@ -31,6 +31,21 @@ def execute(state, phase):
     (state / "exit.tmp").replace(state / "exit")
 
 
+def publish(state, phase, match, offset):
+    path, number, message = match.groups()
+    diagnostic = state / "diagnostic.json"
+    diagnostic.write_text(json.dumps({
+        "run": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+        "checkout": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+        "pr_head": os.environ.get("PR_HEAD") or None, "phase": phase,
+        "file": os.path.relpath(path) if os.path.isabs(path) else path,
+        "line": int(number), "message": message,
+    }) + "\n")
+    (state / "offset").write_text(str(offset))
+    with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+        print(f"diagnostic={diagnostic}", file=output)
+
+
 def follow(state, phase, offset, pid, worker=None):
     with (state / "log").open("rb") as log:
         log.seek(offset)
@@ -43,19 +58,12 @@ def follow(state, phase, offset, pid, worker=None):
                 if phase:
                     match = SOURCE_ERROR.match(line.decode(errors="replace").rstrip())
                     if match:
-                        path, number, message = match.groups()
-                        diagnostic = state / "diagnostic.json"
-                        diagnostic.write_text(json.dumps({
-                            "run": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"],
-                            "checkout": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-                            "pr_head": os.environ.get("PR_HEAD") or None, "phase": phase,
-                            "file": os.path.relpath(path) if os.path.isabs(path) else path,
-                            "line": int(number), "message": message,
-                        }) + "\n")
-                        (state / "offset").write_text(str(log.tell()))
-                        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-                            print(f"diagnostic={diagnostic}", file=output)
-                        return 0
+                        try:
+                            publish(state, phase, match, log.tell())
+                            return 0
+                        except Exception as error:
+                            print(f"::warning::No early diagnostic: {error}", flush=True)
+                            phase = None
                 continue
             if finished:
                 code = int((state / "exit").read_text())
