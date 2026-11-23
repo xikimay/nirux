@@ -584,10 +584,11 @@ def detect_commit(explicit_commit=None):
     return None
 
 
-def detect_changed_files_from_git(diff_base):
+def detect_changed_files_from_git(diff_base, repo=HERE.parents[1]):
+    """What HEAD changed since it left diff_base: the diff from their merge base."""
     result = subprocess.run(
         ["/usr/bin/git", "diff", "--no-renames", "--name-only", "-z", f"{diff_base}...HEAD"],
-        cwd=HERE.parents[1],
+        cwd=repo,
         capture_output=True,
         text=True,
         check=True,

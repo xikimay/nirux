@@ -758,6 +758,30 @@ class ReviewRoundOneTests(unittest.TestCase):
             res = subprocess.run([sys.executable, str(HERE / "run.py"), "--no-such-flag"], capture_output=True, text=True, timeout=20)
             self.assertEqual(res.returncode, 64, res.stderr)
 
+    def test_a_diff_base_that_moved_on_selects_only_this_branchs_changes(self):
+        from run import detect_changed_files_from_git
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+
+            def git(*args):
+                subprocess.run(["/usr/bin/git", "-c", "user.name=c", "-c", "user.email=c@example.invalid", *args],
+                               cwd=repo, check=True, capture_output=True)
+
+            def commit(name):
+                (repo / name).write_text(name, encoding="utf-8")
+                git("add", name)
+                git("commit", "-qm", name)
+
+            git("init", "-q", "-b", "main")
+            commit("base.txt")
+            git("switch", "-qc", "feature")
+            commit("mine.txt")
+            git("switch", "-q", "main")
+            commit("theirs.txt")
+            git("switch", "-q", "feature")
+            self.assertEqual(detect_changed_files_from_git("main", repo=repo), ["mine.txt"])
+
     def test_only_an_infra_verdict_reads_as_inconclusive(self):
         from verdicts import any_infra
 
