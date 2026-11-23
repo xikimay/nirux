@@ -911,7 +911,9 @@ extension WorkspaceState {
             // runs here: they stay dry runs unless asked for by hand.
             "NIRUX_MERGE_QUEUE_LIVE": "",
             // Nor is a copy's opt-in to the real state (see RealStateGuard).
-            "NIRUX_ALLOW_REAL_STATE": ""
+            "NIRUX_ALLOW_REAL_STATE": "",
+            // Nor the canary's token: only its runner drives the app.
+            CanaryChannel.tokenKey: ""
         ]
         // Antigravity then says what it does and why it waits
         // (AgentProgramStatus): Nirux doesn't answer its query. A user's own

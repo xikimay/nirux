@@ -210,79 +210,87 @@ extension NiruxApp {
             // Only the main window's columns are routed here. Other windows —
             // panels, a detached Web Inspector, Sparkle — keep AppKit's own
             // key handling instead of feeding the focused column.
-            guard let shell = self?.shell, event.window === self?.mainWindow else { return event }
-            // Before the key is handled, so a toast it shows stays.
-            shell.dismissToastOnInput()
-            shell.workspaceCardSawKey(event)
-
-            // Don't intercept when an overlay is active (picker, etc.)
-            if shell.isOverlayActive { return event }
-
-            guard let workspace = shell.activeWorkspaceForKeyIntercept,
-                  let col = workspace.columns[safe: workspace.focusedIndex]
-            else { return event }
-
-            // Keys follow a find field while it has the focus,
-            // even when the focused column changed without moving the
-            // keyboard (a resize drag, an agent opening an editor column).
-            if let findColumn = workspace.findFieldColumn {
-                return Self.routeFindFieldKey(event, in: findColumn)
-            }
-
-            if Self.takesWebContentKeys(col) {
-                return Self.routeWebContentKey(event, in: col)
-            }
-
-            if Self.closeFindBarOnEscape(event, in: col) { return nil }
-
-            // A column without a PTY (a Board) hands its keys back to AppKit,
-            // which sends Cmd-chords to the menu.
-            guard let pty = col.pty else { return Self.isHeldNavigation(event) ? nil : event }
-            Self.dismissAgentExitIfTyping(event, in: col)
-
-            // Cmd+key: some go to PTY (Cmd+Backspace), rest to menu system
-            if event.modifierFlags.contains(.command) {
-                let bytes = KeyMapper.bytesForEvent(event)
-                if !bytes.isEmpty {
-                    col.terminalSearch?.returnToPrompt()
-                    pty.sendRaw(bytes)
-                    return nil
-                }
-                // Route Cmd+keys through the menu directly — as of libghostty
-                // c6843ec, AppTerminalView.performKeyEquivalent eagerly
-                // consumes Cmd+key events for its own bindings before the
-                // menu sees them, so Cmd+T/Cmd+arrow/etc. silently die if we
-                // just return the event here. Mirror the WebView/Editor path
-                // above: invoke the menu key equivalent and consume on hit.
-                if Self.performMenuKeyEquivalent(event) {
-                    return nil
-                }
-                return event
-            }
-
-            if Self.resumeAwaitingAgentOnTyping(event, in: col) { return nil }
-
-            // Shell exited — swallow input instead of writing to a dead PTY;
-            // Enter (or keypad Enter) restarts the shell.
-            if pty.hasExited {
-                if event.keyCode == 0x24 || event.keyCode == 0x4C {
-                    col.restartShell()
-                }
-                return nil
-            }
-
-            // ALL other keys: send to PTY and ALWAYS consume.
-            // Never let ghostty's keyDown handler see the event.
-            let bytes = KeyMapper.bytesForEvent(event)
-            if !bytes.isEmpty {
-                // After a search jumped up the scrollback, typing returns
-                // to the prompt first (Ghostty's scroll-to-bottom on
-                // keystroke never runs: keys bypass it).
-                col.terminalSearch?.returnToPrompt()
-                pty.sendRaw(bytes)
-            }
-            return nil // ALWAYS consume — even if bytes is empty (modifier-only)
+            guard let self, event.window === self.mainWindow else { return event }
+            return self.routeMainWindowKey(event)
         }
         return [modifierMonitor, keyMonitor].compactMap { $0 }
+    }
+
+    /// A key for the main window, routed to its focused column: nil once
+    /// taken, the key back when AppKit should handle it. The canary sends
+    /// its terminal keys here too (NiruxApp+Canary).
+    func routeMainWindowKey(_ event: NSEvent) -> NSEvent? {
+        guard let shell else { return event }
+        // Before the key is handled, so a toast it shows stays.
+        shell.dismissToastOnInput()
+        shell.workspaceCardSawKey(event)
+
+        // Don't intercept when an overlay is active (picker, etc.)
+        if shell.isOverlayActive { return event }
+
+        guard let workspace = shell.activeWorkspaceForKeyIntercept,
+              let col = workspace.columns[safe: workspace.focusedIndex]
+        else { return event }
+
+        // Keys follow a find field while it has the focus,
+        // even when the focused column changed without moving the
+        // keyboard (a resize drag, an agent opening an editor column).
+        if let findColumn = workspace.findFieldColumn {
+            return Self.routeFindFieldKey(event, in: findColumn)
+        }
+
+        if Self.takesWebContentKeys(col) {
+            return Self.routeWebContentKey(event, in: col)
+        }
+
+        if Self.closeFindBarOnEscape(event, in: col) { return nil }
+
+        // A column without a PTY (a Board) hands its keys back to AppKit,
+        // which sends Cmd-chords to the menu.
+        guard let pty = col.pty else { return Self.isHeldNavigation(event) ? nil : event }
+        Self.dismissAgentExitIfTyping(event, in: col)
+
+        // Cmd+key: some go to PTY (Cmd+Backspace), rest to menu system
+        if event.modifierFlags.contains(.command) {
+            let bytes = KeyMapper.bytesForEvent(event)
+            if !bytes.isEmpty {
+                col.terminalSearch?.returnToPrompt()
+                pty.sendRaw(bytes)
+                return nil
+            }
+            // Route Cmd+keys through the menu directly — as of libghostty
+            // c6843ec, AppTerminalView.performKeyEquivalent eagerly
+            // consumes Cmd+key events for its own bindings before the
+            // menu sees them, so Cmd+T/Cmd+arrow/etc. silently die if we
+            // just return the event here. Mirror the WebView/Editor path
+            // above: invoke the menu key equivalent and consume on hit.
+            if Self.performMenuKeyEquivalent(event) {
+                return nil
+            }
+            return event
+        }
+
+        if Self.resumeAwaitingAgentOnTyping(event, in: col) { return nil }
+
+        // Shell exited — swallow input instead of writing to a dead PTY;
+        // Enter (or keypad Enter) restarts the shell.
+        if pty.hasExited {
+            if event.keyCode == 0x24 || event.keyCode == 0x4C {
+                col.restartShell()
+            }
+            return nil
+        }
+
+        // ALL other keys: send to PTY and ALWAYS consume.
+        // Never let ghostty's keyDown handler see the event.
+        let bytes = KeyMapper.bytesForEvent(event)
+        if !bytes.isEmpty {
+            // After a search jumped up the scrollback, typing returns
+            // to the prompt first (Ghostty's scroll-to-bottom on
+            // keystroke never runs: keys bypass it).
+            col.terminalSearch?.returnToPrompt()
+            pty.sendRaw(bytes)
+        }
+        return nil // ALWAYS consume — even if bytes is empty (modifier-only)
     }
 }
