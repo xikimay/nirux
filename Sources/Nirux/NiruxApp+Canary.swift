@@ -14,9 +14,9 @@ extension NiruxApp {
         case "menu":
             switch Self.menuItem(path: arguments["path"] as? [String] ?? [], in: NSApp.mainMenu) {
             case .failure(let refusal): answer(refusal.text, true)
-            case .success(let target):
+            case .success(let item):
                 answer("ok", false)
-                target.menu.performActionForItem(at: target.index)
+                Self.pick(item)
             }
         case "press":
             guard let label = arguments["label"] as? String, let element = Self.pressTarget(label: label, in: windows) else {
@@ -76,7 +76,7 @@ extension NiruxApp {
 
     /// The item at `path` (titles from the menu bar down), once its menu has
     /// validated it.
-    static func menuItem(path: [String], in menuBar: NSMenu?) -> Result<(menu: NSMenu, index: Int), CanaryRefusal> {
+    static func menuItem(path: [String], in menuBar: NSMenu?) -> Result<NSMenuItem, CanaryRefusal> {
         var menu = menuBar
         for (depth, title) in path.enumerated() {
             guard let current = menu else { break }
@@ -89,10 +89,20 @@ extension NiruxApp {
                 continue
             }
             guard current.items[index].submenu == nil else { return .failure(CanaryRefusal(text: title + " opens a menu.")) }
-            guard current.items[index].isEnabled else { return .failure(CanaryRefusal(text: title + " is disabled.")) }
-            return .success((current, index))
+            let item = current.items[index]
+            guard item.isEnabled else { return .failure(CanaryRefusal(text: title + " is disabled.")) }
+            guard let action = item.action, NSApp.target(forAction: action, to: item.target, from: item) != nil else {
+                return .failure(CanaryRefusal(text: title + " has nothing to act on it."))
+            }
+            return .success(item)
         }
         return .failure(CanaryRefusal(text: "No menu item " + path.joined(separator: " › ") + "."))
+    }
+
+    /// Sends the item's action as a click on it does.
+    static func pick(_ item: NSMenuItem) {
+        guard let action = item.action else { return }
+        NSApp.sendAction(action, to: item.target, from: item)
     }
 
     enum KeyRoute: CustomStringConvertible {

@@ -144,8 +144,7 @@ final class CanaryChannelTests: XCTestCase {
             item.isEnabled = enabled
         }
 
-        let found = try NiruxApp.menuItem(path: ["Space", "Previous Space"], in: bar).get()
-        found.menu.performActionForItem(at: found.index)
+        NiruxApp.pick(try NiruxApp.menuItem(path: ["Space", "Previous Space"], in: bar).get())
         XCTAssertEqual(target.picked, ["Previous Space"])
         for path in [["Space", "Next Space"], ["Space", "Missing"], ["Space"], []] {
             XCTAssertThrowsError(try NiruxApp.menuItem(path: path, in: bar).get(), "\(path)")
