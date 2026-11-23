@@ -372,6 +372,33 @@ final class MergeQueueTrainTests: XCTestCase {
         }
     }
 
+    func testACancelledRequiredCheckOnTheTrainRunsAgainOnce() throws {
+        let head = TrainGitHub.commit(2)
+        var world = world()
+        world.checks[head] = MQ.checks(MQ.checkRun(id: 9, conclusion: "CANCELLED"))
+        var cancelled = TrainGitHub(world: world)
+        cancelled.rerunsGreen = [head]
+        var first = queue()
+        first.drive(&cancelled)
+        XCTAssertEqual(first.phase, .finished)
+        XCTAssertEqual(first.mutations.filter { if case .rerun = $0 { true } else { false } }, [.rerun(runID: 900)])
+        XCTAssertTrue(first.noted("Required check was cancelled: rerunning the failed jobs of run 900, once"))
+
+        var again = TrainGitHub(world: world)
+        var second = queue()
+        second.drive(&again)
+        XCTAssertTrue(second.stopReason?.message.hasPrefix("Required check Tests / test failed on train #900 at 0000002 again after "
+            + "its rerun.") == true, second.stopReason?.message ?? "")
+        XCTAssertEqual(second.mutations.filter { if case .rerun = $0 { true } else { false } }.count, 1)
+
+        world.checks[head] = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"))
+        var failed = TrainGitHub(world: world)
+        var third = queue()
+        third.drive(&failed)
+        XCTAssertEqual(third.stopReason?.kind, .checks)
+        XCTAssertFalse(third.mutations.contains { if case .rerun = $0 { true } else { false } }, "a failure isn't rerun here")
+    }
+
     func testADryRunStopsBeforeCreatingTheTrainsBranch() {
         var queue = queue()
         XCTAssertEqual(queue.run(world()), .createBranch(name: branch, commit: MQ.sha("0")))
@@ -474,6 +501,10 @@ private struct TrainGitHub {
     var pushToTrainAfterOpen: String?
     /// Branch protection refuses the train's merge.
     var refusesMerge = false
+    /// Heads whose rerun of failed jobs passes; any other's fails again.
+    var rerunsGreen: Set<String> = []
+    /// What gh answers a rerun it sent.
+    var rerunAnswer = MergeQueue.MutationResult.sent
     var refusesClose = false
     /// Agents' pushes between the last check and the train's merge.
     var pushesAfterLanding: [Int: String] = [:]
@@ -488,6 +519,7 @@ private struct TrainGitHub {
     var committer = "web-flow"
     /// Each head's merge commit in the train.
     private(set) var partCommits: [String: String] = [:]
+    private var lastMerge: String?
     private var made = 0
 
     init(world: MQ.World) {
@@ -535,6 +567,7 @@ private struct TrainGitHub {
             if lagReads > 0 { staleTip = (tip, lagReads) }
             world.branches[branch] = commit
             partCommits[head] = commit
+            lastMerge = commit
         case .openPullRequest(_, let head, _, _):
             guard let tip = world.branches[head] else { return .refused(status: 422, message: "No commits between main and \(head)") }
             world.pullRequests[900] = MQ.pullRequest(900, head: pushToTrainAfterOpen ?? tip, branch: head)
@@ -558,7 +591,12 @@ private struct TrainGitHub {
             world.pullRequests[number] = MQ.pullRequest(number, head: open.headOid, branch: open.headRefName, state: .closed)
         case .deleteBranch(let name):
             guard world.branches.removeValue(forKey: name) != nil else { return .refused(status: 422, message: "Reference does not exist") }
-        case .updateBranch, .rerun:
+        case .rerun:
+            guard let head = lastMerge else { return .refused(status: 404, message: "Not Found") }
+            world.checks[head] = rerunsGreen.contains(head) ? MQ.checks(MQ.checkRun(id: 10))
+                : MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"), MQ.checkRun(id: 10, conclusion: "FAILURE"))
+            return rerunAnswer
+        case .updateBranch:
             return .refused(status: 422, message: "not a train's call")
         }
         return .sent

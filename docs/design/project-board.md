@@ -349,6 +349,8 @@ Definitions:
 - **A red check** concluded FAILURE, CANCELLED, TIMED_OUT, ACTION_REQUIRED,
   STARTUP_FAILURE or STALE, or is a commit status in ERROR or FAILURE. NEUTRAL
   and SKIPPED aren't red: CodeQL adds a NEUTRAL "CodeQL" check to every PR.
+  A check that isn't required and was only CANCELLED (a newer run replaced
+  it, no runner came) doesn't block: it says nothing of the code.
 - **Checks are read by commit**, for example with GraphQL `object(oid:)` on the
   head, or REST `commits/{sha}/check-runs` and `commits/{sha}/status`. The
   rollup from `gh pr list` carries no SHA, so the board only displays it.
@@ -384,7 +386,9 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   required checks once, on a commit up to date by construction, so the strict
   "up to date" rule stays. Before merging it, the queue checks the base still
   sits at the train's tip and every PR is still at its head, then merges it
-  pinned to its head. Each look at the train's checks reads the PRs again: a
+  pinned to its head. A required check only cancelled on the train (no runner
+  came in GitHub's wait) runs again, once. Each look at the train's checks
+  reads the PRs again: a
   push to one stops the train at once. A stop the train finds itself (red
   checks, the base moved, a push) closes the train's PR first; a user Stop or
   GitHub not answering leaves it open, and the stop names it. The PRs' heads
