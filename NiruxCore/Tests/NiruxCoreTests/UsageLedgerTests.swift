@@ -86,8 +86,10 @@ struct UsageLedgerTests {
     }
 
     @Test func summariesSplitWhatSubagentsSpentAndFindColdRewritesPerStream() {
-        func event(_ time: TimeInterval, cacheWrite: Int = 0, hour: Bool = false, input: Int = 0, subagent: String? = nil) -> UsageEvent {
-            let counts = TokenCounts(input: input, output: 10, cacheWrite: cacheWrite, hourCacheWrite: hour ? cacheWrite : 0)
+        func event(
+            _ time: TimeInterval, cacheWrite: Int = 0, hour: Bool = false, cacheRead: Int = 0, input: Int = 0, subagent: String? = nil
+        ) -> UsageEvent {
+            let counts = TokenCounts(input: input, output: 10, cacheWrite: cacheWrite, cacheRead: cacheRead, hourCacheWrite: hour ? cacheWrite : 0)
             return UsageEvent(timestamp: time, model: "claude-opus-5-5", counts: counts, subagentID: subagent)
         }
         let claude = UsageSession(
@@ -98,13 +100,17 @@ struct UsageLedgerTests {
             ]
         )
         let codex = UsageSession(key: UsageSessionKey(.codex, "x"), events: [event(500, input: 40_000), event(900, input: 40_000)])
-        // Hour-long entries outlive a 20 minute pause, not a 2 hour one.
+        // Hour-long entries outlive a 20 minute pause, not a 2 hour one, and
+        // a later 5 minute write brings the 5 minute lifetime back.
         let lead = UsageSession(
             key: UsageSessionKey(.claude, "lead"),
-            events: [event(0, cacheWrite: 30_000, hour: true), event(1_200, cacheWrite: 30_000), event(8_400, cacheWrite: 30_000, hour: true)]
+            events: [
+                event(0, cacheWrite: 30_000, hour: true), event(1_200, cacheRead: 30_000), event(8_400, cacheWrite: 30_000, hour: true),
+                event(8_500, cacheWrite: 25_000), event(9_700, cacheWrite: 25_000)
+            ]
         )
-        #expect([lead].summary(since: 0).coldRewrites == 1)
-        #expect([lead].summary(since: 0).coldRewriteWeightedTokens == 30_000 * 2)
+        #expect([lead].summary(since: 0).coldRewrites == 2)
+        #expect([lead].summary(since: 0).coldRewriteWeightedTokens == 30_000 * 2 + 25_000 * 1.25)
 
         let total = [claude, codex].summary(since: 0)
         #expect(total.calls == 7)

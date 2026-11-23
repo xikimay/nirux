@@ -133,7 +133,7 @@ public struct UsageSummary: Equatable, Sendable {
 
     public init() {}
 
-    /// How long a cache outlives its last use: 5 minutes, or an hour once
+    /// How long a cache outlives its last use: 5 minutes, or an hour while
     /// the stream writes hour-long entries (Claude Code's own sessions).
     public static let cacheLifetime: TimeInterval = 5 * 60
     public static let hourCacheLifetime: TimeInterval = 60 * 60
@@ -179,7 +179,9 @@ extension Sequence where Element == UsageSession {
                 let stream = streams[event.subagentID]
                 let afterCacheExpiry = stream.map { event.timestamp - $0.lastUse >= $0.cacheLifetime } ?? false
                 if event.timestamp > 0 {
-                    let lifetime = event.counts.hourCacheWrite > 0 ? UsageSummary.hourCacheLifetime : stream?.cacheLifetime
+                    // The latest write sets it: Claude Code switches between the two mid-session.
+                    let lifetime = event.counts.cacheWrite == 0 ? stream?.cacheLifetime
+                        : event.counts.hourCacheWrite > 0 ? UsageSummary.hourCacheLifetime : UsageSummary.cacheLifetime
                     streams[event.subagentID] = (event.timestamp, lifetime ?? UsageSummary.cacheLifetime)
                 }
                 guard event.timestamp >= since, let group = key(session, event) else { continue }
