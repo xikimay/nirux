@@ -86,8 +86,9 @@ struct UsageLedgerTests {
     }
 
     @Test func summariesSplitWhatSubagentsSpentAndFindColdRewritesPerStream() {
-        func event(_ time: TimeInterval, cacheWrite: Int = 0, input: Int = 0, subagent: String? = nil) -> UsageEvent {
-            UsageEvent(timestamp: time, model: "claude-opus-5-5", counts: TokenCounts(input: input, output: 10, cacheWrite: cacheWrite), subagentID: subagent)
+        func event(_ time: TimeInterval, cacheWrite: Int = 0, hour: Bool = false, input: Int = 0, subagent: String? = nil) -> UsageEvent {
+            let counts = TokenCounts(input: input, output: 10, cacheWrite: cacheWrite, hourCacheWrite: hour ? cacheWrite : 0)
+            return UsageEvent(timestamp: time, model: "claude-opus-5-5", counts: counts, subagentID: subagent)
         }
         let claude = UsageSession(
             key: UsageSessionKey(.claude, "c"), attribution: UsageAttribution(spaceID: "space", taskID: "task"), subagents: 1,
@@ -97,6 +98,13 @@ struct UsageLedgerTests {
             ]
         )
         let codex = UsageSession(key: UsageSessionKey(.codex, "x"), events: [event(500, input: 40_000), event(900, input: 40_000)])
+        // Hour-long entries outlive a 20 minute pause, not a 2 hour one.
+        let lead = UsageSession(
+            key: UsageSessionKey(.claude, "lead"),
+            events: [event(0, cacheWrite: 30_000, hour: true), event(1_200, cacheWrite: 30_000), event(8_400, cacheWrite: 30_000, hour: true)]
+        )
+        #expect([lead].summary(since: 0).coldRewrites == 1)
+        #expect([lead].summary(since: 0).coldRewriteWeightedTokens == 30_000 * 2)
 
         let total = [claude, codex].summary(since: 0)
         #expect(total.calls == 7)
@@ -112,6 +120,7 @@ struct UsageLedgerTests {
         #expect(recent["task"]?.calls == 2)
         #expect(recent["task"]?.coldRewrites == 2)
         #expect(recent["task"]?.peakContextTokens == 50_000)
-        #expect(TokenCounts(input: 1, output: 1, cacheRead: 40).weighted(model: "claude-sonnet-5-5") == 6)
+        #expect(TokenCounts(input: 1, output: 1, cacheRead: 40).weighted(model: "claude-sonnet-5-5") == 4)
+        #expect(TokenCounts(input: 2, output: 1, cacheWrite: 4, cacheRead: 40, hourCacheWrite: 2).weighted(model: "claude-fable-5-2") == 29)
     }
 }

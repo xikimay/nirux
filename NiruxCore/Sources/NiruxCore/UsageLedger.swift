@@ -133,14 +133,15 @@ public struct UsageSummary: Equatable, Sendable {
 
     public init() {}
 
-    /// A response after this long idle finds the cache expired (Claude
-    /// keeps it 5 minutes).
-    public static let coldIdle: TimeInterval = 5 * 60
+    /// How long a cache outlives its last use: 5 minutes, or an hour once
+    /// the stream writes hour-long entries (Claude Code's own sessions).
+    public static let cacheLifetime: TimeInterval = 5 * 60
+    public static let hourCacheLifetime: TimeInterval = 60 * 60
     /// From this many tokens rewritten: cache writes for Claude, uncached
     /// input for Codex and agy.
     public static let coldRewriteTokens = 20_000
 
-    mutating func add(_ event: UsageEvent, of session: UsageSessionKey, idle: TimeInterval?) {
+    mutating func add(_ event: UsageEvent, of session: UsageSessionKey, afterCacheExpiry: Bool) {
         let weighted = event.counts.weighted(model: event.model)
         calls += 1
         totals += event.counts
@@ -153,9 +154,9 @@ public struct UsageSummary: Equatable, Sendable {
             subagents.insert(session.id + "/" + subagentID)
         }
         let rewrite = session.agent == .claude
-            ? TokenCounts(cacheWrite: event.counts.cacheWrite)
+            ? TokenCounts(cacheWrite: event.counts.cacheWrite, hourCacheWrite: event.counts.hourCacheWrite)
             : TokenCounts(input: event.counts.input)
-        if let idle, idle >= Self.coldIdle, rewrite.context >= Self.coldRewriteTokens {
+        if afterCacheExpiry, rewrite.context >= Self.coldRewriteTokens {
             coldRewrites += 1
             coldRewriteWeightedTokens += rewrite.weighted(model: event.model)
         }
@@ -173,12 +174,16 @@ extension Sequence where Element == UsageSession {
         for session in self {
             // Idle gaps run across the whole history, per stream: a
             // subagent's pause says nothing of the session's cache.
-            var lastTimes: [String?: TimeInterval] = [:]
+            var streams: [String?: (lastUse: TimeInterval, cacheLifetime: TimeInterval)] = [:]
             for event in session.events {
-                let idle = lastTimes[event.subagentID].map { event.timestamp - $0 }
-                if event.timestamp > 0 { lastTimes[event.subagentID] = event.timestamp }
+                let stream = streams[event.subagentID]
+                let afterCacheExpiry = stream.map { event.timestamp - $0.lastUse >= $0.cacheLifetime } ?? false
+                if event.timestamp > 0 {
+                    let lifetime = event.counts.hourCacheWrite > 0 ? UsageSummary.hourCacheLifetime : stream?.cacheLifetime
+                    streams[event.subagentID] = (event.timestamp, lifetime ?? UsageSummary.cacheLifetime)
+                }
                 guard event.timestamp >= since, let group = key(session, event) else { continue }
-                summaries[group, default: UsageSummary()].add(event, of: session.key, idle: idle)
+                summaries[group, default: UsageSummary()].add(event, of: session.key, afterCacheExpiry: afterCacheExpiry)
             }
         }
         return summaries

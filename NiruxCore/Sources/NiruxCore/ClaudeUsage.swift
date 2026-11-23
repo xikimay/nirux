@@ -161,7 +161,12 @@ extension TokenCounts {
     init?(claudeUsage usage: [String: Any]) {
         let fields = Self.claudeKeys.map { Self.count(usage[$0]) }
         guard fields.contains(where: { $0 != nil }) else { return nil }
-        self.init(input: fields[0] ?? 0, output: fields[1] ?? 0, cacheWrite: fields[2] ?? 0, cacheRead: fields[3] ?? 0)
+        let cacheWrite = fields[2] ?? 0
+        let hourCacheWrite = Self.count((usage["cache_creation"] as? [String: Any])?["ephemeral_1h_input_tokens"]) ?? 0
+        self.init(
+            input: fields[0] ?? 0, output: fields[1] ?? 0, cacheWrite: cacheWrite, cacheRead: fields[3] ?? 0,
+            hourCacheWrite: min(hourCacheWrite, cacheWrite)
+        )
     }
 }
 

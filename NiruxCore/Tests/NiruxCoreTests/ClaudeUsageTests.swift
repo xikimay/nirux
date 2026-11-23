@@ -9,7 +9,7 @@ struct ClaudeUsageTests {
         let main = folder + "/session.jsonl"
         try UsageFixture.write([
             UsageFixture.claudeUser(cwd: "/Users/dev/app"),
-            UsageFixture.claudeResponse(id: "m1", time: "2026-11-20T10:00:00.000Z", cacheWrite: 30_000),
+            UsageFixture.claudeResponse(id: "m1", time: "2026-11-20T10:00:00.000Z", cacheWrite: 30_000, hourCacheWrite: 25_000),
             UsageFixture.claudeResponse(id: "inline", time: "2026-11-20T10:00:01.000Z", cacheRead: 90_000, sidechain: true)
         ], to: main)
         try UsageFixture.write([
@@ -22,6 +22,7 @@ struct ClaudeUsageTests {
         #expect(reader.sessionID == "session")
         #expect(reader.main.parser.cwd == "/Users/dev/app")
         #expect(reader.main.parser.usage.contextTokens == 30_002)
+        #expect(reader.main.parser.events.first?.counts.hourCacheWrite == 25_000)
         #expect(reader.events.map(\.subagentID) == [nil, "agent-a"])
         #expect(reader.events.map(\.timestamp) == [1_795_168_800, 1_795_168_802.5])
 

@@ -14,7 +14,8 @@ enum UsageFixture {
         cacheRead: Int = 0,
         output: Int = 10,
         model: String = "claude-opus-5-5",
-        sidechain: Bool = false
+        sidechain: Bool = false,
+        hourCacheWrite: Int = 0
     ) -> String {
         json([
             "type": "assistant", "isSidechain": sidechain, "requestId": "req_" + id, "timestamp": time,
@@ -22,7 +23,8 @@ enum UsageFixture {
                 "id": id, "model": model, "content": [["type": "text", "text": "never kept"]],
                 "usage": [
                     "input_tokens": 2, "cache_creation_input_tokens": cacheWrite,
-                    "cache_read_input_tokens": cacheRead, "output_tokens": output
+                    "cache_read_input_tokens": cacheRead, "output_tokens": output,
+                    "cache_creation": ["ephemeral_5m_input_tokens": cacheWrite - hourCacheWrite, "ephemeral_1h_input_tokens": hourCacheWrite]
                 ]
             ]
         ])
