@@ -53,7 +53,7 @@ Scenarios are declared in `scripts/canary/scenarios.py` with explicit step lists
 
 Exercises two Spaces (`Canary Alpha`, `Canary Beta`), two linked git worktrees, two workspaces with stable `agentUUID`s, and an active Mission between them:
 
-1. Launches a raw-PTY `AgentStandIn` (`stty -icanon min 1 time 0; exec -a claude /bin/cat > <capture>`) in each workspace.
+1. Launches a raw-PTY `AgentStandIn` (`stty -icanon min 1 time 0; exec -a claude /bin/cat > <capture>`) in each workspace. Nirux knows agents by their kernel process name, so it sees `cat`, not an agent: this scenario checks where bytes land and what the Mission files hold, not agent state.
 2. Types a seeded token into Beta and verifies byte-for-byte arrival in Beta's PTY with zero leakage into Alpha's PTY (`pty-isolation`).
 3. Exercises the packaged binary's own `--mission ask`, `--hook claude` (permission notification), and `--mission reply --accept` against the isolated `NIRUX_STATE_DIR`, verifying Mission persistence (`mission-no-double-delivery`) and that any active amber waiting badge is backed by a rendered reason in the AX tree (`amber-has-reason`).
 4. Switches back to Alpha via **Space → Previous Space**, types Alpha's token, and verifies byte-for-byte arrival in Alpha with zero cross-PTY leak to Beta.
