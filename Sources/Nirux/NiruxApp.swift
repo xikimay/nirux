@@ -5,6 +5,8 @@ import Sparkle
 @main @MainActor
 final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMenuItemValidation {
     var mainWindow: NSWindow?
+    /// Open for a canary run only (see CanaryChannel).
+    var canaryRequests: LeadRequestCenter?
     var shell: NiruxShellView? {
         // Its Settings window holds Nirux's panes too.
         didSet { if let shell, shell !== oldValue { wireSettings(shell.settingsWindow) } }
@@ -153,6 +155,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             TerminalDebugLog.enable([.metrics, .lifecycle])
         }
         NSApp.setActivationPolicy(.regular)
+        // A canary run drives this copy through its channel: behind the
+        // user's windows, never taking the focus.
+        let drivenByCanary = CanaryChannel.token(in: ProcessInfo.processInfo.environment) != nil
         setupKeyInterceptor()
         setupClickToFocus()
         setupMenus()
@@ -190,7 +195,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             shellView?.replyFromNotification(text, to: target, workspaceID: workspaceID, columnIndex: columnIndex)
         }
 
-        window.makeKeyAndOrderFront(nil)
+        if drivenByCanary { window.orderBack(nil) } else { window.makeKeyAndOrderFront(nil) }
         mainWindow = window
 
         // Before the restore relaunches agent sessions, which read the skills.
@@ -253,6 +258,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             shellView?.workspaces.contains { $0.id == request.workspaceID } == true
         }
         leadRequests.start()
+        canaryRequests = CanaryChannel.start(
+            environment: ProcessInfo.processInfo.environment, stateDirectory: Persistence.stateDirectory
+        ) { [weak self] request, answer in
+            guard let self else { return answer("Nirux is closing.", true) }
+            self.performCanaryRequest(request, answer: answer)
+        }
 
         // Focus first terminal
         shellView.focusActiveTerminal(in: window)
@@ -264,7 +275,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // check window.firstResponder === self and set focus accordingly.
         NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
 
-        NSApp.activate(ignoringOtherApps: true)
+        if !drivenByCanary { NSApp.activate(ignoringOtherApps: true) }
         startTrackingFrontmostApp()
         drainLaunchURLBacklog()
     }
@@ -345,6 +356,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         AgentHookCenter.shared.stop()
         MissionEventCenter.shared.stop()
         LeadRequestCenter.shared.stop()
+        canaryRequests?.stop()
     }
 
     // MARK: - NSMenuItemValidation
