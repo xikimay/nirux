@@ -127,10 +127,11 @@ enum LeadTools {
 
     /// How long a call then waits for the answer: a task fetches origin
     /// and makes its worktree first; a clean-up asks GitHub, then git
-    /// deletes; the daily pass asks GitHub about each repository.
+    /// deletes; the daily pass asks GitHub about each repository; deleting a
+    /// space waits for the user.
     static func workTimeout(for tool: String) -> TimeInterval {
         if tool == dailyPass { return 150 }
-        return [startTask, closeTask, queueMerge].contains(tool) ? 300 : 30
+        return [startTask, closeTask, queueMerge, deleteSpace].contains(tool) ? 300 : 30
     }
 
     static var agentProperties: [String: Any] {
@@ -478,9 +479,9 @@ enum LeadTools {
             definition(
                 deleteSpace, title: "Delete a space",
                 description: """
-                    Delete a space: its tasks move to move_tasks_to first; its defaults, setup scripts and rule proposals \
-                    are deleted, its brief stays. Refused for General, your space, the space on screen, and a space with a \
-                    Lead or a running merge queue.
+                    Delete a space once the user confirms it in Nirux's alert: its tasks move to move_tasks_to first; its \
+                    defaults, setup scripts and rule proposals are deleted, its brief stays. Refused for General, your space, \
+                    the space on screen, and a space with a Lead or a running merge queue.
                     """,
                 properties: [
                     "space": ["type": "string", "description": spaceDescription],

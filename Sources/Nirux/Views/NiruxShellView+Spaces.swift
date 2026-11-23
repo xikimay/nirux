@@ -29,18 +29,23 @@ extension NiruxShellView {
         let count = workspaces.filter { $0.profileID == profileID && !$0.isClosing }.count
         let target = profiles.first { $0.id == WorkspaceProfile.defaultID }?.name
             ?? WorkspaceProfile.defaultProfile.name
+        guard confirmSpaceDeletion(space, movingTo: target, count: count) else { return }
+        deleteSpace(profileID: profileID)
+    }
+
+    /// The question before a space goes, asked by the user or by a Lead.
+    func confirmSpaceDeletion(_ space: WorkspaceProfile, movingTo destination: String, count: Int, byLead: Bool = false) -> Bool {
         let moved = count == 0
             ? "It has no workspaces."
-            : "Its \(count == 1 ? "workspace moves" : "\(count) workspaces move") to \"\(target)\"."
-        guard confirmDestructiveClose(
-            message: "Delete the space \"\(space.name)\"?",
+            : "Its \(count == 1 ? "workspace moves" : "\(count) workspaces move") to \"\(destination)\"."
+        return confirmDestructiveClose(
+            message: byLead ? "The Lead asks to delete the space \"\(space.name)\"" : "Delete the space \"\(space.name)\"?",
             details: [
                 moved,
                 "Its defaults and setup scripts are deleted; its brief stays on disk. Folders and repositories aren't touched."
             ],
             confirmTitle: "Delete Space"
-        ) else { return }
-        deleteSpace(profileID: profileID)
+        )
     }
 
     /// Its shells keep the old NIRUX_PROFILE_ID until they restart.

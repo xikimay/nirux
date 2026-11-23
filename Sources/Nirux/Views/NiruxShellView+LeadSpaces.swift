@@ -14,8 +14,15 @@ extension NiruxShellView {
             return answer(leadTaskList(in: callerSpace, lead: leadID), false)
         }
         switch resolveSpace(requested) {
-        case .success(let target):
+        case .success(let target) where target.id == callerSpace.id:
             answer(leadTaskList(in: target, lead: leadID), false)
+        case .success(let target):
+            // As its own Lead reads it: whose each task is, and what it asks.
+            let owner = leadWorkspace(inSpace: target.id)
+            let name = MissionPromptText.quoted(target.name)
+            let view = owner == nil ? "“\(name)” has no Lead." : "As the Lead of “\(name)” sees it (“you” below is that Lead)."
+            answer(view + " Your tell, reply and close_task reach your own space only.\n"
+                + leadTaskList(in: target, lead: owner?.id ?? ""), false)
         case .failure(let refusal):
             answer(refusal.message, true)
         }
@@ -189,30 +196,60 @@ extension NiruxShellView {
         case .success(let resolved): target = resolved
         case .failure(let refusal): return answer(refusal.message, true)
         }
-        if let refusal = deleteSpaceRefusal(target, callerSpace: callerSpace) { return answer(refusal, true) }
-        let name = "“\(MissionPromptText.quoted(target.name))” (\(target.leadSpaceReference))"
-        // Sub-tasks after their task, as the sidebar lists them.
-        let tasks = workspaceStore.visibleWorkspaceIndices(in: target.id).map { workspaces[$0] }
-        var moved = ""
-        if !tasks.isEmpty {
-            let count = tasks.count == 1 ? "1 task" : "\(tasks.count) tasks"
-            guard let query = LeadTools.string(arguments, "move_tasks_to") else {
-                return answer("\(name) still has \(count): pass move_tasks_to to move them first.", true)
-            }
-            let destination: WorkspaceProfile
+        var destination: WorkspaceProfile?
+        if let query = LeadTools.string(arguments, "move_tasks_to") {
             switch resolveSpace(query) {
             case .success(let resolved): destination = resolved
             case .failure(let refusal): return answer(refusal.message, true)
             }
-            guard destination.id != target.id else { return answer("move_tasks_to must name another space.", true) }
-            if let refusal = spaceMoveRefusal(of: tasks, to: destination) { return answer(refusal, true) }
+        }
+        if let refusal = deleteRefusal(target, movingTo: destination, callerSpace: callerSpace) { return answer(refusal, true) }
+        let (spaceID, destinationID, callerID) = (target.id, destination?.id, callerSpace.id)
+        // Its defaults and setup scripts go: the user decides, as from the sidebar.
+        runFromRunLoop { [weak self] in
+            guard let self else { return answer("Nirux closed meanwhile: nothing changed.", true) }
+            let current = { (id: String?) in id.flatMap { id in self.profiles.first { $0.id == id } } }
+            guard let target = current(spaceID), let caller = current(callerID) else {
+                return answer("That space was deleted meanwhile.", true)
+            }
+            let tasks = self.workspaceStore.visibleWorkspaceIndices(in: spaceID)
+            let destination = current(destinationID)
+            guard self.confirmSpaceDeletion(target, movingTo: destination?.name ?? "", count: tasks.count, byLead: true) else {
+                return answer("The user kept “\(MissionPromptText.quoted(target.name))”: nothing changed.", true)
+            }
+            // Checked again: the space may have changed while the user read.
+            if let refusal = self.deleteRefusal(target, movingTo: destination, callerSpace: caller) { return answer(refusal, true) }
+            answer(self.deleteSpace(target, movingTasksTo: destination), false)
+        }
+    }
+
+    /// Why the Lead may not delete `target`, its tasks moving to `destination`; nil when it may.
+    private func deleteRefusal(_ target: WorkspaceProfile, movingTo destination: WorkspaceProfile?, callerSpace: WorkspaceProfile) -> String? {
+        if let refusal = deleteSpaceRefusal(target, callerSpace: callerSpace) { return refusal }
+        // Sub-tasks after their task, as the sidebar lists them.
+        let tasks = workspaceStore.visibleWorkspaceIndices(in: target.id).map { workspaces[$0] }
+        guard !tasks.isEmpty else { return nil }
+        guard let destination else {
+            let count = tasks.count == 1 ? "1 task" : "\(tasks.count) tasks"
+            return "“\(MissionPromptText.quoted(target.name))” still has \(count): pass move_tasks_to to move them first."
+        }
+        guard destination.id != target.id else { return "move_tasks_to must name another space." }
+        return spaceMoveRefusal(of: tasks, to: destination)
+    }
+
+    /// What it did, for the answer; checked by `deleteRefusal`.
+    private func deleteSpace(_ target: WorkspaceProfile, movingTasksTo destination: WorkspaceProfile?) -> String {
+        let name = "“\(MissionPromptText.quoted(target.name))” (\(target.leadSpaceReference))"
+        let tasks = workspaceStore.visibleWorkspaceIndices(in: target.id).map { workspaces[$0] }
+        var moved = ""
+        if let destination, !tasks.isEmpty {
             for task in tasks { moveWorkspaceToSpace(workspaceID: task.id, profileID: destination.id, refocusing: false) }
+            let count = tasks.count == 1 ? "1 task" : "\(tasks.count) tasks"
             moved = "Moved \(count) to “\(MissionPromptText.quoted(destination.name))” (\(destination.leadSpaceReference)), then "
         }
-        guard deleteSpace(profileID: target.id, refocusing: false) else {
-            return answer(moved + (moved.isEmpty ? "Nirux couldn't delete \(name)." : "couldn't delete \(name)."), true)
-        }
-        answer(moved + (moved.isEmpty ? "Deleted \(name)." : "deleted \(name)."), false)
+        // Refused only for a queue started meanwhile, which deleteRefusal saw.
+        deleteSpace(profileID: target.id, refocusing: false)
+        return moved + (moved.isEmpty ? "Deleted \(name)." : "deleted \(name).")
     }
 
     private func deleteSpaceRefusal(_ target: WorkspaceProfile, callerSpace: WorkspaceProfile) -> String? {
@@ -241,6 +278,10 @@ extension NiruxShellView {
         switch LeadTools.string(arguments, "from_space").map(resolveSpace) ?? .success(callerSpace) {
         case .success(let resolved): source = resolved
         case .failure(let refusal): return answer(refusal.message, true)
+        }
+        // Its Lead tells and closes its tasks, and only there.
+        if source.id != callerSpace.id, leadWorkspace(inSpace: source.id) != nil {
+            return answer("“\(MissionPromptText.quoted(source.name))” has a Lead of its own, which organizes its tasks: ask the user.", true)
         }
         let destination: WorkspaceProfile
         switch resolveSpace(LeadTools.string(arguments, "to_space") ?? "") {
@@ -396,8 +437,11 @@ extension NiruxShellView {
         _ paths: [String], then done: @escaping @MainActor @Sendable (Result<[SpaceAnchor], SpaceRefusal>) -> Void
     ) {
         let folders = paths.map { ($0 as NSString).expandingTildeInPath }
+        let deadline = Date().addingTimeInterval(sideEffects.leadAnchorWait)
         Self.identifyAllOffMain(folders, timeout: Self.anchorPickTimeout) { [weak self] identities in
             guard let self else { return done(.failure(SpaceRefusal(message: "Nirux closed meanwhile: nothing changed."))) }
+            // Past the call's wait, the Lead heard nothing came back: nothing may change then.
+            guard Date() < deadline else { return done(.failure(SpaceRefusal(message: "git took too long to name the folders: nothing changed."))) }
             done(self.anchors(of: folders, identities: identities))
         }
     }

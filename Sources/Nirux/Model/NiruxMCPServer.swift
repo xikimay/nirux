@@ -72,7 +72,8 @@ enum NiruxMCPServer {
     /// replays its launch line on restart. The `=` forms keep the variadic
     /// options from taking the next argument (a handover prompt). The
     /// tools don't ask: history_search only reads the project, and the
-    /// Lead's act through the app, which refuses what it may not do.
+    /// Lead's act through the app, which refuses what it may not do and asks
+    /// the user before deleting a space.
     static func claudeArguments(executable: String) -> [String] {
         let server: [String: Any] = ["type": "stdio", "command": executable, "args": ["--hook", "claude", "--mcp"]]
         let config = json(["mcpServers": [serverName: server]]).flatMap { String(bytes: $0, encoding: .utf8) } ?? "{}"
