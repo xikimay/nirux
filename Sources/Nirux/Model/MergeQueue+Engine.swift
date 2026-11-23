@@ -55,17 +55,21 @@ extension MergeQueue {
         let settings: BoardConfig.QueueSettings
         let cadence: Cadence
         let startedByLead: Bool
+        /// The branch a Train cadence composes its batch on: new for each Start.
+        let trainBranch: String
         private var stopMessage = "Stopped by the user."
-        private(set) var entries: [Entry]
-        private(set) var phase: Phase = .idle
+        // The train's flow (MergeQueue+Train) writes the state below too.
+        var entries: [Entry]
+        var phase: Phase = .idle
         /// The entry being worked on.
-        private(set) var current: Int?
+        var current: Int?
+        var train: Train?
         /// The request whose answer the engine waits for. An answer to any
         /// other is ignored: it comes from before a Stop.
         private(set) var request: Request?
-        private var purpose: Purpose?
+        var purpose: Purpose?
         private var nextRequestID = 1
-        private var clocks = Clocks()
+        var clocks = Clocks()
         /// The post-merge runs on the base that had failed at Start, by run
         /// and attempt: the sheet warns of them. Any other that fails since,
         /// a run still going at Start or rerun since included, stops the
@@ -73,9 +77,13 @@ extension MergeQueue {
         private var baseRunsFailedAtStart: Set<String> = []
         private var outbox = Output()
 
-        init(settings: BoardConfig.QueueSettings, entries: [ConfirmedEntry], cadence: Cadence = .standard, startedByLead: Bool = false) {
+        init(
+            settings: BoardConfig.QueueSettings, entries: [ConfirmedEntry], cadence: Cadence = .standard, startedByLead: Bool = false,
+            trainBranch: String = "nirux-train/queue"
+        ) {
             self.startedByLead = startedByLead
             self.cadence = cadence
+            self.trainBranch = trainBranch
             self.settings = settings
             self.entries = entries.map(Entry.init)
         }
@@ -87,6 +95,7 @@ extension MergeQueue {
         /// pull request doesn't read MERGED yet.
         var unconfirmedMutation: Mutation? {
             if case .mutate(let mutation)? = request?.action { return mutation }
+            if case .train(let step)? = purpose { return trainUnconfirmedMutation(step) }
             guard let entry = currentEntry else { return nil }
             switch purpose {
             case .updatePoll(let from)?, .updateFailed(let from, _)?:
@@ -110,7 +119,7 @@ extension MergeQueue {
             case .finished: return "Finished: \(entries.filter { $0.step == .done }.count) merged"
             case .stopped(let reason): return "Stopped: \(reason.message)"
             case .running, .paused, .stopping:
-                var text = current.map { current in
+                var text = cadence == .train ? trainStatusText : current.map { current in
                     let step = isWaitingOnBaseRun
                         ? "#\(entries[current].number) waiting for the \(GitHub.workflowLabel(settings.postMergeWorkflow)) "
                             + "on \(settings.baseBranch) before merging"
@@ -166,7 +175,7 @@ extension MergeQueue {
 
         // MARK: Why a request was sent
 
-        private enum Purpose: Equatable, Sendable {
+        enum Purpose: Equatable, Sendable {
             case start
             case preflight
             case preflightLocal(head: String)
@@ -187,12 +196,13 @@ extension MergeQueue {
             case mergeConfirm(head: String, baseTip: String, result: MutationResult)
             case postMerge(commit: String)
             case postMergeOutcome(commit: String, run: GitHub.WorkflowRun)
+            case train(TrainPurpose)
         }
 
         /// When each wait began (`systemUptime`), and what the current
         /// pull request's waits know. Reset for each pull request, except
         /// the read retries.
-        private struct Clocks: Equatable, Sendable {
+        struct Clocks: Equatable, Sendable {
             /// The update sent, the checks awaited, the merge sent, the merge made.
             var step: TimeInterval = 0
             var agentBusySince: TimeInterval?
@@ -222,11 +232,11 @@ extension MergeQueue {
 
         // MARK: Requests and stops
 
-        private mutating func read(_ reads: [Read], after delay: TimeInterval = 0, for purpose: Purpose) {
+        mutating func read(_ reads: [Read], after delay: TimeInterval = 0, for purpose: Purpose) {
             issue(.read(reads, after: max(0, delay)), purpose)
         }
 
-        private mutating func mutate(_ mutation: Mutation, for purpose: Purpose) {
+        mutating func mutate(_ mutation: Mutation, for purpose: Purpose) {
             issue(.mutate(mutation), purpose)
         }
 
@@ -238,25 +248,34 @@ extension MergeQueue {
             outbox.request = request
         }
 
-        private mutating func note(_ message: String) {
-            let entry = currentEntry
-            outbox.notes.append(Note(number: entry?.number, step: entry.map { Self.stepName($0.step) } ?? "queue", message: message))
+        /// Who a note or a journal line is about: the entry worked on, else the train.
+        var subject: (number: Int?, step: String) {
+            if let entry = currentEntry { return (entry.number, Self.stepName(entry.step)) }
+            if let train { return (train.number, "train") }
+            return (nil, "queue")
+        }
+
+        mutating func note(_ message: String) {
+            let subject = subject
+            outbox.notes.append(Note(number: subject.number, step: subject.step, message: message))
         }
 
         /// Stops the queue, and the pull request it was working on. When
         /// reads stop it while GitHub hasn't shown the effect of a call
         /// sent, the reason says so.
-        private mutating func stop(_ reason: StopReason) {
+        mutating func stop(_ reason: StopReason) {
             var reason = reason
-            if reason.kind == .github || reason.kind == .setup, let mutation = unconfirmedMutation, let entry = currentEntry {
+            if reason.kind == .github || reason.kind == .setup, let mutation = unconfirmedMutation,
+               let shown = train?.name ?? currentEntry.map({ "#\($0.number)" }) {
                 reason = StopReason(kind: reason.kind, message: reason.message + " The \(Self.describe(mutation)) was sent "
-                    + "and GitHub didn’t show its effect yet: check #\(entry.number) on GitHub.", url: reason.url)
+                    + "and GitHub didn’t show its effect yet: check \(shown) on GitHub.", url: reason.url)
             }
             note("Stopped: \(reason.message)")
             request = nil
             purpose = nil
             outbox.request = nil
             if let current, entries[current].step != .done { entries[current].step = .stopped(reason) }
+            if cadence == .train { settleTrainEntries(after: reason) }
             phase = .stopped(reason)
         }
 
@@ -343,8 +362,9 @@ extension MergeQueue {
         // MARK: Answers
 
         private mutating func observed(_ answers: [Read: ReadResult], purpose: Purpose, now: TimeInterval) {
+            if case .train(let step) = purpose { return trainObserved(answers, step, now: now) }
             guard case .start = purpose else { return observedForEntry(answers, purpose: purpose, now: now) }
-            startChecked(answers)
+            startChecked(answers, now: now)
         }
 
         private mutating func observedForEntry(_ answers: [Read: ReadResult], purpose: Purpose, now: TimeInterval) {
@@ -411,29 +431,34 @@ extension MergeQueue {
                 if !waitForBaseRuns(runs, head: head, index: index, now: now) { mergeChecks(head: head, index: index) }
             case .mergeConfirm(let head, let baseTip, let result):
                 guard let pullRequest = answers.pullRequest(number) else { return missingAnswer() }
-                mergeConfirmRead(pullRequest, head: head, baseTip: baseTip, result: result, index: index, now: now)
+                if pullRequest.state == .merged { entries[index].mergeCommit = pullRequest.mergeCommit }
+                confirmMerge(pullRequest, head: head, baseTip: baseTip, result: result, now: now,
+                             poll: .mergeConfirm(head: head, baseTip: baseTip, result: result)) { engine, commit in
+                    engine.merged(commit, index: index, now: now)
+                }
             case .postMerge(let commit):
                 guard let runs = answers.runs(.pushRuns(commit: commit)) else { return missingAnswer() }
-                postMergeRead(runs, commit: commit, index: index, now: now)
+                postMergeRead(runs, commit: commit, subject: "#\(number)", now: now, poll: .postMerge(commit: commit),
+                              outcome: { .postMergeOutcome(commit: commit, run: $0) }) { engine in engine.finishEntry(index) }
             case .postMergeOutcome(let commit, let run):
                 guard let runs = answers.runs(.baseRuns),
                       let comparison = answers.comparison(base: commit, head: settings.baseBranch)
                 else { return missingAnswer() }
-                postMergeFailed(run, commit: commit, baseRuns: runs, comparison: comparison, index: index)
-            case .start, .update, .rerun, .merge:
+                postMergeFailed(run, commit: commit, baseRuns: runs, comparison: comparison, subject: "#\(number)")
+            case .start, .update, .rerun, .merge, .train:
                 missingAnswer()
             }
         }
 
-        private mutating func missingAnswer() {
+        mutating func missingAnswer() {
             stop(StopReason(kind: .github, message: "Nirux didn’t get every answer it asked GitHub for."))
         }
 
-        private mutating func cannotCompare(_ head: String) {
+        mutating func cannotCompare(_ head: String) {
             stop(StopReason(kind: .github, message: "GitHub can’t compare \(Self.short(head)) with \(settings.baseBranch)."))
         }
 
-        private mutating func startChecked(_ answers: [Read: ReadResult]) {
+        private mutating func startChecked(_ answers: [Read: ReadResult], now: TimeInterval) {
             guard case .signedIn? = answers[.auth], let limit = answers.rateLimit, let mergeQueue = answers.baseMergeQueue else {
                 return missingAnswer()
             }
@@ -453,14 +478,14 @@ extension MergeQueue {
                     + "would queue pull requests there instead of merging them, without waiting for the post-merge workflow. "
                     + "Nirux’s queue doesn’t run on such a base."))
             }
-            advance()
+            cadence == .train ? trainStart(now: now) : advance()
         }
 
         // MARK: 1. Preflight
 
         /// Why a pull request can't go on, at any step: not open, a draft,
         /// another base, a fork, auto-merge, GitHub's merge queue.
-        private func problem(with pullRequest: PullRequestSnapshot) -> StopReason? {
+        func problem(with pullRequest: PullRequestSnapshot) -> StopReason? {
             let number = "#\(pullRequest.number)"
             let url = pullRequest.url
             if !pullRequest.isOpen {
@@ -490,7 +515,7 @@ extension MergeQueue {
         }
 
         /// "#52 changed since you confirmed it", with the two heads compared.
-        private func changed(index: Int, head: String) -> StopReason {
+        func changed(index: Int, head: String) -> StopReason {
             let entry = entries[index]
             return StopReason(
                 kind: .changed,
@@ -500,7 +525,7 @@ extension MergeQueue {
             )
         }
 
-        private func conflict(_ pullRequest: PullRequestSnapshot) -> StopReason {
+        func conflict(_ pullRequest: PullRequestSnapshot) -> StopReason {
             StopReason(kind: .conflict, message: "#\(pullRequest.number) conflicts with \(settings.baseBranch).", url: pullRequest.url)
         }
 
@@ -513,7 +538,7 @@ extension MergeQueue {
             return nil
         }
 
-        private func compareURL(_ base: String, _ head: String) -> String {
+        func compareURL(_ base: String, _ head: String) -> String {
             "https://github.com/\(settings.repository)/compare/\(base)...\(head)"
         }
 
@@ -545,7 +570,7 @@ extension MergeQueue {
         /// at most) before its worktree is looked at; tracked changes and
         /// unpushed commits stop. Returns whether the pull request waits
         /// (`retry` was asked for) or stopped.
-        private mutating func holdForLocal(
+        mutating func holdForLocal(
             _ local: LocalState, index: Int, now: TimeInterval, retry: (inout Engine) -> Void
         ) -> Bool {
             let number = entries[index].number
@@ -654,7 +679,7 @@ extension MergeQueue {
 
         /// `mergeable: UNKNOWN` is read again with back-off for 2 minutes;
         /// nil once they are up.
-        private mutating func unknownDelay(now: TimeInterval) -> TimeInterval? {
+        mutating func unknownDelay(now: TimeInterval) -> TimeInterval? {
             let since = clocks.unknownSince ?? now
             clocks.unknownSince = since
             guard now - since < Limits.mergeableUnknown else { return nil }
@@ -816,6 +841,20 @@ extension MergeQueue {
         /// stops the queue and anything else checks step 4 again. Returns
         /// whether the merge waits.
         private mutating func waitForBaseRuns(_ runs: [GitHub.WorkflowRun], head: String, index: Int, now: TimeInterval) -> Bool {
+            let deferred = cadence == .standard ? [] : Set(entries[..<index].compactMap(\.mergeCommit))
+            return waitForBaseRuns(runs, deferring: deferred, subject: "#\(entries[index].number)", poll: .baseRunWait(head: head),
+                                   now: now) { engine in
+                engine.mergeChecks(head: head, index: index)
+            }
+        }
+
+        /// The same for any merge: the queue's own push runs of `deferring`
+        /// aren't waited for, `poll` reads the runs again, and `recheck`
+        /// checks the merge again once the awaited runs ended.
+        mutating func waitForBaseRuns(
+            _ runs: [GitHub.WorkflowRun], deferring deferredCommits: Set<String>, subject: String, poll: Purpose, now: TimeInterval,
+            recheck: (inout Engine) -> Void
+        ) -> Bool {
             let label = GitHub.workflowLabel(settings.postMergeWorkflow)
             // One that failed between two looks is caught too.
             if let failed = runs.first(where: {
@@ -826,7 +865,6 @@ extension MergeQueue {
                     + "\(settings.baseBranch) failed: the base may be broken.", url: failed.url))
                 return true
             }
-            let deferredCommits = cadence == .standard ? [] : Set(entries[..<index].compactMap(\.mergeCommit))
             let unfinished = runs.filter { run in
                 !run.isCompleted && !(run.event == "push" && run.attempt == 1 && deferredCommits.contains(run.headSha))
             }
@@ -842,7 +880,7 @@ extension MergeQueue {
                         + "\(settings.postMergeTimeoutMinutes) minutes.", url: unfinished.first?.url))
                     return true
                 }
-                read([.baseRuns], after: Limits.runPollInterval, for: .baseRunWait(head: head))
+                read([.baseRuns], after: Limits.runPollInterval, for: poll)
                 return true
             }
             guard !clocks.awaitedBaseRuns.isEmpty else { return false }
@@ -854,24 +892,23 @@ extension MergeQueue {
             }
             clocks.awaitedBaseRuns = []
             clocks.baseRunsSince = nil
-            note("The \(label) on \(settings.baseBranch) finished: checking #\(entries[index].number) again")
-            mergeChecks(head: head, index: index)
+            note("The \(label) on \(settings.baseBranch) finished: checking \(subject) again")
+            recheck(&self)
             return true
         }
 
         /// The pull request must read MERGED, with the confirmed head, and
-        /// its merge commit on top of the base tip step 4 compared with.
-        private mutating func mergeConfirmRead(
-            _ pullRequest: PullRequestSnapshot, head: String, baseTip: String, result: MutationResult, index: Int,
-            now: TimeInterval
+        /// its merge commit on top of the base tip step 4 compared with:
+        /// `landed` goes on with that commit; `poll` reads it again.
+        mutating func confirmMerge(
+            _ pullRequest: PullRequestSnapshot, head: String, baseTip: String, result: MutationResult, now: TimeInterval,
+            poll: Purpose, landed: (inout Engine, String) -> Void
         ) {
             let number = pullRequest.number
             let again = { (engine: inout Engine) in
-                engine.read([.pullRequest(number)], after: Limits.mergeConfirmInterval,
-                            for: .mergeConfirm(head: head, baseTip: baseTip, result: result))
+                engine.read([.pullRequest(number)], after: Limits.mergeConfirmInterval, for: poll)
             }
             if pullRequest.state == .merged {
-                entries[index].mergeCommit = pullRequest.mergeCommit
                 guard pullRequest.headOid == head else {
                     return stop(StopReason(kind: .merge, message: "#\(number) was merged at \(Self.short(pullRequest.headOid)), "
                         + "not at \(Self.short(head)): outside the queue.", url: pullRequest.url))
@@ -889,7 +926,7 @@ extension MergeQueue {
                         + "not on \(Self.short(baseTip)), the tip of \(settings.baseBranch) it was checked against."))
                 }
                 note("Merged as \(Self.short(mergeCommit))")
-                return merged(mergeCommit, index: index, now: now)
+                return landed(&self, mergeCommit)
             }
             if pullRequest.isOpen, pullRequest.hasAutoMerge {
                 return stop(StopReason(kind: .merge, message: "GitHub enabled auto-merge on #\(number) instead of merging it. "
@@ -934,42 +971,44 @@ extension MergeQueue {
             advance()
         }
 
-        private mutating func postMergeRead(_ runs: [GitHub.WorkflowRun], commit: String, index: Int, now: TimeInterval) {
+        /// The post-merge run of `commit`, merged for `subject` ("#52"):
+        /// `poll` reads it again, `outcome` asks why a run didn't succeed.
+        mutating func postMergeRead(
+            _ runs: [GitHub.WorkflowRun], commit: String, subject: String, now: TimeInterval, poll: Purpose,
+            outcome: (GitHub.WorkflowRun) -> Purpose, succeeded: (inout Engine) -> Void
+        ) {
             let label = GitHub.workflowLabel(settings.postMergeWorkflow)
-            let number = entries[index].number
             let again = { (engine: inout Engine) in
-                engine.read([.pushRuns(commit: commit)], after: Limits.runPollInterval, for: .postMerge(commit: commit))
+                engine.read([.pushRuns(commit: commit)], after: Limits.runPollInterval, for: poll)
             }
             guard let run = runs.filter({ $0.headSha == commit && $0.event == "push" }).max(by: { $0.id < $1.id }) else {
                 guard now - clocks.step < Limits.postMergeRunAppears else {
                     return stop(StopReason(kind: .postMerge, message: "No \(label) run started for \(Self.short(commit)) "
-                        + "within 5 minutes of merging #\(number)."))
+                        + "within 5 minutes of merging \(subject)."))
                 }
                 return again(&self)
             }
             guard run.isCompleted else {
                 guard now - clocks.step < TimeInterval(settings.postMergeTimeoutMinutes * 60) else {
-                    return stop(StopReason(kind: .postMerge, message: "The \(label) of #\(number) still runs after "
+                    return stop(StopReason(kind: .postMerge, message: "The \(label) of \(subject) still runs after "
                         + "\(settings.postMergeTimeoutMinutes) minutes.", url: run.url))
                 }
                 return again(&self)
             }
             if GitHub.isSucceededRun(run.conclusion) {
-                note("The \(label) of #\(number) succeeded")
-                return finishEntry(index)
+                note("The \(label) of \(subject) succeeded")
+                return succeeded(&self)
             }
-            read([.baseRuns, .compare(base: commit, head: settings.baseBranch)],
-                 for: .postMergeOutcome(commit: commit, run: run))
+            read([.baseRuns, .compare(base: commit, head: settings.baseBranch)], for: outcome(run))
         }
 
         /// A run that didn't succeed: whether the base moved since the
         /// merge tells a push from outside from the pull request's own
         /// failure (section 3.4).
-        private mutating func postMergeFailed(
-            _ run: GitHub.WorkflowRun, commit: String, baseRuns: [GitHub.WorkflowRun], comparison: Comparison?, index: Int
+        mutating func postMergeFailed(
+            _ run: GitHub.WorkflowRun, commit: String, baseRuns: [GitHub.WorkflowRun], comparison: Comparison?, subject: String
         ) {
             let label = GitHub.workflowLabel(settings.postMergeWorkflow)
-            let number = entries[index].number
             let base = settings.baseBranch
             // GitHub not knowing the merge commit on the base any more: moved too.
             let moved = comparison.map { $0.aheadBy > 0 || $0.behindBy > 0 } ?? true
@@ -981,18 +1020,18 @@ extension MergeQueue {
             let message: String
             if conclusion.lowercased() == "cancelled" {
                 if moved {
-                    message = "The \(label) of #\(number) was cancelled by a push: \(base) moved to \(movedTo) before it "
-                        + "finished. Nirux doesn’t take a later run’s result as #\(number)’s."
+                    message = "The \(label) of \(subject) was cancelled by a push: \(base) moved to \(movedTo) before it "
+                        + "finished. Nirux doesn’t take a later run’s result as \(subject)’s."
                 } else if baseRuns.contains(where: { $0.headSha == commit && $0.event != "push" && $0.id > run.id }) {
-                    message = "The \(label) of #\(number) was cancelled by a manual run on the same commit."
+                    message = "The \(label) of \(subject) was cancelled by a manual run on the same commit."
                 } else {
-                    message = "The \(label) of #\(number) was cancelled."
+                    message = "The \(label) of \(subject) was cancelled."
                 }
             } else if moved {
-                message = "The \(label) of #\(number) failed (\(conclusion)), but \(base) moved to \(movedTo) after the merge: "
-                    + "a run whose commit is no longer the tip may refuse to publish it, so #\(number) may not be at fault."
+                message = "The \(label) of \(subject) failed (\(conclusion)), but \(base) moved to \(movedTo) after the merge: "
+                    + "a run whose commit is no longer the tip may refuse to publish it, so \(subject) may not be at fault."
             } else {
-                message = "The \(label) of #\(number) failed (\(conclusion))."
+                message = "The \(label) of \(subject) failed (\(conclusion))."
             }
             stop(StopReason(kind: .postMerge, message: message, url: run.url))
         }
@@ -1000,12 +1039,13 @@ extension MergeQueue {
         // MARK: Mutation answers
 
         private mutating func mutated(_ result: MutationResult, purpose: Purpose, now: TimeInterval) {
-            guard let index = current else { return missingAnswer() }
-            let number = entries[index].number
             if case .dryRun(let command, let reason) = result {
                 return stop(StopReason(kind: .dryRun, message: "Dry run: this build doesn’t change GitHub, because "
                     + "\(reason). It stopped before running: \(command)"))
             }
+            if case .train(let step) = purpose { return trainMutated(result, step, now: now) }
+            guard let index = current else { return missingAnswer() }
+            let number = entries[index].number
             switch purpose {
             case .update(let from):
                 switch result {
@@ -1061,6 +1101,7 @@ extension MergeQueue {
             case .rerunning: return "rerunning"
             case .merging: return "merging"
             case .waitingForPostMerge: return "post-merge"
+            case .inTrain: return "train"
             case .done: return "done"
             case .stopped: return "stopped"
             }
@@ -1071,6 +1112,9 @@ extension MergeQueue {
             case .updateBranch(let number, let head): return "update-branch #\(number) from \(short(head))"
             case .rerun(let runID): return "rerun of run \(runID)"
             case .merge(let number, let head, let method): return "\(method.rawValue) of #\(number) at \(short(head))"
+            case .createBranch(let name, let commit): return "creation of branch \(name) at \(short(commit))"
+            case .mergeIntoBranch(let branch, let head, _): return "merge of \(short(head)) into \(branch)"
+            case .openPullRequest(let base, let head, _, _): return "pull request of \(head) into \(base)"
             }
         }
 

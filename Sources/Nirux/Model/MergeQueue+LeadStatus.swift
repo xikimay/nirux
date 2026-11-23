@@ -13,6 +13,9 @@ extension MergeQueue {
             lines.append("Status: " + journal.status)
             let current = saved.current.flatMap { saved.entries[safe: $0] }
             if let current { lines.append("Current PR: #\(current.number)") }
+            if let train = saved.train {
+                lines.append("Train: \(train.name) on \(train.branch), at \(MergeQueue.Engine.short(train.head))")
+            }
             if saved.isRunning {
                 lines.append("Cadence: " + saved.effectiveCadence.title)
                 lines.append("Started by: " + (saved.startedByLead.map { $0 ? "Lead" : "user" } ?? "unknown"))

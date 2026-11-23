@@ -94,7 +94,11 @@ enum MQ {
         var pullRequests: [Int: MergeQueue.PullRequestSnapshot] = [:]
         var details: [Int: MergeQueue.PullRequestDetails] = [:]
         var checks: [String: MergeQueue.CommitChecks] = [:]
+        /// The checks of any commit `checks` doesn't name.
+        var defaultChecks = MergeQueue.CommitChecks()
         var mainTip = MQ.sha("0")
+        /// Branches other than main, at their tips.
+        var branches: [String: String] = [:]
         /// Commits of `main` each head lacks.
         var behind: [String: Int] = [:]
         /// Answers for other compares, by read.
@@ -119,7 +123,7 @@ enum MQ {
                 return .pullRequestDetails(details[number] ?? MergeQueue.PullRequestDetails(
                     title: "Change \(number)", files: ["Sources/\(number).swift"], hasMoreFiles: false
                 ))
-            case .checks(let sha): return .checks(checks[sha] ?? MergeQueue.CommitChecks())
+            case .checks(let sha): return .checks(checks[sha] ?? defaultChecks)
             case .compare(let base, let head):
                 if let answer = compares[read] { return .comparison(answer) }
                 if base == "main" {
@@ -134,6 +138,9 @@ enum MQ {
             case .baseRuns: return .runs(baseRuns)
             case .pushRuns(let commit): return .runs(pushRuns[commit] ?? [])
             case .local: return .local(local)
+            case .branch(let name): return .branch(name == "main" ? mainTip : branches[name])
+            case .pullRequests(let head):
+                return .pullRequests(pullRequests.values.filter { $0.headRefName == head }.sorted { $0.number > $1.number })
             }
         }
 

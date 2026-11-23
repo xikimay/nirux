@@ -326,13 +326,20 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
                          GitHub.parseWorkflowRuns).map { .runs($0) }
         case .local:
             return .failure(.unreadable("the local worktrees aren’t a GitHub read"))
+        case .branch(let name):
+            return parse(call(Self.branchArguments(repository: repository, branch: name)), MergeQueue.parseBranchTip)
+                .map { .branch($0) }
+        case .pullRequests(let head):
+            return parse(call(Self.pullRequestsArguments(repository: repository, head: head)), MergeQueue.parsePullRequests)
+                .map { .pullRequests($0) }
         }
     }
 
     // MARK: Mutations
 
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
-        switch gh(.init(Self.mutationArguments(mutation, repository: settings.repository), timeout: Self.mutationTimeout)).flatMap(\.result) {
+        switch gh(.init(Self.mutationArguments(mutation, repository: settings.repository), timeout: Self.mutationTimeout))
+            .flatMap(\.result) {
         case .success: return .sent
         case .failure(let error): return Self.mutationResult(error)
         }
@@ -460,19 +467,56 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         case .merge(let number, let head, let method):
             return ["pr", "merge", "\(number)", "--repo", "\(GitHub.host)/\(repository)", "--\(method.rawValue)",
                     "--match-head-commit", head]
+        case .createBranch(let name, let commit):
+            return ["api", "--hostname", GitHub.host, "--method", "POST", "repos/\(repository)/git/refs",
+                    "-f", "ref=refs/heads/\(name)", "-f", "sha=\(commit)"]
+        case .mergeIntoBranch(let branch, let head, let message):
+            return ["api", "--hostname", GitHub.host, "--method", "POST", "repos/\(repository)/merges",
+                    "-f", "base=\(branch)", "-f", "head=\(head)", "-f", "commit_message=\(message)"]
+        case .openPullRequest(let base, let head, let title, let body):
+            return ["api", "--hostname", GitHub.host, "--method", "POST", "repos/\(repository)/pulls",
+                    "-f", "base=\(base)", "-f", "head=\(head)", "-f", "title=\(title)", "-f", "body=\(body)"]
         }
     }
+
+    /// GraphQL: a branch name with a `/` needs no escaping, and a missing
+    /// branch reads `null` rather than failing.
+    static func branchArguments(repository: String, branch: String) -> [String] {
+        GitHub.CLI.graphQL(branchQuery, strings: GitHub.CLI.repositoryVariables(repository) + [("ref", "refs/heads/\(branch)")])
+    }
+
+    static func pullRequestsArguments(repository: String, head: String) -> [String] {
+        GitHub.CLI.graphQL(pullRequestsQuery, strings: GitHub.CLI.repositoryVariables(repository) + [("head", head)])
+    }
+
+    static let branchQuery = """
+    query($owner: String!, $name: String!, $ref: String!) {
+      repository(owner: $owner, name: $name) { ref(qualifiedName: $ref) { target { oid } } }
+    }
+    """
+
+    static let pullRequestsQuery = """
+    query($owner: String!, $name: String!, $head: String!) {
+      repository(owner: $owner, name: $name) {
+        pullRequests(headRefName: $head, first: 5, orderBy: {field: CREATED_AT, direction: DESC}) {
+          nodes { \(pullRequestFields) }
+        }
+      }
+    }
+    """
+
+    static let pullRequestFields = """
+    number state isDraft url headRefName headRefOid baseRefName \
+    headRepository { name owner { login } } \
+    mergeable isInMergeQueue \
+    autoMergeRequest { enabledAt } \
+    mergeCommit { oid parents(first: 2) { nodes { oid } } }
+    """
 
     static let pullRequestQuery = """
     query($owner: String!, $name: String!, $number: Int!) {
       repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          number state isDraft url headRefName headRefOid baseRefName
-          headRepository { name owner { login } }
-          mergeable isInMergeQueue
-          autoMergeRequest { enabledAt }
-          mergeCommit { oid parents(first: 2) { nodes { oid } } }
-        }
+        pullRequest(number: $number) { \(pullRequestFields) }
       }
     }
     """

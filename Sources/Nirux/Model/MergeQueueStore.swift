@@ -61,6 +61,7 @@ extension MergeQueue {
         var stopReason: StopReason?
         var entries: [Entry]
         var current: Int?
+        var train: Train?
         /// A mutating call sent whose effect GitHub hasn't shown yet: "merge
         /// of #52 at abc1234".
         var inFlight: String?
@@ -75,6 +76,7 @@ extension MergeQueue {
             self.savedAt = savedAt
             entries = engine.entries
             current = engine.current
+            train = engine.train
             inFlight = engine.unconfirmedMutation.map(Engine.describe)
             switch engine.phase {
             case .idle, .running, .paused: status = .running
@@ -87,6 +89,12 @@ extension MergeQueue {
         }
 
         var isRunning: Bool { status == .running || status == .stopping }
+
+        /// Where a running queue is: "waiting for the nightly of #52".
+        var stepDescription: String {
+            if let train { return train.stepDescription(workflow: postMergeWorkflow) }
+            return current.flatMap { entries[safe: $0] }?.stepDescription(workflow: postMergeWorkflow) ?? "starting"
+        }
 
         /// The same queue, whenever it was saved: nothing to write again.
         func isSame(as other: SavedQueue?) -> Bool {
@@ -102,16 +110,15 @@ extension MergeQueue {
             guard isRunning else { return self }
             var saved = self
             let entry = current.flatMap { entries[safe: $0] }
-            var message = "Interrupted while "
-                + (entry?.stepDescription(workflow: postMergeWorkflow) ?? "starting") + ": Nirux quit."
-            if let inFlight, let entry {
-                message += " Its \(inFlight) was sent but not answered: check #\(entry.number) on GitHub."
+            var message = "Interrupted while " + stepDescription + ": Nirux quit."
+            if let inFlight, let shown = train?.name ?? entry.map({ "#\($0.number)" }) {
+                message += " Its \(inFlight) was sent but not answered: check \(shown) on GitHub."
             }
             let reason = StopReason(kind: .interrupted, message: message)
             saved.status = .stopped
             saved.stopReason = reason
-            if let current, saved.entries.indices.contains(current), saved.entries[current].step.isActive {
-                saved.entries[current].step = .stopped(reason)
+            for index in saved.entries.indices where saved.entries[index].step.isActive {
+                saved.entries[index].step = .stopped(reason)
             }
             return saved
         }

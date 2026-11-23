@@ -80,6 +80,7 @@ extension ProjectBoard {
         case .rerunning: return "rerunning checks"
         case .merging: return "merging"
         case .waitingForPostMerge: return "waiting for \(GitHub.workflowLabel(workflow))"
+        case .inTrain: return "in the train"
         case .done: return "merged ✓"
         case .stopped(let reason): return "stopped: \(queueStopLabel(reason, workflow: workflow))"
         }
@@ -98,6 +99,7 @@ extension ProjectBoard {
         case .agentBusy: return "agent busy"
         case .local: return "local changes"
         case .update: return "update failed"
+        case .train: return "train"
         case .checks: return "checks"
         case .merge: return "merge failed"
         case .postMerge: return "\(GitHub.workflowLabel(workflow)) failed"
@@ -119,9 +121,7 @@ extension MergeQueue.SavedQueue {
         case .stopped: return "Stopped: " + (stopReason?.message ?? "no reason saved")
         case .finished: return "Finished: \(entries.filter { $0.step == .done }.count) merged"
         case .running, .stopping:
-            let entry = current.flatMap { entries[safe: $0] }
-            return (entry?.stepDescription(workflow: postMergeWorkflow) ?? "starting")
-                + (current.map { ", \($0 + 1) of \(entries.count)" } ?? "")
+            return stepDescription + (train == nil ? current.map { ", \($0 + 1) of \(entries.count)" } ?? "" : "")
         }
     }
 }

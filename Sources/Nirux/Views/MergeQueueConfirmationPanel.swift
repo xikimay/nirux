@@ -197,7 +197,8 @@ final class MergeQueueConfirmationPanel: NSObject {
             cadencePicker = picker
             y += picker.frame.height + 4
             add(confirmation.summary, color: Self.primaryText)
-            if confirmation.cadence != .standard, confirmation.settings.postMergeWorkflow != nil, confirmation.items.count > 1 {
+            if [.batchPostMerge, .expressDisjoint].contains(confirmation.cadence), confirmation.settings.postMergeWorkflow != nil,
+               confirmation.items.count > 1 {
                 add("Intermediate pushes can still trigger workflows and publish releases.", color: Self.secondaryText, font: Theme.Font.caption)
             }
             if let reason = confirmation.expressRefusal {

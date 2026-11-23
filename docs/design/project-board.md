@@ -356,7 +356,7 @@ Definitions:
   GitHub recomputes it. The queue re-reads with back-off for up to 2 minutes.
   Only CONFLICTING is a conflict.
 
-The sheet opens in **Standard** every time. Two opt-in cadences apply to this Start only.
+The sheet opens in **Standard** every time. Three opt-in cadences apply to this Start only.
 
 - **Batch post-merge** keeps branch updates and required checks for each PR.
   With a configured post-merge workflow, it waits for the push run on the final
@@ -370,6 +370,23 @@ The sheet opens in **Standard** every time. Two opt-in cadences apply to this St
   before each merge, then verifies the final push run if configured.
 - Both fast cadences let pending push runs from earlier merges in this batch
   continue. Other base runs and observed failures retain their usual guards.
+- **Train** lands the batch with one CI run and one merge into the base: one
+  writer on the base. It needs the merge method `merge`. Each PR must be open
+  at its confirmed head, free of conflicts, with idle agents and green checks;
+  checks still running are waited for. Nirux composes the train on GitHub: a
+  branch `nirux-train/<UTC time>` at the base's tip (`POST git/refs`), then
+  one merge commit per PR head in the confirmed order (`POST merges`, made by
+  `web-flow`, each verified on top of the previous one). A 409 is a conflict
+  and stops on that PR. A pull request of the train into the base runs the
+  required checks once, on a commit up to date by construction, so the strict
+  "up to date" rule stays. Before merging it, the queue checks the base still
+  sits at the train's tip and every PR is still at its head, then merges it
+  pinned to its head. The PRs' heads never change. GitHub marks each PR merged
+  once its head lands, with the train's merge commit for it: observed on a
+  throwaway base (#779–#792), not documented. So the queue reads every PR and
+  stops loudly if one doesn't read merged within a minute. The post-merge
+  workflow runs once, on the train's merge. Train branches stay on GitHub,
+  like every branch Nirux pushes (see pr-stacks.md).
 
 For each PR in Standard, in order:
 

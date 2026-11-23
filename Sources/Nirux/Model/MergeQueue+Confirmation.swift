@@ -119,12 +119,24 @@ extension MergeQueue {
         private(set) var cadence: Cadence = .standard
 
         var offeredCadences: [Cadence] {
-            Cadence.allCases.filter { $0 != .batchPostMerge || settings.postMergeWorkflow != nil }
+            Cadence.allCases.filter { Self.unavailability(of: $0, settings: settings) == nil }
         }
 
         func refusal(for cadence: Cadence) -> String? {
-            if !offeredCadences.contains(cadence) { return "Batch post-merge needs a configured post-merge workflow." }
+            if let reason = Self.unavailability(of: cadence, settings: settings) { return reason }
             return cadence == .expressDisjoint ? expressRefusal : nil
+        }
+
+        /// Why these settings don't offer a cadence.
+        static func unavailability(of cadence: Cadence, settings: BoardConfig.QueueSettings) -> String? {
+            switch cadence {
+            case .batchPostMerge where settings.postMergeWorkflow == nil:
+                "Batch post-merge needs a configured post-merge workflow."
+            case .train where settings.mergeMethod != .merge:
+                "A train needs the merge method “merge”: it lands each pull request’s own commits, which a squash would replace."
+            default:
+                nil
+            }
         }
 
         mutating func select(_ cadence: Cadence) {
@@ -145,6 +157,11 @@ extension MergeQueue {
 
         var summary: String {
             let count = items.count
+            if cadence == .train {
+                let lands = "land \(count) pull request\(count == 1 ? "" : "s") into \(settings.baseBranch) in one train: one run "
+                    + "of the required checks" + (settings.postMergeWorkflow.map { ", then \($0) once" } ?? "")
+                return isDryRun ? "A real queue would \(lands). This dry run changes nothing on GitHub." : "The queue will \(lands)."
+            }
             let merges = "\(count) merge\(count == 1 ? "" : "s")"
             guard let workflow = settings.postMergeWorkflow else {
                 return isDryRun ? "A real queue would make \(merges) into \(settings.baseBranch). This dry run makes none."
@@ -168,6 +185,9 @@ extension MergeQueue {
         /// What will happen, line by line (section 4).
         var plan: [String] {
             let base = settings.baseBranch
+            let stops = "It stops at the first problem. Stop is in the board and in the status bar; a call already "
+                + "sent to GitHub finishes."
+            if cadence == .train { return trainPlan + [stops] }
             let method = settings.mergeMethod == .squash ? "Squash and merge it" : "Merge it with a merge commit"
             var lines = ["In this order, for each pull request:"]
             if cadence == .expressDisjoint {
@@ -198,9 +218,24 @@ extension MergeQueue {
             } else {
                 lines.append("• Go on to the next one right away: no post-merge workflow.")
             }
-            lines.append("It stops at the first problem. Stop is in the board and in the status bar; a call already "
-                + "sent to GitHub finishes.")
+            lines.append(stops)
             return lines
+        }
+
+        private var trainPlan: [String] {
+            let base = settings.baseBranch
+            let checks = "\(settings.requiredChecks.joined(separator: ", ")) (up to \(settings.checksTimeoutMinutes) minutes)"
+            return [
+                "In one train, in this order:",
+                "• Check each pull request: open, at the head shown here, its own checks green: \(checks).",
+                "• On GitHub, start a branch nirux-train/… at the tip of \(base) and merge each head into it. The heads stay as "
+                    + "shown: no branch update, rebase or force push.",
+                "• Open a pull request of the train into \(base) and wait for its required checks: \(checks).",
+                "• Merge it with a merge commit, pinned to its head (gh pr merge --merge --match-head-commit), if \(base) hasn’t "
+                    + "moved and each pull request is still at its head. Each pull request then reads merged; the queue checks it.",
+                settings.postMergeWorkflow.map { "• Then wait up to \(settings.postMergeTimeoutMinutes) minutes for \($0), once." }
+                    ?? "• No post-merge workflow: done once they read merged."
+            ]
         }
     }
 
