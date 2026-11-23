@@ -420,16 +420,20 @@ New flow, built on the guarded typing `tell` already uses
     branch, satisfying the Board's local review pass.
   - `list_spaces()`, `create_space(name, color?, anchors?, move_anchors?)`,
     `edit_space(space, name?, color?, add_anchors?, remove_anchors?, move_anchors?)`,
-    `delete_space(space, move_tasks_to?)`, and
-    `move_task_to_space(task, to_space, from_space?)`: space organization
-    without stealing focus or showing modal alerts. `create_space` and
-    `edit_space` validate `#RRGGBB` colors, reject case-insensitive duplicate
-    names and anchors owned by another space unless `move_anchors: true`, and
-    keep General anchor-free. `delete_space` refuses General, the caller's own
-    space, spaces with an active Lead or running merge queue, and non-empty
-    spaces unless `move_tasks_to` migrates their tasks first.
-    `move_task_to_space` refuses Lead or closing workspaces and reuses
-    `moveWorkspaceToSpace` without yanking focus.
+    `delete_space(space, move_tasks_to?)` and
+    `move_task_to_space(task, to_space, from_space?)`, used only when the
+    user asks: no alert, and nothing comes to the front. Anchors are
+    absolute paths; a path in a repository anchors that repository, never
+    one holding the home folder. One that belongs to another space moves
+    only with `move_anchors: true`; a space with a Lead or a running merge
+    queue keeps its own, as Space Settings alone can take or remove them. `delete_space` refuses General, the Lead's own
+    space, the space on screen or open in Space Settings, and a space with a
+    Lead or a running merge queue; its tasks move to `move_tasks_to` first.
+    `move_task_to_space` moves a task with its sub-tasks. It refuses the
+    task on screen, a Lead, a closing task, one waiting for a merge (a held
+    message or start reads the space it is in then), and one with an open
+    Mission to a workspace that stays (Lead and task tools reach their own
+    space only).
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state

@@ -127,12 +127,12 @@ final class LeadSpaceToolsTests: XCTestCase {
             XCTAssertTrue(broadAnchor.isError, broadAnchor.text)
             XCTAssertNil(shell.profiles.first { $0.name == "TooBroad" })
 
-            // Anchor already owned by another space is rejected unless move_anchors: true.
+            // The repository of a space with a Lead stays there, move_anchors or not.
             let ownedConflict = try harness.callLeadTool(LeadTools.createSpace, [
-                "name": "Steal", "anchors": [harness.repo]
+                "name": "Steal", "anchors": [harness.repo], "move_anchors": true
             ], lead: lead)
             XCTAssertTrue(ownedConflict.isError, ownedConflict.text)
-            XCTAssertTrue(ownedConflict.text.contains("already belongs to"), ownedConflict.text)
+            XCTAssertTrue(ownedConflict.text.contains("only the user can move it"), ownedConflict.text)
             XCTAssertNil(shell.profiles.first { $0.name == "Steal" })
 
             // Valid git repository + plain folder anchors + explicit color.
@@ -142,13 +142,17 @@ final class LeadSpaceToolsTests: XCTestCase {
                 "name": "Backend", "color": "#ff9e64", "anchors": [secondRepo, notesDir]
             ], lead: lead)
             XCTAssertFalse(anchored.isError, anchored.text)
+            XCTAssertTrue(anchored.text.contains("with repository “backend”, folder “notes”"), anchored.text)
             let backend = try XCTUnwrap(shell.profiles.first { $0.name == "Backend" })
             XCTAssertEqual(backend.colorHex, "#FF9E64")
             XCTAssertEqual(backend.anchors.map(\.name), ["backend", "notes"])
             XCTAssertEqual(shell.activeProfileID, lead.space)
             XCTAssertEqual(shell.activeWorkspace?.id, active.id)
 
-            // Explicit move_anchors: true moves anchor cleanly.
+            // Another space's anchor moves only with move_anchors: true.
+            let unasked = try harness.callLeadTool(LeadTools.createSpace, ["name": "Backend V2", "anchors": [secondRepo]], lead: lead)
+            XCTAssertTrue(unasked.isError, unasked.text)
+            XCTAssertTrue(unasked.text.contains("move_anchors"), unasked.text)
             let movedAnchor = try harness.callLeadTool(LeadTools.createSpace, [
                 "name": "Backend V2", "anchors": [secondRepo], "move_anchors": true
             ], lead: lead)
@@ -156,6 +160,13 @@ final class LeadSpaceToolsTests: XCTestCase {
             let backendV2 = try XCTUnwrap(shell.profiles.first { $0.name == "Backend V2" })
             XCTAssertEqual(backendV2.anchors.map(\.name), ["backend"])
             XCTAssertEqual(shell.profiles.first { $0.id == backend.id }?.anchors.map(\.name), ["notes"])
+
+            // A folder of a repository holding the home folder names that repository: too broad.
+            try UIFlowHarness.git(["init", "-q"], at: harness.home)
+            let inHome = try makePlainFolder(named: "notes", in: harness.home)
+            let homeRepository = try harness.callLeadTool(LeadTools.createSpace, ["name": "Home", "anchors": [inHome]], lead: lead)
+            XCTAssertTrue(homeRepository.isError, homeRepository.text)
+            XCTAssertNil(shell.profiles.first { $0.name == "Home" })
         }
     }
 
@@ -220,6 +231,12 @@ final class LeadSpaceToolsTests: XCTestCase {
             ], lead: lead)
             XCTAssertTrue(legacyName.isError, legacyName.text)
 
+            // The Lead's own repository stays.
+            let removeOwn = try harness.callLeadTool(LeadTools.editSpace, ["space": "Tools", "remove_anchors": ["repo"]], lead: lead)
+            XCTAssertTrue(removeOwn.isError, removeOwn.text)
+            XCTAssertTrue(removeOwn.text.contains("only the user"), removeOwn.text)
+            XCTAssertEqual(shell.profiles.first { $0.id == lead.space }?.anchors.map(\.name), ["repo"])
+
             let renamedGeneral = try harness.callLeadTool(LeadTools.editSpace, [
                 "space": "General", "name": "Personal"
             ], lead: lead)
@@ -243,8 +260,20 @@ final class LeadSpaceToolsTests: XCTestCase {
             XCTAssertTrue(deleteSelf.isError, deleteSelf.text)
             XCTAssertNotNil(shell.profiles.first { $0.id == lead.space })
 
-            // Delete empty space cleanly without modal alerts.
+            // Delete empty space cleanly without modal alerts, once its Space Settings are closed.
             let empty = shell.workspaceStore.createProfile(named: "Temp", select: false)
+            shell.showSpaceSettings(profileID: empty.id, tab: .general)
+            let settingsOpen = try harness.callLeadTool(LeadTools.deleteSpace, ["space": "Temp"], lead: lead)
+            XCTAssertTrue(settingsOpen.isError, settingsOpen.text)
+            XCTAssertTrue(settingsOpen.text.contains("Space Settings"), settingsOpen.text)
+            shell.spaceSettings?.close()
+            waitUntil("Space Settings closed") { shell.spaceSettings == nil }
+            // The space on screen stays, an empty one too.
+            XCTAssertTrue(shell.workspaceStore.selectProfile(empty.id))
+            let onScreen = try harness.callLeadTool(LeadTools.deleteSpace, ["space": "Temp"], lead: lead)
+            XCTAssertTrue(onScreen.isError, onScreen.text)
+            XCTAssertTrue(onScreen.text.contains("on screen"), onScreen.text)
+            shell.workspaceStore.selectWorkspace(id: lead.workspace.id)
             let deletedEmpty = try harness.callLeadTool(LeadTools.deleteSpace, ["space": "Temp"], lead: lead)
             XCTAssertFalse(deletedEmpty.isError, deletedEmpty.text)
             XCTAssertNil(shell.profiles.first { $0.id == empty.id })
@@ -262,9 +291,10 @@ final class LeadSpaceToolsTests: XCTestCase {
             // Refuse deleting space that has its own active Lead workspace.
             let ledSpace = shell.workspaceStore.createProfile(named: "OtherLed", select: false)
             shell.startLead(spaceID: ledSpace.id)
+            shell.workspaceStore.selectWorkspace(id: lead.workspace.id)
             let deleteLed = try harness.callLeadTool(LeadTools.deleteSpace, ["space": "OtherLed"], lead: lead)
             XCTAssertTrue(deleteLed.isError, deleteLed.text)
-            XCTAssertTrue(deleteLed.text.contains("active Lead"), deleteLed.text)
+            XCTAssertTrue(deleteLed.text.contains("has a Lead"), deleteLed.text)
 
             // Non-empty space refused without move_tasks_to and refused when move_tasks_to == space.
             let retiring = shell.workspaceStore.createProfile(named: "Retiring", select: false)
@@ -294,6 +324,7 @@ final class LeadSpaceToolsTests: XCTestCase {
             let child = try XCTUnwrap(shell.workspaces.first { $0.title == "Child Task" })
             XCTAssertEqual(child.parentWorkspaceID, parentTask.id)
             XCTAssertEqual(shell.activeWorkspace?.id, lead.workspace.id, "must not hijack focus")
+            XCTAssertEqual(harness.alerts, [])
         }
     }
 
@@ -305,15 +336,19 @@ final class LeadSpaceToolsTests: XCTestCase {
             let spaceB = shell.workspaceStore.createProfile(named: "SpaceB", select: false)
 
             shell.addWorkspace(title: "FromLeadSpace", cwd: harness.worktree, profileID: lead.space)
-            shell.addWorkspace(title: "InSpaceA", cwd: harness.worktree, profileID: spaceA.id)
-            shell.addWorkspace(title: "ClosingTask", cwd: harness.worktree, profileID: lead.space)
             let fromLead = try XCTUnwrap(shell.workspaces.first { $0.title == "FromLeadSpace" })
-            let inA = try XCTUnwrap(shell.workspaces.first { $0.title == "InSpaceA" })
-            let closing = try XCTUnwrap(shell.workspaces.first { $0.title == "ClosingTask" })
+            shell.addWorkspace(title: "FromLeadChild", cwd: harness.worktree, profileID: lead.space, parentWorkspaceID: fromLead.id)
+            for (title, space) in [("InSpaceA", spaceA.id), ("BoardHolder", spaceB.id), ("ClosingTask", lead.space),
+                                   ("OnScreen", lead.space), ("Reporting", lead.space), ("Held", lead.space)] {
+                shell.addWorkspace(title: title, cwd: harness.worktree, profileID: space)
+            }
+            let named = { (title: String) in try XCTUnwrap(shell.workspaces.first { $0.title == title }) }
+            let child = try named("FromLeadChild")
+            let inA = try named("InSpaceA")
+            let closing = try named("ClosingTask")
             closing.isClosing = true
-
-            // Keep focus on the Lead workspace while moving other tasks.
-            shell.workspaceStore.selectWorkspace(id: lead.workspace.id)
+            let onScreen = try named("OnScreen")
+            XCTAssertTrue(shell.workspaceStore.selectWorkspace(id: onScreen.id))
 
             // Cross-space list_tasks by name and by space:<id>.
             let listA = try harness.callLeadTool(LeadTools.listTasks, ["space": "SpaceA"], lead: lead)
@@ -324,19 +359,37 @@ final class LeadSpaceToolsTests: XCTestCase {
 
             let listB = try harness.callLeadTool(LeadTools.listTasks, ["space": "space:\(spaceB.id)"], lead: lead)
             XCTAssertFalse(listB.isError, listB.text)
-            XCTAssertTrue(listB.text.hasPrefix("SpaceB: no task."), listB.text)
+            XCTAssertTrue(listB.text.hasPrefix("SpaceB: 1 task."), listB.text)
 
             let listUnknown = try harness.callLeadTool(LeadTools.listTasks, ["space": "Nowhere"], lead: lead)
             XCTAssertTrue(listUnknown.isError, listUnknown.text)
 
-            // Move from caller Lead's space to SpaceA without yanking focus.
+            // The task on screen stays.
+            let moveOnScreen = try harness.callLeadTool(LeadTools.moveTaskToSpace, ["task": "OnScreen", "to_space": "SpaceA"], lead: lead)
+            XCTAssertTrue(moveOnScreen.isError, moveOnScreen.text)
+            XCTAssertTrue(moveOnScreen.text.contains("on screen"), moveOnScreen.text)
+            XCTAssertEqual(onScreen.profileID, lead.space)
+
+            // A task moves with its sub-task, listed under it.
             let moved1 = try harness.callLeadTool(LeadTools.moveTaskToSpace, [
                 "task": fromLead.leadTaskReference, "to_space": "SpaceA"
             ], lead: lead)
             XCTAssertFalse(moved1.isError, moved1.text)
-            XCTAssertEqual(fromLead.profileID, spaceA.id)
-            XCTAssertEqual(shell.activeWorkspace?.id, lead.workspace.id)
-            XCTAssertEqual(shell.activeProfileID, lead.space)
+            XCTAssertTrue(moved1.text.contains("and its sub-task"), moved1.text)
+            XCTAssertEqual(child.profileID, spaceA.id)
+            let titlesA = shell.workspaceStore.visibleWorkspaceIndices(in: spaceA.id).map { shell.workspaces[$0].title }
+            XCTAssertEqual(titlesA, ["InSpaceA", "FromLeadSpace", "FromLeadChild"])
+
+            // Its Board closes quietly in a space that has one (the Lead's): the screen stays as it was.
+            let boardHolder = try named("BoardHolder")
+            boardHolder.addProjectBoardColumn(shell.makeProjectBoard(projectID: spaceB.id, offersSettings: false))
+            let movedBoard = try harness.callLeadTool(LeadTools.moveTaskToSpace, [
+                "task": "BoardHolder", "from_space": "SpaceB", "to_space": "Tools"
+            ], lead: lead)
+            XCTAssertFalse(movedBoard.isError, movedBoard.text)
+            XCTAssertFalse(boardHolder.columns.contains(where: \.isProjectBoard))
+            XCTAssertTrue(shell.activeWorkspace === onScreen)
+            XCTAssertNil(shell.toast)
 
             // Move between SpaceA and SpaceB via from_space.
             let moved2 = try harness.callLeadTool(LeadTools.moveTaskToSpace, [
@@ -351,6 +404,25 @@ final class LeadSpaceToolsTests: XCTestCase {
             ], lead: lead)
             XCTAssertFalse(noop.isError, noop.text)
             XCTAssertTrue(noop.text.contains("already in"), noop.text)
+
+            // A task reporting to the Lead would stop reaching it; a held message reads the space it lands in.
+            let reporting = try named("Reporting")
+            XCTAssertNotNil(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: reporting.id, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+                branch: "feat/reporting", reportsToLead: true
+            ), enabled: true))
+            let held = try named("Held")
+            held.mergeWaits = [MergeWait(
+                id: "held", awaited: .init(workspaceID: fromLead.id, title: fromLead.title),
+                action: .tell(message: "Merge origin/main"), createdAt: 0
+            )]
+            for (task, refusal) in [(reporting, "reports to"), (held, "waits for")] {
+                let move = try harness.callLeadTool(LeadTools.moveTaskToSpace, ["task": task.title, "to_space": "SpaceA"], lead: lead)
+                XCTAssertTrue(move.isError, move.text)
+                XCTAssertTrue(move.text.contains(refusal), move.text)
+                XCTAssertEqual(task.profileID, lead.space)
+            }
 
             // Refuse moving Lead workspace.
             let moveLead = try harness.callLeadTool(LeadTools.moveTaskToSpace, [
@@ -368,12 +440,13 @@ final class LeadSpaceToolsTests: XCTestCase {
             XCTAssertTrue(moveClosing.text.contains("closing"), moveClosing.text)
             XCTAssertEqual(closing.profileID, lead.space)
 
-            // Regular task agent cannot call list_tasks(space:) or move_task_to_space.
+            // A task's agent can't look into another space.
             let taskAgentUUID = try XCTUnwrap(inA.columns.first?.agentUUID)
             let subtaskList = try harness.callLeadTool(
                 LeadTools.listTasks, ["space": "SpaceA"], from: inA, agentUUID: taskAgentUUID
             )
             XCTAssertTrue(subtaskList.isError, subtaskList.text)
+            XCTAssertTrue(subtaskList.text.contains("Only the space's Lead"), subtaskList.text)
         }
     }
 }

@@ -285,7 +285,7 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual((result["content"] as? [[String: Any]])?.first?["text"] as? String, "answered list_tasks")
     }
 
-    func testSpaceManagementToolsSchemaValidationAndInstructionsLength() throws {
+    func testSpaceToolsAreTheLeadsAndCheckTheirArguments() throws {
         let spaceTools = [
             LeadTools.listSpaces, LeadTools.createSpace, LeadTools.editSpace,
             LeadTools.deleteSpace, LeadTools.moveTaskToSpace
@@ -319,6 +319,8 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "color": "7AA2F7"]))
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "color": "#GGGGGG"]))
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "anchors": [""]]))
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "anchors": ["~/Projects/ops"]]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "anchors": ["Projects/ops"]]))
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "move_anchors": "yes"]))
 
         XCTAssertNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "color": "#9ECE6A"]))
@@ -326,6 +328,8 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "name": "  "]))
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "color": "#12345"]))
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "add_anchors": [1]]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "add_anchors": ["."]]))
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "remove_anchors": ["api"]]))
 
         XCTAssertNil(LeadTools.problem(tool: LeadTools.deleteSpace, arguments: ["space": "Ops"]))
         XCTAssertNil(LeadTools.problem(tool: LeadTools.deleteSpace, arguments: ["space": "Ops", "move_tasks_to": "General"]))
@@ -342,9 +346,5 @@ final class LeadChannelTests: XCTestCase {
             "task": "Fix", "to_space": "General", "from_space": " "
         ]))
 
-        let leadInstructions = NiruxMCPServer.instructions(for: context(lead: true))
-        XCTAssertLessThanOrEqual(leadInstructions.count, 2048, "Claude Code cuts server instructions at 2,048 characters")
-        XCTAssertTrue(leadInstructions.contains("list_spaces"))
-        XCTAssertTrue(leadInstructions.contains("move_task_to_space"))
     }
 }

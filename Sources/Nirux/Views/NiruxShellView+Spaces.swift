@@ -48,7 +48,7 @@ extension NiruxShellView {
         guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
         if let refusal = moveRefusal(workspaceID: workspaceID, profileID: profileID) { return showToast(refusal) }
         // Its Board follows (`boardsFollowTheirWorkspaces`, from the store).
-        guard workspaceStore.moveWorkspace(at: index, toProfile: profileID) else { return }
+        guard workspaceStore.moveWorkspace(at: index, toProfile: profileID, byLead: !refocusing) else { return }
         refreshAfterWorkspaceMutation(refocusing: refocusing)
     }
 
