@@ -103,8 +103,8 @@ extension NiruxShellView {
     /// A Board shows its workspace's space. One whose workspace went to
     /// another space shows that one, unless it has its Board already: then
     /// it closes. Moved by the user, the space's own Board comes to the
-    /// front, with a toast; after a space deleted (from Space Settings,
-    /// another space on screen), quietly. The store calls it, every way a
+    /// front, with a toast; by a Lead's tool, or after a space deleted
+    /// (from Space Settings, another space on screen), quietly. The store calls it, every way a
     /// workspace changes space (`WorkspaceStore.onWorkspacesChangedSpace`).
     func boardsFollowTheirWorkspaces(_ change: WorkspaceStore.SpaceChange) {
         // The next sidebar pass draws the one shown.
