@@ -24,6 +24,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex", "Open Antigravity", "Next Waiting Agent"],
             "testSessionHistoryCommand": ["Session History…"],
+            "testTokenUsageCommand": ["Token Usage"],
             "testRestartLeadCommand": [NiruxShellView.restartLeadTitle],
             "testProjectMemoryCommand": ["Space Memory…"],
             "testResumeAllAgentsCommand": ["Resume All Agents"],
@@ -207,6 +208,31 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
     /// The project's sessions, the one a restored column holds first; the
     /// switches; under the list, what Return does: going to the restored
     /// column resumes its agent there, Return on an ended one resumes it.
+    func testTokenUsageCommand() throws {
+        try UIFlowHarness.run { harness in
+            harness.runPaletteCommand("Token Usage")
+            let controller = try XCTUnwrap(harness.shell.usageWindow)
+            defer { controller.close() }
+            harness.waitUntil("the Usage window") { controller.window?.isVisible == true }
+            XCTAssertEqual(controller.headline.stringValue, "Reading the agents’ transcripts…")
+
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            let now = Date().timeIntervalSince1970
+            let session = UsageSession(
+                key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: workspace.profileID, taskID: workspace.id),
+                events: [
+                    UsageEvent(timestamp: now - 2 * 86_400, counts: TokenCounts(input: 1_500)),
+                    UsageEvent(timestamp: now - 60, counts: TokenCounts(input: 500))
+                ]
+            )
+            controller.update(report: UsageReport(sessions: [session], now: now), names: harness.shell.usageNames())
+            XCTAssertEqual(controller.headline.stringValue, "2k tokens · 2 responses · 1 session")
+            controller.period.selectedSegment = 0
+            NSApp.sendAction(try XCTUnwrap(controller.period.action), to: controller.period.target, from: controller.period)
+            XCTAssertEqual(controller.headline.stringValue, "500 tokens · 1 response · 1 session")
+        }
+    }
+
     func testSessionHistoryCommand() throws {
         try UIFlowHarness.run { harness in
             let workspace = try XCTUnwrap(harness.shell.activeWorkspace)

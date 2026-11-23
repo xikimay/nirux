@@ -79,8 +79,8 @@ enum UsageReportText {
 /// The Usage window (⇧⌘U): where the tokens went over the last 24 hours or
 /// 7 days, by agent, day, cause, task and space. Read-only; numbers only.
 final class UsageWindowController: NSWindowController {
-    private let period = NSSegmentedControl(labels: ["24 Hours", "7 Days"], trackingMode: .selectOne, target: nil, action: nil)
-    private let headline = NSTextField(labelWithString: "")
+    let period = NSSegmentedControl(labels: ["24 Hours", "7 Days"], trackingMode: .selectOne, target: nil, action: nil)
+    let headline = NSTextField(labelWithString: "")
     private let chart = UsageDaysChart()
     private let scroll = NSTextView.scrollableTextView()
     private var textView: NSTextView { scroll.documentView as! NSTextView }
