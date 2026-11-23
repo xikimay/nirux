@@ -10,6 +10,20 @@ on:
         options:
           - triage
           - qualify
+      scenario:
+        description: Scenario to run (or 'all', or 'selected' with diff_base)
+        default: ghostty-monaco-restore
+        type: choice
+        options:
+          - ghostty-monaco-restore
+          - multi-agent-routing
+          - sidebar-breakpoints
+          - all
+          - selected
+      diff_base:
+        description: Git base ref for scenario='selected' (e.g. origin/main or HEAD~1)
+        default: ""
+        type: string
       repro_runs:
         description: Fresh-state replays on initial non-infra failure (triage mode)
         default: "2"
@@ -32,6 +46,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Build the ad-hoc bundle
         run: |
           mkdir -p "$RUNNER_TEMP/evidence" "$RUNNER_TEMP/history"
@@ -43,33 +58,43 @@ jobs:
       - name: Run the canary
         env:
           CANARY_MODE: ${{ inputs.mode || 'triage' }}
+          CANARY_SCENARIO: ${{ inputs.scenario || 'ghostty-monaco-restore' }}
+          CANARY_DIFF_BASE: ${{ inputs.diff_base || '' }}
           REPRO_RUNS: ${{ inputs.repro_runs || '2' }}
           QUALIFY_RUNS: ${{ inputs.qualify_runs || '5' }}
         run: |
           status=0
+          scenario_args=()
+          if [[ "$CANARY_SCENARIO" == "selected" ]]; then
+            base="${CANARY_DIFF_BASE:-HEAD~1}"
+            scenario_args=(--diff-base "$base")
+          else
+            scenario_args=(--scenario "$CANARY_SCENARIO")
+          fi
           if [[ "$CANARY_MODE" == "qualify" ]]; then
-            scripts/canary.sh Nirux.app --qualify "$QUALIFY_RUNS" --evidence-dir "$RUNNER_TEMP/evidence" || status=$?
-            qual="$RUNNER_TEMP/evidence/qualification.json"
-            if [[ -f "$qual" ]]; then
-              python3 -c 'import json,sys; q=json.load(open(sys.argv[1])); print(f"**{q[\"verdict\"]}** passRate={q[\"passRate\"]} ({q[\"passedRuns\"]}/{q[\"requestedRuns\"]}) mean={q[\"timing\"][\"meanMs\"]}ms stddev={q[\"timing\"][\"stddevMs\"]}ms")' "$qual" >> "$GITHUB_STEP_SUMMARY"
-              if [[ $status == 2 && $(jq -r .verdict "$qual") == infra_unavailable ]]; then
-                echo "::warning::Canary qualification inconclusive. See the graphical session preflight in report.json."
-                exit 0
-              fi
+            scripts/canary.sh Nirux.app "${scenario_args[@]}" --qualify "$QUALIFY_RUNS" --evidence-dir "$RUNNER_TEMP/evidence" || status=$?
+            for qual in $(find "$RUNNER_TEMP/evidence" -name qualification.json | sort); do
+              python3 -c 'import json,sys; q=json.load(open(sys.argv[1])); print(f"- `{q[\"scenario\"]}`: **{q[\"verdict\"]}** passRate={q[\"passRate\"]} ({q[\"passedRuns\"]}/{q[\"requestedRuns\"]}) mean={q[\"timing\"][\"meanMs\"]}ms stddev={q[\"timing\"][\"stddevMs\"]}ms")' "$qual" >> "$GITHUB_STEP_SUMMARY"
+            done
+            if [[ $status == 2 ]] && python3 scripts/canary/verdicts.py infra qualification.json verdict "$RUNNER_TEMP/evidence"; then
+              echo "::warning::Canary qualification inconclusive. See the graphical session preflight in report.json."
+              exit 0
             fi
           else
-            scripts/canary.sh Nirux.app --triage --repro-runs "$REPRO_RUNS" \
+            scripts/canary.sh Nirux.app "${scenario_args[@]}" --triage --repro-runs "$REPRO_RUNS" \
               --evidence-dir "$RUNNER_TEMP/evidence" \
               --history-dir "$RUNNER_TEMP/history" \
               --commit "$GITHUB_SHA" || status=$?
-            triage=$(find "$RUNNER_TEMP/evidence" -name triage.json -print -quit)
-            if [[ -f "$triage" ]]; then
-              python3 -c 'import json,sys; t=json.load(open(sys.argv[1])); extra=f" fp={t[\"fingerprint\"]}" if t.get("fingerprint") else ""; crash=" (crash observed)" if t.get("hasCrash") else ""; reopened=" [REOPENED]" if t.get("reopened") else ""; print(f"**{t[\"classification\"]}**{extra}{crash}{reopened}")' "$triage" >> "$GITHUB_STEP_SUMMARY"
-              if [[ $status == 2 && $(jq -r .classification "$triage") == infra_unavailable ]]; then
-                echo "::warning::Canary inconclusive. See the graphical session preflight in report.json."
-                exit 0
-              fi
+            for triage in $(find "$RUNNER_TEMP/evidence" -name triage.json | sort); do
+              python3 -c 'import json,sys; t=json.load(open(sys.argv[1])); extra=f" fp={t[\"fingerprint\"]}" if t.get("fingerprint") else ""; crash=" (crash observed)" if t.get("hasCrash") else ""; reopened=" [REOPENED]" if t.get("reopened") else ""; print(f"- `{t[\"scenario\"]}`: **{t[\"classification\"]}**{extra}{crash}{reopened}")' "$triage" >> "$GITHUB_STEP_SUMMARY"
+            done
+            if [[ $status == 2 ]] && python3 scripts/canary/verdicts.py infra triage.json classification "$RUNNER_TEMP/evidence"; then
+              echo "::warning::Canary inconclusive. See the graphical session preflight in report.json."
+              exit 0
             fi
+          fi
+          if [[ $status == 4 ]]; then
+            echo "::error::No scenario selected for this diff: nothing ran."
           fi
           exit "$status"
       - name: Upload evidence
