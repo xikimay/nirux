@@ -34,6 +34,8 @@ extension MergeQueue {
         /// Its pull request into the base, once open.
         var number: Int?
         var mergeCommit: String?
+        /// A stop closed its pull request.
+        var isClosed = false
         var step = Step.composing
 
         /// "train #781", or its branch until it has a pull request.
@@ -41,7 +43,7 @@ extension MergeQueue {
 
         /// Its pull request, open and never merged: named in a stop, so nobody merges it later.
         var leftOpen: String? {
-            guard let number, mergeCommit == nil else { return nil }
+            guard let number, mergeCommit == nil, !isClosed else { return nil }
             return " Train #\(number) stays open on GitHub: close it rather than merge it."
         }
 
@@ -88,11 +90,13 @@ extension MergeQueue.Engine {
         case landed(commit: String)
         case postMerge(commit: String)
         case postMergeOutcome(commit: String, run: GitHub.WorkflowRun)
+        /// The train's pull request closed before the queue stops for this.
+        case close(MergeQueue.StopReason)
     }
 
     /// "waiting for the checks of train #781 (#12, #14)".
     var trainStatusText: String {
-        let numbers = Self.numbers(entries.map(\.number))
+        let numbers = Self.numbers(riders.map { entries[$0].number })
         guard let train else { return "checking \(numbers) for a train" }
         if case .train(.baseRunWait)? = purpose {
             return "\(train.name) waiting for the \(GitHub.workflowLabel(settings.postMergeWorkflow)) on "
@@ -117,6 +121,38 @@ extension MergeQueue.Engine {
         case .train(.landConfirm(_, _, let result))? where result == .sent || result.isUncertain: return nil
         default: return train?.leftOpen
         }
+    }
+
+    /// The entries still in the batch: all but those a stop left out.
+    var riders: [Int] {
+        entries.indices.filter { index in
+            if case .stopped = entries[index].step { return false }
+            return true
+        }
+    }
+
+    /// A pull request that conflicts leaves the train, which goes on without
+    /// it; once the train lands, the queue stops on it for its agent.
+    private mutating func drop(_ index: Int, _ reason: MergeQueue.StopReason) {
+        entries[index].step = .stopped(reason.appending(" It left the train."))
+        note("#\(entries[index].number) left the train: \(reason.message)")
+    }
+
+    /// The train's pull request to close before the queue stops: on a stop
+    /// the train found itself, never on Stop, a dry run or GitHub not
+    /// answering, nor once the train may have landed.
+    func trainToClose(for reason: MergeQueue.StopReason) -> Int? {
+        if case .train(.close)? = purpose { return nil }
+        guard ![.user, .interrupted, .dryRun, .setup, .github].contains(reason.kind), trainLeftover != nil else { return nil }
+        return train?.number
+    }
+
+    /// Every pull request left the train: the queue stops on the first.
+    private mutating func stopOnLeftOut() {
+        for index in entries.indices {
+            if case .stopped(let reason) = entries[index].step { return stop(reason, on: index) }
+        }
+        missingAnswer()
     }
 
     /// A stop that is one pull request's own: the others go back to waiting.
@@ -147,7 +183,7 @@ extension MergeQueue.Engine {
     private mutating func trainPreflight(after delay: TimeInterval = 0) {
         current = nil
         var reads: [MergeQueue.Read] = []
-        for index in entries.indices {
+        for index in riders {
             if entries[index].step == .waiting { entries[index].step = .preflight }
             let entry = entries[index]
             reads += [.pullRequest(entry.number), .checks(entry.confirmedHead), .local(branch: entry.branch, head: entry.confirmedHead)]
@@ -161,7 +197,7 @@ extension MergeQueue.Engine {
     private mutating func trainPreflightRead(_ answers: [MergeQueue.Read: MergeQueue.ReadResult], now: TimeInterval) {
         var locals: [(index: Int, local: MergeQueue.LocalState)] = []
         var verdicts: [MergeQueue.ChecksVerdict] = []
-        for index in entries.indices {
+        for index in riders {
             let entry = entries[index]
             guard let pullRequest = answers.pullRequest(entry.number), let checks = answers.checks(entry.confirmedHead),
                   let local = answers.local(branch: entry.branch, head: entry.confirmedHead)
@@ -170,16 +206,20 @@ extension MergeQueue.Engine {
             guard pullRequest.headOid == entry.confirmedHead else {
                 return stop(changed(index: index, head: pullRequest.headOid), on: index)
             }
-            if pullRequest.mergeable == "CONFLICTING" { return stop(conflict(pullRequest), on: index) }
+            if pullRequest.mergeable == "CONFLICTING" {
+                drop(index, conflict(pullRequest))
+                continue
+            }
             let verdict = MergeQueue.judge(checks, required: settings.requiredChecks)
             if let refusal = trainRefusal(verdict, entry: entry, url: pullRequest.url) { return stop(refusal, on: index) }
             locals.append((index: index, local: local))
             verdicts.append(verdict)
         }
+        guard !locals.isEmpty else { return stopOnLeftOut() }
         let isHeld = holdForLocal(locals, now: now) { engine in engine.trainPreflight(after: MergeQueue.Limits.pollInterval) }
         guard !isHeld else { return }
         var pending: [String] = []
-        for (index, verdict) in zip(entries.indices, verdicts) where !verdict.pending.isEmpty {
+        for (index, verdict) in zip(locals.map(\.index), verdicts) where !verdict.pending.isEmpty {
             entries[index].step = .waitingForChecks(entries[index].confirmedHead)
             pending += verdict.pending.map { "\($0) of #\(entries[index].number)" }
         }
@@ -191,7 +231,7 @@ extension MergeQueue.Engine {
             }
             return trainPreflight(after: MergeQueue.Limits.pollInterval)
         }
-        for index in entries.indices { entries[index].step = .inTrain }
+        for index in riders { entries[index].step = .inTrain }
         read([.branch(settings.baseBranch)], for: .train(.base))
     }
 
@@ -230,7 +270,8 @@ extension MergeQueue.Engine {
     /// order; then the train's pull request.
     private mutating func mergeNextPart() {
         guard let train else { return missingAnswer() }
-        guard let index = entries.indices.first(where: { index in
+        guard !riders.isEmpty else { return stopOnLeftOut() }
+        guard let index = riders.first(where: { index in
             !train.parts.contains { $0.number == entries[index].number }
         }) else { return openTrain() }
         mutate(partMutation(index, into: train.branch), for: .train(.part(index: index, from: train.head)))
@@ -266,26 +307,23 @@ extension MergeQueue.Engine {
     }
 
     private func openMutation(_ train: MergeQueue.Train) -> MergeQueue.Mutation {
-        let list = entries.map { "- #\($0.number) at \($0.confirmedHead)" }.joined(separator: "\n")
+        let list = riders.map { "- #\(entries[$0].number) at \(entries[$0].confirmedHead)" }.joined(separator: "\n")
         let body = "Nirux’s merge queue lands these pull requests in one CI run, merged in this order on "
             + "\(settings.baseBranch) at \(train.base):\n\n\(list)\n\nTheir heads don’t change: each one reads merged once this "
             + "pull request is merged."
         return .openPullRequest(base: settings.baseBranch, head: train.branch,
-                                title: "Merge train: \(Self.numbers(entries.map(\.number)))", body: body)
+                                title: "Merge train: \(Self.numbers(riders.map { entries[$0].number }))", body: body)
     }
 
-    /// GitHub's 409. On the base's tip alone it is a conflict with the base,
-    /// which the pull request's agent resolves by merging it; after other
-    /// pull requests, it may be with them, which merging the base can't fix.
+    /// GitHub's 409: a conflict with the base, or with the pull requests
+    /// merged before it, which are on the base too once the train lands, so
+    /// its agent resolves it by merging the base then.
     private func partConflict(_ index: Int, after parts: [MergeQueue.Train.Part]) -> MergeQueue.StopReason {
         let number = entries[index].number
         let url = "https://\(settings.gitHubRepository.host)/\(settings.repository)/pull/\(number)"
-        guard !parts.isEmpty else {
-            return MergeQueue.StopReason(kind: .conflict, message: "#\(number) conflicts with \(settings.baseBranch).", url: url)
-        }
-        let before = Self.numbers(parts.map(\.number))
-        return MergeQueue.StopReason(kind: .train, message: "#\(number) conflicts with \(settings.baseBranch) or with \(before), "
-            + "merged before it in the train. Start again without #\(number), or once \(before) landed.", url: url)
+        let with = parts.isEmpty ? settings.baseBranch
+            : "\(settings.baseBranch) or with \(Self.numbers(parts.map(\.number))), merged before it in the train"
+        return MergeQueue.StopReason(kind: .conflict, message: "#\(number) conflicts with \(with).", url: url)
     }
 
     private func trainMoved(to head: String) -> MergeQueue.StopReason {
@@ -299,7 +337,8 @@ extension MergeQueue.Engine {
 
     private mutating func waitForTrainChecks(head: String, after delay: TimeInterval = 0) {
         guard let number = train?.number else { return missingAnswer() }
-        read([.pullRequest(number), .checks(head)], after: delay, for: .train(.checks(head: head)))
+        read([.pullRequest(number), .checks(head)] + riders.map { .pullRequest(entries[$0].number) }, after: delay,
+             for: .train(.checks(head: head)))
     }
 
     private mutating func decideOnTrain(_ checks: MergeQueue.CommitChecks, head: String, now: TimeInterval) {
@@ -333,7 +372,7 @@ extension MergeQueue.Engine {
         current = nil
         train?.step = .merging
         var reads: [MergeQueue.Read] = [.pullRequest(number), .checks(head), .compare(base: settings.baseBranch, head: head)]
-        for entry in entries {
+        for entry in riders.map({ entries[$0] }) {
             reads += [.pullRequest(entry.number), .local(branch: entry.branch, head: entry.confirmedHead)]
         }
         if settings.postMergeWorkflow != nil { reads.append(.baseRuns) }
@@ -374,7 +413,7 @@ extension MergeQueue.Engine {
                 + "\(train.name): any red check blocks the merge, required or not.", url: pullRequest.url))
         }
         var locals: [(index: Int, local: MergeQueue.LocalState)] = []
-        for index in entries.indices {
+        for index in riders {
             let entry = entries[index]
             guard let part = answers.pullRequest(entry.number),
                   let local = answers.local(branch: entry.branch, head: entry.confirmedHead)
@@ -416,7 +455,7 @@ extension MergeQueue.Engine {
     private mutating func trainLanded(_ commit: String, now: TimeInterval) {
         train?.step = .verifying(commit)
         clocks.step = now
-        read(entries.map { .pullRequest($0.number) }, for: .train(.landed(commit: commit)))
+        read(riders.map { .pullRequest(entries[$0].number) }, for: .train(.landed(commit: commit)))
     }
 
     /// GitHub marks a pull request merged once its head reaches the base.
@@ -477,8 +516,11 @@ extension MergeQueue.Engine {
     /// the train landed stops the queue there.
     private mutating func finishTrain() {
         train?.step = .done
+        let landed = Self.numbers(entries.filter { $0.step == .done }.map(\.number))
         for index in entries.indices {
-            if case .stopped(let reason) = entries[index].step { return stop(reason, on: index) }
+            if case .stopped(let reason) = entries[index].step {
+                return stop(reason.appending(train?.number.map { " Train #\($0) landed \(landed)." }), on: index)
+            }
         }
         current = nil
         phase = .finished
@@ -545,7 +587,7 @@ extension MergeQueue.Engine {
             if let problem = problem(with: pullRequest) { return stop(problem) }
             guard pullRequest.headOid == train.head else { return stop(trainMoved(to: pullRequest.headOid)) }
             self.train?.step = .waitingForChecks
-            note("Opened for \(Self.numbers(entries.map(\.number)))")
+            note("Opened for \(Self.numbers(riders.map { entries[$0].number }))")
             clocks.step = now
             waitForTrainChecks(head: train.head)
         case .checks(let head):
@@ -554,6 +596,14 @@ extension MergeQueue.Engine {
             }
             if let problem = problem(with: pullRequest) { return stop(problem) }
             guard pullRequest.headOid == head else { return stop(trainMoved(to: pullRequest.headOid)) }
+            // A push to a pull request of the batch makes the run moot: stop now, not at the merge.
+            for index in riders {
+                guard let rider = answers.pullRequest(entries[index].number) else { return missingAnswer() }
+                if let problem = problem(with: rider) { return stop(problem, on: index) }
+                guard rider.headOid == entries[index].confirmedHead else {
+                    return stop(changed(index: index, head: rider.headOid), on: index)
+                }
+            }
             decideOnTrain(checks, head: head, now: now)
         case .mergeChecks(let head):
             trainMergeChecksRead(answers, head: head, now: now)
@@ -578,7 +628,7 @@ extension MergeQueue.Engine {
                   let comparison = answers.comparison(base: commit, head: settings.baseBranch)
             else { return missingAnswer() }
             postMergeFailed(run, commit: commit, baseRuns: runs, comparison: comparison, subject: train.name)
-        case .preflight, .base, .create, .part, .open, .land:
+        case .preflight, .base, .create, .part, .open, .land, .close:
             missingAnswer()
         }
     }
@@ -592,11 +642,19 @@ extension MergeQueue.Engine {
             read([.branch(train.branch)], for: .train(.created(result)))
         case .part(let index, let from):
             clocks.step = now
-            if case .refused(409?, _) = result { return stop(partConflict(index, after: train.parts), on: index) }
+            if case .refused(409?, _) = result {
+                drop(index, partConflict(index, after: train.parts))
+                return mergeNextPart()
+            }
             read([.branch(train.branch)], for: .train(.partTip(index: index, from: from, result: result)))
         case .open:
             clocks.step = now
             read([.pullRequests(head: train.branch)], for: .train(.opened(result)))
+        case .close(let reason):
+            guard let number = train.number else { return missingAnswer() }
+            if result == .sent { self.train?.isClosed = true }
+            stop(reason.appending(result == .sent ? " Nirux closed train #\(number)."
+                : " Nirux couldn’t close train #\(number): \(Self.describe(result))."))
         case .land(let head, let baseTip):
             guard let number = train.number else { return missingAnswer() }
             clocks.step = now

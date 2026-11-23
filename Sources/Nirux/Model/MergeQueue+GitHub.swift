@@ -476,6 +476,8 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         case .openPullRequest(let base, let head, let title, let body):
             return ["api", "--hostname", GitHub.host, "--method", "POST", "repos/\(repository)/pulls",
                     "-f", "base=\(base)", "-f", "head=\(head)", "-f", "title=\(title)", "-f", "body=\(body)"]
+        case .closePullRequest(let number):
+            return ["api", "--hostname", GitHub.host, "--method", "PATCH", "repos/\(repository)/pulls/\(number)", "-f", "state=closed"]
         }
     }
 

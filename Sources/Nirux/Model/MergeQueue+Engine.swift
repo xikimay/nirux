@@ -266,6 +266,10 @@ extension MergeQueue {
         /// reads stop it while GitHub hasn't shown the effect of a call
         /// sent, the reason says so.
         mutating func stop(_ reason: StopReason) {
+            if cadence == .train, let number = trainToClose(for: reason) {
+                note("Closing train #\(number)")
+                return mutate(.closePullRequest(number: number), for: .train(.close(reason)))
+            }
             var reason = reason
             if reason.kind == .github || reason.kind == .setup, let mutation = unconfirmedMutation,
                let shown = train?.name ?? currentEntry.map({ "#\($0.number)" }) {
@@ -1135,6 +1139,7 @@ extension MergeQueue {
             case .createBranch(let name, let commit): return "creation of branch \(name) at \(short(commit))"
             case .mergeIntoBranch(let branch, let head, _): return "merge of \(short(head)) into \(branch)"
             case .openPullRequest(let base, let head, _, _): return "pull request of \(head) into \(base)"
+            case .closePullRequest(let number): return "close of #\(number)"
             }
         }
 

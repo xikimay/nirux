@@ -170,7 +170,8 @@ extension MergeQueue {
         /// The same reason, its message followed by `text`.
         func appending(_ text: String?) -> StopReason {
             guard let text else { return self }
-            return StopReason(kind: kind, message: message + text, url: url, checksTimedOut: checksTimedOut)
+            let sentence = message.last.map { ".!?".contains($0) } == true ? message : message + "."
+            return StopReason(kind: kind, message: sentence + text, url: url, checksTimedOut: checksTimedOut)
         }
 
         /// A token that a gh error echoes never reaches the saved queue.
@@ -270,6 +271,8 @@ extension MergeQueue {
         case mergeIntoBranch(branch: String, head: String, message: String)
         /// `POST pulls`.
         case openPullRequest(base: String, head: String, title: String, body: String)
+        /// `PATCH pulls/{n}` to `closed`: a train's pull request left behind by a stop.
+        case closePullRequest(number: Int)
     }
 
     enum MutationResult: Equatable, Sendable {
