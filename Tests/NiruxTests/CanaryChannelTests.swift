@@ -27,10 +27,12 @@ final class CanaryChannelTests: XCTestCase {
     private var requests: URL { LeadChannel.requestsFolder(stateDirectory: stateDirectory, root: CanaryChannel.root) }
     private var responses: URL { LeadChannel.responsesFolder(stateDirectory: stateDirectory, root: CanaryChannel.root) }
 
-    private func request(token: String?, tool: String = "menu") -> LeadChannel.Request {
-        LeadChannel.Request(
-            id: UUID().uuidString, tool: tool, arguments: token.map { "{\"token\":\"\($0)\"}" } ?? "{}",
-            workspaceID: "", agentUUID: "", createdAt: Date().timeIntervalSince1970 + 1
+    private func request(token: String?, tool: String = "menu", arguments: [String: Any] = [:]) -> LeadChannel.Request {
+        var all = arguments
+        if let token { all["token"] = token }
+        let json = String(decoding: (try? JSONSerialization.data(withJSONObject: all)) ?? Data(), as: UTF8.self)
+        return LeadChannel.Request(
+            id: UUID().uuidString, tool: tool, arguments: json, workspaceID: "", agentUUID: "", createdAt: Date().timeIntervalSince1970 + 1
         )
     }
 
@@ -96,13 +98,14 @@ final class CanaryChannelTests: XCTestCase {
     /// next request: it runs inside that loop.
     @MainActor
     func testAModalActionDoesntHoldBackTheNextRequest() throws {
-        var inModal = false
         var released = false
         var finished: [String] = []
+        let next = request(token: token, tool: "menu")
         let center = try XCTUnwrap(CanaryChannel.start(environment: canaryEnvironment, stateDirectory: stateDirectory) { request, answer in
             answer("ok", false)
             if request.tool == "modal" {
-                inModal = true
+                // The runner sends its next request while the alert is up.
+                XCTAssertTrue(LeadChannel.write(next, id: next.id, in: self.requests))
                 let deadline = Date().addingTimeInterval(5)
                 while !released, Date() < deadline { RunLoop.current.run(mode: .modalPanel, before: Date().addingTimeInterval(0.02)) }
             } else {
@@ -113,11 +116,8 @@ final class CanaryChannelTests: XCTestCase {
         defer { center.stop() }
         let modal = request(token: token, tool: "modal")
         XCTAssertTrue(LeadChannel.write(modal, id: modal.id, in: requests))
-        waitUntil("the modal action started", timeout: 10) { inModal }
-        let next = request(token: token, tool: "menu")
-        XCTAssertTrue(LeadChannel.write(next, id: next.id, in: requests))
-        waitUntil("both actions ended", timeout: 10) { finished.count == 2 }
-        XCTAssertEqual(finished, ["menu", "modal"])
+        waitUntil("both actions ended", timeout: 15) { finished.count == 2 }
+        XCTAssertEqual(finished, ["menu", "modal"], "the next request ran inside the modal loop")
     }
 
     /// What the app's terminals run never sees the token.
@@ -178,6 +178,22 @@ final class CanaryChannelTests: XCTestCase {
         XCTAssertEqual(target.picked, ["Board"])
     }
 
+    /// The runner hears that the press happened, in a window never shown too,
+    /// where the accessibility press reports false although its action ran.
+    @MainActor
+    func testAPressAnswersThatItPressed() {
+        let target = Target()
+        let window = window()
+        window.contentView?.addSubview(NSButton(title: "Board", target: target, action: #selector(Target.pick(_:))))
+        let app = NiruxApp()
+        app.mainWindow = window
+        var answers: [(String, Bool)] = []
+        app.performCanaryRequest(request(token: token, tool: "press", arguments: ["label": "Board"])) { answers.append(($0, $1)) }
+        XCTAssertEqual(answers.map { $0.0 }, ["Pressed Board."])
+        XCTAssertEqual(answers.map { $0.1 }, [false])
+        XCTAssertEqual(target.picked, ["Board"])
+    }
+
     /// An element off every screen has no frame rather than breaking the JSON.
     @MainActor
     func testAnElementWithoutAFiniteFrameStillSnapshots() throws {
@@ -189,20 +205,28 @@ final class CanaryChannelTests: XCTestCase {
         XCTAssertTrue(nowhere["frame"] is NSNull)
     }
 
-    /// Keys reach the view that has the keyboard, or are refused when
-    /// nothing has it: never a false "delivered".
+    /// A terminal's keys go through the key interceptor, as typed keys do;
+    /// other keys go to the view with the keyboard; with neither, refused.
     @MainActor
-    func testKeysReachTheFocusedViewOrAreRefused() {
+    func testKeysTakeTheRouteATypedKeyWould() throws {
         let window = window()
         let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
         window.contentView?.addSubview(text)
-        XCTAssertTrue(NiruxApp.deliver([("a", 0, [])], to: window).isError, "nothing focused")
-        XCTAssertEqual(text.string, "")
+        guard case .interceptor? = NiruxApp.keyRoute(interceptorTakesKeys: true, in: window) else { return XCTFail("a terminal's keys") }
+        XCTAssertNil(NiruxApp.keyRoute(interceptorTakesKeys: false, in: window), "nothing focused")
 
         XCTAssertTrue(window.makeFirstResponder(text))
-        let delivered = NiruxApp.deliver([("a", 0, []), ("b", 11, [])], to: window)
-        XCTAssertFalse(delivered.isError, delivered.text)
-        XCTAssertEqual(text.string, "ab")
+        let route = try XCTUnwrap(NiruxApp.keyRoute(interceptorTakesKeys: false, in: window))
+        NiruxApp.send(NiruxApp.keys(typing: "aB"), via: route, to: window)
+        XCTAssertEqual(text.string, "aB")
+    }
+
+    /// Text is typed with each character's US key code and Shift, as KeyMapper expects.
+    func testTextTypesEachCharactersKey() {
+        let keys = NiruxApp.keys(typing: "aB1!\r é")
+        XCTAssertEqual(keys.map { $0.keyCode }, [0, 11, 18, 18, 36, 49, 0])
+        XCTAssertEqual(keys.map { $0.modifiers.contains(.shift) }, [false, true, false, true, false, false, false])
+        XCTAssertEqual(keys.map { $0.characters }, ["a", "B", "1", "!", "\r", " ", "é"])
     }
 }
 

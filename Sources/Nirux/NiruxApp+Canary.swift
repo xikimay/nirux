@@ -25,17 +25,20 @@ extension NiruxApp {
             answer("Pressed \(label).", false)
             Self.press(element)
         case "key", "text":
-            guard let window = mainWindow else { return answer("No main window.", true) }
             let keys: [CanaryKey] = request.tool == "text"
-                ? (arguments["text"] as? String ?? "").map { (String($0), 0, []) }
+                ? Self.keys(typing: arguments["text"] as? String ?? "")
                 : [(
                     arguments["characters"] as? String ?? "",
                     UInt16(truncatingIfNeeded: arguments["keyCode"] as? Int ?? 0),
                     NSEvent.ModifierFlags(canaryNames: arguments["modifiers"] as? [String] ?? [])
                 )]
             guard !keys.isEmpty, keys.allSatisfy({ !$0.characters.isEmpty }) else { return answer("Keys need characters.", true) }
-            let (text, isError) = Self.deliver(keys, to: window)
-            answer(text, isError)
+            guard let window = mainWindow, let route = Self.keyRoute(interceptorTakesKeys: interceptorTakesKeys, in: window) else {
+                return answer("Not sent: nothing in the main window has the keyboard.", true)
+            }
+            // Whether the view used them shows in what it does next, not here.
+            answer("Sent, unconfirmed, to \(route).", false)
+            Self.send(keys, via: route, to: window)
         case "snapshot":
             answer(Self.snapshotJSON(of: windows), false)
         case "render":
@@ -92,12 +95,38 @@ extension NiruxApp {
         return .failure(CanaryRefusal(text: "No menu item " + path.joined(separator: " › ") + "."))
     }
 
-    /// Keys as the focused view gets them. Command chords go to the menus
-    /// first, as AppKit sends them. The canary's window is never key, so
-    /// AppKit would drop the rest: they go to the window's first responder,
-    /// and are refused when nothing in the window has the keyboard.
-    static func deliver(_ keys: [CanaryKey], to window: NSWindow) -> (text: String, isError: Bool) {
-        var reached: [String] = []
+    enum KeyRoute: CustomStringConvertible {
+        /// A terminal column: the key interceptor maps keys to its PTY, as for typed keys.
+        case interceptor
+        /// Anything else: AppKit would send keys to the key window, which the
+        /// canary copy never has, so they go to the view with the keyboard.
+        case responder(NSResponder)
+
+        var description: String {
+            switch self {
+            case .interceptor: "the terminal through the key interceptor"
+            case .responder(let responder): String(describing: type(of: responder))
+            }
+        }
+    }
+
+    /// Whether the key interceptor takes the main window's keys: its focused
+    /// column is a terminal with nothing over it.
+    var interceptorTakesKeys: Bool {
+        guard let shell, !shell.isOverlayActive, let workspace = shell.activeWorkspaceForKeyIntercept,
+              let column = workspace.columns[safe: workspace.focusedIndex] else { return false }
+        return workspace.findFieldColumn == nil && !Self.takesWebContentKeys(column) && column.pty != nil
+    }
+
+    /// Nil when nothing in the window has the keyboard.
+    static func keyRoute(interceptorTakesKeys: Bool, in window: NSWindow) -> KeyRoute? {
+        if interceptorTakesKeys { return .interceptor }
+        guard let responder = window.firstResponder, responder !== window else { return nil }
+        return .responder(responder)
+    }
+
+    /// Command chords off a terminal go to the menus first, as AppKit sends them.
+    static func send(_ keys: [CanaryKey], via route: KeyRoute, to window: NSWindow) {
         for key in keys {
             let events = [NSEvent.EventType.keyDown, .keyUp].compactMap { type in
                 NSEvent.keyEvent(
@@ -106,19 +135,29 @@ extension NiruxApp {
                     characters: key.characters, charactersIgnoringModifiers: key.characters, isARepeat: false, keyCode: key.keyCode
                 )
             }
-            guard events.count == 2 else { return ("A key event couldn't be made.", true) }
-            if key.modifiers.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: events[0]) == true {
-                reached.append("menu")
-                continue
+            guard events.count == 2 else { continue }
+            switch route {
+            case .interceptor:
+                events.forEach(NSApp.sendEvent)
+            case .responder(let responder):
+                if key.modifiers.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: events[0]) == true { continue }
+                responder.keyDown(with: events[0])
+                responder.keyUp(with: events[1])
             }
-            guard let responder = window.firstResponder, responder !== window else {
-                return ("Not delivered: nothing in the window has the keyboard.", true)
-            }
-            responder.keyDown(with: events[0])
-            responder.keyUp(with: events[1])
-            reached.append(String(describing: type(of: responder)))
         }
-        return ("Delivered to " + Set(reached).sorted().joined(separator: ", ") + ".", false)
+    }
+
+    /// Text as US keyboard presses: each character with its key code and
+    /// Shift where it needs it; others go with code 0 and their characters.
+    static func keys(typing text: String) -> [CanaryKey] {
+        let plain = Array("asdfhgzxcv\u{0}bqweryt123465=97-80]ou[ip\u{0}lj'k;\\,/nm.\t `")
+        let shifted = Array("ASDFHGZXCV\u{0}BQWERYT!@#$^%+(&_*)}OU{IP\u{0}LJ\"K:|<?NM>\u{0}\u{0}~")
+        return text.map { character in
+            if character == "\r" || character == "\n" { return ("\r", 36, []) }
+            if let code = plain.firstIndex(of: character), character != "\u{0}" { return (String(character), UInt16(code), []) }
+            if let code = shifted.firstIndex(of: character), character != "\u{0}" { return (String(character), UInt16(code), .shift) }
+            return (String(character), 0, [])
+        }
     }
 
     /// The windows' accessibility elements as JSON.
