@@ -33,11 +33,38 @@ if [[ "${1:-}" == --class ]]; then
     fi
     start=$SECONDS
     status=0
-    perl -e '$ENV{DYLD_FRAMEWORK_PATH} = $ENV{NIRUX_TESTS_FRAMEWORK_PATH};
+    run_xctest() {
+        perl -e '$ENV{DYLD_FRAMEWORK_PATH} = $ENV{NIRUX_TESTS_FRAMEWORK_PATH};
         $ENV{DYLD_LIBRARY_PATH} = $ENV{NIRUX_TESTS_LIBRARY_PATH};
         alarm shift; exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!\n"' \
-        "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$filter" "$NIRUX_TESTS_BUNDLE" \
-        > "$log" 2>&1 || status=$?
+            "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$filter" "$NIRUX_TESTS_BUNDLE"
+    }
+    if [[ ${NIRUX_STREAM_TEST_ERRORS:-} == 1 ]]; then
+        # xctest writes to the log, not a pipe: a process a test leaves running
+        # inherits its output and would hold a pipe, and so the class, open. A
+        # follower prints the class's first source error as it lands.
+        : > "$log" # before the follower opens it
+        NSUnbufferedIO=YES run_xctest > "$log" 2>&1 &
+        xctest=$!
+        perl -e '
+            my ($log, $xctest) = @ARGV;
+            open my $in, "<", $log or die "open $log: $!\n";
+            while (1) {
+                my $running = kill 0, $xctest;
+                while (<$in>) {
+                    if (!/\n\z/ && $running) { seek $in, -length $_, 1; last }
+                    if (/:\d+(?::\d+)?: error: /) { chomp; print "$_\n"; exit }
+                }
+                exit unless $running;
+                seek $in, 0, 1;
+                select undef, undef, undef, 0.1;
+            }' "$log" "$xctest" &
+        follower=$!
+        wait "$xctest" || status=$?
+        wait "$follower" || true
+    else
+        run_xctest > "$log" 2>&1 || status=$?
+    fi
     # 128 + SIGALRM.
     if [[ $status -eq 142 ]]; then
         echo "Stopped after ${NIRUX_TESTS_CLASS_TIMEOUT}s." >> "$log"
