@@ -30,12 +30,15 @@ final class SpaceDefaultsTests: XCTestCase {
         var defaults = SpaceDefaults()
         XCTAssertEqual(defaults.claudeMode(settings: .acceptEdits), .acceptEdits)
         XCTAssertEqual(defaults.codexMode(settings: .fullAuto), .fullAuto)
+        XCTAssertEqual(defaults.agyMode(settings: .auto), .auto)
         XCTAssertEqual(defaults.taskAgent, .claude)
         defaults.claudeLaunchMode = .plan
         defaults.codexLaunchMode = .readOnly
+        defaults.agyLaunchMode = .default
         defaults.agent = .codex
         XCTAssertEqual(defaults.claudeMode(settings: .acceptEdits), .plan)
         XCTAssertEqual(defaults.codexMode(settings: .fullAuto), .readOnly)
+        XCTAssertEqual(defaults.agyMode(settings: .auto), .default)
         XCTAssertEqual(defaults.taskAgent, .codex)
     }
 
@@ -86,7 +89,7 @@ final class SpaceDefaultsTests: XCTestCase {
     func testSaveWritesAPrivateFileThatReadsBack() throws {
         let store = try store()
         let defaults = SpaceDefaults(
-            agent: .codex, claudeLaunchMode: .plan, codexLaunchMode: nil,
+            agent: .codex, claudeLaunchMode: .plan, codexLaunchMode: nil, agyLaunchMode: .acceptEdits,
             environment: [variable("TOKEN", "s3cr3t"), variable("URL", "https://example.com/a")]
         )
         let saved = try store.save(defaults, replacing: store.load()).get()
@@ -103,6 +106,39 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(loaded.contents, saved.contents)
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: store.fileURL.deletingLastPathComponent().path)
         XCTAssertEqual(leftovers, [SpaceDefaultsStore.fileName], "no temporary file left")
+    }
+
+    func testLeadQueueStartRequiresAnExplicitReadableOptIn() throws {
+        let store = try store()
+        XCTAssertFalse(store.load().defaults.leadCanStartMergeQueue)
+        _ = try store.save(SpaceDefaults(leadStartsMergeQueue: true)).get()
+        XCTAssertTrue(store.load().defaults.leadCanStartMergeQueue)
+        _ = try store.save(SpaceDefaults(leadStartsMergeQueue: false)).get()
+        XCTAssertFalse(try String(contentsOf: store.fileURL, encoding: .utf8).contains("leadStartsMergeQueue"))
+        for contents in ["{", #"{"leadStartsMergeQueue":"yes"}"#,
+                         #"{"schemaVersion":2,"leadStartsMergeQueue":true}"#,
+                         #"{"schemaVersion":"2","leadStartsMergeQueue":true}"#,
+                         #"{"futureQueuePolicy":true,"leadStartsMergeQueue":true}"#] {
+            try Data(contents.utf8).write(to: store.fileURL)
+            XCTAssertFalse(store.load().defaults.leadCanStartMergeQueue, contents)
+        }
+    }
+
+    func testLeadQueueWithoutLocalReviewRequiresAnExplicitReadableOptIn() throws {
+        let store = try store()
+        XCTAssertFalse(store.load().defaults.leadCanStartMergeQueueWithoutLocalReview)
+        _ = try store.save(SpaceDefaults(leadStartsMergeQueue: true, leadStartsMergeQueueWithoutLocalReview: true)).get()
+        XCTAssertTrue(store.load().defaults.leadCanStartMergeQueueWithoutLocalReview)
+        _ = try store.save(SpaceDefaults(leadStartsMergeQueue: true, leadStartsMergeQueueWithoutLocalReview: false)).get()
+        XCTAssertFalse(store.load().defaults.leadCanStartMergeQueueWithoutLocalReview)
+        XCTAssertFalse(try String(contentsOf: store.fileURL, encoding: .utf8).contains("leadStartsMergeQueueWithoutLocalReview"))
+        for contents in ["{", #"{"leadStartsMergeQueueWithoutLocalReview":"yes"}"#,
+                         #"{"schemaVersion":2,"leadStartsMergeQueueWithoutLocalReview":true}"#,
+                         #"{"schemaVersion":"2","leadStartsMergeQueueWithoutLocalReview":true}"#,
+                         #"{"futureQueuePolicy":true,"leadStartsMergeQueueWithoutLocalReview":true}"#] {
+            try Data(contents.utf8).write(to: store.fileURL)
+            XCTAssertFalse(store.load().defaults.leadCanStartMergeQueueWithoutLocalReview, contents)
+        }
     }
 
     /// docs/design/pr-follow-up.md: on unless turned off; a value this build
@@ -138,8 +174,11 @@ final class SpaceDefaultsTests: XCTestCase {
         try FileManager.default.createDirectory(at: store.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let cases: [(String, SpaceDefaultsStore.ReadOnlyReason)] = [
             (#"{"schemaVersion": 2, "claudeLaunchMode": "plan", "environment": [{"name": "A", "value": "1"}]}"#, .newerSchema(2)),
+            (#"{"claudeLaunchMode": "plan", "leadAgent": "future"}"#, .unknownSettings(["leadAgent"])),
+            (#"{"claudeLaunchMode": "plan", "leadAgent": "gemini"}"#, .unknownSettings(["leadAgent"])),
             (#"{"claudeLaunchMode": "plan", "setupTimeout": 30}"#, .unknownSettings(["setupTimeout"])),
             (#"{"claudeLaunchMode": "plan", "codexLaunchMode": "turbo"}"#, .unknownSettings(["codexLaunchMode"])),
+            (#"{"claudeLaunchMode": "plan", "agyLaunchMode": "turbo"}"#, .unknownSettings(["agyLaunchMode"])),
             (#"{"claudeLaunchMode": "plan", "environment": [{"name": "A", "value": "1", "secret": true}]}"#,
              .unknownSettings(["environment"]))
         ]

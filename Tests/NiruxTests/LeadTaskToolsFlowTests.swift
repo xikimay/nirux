@@ -167,6 +167,51 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
     }
 
+    func testCloseTaskRequiresAMergeToDiscardAnIdleCodexDraft() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            _ = try harness.stubCleanupTools()
+            try UIFlowHarness.git(["remote", "add", "acme", "https://github.com/acme/widgets.git"], at: harness.repo)
+            let folder = harness.root + "/repo.feat-codex"
+            try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/codex", folder], at: harness.repo)
+            harness.shell.addWorkspace(title: "Codex work", cwd: folder, profileID: lead.space)
+            let task = try XCTUnwrap(harness.shell.workspaces.first { $0.title == "Codex work" })
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            task.addColumn(command: standIn.command(named: "codex"), cwd: folder)
+            let pty = try XCTUnwrap(task.columns.last?.pty)
+            harness.waitUntil("Codex in the foreground") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.interactiveAgent == .codex }
+            let process = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
+            let report = { (state: AgentProgramStatus.State, kind: String?) in
+                pty.noteCodexStatus(.init(state: state, kind: kind, message: nil, agent: .codex), from: process)
+            }
+            let close = { try harness.callLeadTool(LeadTools.closeTask, ["task": "Codex work"], lead: lead, timeout: 180) }
+
+            report(.idle, nil)
+            pty.sendRaw("half a prompt")
+            let draft = try close()
+            XCTAssertTrue(draft.isError, draft.text)
+            XCTAssertTrue(draft.text.contains("text typed into its prompt"), draft.text)
+
+            try harness.markBranchMerged("feat/codex", in: folder, number: 17)
+            report(.working, nil)
+            let working = try close()
+            XCTAssertTrue(working.isError, working.text)
+            XCTAssertTrue(working.text.contains("agent is working"), working.text)
+            report(.blocked, "permission")
+            let waiting = try close()
+            XCTAssertTrue(waiting.isError, waiting.text)
+            XCTAssertTrue(waiting.text.contains("waits for the user"), waiting.text)
+
+            report(.done, nil)
+            XCTAssertTrue(pty.hasPromptDraft)
+            let closed = try close()
+            XCTAssertFalse(closed.isError, closed.text)
+            XCTAssertTrue(closed.text.contains("pull request #17 merged"), closed.text)
+            harness.waitUntil("the merged Codex task to close") { !harness.shell.workspaces.contains { $0 === task } }
+        }
+    }
+
     func testCloseTaskCleansItsMissionFolderAfterSwitchingBranches() throws {
         try UIFlowHarness.run { harness in
             let lead = try harness.makeLead()

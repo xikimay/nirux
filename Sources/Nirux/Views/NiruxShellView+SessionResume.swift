@@ -286,19 +286,21 @@ extension NiruxShellView {
         _ launch: AgentLaunch, workingDirectory: String? = nil, in workspace: WorkspaceState, column: ColumnState,
         settingsFiles: [String: String]? = nil
     ) -> String {
-        if let sessionID = launch.sessionID {
-            sessionResume.noteLaunch(of: sessionID, in: column, now: ProcessInfo.processInfo.systemUptime)
-            switch launch.agent {
-            case .claude: column.prepareClaudeResume(sessionID: sessionID)
-            case .codex: column.prepareCodexResume(sessionID: sessionID)
-            case .agy: column.prepareAgyResume(sessionID: sessionID)
-            case .gemini, .opencode: break
-            }
-        }
+        prepareSessionResume(launch, in: column)
         return agentCommand(
             launch, in: workspace, column: column, launchDirectory: workingDirectory ?? column.launchDirectory ?? workspace.cwd,
             resumeDirectory: workingDirectory, settingsFiles: settingsFiles
         )
+    }
+
+    func prepareSessionResume(_ launch: AgentLaunch, in column: ColumnState) {
+        guard let sessionID = launch.sessionID else { return }
+        sessionResume.noteLaunch(of: sessionID, in: column, now: ProcessInfo.processInfo.systemUptime)
+        switch launch {
+        case .claude: column.prepareClaudeResume(sessionID: sessionID)
+        case .codex: column.prepareCodexResume(sessionID: sessionID)
+        case .agy: column.prepareAgyResume(sessionID: sessionID)
+        }
     }
 
     /// Brings forward the column that holds the session: a restored one

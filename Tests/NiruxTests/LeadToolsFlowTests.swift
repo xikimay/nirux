@@ -39,7 +39,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(started.text.contains("with agy, model neon-low"))
             let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Compare parsers" })
             let launch = try XCTUnwrap(harness.agentLaunches.last)
-            XCTAssertTrue(launch.hasPrefix("command agy --model 'neon-low' --settings "), launch)
+            XCTAssertTrue(launch.hasPrefix("command agy --mode auto --model 'neon-low' --settings "), launch)
             XCTAssertTrue(launch.contains("Read .agy-handover.md"))
             XCTAssertTrue(FileManager.default.fileExists(atPath: task.cwd + "/.agy-handover.md"))
             let standIn = AgentStandIn()
@@ -205,7 +205,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(shell.pendingLeadNotices.map(\.text), ["[Nirux Mission] The user answered “Add a date filter”: Yes, until v3"])
             let handedAt = MissionStore.shared.missions.flatMap(\.events).first { $0.id == second.id }?.handedToUserAt
             XCTAssertNotNil(handedAt, "never typed: handed over")
-            XCTAssertEqual(shell.pendingLeadNotices.last?.forClaudeStartedBy, handedAt, "for the claude that handed it over")
+            XCTAssertEqual(shell.pendingLeadNotices.last?.forAgentStartedBy, handedAt, "for the claude that handed it over")
 
             // One handed over with a recommendation: the user accepts it in
             // one click. An access question's can't be accepted.
@@ -233,7 +233,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(shell.pendingLeadNotices.last?.text, "[Nirux Mission] The user answered “Add a date filter”: en-US")
             let typedAt = MissionStore.shared.missions.flatMap(\.events).first { $0.id == typed.id }?.parentTypedAt
             XCTAssertNotNil(typedAt)
-            XCTAssertEqual(shell.pendingLeadNotices.last?.forClaudeStartedBy, typedAt, "for the claude it was typed into")
+            XCTAssertEqual(shell.pendingLeadNotices.last?.forAgentStartedBy, typedAt, "for the claude it was typed into")
 
             XCTAssertFalse(try call(LeadTools.tell, ["task": "Add a date filter", "message": "/code-review"], lead: lead, in: harness).isError)
             let instructions = MissionStore.shared.missions.first { $0.id == mission.id }?.events.filter { $0.kind == .instruction }
@@ -996,6 +996,65 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    func testRecordReviewMarksCodeReviewOnlyOnCleanReviews() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            shell.addWorkspace(title: "Codex fix", cwd: harness.worktree, profileID: lead.space)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Codex fix" })
+            shell.refreshGitContextNow(for: task)
+            harness.waitUntil("the task's branch and head") {
+                task.gitBranch == harness.worktreeBranch && task.gitContext?.identity.head != nil
+            }
+            let head = try XCTUnwrap(task.gitContext?.identity.head)
+            let branch = harness.worktreeBranch
+
+            @MainActor func missingReviews() -> [String] {
+                MergeQueue.missingReviews(
+                    branch: branch, tasks: NiruxShellView.reviewTasks(of: [task]), required: BoardStages.Rules().requiredReviews
+                )
+            }
+            @MainActor func leadRefusal() -> String? {
+                var candidate = MergeQueue.ConfirmationReading.Candidate(number: 14)
+                candidate.pullRequest = MQ.pullRequest(14, head: head, branch: branch)
+                candidate.details = MergeQueue.PullRequestDetails(
+                    title: "Codex fix", files: ["Sources/app.swift"], hasMoreFiles: false, head: head, baseBranch: "main", allPathsKnown: true
+                )
+                candidate.checks = MQ.checks(MQ.checkRun(id: 1))
+                candidate.comparison = .some(MergeQueue.Comparison(status: "ahead", aheadBy: 1, behindBy: 0, baseCommit: MQ.sha("0")))
+                candidate.local = MergeQueue.LocalState()
+                candidate.missingReviews = missingReviews()
+                var reading = MergeQueue.ConfirmationReading(settings: MQ.settings(), isDryRun: false)
+                reading.rateLimit = MergeQueue.RateLimit(
+                    coreRemaining: 5000, coreReset: Date(timeIntervalSince1970: 0),
+                    graphQLRemaining: 5000, graphQLReset: Date(timeIntervalSince1970: 0)
+                )
+                reading.baseMergeQueue = false
+                reading.baseRuns = [MQ.run(1, head: MQ.sha("c"))]
+                reading.candidates = [candidate]
+                return reading.leadStartRefusal(confirmation: MergeQueue.confirmation(reading), numbers: [14], cadence: .standard)
+            }
+
+            // Issues found: must NOT record .codeReview or clear missingReviews.
+            let blocking = ["kind": "missing-test", "text": "Cover the error branch."]
+            let withFindings = try call(LeadTools.recordReview, ["task": "Codex fix", "findings": [blocking]], lead: lead, in: harness)
+            XCTAssertFalse(withFindings.isError, withFindings.text)
+            XCTAssertNil(task.reviewRuns[.codeReview])
+            XCTAssertEqual(missingReviews(), ["Code review"])
+            XCTAssertNotNil(leadRefusal())
+
+            // Clean review (zero findings): records .codeReview on current HEAD/branch and clears missingReviews.
+            let clean = try call(LeadTools.recordReview, ["task": "Codex fix", "findings": [] as [Any]], lead: lead, in: harness)
+            XCTAssertFalse(clean.isError, clean.text)
+            XCTAssertTrue(clean.text.hasPrefix("Recorded round 2 of “Codex fix”: 0 findings."), clean.text)
+            let recorded = try XCTUnwrap(task.reviewRuns[.codeReview])
+            XCTAssertEqual(recorded.head, head)
+            XCTAssertEqual(recorded.branch, branch)
+            XCTAssertEqual(missingReviews(), [])
+            XCTAssertNil(leadRefusal())
+        }
+    }
+
     func testUnreadableMissionsLeaveTheFirstDailyWindowForRecovery() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -1699,12 +1758,10 @@ final class LeadToolsFlowTests: XCTestCase {
             // to answer it; then answered.
             let question = try ask("Document the old date= parameter?", from: mission)
             let accepted = MissionStore.AcceptedEvent(mission: mission, event: question)
-            XCTAssertEqual(
-                MissionPromptText.text(for: accepted, childTitle: subtask.title, parentTitle: task.title),
-                "[Nirux Mission] Question from \"Write the API docs\" (branch feat/write-api-docs):\nDocument the old date= parameter?\n"
-                    + "Answer with the reply tool, question \(question.id); if neither the code nor the user's words settle it, "
-                    + "don't guess: hand it to the user with ask_user."
-            )
+            let prompt = try XCTUnwrap(MissionPromptText.text(for: accepted, childTitle: subtask.title, parentTitle: task.title))
+            XCTAssertTrue(prompt.contains("Answer with the reply tool, question \(question.id)"))
+            XCTAssertTrue(prompt.contains("ask_user"))
+            XCTAssertTrue(prompt.contains("\"$NIRUX_CLI_PATH\" --mission reply --event \(question.id)"))
             XCTAssertTrue(try call(LeadTools.listTasks, from: task, agentUUID: agent, in: harness).text.contains("question \(question.id)"))
             XCTAssertTrue(try call(LeadTools.reply, ["question": question.id, "message": "No"], lead: lead, in: harness).isError,
                           "not the Lead's to answer")

@@ -55,7 +55,7 @@ final class ColumnState {
     /// Fires (main queue) when the terminal prints a local dev-server URL.
     /// The workspace decides whether it becomes a proposal chip.
     var onLocalServerURLDetected: ((LocalServerURL) -> Void)?
-    var onLocalServerChipOpen: ((LocalServerURL) -> Void)?
+    var onLocalServerChipOpen: ((LocalServerURL, _ isIsolated: Bool) -> Void)?
     var onLocalServerChipDismiss: ((LocalServerURL) -> Void)?
     private var localServerChip: LocalServerChipView?
 
@@ -249,7 +249,7 @@ final class ColumnState {
         if localServerChip == nil {
             guard url != nil, let header = terminalHeader else { return }
             let chip = LocalServerChipView(frame: .zero)
-            chip.onOpen = { [weak self] url in self?.onLocalServerChipOpen?(url) }
+            chip.onOpen = { [weak self] url, isIsolated in self?.onLocalServerChipOpen?(url, isIsolated) }
             chip.onDismiss = { [weak self] url in self?.onLocalServerChipDismiss?(url) }
             header.accessories.append(chip)
             localServerChip = chip
@@ -455,9 +455,8 @@ final class ColumnState {
             guard status.agent != .codex else { return noteCodexStatus(status, in: ptySession) }
             // One read on an empty process table goes to the agy last seen in front.
             let snapshot = readsProcesses()
-            guard ptySession.isNewProgramStatus(status),
-                  let agy = snapshot.isEmpty ? lastForegroundAgent : ptySession.foregroundProcess(snapshot: snapshot),
-                  agy.agent == status.agent
+            guard let agy = snapshot.isEmpty ? lastForegroundAgent : ptySession.foregroundProcess(snapshot: snapshot),
+                  agy.agent == status.agent, ptySession.programStatus(of: agy) != status
             else { return }
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
@@ -525,11 +524,14 @@ final class ColumnState {
     }
 
     /// WebView column
-    init(url: String) {
+    convenience init(url: String) {
+        self.init(webView: WebViewColumn(url: url))
+    }
+
+    init(webView: WebViewColumn) {
         agentUUID = nil
         view = Self.filled(NSView())
 
-        let webView = WebViewColumn(url: url)
         webView.autoresizingMask = [.width, .height]
         view.addSubview(webView)
         webViewColumn = webView
@@ -615,11 +617,18 @@ final class ColumnState {
 
     /// Binds the conversation the column's `agy` reports in its hooks: its
     /// own, not a nested agy's that its shell tool started in its job.
-    func captureAgySession(sessionID: String?, emitterProcess: ProcessInstance?, snapshot: ProcessSnapshot) -> Bool {
+    func captureAgySession(
+        sessionID: String?,
+        eventName: AgentHookEvent.Name = .sessionStart,
+        emitterProcess: ProcessInstance?,
+        snapshot: ProcessSnapshot
+    ) -> Bool {
         guard let place = hookEmitterPlace(emitterProcess, snapshot: snapshot),
               place.foreground?.headlessAgent != .agy else { return false }
         return agySessionTracker.capture(
-            sessionID: sessionID, emitterBelongsToForegroundJob: emitterProcess == place.foreground?.instance,
+            sessionID: sessionID,
+            eventName: eventName,
+            emitterBelongsToForegroundJob: emitterProcess == place.foreground?.instance,
             foregroundProcess: place.foreground
         )
     }
@@ -643,7 +652,19 @@ final class ColumnState {
     }
 
     func persistedAgySessionID(foregroundProcess: ForegroundProcess?) -> String? {
-        agySessionTracker.sessionID(for: foregroundProcess)
+        if let sessionID = agySessionTracker.sessionID(for: foregroundProcess) {
+            return sessionID
+        }
+        if let foregroundProcess, foregroundProcess.interactiveAgent == .agy,
+           let resumed = NiruxShellView.resumedConversation(ofAgy: foregroundProcess.arguments),
+           UUID(uuidString: resumed) != nil {
+            agySessionTracker.bindIfUnbound(sessionID: resumed, process: foregroundProcess.instance)
+            return resumed
+        }
+        if foregroundProcess == nil, case .agy(.session(let sessionID)?, _, _)? = deferredAgent?.launch {
+            return sessionID
+        }
+        return nil
     }
 
     func persistedCodexSessionID(foregroundProcess: ForegroundProcess?) -> String? {

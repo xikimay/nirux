@@ -2,9 +2,8 @@ import Foundation
 
 /// `Nirux --hook claude --mcp`: the Model Context Protocol server Nirux
 /// gives the Claude agents it launches (`claudeArguments`), over stdin and
-/// stdout, one JSON-RPC message per line. Its tools are read-only views of
-/// the project: `history_search` (see HistorySearch) for now, room for
-/// more. Spelled as a hook, like the status line, so that an older build at
+/// stdout, one JSON-RPC message per line. Its searches read local project files.
+/// Spelled as a hook, like the status line, so that an older build at
 /// the same path (a rollback) takes the messages for a hook payload instead
 /// of launching its UI: it waits for the end of stdin, records nothing, and
 /// Claude reports the server as failed. See "Agent history search" in
@@ -16,9 +15,8 @@ enum NiruxMCPServer {
     static let maxLineBytes = 1_000_000
     /// What Claude adds to the system prompt for this server.
     static let instructions = """
-        Nirux keeps this project's past Claude conversations, across all its worktrees and sessions. \
-        Before starting a task, and before asking the user about a past decision, search them with \
-        history_search: a feature or branch name, a PR number, a distinctive word. \
+        Before starting a task or asking about a past decision, use history_search for this project's past \
+        Claude conversations (try a branch name or PR number). Use memory_search for project rules and notes. \
         Nirux's binary ($NIRUX_CLI_PATH) starts no task: run it only for the --mission commands Nirux \
         gives you, and never launch the app itself (open -a Nirux, open -n) to start work: that can open a \
         second Nirux.
@@ -47,22 +45,16 @@ enum NiruxMCPServer {
     /// space's Lead workspace: what it may do, and what it hands to the
     /// user.
     static let leadInstructions = """
-        You are the Lead of this Nirux space. The user talks to you: turn what they ask into tasks, start \
-        them, follow them, and bring the user only what needs them. Start tasks only with start_task (not \
-        the nirux-worktree skill, not git worktree), one repository per task: a feature across two \
-        repositories is two tasks; work that needs no repository starts with repo "none", in a folder of its \
-        own. Read list_tasks first: give any task (the user's too) more work or your review with tell \
-        instead of starting another, and group small related fixes into one task. Don't edit files, commit \
-        or switch branches in this checkout. Each task's questions and result are typed into your prompt as \
-        [Nirux Mission] messages, only while you are idle: after starting or telling tasks, end your turn; \
-        don't poll or sleep. Answer a question with reply when the space brief, the code or this \
-        conversation settles it; otherwise hand it over with ask_user and say why. Keep each task's next \
-        step and blocker current with set_task_context (shown on its row): after its question is answered, \
-        when it completes, and when you notice a blocker (clear it once it is gone). Propose tasks ready to \
-        merge with queue_merge: the user starts the queue. Record each review you send with record_review; when a \
-        second task gets the same kind of finding, propose a rule for the space brief with propose_rule: the user \
-        decides. Close a merged or abandoned task with close_task, never by removing its worktree or branch yourself. Never merge a pull request \
-        or act on another space: leave those to the user.
+        You are the Lead of this Nirux space. Read list_tasks first. Use tell for follow-ups and reviews, including the user's tasks. \
+        Group related fixes. Start tasks only with start_task, one repository per task. Use repo "none" for work needing no repository. \
+        Don't edit, commit or switch branches in this checkout. End your turn after starting or telling tasks. Their questions and results \
+        arrive as [Nirux Mission] messages while you are idle. Don't poll or sleep. Use reply when the brief, code or conversation answers \
+        a question. Otherwise use ask_user and explain why. Update set_task_context after answers, at completion and when blockers arise or clear. \
+        Inspect queue progress and journal entries with merge_queue_status. Merge only via queue_merge. The user confirms by default. With \
+        Lead auto-start enabled, a clean preflight starts the queue. Use stop_merge_queue to stop it locally. Pass replace: true only when \
+        the user asks to replace an idle Board selection. Cadences: standard, batch_post_merge, express_disjoint. \
+        Record reviews with record_review. When two tasks get the same kind of finding, use propose_rule for the user's decision. Close merged \
+        or abandoned tasks with close_task. Leave worktree and branch cleanup to Nirux. Stay in this space.
         """
 
     /// The instructions for whoever launched the server: the Lead's role
@@ -87,10 +79,31 @@ enum NiruxMCPServer {
         return ["--mcp-config=" + config, "--allowedTools=" + allowed]
     }
 
+    private static let codexServerKey = "mcp_servers.\(serverName)"
+
+    static func hasCodexLaunchOverride(in arguments: [String]) -> Bool {
+        zip(arguments, arguments.dropFirst()).contains { flag, value in
+            (flag == "-c" || flag == "--config") && value.hasPrefix(codexServerKey + "={")
+                && value.contains(#"args=["--hook","claude","--mcp"]"#)
+        }
+    }
+
+    /// Codex forwards only named environment variables to stdio servers.
+    static func codexArguments(executable: String) -> [String] {
+        let context = ["NIRUX_WORKSPACE_ID", "NIRUX_AGENT_UUID", "NIRUX_PROFILE_ID", "NIRUX_STATE_DIR",
+                       LeadChannel.environmentKey, NiruxLaunchAuthorization.environmentKey, "CLAUDE_CONFIG_DIR"]
+        let variables = context.map(SpaceBrief.tomlBasicString).joined(separator: ",")
+        let config = "\(codexServerKey)={command=\(SpaceBrief.tomlBasicString(executable)),"
+            + #"args=["--hook","claude","--mcp"],env_vars=["# + variables + "]}"
+        return ["-c", config]
+    }
+
+    private static let searchToolNames = [HistorySearchTool.name, MemorySearchTool.name]
+
     /// Every tool, pre-allowed for every Claude Nirux launches; the Lead's
     /// are listed to a Lead only, a task's (the same names) to the agent of
     /// any other Nirux workspace, and the app checks each call.
-    static let toolNames = [HistorySearchTool.name] + LeadTools.names
+    static let toolNames = searchToolNames + LeadTools.names
 
     /// Who runs the server, and where.
     struct Context: Sendable {
@@ -211,18 +224,20 @@ enum NiruxMCPServer {
         case "ping":
             return response(id: id, result: [:])
         case "tools/list":
-            return response(id: id, result: ["tools": [HistorySearchTool.definition] + context.appToolDefinitions])
+            return response(id: id, result: ["tools": [HistorySearchTool.definition, MemorySearchTool.definition] + context.appToolDefinitions])
         case "tools/call":
             let name = params["name"] as? String
-            guard let name, name == HistorySearchTool.name || context.appToolNames.contains(name) else {
+            guard let name, searchToolNames.contains(name) || context.appToolNames.contains(name) else {
                 return response(id: id, error: (-32602, "Unknown tool: \(name ?? "none")"))
             }
             guard let arguments = params["arguments"] as? [String: Any] ?? (params["arguments"] == nil ? [:] : nil) else {
                 return response(id: id, error: (-32602, "The arguments must be an object."))
             }
-            let result = name == HistorySearchTool.name
-                ? HistorySearchTool.call(arguments, context: context)
-                : callAppTool(name, arguments: arguments, context: context)
+            let result = switch name {
+            case HistorySearchTool.name: HistorySearchTool.call(arguments, context: context)
+            case MemorySearchTool.name: MemorySearchTool.call(arguments, context: context)
+            default: callAppTool(name, arguments: arguments, context: context)
+            }
             return response(id: id, result: [
                 "content": [["type": "text", "text": result.text]],
                 "isError": result.isError

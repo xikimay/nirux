@@ -37,6 +37,8 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
     /// that data's generation.
     var onLoadFile: ((_ id: Int, _ generation: Int) -> Void)?
     var onRefresh: (() -> Void)?
+    var onAttachReport: (() -> Void)?
+    var onOpenReceiptArtifact: ((_ id: String) -> Void)?
     /// The Reload banner's button: show the branch as it is now.
     var onReload: (() -> Void)?
     /// The button a status offers (`showStatus(_:action:)`).
@@ -84,7 +86,7 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         refreshButton.target = self
         refreshButton.action = #selector(refreshClicked)
         header.trailingButtons = [refreshButton]
-        header.menuProvider = { Self.headerMenu() }
+        header.menuProvider = { [weak self] in self?.headerMenu() ?? NSMenu() }
 
         config.userContentController.add(WeakMessageHandler(self), name: Self.messageHandler)
         webView.navigationDelegate = self
@@ -100,8 +102,12 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    private static func headerMenu() -> NSMenu {
+    private func headerMenu() -> NSMenu {
         let menu = NSMenu()
+        if onAttachReport != nil {
+            menu.addItem(withTitle: "Attach Report…", action: #selector(attachReportClicked), keyEquivalent: "").target = self
+            menu.addItem(.separator())
+        }
         ColumnHeaderView.columnMenuItems().forEach(menu.addItem)
         return menu
     }
@@ -114,6 +120,13 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
     /// The page scrolls with the keyboard once the column has the focus.
     func takeKeyboard() {
         window?.makeFirstResponder(webView)
+    }
+
+    @objc private func attachReportClicked() { onAttachReport?() }
+
+    func showReportProblem(_ message: String?) {
+        guard isPageReady else { return }
+        call("NiruxReview.showReportProblem(message)", ["message": message ?? NSNull()])
     }
 
     @objc private func refreshClicked() {
@@ -308,6 +321,9 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         case "openLink":
             guard let text = body["url"] as? String, let url = Self.webLink(text) else { return }
             openLink(url)
+        case "openReceiptArtifact":
+            guard let id = body["id"] as? String, !id.isEmpty, id.utf8.count <= 256 else { return }
+            onOpenReceiptArtifact?(id)
         default:
             break
         }

@@ -307,15 +307,15 @@ extension NiruxShellView {
             guard !resumingTasks.contains(recipientID) else { continue }
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
-            guard let agent = Self.recipientAgent(of: delivery) else { continue }
+            guard let recipient = missionRecipient(of: delivery), let pty = recipient.pty,
+                  let agent = Self.recipientAgent(of: delivery, foreground: pty.foregroundProcess(snapshot: snapshot))
+            else { continue }
             if agent == .codex {
                 guard let delivery = MissionStore.shared.pendingPromptDelivery(delivery) else { continue }
                 queueForCodex(delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title, snapshot: snapshot, now: now)
                 continue
             }
-            guard let recipient = missionRecipient(of: delivery), let pty = recipient.pty,
-                  !missionWaits.typing.contains(delivery.event.id)
-            else { continue }
+            guard !missionWaits.typing.contains(delivery.event.id) else { continue }
             let refusal = pty.missionPromptRefusal(
                 runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now), snapshot: snapshot,
                 seenByUser: recipient.id == seenAtPrompt, agent: agent
@@ -339,16 +339,16 @@ extension NiruxShellView {
             let front = pty.foregroundProcess(snapshot: snapshot)?.instance
             typeMissionPrompt(paste, into: pty, keepingInFront: front, typedByNirux: !byUser) { [weak self] typed in
                 guard let self else { return }
-                self.finishTyping(delivery, typed)
+                self.finishTyping(delivery, typed, at: now)
                 self.reportUnsent(typed, what: byUser ? "your answer" : "a Mission message", for: recipientTitle, telling: sender)
                 // agy says when it takes a prompt (OSC 7501 working).
                 guard typed == .sent, agent == .agy, let front else { return }
-                self.checkStarted(front, in: pty, since: now) {
+                self.checkStarted(front, in: pty, since: now) { shell in
                     if let sender {
-                        self.tellProposer(sender, "Your message to “\(recipientTitle)” was typed into its prompt, but Antigravity hasn't "
+                        shell.tellProposer(sender, "Your message to “\(recipientTitle)” was typed into its prompt, but Antigravity hasn't "
                             + "started it: it may still sit there. Look at “\(recipientTitle)” before sending it again.")
                     }
-                    self.showToast("Antigravity in “\(recipientTitle)” hasn't started the Mission message typed into it.")
+                    shell.showToast("Antigravity in “\(recipientTitle)” hasn't started the Mission message typed into it.")
                 }
             }
             missionWaits.noteTyped(into: recipient, at: now)
@@ -388,63 +388,73 @@ extension NiruxShellView {
         }
     }
 
-    /// The agent kind, its process's name too, a message goes to: a question
-    /// or a result to a Claude Code parent (another one polls with
-    /// `receive`), the rest to the child's agent.
-    nonisolated static func recipientAgent(of delivery: MissionStore.AcceptedEvent) -> CodingAgent? {
-        goesToParent(delivery.event) ? .claude : delivery.mission.deliveryAgent
+    nonisolated static func recipientAgent(of delivery: MissionStore.AcceptedEvent, foreground: ForegroundProcess?) -> CodingAgent? {
+        guard goesToParent(delivery.event) else { return delivery.mission.deliveryAgent }
+        return foreground?.interactiveAgent.flatMap { $0.isLaunchable ? $0 : nil }
     }
 
-    /// Hands `delivery`, a message for a Codex child, to Codex's own queue
-    /// for the thread its `codex` proved it runs (`CodexQueue`), once
-    /// Codex reports its turn over: Codex taking it counts as typed. It
-    /// starts it at once, that conversation being idle; if it says nothing
-    /// for `MissionWaitState.startWait`, the message's sender and the
-    /// user hear so.
     private func queueForCodex(
         _ delivery: MissionStore.AcceptedEvent, childTitle: String?, parentTitle: String?, snapshot: ProcessSnapshot,
         now: TimeInterval
     ) {
         let id = delivery.event.id
-        guard !missionWaits.typing.contains(id), missionWaits.tries[id, default: 0] < Self.missionTypingTries,
-              let column = missionRecipient(of: delivery), let pty = column.pty, !missionWaits.codexQueuing.contains(column.id),
-              column.codexMissionRefusal(runningSince: runningSince(of: delivery.event, in: column, snapshot: snapshot, now: now),
-                                         snapshot: snapshot) == nil,
-              let codex = pty.foregroundProcess(snapshot: snapshot), let thread = column.provenCodexSessionID(of: codex),
-              let command = CodexQueue.command(of: codex),
+        guard !missionWaits.typing.contains(id), let column = missionRecipient(of: delivery),
               let text = MissionPromptText.text(for: delivery, childTitle: childTitle, parentTitle: parentTitle)
-                  .flatMap(TypedPromptSanitizer.sanitize)
         else { return }
-        missionWaits.typing.insert(id)
-        missionWaits.codexQueuing.insert(column.id)
-        let sender = delivery.event.leadSender
+        let toParent = Self.goesToParent(delivery.event)
+        let sender = toParent || delivery.event.answeredByUser == true ? nil : delivery.event.leadSender
             ?? NewTask.MissionParent(workspaceID: delivery.mission.parentWorkspaceID, agentUUID: delivery.mission.parentAgentUUID)
-        let recipient = MissionPromptText.quoted(childTitle ?? delivery.mission.branch)
+        let since = runningSince(of: delivery.event, in: column, snapshot: snapshot, now: now)
+        missionWaits.typing.insert(id)
+        let queued = queueForCodex(text, id: id, in: column, runningSince: since, snapshot: snapshot, now: now,
+                                   title: (toParent ? parentTitle : childTitle) ?? delivery.mission.branch, sender: sender) { [weak self] outcome in
+            guard let self else { return }
+            switch outcome {
+            case .queued: self.finishTyping(delivery, .sent, at: now)
+            case .unconfirmed: self.finishTyping(delivery, .cut, at: now)
+            case .refused: self.missionWaits.typing.remove(id)
+            }
+        }
+        if !queued { missionWaits.typing.remove(id) }
+    }
+
+    @discardableResult
+    private func queueForCodex(
+        _ text: String, id: String, in column: ColumnState, runningSince: TimeInterval, snapshot: ProcessSnapshot,
+        now: TimeInterval, title: String, sender: NewTask.MissionParent?, done: @escaping @MainActor (CodexQueue.Outcome) -> Void
+    ) -> Bool {
+        guard missionWaits.tries[id, default: 0] < Self.missionTypingTries, !missionWaits.codexQueuing.contains(column.id),
+              column.codexMissionRefusal(runningSince: runningSince, snapshot: snapshot) == nil, let pty = column.pty,
+              let codex = pty.foregroundProcess(snapshot: snapshot), let thread = column.provenCodexSessionID(of: codex),
+              let command = CodexQueue.command(of: codex), let message = TypedPromptSanitizer.sanitize(text)
+        else { return false }
         let columnID = column.id
-        let sentAt = Date().timeIntervalSince1970
+        let recipient = MissionPromptText.quoted(title)
+        missionWaits.codexQueuing.insert(columnID)
         let request = CodexQueue.Request(
-            command: command, thread: thread, message: text, codexHome: ProcessSnapshot.environment(of: codex.instance.pid)["CODEX_HOME"]
+            command: command, thread: thread, message: message, codexHome: ProcessSnapshot.environment(of: codex.instance.pid)["CODEX_HOME"]
         )
         sideEffects.queueCodexMessage(request) { [weak self] outcome in
             guard let self else { return }
             self.missionWaits.codexQueuing.remove(columnID)
+            done(outcome)
             switch outcome {
             case .queued:
-                self.finishTyping(delivery, .sent)
                 self.updateSidebar()
-                self.checkStarted(codex.instance, in: pty, since: sentAt) {
-                    self.tellProposer(sender, "Your message to “\(recipient)” is in its Codex's queue, but Codex hasn't started it yet: "
-                        + "it starts it once that conversation is idle. Don't send it again.")
-                    self.showToast("Codex in “\(recipient)” hasn't started the Mission message in its queue yet.")
+                self.checkStarted(codex.instance, in: pty, since: now) { shell in
+                    if let sender {
+                        shell.tellProposer(sender, "Your message to “\(recipient)” is in its Codex's queue, but Codex hasn't started it yet: "
+                            + "it starts it once that conversation is idle. Don't send it again.")
+                    }
+                    shell.showToast("Codex in “\(recipient)” hasn't started the Mission message in its queue yet.")
                 }
             case .unconfirmed:
-                // Codex may hold it: handed again, it could run twice.
-                self.finishTyping(delivery, .cut)
-                self.tellProposer(sender, "Your message to “\(recipient)” may be in its Codex's queue: Codex didn't answer within "
-                    + "\(Int(CodexQueue.timeout)) seconds, and Nirux won't hand it over again. Check “\(recipient)” before sending it again.")
+                if let sender {
+                    self.tellProposer(sender, "Your message to “\(recipient)” may be in its Codex's queue: Codex didn't answer within "
+                        + "\(Int(CodexQueue.timeout)) seconds, and Nirux won't hand it over again. Check “\(recipient)” before sending it again.")
+                }
                 self.showToast("Codex in “\(recipient)” didn't confirm the Mission message Nirux handed it.")
             case .refused(let why):
-                self.missionWaits.typing.remove(id)
                 self.missionWaits.tries[id, default: 0] += 1
                 MissionWaitLog.logger.error(
                     "Codex didn't queue a Mission message: id=\(id.prefix(8), privacy: .public) why=\(why, privacy: .public)"
@@ -452,17 +462,18 @@ extension NiruxShellView {
             }
         }
         missionWaits.noteTyped(into: column, at: now)
+        return true
     }
 
     /// Runs `notice` when `process`, an agent that says its state (Codex,
     /// Antigravity), started no turn `MissionWaitState.startWait` after
     /// `sentAt`, when Nirux handed it a message.
     private func checkStarted(
-        _ process: ProcessInstance, in pty: PtySession, since sentAt: TimeInterval, notice: @escaping @MainActor () -> Void
+        _ process: ProcessInstance, in pty: PtySession, since sentAt: TimeInterval, notice: @escaping @MainActor (NiruxShellView) -> Void
     ) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + missionWaits.startWait) { [weak pty] in
-            guard let pty, !pty.startedTurn(since: sentAt, by: process) else { return }
-            notice()
+        DispatchQueue.main.asyncAfter(deadline: .now() + missionWaits.startWait) { [weak self, weak pty] in
+            guard let self, let pty, !pty.startedTurn(since: sentAt, by: process) else { return }
+            notice(self)
         }
     }
 
@@ -471,7 +482,7 @@ extension NiruxShellView {
     /// prompt (a tell is given up then, an answer or a question counts as
     /// typed). One whose agent left before any of it did waits for the next
     /// free prompt.
-    private func finishTyping(_ delivery: MissionStore.AcceptedEvent, _ typed: TypedMessage) {
+    private func finishTyping(_ delivery: MissionStore.AcceptedEvent, _ typed: TypedMessage, at timestamp: TimeInterval) {
         let store = MissionStore.shared
         let id = delivery.event.id
         switch typed {
@@ -480,7 +491,7 @@ extension NiruxShellView {
         case .sent, .inPrompt, .cut:
             let recorded = typed != .sent && delivery.event.kind == .instruction
                 ? store.noteInstructions(heldNotice: [], expired: [id], at: Date().timeIntervalSince1970)
-                : store.markTyped(delivery)
+                : store.markTyped(delivery, at: delivery.event.kind == .question ? timestamp : Date().timeIntervalSince1970)
             // Unrecorded, it stays out of reach: typed again, it would go in twice.
             guard recorded else {
                 return MissionWaitLog.logger.error("A typed Mission message wasn't recorded: id=\(id.prefix(8), privacy: .public)")
@@ -626,8 +637,7 @@ extension NiruxShellView {
 
     /// The conversation `agy --conversation <id>` (or `=<id>`) resumes.
     nonisolated static func resumedConversation(ofAgy arguments: [String]) -> String? {
-        arguments.firstIndex(of: "--conversation").flatMap { arguments[safe: $0 + 1] }
-            ?? arguments.lazy.compactMap { $0.hasPrefix("--conversation=") ? String($0.dropFirst("--conversation=".count)) : nil }.first
+        AgyLaunch.resumedConversation(in: arguments)
     }
 
     /// Types each Lead notice whose Lead's prompt is free; the others wait
@@ -641,27 +651,47 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
         var onSight: TypedOnSight?
-        pendingLeadNotices = pendingLeadNotices.filter { notice in
+        let notices = pendingLeadNotices
+        pendingLeadNotices.removeAll()
+        for notice in notices {
             guard now - notice.queuedAt < MissionEventCLI.parentMessageLifetime,
                   let workspace = workspaces.first(where: { $0.id == notice.workspaceID && !$0.isClosing }),
                   let column = workspace.columns.first(where: { $0.agentUUID == notice.agentUUID })
-            else { return false }
-            guard let pty = column.pty else { return true }
-            if let process = pty.foregroundProcess(snapshot: snapshot), process.interactiveAgent == .claude,
-               !notice.isFor(claudeStartedAt: process.instance.startedAt), !workspace.runsRestartedLead(process) { return false }
-            let refusal = pty.missionPromptRefusal(runningSince: now, snapshot: snapshot, seenByUser: column.id == seenAtPrompt)
+            else { continue }
+            guard let pty = column.pty, let process = pty.foregroundProcess(snapshot: snapshot),
+                  let agent = process.interactiveAgent, agent.isLaunchable else {
+                pendingLeadNotices.append(notice)
+                continue
+            }
+            guard notice.isFor(agentStartedAt: process.instance.startedAt) || workspace.runsRestartedLead(process) else { continue }
+            if agent == .codex {
+                pendingLeadNotices.append(notice)
+                queueForCodex(notice.text, id: notice.waitID, in: column, runningSince: now, snapshot: snapshot,
+                              now: now, title: workspace.title, sender: nil) { [weak self] outcome in
+                    if case .refused = outcome { return }
+                    self?.pendingLeadNotices.removeAll { $0 == notice }
+                }
+                continue
+            }
+            let refusal = pty.missionPromptRefusal(runningSince: now, snapshot: snapshot, seenByUser: column.id == seenAtPrompt, agent: agent)
             if column.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
-            guard refusal == nil, let paste = TypedPromptSanitizer.bracketedPaste(for: notice.text) else { return true }
-            // A user's answer it carries may be long.
+            guard refusal == nil, let paste = TypedPromptSanitizer.bracketedPaste(for: notice.text) else {
+                pendingLeadNotices.append(notice)
+                continue
+            }
             let lead = MissionPromptText.quoted(workspace.title)
-            typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { [weak self] typed in
+            typeMissionPrompt(paste, into: pty, keepingInFront: process.instance) { [weak self] typed in
                 guard let self else { return }
                 if typed == .left { self.pendingLeadNotices.append(notice) }
                 self.reportUnsent(typed, what: "a message", for: lead, telling: nil)
+                if typed == .sent, agent == .agy {
+                    self.checkStarted(process.instance, in: pty, since: now) { shell in
+                        shell.showToast("Antigravity in “\(lead)” hasn't started the notice typed into it.")
+                    }
+                }
             }
             missionWaits.noteTyped(into: column, at: now)
             if column.id == seenAtPrompt { onSight = .typed }
-            return false
         }
         return onSight
     }
@@ -765,19 +795,20 @@ private enum DeliveredHandovers {
 
 /// A line for a Lead's prompt (see `NiruxShellView.pendingLeadNotices`).
 struct LeadNotice: Equatable {
+    var waitID: String { "notice-\(queuedAt)" }
     let workspaceID: String
     let agentUUID: String
     let text: String
     /// Epoch seconds.
     let queuedAt: TimeInterval
-    /// Only a `claude` started by then takes it: the one that saw what it
+    /// Only an agent started by then takes it: the one that saw what it
     /// answers. Nil: any.
-    var forClaudeStartedBy: TimeInterval?
+    var forAgentStartedBy: TimeInterval?
 
-    /// Whether the `claude` started at `claudeStartedAt` (nil: not known)
+    /// Whether the agent started at `agentStartedAt` (nil: not known)
     /// takes it.
-    func isFor(claudeStartedAt: TimeInterval?) -> Bool {
-        guard let forClaudeStartedBy, let claudeStartedAt else { return true }
-        return claudeStartedAt <= forClaudeStartedBy
+    func isFor(agentStartedAt: TimeInterval?) -> Bool {
+        guard let forAgentStartedBy, let agentStartedAt else { return true }
+        return agentStartedAt <= forAgentStartedBy
     }
 }

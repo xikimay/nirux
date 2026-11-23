@@ -881,11 +881,14 @@ final class WorktreeCleanupTests: XCTestCase {
         let tip = try head(at: worktree)
         let branchReview = try review(head: tip)
         let mainReview = try review(of: "main", head: try head(at: repo))
+        let checkpoints = try LocalCheckpoints(stateDirectory: URL(fileURLWithPath: root + "/state"), workspaceID: "cleanup")
+        let saved = try checkpoints.save(worktree: worktree, label: "Before cleanup")
         try setPullRequests([pullRequest(12, "MERGED", head: tip)])
 
         XCTAssertEqual(WorktreeCleanup.execute(try readyPlan(), tools: tools), .cleaned(forcedBranchDelete: false, trashFolder: nil))
         XCTAssertFalse(FileManager.default.fileExists(atPath: branchReview.fileURL.path))
         XCTAssertEqual(mainReview.load().status, .loaded)
+        XCTAssertEqual(try checkpoints.list().first?.manifest, saved)
     }
 
     func testBranchKeptByTheCleanUpKeepsItsReview() throws {

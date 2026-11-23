@@ -65,6 +65,8 @@ The row reads `Needs you · …` in amber with the reason when a fourth round wo
 
 A row opens into its diff. The column follows its worktree, and reads the branch again a moment after the agent stops writing. A new commit waits behind a **Reload** banner, so the page doesn't change while you read it.
 
+From the column’s **⋯** menu, choose **Attach Report…** to import a JUnit XML file up to 2 MB. Its test counts and result appear under **Verification receipts** with the source **Local**. From an isolated test browser’s **Screenshot Saved** or **Browser Diagnostics** sheet, choose **Attach to Branch Review** to attach that workspace’s capture as a **Local browser** receipt with its URL, timestamp, error counts, and a safe preview/reveal action. **Current** means the commit and working tree match the snapshot shown when you attached the report or capture. A later commit or local edit makes the receipt **Stale**.
+
 ### Explain
 
 **Explain** asks Claude Code, on your Claude account, to read the branch and a read-only copy of its files, with secrets and instruction files left out. The model and effort are set in **Settings › Agents › Branch Review**.
@@ -87,6 +89,6 @@ One Explain runs at a time in the whole app, and **Cancel** stops it. Explain is
 - Pull requests without a task and other worktrees are folded at the end of each repository, then the pull requests merged today.
 - The switch at the top orders the lines as the sidebar does, or by progress.
 - The Board belongs to its workspace's space: move that workspace to another space and the Board follows. A space has one Board: if it has its own already, the moved one closes and that one comes forward. While the space's merge queue runs, the workspace of its Board stays where it is.
-- A repository's header shows its last post-merge run, or what went wrong reading it, and its merge queue: Start… and Stop.
+- A repository's header shows its last post-merge run, or what went wrong reading it, and its merge queue: Start… and Stop. Once a queue has run, Journal… shows its stop cause and recent steps. Open on GitHub takes you to the relevant run or pull request. Copy includes the status and entries, and labels a dry run.
 
 From the Board you can queue pull requests to merge one at a time: a click on a line's Merge station adds its pull request to the queue, a second one takes it back. Nothing merges without your confirmation. The queue reruns a failed required check once, then stops at the first problem. Its rules are written down in the design record [Project Board](design/project-board.md).

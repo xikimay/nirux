@@ -783,3 +783,48 @@ extension BranchReview {
         }
     }
 }
+
+extension BranchReview.Record {
+    static let maxReceipts = 20
+
+    /// A missing section can be created. An unrecognized section stays intact.
+    private var receiptItems: [JSONValue]? {
+        guard let section = fields["receipts"] else { return [] }
+        guard let object = section.objectValue, object["version"]?.intValue == 1 else { return nil }
+        return object["items"]?.arrayValue
+    }
+
+    private func decodedReceipt(_ item: JSONValue) -> BranchReview.Receipt? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        guard let data = try? JSONEncoder().encode(item),
+              let receipt = try? decoder.decode(BranchReview.Receipt.self, from: data),
+              receipt.fitsStorage else { return nil }
+        return receipt
+    }
+
+    var receipts: [BranchReview.Receipt] {
+        guard let receiptItems else { return [] }
+        return Array(receiptItems.lazy.compactMap(decodedReceipt).prefix(Self.maxReceipts))
+    }
+
+    /// Newest additions first. Recording the same run again updates its result.
+    @discardableResult
+    mutating func addReceipt(_ receipt: BranchReview.Receipt) -> Bool {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        guard receipt.fitsStorage, let items = receiptItems,
+              let data = try? encoder.encode(receipt),
+              let value = try? JSONDecoder().decode(JSONValue.self, from: data) else { return false }
+        var kept = [value]
+        for item in items {
+            if kept.count == Self.maxReceipts { break }
+            if let previous = decodedReceipt(item), previous.id != receipt.id { kept.append(item) }
+        }
+        var section = fields["receipts"]?.objectValue ?? [:]
+        section["version"] = .int(1)
+        section["items"] = .array(kept)
+        fields["receipts"] = .object(section)
+        return true
+    }
+}

@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 
 struct GitContextObservation: Sendable {
     fileprivate let generation: UInt64
@@ -245,7 +246,13 @@ final class WorkspaceState {
     var onGitContextChanged: (() -> Void)?
     /// A terminal link was cmd-clicked — the shell opens a browser column
     /// in this workspace.
-    var onTerminalOpenURL: ((WorkspaceState, String) -> Void)?
+    var onTerminalOpenURL: ((WorkspaceState, String, _ isIsolated: Bool) -> Void)?
+    var onAttachBrowserCapture: ((
+        WorkspaceState,
+        BranchReview.BrowserReceipt.Input,
+        @escaping @MainActor (Result<Bool, Error>) -> Void
+    ) -> Void)?
+    var onOpenBranchReview: ((WorkspaceState) -> Void)?
     /// A terminal file: link was cmd-clicked — the shell opens it in an
     /// editor column in this workspace, at the optional line.
     var onTerminalOpenFile: ((WorkspaceState, String, Int?) -> Void)?
@@ -255,6 +262,7 @@ final class WorkspaceState {
     var onTerminalStarting: ((WorkspaceState, ColumnState) -> Void)?
     /// Bring an existing column of this workspace into view and focus it.
     var onRevealColumn: ((WorkspaceState, Int) -> Void)?
+    private lazy var isolatedBrowserDataStore = WKWebsiteDataStore.nonPersistent()
     /// Dev-server proposals — see WorkspaceState+LocalServers.swift.
     var localServers = LocalServerTracking()
 
@@ -819,7 +827,7 @@ extension WorkspaceState {
     private func setupLinkOpening(for col: ColumnState) {
         col.onOpenURL = { [weak self] url in
             guard let self else { return }
-            self.onTerminalOpenURL?(self, url)
+            self.onTerminalOpenURL?(self, url, false)
         }
         col.onOpenFile = { [weak self] path, line in
             guard let self else { return }
@@ -1183,12 +1191,26 @@ extension WorkspaceState {
         insertColumn(col)
     }
 
-    func addColumn(webViewURL: String) {
+    func addColumn(webViewURL: String, isIsolated: Bool = false) {
         guard !isWaitingTask else { return }
-        let col = ColumnState(url: webViewURL)
+        let store = isIsolated ? isolatedBrowserDataStore : WebViewColumn.sharedDataStore
+        let browser = WebViewColumn(url: webViewURL, dataStore: store, isolatedWorkspaceID: isIsolated ? id : nil)
+        if isIsolated {
+            browser.onAttachCaptureToBranchReview = { [weak self] input, completion in
+                guard let self, let attach = self.onAttachBrowserCapture else {
+                    return completion(.failure(BranchReview.BrowserReceipt.Problem.invalidWorkspace))
+                }
+                attach(self, input, completion)
+            }
+            browser.onOpenBranchReview = { [weak self] in
+                guard let self else { return }
+                self.onOpenBranchReview?(self)
+            }
+        }
+        let col = ColumnState(webView: browser)
         insertColumn(col)
         // A browser column on a proposed port makes that proposal moot.
-        col.webViewColumn?.onURLChanged = { [weak self] in self?.pruneLocalServerProposals() }
+        browser.onURLChanged = { [weak self] in self?.pruneLocalServerProposals() }
         pruneLocalServerProposals()
     }
 

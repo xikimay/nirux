@@ -16,7 +16,17 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertEqual(event.sessionID, "c1")
         XCTAssertEqual(event.cwd, "/w")
         XCTAssertFalse(String(decoding: try JSONEncoder().encode(event), as: UTF8.self).contains("the user's prompt"))
-        XCTAssertNil(AgentHookEvent(kind: .agy, payload: ["hookEventName": "Stop", "conversationId": "c2"], env: [:], now: 1))
+        let stop = try XCTUnwrap(AgentHookEvent(
+            kind: .agy,
+            payload: ["hookEventName": "Stop", "conversationId": "c2", "cwd": "/w", "lastUserInput": "secret"],
+            env: ["NIRUX_AGENT_UUID": "u"],
+            now: 2
+        ))
+        XCTAssertEqual(stop.name, .stop)
+        XCTAssertEqual(stop.sessionID, "c2")
+        XCTAssertEqual(stop.cwd, "/w")
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(stop), as: UTF8.self).contains("secret"))
+        XCTAssertNil(AgentHookEvent(kind: .agy, payload: ["hookEventName": "PreToolUse", "conversationId": "c3"], env: [:], now: 3))
     }
 
     func testClaudePreToolUse() {

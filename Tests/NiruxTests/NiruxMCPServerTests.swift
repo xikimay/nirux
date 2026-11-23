@@ -91,7 +91,7 @@ final class NiruxMCPServerTests: XCTestCase {
         }
     }
 
-    func testHandshakeListsTheReadOnlyTool() throws {
+    func testHandshakeListsTheReadOnlyTools() throws {
         // Claude probes a newer protocol first and falls back on this error.
         let probe = try send(["jsonrpc": "2.0", "id": "probe", "method": "server/discover"])
         XCTAssertEqual(error(probe), -32601)
@@ -108,9 +108,56 @@ final class NiruxMCPServerTests: XCTestCase {
         XCTAssertEqual(result(try send(["jsonrpc": "2.0", "id": 2, "method": "ping"]))?.count, 0)
 
         let tools = try XCTUnwrap(result(try send(["jsonrpc": "2.0", "id": 3, "method": "tools/list"]))?["tools"] as? [[String: Any]])
-        XCTAssertEqual(tools.map { $0["name"] as? String }, ["history_search"])
+        XCTAssertEqual(tools.map { $0["name"] as? String }, ["history_search", "memory_search"])
         XCTAssertEqual((tools[0]["inputSchema"] as? [String: Any])?["required"] as? [String], ["query"])
         XCTAssertEqual((tools[0]["annotations"] as? [String: Any])?["readOnlyHint"] as? Bool, true)
+        let memory = try XCTUnwrap(tools.first { $0["name"] as? String == "memory_search" })
+        let schema = try XCTUnwrap(memory["inputSchema"] as? [String: Any])
+        let properties = try XCTUnwrap(schema["properties"] as? [String: [String: Any]])
+        XCTAssertEqual(schema["additionalProperties"] as? Bool, false)
+        XCTAssertEqual(properties["query"]?["type"] as? String, "string")
+        XCTAssertEqual(properties["scope"]?["enum"] as? [String], ["all", "always", "team", "when_relevant"])
+        XCTAssertEqual(properties["scope"]?["default"] as? String, "all")
+        XCTAssertEqual(properties["limit"]?["minimum"] as? Int, 1)
+        XCTAssertEqual(properties["limit"]?["maximum"] as? Int, 20)
+        XCTAssertEqual(properties["limit"]?["default"] as? Int, 8)
+        let hints = try XCTUnwrap(memory["annotations"] as? [String: Bool])
+        XCTAssertEqual(hints["readOnlyHint"], true)
+        XCTAssertEqual(hints["destructiveHint"], false)
+        XCTAssertEqual(hints["openWorldHint"], false)
+        XCTAssertTrue((initialize?["instructions"] as? String)?.contains("memory_search") == true)
+    }
+
+    func testMemorySearchCallWithoutArgumentsReadsTheActiveSpace() throws {
+        var context = self.context
+        context.environment["CLAUDE_CONFIG_DIR"] = folder + "/claude"
+        let url = try XCTUnwrap(SpaceBrief.briefURL(spaceID: "space", stateDirectory: context.stateDirectory))
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("- Run the tests.".utf8).write(to: url)
+        let reply = result(try send([
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": ["name": "memory_search"]
+        ], context: context))
+        XCTAssertEqual(reply?["isError"] as? Bool, false)
+        let content = try XCTUnwrap(reply?["content"] as? [[String: String]])
+        XCTAssertEqual(content.first?["text"], "[Always · brief.md:1] Run the tests.")
+    }
+
+    func testMemorySearchAccountsForEscapesOnTheWire() throws {
+        var context = self.context
+        context.environment["CLAUDE_CONFIG_DIR"] = folder + "/claude"
+        let repo = URL(fileURLWithPath: context.workingDirectory)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let quotes = String(repeating: "\"", count: 500)
+        let rules = (1...20).map { "- Rule \($0) \(quotes)" }.joined(separator: "\n")
+        try Data(rules.utf8).write(to: repo.appendingPathComponent("CLAUDE.md"))
+        let call = Data(#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_search","arguments":{"limit":20}}}"#.utf8)
+        let reply = try XCTUnwrap(NiruxMCPServer.reply(to: call, context: context))
+        XCTAssertLessThanOrEqual(reply.count, 16_000)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: reply) as? [String: Any])
+        let content = try XCTUnwrap(result(object)?["content"] as? [[String: String]])
+        let answer = try XCTUnwrap(content.first?["text"])
+        XCTAssertTrue(answer.contains("[Team · CLAUDE.md:1]"))
+        XCTAssertTrue(answer.contains("Results truncated"))
     }
 
     func testBrokenMessagesGetErrorsAndResponsesNone() throws {
@@ -216,6 +263,28 @@ final class NiruxMCPServerTests: XCTestCase {
     }
 
     // MARK: - Launch
+
+    @MainActor
+    func testCodexLaunchCarriesNiruxMCPAndColumnContext() throws {
+        let executable = "/Applications/It's Nirux.app/Contents/MacOS/Nirux"
+        let command = NiruxShellView.codexCommand(mode: .default, niruxExecutable: executable, handoverPrompt: "Go")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "printf '%s\n' " + command.dropFirst("command codex ".count)]
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        let words = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .split(separator: "\n").map(String.init)
+        process.waitUntilExit()
+        XCTAssertEqual(Array(words.suffix(3)), NiruxMCPServer.codexArguments(executable: executable) + ["Go"])
+        let config = try XCTUnwrap(words.dropLast().last)
+        XCTAssertTrue(config.contains("mcp_servers.nirux={command=\"\(executable)\""))
+        XCTAssertTrue(config.contains(#"args=["--hook","claude","--mcp"]"#))
+        for key in ["NIRUX_WORKSPACE_ID", "NIRUX_AGENT_UUID", "NIRUX_PROFILE_ID", "NIRUX_STATE_DIR", "NIRUX_LAUNCH_ID", "NIRUX_LEAD"] {
+            XCTAssertTrue(config.contains("\"\(key)\""), key)
+        }
+    }
 
     /// The arguments survive the shell as one word each, the config parses,
     /// and the handover prompt stays a prompt.

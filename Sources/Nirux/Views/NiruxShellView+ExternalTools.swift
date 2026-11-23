@@ -95,6 +95,7 @@ extension NiruxShellView {
         mode: CodexLaunchMode,
         model: String? = nil,
         briefFile: String? = nil,
+        niruxExecutable: String? = NiruxShellView.niruxExecutable,
         shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
     ) -> String {
@@ -113,6 +114,9 @@ extension NiruxShellView {
         if let briefFile, let override = Self.codexDeveloperInstructionsOverride(briefFile: briefFile, shell: shell) {
             parts.append(contentsOf: ["-c", override])
         }
+        if let niruxExecutable {
+            parts += NiruxMCPServer.codexArguments(executable: niruxExecutable).map(Self.shellQuotedArgument)
+        }
         if let prompt = handoverPrompt {
             parts.append(Self.shellQuotedArgument(prompt))
         }
@@ -120,23 +124,41 @@ extension NiruxShellView {
     }
 
     /// Build an `agy …` shell command: Antigravity CLI with its own mode,
-    /// model and settings. A restore resumes the exact conversation, or
-    /// starts a fresh one (agy has no picker flag; `/resume` is in it).
+    /// model and settings. A restore resumes the exact conversation
+    /// (`--conversation <id>`), or continues the most recent conversation in
+    /// the folder (`--continue`) when no exact ID was recorded. A fresh launch
+    /// (`resume == nil`) starts a new conversation.
     /// `handoverPrompt` is its first prompt (`-i`), as in the worktree
     /// handover flow.
     static func agyCommand(
-        resume: AgentResumeTarget? = nil, model: String? = nil, settings: String? = nil, handoverPrompt: String? = nil
+        resume: AgentResumeTarget? = nil, mode: AgyLaunchMode = .auto, model: String? = nil,
+        settings: String? = nil, handoverPrompt: String? = nil
     ) -> String {
         var parts = ["command", "agy"]
-        if case .session(let sessionID)? = resume {
+        switch resume {
+        case .session(let sessionID)?:
             parts.append(contentsOf: ["--conversation", Self.shellQuotedArgument(sessionID)])
+        case .picker?:
+            parts.append("--continue")
+        case nil:
+            break
         }
+        parts.append(contentsOf: mode.cliArgs)
         if let model { parts += ["--model", Self.shellQuotedArgument(model)] }
         if let settings { parts += ["--settings", Self.shellQuotedArgument(settings)] }
         if let prompt = handoverPrompt {
             parts.append(contentsOf: ["-i", Self.shellQuotedArgument(prompt)])
         }
         return parts.joined(separator: " ")
+    }
+
+    static func currentAgyLaunchMode() -> AgyLaunchMode {
+        Persistence.load()?.settings?.agyLaunchMode ?? .auto
+    }
+
+    static func agyLaunchMode(for workspace: WorkspaceState) -> AgyLaunchMode {
+        guard !workspace.startedOutsideNirux else { return currentAgyLaunchMode() }
+        return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).agyMode(settings: currentAgyLaunchMode())
     }
 
     static func currentCodexLaunchMode() -> CodexLaunchMode {
@@ -198,7 +220,10 @@ extension NiruxShellView {
     /// `agent`'s launch in `workspace`, in the space's mode; nil for an
     /// agent Nirux doesn't start.
     static func launch(of agent: CodingAgent, resume: AgentResumeTarget?, model: String? = nil, in workspace: WorkspaceState, codexMode: CodexLaunchMode? = nil) -> AgentLaunch? {
-        AgentLaunch(agent, resume: resume, model: model, claudeMode: claudeLaunchMode(for: workspace), codexMode: codexMode ?? codexLaunchMode(for: workspace))
+        AgentLaunch(
+            agent, resume: resume, model: model, claudeMode: claudeLaunchMode(for: workspace),
+            codexMode: codexMode ?? codexLaunchMode(for: workspace), agyMode: agyLaunchMode(for: workspace)
+        )
     }
 
     /// The line that runs `launch` in `workspace`, with the space's brief
@@ -223,10 +248,10 @@ extension NiruxShellView {
                 briefFile: Self.codexBriefFile(from: spaceBriefInjection(for: workspace), launchDirectory: launchDirectory),
                 handoverPrompt: handoverPrompt
             )
-        case .agy(let resume, let model):
+        case .agy(let resume, let mode, let model):
             let settings = workspace.startedOutsideNirux || workspace.isFolderTask ? nil
                 : AgyWorktreeTrust.settings(for: launchDirectory, home: sideEffects.homeDirectory())
-            return Self.agyCommand(resume: resume, model: model, settings: settings, handoverPrompt: handoverPrompt)
+            return Self.agyCommand(resume: resume, mode: mode, model: model, settings: settings, handoverPrompt: handoverPrompt)
         }
     }
 
@@ -273,18 +298,20 @@ extension NiruxShellView {
                 mode: .head
             )
 
-            if let columnIndex = workspace.columns.firstIndex(where: { $0.editorColumn === editor }) {
-                workspace.focusedIndex = columnIndex
-            }
-            if let workspaceIndex = self.workspaces.firstIndex(where: { $0 === workspace }) {
-                self.activeWSIndex = workspaceIndex
-            }
-            self.relayout(animated: false)
-            self.updateSidebar()
+            self.focusEditor(editor, in: workspace)
         }
     }
 
-    private func editorColumn(in workspace: WorkspaceState, cwd: String) -> EditorColumn? {
+    func focusEditor(_ editor: EditorColumn, in workspace: WorkspaceState) {
+        guard let column = workspace.columns.firstIndex(where: { $0.editorColumn === editor }),
+              let index = workspaces.firstIndex(where: { $0 === workspace }) else { return }
+        workspace.focusedIndex = column
+        activeWSIndex = index
+        relayout(animated: false)
+        updateSidebar()
+    }
+
+    func editorColumn(in workspace: WorkspaceState, cwd: String) -> EditorColumn? {
         if let existing = workspace.columns.compactMap({ $0.editorColumn }).first(where: { $0.workspaceCwd == cwd }) {
             return existing
         }
@@ -864,9 +891,14 @@ extension NiruxShellView {
         }
     }
 
-    func openWebView(url: String, in workspace: WorkspaceState? = nil) {
+    func openIsolatedTestBrowser() {
+        guard let workspace = activeWorkspace else { return }
+        openWebView(url: workspace.detectedLocalServerURLs.first ?? "http://localhost", in: workspace, isIsolated: true)
+    }
+
+    func openWebView(url: String, in workspace: WorkspaceState? = nil, isIsolated: Bool = false) {
         guard let workspace = workspace ?? activeWorkspace else { return }
-        workspace.addColumn(webViewURL: url)
+        workspace.addColumn(webViewURL: url, isIsolated: isIsolated)
         relayout(animated: false)
         updateSidebar()
         focusActiveTerminal(in: window)

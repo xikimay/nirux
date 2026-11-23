@@ -53,6 +53,8 @@ final class MergeQueueBoardTests: XCTestCase {
         XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(7, head: MQ.sha("a"))]))
         XCTAssertEqual(queue.selection(for: widgets), [7], "the confirmed list: what the sheet left out leaves it")
         queue.addToSelection(9, repository: widgets)
+        queue.pruneSelection(keepingOpen: [])
+        queue.clearSelection()
         XCTAssertEqual(queue.selection(for: widgets), [7], "nothing joins a running queue")
         queue.stop()
 
@@ -70,6 +72,33 @@ final class MergeQueueBoardTests: XCTestCase {
         queue.addToSelection(5, repository: widgets)
         queue.addToSelection(2, repository: widgets)
         XCTAssertEqual(queue.selection(for: widgets), [2, 5], "an emptied list starts over by number")
+    }
+
+    @MainActor
+    func testPruningAndClearingNotifyOnceAndResetOrderOnlyWhenEmpty() {
+        let queue = controller()
+        queue.proposeSelection([12, 7, 9], repository: MQ.widgets)
+        var changes = 0
+        queue.onChange = { changes += 1 }
+        queue.pruneSelection(keepingOpen: [12, 9])
+        queue.pruneSelection(keepingOpen: [12, 9])
+        XCTAssertEqual(queue.selection, [12, 9])
+        XCTAssertEqual(changes, 1)
+        queue.addToSelection(3, repository: MQ.widgets)
+        XCTAssertEqual(queue.selection, [12, 9, 3])
+        queue.clearSelection()
+        queue.clearSelection()
+        XCTAssertEqual(changes, 3)
+        XCTAssertTrue(queue.selection.isEmpty)
+
+        queue.addToSelection(9, repository: MQ.widgets)
+        queue.addToSelection(3, repository: MQ.widgets)
+        XCTAssertEqual(queue.selection, [3, 9])
+        queue.proposeSelection([9, 3], repository: MQ.widgets)
+        queue.pruneSelection(keepingOpen: [])
+        queue.addToSelection(9, repository: MQ.widgets)
+        queue.addToSelection(3, repository: MQ.widgets)
+        XCTAssertEqual(queue.selection, [3, 9])
     }
 
     @MainActor
@@ -124,10 +153,13 @@ final class MergeQueueBoardTests: XCTestCase {
         let lock = try XCTUnwrap(MergeQueueLock.acquire(repository: MQ.widgets, folder: lockFolder))
         defer { lock.release() }
 
+        live.addToSelection(5, repository: MQ.widgets)
         live.reloadSaved()
         XCTAssertTrue(live.runsElsewhere)
         live.addToSelection(7, repository: MQ.widgets)
-        XCTAssertEqual(live.selection(for: MQ.widgets), [])
+        live.pruneSelection(keepingOpen: [])
+        live.clearSelection()
+        XCTAssertEqual(live.selection(for: MQ.widgets), [5])
     }
 
     @MainActor
@@ -203,7 +235,7 @@ final class MergeQueueBoardTests: XCTestCase {
         let confirmation = MergeQueue.confirmation(read)
         XCTAssertEqual(confirmation.entries.map(\.number), [1])
         XCTAssertEqual(confirmation.excluded.map(\.reason), ["It is a draft."])
-        XCTAssertEqual(confirmation.items.first?.notes, ["Behind main by 2 commits: the queue merges main into it first."])
+        XCTAssertEqual(confirmation.items.first?.notes, ["Behind main by 2 commits."])
         XCTAssertEqual(confirmation.items.first?.warnings, ["No code review yet: Nirux saw none run on its branch."])
         // One recorded on its branch counts, whichever task ran it.
         tasks[1] = MergeQueue.ReviewTask(branch: "main", runs: [.codeReview: ReviewRun(head: MQ.sha("a"), at: 2, branch: "feat/1")])
@@ -305,6 +337,20 @@ final class MergeQueueBoardTests: XCTestCase {
     }
 
     // MARK: - The details read
+
+    func testFileEvidenceIncludesTheHeadAndRejectsRenamesMissingPathsAndShortPages() throws {
+        let head = MQ.sha("a")
+        for (type, count, known) in [("ADDED", 1, true), ("RENAMED", 1, false), ("", 1, false), ("MODIFIED", 2, false)] {
+            let json = """
+            {"data":{"repository":{"pullRequest":{"title":"Change","headRefOid":"\(head)","baseRefName":"main","changedFiles":\(count),
+            "files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"new.swift","changeType":"\(type)"}]}}}}}
+            """
+            let details = try XCTUnwrap(MergeQueue.parsePullRequestDetails(Data(json.utf8)))
+            XCTAssertEqual(details.head, head)
+            XCTAssertEqual(details.baseBranch, "main")
+            XCTAssertEqual(details.allPathsKnown, known)
+        }
+    }
 
     func testTheDetailsQueryReadsTheTitleAndFilesAndFailsClosed() throws {
         let json = """

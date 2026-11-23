@@ -7,6 +7,7 @@ extension MergeQueue {
     /// board.json: `queues/<owner>/<name>/`, the journal and the saved
     /// state. A dry run writes its own, so it never touches a live queue's.
     struct Files: Equatable, Sendable {
+        let stateDirectory: URL
         let journal: URL
         let state: URL
         /// Where the state was kept before a space had one queue per
@@ -22,6 +23,7 @@ extension MergeQueue {
             let queueFolder = folder.appendingPathComponent("queues", isDirectory: true)
                 .appendingPathComponent(repository.owner, isDirectory: true)
                 .appendingPathComponent(repository.name, isDirectory: true)
+            self.stateDirectory = stateDirectory
             journal = queueFolder.appendingPathComponent(dryRun ? "queue.dry-run.log" : "queue.log")
             state = queueFolder.appendingPathComponent(dryRun ? "queue-state.dry-run.json" : "queue-state.json")
             legacyState = folder.appendingPathComponent(dryRun ? "queue-state.dry-run.json" : "queue-state.json")
@@ -50,6 +52,9 @@ extension MergeQueue {
         var repository: String
         var baseBranch: String
         var postMergeWorkflow: String?
+        var cadence: Cadence?
+        var effectiveCadence: Cadence { cadence ?? .standard }
+        var startedByLead: Bool?
         var dryRun: Bool
         var savedAt: Date
         var status: Status
@@ -61,6 +66,8 @@ extension MergeQueue {
         var inFlight: String?
 
         init(engine: Engine, dryRun: Bool, savedAt: Date) {
+            startedByLead = engine.startedByLead
+            cadence = engine.cadence
             repository = engine.settings.repository
             baseBranch = engine.settings.baseBranch
             postMergeWorkflow = engine.settings.postMergeWorkflow

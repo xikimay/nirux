@@ -81,6 +81,7 @@ enum ProjectMemory {
         /// The lines of `MEMORY.md` Claude Code reads (see `linesRead`); nil
         /// without one.
         let linesRead: Set<Int>?
+        let isTruncated: Bool
 
         var hasIndex: Bool { linesRead != nil }
         /// Whether Claude Code reads `line` at the start of a session.
@@ -114,13 +115,25 @@ enum ProjectMemory {
     /// finds them (no hidden or linked file, no `MEMORY.md`, nothing in
     /// `skippedFolders`), and the index. Nil when there is no folder. Call
     /// it off the main thread.
-    static func read(directory: URL) -> Contents? {
+    static func read(directory: URL, followingSymlinks: Bool = true) -> Contents? {
+        if !followingSymlinks {
+            let directoryFD = open(directory.path.expandingSystemAliases, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+            guard directoryFD >= 0 else { return nil }
+            close(directoryFD)
+        }
         let manager = FileManager.default
         var isDirectory: ObjCBool = false
         guard manager.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue,
               let files = manager.enumerator(atPath: directory.path)
         else { return nil }
-        let indexText = readText(directory.appendingPathComponent(indexFileName).path)
+        func fileContents(_ name: String) -> (text: String, isTruncated: Bool)? {
+            let path = directory.appendingPathComponent(name).path
+            guard let data = readData(path, limit: maxFileBytes + 1, followingSymlinks: followingSymlinks) else { return nil }
+            return (decodedText(data.prefix(maxFileBytes)), data.count > maxFileBytes)
+        }
+        let index = fileContents(indexFileName)
+        let indexText = index?.text
+        var isTruncated = index?.isTruncated == true
         let lines = indexText.map(indexLines(in:)) ?? []
         var lineByFile: [String: IndexLine] = [:]
         for line in lines where lineByFile[fileKey(line.fileName)] == nil { lineByFile[fileKey(line.fileName)] = line }
@@ -130,23 +143,29 @@ enum ProjectMemory {
         // link points to.
         var memories: [Memory] = []
         var visited = 0
-        while let relative = files.nextObject() as? String, memories.count < maxFiles {
+        while let relative = files.nextObject() as? String {
             visited += 1
-            guard visited <= maxEntries else { break }
+            guard visited <= maxEntries, memories.count < maxFiles else {
+                isTruncated = true
+                break
+            }
             let type = files.fileAttributes?[.type] as? FileAttributeType
             let name = (relative as NSString).lastPathComponent
             if type == .typeDirectory {
-                if name.hasPrefix(".") || files.level >= maxDepth
-                    || (files.level == 1 && skippedFolders.contains(folderKey(name))) {
+                if name.hasPrefix(".") || (files.level == 1 && skippedFolders.contains(folderKey(name))) {
+                    files.skipDescendants()
+                } else if files.level >= maxDepth {
+                    isTruncated = true
                     files.skipDescendants()
                 }
                 continue
             }
             guard type == .typeRegular, !name.hasPrefix("."), name.hasSuffix(".md"), name != indexFileName,
-                  let text = readText(directory.appendingPathComponent(relative).path)
+                  let contents = fileContents(relative)
             else { continue }
+            if contents.isTruncated { isTruncated = true }
             memories.append(memory(
-                fileName: relative, text: text, indexLine: lineByFile[fileKey(relative)],
+                fileName: relative, text: contents.text, indexLine: lineByFile[fileKey(relative)],
                 fileDate: files.fileAttributes?[.modificationDate] as? Date
             ))
         }
@@ -163,11 +182,17 @@ enum ProjectMemory {
         // A file skipped above (linked, in a skipped folder) is there all
         // the same.
         let missing = lines.filter { line in
-            !present.contains(fileKey(line.fileName))
-                && !manager.fileExists(atPath: directory.appendingPathComponent(line.fileName).path)
+            let name = line.fileName
+            guard !present.contains(fileKey(name)) else { return false }
+            let path = directory.appendingPathComponent(name).path
+            if followingSymlinks { return !manager.fileExists(atPath: path) }
+            guard !name.hasPrefix("/"), !name.contains("\0"), !name.split(separator: "/").contains("..") else { return false }
+            var info = stat()
+            return fstatat(AT_FDCWD, path.expandingSystemAliases, &info, AT_SYMLINK_NOFOLLOW_ANY) != 0 && errno == ENOENT
         }
         return Contents(
-            directory: directory, memories: memories, missingFiles: missing, linesRead: indexText.map(linesRead(of:))
+            directory: directory, memories: memories, missingFiles: missing, linesRead: indexText.map(linesRead(of:)),
+            isTruncated: isTruncated
         )
     }
 
@@ -188,21 +213,24 @@ enum ProjectMemory {
     /// A regular file's text (a named pipe would block), its first
     /// `limit` bytes at most; nil when it can't be read. Invalid UTF-8 is
     /// replaced, not refused.
-    static func readText(_ path: String, limit: Int = maxFileBytes) -> String? {
-        readData(path, limit: limit).map { data in
-            let text = String(decoding: data, as: UTF8.self)
-            return text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
-        }
+    static func readText(_ path: String, limit: Int = maxFileBytes, followingSymlinks: Bool = true) -> String? {
+        readData(path, limit: limit, followingSymlinks: followingSymlinks).map(decodedText)
     }
 
-    static func readData(_ path: String, limit: Int) -> Data? {
-        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
-        guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true,
-              let handle = try? FileHandle(forReadingFrom: url)
-        else { return nil }
-        defer { try? handle.close() }
+    private static func decodedText(_ data: Data) -> String {
+        let text = String(decoding: data, as: UTF8.self)
+        return text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
+    }
+
+    static func readData(_ path: String, limit: Int, followingSymlinks: Bool = true) -> Data? {
+        let flags = O_RDONLY | O_NONBLOCK | O_CLOEXEC | (followingSymlinks ? 0 : O_NOFOLLOW_ANY)
+        guard !path.contains("\0") else { return nil }
+        let descriptor = open(followingSymlinks ? path : path.expandingSystemAliases, flags)
+        guard descriptor >= 0 else { return nil }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return nil }
         do {
-            // Nil at the end of the file: an empty file.
             return try handle.read(upToCount: limit) ?? Data()
         } catch {
             return nil
@@ -274,8 +302,10 @@ enum ProjectMemory {
         func isSpace(_ unit: UInt16) -> Bool {
             [0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0xA0, 0xFEFF, 0x2028, 0x2029].contains(unit)
         }
-        while let first = kept.first, isSpace(first.unit) { kept.removeFirst() }
-        while let last = kept.last, isSpace(last.unit) { kept.removeLast() }
+        guard let first = kept.firstIndex(where: { !isSpace($0.unit) }),
+              let last = kept.lastIndex(where: { !isSpace($0.unit) }) else { return [] }
+        kept.removeSubrange((last + 1)...)
+        kept.removeFirst(first)
         var breaks = 0
         for (index, entry) in kept.enumerated() where entry.unit == 0x0A {
             breaks += 1

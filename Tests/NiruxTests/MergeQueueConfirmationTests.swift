@@ -21,7 +21,8 @@ final class MergeQueueConfirmationTests: XCTestCase {
     ) -> MergeQueue.ConfirmationReading.Candidate {
         var candidate = MergeQueue.ConfirmationReading.Candidate(number: number)
         candidate.pullRequest = pullRequest ?? MQ.pullRequest(number, head: head)
-        candidate.details = MergeQueue.PullRequestDetails(title: "Change \(number)", files: files, hasMoreFiles: hasMoreFiles)
+        candidate.details = MergeQueue.PullRequestDetails(title: "Change \(number)", files: files, hasMoreFiles: hasMoreFiles,
+                                                  head: head, baseBranch: "main", allPathsKnown: true)
         candidate.checks = checks
         candidate.comparison = .some(MergeQueue.Comparison(
             status: behind > 0 ? "diverged" : "ahead", aheadBy: 1, behindBy: behind, baseCommit: MQ.sha("0")
@@ -47,6 +48,147 @@ final class MergeQueueConfirmationTests: XCTestCase {
         reading.baseRuns = baseRuns
         reading.candidates = candidates
         return reading
+    }
+
+    func testExpressRequiresCompleteDisjointFilesAndGreenChecksOnTheConfirmedHeads() {
+        let first = candidate(12, head: a, files: ["Sources/Café.swift"])
+        let second = candidate(14, head: b, files: ["Sources/Other.swift"])
+        let eligible = MergeQueue.confirmation(reading([first, second], settings: MQ.settings(postMergeWorkflow: nil)))
+        XCTAssertNil(eligible.expressRefusal)
+        XCTAssertEqual(eligible.offeredCadences, [.standard, .expressDisjoint])
+        XCTAssertEqual(MergeQueue.confirmation(reading([first])).expressRefusal, "Express needs at least two pull requests.")
+
+        let collision = candidate(14, head: b, files: ["Sources/Café.swift"])
+        let folded = candidate(14, head: b, files: ["sources/CAFE\u{301}.SWIFT"])
+        var unknown = second
+        unknown.details = nil
+        var changed = second
+        changed.details?.head = c
+        var renamed = second
+        renamed.details?.allPathsKnown = false
+        let cases: [(MergeQueue.ConfirmationReading.Candidate, String)] = [
+            (collision, "PR #12 and #14 both touch Sources/Café.swift."),
+            (folded, "PR #12 and #14 both touch sources/CAFE\u{301}.SWIFT."),
+            (unknown, "The changed files for the confirmed head of #14 are unknown."),
+            (changed, "The changed files for the confirmed head of #14 are unknown."),
+            (renamed, "GitHub didn’t identify every changed path for #14."),
+            (candidate(14, head: b, hasMoreFiles: true), "#14 changes more than 100 files."),
+            (candidate(14, head: b, files: (1...101).map(String.init)), "#14 changes more than 100 files."),
+            (candidate(14, head: b, files: [".GitHub/Workflows/test.yml"]), "#14 changes .GitHub/Workflows/test.yml."),
+            (candidate(14, head: b, checks: nil), "The checks for #14 are unknown."),
+            (candidate(14, head: b, checks: MQ.checks()), "Required checks for #14 aren’t all green."),
+            (candidate(14, head: b, checks: MQ.checks(MQ.checkRun(id: 1), MQ.checkRun(id: 2, name: "lint", conclusion: "FAILURE"))),
+             "Red checks for #14: Tests / lint."),
+            (candidate(14, head: b, pullRequest: MQ.pullRequest(14, head: b, mergeable: "UNKNOWN")),
+             "GitHub hasn’t confirmed that #14 is mergeable.")
+        ]
+        for (other, reason) in cases {
+            var confirmation = MergeQueue.confirmation(reading([first, other]))
+            XCTAssertEqual(confirmation.expressRefusal, reason)
+            confirmation.select(.expressDisjoint)
+            XCTAssertEqual(confirmation.cadence, .standard)
+        }
+    }
+
+    func testLeadStartRequiresEveryRequestedPRAndEveryPreflightRead() {
+        let first = candidate(12, head: a)
+        let second = candidate(14, head: b)
+        let good = reading([first, second], baseRuns: [MQ.run(1, head: c)])
+        func refusal(_ read: MergeQueue.ConfirmationReading, _ cadence: MergeQueue.Cadence = .standard) -> String? {
+            read.leadStartRefusal(confirmation: MergeQueue.confirmation(read), numbers: [12, 14], cadence: cadence)
+        }
+        XCTAssertNil(refusal(good))
+        XCTAssertNil(refusal(good, .batchPostMerge))
+        XCTAssertNotNil(refusal(good, .expressDisjoint), "both PRs change the same path")
+        var distinct = good
+        distinct.candidates[1] = candidate(14, head: b, files: ["Other.swift"])
+        XCTAssertNil(refusal(distinct, .expressDisjoint))
+        let blockers: [(inout MergeQueue.ConfirmationReading) -> Void] = [
+            { $0.candidates.removeLast() },
+            { $0.candidates.reverse() },
+            { $0.candidates[1].pullRequest = MQ.pullRequest(14, head: self.b, isDraft: true) },
+            { $0.candidates[1].pullRequest = MQ.pullRequest(14, head: self.b, mergeable: "UNKNOWN") },
+            { $0.candidates[1].missingReviews = ["Code review"] },
+            { $0.candidates[1].local = nil },
+            { $0.candidates[1].checks = nil },
+            { $0.candidates[1].checks = MQ.checks(MQ.checkRun(id: 1, status: "QUEUED", conclusion: nil)) },
+            { $0.candidates[1].checks = MQ.checks(MQ.checkRun(id: 1), MQ.checkRun(id: 2, name: "lint", conclusion: "FAILURE")) },
+            { $0.candidates[1].comparison = nil },
+            { $0.candidates[1].details?.allPathsKnown = false },
+            { $0.candidates[1].details?.head = self.c },
+            { $0.candidates[1].details?.baseBranch = "other" },
+            { $0.rateLimit = nil },
+            { $0.rateLimit = .init(coreRemaining: 499, coreReset: Date(), graphQLRemaining: 500, graphQLReset: Date()) },
+            { $0.baseMergeQueue = nil },
+            { $0.baseMergeQueue = true },
+            { $0.baseRuns = nil },
+            { $0.baseRuns = [] },
+            { $0.baseRuns = [MQ.run(1, head: self.c, conclusion: nil)] },
+            { $0.baseRuns = [MQ.run(1, head: self.c, conclusion: "cancelled")] }
+        ]
+        for (index, block) in blockers.enumerated() {
+            var blocked = good
+            block(&blocked)
+            XCTAssertNotNil(refusal(blocked), "blocker \(index)")
+        }
+        let noWorkflow = reading([first, second], settings: MQ.settings(postMergeWorkflow: nil))
+        XCTAssertNil(refusal(noWorkflow))
+        XCTAssertNotNil(refusal(noWorkflow, .batchPostMerge))
+    }
+
+    func testLeadStartCanOptOutOfLocalReviewWithoutWeakeningOtherChecks() {
+        let first = candidate(12, head: a)
+        var unreviewed = candidate(14, head: b)
+        unreviewed.missingReviews = ["Code review"]
+        let read = reading([first, unreviewed], baseRuns: [MQ.run(1, head: c)])
+        let confirmation = MergeQueue.confirmation(read)
+        XCTAssertEqual(confirmation.items[1].warnings, ["No code review yet: Nirux saw none run on its branch."])
+        XCTAssertEqual(
+            read.leadStartRefusal(confirmation: confirmation, numbers: [12, 14], cadence: .standard, allowWithoutLocalReview: false),
+            "#14: No code review yet: Nirux saw none run on its branch."
+        )
+        XCTAssertNil(
+            read.leadStartRefusal(confirmation: confirmation, numbers: [12, 14], cadence: .standard, allowWithoutLocalReview: true)
+        )
+
+        let stillBlocked: [(String, (inout MergeQueue.ConfirmationReading) -> Void)] = [
+            ("workflow change", {
+                $0.candidates[1].details = MergeQueue.PullRequestDetails(
+                    title: "Change 14", files: [".github/workflows/ci.yml"], hasMoreFiles: false,
+                    head: self.b, baseBranch: "main", allPathsKnown: true
+                )
+            }),
+            ("incomplete file list", {
+                $0.candidates[1].details = MergeQueue.PullRequestDetails(
+                    title: "Change 14", files: ["Sources/app.swift"], hasMoreFiles: true,
+                    head: self.b, baseBranch: "main", allPathsKnown: true
+                )
+            }),
+            ("unreadable file list", { $0.candidates[1].details = nil; $0.candidates[1].detailsError = "HTTP 502" }),
+            ("red non-required check", { $0.candidates[1].checks = MQ.checks(MQ.checkRun(id: 1), MQ.checkRun(id: 2, name: "lint", conclusion: "FAILURE")) }),
+            ("skipped required check", { $0.candidates[1].checks = MQ.checks(MQ.checkRun(id: 1, conclusion: "SKIPPED")) }),
+            ("unknown checks", { $0.candidates[1].checks = nil; $0.candidates[1].checksError = "HTTP 502" }),
+            ("failed post-merge run", { $0.baseRuns = [MQ.run(1, head: self.c, conclusion: "failure")] }),
+            ("missing post-merge run", { $0.baseRuns = [] }),
+            ("conflicting PR", { $0.candidates[1].pullRequest = MQ.pullRequest(14, head: self.b, mergeable: "CONFLICTING") }),
+            ("dirty worktree", {
+                $0.candidates[1].local = MergeQueue.LocalState(worktrees: [
+                    MergeQueue.LocalWorktree(path: "/tmp/x/app.feat-14", problem: .trackedChanges)
+                ])
+            })
+        ]
+        for (label, mutate) in stillBlocked {
+            var blocked = read
+            mutate(&blocked)
+            XCTAssertNotNil(
+                blocked.leadStartRefusal(confirmation: MergeQueue.confirmation(blocked), numbers: [12, 14], cadence: .standard, allowWithoutLocalReview: true),
+                label
+            )
+        }
+        let dryRun = reading([first, unreviewed], isDryRun: true, baseRuns: [MQ.run(1, head: c)])
+        XCTAssertNotNil(
+            dryRun.leadStartRefusal(confirmation: MergeQueue.confirmation(dryRun), numbers: [12, 14], cadence: .standard, allowWithoutLocalReview: true)
+        )
     }
 
     // MARK: - Who joins
@@ -144,7 +286,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
         let items = MergeQueue.confirmation(reading(candidates)).items
 
         XCTAssertEqual(items.map(\.checks), ["test ●", "test ✓", "test ✗", "test (skipped)", "test not started"])
-        XCTAssertEqual(items[0].notes, ["Behind main by 3 commits: the queue merges main into it first."])
+        XCTAssertEqual(items[0].notes, ["Behind main by 3 commits."])
         XCTAssertEqual(items[1].notes, ["GitHub is still computing whether it merges cleanly: the queue waits up to 2 minutes for it."])
         XCTAssertEqual(items[1].warnings, ["Red, though not required: Tests / lint. The queue never merges with a check red."])
         XCTAssertEqual(items[2].notes, ["A required check failed on this head: the queue reruns it once if it can, and stops if it fails again."])
@@ -225,7 +367,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
         let item = try? XCTUnwrap(MergeQueue.confirmation(reading([unread])).items.first)
 
         XCTAssertEqual(item?.checks, "checks unknown: HTTP 502")
-        XCTAssertEqual(item?.notes, ["Nirux couldn’t tell whether it is behind main (HTTP 502): the queue checks again."])
+        XCTAssertEqual(item?.notes, ["Nirux couldn’t tell whether it is behind main (HTTP 502)."])
         XCTAssertEqual(item?.warnings, ["Nirux couldn’t read the files it changes (not read): check .github/workflows/ yourself."])
         XCTAssertNil(item?.title)
     }
@@ -288,6 +430,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
 
     func testThePlanSaysHowManyNightliesTheQueuePublishes() {
         let confirmation = MergeQueue.confirmation(reading([candidate(1, head: a), candidate(2, head: b)]))
+        XCTAssertEqual(confirmation.summary, "This queue publishes 2 nightlies: nightly.yml runs after each of its 2 merges.")
         XCTAssertEqual(confirmation.plan, [
             "In this order, for each pull request:",
             "• If its branch is behind main, merge main into it on GitHub (never a rebase or a force push), at most 2 times.",
@@ -296,25 +439,24 @@ final class MergeQueueConfirmationTests: XCTestCase {
             "• Merge it with a merge commit, pinned to the head shown here, or to the queue’s own updates of it "
                 + "(gh pr merge --merge --match-head-commit).",
             "• Wait for nightly.yml on main (up to 30 minutes), then go on to the next one.",
-            "This queue publishes 2 nightlies: nightly.yml runs after each of its 2 merges.",
             "It stops at the first problem. Stop is in the board and in the status bar; a call already sent to GitHub "
                 + "finishes.",
         ])
 
         let dryRun = MergeQueue.confirmation(reading([candidate(1, head: a)], isDryRun: true))
-        XCTAssertTrue(dryRun.plan.contains("A real queue would publish 1 nightly, one after each merge. This dry run publishes none."))
+        XCTAssertEqual(dryRun.summary, "A real queue would publish 1 nightly, one after each merge. This dry run publishes none.")
 
         let noWorkflow = MergeQueue.confirmation(reading(
             [candidate(1, head: a)], settings: MQ.settings(postMergeWorkflow: nil, mergeMethod: .squash)
         ))
         XCTAssertTrue(noWorkflow.plan.contains("• Go on to the next one right away: no post-merge workflow."))
-        XCTAssertTrue(noWorkflow.plan.contains("This queue makes 1 merge into main, one right after the other."))
+        XCTAssertEqual(noWorkflow.summary, "This queue makes 1 merge into main, one right after the other.")
         XCTAssertTrue(noWorkflow.plan[3].hasPrefix("• Squash and merge it"))
 
         let deploy = MergeQueue.confirmation(reading(
             [candidate(1, head: a), candidate(2, head: b)], settings: MQ.settings(postMergeWorkflow: "deploy.yml")
         ))
-        XCTAssertTrue(deploy.plan.contains("This queue runs deploy.yml 2 times: after each of its 2 merges."),
+        XCTAssertEqual(deploy.summary, "This queue runs deploy.yml 2 times: after each of its 2 merges.",
                       "only a nightly is said to publish")
     }
 

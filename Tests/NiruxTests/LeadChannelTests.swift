@@ -28,7 +28,7 @@ final class LeadChannelTests: XCTestCase {
     /// times, from another thread.
     private func answerRequests(_ answers: Int, with text: String) -> Thread {
         let directory = stateDirectory!
-        let thread = Thread {
+        let respond: @Sendable () -> Void = {
             var answered = 0
             let deadline = Date().addingTimeInterval(10)
             while answered < answers, Date() < deadline {
@@ -39,6 +39,7 @@ final class LeadChannelTests: XCTestCase {
                 Thread.sleep(forTimeInterval: 0.02)
             }
         }
+        let thread = Thread(block: respond)
         thread.start()
         return thread
     }
@@ -63,13 +64,13 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(LeadChannel.takeRequests(stateDirectory: stateDirectory), [])
 
         let directory = stateDirectory!
-        let taker = Thread {
+        let take: @Sendable () -> Void = {
             let deadline = Date().addingTimeInterval(5)
             while Date() < deadline, LeadChannel.takeRequests(stateDirectory: directory).isEmpty {
                 Thread.sleep(forTimeInterval: 0.02)
             }
         }
-        taker.start()
+        Thread(block: take).start()
         XCTAssertEqual(LeadChannel.send(request(), stateDirectory: stateDirectory, takeTimeout: 2, workTimeout: 0.3), .stillWorking)
     }
 
@@ -154,11 +155,11 @@ final class LeadChannelTests: XCTestCase {
         let names = { (context: NiruxMCPServer.Context) in
             ((try self.send(list, context: context)["result"] as? [String: Any])?["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
         }
-        XCTAssertEqual(try names(context(lead: true)), [HistorySearchTool.name] + LeadTools.names)
-        XCTAssertEqual(try names(context(lead: false)), [HistorySearchTool.name] + TaskTools.names)
-        XCTAssertEqual(try names(context(lead: false, inWorkspace: false)), [HistorySearchTool.name])
+        XCTAssertEqual(try names(context(lead: true)), [HistorySearchTool.name, MemorySearchTool.name] + LeadTools.names)
+        XCTAssertEqual(try names(context(lead: false)), [HistorySearchTool.name, MemorySearchTool.name] + TaskTools.names)
+        XCTAssertEqual(try names(context(lead: false, inWorkspace: false)), [HistorySearchTool.name, MemorySearchTool.name])
         // A workspace opened by a link from outside Nirux has no launch id.
-        XCTAssertEqual(try names(context(lead: false, launchID: "")), [HistorySearchTool.name])
+        XCTAssertEqual(try names(context(lead: false, launchID: "")), [HistorySearchTool.name, MemorySearchTool.name])
         XCTAssertNotNil(try call(LeadTools.readThread, ["task": "sample"], context: context(lead: false))["error"])
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.readThread, arguments: [:]))
         // Both roles expose the same start options.
@@ -172,6 +173,20 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertNotNil(try call(LeadTools.listTasks, [:], context: context(lead: false, inWorkspace: false))["error"], "unknown outside")
         let allowed = NiruxMCPServer.claudeArguments(executable: "/x/Nirux").first { $0.hasPrefix("--allowedTools=") }
         for name in LeadTools.names { XCTAssertEqual(allowed?.contains("mcp__nirux__\(name)"), true) }
+    }
+
+    func testQueueControlsAreScopedToLeadsAndValidateArguments() throws {
+        for tool in [LeadTools.mergeQueueStatus, LeadTools.stopMergeQueue] {
+            let definition = try XCTUnwrap(LeadTools.definitions.first { $0["name"] as? String == tool })
+            let hints = try XCTUnwrap(definition["annotations"] as? [String: Bool])
+            XCTAssertEqual(hints["readOnlyHint"], tool == LeadTools.mergeQueueStatus)
+            XCTAssertFalse(TaskTools.names.contains(tool))
+            XCTAssertNil(LeadTools.problem(tool: tool, arguments: [:]))
+            XCTAssertNotNil(LeadTools.problem(tool: tool, arguments: ["repo": 1]))
+        }
+        for invalid: Any in [1, "true", NSNull()] {
+            XCTAssertNotNil(LeadTools.problem(tool: LeadTools.queueMerge, arguments: ["prs": [12], "replace": invalid]))
+        }
     }
 
     func testOnlyTheLeadCanSetATasksDependency() throws {

@@ -20,6 +20,44 @@ final class SpaceSettingsFlowTests: XCTestCase {
         harness.shell.workspaces.first { $0.title == title && !$0.isClosing }
     }
 
+    func testLeadMergeQueueSwitchUpdatesTheSpaceAndManualMergeCopy() throws {
+        try UIFlowHarness.run { harness in
+            let space = try anchoredSpace(harness)
+            harness.shell.showSpaceSettings(profileID: space.id, tab: .lead)
+            let pane = try XCTUnwrap(harness.shell.spaceSettings?.lead)
+            let toggle = pane.startsMergeQueueSwitch
+            let withoutReview = pane.startsMergeQueueWithoutLocalReviewSwitch
+            XCTAssertEqual(toggle.accessibilityLabel(), "Allow Lead to start the merge queue")
+            let hint = try XCTUnwrap(toggle.accessibilityHelp())
+            for term in ["Workflow changes", "conflicts", "dry-run"] { XCTAssertTrue(hint.contains(term)) }
+            XCTAssertEqual(withoutReview.accessibilityLabel(), "Allow without local code review")
+            let withoutReviewHint = try XCTUnwrap(withoutReview.accessibilityHelp())
+            for term in ["GitHub checks", "mergeability", "workflow safety", "post-merge health"] {
+                XCTAssertTrue(withoutReviewHint.contains(term), withoutReviewHint)
+            }
+            XCTAssertEqual(toggle.state, .off)
+            XCTAssertEqual(withoutReview.state, .off)
+            XCTAssertFalse(withoutReview.isEnabled)
+            XCTAssertFalse(pane.manualMergeRow.isHidden)
+            for on in [true, false] {
+                toggle.state = on ? .on : .off
+                XCTAssertTrue(toggle.sendAction(toggle.action, to: toggle.target))
+                XCTAssertEqual(toggle.state, on ? .on : .off)
+                XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: space.id).leadCanStartMergeQueue, on)
+                XCTAssertEqual(pane.manualMergeRow.isHidden, on)
+                XCTAssertEqual(withoutReview.isEnabled, on)
+                if on {
+                    for allow in [true, false] {
+                        withoutReview.state = allow ? .on : .off
+                        XCTAssertTrue(withoutReview.sendAction(withoutReview.action, to: withoutReview.target))
+                        XCTAssertEqual(withoutReview.state, allow ? .on : .off)
+                        XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: space.id).leadCanStartMergeQueueWithoutLocalReview, allow)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Launches and shells
 
     /// The space's modes beat Settings' for a fresh launch; its variables
@@ -30,7 +68,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             let shell = harness.shell
             let space = try anchoredSpace(harness)
             try save(SpaceDefaults(
-                claudeLaunchMode: .plan, codexLaunchMode: .readOnly,
+                claudeLaunchMode: .plan, codexLaunchMode: .readOnly, agyLaunchMode: .plan,
                 environment: [
                     .init(name: "API_URL", value: "http://localhost:4000"),
                     .init(name: "NIRUX_WORKSPACE_ID", value: "spoofed")
@@ -46,6 +84,9 @@ final class SpaceSettingsFlowTests: XCTestCase {
             shell.openAgent(.codex)
             let codexFlags = CodexLaunchMode.readOnly.cliArgs.joined(separator: " ")
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command codex " + codexFlags) == true, harness.agentLaunches.last ?? "")
+
+            shell.openAgent(.agy)
+            XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command agy --mode plan") == true)
 
             let environment = claude.terminalEnvironment(agentUUID: "A-1")
             XCTAssertEqual(environment["API_URL"], "http://localhost:4000")
@@ -71,6 +112,30 @@ final class SpaceSettingsFlowTests: XCTestCase {
             XCTAssertNil(outside.terminalEnvironment(agentUUID: "A-3")["API_URL"])
             let persisted = try XCTUnwrap(shell.persistedState().workspaces.first { $0.id == outside.id })
             XCTAssertTrue(persisted.startedOutsideNirux)
+            XCTAssertEqual(NiruxShellView.agyLaunchMode(for: outside), .auto)
+        }
+    }
+
+    func testRestoredAntigravityColumnsUseRecordedModeOrSpaceDefault() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let space = try anchoredSpace(harness)
+            try save(SpaceDefaults(agyLaunchMode: .plan), for: space)
+            var state = shell.persistedState()
+            let savedModes: [AgyLaunchMode?] = [nil, .default, .acceptEdits]
+            let columns = savedModes.map { mode in
+                PersistedColumn(widthPreset: 1, cwd: harness.repo, columnType: .agy, webViewURL: nil,
+                                claudeLaunchMode: nil, codexLaunchMode: nil, agyLaunchMode: mode)
+            }
+            state.workspaces.append(PersistedWorkspace(id: "agy", title: "Antigravity", cwd: harness.repo,
+                                                       columns: columns, focusedColumnIndex: 0, profileID: space.id))
+            XCTAssertTrue(Persistence.save(state))
+            shell.restoreState()
+            let workspace = try XCTUnwrap(shell.workspaces.first { $0.id == "agy" })
+            XCTAssertEqual(workspace.columns.compactMap { $0.deferredAgent?.launch }, [
+                .agy(resume: .picker, mode: .plan), .agy(resume: nil, mode: .default),
+                .agy(resume: nil, mode: .acceptEdits)
+            ])
         }
     }
 
@@ -256,6 +321,11 @@ final class SpaceSettingsFlowTests: XCTestCase {
                 popup.selectItem(at: popup.indexOfItem(withRepresentedObject: raw))
                 popup.sendAction(popup.action, to: popup.target)
             }
+            XCTAssertEqual(pane.agyPopup.titleOfSelectedItem, "Same as Settings (Auto)")
+            pick(AgyLaunchMode.default.rawValue, in: pane.agyPopup)
+            XCTAssertEqual(store.load().defaults.agyLaunchMode, .default)
+            pick(SpaceSettingsDefaultsPane.settingsChoice, in: pane.agyPopup)
+            XCTAssertNil(store.load().defaults.agyLaunchMode)
             pick(ClaudeLaunchMode.plan.rawValue, in: pane.claudePopup)
             XCTAssertEqual(store.load().defaults.claudeLaunchMode, .plan)
             pick(CodingAgent.codex.rawValue, in: pane.agentPopup)

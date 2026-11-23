@@ -130,6 +130,11 @@ final class GitRefreshTests: XCTestCase {
                                   ["name": "lint", "status": "QUEUED", "conclusion": ""]]), "FAILURE")
         XCTAssertEqual(ciStatus([passed, ["state": "PENDING"]]), "PENDING")
         XCTAssertEqual(ciStatus([passed, ["state": "SUCCESS"]]), "SUCCESS")
+        XCTAssertEqual(ciStatus([["context": "ci/build", "state": "SUCCESS"]]), "SUCCESS")
+        XCTAssertEqual(ciStatus([
+            ["name": "test", "status": "IN_PROGRESS", "startedAt": "2026-10-02T10:00:00Z"],
+            ["name": "test", "conclusion": "SUCCESS", "startedAt": "2026-10-02T10:05:00Z"]
+        ]), "SUCCESS")
         XCTAssertNil(ciStatus([]))
     }
 

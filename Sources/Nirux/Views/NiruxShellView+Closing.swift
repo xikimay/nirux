@@ -232,6 +232,10 @@ extension NiruxShellView {
         } else {
             alert.informativeText = details.joined(separator: "\n")
         }
+        return confirmDestructiveClose(alert, confirmTitle: confirmTitle)
+    }
+
+    func confirmDestructiveClose(_ alert: NSAlert, confirmTitle: String) -> Bool {
         let cancel = alert.addButton(withTitle: "Cancel")
         cancel.keyEquivalent = "\r"
         let confirm = alert.addButton(withTitle: confirmTitle)

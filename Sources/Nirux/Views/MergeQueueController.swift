@@ -79,6 +79,9 @@ final class MergeQueueController {
     /// After every step: the board draws the queue again.
     var onChange: (() -> Void)?
 
+    private(set) var hasJournalFile = false
+    private var journalCheckedAt: TimeInterval?
+
     var isDryRun: Bool { client.isDryRun }
     /// Why this build's queue is a dry run ("not the notarized release
     /// (…)"), when its client says.
@@ -109,6 +112,22 @@ final class MergeQueueController {
         savedReadAt = clock.now()
     }
 
+    /// A journal may outlive its saved state or appear while another Nirux runs.
+    func refreshJournalAvailabilityIfStale() {
+        guard engine == nil, saved == nil, let files else { return }
+        let now = clock.now()
+        if let journalCheckedAt, now - journalCheckedAt < 30 { return }
+        journalCheckedAt = now
+        Self.fileQueue.async { [weak self] in
+            let exists = files.hasJournal
+            Task { @MainActor [weak self] in
+                guard let self, exists != hasJournalFile else { return }
+                hasJournalFile = exists
+                onChange?()
+            }
+        }
+    }
+
     /// Reads the saved queue again, when none runs here: the board asks
     /// whether a queue another Nirux ran is still running.
     func reloadSaved() {
@@ -117,6 +136,13 @@ final class MergeQueueController {
         saved = nil
         restore()
         if selection.isEmpty, !runsElsewhere { takeLeftOver(saved) }
+    }
+
+    func refreshSavedForLead() {
+        guard !isRunning, !isDryRun else { return }
+        Self.waitForFiles()
+        guard let latest = loadSaved(), runsElsewhere || !latest.isSame(as: saved) else { return }
+        reloadSaved()
     }
 
     /// While another Nirux runs the queue, the board asks now and then
@@ -164,8 +190,22 @@ final class MergeQueueController {
     }
 
     func removeFromSelection(_ number: Int) {
-        guard !isRunning, !runsElsewhere, selection.contains(number) else { return }
-        setSelection(selection.filter { $0 != number })
+        removeSelected { $0 == number }
+    }
+
+    func pruneSelection(keepingOpen openNumbers: Set<Int>) {
+        removeSelected { !openNumbers.contains($0) }
+    }
+
+    func clearSelection() {
+        pruneSelection(keepingOpen: [])
+    }
+
+    private func removeSelected(where shouldRemove: (Int) -> Bool) {
+        guard !isRunning, !runsElsewhere else { return }
+        let remaining = selection.filter { !shouldRemove($0) }
+        guard remaining.count != selection.count else { return }
+        setSelection(remaining)
         onChange?()
     }
 
@@ -232,7 +272,31 @@ final class MergeQueueController {
     /// Starts the confirmed list with the settings the confirmation showed.
     /// Returns why not, if it can't.
     @discardableResult
+    func start(_ confirmation: MergeQueue.Confirmation) -> StartRefusal? {
+        guard confirmation.canStart else { return .invalidSettings(confirmation.refusals) }
+        return start(settings: confirmation.settings, entries: confirmation.entries, cadence: confirmation.cadence)
+    }
+
+    func startFromLead(
+        _ reading: MergeQueue.ConfirmationReading, numbers: [Int], cadence: MergeQueue.Cadence,
+        allowWithoutLocalReview: Bool = false
+    ) -> StartRefusal? {
+        guard client.allowsLeadStart else { return .invalidSettings(["This build requires manual confirmation."]) }
+        let confirmation = MergeQueue.confirmation(reading)
+        if let reason = reading.leadStartRefusal(
+            confirmation: confirmation, numbers: numbers, cadence: cadence, allowWithoutLocalReview: allowWithoutLocalReview
+        ) {
+            return .invalidSettings([reason])
+        }
+        return start(settings: confirmation.settings, entries: confirmation.entries, cadence: cadence, startedByLead: true)
+    }
+
     func start(settings: BoardConfig.QueueSettings, entries: [MergeQueue.ConfirmedEntry]) -> StartRefusal? {
+        start(settings: settings, entries: entries, cadence: .standard)
+    }
+
+    private func start(settings: BoardConfig.QueueSettings, entries: [MergeQueue.ConfirmedEntry],
+                       cadence: MergeQueue.Cadence, startedByLead: Bool = false) -> StartRefusal? {
         guard !isRunning else { return .alreadyRunning }
         guard settings.gitHubRepository == queueRepository else { return .otherRepository }
         guard files != nil else { return .noProjectFolder }
@@ -258,7 +322,7 @@ final class MergeQueueController {
         }
         runsElsewhere = false
         let driver = MergeQueueDriver(
-            engine: MergeQueue.Engine(settings: settings, entries: entries), client: client, local: local, clock: clock
+            engine: MergeQueue.Engine(settings: settings, entries: entries, cadence: cadence, startedByLead: startedByLead), client: client, local: local, clock: clock
         )
         driver.onUpdate = { [weak self] engine, notes in self?.update(engine, notes: notes) }
         driver.onMutation = { [weak self] mutation, command, result in
@@ -268,13 +332,28 @@ final class MergeQueueController {
         // The list a sheet confirmed, in its order: what it left out leaves it.
         setSelection(entries.map(\.number), isNewOrder: true)
         activity = beginActivity()
+        if startedByLead {
+            let note = MergeQueue.Note(number: nil, step: "queue", message: "Started by Lead")
+            write(lines: [MergeQueue.Journal.line(note, at: clock.date())], saved: nil)
+        }
         driver.start()
         return nil
     }
 
+    /// Keep a live Start in another Nirux out until the draft reaches its agent.
+    func lockForResolution(of conflict: MergeQueue.Conflict) -> Result<MergeQueueLock, StartRefusal> {
+        guard !isRunning, !runsElsewhere, !isRepositoryBusy(queueRepository) else { return .failure(.repositoryBusy) }
+        Self.waitForFiles()
+        guard let lock = MergeQueueLock.acquire(repository: queueRepository, folder: lockFolder) else { return .failure(.lockedElsewhere) }
+        guard MergeQueue.Conflict(saved: loadSaved(), repository: queueRepository, dryRun: isDryRun) == conflict else {
+            return .failure(.invalidEntry("The saved queue changed since this conflict. Check its current status before asking an agent."))
+        }
+        return .success(lock)
+    }
+
     /// Stops before the next command; a call already sent finishes.
-    func stop() {
-        driver?.stop()
+    func stop(byLead: Bool = false) {
+        driver?.stop(byLead: byLead)
     }
 
     /// `queueSettings` only makes valid settings; this checks them again
@@ -346,6 +425,31 @@ final class MergeQueueController {
 
     /// The journal and the state are written in order, off the main thread.
     nonisolated private static let fileQueue = DispatchQueue(label: "MergeQueue.files", qos: .utility)
+
+    func leadStatus(
+        openPRs: Set<Int>?, enabled: Bool, allowWithoutLocalReview: Bool = false, settingsProblem: String?
+    ) async -> String {
+        let build = client.allowsLeadStart ? "eligible for Lead auto-start"
+            : isDryRun ? "dry run; manual confirmation required" : "live override; manual confirmation required"
+        return await MergeQueue.leadStatus(
+            repository: queueRepository, saved: saved, runsElsewhere: runsElsewhere, selection: selection,
+            openPRs: openPRs, leadEnabled: enabled, allowWithoutLocalReview: allowWithoutLocalReview,
+            build: build, settingsProblem: settingsProblem,
+            journal: journalSnapshot(entryLimit: 10)
+        )
+    }
+
+    func journalSnapshot(entryLimit: Int = 200) async -> MergeQueue.JournalSnapshot {
+        let engine = isRunning ? self.engine : nil
+        let saved = self.saved
+        return await withCheckedContinuation { continuation in
+            Self.fileQueue.async { [files, queueRepository, isDryRun] in
+                continuation.resume(returning: MergeQueue.JournalSnapshot(
+                    repository: queueRepository, dryRun: isDryRun, engine: engine, saved: saved, entries: files?.recentEntries(limit: entryLimit) ?? []
+                ))
+            }
+        }
+    }
 
     private func write(lines: [MergeQueue.Journal.Line], saved: MergeQueue.SavedQueue?) {
         guard let files, !lines.isEmpty || saved != nil else { return }

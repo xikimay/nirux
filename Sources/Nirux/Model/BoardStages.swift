@@ -245,6 +245,8 @@ extension BoardStages {
         /// Its agent asked the agent that started it, and the line says so
         /// (a grey ring and a question, as on the sidebar's row).
         var asksParent = false
+        /// The PR could merge now if the Board's local review passes were complete.
+        var readyApartFromLocalReviews = false
         /// Waiting starts in dependency order, flat even when one waits for another.
         var following: [Line] = []
     }
@@ -518,7 +520,10 @@ extension BoardStages {
             menu: menu(of: facts, rail: rail, offer: offer),
             hasTask: facts.hasTask,
             reason: reading.reason,
-            asksParent: reading.asksParent
+            asksParent: reading.asksParent,
+            readyApartFromLocalReviews: station == .reviews && facts.reviewsInFlight.isEmpty
+                && facts.pullRequest?.checks.allowMerge == true && reading.state == .idle
+                && Self.reading(of: facts, at: .merge, rules: rules).state == .ready
         )
     }
 
@@ -715,10 +720,13 @@ extension BoardStages {
         case .failed(let what):
             return Reading(.failed, text(what) ?? "Stopped", since: last)
         case .working(let since):
-            let conflict = facts.pullRequest.flatMap { pr in
-                facts.gitHubStatus == .current && !pr.isMerged && pr.isConflicting ? "Conflict with " + branch(pr.base) : nil
+            let problem = facts.pullRequest.flatMap { pr -> String? in
+                guard facts.gitHubStatus == .current, !pr.isMerged else { return nil }
+                if pr.isConflicting { return "Conflict with " + branch(pr.base) }
+                if case .failed = pr.checks { return "Checks failed" }
+                return nil
             }
-            return Reading(.working, ["Agent working", conflict ?? text(facts.summary)].compactMap { $0 }.joined(separator: " · "), since: since ?? last)
+            return Reading(.working, ["Agent working", problem ?? text(facts.summary)].compactMap { $0 }.joined(separator: " · "), since: since ?? last)
         case .asking(let parent, let question):
             let owner = "Awaiting " + (text(parent) ?? "parent") + " reply"
             var reading = Reading(.waiting, [owner, text(question)].compactMap { $0 }.joined(separator: " · "), since: last)

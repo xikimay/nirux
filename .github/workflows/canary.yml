@@ -1,0 +1,83 @@
+name: Packaged app canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Canary mode (triage or qualify)
+        default: triage
+        type: choice
+        options:
+          - triage
+          - qualify
+      repro_runs:
+        description: Fresh-state replays on initial non-infra failure (triage mode)
+        default: "2"
+        type: string
+      qualify_runs:
+        description: Consecutive clean passes required (qualify mode)
+        default: "5"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Build the ad-hoc bundle
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence" "$RUNNER_TEMP/history"
+          set -o pipefail
+          swift build -c release 2>&1 | tee "$RUNNER_TEMP/evidence/build.log"
+          scripts/bundle.sh 0.0.0 0 2>&1 | tee -a "$RUNNER_TEMP/evidence/build.log"
+      - name: Test the runner
+        run: /usr/bin/python3 -B -m unittest discover -s scripts/canary -v
+      - name: Run the canary
+        env:
+          CANARY_MODE: ${{ inputs.mode || 'triage' }}
+          REPRO_RUNS: ${{ inputs.repro_runs || '2' }}
+          QUALIFY_RUNS: ${{ inputs.qualify_runs || '5' }}
+        run: |
+          status=0
+          if [[ "$CANARY_MODE" == "qualify" ]]; then
+            scripts/canary.sh Nirux.app --qualify "$QUALIFY_RUNS" --evidence-dir "$RUNNER_TEMP/evidence" || status=$?
+            qual="$RUNNER_TEMP/evidence/qualification.json"
+            if [[ -f "$qual" ]]; then
+              python3 -c 'import json,sys; q=json.load(open(sys.argv[1])); print(f"**{q[\"verdict\"]}** passRate={q[\"passRate\"]} ({q[\"passedRuns\"]}/{q[\"requestedRuns\"]}) mean={q[\"timing\"][\"meanMs\"]}ms stddev={q[\"timing\"][\"stddevMs\"]}ms")' "$qual" >> "$GITHUB_STEP_SUMMARY"
+              if [[ $status == 2 && $(jq -r .verdict "$qual") == infra_unavailable ]]; then
+                echo "::warning::Canary qualification inconclusive. See the graphical session preflight in report.json."
+                exit 0
+              fi
+            fi
+          else
+            scripts/canary.sh Nirux.app --triage --repro-runs "$REPRO_RUNS" \
+              --evidence-dir "$RUNNER_TEMP/evidence" \
+              --history-dir "$RUNNER_TEMP/history" \
+              --commit "$GITHUB_SHA" || status=$?
+            triage=$(find "$RUNNER_TEMP/evidence" -name triage.json -print -quit)
+            if [[ -f "$triage" ]]; then
+              python3 -c 'import json,sys; t=json.load(open(sys.argv[1])); extra=f" fp={t[\"fingerprint\"]}" if t.get("fingerprint") else ""; crash=" (crash observed)" if t.get("hasCrash") else ""; reopened=" [REOPENED]" if t.get("reopened") else ""; print(f"**{t[\"classification\"]}**{extra}{crash}{reopened}")' "$triage" >> "$GITHUB_STEP_SUMMARY"
+              if [[ $status == 2 && $(jq -r .classification "$triage") == infra_unavailable ]]; then
+                echo "::warning::Canary inconclusive. See the graphical session preflight in report.json."
+                exit 0
+              fi
+            fi
+          fi
+          exit "$status"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nirux-canary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/evidence
+            ${{ runner.temp }}/history
+          if-no-files-found: warn

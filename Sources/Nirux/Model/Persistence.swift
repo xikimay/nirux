@@ -270,6 +270,7 @@ struct PersistedSettings: Codable {
     var claudeLaunchMode: ClaudeLaunchMode?
     var claudeNoFlicker: Bool? = true
     var codexLaunchMode: CodexLaunchMode?
+    var agyLaunchMode: AgyLaunchMode?
     var sidebarExpanded: Bool?
     var sidebarWidth: Double?
     /// Parent/child messages between worktree agents (Missions). On for a
@@ -350,6 +351,7 @@ struct PersistedSettings: Codable {
         claudeLaunchMode: ClaudeLaunchMode? = nil,
         claudeNoFlicker: Bool? = true,
         codexLaunchMode: CodexLaunchMode? = nil,
+        agyLaunchMode: AgyLaunchMode? = nil,
         sidebarExpanded: Bool? = nil,
         missionHandoffsEnabled: Bool = true,
         sidebarApprovalsEnabled: Bool = true,
@@ -358,6 +360,7 @@ struct PersistedSettings: Codable {
         self.claudeLaunchMode = claudeLaunchMode
         self.claudeNoFlicker = claudeNoFlicker
         self.codexLaunchMode = codexLaunchMode
+        self.agyLaunchMode = agyLaunchMode
         self.sidebarExpanded = sidebarExpanded
         self.missionHandoffsEnabled = missionHandoffsEnabled
         self.sidebarApprovalsEnabled = sidebarApprovalsEnabled
@@ -368,6 +371,7 @@ struct PersistedSettings: Codable {
         case claudeLaunchMode
         case claudeNoFlicker
         case codexLaunchMode
+        case agyLaunchMode
         case sidebarExpanded
         case sidebarWidth
         case missionHandoffsEnabled
@@ -414,6 +418,7 @@ struct PersistedSettings: Codable {
         }
         claudeNoFlicker = try container.decodeIfPresent(Bool.self, forKey: .claudeNoFlicker) ?? true
         codexLaunchMode = (try? container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)) ?? nil
+        agyLaunchMode = (try? container.decodeIfPresent(AgyLaunchMode.self, forKey: .agyLaunchMode)) ?? nil
         sidebarExpanded = try container.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
         sidebarWidth = try? container.decode(Double.self, forKey: .sidebarWidth)
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? true
@@ -471,6 +476,7 @@ struct PersistedSettings: Codable {
         }
         try container.encodeIfPresent(claudeNoFlicker, forKey: .claudeNoFlicker)
         try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
+        try container.encodeIfPresent(agyLaunchMode, forKey: .agyLaunchMode)
         try container.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)
         try container.encodeIfPresent(sidebarWidth, forKey: .sidebarWidth)
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
@@ -722,12 +728,14 @@ struct PersistedColumn: Codable {
     var cwd: String
     var columnType: ColumnKind?
     var webViewURL: String? // current URL for webView columns
+    var isIsolatedBrowser: Bool?
     /// Absolute paths of all open tabs in this editor column.
     var editorOpenFiles: [String]?
     /// Absolute path of the active tab. Must be present in `editorOpenFiles`.
     var editorActiveFile: String?
     var claudeLaunchMode: ClaudeLaunchMode?
     var codexLaunchMode: CodexLaunchMode?
+    var agyLaunchMode: AgyLaunchMode?
     var agentModel: String?
     /// Exact Codex thread formerly attached to this column. Older state files
     /// omit it and restore through Codex's interactive session picker.
@@ -760,10 +768,12 @@ struct PersistedColumn: Codable {
     init(
         widthPreset: Double, cwd: String, columnType: ColumnKind?,
         webViewURL: String?,
+        isIsolatedBrowser: Bool? = nil,
         editorOpenFiles: [String]? = nil,
         editorActiveFile: String? = nil,
         claudeLaunchMode: ClaudeLaunchMode?,
         codexLaunchMode: CodexLaunchMode?,
+        agyLaunchMode: AgyLaunchMode? = nil,
         agentModel: String? = nil,
         codexSessionID: String? = nil,
         claudeSessionID: String? = nil,
@@ -779,10 +789,12 @@ struct PersistedColumn: Codable {
         self.cwd = cwd
         self.columnType = columnType
         self.webViewURL = webViewURL
+        self.isIsolatedBrowser = isIsolatedBrowser
         self.editorOpenFiles = editorOpenFiles
         self.editorActiveFile = editorActiveFile
         self.claudeLaunchMode = claudeLaunchMode
         self.codexLaunchMode = codexLaunchMode
+        self.agyLaunchMode = agyLaunchMode
         self.agentModel = agentModel
         self.codexSessionID = codexSessionID
         self.claudeSessionID = claudeSessionID
@@ -796,11 +808,11 @@ struct PersistedColumn: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case widthPreset, cwd, columnType, webViewURL
+        case widthPreset, cwd, columnType, webViewURL, isIsolatedBrowser
         case editorOpenFiles, editorActiveFile
         case editorOpenFile // legacy single-file editor state
         case claudeLaunchMode
-        case codexLaunchMode, agentModel
+        case codexLaunchMode, agyLaunchMode, agentModel
         case codexSessionID
         case claudeSessionID
         case claudeSessionIsUnprompted
@@ -823,6 +835,7 @@ struct PersistedColumn: Codable {
         cwd = try container.decode(String.self, forKey: .cwd)
         columnType = try? container.decodeIfPresent(ColumnKind.self, forKey: .columnType)
         webViewURL = try container.decodeIfPresent(String.self, forKey: .webViewURL)
+        isIsolatedBrowser = try container.decodeIfPresent(Bool.self, forKey: .isIsolatedBrowser)
 
         if let openList = try? container.decodeIfPresent([String].self, forKey: .editorOpenFiles), !openList.isEmpty {
             editorOpenFiles = openList
@@ -845,6 +858,7 @@ struct PersistedColumn: Codable {
             claudeLaunchMode = nil
         }
         codexLaunchMode = try? container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
+        agyLaunchMode = try? container.decodeIfPresent(AgyLaunchMode.self, forKey: .agyLaunchMode)
         agentModel = try? container.decodeIfPresent(String.self, forKey: .agentModel)
         codexSessionID = try? container.decodeIfPresent(String.self, forKey: .codexSessionID)
         claudeSessionID = try? container.decodeIfPresent(String.self, forKey: .claudeSessionID)
@@ -866,10 +880,12 @@ struct PersistedColumn: Codable {
         try container.encode(cwd, forKey: .cwd)
         try container.encodeIfPresent(columnType, forKey: .columnType)
         try container.encodeIfPresent(webViewURL, forKey: .webViewURL)
+        if isIsolatedBrowser == true { try container.encode(true, forKey: .isIsolatedBrowser) }
         try container.encodeIfPresent(editorOpenFiles, forKey: .editorOpenFiles)
         try container.encodeIfPresent(editorActiveFile, forKey: .editorActiveFile)
         try container.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
         try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
+        try container.encodeIfPresent(agyLaunchMode, forKey: .agyLaunchMode)
         try container.encodeIfPresent(agentModel, forKey: .agentModel)
         try container.encodeIfPresent(codexSessionID, forKey: .codexSessionID)
         try container.encodeIfPresent(claudeSessionID, forKey: .claudeSessionID)

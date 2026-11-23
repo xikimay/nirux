@@ -64,6 +64,73 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertTrue(queue.noted("Merging aaaaaaa into main at 0000000: test ✓ (run 900); mergeable, not behind"))
     }
 
+    private func fastQueue(_ cadence: MergeQueue.Cadence) -> MQ.Harness {
+        var queue = MQ.Harness(entries: [MQ.entry(52, head: a), MQ.entry(53, head: b)], cadence: cadence)
+        queue.start()
+        return queue
+    }
+
+    func testFastCadencesVerifyOnlyTheLastMergeAndStillRespectExternalRuns() {
+        for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
+            var world = readyWorld()
+            world.pullRequests[53] = MQ.pullRequest(53, head: b)
+            world.checks[b] = MQ.checks(MQ.checkRun(id: 2))
+            if cadence == .expressDisjoint { world.behind = [a: 1, b: 2] }
+            var queue = fastQueue(cadence)
+            XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
+            XCTAssertTrue(queue.noted(cadence.title))
+            world.merge(52, as: c)
+            queue.mutated(.sent)
+            queue.answer(world)
+            XCTAssertEqual(queue.pendingReads, [.pullRequest(53)])
+            let intermediate = MQ.run(20, head: c, status: "in_progress", conclusion: nil)
+            world.baseRuns = [intermediate, MQ.run(21, head: c, status: "queued", conclusion: nil, event: "workflow_dispatch")]
+            queue.answer(world, until: { $0.pendingReads == [.baseRuns] })
+            world.baseRuns = [intermediate, MQ.run(21, head: c, event: "workflow_dispatch")]
+            XCTAssertEqual(queue.run(world), .merge(number: 53, head: b, method: .merge))
+            world.merge(53, as: d)
+            queue.mutated(.sent)
+            queue.answer(world)
+            XCTAssertEqual(queue.pendingReads, [.pushRuns(commit: d)])
+            world.pushRuns[d] = [MQ.run(22, head: d)]
+            queue.answer(world)
+            XCTAssertEqual(queue.phase, .finished)
+            XCTAssertEqual(queue.engine.entries.map(\.mergeCommit), [c, d])
+        }
+    }
+
+    func testBatchStillUpdatesBehindBranchesBeforeMerging() {
+        var world = readyWorld()
+        world.behind[a] = 2
+        var queue = fastQueue(.batchPostMerge)
+        XCTAssertEqual(queue.run(world), .updateBranch(number: 52, expectedHead: a))
+    }
+
+    func testExpressStopsAtTheFinalReadIfTheConfirmedHeadIsNoLongerGreenAndMergeable() {
+        let cases: [(String, String, MergeQueue.CommitChecks, MergeQueue.StopReason.Kind)] = [
+            (b, "CONFLICTING", MQ.checks(), .conflict),
+            (b, "UNKNOWN", MQ.checks(), .notMergeable),
+            (f, "MERGEABLE", MQ.checks(), .changed),
+            (b, "MERGEABLE", MQ.checks(), .checks),
+            (b, "MERGEABLE", MQ.checks(MQ.checkRun(id: 1, conclusion: "FAILURE")), .checks),
+            (b, "MERGEABLE", MQ.checks(MQ.checkRun(id: 1), MQ.checkRun(id: 2, name: "lint", conclusion: "FAILURE")), .checks)
+        ]
+        for (head, mergeable, checks, kind) in cases {
+            var world = readyWorld()
+            world.pullRequests[53] = MQ.pullRequest(53, head: b)
+            var queue = fastQueue(.expressDisjoint)
+            XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
+            world.merge(52, as: c)
+            queue.mutated(.sent)
+            queue.answer(world, until: { $0.pendingReads?.contains(.checks(self.b)) == true })
+            world.pullRequests[53] = MQ.pullRequest(53, head: head, mergeable: mergeable)
+            world.checks[b] = checks
+            queue.answer(world)
+            XCTAssertEqual(queue.stopReason?.kind, kind)
+            XCTAssertEqual(queue.mutations, [.merge(number: 52, head: a, method: .merge)])
+        }
+    }
+
     func testWithoutAPostMergeWorkflowTheNextMergeFollowsAtOnce() {
         var world = readyWorld()
         world.pullRequests[53] = MQ.pullRequest(53, head: b)
@@ -401,6 +468,7 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertNil(queue.run(world))
         XCTAssertEqual(queue.stopReason?.kind, .checks)
         XCTAssertTrue(queue.stopReason?.message.contains("failed again") == true)
+        XCTAssertEqual(queue.stopReason?.url, "https://github.com/acme/widgets/actions/runs/900")
         XCTAssertEqual(queue.mutations, [.rerun(runID: 900)])
     }
 

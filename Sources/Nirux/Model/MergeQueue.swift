@@ -174,7 +174,7 @@ extension MergeQueue {
     /// GitHub tokens (`ghp_…`, `gho_…`, `github_pat_…`) masked.
     static func redacted(_ text: String) -> String {
         text.replacingOccurrences(
-            of: #"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"#,
+            of: #"(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}"#,
             with: "[token]",
             options: .regularExpression
         )
@@ -287,6 +287,7 @@ extension MergeQueue {
     enum Event: Equatable, Sendable {
         case start
         case stop
+        case stopByLead
         case read(requestID: Int, Result<[Read: ReadResult], ReadFailure>)
         case mutated(requestID: Int, MutationResult)
     }
@@ -331,6 +332,9 @@ extension MergeQueue {
         let files: [String]
         /// It changes more files than `files` holds.
         let hasMoreFiles: Bool
+        var head: String?
+        var baseBranch: String?
+        var allPathsKnown = false
 
         static let maxFiles = 100
 

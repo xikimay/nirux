@@ -18,6 +18,7 @@ extension ProjectBoard {
         }
 
         var run: Run = .none
+        var hasJournalFile = false
         /// This build can't change GitHub: every queue is a dry run.
         var isDryRun: Bool
         /// Why, when the client says: "not the notarized release (…)".
@@ -36,6 +37,7 @@ extension ProjectBoard {
         var startProblems: [String] = []
         /// The confirmation sheet is open.
         var isConfirming = false
+        var selectionBusyReason: String?
 
         var isRunning: Bool {
             if case .running = run { return true }

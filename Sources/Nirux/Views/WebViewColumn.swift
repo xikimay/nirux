@@ -5,6 +5,8 @@ import WebKit
 /// the Web Inspector), integrated into Nirux's niri scroll.
 @MainActor
 final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
+    let diagnostics: IsolatedBrowserDiagnostics?
+    var isIsolated: Bool { diagnostics != nil }
     let webView: WKWebView
     let header = ColumnHeaderView()
     let backButton = ColumnHeaderButton(symbol: Theme.Symbol.back, toolTip: "Back")
@@ -19,6 +21,13 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     }
     /// Fires when the displayed URL changes (navigation, redirects).
     var onURLChanged: (() -> Void)?
+    /// Explicit manual action from an isolated browser's capture or diagnostics sheet.
+    /// Completes with `true` when the workspace's Branch Review is already visible on screen.
+    var onAttachCaptureToBranchReview: (@MainActor (
+        BranchReview.BrowserReceipt.Input,
+        @escaping @MainActor (Result<Bool, Error>) -> Void
+    ) -> Void)?
+    var onOpenBranchReview: (@MainActor () -> Void)?
     private(set) var pageTitle: String = ""
     private var observations: [NSKeyValueObservation] = []
     /// Find in page (⌘F), driven by the column's find bar.
@@ -29,13 +38,20 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
 
     private static let accent: NSColor = Theme.Color.accent
 
-    /// Shared data store — all WebViews share the same cookies
+    /// Regular browser columns share the cookies imported from Chromium.
     static let sharedDataStore = WKWebsiteDataStore.default()
 
-    init(url: String) {
+    convenience init(url: String) {
+        self.init(url: url, dataStore: Self.sharedDataStore, isolatedWorkspaceID: nil)
+    }
+
+    init(url: String, dataStore: WKWebsiteDataStore, isolatedWorkspaceID: String?) {
+        precondition(isolatedWorkspaceID == nil || !dataStore.isPersistent)
+        diagnostics = isolatedWorkspaceID.map(IsolatedBrowserDiagnostics.init(workspaceID:))
         let config = WKWebViewConfiguration()
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
-        config.websiteDataStore = Self.sharedDataStore
+        config.websiteDataStore = dataStore
+        diagnostics?.install(in: config.userContentController)
 
         // Allow media playback
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -60,7 +76,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     // MARK: - Setup
 
     private func setupHeader() {
-        header.icon = .symbol(Theme.Symbol.browser)
+        header.icon = .symbol(isIsolated ? Theme.Symbol.testBrowser : Theme.Symbol.browser)
         for (button, action) in [
             (backButton, #selector(goBackAction)), (forwardButton, #selector(goForwardAction)),
             (reloadButton, #selector(reloadAction)), (inspectorButton, #selector(inspectorAction))
@@ -72,8 +88,17 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         forwardButton.isEnabled = false
         header.leadingButtons = [backButton, forwardButton, reloadButton]
         header.trailingButtons = [inspectorButton]
-        header.menuProvider = {
+        if isIsolated {
+            header.status = .init("Test", tone: .neutral, toolTip: "Cookies and storage are isolated to this task and cleared on restart.")
+        }
+        header.menuProvider = { [weak self] in
             let menu = NSMenu()
+            if let self, self.isIsolated {
+                menu.addItem(withTitle: "Capture Screenshot", action: #selector(captureScreenshot), keyEquivalent: "").target = self
+                menu.addItem(withTitle: "Diagnostics…", action: #selector(showDiagnostics), keyEquivalent: "").target = self
+                menu.addItem(withTitle: "Clear Session", action: #selector(clearSession), keyEquivalent: "").target = self
+                menu.addItem(.separator())
+            }
             ColumnHeaderView.columnMenuItems().forEach(menu.addItem)
             return menu
         }
@@ -181,6 +206,14 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    @objc private func clearSession() {
+        guard let diagnostics else { return }
+        diagnostics.clear()
+        webView.configuration.websiteDataStore.removeData(
+            ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast, completionHandler: {}
+        )
+    }
+
     @objc private func goBackAction() { webView.goBack() }
     @objc private func goForwardAction() { webView.goForward() }
     @objc private func reloadAction() { webView.reload() }
@@ -214,8 +247,8 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         DispatchQueue.main.async { [weak self] in
             self?.progressBar.isHidden = true
-            if let url = self?.currentURL, !url.isEmpty {
-                URLHistory.add(url)
+            if let self, !self.isIsolated, !self.currentURL.isEmpty {
+                URLHistory.add(self.currentURL)
             }
         }
     }
@@ -223,6 +256,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     /// A new document has none of the matches the find bar counted.
     @MainActor
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        diagnostics?.clear()
         pageFind.pageDidChange()
     }
 

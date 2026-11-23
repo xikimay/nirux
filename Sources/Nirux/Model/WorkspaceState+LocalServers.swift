@@ -32,9 +32,9 @@ extension WorkspaceState {
             guard let self, let col else { return }
             self.noteLocalServerURL(url, in: col)
         }
-        col.onLocalServerChipOpen = { [weak self, weak col] url in
+        col.onLocalServerChipOpen = { [weak self, weak col] url, isIsolated in
             guard let self, let col else { return }
-            self.openLocalServer(url, from: col)
+            self.openLocalServer(url, from: col, isIsolated: isIsolated)
         }
         col.onLocalServerChipDismiss = { [weak self] url in
             guard let self else { return }
@@ -134,11 +134,10 @@ extension WorkspaceState {
 
     // MARK: - Chip actions
 
-    private func openLocalServer(_ url: LocalServerURL, from col: ColumnState) {
+    private func openLocalServer(_ url: LocalServerURL, from col: ColumnState, isIsolated: Bool) {
         localServers.book.markHandled(port: url.port)
         localServerProposalsChanged()
-        // Never a second browser column for the same server.
-        if let existing = columns.firstIndex(where: { Self.loopbackPort(of: $0) == url.port }) {
+        if let existing = columns.firstIndex(where: { $0.webViewColumn?.isIsolated == isIsolated && Self.loopbackPort(of: $0) == url.port }) {
             onRevealColumn?(self, existing)
             return
         }
@@ -147,7 +146,7 @@ extension WorkspaceState {
         if let index = columns.firstIndex(where: { $0 === col }) {
             focusedIndex = index
         }
-        onTerminalOpenURL?(self, url.urlString)
+        onTerminalOpenURL?(self, url.urlString, isIsolated)
     }
 
     /// Sync every terminal's chip with the book, and stop scanning once

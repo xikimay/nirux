@@ -6,6 +6,51 @@ import XCTest
 final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
     // MARK: - Reading the diff
 
+    func testReceiptFollowsEditsAtTheSameHeadIncludingUntrackedAndUnreadFiles() throws {
+        let clean = try snapshot()
+        let ci = BranchReview.Receipt(id: "ci", title: "build", command: nil, status: .passed, summary: nil,
+                                      provenance: .ci(url: nil), recordedAt: Date(), head: clean.head, workingTreeDigest: nil)
+        XCTAssertEqual(ci.freshness(head: clean.head, tree: clean.workingTree), .fresh)
+        try write("new.txt", "one")
+        let first = try snapshot()
+        XCTAssertEqual(ci.freshness(head: first.head, tree: first.workingTree), .stale(.localEdits))
+        let digest = try XCTUnwrap(first.workingTreeDigest)
+        let local = BranchReview.Receipt(id: "local", title: "test", command: nil, status: .passed, summary: nil,
+                                         provenance: .local, recordedAt: Date(), head: first.head, workingTreeDigest: digest)
+        XCTAssertEqual(local.freshness(head: first.head, tree: first.workingTree), .fresh)
+        try write("new.txt", "two")
+        XCTAssertEqual(local.freshness(head: clean.head, tree: try snapshot().workingTree), .stale(.localEdits))
+        var limited = options()
+        limited.maxUntrackedFilesRead = 0
+        XCTAssertEqual(local.freshness(head: clean.head, tree: try snapshot(limited).workingTree), .unverified)
+        try commit("include the new file")
+        let committed = try snapshot()
+        XCTAssertEqual(ci.freshness(head: committed.head, tree: committed.workingTree), .stale(.earlierCommit))
+    }
+
+    func testReceiptDetectsAnIdenticalEditMovedToAnotherLine() throws {
+        let path = "positions.txt"
+        let lines = ["before", "target", "middle", "target", "after"]
+        try write(path, lines.joined(separator: "\n"))
+        try commitToMain("two identical lines")
+        func changeLine(_ index: Int) throws -> BranchReview.Snapshot {
+            var edited = lines
+            edited[index] = "changed"
+            try write(path, edited.joined(separator: "\n"))
+            return try snapshot()
+        }
+        let first = try changeLine(1)
+        let second = try changeLine(3)
+        XCTAssertEqual(first.head, second.head)
+        XCTAssertEqual(try file(path, in: first).patchHash, try file(path, in: second).patchHash)
+        let receipt = BranchReview.Receipt(
+            id: "test", title: "test", command: nil, status: .passed, summary: nil, provenance: .local,
+            recordedAt: Date(), head: first.head, workingTreeDigest: try XCTUnwrap(first.workingTreeDigest)
+        )
+        XCTAssertEqual(receipt.freshness(head: first.head, tree: first.workingTree), .fresh)
+        XCTAssertEqual(receipt.freshness(head: second.head, tree: second.workingTree), .stale(.localEdits))
+    }
+
     func testDiffLeavesTheIndexUntouchedAndSkipsTouchedFiles() throws {
         try write("Sources/App.swift", "let a = 1\nlet b = 20\nlet c = 3\n")
         try git(["config", "core.splitIndex", "true"])
@@ -339,6 +384,7 @@ final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
         // GitHub refuses a list with commits: 100 × 100 commits × 100
         // authors is over its 500,000-node limit. The reflog settled it.
         XCTAssertEqual(gitHub.calls.count, 1)
+        XCTAssertTrue(gitHub.calls[0].contains { $0.split(separator: ",").contains("statusCheckRollup") })
         XCTAssertFalse(gitHub.calls[0].joined(separator: " ").contains("commits"), "\(gitHub.calls)")
     }
 

@@ -122,6 +122,7 @@ extension NiruxShellView {
         defaultsActions.reload = { store?.load() ?? unread }
         defaultsActions.settingsClaudeMode = { Self.currentClaudeLaunchMode() }
         defaultsActions.settingsCodexMode = { Self.currentCodexLaunchMode() }
+        defaultsActions.settingsAgyMode = { Self.currentAgyLaunchMode() }
         // Read when its pane first shows (`onTabShown`), not for each ⌘,.
         let defaults = SpaceSettingsDefaultsPane(loaded: unread, actions: defaultsActions)
         let safety = SpaceSettingsSafetyPane(model: spaceSettingsSafetyModel(for: space))
@@ -135,7 +136,19 @@ extension NiruxShellView {
             if on { self.startLead(spaceID: spaceID) } else { self.stopLead(spaceID: spaceID) }
         }
         lead.actions.restartLead = { [weak self] in self?.requestRestartLead(spaceID: spaceID) }
+        lead.actions.setAgent = { [weak self] agent in
+            self?.changeSpaceDefaults(spaceID: spaceID) { $0.leadAgent = agent == .claude ? nil : agent }
+            self?.refreshSpaceSettingsLead()
+        }
         lead.actions.setStartsTasks = { [weak self] on in self?.setLeadStartsTasks(on, spaceID: spaceID) }
+        lead.actions.setStartsMergeQueue = { [weak self] on in
+            self?.changeSpaceDefaults(spaceID: spaceID) { $0.leadStartsMergeQueue = on ? true : nil }
+            self?.refreshSpaceSettingsLead()
+        }
+        lead.actions.setStartsMergeQueueWithoutLocalReview = { [weak self] on in
+            self?.changeSpaceDefaults(spaceID: spaceID) { $0.leadStartsMergeQueueWithoutLocalReview = on ? true : nil }
+            self?.refreshSpaceSettingsLead()
+        }
         lead.actions.setDailyPass = { [weak self] on in self?.setDailyPass(on, spaceID: spaceID) }
         lead.actions.setDailyPassHour = { [weak self] hour in self?.setDailyPassHour(hour, spaceID: spaceID) }
         let settings = SpaceSettingsSection(

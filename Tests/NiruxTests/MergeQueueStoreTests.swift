@@ -18,6 +18,17 @@ final class MergeQueueStoreTests: XCTestCase {
         super.tearDown()
     }
 
+    func testCadenceRoundTripsAndLegacyStateReadsAsStandard() throws {
+        let url = root.appendingPathComponent("queue-state.json")
+        let engine = MergeQueue.Engine(settings: MQ.settings(), entries: [], cadence: .batchPostMerge)
+        MergeQueue.SavedQueue(engine: engine, dryRun: true, savedAt: Date()).save(to: url)
+        XCTAssertEqual(MergeQueue.SavedQueue.load(from: url)?.effectiveCadence, .batchPostMerge)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        XCTAssertEqual(json.removeValue(forKey: "cadence") as? String, "batchPostMerge")
+        try JSONSerialization.data(withJSONObject: json).write(to: url)
+        XCTAssertEqual(MergeQueue.SavedQueue.load(from: url)?.effectiveCadence, .standard)
+    }
+
     // MARK: Lock
 
     func testTheLockExcludesASecondHolderUntilReleased() throws {
@@ -81,6 +92,107 @@ final class MergeQueueStoreTests: XCTestCase {
         // Stop reasons, saved in queue-state.json, carry gh's messages too.
         let reason = MergeQueue.StopReason(kind: .github, message: "GitHub refused a read: bad token gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123")
         XCTAssertEqual(reason.message, "GitHub refused a read: bad token [token]")
+    }
+
+    private func journalFiles(dryRun: Bool = false) throws -> MergeQueue.Files {
+        let files = try XCTUnwrap(MergeQueue.Files(projectID: "space", repository: MQ.widgets, stateDirectory: root, dryRun: dryRun))
+        try FileManager.default.createDirectory(at: files.journal.deletingLastPathComponent(), withIntermediateDirectories: true)
+        return files
+    }
+
+    func testJournalReadsTheLast200LinesAcrossRotationAndSkipsUnrecognizedRecords() throws {
+        let files = try journalFiles()
+        let journal = MergeQueue.Journal(url: files.journal)
+        let lines = (1...204).map { MergeQueue.Journal.Line(time: "now", pr: $0, step: "checks", result: "ok") }
+        journal.append(Array(lines.prefix(201)))
+        try FileManager.default.moveItem(at: journal.url, to: journal.previousURL)
+        try Data("not json\n{\"futureEvent\":true}\n".utf8).write(to: journal.url)
+        journal.append(Array(lines.suffix(3)))
+        let handle = try FileHandle(forWritingTo: journal.url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("{\"time\":".utf8))
+        try handle.close()
+        XCTAssertTrue(files.hasJournal)
+        XCTAssertEqual(files.recentEntries().compactMap(\.pr), Array(7...204))
+        let dryRun = try journalFiles(dryRun: true)
+        XCTAssertFalse(dryRun.hasJournal)
+        XCTAssertTrue(dryRun.recentEntries().isEmpty)
+    }
+
+    func testJournalReadsOnlyTheByteBudgetAcrossBothFiles() throws {
+        let files = try journalFiles(dryRun: true)
+        let journal = MergeQueue.Journal(url: files.journal)
+        journal.append([.init(time: "then", pr: 1, step: "checks", result: "outside budget"),
+                        .init(time: "then", pr: 2, step: "checks", result: String(repeating: "x", count: 180_000)),
+                        .init(time: "then", pr: 3, step: "checks", result: "previous")])
+        try FileManager.default.moveItem(at: journal.url, to: journal.previousURL)
+        journal.append([.init(time: "now", pr: 4, step: "checks", result: String(repeating: "y", count: 160_000))])
+        XCTAssertEqual(files.recentEntries().compactMap(\.pr), [3, 4])
+        journal.append([.init(time: "now", pr: 5, step: "checks", result: String(repeating: "z", count: 300_000)),
+                        .init(time: "now", pr: 6, step: "checks", result: "latest")])
+        XCTAssertEqual(files.recentEntries().compactMap(\.pr), [6])
+    }
+
+    func testJournalSkipsLinksAndNonRegularFiles() throws {
+        let files = try journalFiles()
+        let external = root.appendingPathComponent("another-log")
+        MergeQueue.Journal(url: external).append([.init(time: "now", pr: 1, step: "queue", result: "elsewhere")])
+        try FileManager.default.createSymbolicLink(at: files.journal, withDestinationURL: external)
+        XCTAssertEqual(mkfifo(files.journal.appendingPathExtension("1").path, 0o600), 0)
+        XCTAssertFalse(files.hasJournal)
+        XCTAssertTrue(files.recentEntries().isEmpty)
+        let folder = files.journal.deletingLastPathComponent()
+        try FileManager.default.removeItem(at: folder)
+        let other = root.appendingPathComponent("elsewhere")
+        MergeQueue.Journal(url: other.appendingPathComponent(files.journal.lastPathComponent))
+            .append([.init(time: "now", pr: 1, step: "queue", result: "outside the repository")])
+        try FileManager.default.createSymbolicLink(at: folder, withDestinationURL: other)
+        XCTAssertFalse(files.hasJournal)
+        XCTAssertTrue(files.recentEntries().isEmpty)
+    }
+
+    func testJournalExportsTheStopAndChronologicalEntriesWithSecretsMaskedAgain() throws {
+        let token = "ghp_" + String(repeating: "a", count: 36)
+        let engine = MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(52, head: MQ.sha("a"))])
+        var saved = MergeQueue.SavedQueue(engine: engine, dryRun: true, savedAt: Date())
+        saved.status = .stopped
+        saved.current = 0
+        // Decode as an old saved file would, bypassing the writer's masking.
+        let cause = #"{"kind":"checks","message":"failed TOKEN","url":"https://github.com/acme/widgets/actions/runs/72?token=TOKEN"}"#
+        saved.stopReason = try JSONDecoder().decode(MergeQueue.StopReason.self, from: Data(cause.replacingOccurrences(of: "TOKEN", with: token).utf8))
+        let journal = MergeQueue.JournalSnapshot(repository: MQ.widgets, dryRun: true, engine: nil, saved: saved, entries: [
+            .init(time: "09:00", pr: nil, step: "queue", result: "started"),
+            .init(time: "09:01 " + token, pr: 52, step: "checks " + token, command: "gh " + token, result: "failed " + token)
+        ])
+        XCTAssertEqual(journal.copyText, """
+        acme/widgets · Merge Queue Journal · Dry Run
+        Stopped: failed [token]
+        https://github.com/acme/widgets/actions/runs/72
+        09:00 · queue · started
+        09:01 [token] · #52 · checks [token] · gh [token] · failed [token]
+        """)
+        saved.stopReason = .init(kind: .checks, message: "failed", url: "https://github.com/acme/other/actions/runs/72")
+        let fallback = MergeQueue.JournalSnapshot(repository: MQ.widgets, dryRun: true, engine: nil, saved: saved, entries: [])
+        XCTAssertEqual(fallback.link?.absoluteString, "https://github.com/acme/widgets/pull/52/checks")
+    }
+
+    func testStopLinksOnlyOpenPullRequestsAndRunsOfTheConfiguredRepository() {
+        let repo = GitHubRepository(host: "git.example", owner: "acme", name: "widgets")
+        let base = "https://git.example/acme/widgets/"
+        for route in ["pull/2", "pull/2/checks", "pull/2/checks/35", "actions/runs/72/job/11", "checks/44", "runs/12"] {
+            XCTAssertEqual(MergeQueue.JournalSnapshot.stopURL(base + route, repository: repo)?.absoluteString, base + route)
+        }
+        XCTAssertEqual(MergeQueue.JournalSnapshot.stopURL(base + "pull/2/checks?token=private&check_run_id=35", repository: repo)?.query,
+                       "check_run_id=35")
+        for address in [
+            "http://git.example/acme/widgets/pull/2", "https://git.example.evil/acme/widgets/pull/2",
+            "https://github.com/acme/widgets/pull/2", "https://git.example:8080/acme/widgets/pull/2",
+            "https://user:pass@git.example/acme/widgets/pull/2", "https://git.example/acme/widgets2/pull/2",
+            base + "../other/pull/2", base + "pull/%2e%2e", base + "actions/runs/4%2f..", base + "settings",
+            base + "pull/2/../../other/pull/1", base + "pull//2", base + "pull/0", base + "actions/runs/nope"
+        ] {
+            XCTAssertNil(MergeQueue.JournalSnapshot.stopURL(address, repository: repo), address)
+        }
     }
 
     // MARK: Saved state

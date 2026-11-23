@@ -132,6 +132,7 @@ extension NiruxShellView {
         else { return nil }
         // Made once per repository: it reads the saved queue.
         let controller = mergeQueue(projectID: board.projectID, repository: repository)
+        controller.refreshJournalAvailabilityIfStale()
         var state = queueState(of: controller)
         state.startProblems = board.loaded(for: section)?.queueStartProblems ?? ["board.json isn’t read yet."]
         return state
@@ -161,8 +162,10 @@ extension NiruxShellView {
     /// The queue shown: running here, running elsewhere, or the last one.
     private func queueState(of controller: MergeQueueController) -> ProjectBoard.QueueState {
         var state = ProjectBoard.QueueState(isDryRun: controller.isDryRun, dryRunReason: controller.dryRunReason)
+        state.hasJournalFile = controller.hasJournalFile
         state.selection = controller.selection(for: controller.queueRepository)
         state.isConfirming = mergeQueueConfirmation != nil
+        state.selectionBusyReason = mergeQueueSelectionBusy
         let shown: (entries: [MergeQueue.Entry], workflow: String?)?
         if let engine = controller.engine, controller.isRunning {
             state.run = .running(isStopping: engine.phase == .stopping)
@@ -234,7 +237,7 @@ extension NiruxShellView {
 
     /// Why the queue's list can't change now, if it can't; as the Board's
     /// Merge stations say it.
-    private var mergeQueueSelectionBusy: String? {
+    var mergeQueueSelectionBusy: String? {
         if mergeQueueQuit != nil { return "Nirux is stopping the merge queue to quit" }
         if mergeQueueConfirmation != nil { return "The confirmation sheet is open: change the list once it closes" }
         return nil
@@ -260,7 +263,7 @@ extension NiruxShellView {
 
     /// Start: the sheet reads the queued pull requests on GitHub as they
     /// are now, then shows what will happen. Every Start opens a new one.
-    func requestMergeQueueStart(board: ProjectBoardController, section id: String?) {
+    func requestMergeQueueStart(board: ProjectBoardController, section id: String?, cadence: MergeQueue.Cadence = .standard) {
         // Already open: in front, which says it.
         if let open = mergeQueueConfirmation { return open.focus() }
         guard mergeQueueQuit == nil else { return showToast("Nirux is stopping the merge queue to quit") }
@@ -296,7 +299,10 @@ extension NiruxShellView {
             for candidate in reading.candidates where candidate.pullRequest.map({ !$0.isOpen }) == true {
                 controller?.removeFromSelection(candidate.number)
             }
-            panel.update(MergeQueue.confirmation(reading))
+            var confirmation = MergeQueue.confirmation(reading)
+            confirmation.select(cadence)
+            panel.update(confirmation)
+            if let reason = confirmation.refusal(for: cadence) { panel.showError(reason) }
         }
         panel.onDismiss = { [weak self, weak panel] in
             // A sheet closed while it reads: the reads still to come don't run.
@@ -324,7 +330,7 @@ extension NiruxShellView {
         }
         let controller = mergeQueue(projectID: panel.projectID, repository: panel.repository)
         guard controller.isDryRun == confirmation.isDryRun else { return panel.showError("Cancel, then Start again.") }
-        if let refusal = controller.start(settings: confirmation.settings, entries: confirmation.entries) {
+        if let refusal = controller.start(confirmation) {
             return panel.showError(refusal.message)
         }
         dismissedMergeQueueNotices.remove(MergeQueueKey(projectID: panel.projectID, repository: panel.repository))

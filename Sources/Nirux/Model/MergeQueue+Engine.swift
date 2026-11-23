@@ -53,6 +53,9 @@ extension MergeQueue {
         }
 
         let settings: BoardConfig.QueueSettings
+        let cadence: Cadence
+        let startedByLead: Bool
+        private var stopMessage = "Stopped by the user."
         private(set) var entries: [Entry]
         private(set) var phase: Phase = .idle
         /// The entry being worked on.
@@ -70,7 +73,9 @@ extension MergeQueue {
         private var baseRunsFailedAtStart: Set<String> = []
         private var outbox = Output()
 
-        init(settings: BoardConfig.QueueSettings, entries: [ConfirmedEntry]) {
+        init(settings: BoardConfig.QueueSettings, entries: [ConfirmedEntry], cadence: Cadence = .standard, startedByLead: Bool = false) {
+            self.startedByLead = startedByLead
+            self.cadence = cadence
             self.settings = settings
             self.entries = entries.map(Entry.init)
         }
@@ -124,7 +129,9 @@ extension MergeQueue {
             case .start:
                 start()
             case .stop:
-                userStop()
+                userStop(message: "Stopped by the user.")
+            case .stopByLead:
+                userStop(message: "Stopped by Lead.")
             case .read(let id, let result):
                 guard let request, id == request.id, case .read(let reads, _) = request.action, let purpose else { break }
                 self.request = nil
@@ -142,7 +149,7 @@ extension MergeQueue {
                 guard let request, id == request.id, case .mutate(let mutation) = request.action, let purpose else { break }
                 self.request = nil
                 if phase == .stopping {
-                    var message = "Stopped by the user. The \(Self.describe(mutation)), already sent, answered: "
+                    var message = stopMessage + " The \(Self.describe(mutation)), already sent, answered: "
                         + "\(Self.describe(result))."
                     if case .merge(let number, _, _) = mutation, result == .sent || result.isUncertain {
                         message += " Check #\(number) on GitHub: it may be merged."
@@ -255,14 +262,15 @@ extension MergeQueue {
 
         /// Stop: at once, unless a mutating call runs. A read's late answer
         /// is ignored; a merge can't be taken back, so its answer is awaited.
-        private mutating func userStop() {
+        private mutating func userStop(message: String) {
             switch phase {
             case .running, .paused:
                 if request?.isMutation == true {
+                    stopMessage = message
                     phase = .stopping
-                    note("Stop pressed: stopping once the call already sent answers")
+                    note(message + " Stopping once the call already sent answers.")
                 } else {
-                    stop(StopReason(kind: .user, message: "Stopped by the user."))
+                    stop(StopReason(kind: .user, message: message))
                 }
             case .idle, .stopping, .stopped, .finished:
                 break
@@ -277,7 +285,7 @@ extension MergeQueue {
             }
             phase = .running
             note("Started: \(entries.map { "#\($0.number)" }.joined(separator: ", ")) into \(settings.baseBranch) of "
-                + "\(settings.repository)")
+                + "\(settings.repository) (\(cadence.title))")
             read([.auth, .rateLimit, .baseMergeQueue] + (settings.postMergeWorkflow != nil ? [.baseRuns] : []), for: .start)
         }
 
@@ -496,6 +504,15 @@ extension MergeQueue {
             StopReason(kind: .conflict, message: "#\(pullRequest.number) conflicts with \(settings.baseBranch).", url: pullRequest.url)
         }
 
+        private func mergeabilityProblem(_ pr: PullRequestSnapshot) -> StopReason? {
+            if pr.mergeable == "CONFLICTING" { return conflict(pr) }
+            if cadence == .expressDisjoint, pr.mergeable != "MERGEABLE" {
+                return StopReason(kind: .notMergeable, message: "Express requires #\(pr.number) to be mergeable "
+                    + "(GitHub reports \(pr.mergeable)).", url: pr.url)
+            }
+            return nil
+        }
+
         private func compareURL(_ base: String, _ head: String) -> String {
             "https://github.com/\(settings.repository)/compare/\(base)...\(head)"
         }
@@ -505,8 +522,11 @@ extension MergeQueue {
             guard entries[index].heads.contains(pullRequest.headOid) else {
                 return stop(changed(index: index, head: pullRequest.headOid))
             }
-            if pullRequest.mergeable == "CONFLICTING" { return stop(conflict(pullRequest)) }
+            if let problem = mergeabilityProblem(pullRequest) { return stop(problem) }
             entries[index].branch = pullRequest.headRefName
+            if cadence == .expressDisjoint {
+                return mergeChecks(head: pullRequest.headOid, index: index)
+            }
             read([.local(branch: pullRequest.headRefName, head: pullRequest.headOid)], for: .preflightLocal(head: pullRequest.headOid))
         }
 
@@ -684,9 +704,12 @@ extension MergeQueue {
         ) {
             let names = (verdict.failed.map { run in GitHub.qualifiedName(name: run.name, workflow: run.workflow) ?? run.name }
                 + verdict.failedStatuses).joined(separator: ", ")
+            let failedRunURL = verdict.failed.first?.workflowRunID.map {
+                "https://\(settings.gitHubRepository.host)/\(settings.repository)/actions/runs/\($0)"
+            }
             guard !entries[index].hasRerun else {
                 return stop(StopReason(kind: .checks, message: "Required check \(names) failed again on \(Self.short(head)) "
-                    + "after its rerun."))
+                    + "after its rerun.", url: failedRunURL))
             }
             let runIDs = Set(verdict.failed.compactMap(\.workflowRunID))
             guard verdict.failedStatuses.isEmpty, verdict.failed.allSatisfy({ $0.workflowRunID != nil }),
@@ -701,7 +724,7 @@ extension MergeQueue {
             }) {
                 guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else {
                     return stop(StopReason(kind: .checks, message: "Required check \(names) failed on \(Self.short(head)), "
-                        + "and its workflow run was still running after \(settings.checksTimeoutMinutes) minutes."))
+                        + "and its workflow run was still running after \(settings.checksTimeoutMinutes) minutes.", url: failedRunURL))
                 }
                 return read([.pullRequest(entries[index].number), .checks(head)], after: Limits.pollInterval,
                             for: .checks(head: head))
@@ -742,13 +765,16 @@ extension MergeQueue {
             else { return missingAnswer() }
             if let problem = problem(with: pullRequest) { return stop(problem) }
             guard pullRequest.headOid == head else { return stop(changed(index: index, head: pullRequest.headOid)) }
-            if pullRequest.mergeable == "CONFLICTING" { return stop(conflict(pullRequest)) }
+            if let problem = mergeabilityProblem(pullRequest) { return stop(problem) }
             guard let comparison else { return cannotCompare(head) }
-            if comparison.behindBy > 0 {
+            if cadence != .expressDisjoint, comparison.behindBy > 0 {
                 note("\(settings.baseBranch) moved: #\(number) is behind again")
                 return behind(by: comparison.behindBy, head: head, index: index, now: now)
             }
             let verdict = MergeQueue.judge(checks, required: settings.requiredChecks, replaced: clocks.replacedChecks)
+            if cadence == .expressDisjoint, let reason = verdict.expressRefusal(number: number) {
+                return stop(StopReason(kind: .checks, message: reason, url: pullRequest.url))
+            }
             guard verdict.allRequiredGreen else {
                 if verdict.failed.isEmpty, verdict.failedStatuses.isEmpty, verdict.notGreen.isEmpty {
                     note("A required check runs again: waiting for it")
@@ -778,8 +804,9 @@ extension MergeQueue {
                 guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
                 if waitForBaseRuns(runs, head: head, index: index, now: now) { return }
             }
+            let mergeability = comparison.behindBy == 0 ? "mergeable, not behind" : "mergeable, \(comparison.behindBy) behind"
             note("Merging \(Self.short(head)) into \(settings.baseBranch) at \(Self.short(comparison.baseCommit)): "
-                + MergeQueue.checksSummary(checks, required: settings.requiredChecks) + "; mergeable, not behind")
+                + MergeQueue.checksSummary(checks, required: settings.requiredChecks) + "; \(mergeability)")
             mutate(.merge(number: number, head: head, method: settings.mergeMethod),
                    for: .merge(head: head, baseTip: comparison.baseCommit))
         }
@@ -799,7 +826,10 @@ extension MergeQueue {
                     + "\(settings.baseBranch) failed: the base may be broken.", url: failed.url))
                 return true
             }
-            let unfinished = runs.filter { !$0.isCompleted }
+            let deferredCommits = cadence == .standard ? [] : Set(entries[..<index].compactMap(\.mergeCommit))
+            let unfinished = runs.filter { run in
+                !run.isCompleted && !(run.event == "push" && run.attempt == 1 && deferredCommits.contains(run.headSha))
+            }
             if !unfinished.isEmpty {
                 if clocks.baseRunsSince == nil {
                     note("Waiting for the \(label) running on \(settings.baseBranch) before merging")
@@ -891,7 +921,9 @@ extension MergeQueue {
         // MARK: 5. Post-merge workflow
 
         private mutating func merged(_ mergeCommit: String, index: Int, now: TimeInterval) {
-            guard settings.postMergeWorkflow != nil else { return finishEntry(index) }
+            guard settings.postMergeWorkflow != nil, cadence == .standard || index == entries.count - 1 else {
+                return finishEntry(index)
+            }
             entries[index].step = .waitingForPostMerge(mergeCommit)
             clocks.step = now
             read([.pushRuns(commit: mergeCommit)], after: Limits.firstRunPoll, for: .postMerge(commit: mergeCommit))

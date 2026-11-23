@@ -1,4 +1,5 @@
 import AppKit
+import Security
 import XCTest
 @testable import Nirux
 
@@ -64,6 +65,352 @@ final class MergeQueueBoardFlowTests: XCTestCase {
     // MARK: - Flows
 
     @MainActor
+    private func callQueueTool(
+        _ arguments: String, tool: String = LeadTools.queueMerge, shell: NiruxShellView, duringRead: () throws -> Void = {}
+    ) throws -> (text: String, isError: Bool) {
+        let lead = try XCTUnwrap(shell.workspaces.first { $0.title == "widgets" })
+        lead.isLead = true
+        let request = LeadChannel.Request(id: UUID().uuidString, tool: tool, arguments: arguments,
+                                          workspaceID: lead.id, agentUUID: try XCTUnwrap(lead.columns.compactMap(\.agentUUID).first),
+                                          createdAt: Date().timeIntervalSince1970)
+        var result: (String, Bool)?
+        shell.handleLeadRequest(request) { result = ($0, $1) }
+        try duringRead()
+        waitUntil("\(tool) answered") { result != nil }
+        return try XCTUnwrap(result)
+    }
+
+    @MainActor
+    func testLeadRequiresConfirmationByDefaultAndAlwaysForDryRuns() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [14: Self.b])
+        try withBoard(world: world) { shell, board in
+            for optIn in [false, true] {
+                shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = optIn ? true : nil }
+                let response = try callQueueTool(#"{"prs":[14],"cadence":"batch_post_merge"}"#, shell: shell)
+                XCTAssertFalse(response.isError, response.text)
+                let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
+                waitUntil("proposed cadence is visible") { sheet.confirmation != nil }
+                XCTAssertEqual(sheet.confirmation?.cadence, .batchPostMerge)
+                XCTAssertNil(shell.boardQueue(board, section: nil)?.engine)
+                sheet.dismiss()
+            }
+            XCTAssertTrue(world.mergedNumbers.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testDeveloperLiveOverrideStillNeedsManualConfirmation() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [14: Self.b])
+        let override = MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "1"], bundleURL: Bundle.main.bundleURL,
+                                         signature: .notRelease(errSecCSReqFailed), live: GitHubCLIQueueClient(gh: world.run))
+        try withBoard(queueClient: override) { shell, board in
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
+            let result = try callQueueTool(#"{"prs":[14]}"#, shell: shell)
+            XCTAssertFalse(result.isError, result.text)
+            let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
+            waitUntil("the live override is ready for the user") { sheet.startButton?.isEnabled == true }
+            XCTAssertEqual(sheet.confirmation?.isDryRun, false)
+            XCTAssertNil(shell.boardQueue(board, section: nil)?.engine)
+            XCTAssertTrue(world.mergedNumbers.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testLiveLeadStartChecksTheWholeProposalAndKeepsStopInReach() throws {
+        let client = FakeQueueClient()
+        try withBoard(queueClient: client) { shell, board in
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            var green = MQ.World()
+            green.pullRequests[14] = MQ.pullRequest(14, head: Self.b)
+            green.details[14] = MergeQueue.PullRequestDetails(title: "API", files: ["API.swift"], hasMoreFiles: false,
+                                                             head: Self.b, baseBranch: "main", allPathsKnown: true)
+            green.checks[Self.b] = MQ.checks(MQ.checkRun(id: 1))
+            green.baseRuns = [MQ.run(1, head: Self.a)]
+            client.update { $0 = green }
+            let args = #"{"prs":[14]}"#
+            queue.addToSelection(12, repository: MQ.widgets)
+            let replacement = #"{"prs":[14],"cadence":"batch_post_merge","replace":true}"#
+            let disabled = try callQueueTool(replacement, shell: shell)
+            XCTAssertTrue(disabled.isError)
+            XCTAssertEqual(queue.selection, [12])
+            queue.removeFromSelection(12)
+            let manual = try callQueueTool(args, shell: shell)
+            XCTAssertFalse(manual.isError, manual.text)
+            let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
+            waitUntil("manual preflight completed") { sheet.confirmation != nil }
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
+            let sheetOpen = try callQueueTool(#"{"prs":[12],"replace":true}"#, shell: shell)
+            XCTAssertTrue(sheetOpen.isError)
+            XCTAssertTrue(sheetOpen.text.contains("sheet is already open"), sheetOpen.text)
+            XCTAssertEqual(queue.selection, [14])
+            XCTAssertNil(queue.engine)
+            sheet.dismiss()
+            queue.removeFromSelection(14)
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
+
+            @MainActor func refused(_ args: String, _ reason: String, duringRead: () throws -> Void = {}) throws {
+                let reply = try callQueueTool(args, shell: shell, duringRead: duringRead)
+                XCTAssertTrue(reply.isError, reply.text)
+                XCTAssertTrue(reply.text.localizedCaseInsensitiveContains(reason), reply.text)
+                XCTAssertNil(queue.engine)
+                XCTAssertTrue(client.mutations.isEmpty)
+            }
+            try refused(#"{"prs":[14],"cadence":"fast"}"#, "cadence")
+            try refused(#"{"prs":[14],"cadence":"express_disjoint"}"#, "at least two")
+            client.update { $0.details[14] = .init(title: "CI", files: [".github/workflows/test.yml"], hasMoreFiles: false,
+                                                    head: Self.b, baseBranch: "main", allPathsKnown: true) }
+            try refused(args, ".github/workflows/")
+            client.update { $0.details[14] = .init(title: "Big", files: [], hasMoreFiles: true, head: Self.b, baseBranch: "main") }
+            try refused(args, "more than 100")
+            client.update { $0 = green; $0.baseRuns = [MQ.run(1, head: Self.a, conclusion: "failure")] }
+            try refused(args, "failed")
+            client.update { $0 = green; $0.checks[Self.b] = MQ.checks(MQ.checkRun(id: 1, conclusion: "FAILURE")) }
+            try refused(args, "green")
+            client.update { $0 = green }
+            try refused(args, "selection changed") { queue.addToSelection(12, repository: MQ.widgets) }
+            try refused(args, "preparing")
+            XCTAssertEqual(queue.selection, [12])
+            queue.removeFromSelection(12)
+            try refused(args, "permission") { shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = nil } }
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
+
+            queue.addToSelection(12, repository: MQ.widgets)
+            try refused(replacement, "selection changed") { queue.addToSelection(90, repository: MQ.widgets) }
+            XCTAssertEqual(queue.selection, [12, 90])
+            client.update { $0.baseRuns = [MQ.run(1, head: Self.a, conclusion: "failure")] }
+            let review = try callQueueTool(replacement, shell: shell)
+            XCTAssertFalse(review.isError, review.text)
+            XCTAssertTrue(review.text.contains("confirmation sheet"), review.text)
+            XCTAssertNil(queue.engine)
+            XCTAssertEqual(queue.selection, [14])
+            try XCTUnwrap(shell.mergeQueueConfirmation).dismiss()
+            client.update { $0 = green }
+            queue.proposeSelection([12], repository: MQ.widgets)
+            let started = try callQueueTool(replacement, shell: shell)
+            XCTAssertFalse(started.isError, started.text)
+            XCTAssertNil(shell.mergeQueueConfirmation)
+            XCTAssertEqual(queue.saved?.startedByLead, true)
+            XCTAssertEqual(queue.engine?.cadence, .batchPostMerge)
+            XCTAssertEqual(queue.engine?.entries.map(\.number), [14])
+            XCTAssertEqual(shell.statusBar.queueNotice?.isRunning, true)
+            XCTAssertFalse(try header(of: board).stopButton.isHidden)
+            shell.stopMergeQueue(board: board, section: nil)
+            MergeQueueController.waitForFiles()
+            let journal = try String(contentsOf: XCTUnwrap(queue.files).journal, encoding: .utf8)
+            XCTAssertTrue(journal.contains("Started by Lead"), journal)
+        }
+    }
+
+    @MainActor
+    func testLeadAutoStartOptInIgnoresOnlyMissingLocalReview() throws {
+        let client = FakeQueueClient()
+        try withBoard(queueClient: client) { shell, board in
+            let login = try XCTUnwrap(shell.projectWorkspaces(of: board.projectID).first { $0.title == "login" })
+            shell.refreshGitContextNow(for: login)
+            waitUntil("login git context") { login.gitBranch == "feat/login" && login.gitContext?.identity.head != nil }
+            let loginHead = try XCTUnwrap(login.gitContext?.identity.head)
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+
+            var green = MQ.World()
+            green.pullRequests[12] = MQ.pullRequest(12, head: loginHead, branch: "feat/login")
+            green.details[12] = MergeQueue.PullRequestDetails(
+                title: "Login", files: ["Login.swift"], hasMoreFiles: false, head: loginHead, baseBranch: "main", allPathsKnown: true
+            )
+            green.checks[loginHead] = MQ.checks(MQ.checkRun(id: 1))
+            green.baseRuns = [MQ.run(1, head: Self.a)]
+            client.update { $0 = green }
+
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
+            let refused = try callQueueTool(#"{"prs":[12]}"#, shell: shell)
+            XCTAssertTrue(refused.isError, refused.text)
+            XCTAssertTrue(refused.text.contains("No code review yet"), refused.text)
+            XCTAssertNil(queue.engine)
+
+            // Turning on the opt-in still enforces other warnings like workflow edits.
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueueWithoutLocalReview = true }
+            client.update {
+                $0.details[12] = .init(
+                    title: "Login CI", files: [".github/workflows/test.yml"], hasMoreFiles: false,
+                    head: loginHead, baseBranch: "main", allPathsKnown: true
+                )
+            }
+            let workflowBlocked = try callQueueTool(#"{"prs":[12]}"#, shell: shell)
+            XCTAssertTrue(workflowBlocked.isError, workflowBlocked.text)
+            XCTAssertTrue(workflowBlocked.text.contains(".github/workflows/"), workflowBlocked.text)
+            XCTAssertNil(queue.engine)
+
+            // With only missing local review remaining, opt-in allows Lead auto-start.
+            client.update { $0 = green }
+            let started = try callQueueTool(#"{"prs":[12]}"#, shell: shell)
+            XCTAssertFalse(started.isError, started.text)
+            XCTAssertEqual(queue.engine?.entries.map(\.number), [12])
+            shell.stopMergeQueue(board: board, section: nil)
+        }
+    }
+
+    @MainActor
+    func testLeadStatusAndStopFollowAnInFlightMergeThroughItsJournal() throws {
+        var world = MQ.World()
+        world.pullRequests[14] = MQ.pullRequest(14, head: Self.b)
+        world.checks[Self.b] = MQ.checks(MQ.checkRun(id: 1))
+        let client = HeldMutationClient(world: world)
+        try withBoard(queueClient: client) { shell, board in
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            let status = { try self.callQueueTool("{}", tool: LeadTools.mergeQueueStatus, shell: shell).text }
+            let stop = { try self.callQueueTool("{}", tool: LeadTools.stopMergeQueue, shell: shell) }
+            queue.addToSelection(90, repository: MQ.widgets)
+            let idle = try status()
+            XCTAssertTrue(idle.contains("Phase: idle"), idle)
+            XCTAssertTrue(idle.contains("#90 (closed or stale)"), idle)
+            XCTAssertTrue(idle.contains("Lead auto-start: disabled"), idle)
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
+            let enabledStatus = try status()
+            XCTAssertTrue(enabledStatus.contains("Lead auto-start: enabled\n"), enabledStatus)
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueueWithoutLocalReview = true }
+            let withoutReviewStatus = try status()
+            XCTAssertTrue(withoutReviewStatus.contains("Lead auto-start: enabled (without local review required)\n"), withoutReviewStatus)
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueueWithoutLocalReview = nil }
+            let noRun = try stop()
+            XCTAssertTrue(noRun.isError)
+            XCTAssertTrue(noRun.text.contains("No queue is running here"), noRun.text)
+            XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(14, head: Self.b), MQ.entry(12, head: Self.a)]))
+            defer { client.release() }
+            waitUntil("merge command in flight") { client.isHoldingMutation }
+            let running = try status()
+            for field in ["Phase: running", "Cadence: Standard", "Current PR: #14", "merging #14", "Remaining PRs: #12", "Started by: user"] {
+                XCTAssertTrue(running.contains(field), running)
+            }
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = nil }
+            let disabled = try stop()
+            XCTAssertTrue(disabled.isError)
+            XCTAssertTrue(disabled.text.contains("Space Settings › Lead"), disabled.text)
+            XCTAssertEqual(queue.engine?.phase, .running)
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
+            let accepted = try stop()
+            XCTAssertFalse(accepted.isError, accepted.text)
+            XCTAssertTrue(accepted.text.contains("next command"), accepted.text)
+            XCTAssertTrue(try status().contains("Phase: stopping"))
+            client.release()
+            waitUntil("in-flight merge answered") { !queue.isRunning }
+            let ended = try status()
+            for field in ["Phase: ended", "Current PR: #14", "Stopped by Lead", "already sent, answered"] {
+                XCTAssertTrue(ended.contains(field), ended)
+            }
+            let journal = try XCTUnwrap(ended.components(separatedBy: "Recent journal entries:\n").last)
+            XCTAssertTrue(journal.contains("Stopped by Lead"), journal)
+            XCTAssertLessThanOrEqual(journal.split(separator: "\n").count, 10)
+        }
+    }
+
+    @MainActor
+    func testLeadStatusReadsClosedBoardAndReportsMissingSettings() throws {
+        let lines = (1...12).map { MergeQueue.Journal.Line(time: "now", pr: nil, step: "queue", result: "entry-\($0).") }
+        try withBoard(previousJournal: lines) { shell, board in
+            let location = try XCTUnwrap(shell.projectBoardLocation(projectID: board.projectID))
+            location.workspace.closeColumn(at: try XCTUnwrap(location.workspace.columns.firstIndex { $0 === location.column }))
+            XCTAssertNil(shell.projectBoardLocation(projectID: board.projectID))
+            let status = try callQueueTool(#"{"repo":"ACME/WIDGETS"}"#, tool: LeadTools.mergeQueueStatus, shell: shell)
+            XCTAssertFalse(status.isError, status.text)
+            XCTAssertTrue(status.text.contains("Phase: idle"), status.text)
+            XCTAssertTrue(status.text.contains("Build: dry run"), status.text)
+            XCTAssertFalse(status.text.contains("entry-2."), status.text)
+            XCTAssertTrue(status.text.contains("entry-3."), status.text)
+            XCTAssertTrue(status.text.hasSuffix("entry-12."), status.text)
+            try FileManager.default.removeItem(at: XCTUnwrap(BoardConfigStore(spaceID: board.projectID)).fileURL)
+            let missing = try callQueueTool("{}", tool: LeadTools.mergeQueueStatus, shell: shell)
+            XCTAssertTrue(missing.isError)
+            XCTAssertTrue(missing.text.contains("Board Settings"), missing.text)
+        }
+    }
+
+    @MainActor
+    func testLeadRefusesToStopOrReplaceAQueueRunningElsewhere() throws {
+        try withBoard(queueClient: FakeQueueClient()) { shell, board in
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            let lock = try XCTUnwrap(MergeQueueLock.acquire(repository: MQ.widgets, folder: shell.mergeQueueLockFolder))
+            defer { lock.release() }
+            let engine = MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(14, head: Self.b)])
+            MergeQueue.SavedQueue(engine: engine, dryRun: false, savedAt: Date()).save(to: try XCTUnwrap(queue.files?.state))
+            shell.changeSpaceDefaults(spaceID: board.projectID) { $0.leadStartsMergeQueue = true }
+            let status = try callQueueTool("{}", tool: LeadTools.mergeQueueStatus, shell: shell)
+            XCTAssertTrue(status.text.contains("Phase: running elsewhere"), status.text)
+            let stop = try callQueueTool("{}", tool: LeadTools.stopMergeQueue, shell: shell)
+            XCTAssertTrue(stop.isError)
+            XCTAssertTrue(stop.text.contains("another Nirux"), stop.text)
+            let replace = try callQueueTool(#"{"prs":[12],"replace":true}"#, shell: shell)
+            XCTAssertTrue(replace.isError)
+            XCTAssertTrue(queue.selection.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testBoardPrunesClosedLeftoversFromAStoppedQueue() throws {
+        let engine = MergeQueue.Engine(settings: MQ.settings(), entries: [14, 99, 12].map { MQ.entry($0, head: Self.a) })
+        var saved = MergeQueue.SavedQueue(engine: engine, dryRun: true, savedAt: Date())
+        saved.status = .stopped
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
+        try withBoard(world: world, saved: saved) { shell, board in
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            XCTAssertEqual(queue.selection, [14, 12])
+            XCTAssertEqual(queue.saved?.entries.map(\.number), [14, 99, 12])
+        }
+    }
+
+    @MainActor
+    func testLeadQueueMergePrunesClosedNumbersAndProtectsAnOpenUserSelection() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
+        try withBoard(world: world) { shell, board in
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            let proposal = #"{"prs":[14]}"#
+            queue.proposeSelection([99, 12], repository: MQ.widgets)
+            let refused = try callQueueTool(proposal, shell: shell)
+            XCTAssertTrue(refused.isError)
+            XCTAssertTrue(refused.text.contains("queue (#12)"), refused.text)
+            XCTAssertEqual(queue.selection, [12])
+            XCTAssertNil(shell.mergeQueueConfirmation)
+
+            queue.proposeSelection([99], repository: MQ.widgets)
+            let accepted = try callQueueTool(proposal, shell: shell)
+            XCTAssertFalse(accepted.isError, accepted.text)
+            XCTAssertEqual(queue.selection, [14])
+            XCTAssertNotNil(shell.mergeQueueConfirmation)
+        }
+    }
+
+    @MainActor
+    func testClearQueueMenuWorksForInvisibleSelectionsAndRespectsConfirmationAndQuit() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a])
+        try withBoard(world: world) { shell, board in
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            let header = try self.header(of: board)
+            XCTAssertNil(header.contextMenu()?.item(withTitle: "Clear Queue"))
+            queue.addToSelection(99, repository: MQ.widgets)
+            try BoardStagesClicks.choose("Clear Queue", in: header.contextMenu())
+            XCTAssertTrue(queue.selection.isEmpty)
+            XCTAssertNil(header.contextMenu()?.item(withTitle: "Clear Queue"))
+
+            queue.addToSelection(12, repository: MQ.widgets)
+            try BoardStagesClicks.click(header.startButton)
+            let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
+            let blocked = try XCTUnwrap(header.contextMenu()?.item(withTitle: "Clear Queue"))
+            XCTAssertFalse(blocked.isEnabled)
+            XCTAssertTrue(blocked.toolTip?.contains("confirmation sheet") == true)
+            queue.addToSelection(99, repository: MQ.widgets)
+            let lastRead = board.reads.values.first?.pullRequestsReadAt
+            board.reload()
+            waitUntil("the Board refreshed with the sheet open") { board.reads.values.first?.pullRequestsReadAt != lastRead }
+            XCTAssertEqual(queue.selection, [12, 99])
+            sheet.dismiss()
+            shell.mergeQueueQuit = .init { _ in }
+            shell.renderProjectBoard(board)
+            let quitting = try XCTUnwrap(header.contextMenu()?.item(withTitle: "Clear Queue"))
+            XCTAssertFalse(quitting.isEnabled)
+            XCTAssertTrue(quitting.toolTip?.contains("quit") == true)
+            shell.mergeQueueQuit = nil
+        }
+    }
+
+    @MainActor
     func testAQueueStartsFromTheBoardThroughTheSheetInTheUsersOrder() throws {
         let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
         try withBoard(world: world) { shell, board in
@@ -83,6 +430,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertEqual(header.startButton.title, "Start Dry Run… · 2")
             XCTAssertEqual(header.queueLabel.stringValue, "2 pull requests queued")
 
+            XCTAssertTrue(header.journalButton.isHidden)
             try BoardStagesClicks.click(header.startButton)
             let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
             XCTAssertFalse(header.startButton.isEnabled, "one sheet at a time")
@@ -124,6 +472,40 @@ final class MergeQueueBoardFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testEverySheetOpensInStandardAndStartsOnlyTheSelectedCadenceAsADryRun() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
+        try withBoard(world: world) { shell, board in
+            try BoardStagesClicks.pressMerge(try line("login", in: board))
+            waitUntil("#12 is queued") { BoardStagesClicks.shownLine("login", in: board)?.line.offer?.change == .remove }
+            try BoardStagesClicks.pressMerge(try line("feat/api", in: board))
+            waitUntil("#14 is queued") { BoardStagesClicks.shownLine("feat/api", in: board)?.line.offer?.change == .remove }
+            let header = try self.header(of: board)
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
+                try BoardStagesClicks.click(header.startButton)
+                let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
+                waitUntil("the cadence picker is ready") { sheet.cadencePicker != nil }
+                let picker = try XCTUnwrap(sheet.cadencePicker)
+                XCTAssertEqual(sheet.confirmation?.cadence, .standard)
+                XCTAssertEqual(picker.titleOfSelectedItem, "Standard")
+                XCTAssertTrue(sheet.lines.contains { $0.contains("publish 2 nightlies") })
+                XCTAssertTrue(try XCTUnwrap(picker.item(withTitle: cadence.title)).isEnabled)
+                picker.selectItem(withTitle: cadence.title)
+                XCTAssertTrue(picker.sendAction(picker.action, to: picker.target))
+                XCTAssertEqual(sheet.confirmation?.cadence, cadence)
+                XCTAssertTrue(sheet.lines.contains("A real queue would verify nightly.yml once, on the final merge of 2 pull requests. This dry run publishes nothing."))
+                try click(try XCTUnwrap(sheet.startButton))
+                waitUntil("the dry run stops") { !queue.isRunning }
+                guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("queue did not stop") }
+                XCTAssertEqual(reason.kind, .dryRun)
+                XCTAssertEqual(queue.saved?.effectiveCadence, cadence)
+                XCTAssertEqual(world.mergedNumbers, [])
+                waitUntil("Start is ready again") { header.startButton.isEnabled && !header.startButton.isHidden }
+            }
+        }
+    }
+
+    @MainActor
     func testStopFromTheBoardEndsAWaitingQueue() throws {
         // Checks still running: the queue waits between looks.
         let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b], testConclusion: nil)
@@ -146,6 +528,14 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertTrue(header.startButton.isHidden)
             XCTAssertFalse(header.stopButton.isHidden, "Stop is in reach while it runs")
             XCTAssertEqual(board.view.stages.runningQueueViews.map(\.queue.title), ["acme/widgets"], "and at the Board's foot")
+            XCTAssertNil(header.contextMenu()?.item(withTitle: "Clear Queue"))
+            try BoardStagesClicks.click(header.journalButton)
+            let runningJournal = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
+            waitUntil("the running journal was read") { runningJournal.snapshot != nil }
+            XCTAssertFalse(runningJournal.resolveButton.isEnabled)
+            XCTAssertTrue(runningJournal.resolveButton.toolTip?.contains("queue is running") == true)
+            try click(runningJournal.doneButton)
+            waitUntil("the running journal closed") { board.view.window?.attachedSheet == nil }
             try BoardStagesClicks.click(header.stopButton)
             XCTAssertFalse(queue.isRunning)
             XCTAssertEqual(header.queueLabel.stringValue, "Stopped: Stopped by the user. · 1 pull request queued")
@@ -153,6 +543,53 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertTrue(header.stopButton.isHidden)
             XCTAssertEqual(header.startButton.isEnabled, true, "a new Start opens a new sheet")
             XCTAssertEqual(board.view.stages.runningQueueViews.count, 0)
+
+            try BoardStagesClicks.click(header.journalButton)
+            let journal = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
+            waitUntil("the journal includes Stop") { journal.snapshot?.entriesText.contains("Stopped by the user.") == true }
+            let snapshot = try XCTUnwrap(journal.snapshot)
+            XCTAssertTrue(journal.resolveButton.isHidden)
+            XCTAssertEqual(snapshot.status, "Stopped: Stopped by the user.")
+            XCTAssertTrue(snapshot.title.contains("Dry Run"))
+            XCTAssertEqual(snapshot.link?.absoluteString, "https://github.com/acme/widgets/pull/12")
+            journal.pasteboard = NSPasteboard.withUniqueName()
+            defer { journal.pasteboard.releaseGlobally() }
+            try click(journal.copyButton)
+            XCTAssertEqual(journal.pasteboard.string(forType: .string), snapshot.copyText)
+
+            let files = try XCTUnwrap(queue.files)
+            MergeQueue.Journal(url: files.journal).append([.init(time: "later", pr: 12, step: "queue", result: "refreshed")])
+            try click(journal.refreshButton)
+            waitUntil("Refresh reads the latest line") { journal.snapshot?.entriesText.hasSuffix("refreshed") == true }
+            try click(journal.doneButton)
+            waitUntil("the journal closed") { board.view.window?.attachedSheet == nil }
+        }
+    }
+
+    @MainActor
+    func testJournalOpensFromItsRotatedFileWithoutSavedState() throws {
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a])
+        let last = MergeQueue.Journal.Line(time: "now", pr: 12, step: "preflight", result: "Stopped: draft")
+        try withBoard(world: world, isDryRun: false, previousJournal: [last]) { shell, board in
+            let header = try self.header(of: board)
+            waitUntil("the Board found the rotated live journal") { !header.journalButton.isHidden }
+            var opened: [URL] = []
+            shell.sideEffects.openURL = { opened.append($0) }
+            try BoardStagesClicks.click(header.journalButton)
+            let panel = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
+            waitUntil("the stop is shown") { panel.copyButton.isEnabled }
+            let snapshot = try XCTUnwrap(panel.snapshot)
+            XCTAssertEqual(snapshot.status, last.result)
+            XCTAssertFalse(snapshot.title.contains("Dry Run"))
+            let scroll = try XCTUnwrap(panel.contentView?.subviews.compactMap { $0 as? NSScrollView }.first)
+            let text = try XCTUnwrap(scroll.documentView as? NSTextView)
+            XCTAssertTrue(text.string.hasPrefix("Stopped: draft\nOpen on GitHub"))
+            XCTAssertTrue(text.string.hasSuffix("now · #12 · preflight · Stopped: draft"))
+            let index = (text.string as NSString).range(of: "Open on GitHub").location
+            let link = try XCTUnwrap(text.textStorage?.attribute(.link, at: index, effectiveRange: nil) as? URL)
+            XCTAssertTrue(panel.textView(text, clickedOnLink: link, at: index))
+            XCTAssertEqual(opened.map(\.absoluteString), ["https://github.com/acme/widgets/pull/12"])
+            try click(panel.doneButton)
         }
     }
 
@@ -182,10 +619,12 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             try BoardStagesClicks.click(board.view.refreshButton)
             waitUntil("Refresh clears it") { header.pill.status?.tone != .error && BoardStagesClicks.wasUpdated(board) }
 
-            let reads = client.calls.filter { $0.what == "pr open acme/widgets" }.count
+            let callsBeforeRetarget = client.calls.count
             try BoardStagesClicks.choose("Retarget to main", in: try line("feat/api", in: board).contextMenu())
-            waitUntil("the pull requests are read again") {
-                client.calls.filter { $0.what == "pr open acme/widgets" }.count > reads
+            waitUntil("the pull requests are read after retargeting") {
+                let calls = client.calls.dropFirst(callsBeforeRetarget).map(\.what)
+                guard let retarget = calls.firstIndex(of: "retarget acme/widgets #14 main") else { return false }
+                return calls[retarget...].contains("pr open acme/widgets")
             }
             XCTAssertEqual(client.calls.filter { $0.what.hasPrefix("retarget") }.map(\.what),
                            ["retarget acme/widgets #14 main", "retarget acme/widgets #14 main"])
@@ -307,6 +746,104 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testJournalRefusesMissingWorktreeAndRechecksTheRepositoryLockAndSavedStop() throws {
+        let saved = MQ.stoppedConflict(number: 14, branch: "feat/api")
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [14: Self.b])
+        try withBoard(world: world, isDryRun: false, saved: saved) { shell, board in
+            let header = try self.header(of: board)
+            try BoardStagesClicks.click(header.journalButton)
+            let panel = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
+            waitUntil("the stopped journal was read") { panel.snapshot != nil }
+            XCTAssertFalse(panel.resolveButton.isEnabled)
+            XCTAssertTrue(panel.resolveButton.toolTip?.contains("No worktree") == true)
+
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            let conflict = try XCTUnwrap(MergeQueue.Conflict(saved: saved, repository: MQ.widgets, dryRun: false))
+            let lock = try XCTUnwrap(MergeQueueLock.acquire(repository: MQ.widgets, folder: shell.mergeQueueLockFolder))
+            guard case .failure(.lockedElsewhere) = queue.lockForResolution(of: conflict) else {
+                return XCTFail("Another Nirux holds the live repository lock")
+            }
+            lock.release()
+            var replaced = saved
+            replaced.status = .finished
+            replaced.save(to: try XCTUnwrap(queue.files?.state))
+            guard case .failure(.invalidEntry) = queue.lockForResolution(of: conflict) else {
+                return XCTFail("A newer queue replaced the conflict shown")
+            }
+            try click(panel.doneButton)
+        }
+    }
+
+    @MainActor
+    func testStoppedConflictPreparesOnlyTheChosenAgentsDraft() throws {
+        let saved = MQ.stoppedConflict()
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a])
+        try withBoard(world: world, isDryRun: false, saved: saved) { shell, board in
+            let login = try XCTUnwrap(shell.projectWorkspaces(of: board.projectID).first { $0.title == "login" })
+            let main = try XCTUnwrap(shell.projectWorkspaces(of: board.projectID).first { $0.title == "widgets" })
+            let header = try self.header(of: board)
+            try BoardStagesClicks.click(header.journalButton)
+            let panel = try XCTUnwrap(board.view.window?.attachedSheet as? MergeQueueJournalPanel)
+            let id = try XCTUnwrap(board.view.stages.content?.sections.first?.id)
+            board.view.stages.onJournal?(id)
+            XCTAssertEqual(board.view.window?.sheets, [panel])
+            waitUntil("the stopped journal was read") { panel.snapshot != nil }
+            XCTAssertFalse(panel.resolveButton.isEnabled)
+            XCTAssertTrue(panel.resolveButton.toolTip?.contains("No agent") == true)
+
+            let agents = [AgentStandIn(), AgentStandIn(), AgentStandIn()]
+            defer { agents.forEach { $0.remove() } }
+            var columns: [ColumnState] = []
+            for (agent, space) in zip(agents, [main, login, login]) {
+                space.addColumn(command: agent.command(), cwd: space.cwd)
+                let column = try XCTUnwrap(space.columns.last)
+                let pty = try XCTUnwrap(column.pty)
+                waitUntil("Claude in the new terminal") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+                let process = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
+                for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit, .stop] {
+                    _ = pty.applyAgentHook(.init(kind: .claude, name: name, sessionID: "s", emitterProcess: process,
+                                                 timestamp: Date().timeIntervalSince1970), isUserFocused: false)
+                }
+                columns.append(column)
+            }
+            panel.refreshResolution(snapshot: ProcessSnapshot())
+            let menu = try XCTUnwrap(panel.resolveButton.menu)
+            XCTAssertEqual(menu.items.count, 2)
+            XCTAssertTrue(menu.items.allSatisfy { $0.title.contains("login") })
+            let selected = try XCTUnwrap(menu.items.last)
+            let pty = try XCTUnwrap(columns[2].pty)
+            // Keep the old menu item, then type a draft before choosing it.
+            pty.sendRaw("my draft")
+            try BoardStagesClicks.choose(selected.title, in: menu)
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
+            waitUntil("the remaining agent is offered") { panel.resolveButton.isEnabled && panel.resolveButton.menu == nil }
+            XCTAssertEqual(agents[2].input, "my draft")
+            XCTAssertIdentical(board.view.window?.attachedSheet, panel)
+
+            try BoardConfigSuggestionsTests.git(["switch", "-q", "-c", "another-branch"], at: login.cwd)
+            try click(panel.resolveButton)
+            waitUntil("the checkout change refused the paste") { panel.resolveButton.isEnabled && panel.sheetParent != nil }
+            XCTAssertEqual(agents[1].input, "")
+            try BoardConfigSuggestionsTests.git(["switch", "-q", "feat/login"], at: login.cwd)
+            try click(panel.resolveButton)
+            let expected = "PR #12 conflicts with `main`. Run `git pull`, then `git merge origin/main`, "
+                + "resolve the conflicts, run the tests, commit and push. Don't rebase or force-push."
+            waitUntil("the selected column is focused with the complete draft") {
+                shell.activeWorkspace === login && login.columns[login.focusedIndex] === columns[1]
+                    && agents[1].input.hasSuffix("\u{1b}[201~")
+            }
+            XCTAssertEqual(agents[1].input, "\u{1b}[200~" + expected + "\u{1b}[201~")
+            XCTAssertEqual(agents[0].input, "")
+            XCTAssertEqual(agents[2].input, "my draft")
+            XCTAssertFalse(queue.isRunning)
+            XCTAssertEqual(queue.saved?.stopReason, saved.stopReason)
+            XCTAssertEqual(queue.saved?.entries, saved.entries)
+            XCTAssertEqual(queue.selection, [12])
+            XCTAssertEqual(world.callCount, 0)
+        }
+    }
+
     // MARK: - Helpers
 
     /// A shell in a window with the board of a project whose repository is
@@ -314,10 +851,12 @@ final class MergeQueueBoardFlowTests: XCTestCase {
     /// worktree, the board read.
     @MainActor
     private func withBoard(
-        world: MergeQueueFlowTests.GitHubWorld,
+        world: MergeQueueFlowTests.GitHubWorld = .init(pullRequests: [:]),
+        queueClient injectedClient: (any MergeQueueGitHub)? = nil,
         boardClient: ProjectBoardFlowTests.FakeGitHub? = nil,
         isDryRun: Bool = true,
         saved: MergeQueue.SavedQueue? = nil,
+        previousJournal: [MergeQueue.Journal.Line] = [],
         _ body: (NiruxShellView, ProjectBoardController) throws -> Void
     ) throws {
         let stateDirectory = root + "/state"
@@ -334,7 +873,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             openPullRequests: Self.boardPullRequests, runs: ProjectBoardGitHubTests.postMergeRuns
         )
         let queueClient = GitHubCLIQueueClient(gh: world.run)
-        shell.mergeQueueClient = isDryRun ? DryRunQueueClient(wrapped: queueClient, reason: "NIRUX_STATE_DIR is set") : queueClient
+        shell.mergeQueueClient = injectedClient ?? (isDryRun ? DryRunQueueClient(wrapped: queueClient, reason: "NIRUX_STATE_DIR is set") : queueClient)
         shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1600, height: 900),
@@ -350,10 +889,11 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             window.close()
         }
         let space = shell.workspaceStore.createProfile(named: "Board")
-        if let saved {
+        if saved != nil || !previousJournal.isEmpty {
             let files = try XCTUnwrap(MergeQueue.Files(projectID: space.id, repository: MQ.widgets,
                                                        stateDirectory: URL(fileURLWithPath: stateDirectory), dryRun: isDryRun))
-            saved.save(to: files.state)
+            saved?.save(to: files.state)
+            MergeQueue.Journal(url: files.journal.appendingPathExtension("1")).append(previousJournal)
         }
         let repo = root + "/widgets"
         try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")

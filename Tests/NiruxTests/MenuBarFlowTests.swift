@@ -107,6 +107,17 @@ final class MenuBarFlowTests: XCTestCase {
         }
     }
 
+    func testOpenIsolatedTestBrowserFromColumnsMenu() throws {
+        try UIFlowHarness.run { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            let bar = MenuBar(shell: harness.shell)
+            bar.run(["Columns", "Open Isolated Test Browser"])
+            let browser = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.webViewColumn)
+            XCTAssertTrue(browser.isIsolated)
+            XCTAssertEqual(URL(string: browser.currentURL)?.host, "localhost")
+        }
+    }
+
     func testAgentColumnsAndHelpMenus() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

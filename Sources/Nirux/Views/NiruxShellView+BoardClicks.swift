@@ -18,6 +18,10 @@ extension NiruxShellView {
             guard let self, let board else { return }
             self.requestMergeQueueStart(board: board, section: id)
         }
+        stages.onJournal = { [weak self, weak board] id in
+            guard let self, let board, let window = board.view.window, window.attachedSheet == nil else { return }
+            self.showQueueJournal(board: board, section: id, in: window)
+        }
         stages.onStop = { [weak self, weak board] id in
             guard let self, let board else { return }
             self.stopMergeQueue(board: board, section: id)
@@ -25,6 +29,10 @@ extension NiruxShellView {
         stages.onSectionMenu = { [weak self, weak board] section, item in
             guard let self, let board else { return }
             switch item {
+            case .clearQueue(let repository, let blocked):
+                guard blocked == nil, self.mergeQueueSelectionBusy == nil,
+                      let queue = self.boardQueue(board, section: section), queue.queueRepository == repository else { return }
+                queue.clearSelection()
             case .boardSettings:
                 self.showBoardSettings(of: board, repository: section)
             case .openMainCheckout(let path):

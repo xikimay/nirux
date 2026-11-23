@@ -197,6 +197,7 @@ final class NiruxShellView: NSView {
     /// (`queue_merge`), by `<space id> <owner/name>`: a Lead may replace its
     /// own, never the user's.
     var leadQueueProposals: [String: [Int]] = [:]
+    var pendingLeadQueueStarts: Set<MergeQueueKey> = []
     /// The rules each space's Lead proposed, by space id, read from
     /// RuleProposalStore once and kept current by the app's own changes
     /// (the sidebar asks several times a second).
@@ -304,6 +305,7 @@ final class NiruxShellView: NSView {
     lazy var branchReviewReader: BranchReviewController.Reader = BranchReviewController.readWorktree
     /// The review files Branch Review columns open: tests give theirs.
     lazy var branchReviewOpener: BranchReviewController.ReviewOpener = BranchReviewController.openReviewFile
+    lazy var branchReviewBranchCheck: BranchReviewController.BranchCheck = BranchReviewController.branchExists
     /// Reloads the boards whose board.json was saved.
     var boardConfigSaveObserver: NSObjectProtocol?
     /// The merge queue's `gh` client. Nil: each new queue gets
@@ -534,8 +536,14 @@ final class NiruxShellView: NSView {
             guard let self, let workspace else { return }
             self.retireMissionQuestions(of: column, in: workspace, promptedAt: typedAt)
         }
-        workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url in
-            self?.openWebView(url: url, in: targetWorkspace)
+        workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url, isIsolated in
+            self?.openWebView(url: url, in: targetWorkspace, isIsolated: isIsolated)
+        }
+        workspace.onAttachBrowserCapture = { [weak self] targetWorkspace, input, completion in
+            self?.attachBrowserCapture(input, in: targetWorkspace, completion: completion)
+        }
+        workspace.onOpenBranchReview = { [weak self] targetWorkspace in
+            self?.openBranchReview(in: targetWorkspace)
         }
         workspace.onTerminalOpenFile = { [weak self] targetWorkspace, path, line in
             self?.openInEditorColumn(path: path, line: line, in: targetWorkspace)

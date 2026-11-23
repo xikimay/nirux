@@ -1,7 +1,7 @@
 import Foundation
 
 /// What a space sets for the workspaces started in it (docs/design/projects.md,
-/// section 5): the agent preselected for its tasks, the Claude and Codex
+/// section 5): the agent preselected for its tasks, the agent
 /// launch modes, and environment variables for new shells. Edited in Space
 /// Settings › Defaults, kept in the space's `defaults.json`
 /// (SpaceDefaultsStore).
@@ -12,15 +12,23 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Preselected for a task (New Task…, ⌘N). Nil: Claude Code. A plain
     /// workspace stays a shell whatever it says.
     var agent: CodingAgent?
+    var leadAgent: CodingAgent?
+    var preferredLeadAgent: CodingAgent { leadAgent ?? .claude }
+
     /// Nil: Settings' mode.
     var claudeLaunchMode: ClaudeLaunchMode?
     var codexLaunchMode: CodexLaunchMode?
+    var agyLaunchMode: AgyLaunchMode?
     /// As listed in Space Settings. `effectiveEnvironment` is what shells
     /// get.
     var environment: [EnvironmentVariable] = []
     /// Space Settings › Lead, "Starts tasks without asking". Nil: on. Off,
     /// the Lead's `start_task` opens the New sheet for the user to start.
     var leadStartsTasks: Bool?
+    var leadStartsMergeQueue: Bool?
+    var leadCanStartMergeQueue: Bool { leadStartsMergeQueue ?? false }
+    var leadStartsMergeQueueWithoutLocalReview: Bool?
+    var leadCanStartMergeQueueWithoutLocalReview: Bool { leadStartsMergeQueueWithoutLocalReview ?? false }
     /// Space Settings › Lead, "Daily pass" (docs/design/daily-pass.md). Nil:
     /// on, after `DailyPass.defaultHour`.
     var leadDailyPass: Bool?
@@ -77,6 +85,8 @@ struct SpaceDefaults: Equatable, Sendable {
     static var switches: [(key: WritableKeyPath<SpaceDefaults, Bool?>, name: CodingKeys, safe: Bool)] {
         [
             (\.leadStartsTasks, .leadStartsTasks, false),
+            (\.leadStartsMergeQueue, .leadStartsMergeQueue, false),
+            (\.leadStartsMergeQueueWithoutLocalReview, .leadStartsMergeQueueWithoutLocalReview, false),
             (\.leadDailyPass, .leadDailyPass, false),
             (\.prFollowUp, .prFollowUp, false),
             (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
@@ -96,6 +106,7 @@ struct SpaceDefaults: Equatable, Sendable {
     func claudeMode(settings: ClaudeLaunchMode) -> ClaudeLaunchMode { claudeLaunchMode ?? settings }
 
     func codexMode(settings: CodexLaunchMode) -> CodexLaunchMode { codexLaunchMode ?? settings }
+    func agyMode(settings: AgyLaunchMode) -> AgyLaunchMode { agyLaunchMode ?? settings }
 
     // MARK: - Environment
 
@@ -189,8 +200,8 @@ struct SpaceDefaults: Equatable, Sendable {
 /// errors.
 extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case schemaVersion, agent, claudeLaunchMode, codexLaunchMode, environment, leadStartsTasks, leadDailyPass, leadDailyPassHour
-        case prFollowUp
+        case schemaVersion, agent, leadAgent, claudeLaunchMode, codexLaunchMode, agyLaunchMode, environment
+        case leadStartsTasks, leadStartsMergeQueue, leadStartsMergeQueueWithoutLocalReview, leadDailyPass, leadDailyPassHour, prFollowUp
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
 
@@ -202,13 +213,17 @@ extension SpaceDefaults: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         agent = (try? container.decodeIfPresent(String.self, forKey: .agent)).flatMap(CodingAgent.init(launchable:))
+        leadAgent = (try? container.decodeIfPresent(String.self, forKey: .leadAgent)).flatMap(CodingAgent.init(launchable:))
         claudeLaunchMode = (try? container.decodeIfPresent(String.self, forKey: .claudeLaunchMode))
             .flatMap(ClaudeLaunchMode.init(rawValue:))
         codexLaunchMode = (try? container.decodeIfPresent(String.self, forKey: .codexLaunchMode))
             .flatMap(CodexLaunchMode.init(rawValue:))
+        agyLaunchMode = try? container.decode(AgyLaunchMode.self, forKey: .agyLaunchMode)
         environment = ((try? container.decodeIfPresent([StoredVariable].self, forKey: .environment)) ?? nil)?
             .map { EnvironmentVariable(name: $0.name, value: $0.value) } ?? []
         leadStartsTasks = (try? container.decodeIfPresent(Bool.self, forKey: .leadStartsTasks)) ?? nil
+        leadStartsMergeQueue = try? container.decodeIfPresent(Bool.self, forKey: .leadStartsMergeQueue)
+        leadStartsMergeQueueWithoutLocalReview = try? container.decodeIfPresent(Bool.self, forKey: .leadStartsMergeQueueWithoutLocalReview)
         leadDailyPass = (try? container.decodeIfPresent(Bool.self, forKey: .leadDailyPass)) ?? nil
         leadDailyPassHour = ((try? container.decodeIfPresent(Int.self, forKey: .leadDailyPassHour)) ?? nil).flatMap { (0...23).contains($0) ? $0 : nil }
         prFollowUp = (try? container.decodeIfPresent(Bool.self, forKey: .prFollowUp)) ?? nil
@@ -223,12 +238,18 @@ extension SpaceDefaults: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(SpaceDefaultsStore.schemaVersion, forKey: .schemaVersion)
         try container.encodeIfPresent(agent?.rawValue, forKey: .agent)
+        try container.encodeIfPresent(leadAgent?.rawValue, forKey: .leadAgent)
         try container.encodeIfPresent(claudeLaunchMode?.rawValue, forKey: .claudeLaunchMode)
         try container.encodeIfPresent(codexLaunchMode?.rawValue, forKey: .codexLaunchMode)
+        try container.encodeIfPresent(agyLaunchMode?.rawValue, forKey: .agyLaunchMode)
         if !environment.isEmpty {
             try container.encode(environment.map { StoredVariable(name: $0.name, value: $0.value) }, forKey: .environment)
         }
         try container.encodeIfPresent(leadStartsTasks, forKey: .leadStartsTasks)
+        if leadCanStartMergeQueue { try container.encode(true, forKey: .leadStartsMergeQueue) }
+        if leadCanStartMergeQueueWithoutLocalReview {
+            try container.encode(true, forKey: .leadStartsMergeQueueWithoutLocalReview)
+        }
         try container.encodeIfPresent(leadDailyPass, forKey: .leadDailyPass)
         try container.encodeIfPresent(leadDailyPassHour, forKey: .leadDailyPassHour)
         try container.encodeIfPresent(prFollowUp, forKey: .prFollowUp)

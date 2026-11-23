@@ -160,17 +160,16 @@ extension NiruxShellView {
     }
 
     /// The space's Lead as a Mission parent: its workspace and the column
-    /// its Claude runs in (or will, once a restored one resumes), else its
-    /// Claude column.
+    /// its agent runs in (or will, once a restored one resumes).
     func leadMissionParent(inSpace spaceID: String) -> NewTask.MissionParent? {
         guard let lead = leadWorkspace(inSpace: spaceID) else { return nil }
         let snapshot = ProcessSnapshot()
         let terminals = lead.columns.filter { !$0.isClosing && $0.agentUUID != nil && ($0.pty != nil || $0.deferredAgent != nil) }
-        func runsClaude(_ column: ColumnState) -> Bool {
-            column.isRestartingShell || column.runsClaude(snapshot: snapshot)
+        func canParent(_ column: ColumnState) -> Bool {
+            column.isRestartingShell || column.runningOrDeferredAgent(snapshot: snapshot)?.isLaunchable == true
         }
         let designated = lead.leadTerminal
-        let parent = designated.flatMap { runsClaude($0) ? $0 : nil } ?? terminals.first(where: runsClaude)
+        let parent = designated.flatMap { canParent($0) ? $0 : nil } ?? terminals.first(where: canParent)
             ?? designated ?? terminals.first
         guard let agentUUID = parent?.agentUUID else { return nil }
         return NewTask.MissionParent(workspaceID: lead.id, agentUUID: agentUUID)

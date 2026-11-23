@@ -44,8 +44,9 @@ space, and strips the interface down to what is used.
 - **One Lead per space**, optional, seeing only its space. It starts tasks
   without asking (a switch turns that into "propose, you click").
 - **"Report to the Lead"** in ⌘N, checked by default when the space has a Lead.
-- **Always the user:** merging, removing a worktree or branch, and permissions
-  the Lead can't judge.
+- **Merge confirmation** belongs to the user by default. A space can opt into
+  Lead starts for queues that pass every safety check. Removing a worktree
+  or branch and permissions the Lead can't judge still need the user.
 - **Isolation by place and by view.** Each task has its own worktree and
   branch; a space shows only itself. No sandbox (out of scope).
 - **The sidebar Activity section goes.** Cards, native notifications, the Dock
@@ -141,7 +142,7 @@ A sheet titled "New in <space>":
   repository, the folder's name, editable, "new folder in ~/Nirux Tasks, no
   repository".
 - **Report to the Lead** checkbox, shown when the space has a Lead, checked by
-  default: the task's Mission reports to the Lead's Claude (shipped with
+  default: the task's Mission reports to the Lead's agent (shipped with
   S11c). A Lead's proposal comes with it checked.
 - **Sub-task of “<task>”** checkbox, shown when the sheet comes from a task's
   "New Sub-task…" (its card menu, or Workspaces in the menu bar), checked: the
@@ -230,16 +231,29 @@ New flow, built on the guarded typing `tell` already uses
 
 - **Opt-in per space:** "Start a Lead" in New Space… (off unless switched on)
   and Space Settings › Lead. A workspace pinned at the top of the sidebar, in
-  the default anchor's main checkout, with Claude and the Board column (unless
+  the default anchor's main checkout, with the selected agent and the Board column (unless
   another workspace of the space shows the Board). One per space, never in
   General; it can't be moved, dragged, parked or sent to another space.
   ⌃⌘L (Space › Lead) focuses it, or starts it when the space has none: ⌘0
   stays the editor's font-size reset. Turning it off, or closing its
-  workspace, closes it (asking first while Claude runs); the tasks it started
+  workspace, closes it (asking first while an agent runs); the tasks it started
   then ask the user, as for any parent gone, and a new Lead doesn't take them
   over. Deleting its space makes it a plain workspace in General (its running
   shells keep `NIRUX_LEAD=1` until they restart).
-- **Its role** reaches its Claude through the Nirux MCP server's instructions:
+- **Agent choice** in Space Settings › Lead sets the default for a stopped Lead.
+  Restart Lead… preselects the running agent when there is one. Choosing another agent
+  starts a fresh conversation for this restart and keeps the saved preference.
+  Relaunch resumes the current conversation with the space’s current options. The sidebar
+  offers it for a Claude Code or Codex Lead with older options. A running Antigravity Lead
+  offers it in the workspace menu.
+  Claude Code is the default. Nirux launches Codex with a per-session MCP configuration and
+  an initial prompt so it can establish which thread receives Mission messages. A manual
+  Codex session can receive queued messages once its launch prompt or resume ID proves the
+  thread. A bare Codex can collect a pending child event with `"$NIRUX_CLI_PATH" --mission receive`.
+  Antigravity reports turn state through OSC 7501. Its CLI rejects `mcpServers` in
+  `--settings` and exposes server configuration through the persistent `agy mcp` commands.
+  A Lead without MCP can answer with `"$NIRUX_CLI_PATH" --mission reply --event <id> --message "<answer>"`.
+- **Its role** reaches Claude Code and Codex through the Nirux MCP server's instructions:
   its shells carry `NIRUX_LEAD=1` (blank in every other shell). It starts
   tasks only with its tools, reads `list_tasks` before starting one, and
   ends its turn after starting or telling tasks: Nirux types their messages
@@ -247,7 +261,7 @@ New flow, built on the guarded typing `tell` already uses
   Its folder is fixed when it starts: Space Settings › Lead says when it is
   none of the space's repositories any more, and turning it off and on moves
   it.
-- **Tools** (Nirux MCP server, given to the Lead's Claude only), limited to its
+- **Tools** (Nirux MCP server, available in the Lead workspace), limited to its
   space and its anchors (shipped with S11b):
   - `start_task(description, repo?, template?, title?, branch?, goal?)`: the
     ⌘N path (origin's base fetched, else as last fetched; the space's agent;
@@ -304,10 +318,30 @@ New flow, built on the guarded typing `tell` already uses
     (amber row at once, the popover saying why). The answer is typed into the
     task, and a line into the Lead ("[Nirux Mission] The user answered …").
     The question is the task's own: the Lead asks its own in its conversation.
-  - `queue_merge(prs, repo?)`: opens one repository's merge queue confirmation
-    sheet with those pull requests, in that order (one queue per repository),
-    once Board Settings allow it; only open pull requests, and never over a
-    list the user is preparing. It never starts a queue.
+  - `queue_merge(prs, repo?, cadence?, replace?)` proposes open pull requests in merge order
+    for one repository. By default the user confirms in the sheet. **Allow Lead
+    to start the merge queue** in Space Settings › Lead enables direct starts
+    after a clean preflight of every requested PR. A warning or an incomplete
+    read requires manual review. Enabling **Allow without local code review**
+    under that switch lets Lead auto-start ignore only the missing local review
+    pass (`No code review yet`), while continuing to enforce GitHub checks,
+    mergeability, workflow safety, local worktree cleanliness and post-merge
+    health (the Board and manual confirmation sheets still show the warning).
+    Dry runs and the developer live override always use the confirmation sheet.
+    `cadence` accepts `standard` (default), `batch_post_merge`, or
+    `express_disjoint`. The default protects the user's prepared list. When the
+    user requests a replacement, an opted-in Lead can pass `replace: true`.
+    The same preflight checks the requested order and cadence. A proposal that
+    needs manual review opens the confirmation sheet. An open sheet, a running
+    queue or a selection changed during preflight prevents replacement.
+  - `merge_queue_status(repo?)` reports the phase, cadence, current step,
+    remaining PRs, Board selection, Lead setting (including whether local
+    review is required for auto-start), build eligibility and last
+    ten journal entries. It also reads a configured repository with the Board
+    closed. Selection freshness comes from the Board's last list of open PRs.
+  - `stop_merge_queue(repo?)` requires **Allow Lead to start the merge queue**.
+    It stops this instance’s queue before its next command and records
+    **Stopped by Lead**. Any GitHub command already sent finishes.
   - `set_task_context(task, next_step?, blocker?)` (shipped with S13): a task's
     next step and blocker (View/Edit Context…), one line each, at most 200
     characters; an empty string clears one. Its role says when: after a
@@ -380,7 +414,9 @@ New flow, built on the guarded typing `tell` already uses
     like a secret are withheld.
   - `record_review(task, findings)` and `daily_pass()`: what the Lead's
     reviews found, by kind, and what happened in the space since its last
-    daily pass, for its rules (see daily-pass.md).
+    daily pass, for its rules (see daily-pass.md). Recording a clean review
+    (empty `findings`) also marks `.codeReview` on the task's current HEAD and
+    branch, satisfying the Board's local review pass.
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state

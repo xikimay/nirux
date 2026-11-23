@@ -45,6 +45,36 @@ extension MergeQueue {
         var baseRuns: [GitHub.WorkflowRun]?
         /// In the order the next Start proposes.
         var candidates: [Candidate] = []
+
+        func leadStartRefusal(
+            confirmation: Confirmation, numbers: [Int], cadence: Cadence, allowWithoutLocalReview: Bool = false
+        ) -> String? {
+            if isDryRun { return "Dry runs need your confirmation." }
+            if let exclusion = confirmation.excluded.first { return "#\(exclusion.number): \(exclusion.reason)" }
+            if let reason = confirmation.refusals.first ?? confirmation.warnings.first { return reason }
+            guard rateLimit != nil, baseMergeQueue == false,
+                  confirmation.entries.map(\.number) == numbers, candidates.map(\.number) == numbers else {
+                return "The queue preflight was incomplete."
+            }
+            if let workflow = settings.postMergeWorkflow {
+                guard let last = baseRuns?.first(where: \.isCompleted) else {
+                    return "No completed run of \(workflow) on \(settings.baseBranch) was found."
+                }
+                guard GitHub.isSucceededRun(last.conclusion) else {
+                    return "The last completed run of \(workflow) on \(settings.baseBranch) didn’t succeed."
+                }
+            }
+            for (item, candidate) in zip(confirmation.items, candidates) {
+                let itemWarnings = allowWithoutLocalReview ? item.otherWarnings : item.warnings
+                if let warning = itemWarnings.first { return "#\(candidate.number): \(warning)" }
+                guard case .some(.some) = candidate.comparison else {
+                    return "GitHub couldn’t compare #\(candidate.number) with \(settings.baseBranch)."
+                }
+            }
+            if let reason = confirmation.refusal(for: cadence) { return reason }
+            if cadence == .expressDisjoint { return nil }
+            return MergeQueue.strictCandidateRefusal(for: candidates, settings: settings, requireDisjoint: false)
+        }
     }
 
     /// The sheet's content: the pull requests that join, in order, those
@@ -59,8 +89,14 @@ extension MergeQueue {
             let checks: String
             /// What the queue will do with it: "Behind main by 3 commits…".
             var notes: [String] = []
+            /// Missing local review passes on its branch ("No code review yet…"),
+            /// kept separate so Lead auto-start can opt out of it without
+            /// suppressing any other warning.
+            var missingReviewWarning: String?
+            /// Warnings other than missing local review passes.
+            var otherWarnings: [String] = []
             /// What may stop the queue, or deserves a look.
-            var warnings: [String] = []
+            var warnings: [String] { (missingReviewWarning.map { [$0] } ?? []) + otherWarnings }
         }
 
         struct Excluded: Equatable, Sendable {
@@ -79,6 +115,23 @@ extension MergeQueue {
         /// Why Start is refused.
         let refusals: [String]
 
+        let expressRefusal: String?
+        private(set) var cadence: Cadence = .standard
+
+        var offeredCadences: [Cadence] {
+            Cadence.allCases.filter { $0 != .batchPostMerge || settings.postMergeWorkflow != nil }
+        }
+
+        func refusal(for cadence: Cadence) -> String? {
+            if !offeredCadences.contains(cadence) { return "Batch post-merge needs a configured post-merge workflow." }
+            return cadence == .expressDisjoint ? expressRefusal : nil
+        }
+
+        mutating func select(_ cadence: Cadence) {
+            guard refusal(for: cadence) == nil else { return }
+            self.cadence = cadence
+        }
+
         var canStart: Bool { refusals.isEmpty && !items.isEmpty }
         var entries: [ConfirmedEntry] { items.map(\.entry) }
 
@@ -90,44 +143,60 @@ extension MergeQueue {
             items.swapAt(index, target)
         }
 
+        var summary: String {
+            let count = items.count
+            let merges = "\(count) merge\(count == 1 ? "" : "s")"
+            guard let workflow = settings.postMergeWorkflow else {
+                return isDryRun ? "A real queue would make \(merges) into \(settings.baseBranch). This dry run makes none."
+                    : "This queue makes \(merges) into \(settings.baseBranch), one right after the other."
+            }
+            if cadence != .standard {
+                let final = "verify \(workflow) once, on the final merge of \(count) pull request\(count == 1 ? "" : "s")"
+                return isDryRun ? "A real queue would \(final). This dry run publishes nothing." : "The queue will \(final)."
+            }
+            let label = GitHub.workflowLabel(workflow)
+            if label.lowercased().contains("nightly") {
+                let nightlies = "\(count) \(count == 1 ? label : MergeQueue.plural(label))"
+                return isDryRun ? "A real queue would publish \(nightlies), one after each merge. This dry run publishes none."
+                    : "This queue publishes \(nightlies): \(workflow) runs after each of its \(merges)."
+            }
+            let times = "\(count) time\(count == 1 ? "" : "s")"
+            return isDryRun ? "A real queue would run \(workflow) \(times), after each merge. This dry run merges nothing, so it runs none."
+                : "This queue runs \(workflow) \(times): after each of its \(merges)."
+        }
+
         /// What will happen, line by line (section 4).
         var plan: [String] {
             let base = settings.baseBranch
-            let workflow = settings.postMergeWorkflow
-            let label = GitHub.workflowLabel(workflow)
-            let count = items.count
             let method = settings.mergeMethod == .squash ? "Squash and merge it" : "Merge it with a merge commit"
-            var lines = [
-                "In this order, for each pull request:",
-                "• If its branch is behind \(base), merge \(base) into it on GitHub (never a rebase or a force push), "
-                    + "at most \(Limits.maxUpdates) times.",
-                "• Wait for the required checks on its head: \(settings.requiredChecks.joined(separator: ", ")) "
-                    + "(up to \(settings.checksTimeoutMinutes) minutes). A failed one is rerun once; a second failure stops "
-                    + "the queue.",
-                "• \(method), pinned to the head shown here, or to the queue’s own updates of it "
-                    + "(gh pr merge --\(settings.mergeMethod.rawValue) --match-head-commit).",
-            ]
-            if let workflow {
-                lines.append("• Wait for \(workflow) on \(base) (up to \(settings.postMergeTimeoutMinutes) minutes), "
-                    + "then go on to the next one.")
-                let merges = "\(count) merge\(count == 1 ? "" : "s")"
-                // A nightly publishes: say how many; another workflow, how often it runs.
-                if label.lowercased().contains("nightly") {
-                    let nightlies = "\(count) \(count == 1 ? label : MergeQueue.plural(label))"
-                    lines.append(isDryRun
-                        ? "A real queue would publish \(nightlies), one after each merge. This dry run publishes none."
-                        : "This queue publishes \(nightlies): \(workflow) runs after each of its \(merges).")
+            var lines = ["In this order, for each pull request:"]
+            if cadence == .expressDisjoint {
+                lines += [
+                    "• Keep its confirmed head, even if it is behind \(base).",
+                    "• Require green checks (\(settings.requiredChecks.joined(separator: ", "))). Stop if its head changes, "
+                        + "it is no longer mergeable, or any check is red.",
+                    "• \(method), pinned to the confirmed head (gh pr merge --\(settings.mergeMethod.rawValue) --match-head-commit)."
+                ]
+            } else {
+                lines += [
+                    "• If its branch is behind \(base), merge \(base) into it on GitHub (never a rebase or a force push), "
+                        + "at most \(Limits.maxUpdates) times.",
+                    "• Wait for the required checks on its head: \(settings.requiredChecks.joined(separator: ", ")) "
+                        + "(up to \(settings.checksTimeoutMinutes) minutes). A failed one is rerun once; a second failure stops "
+                        + "the queue.",
+                    "• \(method), pinned to the head shown here, or to the queue’s own updates of it "
+                        + "(gh pr merge --\(settings.mergeMethod.rawValue) --match-head-commit).",
+                ]
+            }
+            if let workflow = settings.postMergeWorkflow {
+                if cadence == .standard {
+                    lines.append("• Wait for \(workflow) on \(base) (up to \(settings.postMergeTimeoutMinutes) minutes), "
+                        + "then go on to the next one.")
                 } else {
-                    lines.append(isDryRun
-                        ? "A real queue would run \(workflow) \(count) time\(count == 1 ? "" : "s"), after each merge. This "
-                            + "dry run merges nothing, so it runs none."
-                        : "This queue runs \(workflow) \(count) time\(count == 1 ? "" : "s"): after each of its \(merges).")
+                    lines.append("• After the final merge, wait up to \(settings.postMergeTimeoutMinutes) minutes for \(workflow).")
                 }
             } else {
                 lines.append("• Go on to the next one right away: no post-merge workflow.")
-                lines.append(isDryRun
-                    ? "A real queue would make \(count) merge\(count == 1 ? "" : "s") into \(base). This dry run makes none."
-                    : "This queue makes \(count) merge\(count == 1 ? "" : "s") into \(base), one right after the other.")
             }
             lines.append("It stops at the first problem. Stop is in the board and in the status bar; a call already "
                 + "sent to GitHub finishes.")
@@ -144,10 +213,13 @@ extension MergeQueue {
         let settings = reading.settings
         var items: [Confirmation.Item] = []
         var excluded: [Confirmation.Excluded] = []
+        var joining: [ConfirmationReading.Candidate] = []
         if reading.setupError == nil {
             for candidate in reading.candidates {
                 switch confirmationItem(candidate, settings: settings) {
-                case .joins(let item): items.append(item)
+                case .joins(let item):
+                    items.append(item)
+                    joining.append(candidate)
                 case .leftOut(let left): excluded.append(left)
                 }
             }
@@ -179,7 +251,8 @@ extension MergeQueue {
             items: items,
             excluded: excluded,
             warnings: reading.setupError == nil ? baseWarnings(reading.baseRuns, settings: settings) : [],
-            refusals: refusals
+            refusals: refusals,
+            expressRefusal: strictCandidateRefusal(for: joining, settings: settings, requireDisjoint: true)
         )
     }
 
@@ -229,9 +302,8 @@ extension MergeQueue {
         }
         if let reason = local.worktrees.lazy.compactMap(localProblem).first { return leftOut(reason) }
         // What the Board's Reviews station says of it, the sheet says too: a click on its Merge station lists it for Start.
-        let unreviewed = candidate.missingReviews.isEmpty ? [] : [
-            "No \(spoken(candidate.missingReviews.map { $0.lowercased() })) yet: Nirux saw none run on its branch."
-        ]
+        let unreviewed: String? = candidate.missingReviews.isEmpty ? nil
+            : "No \(spoken(candidate.missingReviews.map { $0.lowercased() })) yet: Nirux saw none run on its branch."
 
         var item = Confirmation.Item(
             entry: entry,
@@ -239,14 +311,14 @@ extension MergeQueue {
             url: pullRequest.url,
             checks: candidate.checks.map { checksText($0, required: settings.requiredChecks) }
                 ?? "checks unknown" + (candidate.checksError.map { ": \($0)" } ?? ""),
-            warnings: unreviewed
+            missingReviewWarning: unreviewed
         )
         if case .some(.some(let comparison)) = candidate.comparison, comparison.behindBy > 0 {
             item.notes.append("Behind \(settings.baseBranch) by \(comparison.behindBy) "
-                + "commit\(comparison.behindBy == 1 ? "" : "s"): the queue merges \(settings.baseBranch) into it first.")
+                + "commit\(comparison.behindBy == 1 ? "" : "s").")
         } else if candidate.comparison == nil {
             item.notes.append("Nirux couldn’t tell whether it is behind \(settings.baseBranch)"
-                + (candidate.compareError.map { " (\($0))" } ?? "") + ": the queue checks again.")
+                + (candidate.compareError.map { " (\($0))" } ?? "") + ".")
         }
         if pullRequest.mergeable == "UNKNOWN" {
             item.notes.append("GitHub is still computing whether it merges cleanly: the queue waits up to "
@@ -259,23 +331,23 @@ extension MergeQueue {
                     + "if it fails again.")
             }
             if !verdict.notGreen.isEmpty {
-                item.warnings.append("\(verdict.notGreen.joined(separator: ", ")): only a new run can turn it green, so "
+                item.otherWarnings.append("\(verdict.notGreen.joined(separator: ", ")): only a new run can turn it green, so "
                     + "the queue will stop on it.")
             }
             if !verdict.otherFailures.isEmpty {
-                item.warnings.append("Red, though not required: \(verdict.otherFailures.joined(separator: ", ")). The "
+                item.otherWarnings.append("Red, though not required: \(verdict.otherFailures.joined(separator: ", ")). The "
                     + "queue never merges with a check red.")
             }
         }
         if let details = candidate.details {
             if details.changesWorkflows {
-                item.warnings.append("It changes .github/workflows/: its checks ran its own version of the workflows.")
+                item.otherWarnings.append("It changes .github/workflows/: its checks ran its own version of the workflows.")
             } else if details.hasMoreFiles {
-                item.warnings.append("It changes more than \(PullRequestDetails.maxFiles) files: Nirux didn’t check them "
+                item.otherWarnings.append("It changes more than \(PullRequestDetails.maxFiles) files: Nirux didn’t check them "
                     + "all for .github/workflows/.")
             }
         } else {
-            item.warnings.append("Nirux couldn’t read the files it changes"
+            item.otherWarnings.append("Nirux couldn’t read the files it changes"
                 + (candidate.detailsError.map { " (\($0))" } ?? "") + ": check .github/workflows/ yourself.")
         }
         return .joins(item)

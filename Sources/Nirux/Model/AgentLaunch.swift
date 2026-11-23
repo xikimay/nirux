@@ -3,9 +3,9 @@ import Foundation
 /// The session a launch resumes.
 enum AgentResumeTarget: Equatable {
     /// No usable stored ID (state written by an older Nirux, a session
-    /// never bound, or one another column already claimed). Let the user
-    /// choose; `codex resume --last` / `claude --continue` would attach
-    /// several columns to the most recent conversation.
+    /// never bound, or one another column already claimed). Claude and Codex
+    /// open their interactive picker; Antigravity (which has no picker flag)
+    /// passes `--continue` at most once per working directory during restore.
     case picker
     case session(String)
 }
@@ -15,18 +15,19 @@ enum AgentResumeTarget: Equatable {
 enum AgentLaunch: Equatable {
     case claude(resume: AgentResumeTarget?, mode: ClaudeLaunchMode, model: String? = nil)
     case codex(resume: AgentResumeTarget?, mode: CodexLaunchMode?, model: String? = nil)
-    case agy(resume: AgentResumeTarget?, model: String? = nil)
+    case agy(resume: AgentResumeTarget?, mode: AgyLaunchMode = .auto, model: String? = nil)
 
     /// `agent`'s, with the mode of its kind; nil for an agent Nirux doesn't
     /// start.
     init?(
         _ agent: CodingAgent, resume: AgentResumeTarget?, model: String? = nil,
-        claudeMode: @autoclosure () -> ClaudeLaunchMode, codexMode: @autoclosure () -> CodexLaunchMode
+        claudeMode: @autoclosure () -> ClaudeLaunchMode, codexMode: @autoclosure () -> CodexLaunchMode,
+        agyMode: @autoclosure () -> AgyLaunchMode
     ) {
         switch agent {
         case .claude: self = .claude(resume: resume, mode: claudeMode(), model: model)
         case .codex: self = .codex(resume: resume, mode: codexMode(), model: model)
-        case .agy: self = .agy(resume: resume, model: model)
+        case .agy: self = .agy(resume: resume, mode: agyMode(), model: model)
         case .gemini, .opencode: return nil
         }
     }
@@ -41,14 +42,14 @@ enum AgentLaunch: Equatable {
 
     var model: String? {
         switch self {
-        case .claude(_, _, let model), .codex(_, _, let model), .agy(_, let model): model
+        case .claude(_, _, let model), .codex(_, _, let model), .agy(_, _, let model): model
         }
     }
 
     /// The session it will resume; nil for a fresh agent or the picker.
     var sessionID: String? {
         switch self {
-        case .claude(.session(let sessionID)?, _, _), .codex(.session(let sessionID)?, _, _), .agy(.session(let sessionID)?, _):
+        case .claude(.session(let sessionID)?, _, _), .codex(.session(let sessionID)?, _, _), .agy(.session(let sessionID)?, _, _):
             return sessionID
         default:
             return nil
@@ -64,7 +65,9 @@ enum AgentLaunch: Equatable {
         switch self {
         case .claude(_, let mode, let model): return .claude(resume: .picker, mode: mode, model: model)
         case .codex(_, let mode, let model): return .codex(resume: .picker, mode: mode, model: model)
-        case .agy(_, let model): return .agy(resume: .picker, model: model)
+        // Another column already runs this conversation: start fresh instead
+        // of `--continue`, which could attach to the same conversation.
+        case .agy(_, let mode, let model): return .agy(resume: nil, mode: mode, model: model)
         }
     }
 }
@@ -189,5 +192,52 @@ enum CodexLaunchMode: String, Codable, CaseIterable {
         default:
             return nil
         }
+    }
+}
+
+enum AgyLaunchMode: String, Codable, CaseIterable {
+    case auto
+    case `default`
+    case acceptEdits = "accept-edits"
+    case plan
+    case bypassPermissions
+
+    var displayName: String {
+        switch self {
+        case .auto: "Auto (default — approves safe workspace edits and commands)"
+        case .default: "Antigravity default (your settings.json)"
+        case .acceptEdits: "Accept edits (approves file edits, asks for commands)"
+        case .plan: "Plan (read-only)"
+        case .bypassPermissions: "Bypass permissions (skips all permission prompts)"
+        }
+    }
+
+    var cliArgs: [String] {
+        switch self {
+        case .auto, .acceptEdits, .plan: ["--mode", rawValue]
+        case .default: []
+        case .bypassPermissions: ["--dangerously-skip-permissions"]
+        }
+    }
+
+    static func detect(arguments: [String]) -> AgyLaunchMode? {
+        var args = arguments.makeIterator()
+        var mode: AgyLaunchMode?
+        while let argument = args.next(), argument != "--" {
+            let value: String?
+            switch argument {
+            case "--dangerously-skip-permissions": return .bypassPermissions
+            case "--mode": value = args.next()
+            case let flag where flag.hasPrefix("--mode="): value = String(flag.dropFirst("--mode=".count))
+            case "-i", "--prompt-interactive", "-p", "--print", "--prompt", "--settings", "--conversation", "--model",
+                 "--add-dir", "--agent", "--effort", "--project", "--input-format", "--output-format", "--json-schema",
+                 "--log-file", "--print-timeout":
+                _ = args.next()
+                continue
+            default: continue
+            }
+            mode = [Self.auto, .acceptEdits, .plan].first { $0.rawValue == value }
+        }
+        return mode
     }
 }

@@ -135,6 +135,8 @@ enum BranchReview {
         var isUncommitted = false
         /// See `patchHash(of:)`. Nil only for `.notRead`.
         var patchHash: String?
+        /// Receipts include the exact diff bytes, including context and hunk positions.
+        var rawPatchDigest: Data?
         /// Empty when `omission` says why.
         var hunks: [Hunk] = []
         var omission: Omission?
@@ -203,6 +205,7 @@ enum BranchReview {
         let baseRefName: String
         let headRefOid: String
         let isDraft: Bool
+        var checkReceipts: [Receipt] = []
     }
 
     /// What a snapshot found for its branch, for the next one to reuse

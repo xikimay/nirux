@@ -150,6 +150,7 @@ extension NiruxShellView {
         var claude = Set<String>()
         var codex = Set<String>()
         var agy = Set<String>()
+        var agyContinueCwds = Set<String>()
     }
 
     private func restoreColumn(
@@ -160,7 +161,7 @@ extension NiruxShellView {
     ) {
         switch persistedColumn.resolvedType {
         case .webView:
-            workspace.addColumn(webViewURL: persistedColumn.webViewURL ?? "about:blank")
+            workspace.addColumn(webViewURL: persistedColumn.webViewURL ?? "about:blank", isIsolated: persistedColumn.isIsolatedBrowser == true)
         case .claudeCode:
             // Claimed now, for the whole layout: whenever each column
             // resumes (see NiruxShellView+LazyRestore.swift), two never
@@ -184,10 +185,15 @@ extension NiruxShellView {
                 restoring: persistedColumn, in: workspace
             )
         case .agy:
-            let resumeTarget = Self.agentRestoreTarget(
-                sessionID: persistedColumn.agySessionID, claimedSessionIDs: &claimedSessionIDs.agy
+            let effectiveCwd = Self.existingDirectory(persistedColumn.cwd) ?? workspace.cwd
+            let resumeTarget = Self.agyRestoreTarget(
+                sessionID: persistedColumn.agySessionID,
+                cwd: effectiveCwd,
+                claimedSessionIDs: &claimedSessionIDs.agy,
+                claimedContinueCwds: &claimedSessionIDs.agyContinueCwds
             )
-            addDeferredAgentColumn(.agy(resume: resumeTarget, model: persistedColumn.agentModel), restoring: persistedColumn, in: workspace)
+            let mode = persistedColumn.agyLaunchMode ?? Self.agyLaunchMode(for: workspace)
+            addDeferredAgentColumn(.agy(resume: resumeTarget, mode: mode, model: persistedColumn.agentModel), restoring: persistedColumn, in: workspace)
         case .editor:
             let openFiles = persistedColumn.editorOpenFiles ?? []
             // Non-interactive: a binary or huge file in the persisted tab set
@@ -234,7 +240,9 @@ extension NiruxShellView {
             } else {
                 // It loads its page and reads the branch once its
                 // workspace shows (`scheduleBranchReviewsOnScreen`).
-                workspace.addBranchReviewColumn(makeBranchReview(worktree: persistedColumn.cwd, branch: persistedColumn.reviewBranch))
+                workspace.addBranchReviewColumn(makeBranchReview(
+                    worktree: persistedColumn.cwd, branch: persistedColumn.reviewBranch, workspaceID: workspace.id
+                ))
             }
         case .terminal:
             workspace.addColumn(agentUUID: persistedColumn.agentUUID ?? UUID().uuidString)
@@ -303,6 +311,25 @@ extension NiruxShellView {
     ) -> AgentResumeTarget? {
         if sessionID == nil, sessionIsUnprompted { return nil }
         return agentRestoreTarget(sessionID: sessionID, claimedSessionIDs: &claimedSessionIDs)
+    }
+
+    /// Claim an exact Antigravity conversation once per restore pass. When no
+    /// exact UUID was stored, `.picker` (`agy --continue`) is claimed at most
+    /// once per working directory so duplicate un-ID'd columns in the same
+    /// folder don't attach to the same conversation; subsequent ones start
+    /// fresh (`nil`), as does a duplicate exact session ID.
+    static func agyRestoreTarget(
+        sessionID: String?,
+        cwd: String,
+        claimedSessionIDs: inout Set<String>,
+        claimedContinueCwds: inout Set<String>
+    ) -> AgentResumeTarget? {
+        if let sessionID, UUID(uuidString: sessionID) != nil {
+            return claimedSessionIDs.insert(sessionID).inserted ? .session(sessionID) : nil
+        }
+        let url = URL(fileURLWithPath: cwd).standardizedFileURL
+        let key = url.path.realPath ?? url.path
+        return claimedContinueCwds.insert(key).inserted ? .picker : nil
     }
 
     func saveState(snapshot: ProcessSnapshot? = nil) {
@@ -449,6 +476,7 @@ extension NiruxShellView {
         var claudeMode: ClaudeLaunchMode?
         var claudeRestore: ClaudeSessionTracker.Restore?
         var codexMode: CodexLaunchMode?
+        var agyMode: AgyLaunchMode?
         if col.isEditor {
             kind = .editor
             webURL = nil
@@ -470,6 +498,7 @@ extension NiruxShellView {
                 codexMode = CodexLaunchMode.detect(arguments: foregroundProcess.arguments) ?? .default
             case .agy? where foregroundProcess.interactiveAgent == .agy:
                 kind = .agy; webURL = nil
+                agyMode = AgyLaunchMode.detect(arguments: foregroundProcess.arguments) ?? .default
             default: kind = .terminal; webURL = nil
             }
         } else {
@@ -482,10 +511,12 @@ extension NiruxShellView {
             cwd: col.editorColumn?.workspaceCwd ?? col.pty?.childCwd ?? workspace.cwd,
             columnType: kind,
             webViewURL: webURL,
+            isIsolatedBrowser: col.webViewColumn?.isIsolated,
             editorOpenFiles: editorOpenFiles,
             editorActiveFile: editorActiveFile,
             claudeLaunchMode: claudeMode,
             codexLaunchMode: codexMode,
+            agyLaunchMode: agyMode,
             agentModel: isAgent ? foregroundProcess.flatMap { AgentModels.launchModel(arguments: $0.arguments) } : nil,
             codexSessionID: kind == .codex
                 ? col.persistedCodexSessionID(foregroundProcess: foregroundProcess)

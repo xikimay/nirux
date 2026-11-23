@@ -21,7 +21,14 @@ extension NiruxShellView {
                 self?.importBrowserCookies()
             }
         ]
-        return [openBrowser] + importCookies + [
+        let openTestBrowser = PaletteAction(
+            icon: .symbol(Theme.Symbol.testBrowser), title: "Open Isolated Test Browser",
+            subtitle: "Test a local app with cookies and storage scoped to this task",
+            shortcut: nil
+        ) { [weak self] in
+            self?.openIsolatedTestBrowser()
+        }
+        return [openBrowser, openTestBrowser] + importCookies + [
             PaletteAction(
                 icon: .symbol("terminal"), title: "New Terminal", subtitle: "Open a new terminal column",
                 shortcut: .newTerminal
@@ -86,7 +93,7 @@ extension NiruxShellView {
         let restartLead = leadWorkspace(inSpace: activeProfileID) == nil ? [] : [
             PaletteAction(
                 icon: .agent(.claude), title: Self.restartLeadTitle,
-                subtitle: "End the Lead’s Claude and start a fresh conversation with the space’s launch options", shortcut: nil
+                subtitle: "End the Lead’s current session and start a fresh conversation with the space’s launch options", shortcut: nil
             ) { [weak self] in
                 guard let self else { return }
                 self.requestRestartLead(spaceID: self.activeProfileID)
@@ -149,6 +156,18 @@ extension NiruxShellView {
                 subtitle: "Open an existing worktree, or go back to its workspace", shortcut: nil
             ) { [weak self] in
                 self?.showWorktreeListPalette()
+            },
+            PaletteAction(
+                icon: .symbol("camera"), title: "Save Checkpoint…",
+                subtitle: "Save the current workspace’s tracked changes locally", shortcut: nil
+            ) { [weak self] in
+                self?.requestCheckpoint(in: self?.activeWorkspace)
+            },
+            PaletteAction(
+                icon: .symbol("clock"), title: "Checkpoints…",
+                subtitle: "View saved checkpoints for this workspace", shortcut: nil
+            ) { [weak self] in
+                self?.showCheckpoints(in: self?.activeWorkspace)
             },
             PaletteAction(
                 icon: .symbol("trash"), title: "Clean Up Merged Worktrees…",
