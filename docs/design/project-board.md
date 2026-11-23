@@ -385,8 +385,10 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   once its head lands, with the train's merge commit for it: observed on a
   throwaway base (#779–#792), not documented. So the queue reads every PR and
   stops loudly if one doesn't read merged within 3 minutes. The post-merge
-  workflow runs once, on the train's merge. Train branches stay on GitHub,
-  like every branch Nirux pushes (see pr-stacks.md).
+  workflow runs once, on the train's merge. Nirux deletes the train's
+  branch once it landed, or when the train stops before it has a pull request
+  (never one someone else pushed to); a stop that leaves the train's pull
+  request open leaves its branch too. Agents' branches are never deleted.
 
 For each PR in Standard, in order:
 
