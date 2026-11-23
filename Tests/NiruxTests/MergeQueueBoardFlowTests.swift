@@ -481,7 +481,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             waitUntil("#14 is queued") { BoardStagesClicks.shownLine("feat/api", in: board)?.line.offer?.change == .remove }
             let header = try self.header(of: board)
             let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
-            for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
+            for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint, .train] {
                 try BoardStagesClicks.click(header.startButton)
                 let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
                 waitUntil("the cadence picker is ready") { sheet.cadencePicker != nil }
@@ -493,11 +493,14 @@ final class MergeQueueBoardFlowTests: XCTestCase {
                 picker.selectItem(withTitle: cadence.title)
                 XCTAssertTrue(picker.sendAction(picker.action, to: picker.target))
                 XCTAssertEqual(sheet.confirmation?.cadence, cadence)
-                XCTAssertTrue(sheet.lines.contains("A real queue would verify nightly.yml once, on the final merge of 2 pull requests. This dry run publishes nothing."))
+                XCTAssertTrue(sheet.lines.contains(cadence == .train
+                    ? "A real queue would land 2 pull requests into main in one train: one run of the required checks, then nightly.yml once. This dry run changes nothing on GitHub."
+                    : "A real queue would verify nightly.yml once, on the final merge of 2 pull requests. This dry run publishes nothing."))
                 try click(try XCTUnwrap(sheet.startButton))
                 waitUntil("the dry run stops") { !queue.isRunning }
                 guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("queue did not stop") }
                 XCTAssertEqual(reason.kind, .dryRun)
+                if cadence == .train { XCTAssertTrue(reason.message.contains("repos/acme/widgets/git/refs"), reason.message) }
                 XCTAssertEqual(queue.saved?.effectiveCadence, cadence)
                 XCTAssertEqual(world.mergedNumbers, [])
                 waitUntil("Start is ready again") { header.startButton.isEnabled && !header.startButton.isHidden }

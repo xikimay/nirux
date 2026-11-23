@@ -197,6 +197,9 @@ struct ShellSideEffects {
     /// How long routing a new workspace waits for git (see SpaceRouting).
     /// Tests on a busy machine wait longer.
     var routingTimeout: TimeInterval = FolderIdentity.routingTimeout
+    /// How long a Lead's create_space or edit_space may wait for git to name
+    /// its folders: within the call's wait, or nothing changes.
+    var leadAnchorWait: TimeInterval = 20
 
     /// The native notification for a setup script that failed (workspace
     /// id, workspace title). Tests replace it: xctest must never reach

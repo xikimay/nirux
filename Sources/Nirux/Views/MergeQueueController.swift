@@ -322,7 +322,9 @@ final class MergeQueueController {
         }
         runsElsewhere = false
         let driver = MergeQueueDriver(
-            engine: MergeQueue.Engine(settings: settings, entries: entries, cadence: cadence, startedByLead: startedByLead), client: client, local: local, clock: clock
+            engine: MergeQueue.Engine(settings: settings, entries: entries, cadence: cadence, startedByLead: startedByLead,
+                                      trainBranch: MergeQueue.trainBranch(at: clock.date())),
+            client: client, local: local, clock: clock
         )
         driver.onUpdate = { [weak self] engine, notes in self?.update(engine, notes: notes) }
         driver.onMutation = { [weak self] mutation, command, result in
@@ -405,10 +407,10 @@ final class MergeQueueController {
     }
 
     private func journal(_ mutation: MergeQueue.Mutation, command: String, result: MergeQueue.MutationResult?) {
-        let entry = engine?.currentEntry
+        let subject = engine?.subject
         let line = MergeQueue.Journal.line(
-            number: entry?.number,
-            step: entry.map { MergeQueue.Engine.stepName($0.step) } ?? "queue",
+            number: subject?.number,
+            step: subject?.step ?? "queue",
             command: command,
             result: result.map(MergeQueue.Engine.describe)
                 ?? (isDryRun ? "handed to the dry run, which doesn’t send it" : "sent, waiting for the answer"),

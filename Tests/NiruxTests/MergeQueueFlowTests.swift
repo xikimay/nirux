@@ -134,6 +134,10 @@ final class MergeQueueFlowTests: XCTestCase {
                 if joined.contains("checkSuites"), value(after: "-f", prefix: "oid=") != nil {
                     return ok(Self.checksJSON(conclusion: testConclusion))
                 }
+                if joined.contains("ref(qualifiedName") {
+                    let tip = value(after: "-f", prefix: "ref=") == "refs/heads/main" ? #"{"target":{"oid":"\#(mainTip)"}}"# : "null"
+                    return ok(#"{"data":{"repository":{"ref":\#(tip)}}}"#)
+                }
                 if joined.contains("/compare/") {
                     return ok(#"{"status":"ahead","ahead_by":1,"behind_by":0,"base_commit":"\#(mainTip)"}"#)
                 }
