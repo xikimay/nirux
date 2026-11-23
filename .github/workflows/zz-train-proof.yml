@@ -1,0 +1,12 @@
+# Throwaway: a check for the merge train's proof (feat/merge-train). Never merge into main.
+name: Train proof
+on:
+  pull_request:
+    branches: [zz/train-proof-base]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "throwaway check for the merge train proof"
