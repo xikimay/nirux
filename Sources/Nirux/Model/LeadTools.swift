@@ -57,8 +57,8 @@ enum LeadTools {
 
     /// tell's `after`.
     static let afterDescription = "Another task of this space, named the same way: the message is held until that task's "
-        + "pull request merges, then typed as a tell then would be (\"merge origin/main\" once the pull request it builds on "
-        + "lands). Held across relaunches. If that pull request closes without merging, or its task closes first, the message "
+        + "pull request merges, then typed as a tell then would be (\"build the UI on the API\" once the pull request adding "
+        + "that API lands). Held across relaunches. If that pull request closes without merging, or its task closes first, the message "
         + "isn't typed and you hear it."
 
     /// What reply's description adds about a question's kind and recommendation.
