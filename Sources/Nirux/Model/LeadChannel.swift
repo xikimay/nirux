@@ -42,13 +42,21 @@ enum LeadChannel {
         let isError: Bool
     }
 
-    static func folder(_ name: String, stateDirectory: URL) -> URL {
-        stateDirectory.appendingPathComponent("lead", isDirectory: true).appendingPathComponent(name, isDirectory: true)
+    /// The Lead's folders; `root` names another channel on the same files
+    /// (CanaryChannel).
+    static let root = "lead"
+
+    static func folder(_ name: String, stateDirectory: URL, root: String = LeadChannel.root) -> URL {
+        stateDirectory.appendingPathComponent(root, isDirectory: true).appendingPathComponent(name, isDirectory: true)
     }
 
-    static func requestsFolder(stateDirectory: URL) -> URL { folder("requests", stateDirectory: stateDirectory) }
+    static func requestsFolder(stateDirectory: URL, root: String = LeadChannel.root) -> URL {
+        folder("requests", stateDirectory: stateDirectory, root: root)
+    }
 
-    static func responsesFolder(stateDirectory: URL) -> URL { folder("responses", stateDirectory: stateDirectory) }
+    static func responsesFolder(stateDirectory: URL, root: String = LeadChannel.root) -> URL {
+        folder("responses", stateDirectory: stateDirectory, root: root)
+    }
 
     // MARK: - Writing
 
@@ -97,11 +105,11 @@ enum LeadChannel {
     /// (else takes it back: nothing happens), then up to `workTimeout` for
     /// the answer.
     static func send(
-        _ request: Request, stateDirectory: URL, takeTimeout: TimeInterval, workTimeout: TimeInterval,
+        _ request: Request, stateDirectory: URL, root: String = LeadChannel.root, takeTimeout: TimeInterval, workTimeout: TimeInterval,
         pollInterval: TimeInterval = 0.05
     ) -> Outcome {
-        let requests = requestsFolder(stateDirectory: stateDirectory)
-        let responses = responsesFolder(stateDirectory: stateDirectory)
+        let requests = requestsFolder(stateDirectory: stateDirectory, root: root)
+        let responses = responsesFolder(stateDirectory: stateDirectory, root: root)
         let requestFile = requests.appendingPathComponent(request.id + ".json")
         guard write(request, id: request.id, in: requests) else { return .notTaken }
         let start = Date()
@@ -126,8 +134,10 @@ enum LeadChannel {
     /// The requests waiting, oldest first, without taking them: `claim`
     /// takes one. Ones of another protocol, too old, or unreadable are
     /// removed.
-    static func waitingRequests(stateDirectory: URL, now: TimeInterval = Date().timeIntervalSince1970) -> [Request] {
-        let folder = requestsFolder(stateDirectory: stateDirectory)
+    static func waitingRequests(
+        stateDirectory: URL, root: String = LeadChannel.root, now: TimeInterval = Date().timeIntervalSince1970
+    ) -> [Request] {
+        let folder = requestsFolder(stateDirectory: stateDirectory, root: root)
         let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
         var requests: [Request] = []
         for name in names where name.hasSuffix(".json") && !name.hasPrefix(".") {
@@ -146,8 +156,8 @@ enum LeadChannel {
 
     /// Takes `request` for this process: false when another Nirux, or its
     /// caller giving up, took it first.
-    static func claim(_ request: Request, stateDirectory: URL) -> Bool {
-        let folder = requestsFolder(stateDirectory: stateDirectory)
+    static func claim(_ request: Request, stateDirectory: URL, root: String = LeadChannel.root) -> Bool {
+        let folder = requestsFolder(stateDirectory: stateDirectory, root: root)
         let claimed = folder.appendingPathComponent(".\(request.id).claimed-\(getpid())")
         guard rename(folder.appendingPathComponent(request.id + ".json").path, claimed.path) == 0 else { return false }
         try? FileManager.default.removeItem(at: claimed)
@@ -156,19 +166,26 @@ enum LeadChannel {
 
     /// Every request waiting, each claimed: tests, and a Nirux that takes
     /// them all.
-    static func takeRequests(stateDirectory: URL, now: TimeInterval = Date().timeIntervalSince1970) -> [Request] {
-        waitingRequests(stateDirectory: stateDirectory, now: now).filter { claim($0, stateDirectory: stateDirectory) }
+    static func takeRequests(
+        stateDirectory: URL, root: String = LeadChannel.root, now: TimeInterval = Date().timeIntervalSince1970
+    ) -> [Request] {
+        waitingRequests(stateDirectory: stateDirectory, root: root, now: now)
+            .filter { claim($0, stateDirectory: stateDirectory, root: root) }
     }
 
     @discardableResult
-    static func respond(_ response: Response, stateDirectory: URL) -> Bool {
-        write(response, id: response.id, in: responsesFolder(stateDirectory: stateDirectory))
+    static func respond(_ response: Response, stateDirectory: URL, root: String = LeadChannel.root) -> Bool {
+        write(response, id: response.id, in: responsesFolder(stateDirectory: stateDirectory, root: root))
     }
 
     /// Answers left behind by callers that gave up (and stray staging
     /// files): removed at launch.
-    static func sweep(stateDirectory: URL, now: Date = Date()) {
-        for folder in [requestsFolder(stateDirectory: stateDirectory), responsesFolder(stateDirectory: stateDirectory)] {
+    static func sweep(stateDirectory: URL, root: String = LeadChannel.root, now: Date = Date()) {
+        let folders = [
+            requestsFolder(stateDirectory: stateDirectory, root: root),
+            responsesFolder(stateDirectory: stateDirectory, root: root),
+        ]
+        for folder in folders {
             let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
             for name in names {
                 let url = folder.appendingPathComponent(name)

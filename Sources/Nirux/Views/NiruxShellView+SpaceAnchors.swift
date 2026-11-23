@@ -250,13 +250,13 @@ extension NiruxShellView {
     /// wait stays about one git call however many workspaces are open; a
     /// folder that is gone is left out.
     nonisolated static func identifyAllOffMain(
-        _ folders: [String],
+        _ folders: [String], timeout: TimeInterval = 2,
         completion: @escaping @MainActor @Sendable ([String: FolderIdentity]) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
             let results = IdentityResults()
             DispatchQueue.concurrentPerform(iterations: folders.count) { index in
-                results.set(FolderIdentity.identify(folders[index], timeout: 2), for: folders[index])
+                results.set(FolderIdentity.identify(folders[index], timeout: timeout), for: folders[index])
             }
             let identities = results.all
             DispatchQueue.main.async { @MainActor in completion(identities) }

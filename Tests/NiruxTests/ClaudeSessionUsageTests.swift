@@ -77,7 +77,7 @@ final class ClaudeSessionUsageTests: XCTestCase {
             TranscriptLine.response(id: "msg_1", input: 3, cacheWrite: 1_000, cacheRead: 20_000, output: 250, block: 2)
         ])
         XCTAssertEqual(usage.responses, 1)
-        XCTAssertEqual(usage.totals, ClaudeTokenCounts(input: 3, output: 250, cacheWrite: 1_000, cacheRead: 20_000))
+        XCTAssertEqual(usage.totals, TokenCounts(input: 3, output: 250, cacheWrite: 1_000, cacheRead: 20_000))
         XCTAssertEqual(usage.contextTokens, 21_003)
         XCTAssertEqual(usage.model, "claude-opus-5-5")
     }
@@ -89,7 +89,7 @@ final class ClaudeSessionUsageTests: XCTestCase {
             TranscriptLine.response(id: "msg_2", input: 2, cacheWrite: 500, cacheRead: 30_000, output: 40)
         ])
         XCTAssertEqual(usage.responses, 2)
-        XCTAssertEqual(usage.totals, ClaudeTokenCounts(input: 4, output: 140, cacheWrite: 30_500, cacheRead: 30_000))
+        XCTAssertEqual(usage.totals, TokenCounts(input: 4, output: 140, cacheWrite: 30_500, cacheRead: 30_000))
         XCTAssertEqual(usage.contextTokens, 30_502)
         XCTAssertEqual(usage.peakContextTokens, 30_502)
     }

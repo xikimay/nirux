@@ -114,6 +114,10 @@ final class LeadChannelTests: XCTestCase {
         center.start(stateDirectory: stateDirectory)
         defer { center.stop() }
         XCTAssertEqual(handled, [], "an earlier launch's request")
+        XCTAssertEqual(
+            LeadChannel.take(LeadChannel.Response.self, id: left.id, from: LeadChannel.responsesFolder(stateDirectory: stateDirectory))?.isError,
+            true, "refused, not left waiting"
+        )
         let mine = request(createdAt: Date().timeIntervalSince1970 + 1)
         for item in [mine, foreign] { XCTAssertTrue(LeadChannel.write(item, id: item.id, in: folder)) }
         center.drain()
@@ -283,5 +287,68 @@ final class LeadChannelTests: XCTestCase {
         let result = try XCTUnwrap(try call(LeadTools.listTasks, [:], context: context(lead: true))["result"] as? [String: Any])
         XCTAssertEqual(result["isError"] as? Bool, false)
         XCTAssertEqual((result["content"] as? [[String: Any]])?.first?["text"] as? String, "answered list_tasks")
+    }
+
+    func testSpaceToolsAreTheLeadsAndCheckTheirArguments() throws {
+        let spaceTools = [
+            LeadTools.listSpaces, LeadTools.createSpace, LeadTools.editSpace,
+            LeadTools.deleteSpace, LeadTools.moveTaskToSpace
+        ]
+        for tool in spaceTools {
+            let definition = try XCTUnwrap(LeadTools.definitions.first { $0["name"] as? String == tool }, tool)
+            let schema = try XCTUnwrap(definition["inputSchema"] as? [String: Any])
+            XCTAssertEqual(schema["additionalProperties"] as? Bool, false, tool)
+            let hints = try XCTUnwrap(definition["annotations"] as? [String: Bool])
+            XCTAssertEqual(hints["readOnlyHint"], tool == LeadTools.listSpaces, tool)
+            XCTAssertEqual(hints["destructiveHint"], tool == LeadTools.deleteSpace, tool)
+            XCTAssertFalse(TaskTools.names.contains(tool), tool)
+            XCTAssertNotNil(try call(tool, [:], context: context(lead: false))["error"], "\(tool) is Lead-only")
+        }
+
+        let leadListTasks = try XCTUnwrap(LeadTools.definitions.first { $0["name"] as? String == LeadTools.listTasks })
+        let leadListProps = try XCTUnwrap((leadListTasks["inputSchema"] as? [String: Any])?["properties"] as? [String: Any])
+        XCTAssertNotNil(leadListProps["space"])
+        let taskListTasks = try XCTUnwrap(TaskTools.definitions.first { $0["name"] as? String == LeadTools.listTasks })
+        let taskListProps = try XCTUnwrap((taskListTasks["inputSchema"] as? [String: Any])?["properties"] as? [String: Any])
+        XCTAssertNil(taskListProps["space"])
+
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.listSpaces, arguments: [:]))
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.listTasks, arguments: ["space": "General"]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.listTasks, arguments: ["space": "  "]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.listTasks, arguments: ["space": "General"], subtask: true))
+
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "color": "#aabbcc", "anchors": ["/tmp"]]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "   "]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "A\nB"]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "color": "7AA2F7"]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "color": "#GGGGGG"]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "anchors": [""]]))
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "anchors": ["~/Projects/ops"]]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "anchors": ["Projects/ops"]]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "move_anchors": "yes"]))
+
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "color": "#9ECE6A"]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops"]), "needs at least one change")
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "name": "  "]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "color": "#12345"]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "add_anchors": [1]]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "add_anchors": ["."]]))
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.editSpace, arguments: ["space": "Ops", "remove_anchors": ["api"]]))
+
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.deleteSpace, arguments: ["space": "Ops"]))
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.deleteSpace, arguments: ["space": "Ops", "move_tasks_to": "General"]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.deleteSpace, arguments: [:]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.deleteSpace, arguments: ["space": "Ops", "move_tasks_to": "  "]))
+
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.moveTaskToSpace, arguments: ["task": "Fix", "to_space": "General"]))
+        XCTAssertNil(LeadTools.problem(tool: LeadTools.moveTaskToSpace, arguments: [
+            "task": "Fix", "to_space": "General", "from_space": "Ops"
+        ]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.moveTaskToSpace, arguments: ["task": "Fix"]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.moveTaskToSpace, arguments: ["to_space": "General"]))
+        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.moveTaskToSpace, arguments: [
+            "task": "Fix", "to_space": "General", "from_space": " "
+        ]))
+
     }
 }

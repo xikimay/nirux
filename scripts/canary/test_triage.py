@@ -965,7 +965,7 @@ class CLIValidationTests(unittest.TestCase):
                     capture_output=True,
                     text=True,
                 )
-                self.assertEqual(proc.returncode, 2, msg=f"expected usage error for {bad_args}: {proc.stderr}")
+                self.assertEqual(proc.returncode, 64, msg=f"expected usage error for {bad_args}: {proc.stderr}")
 
 
 if __name__ == "__main__":

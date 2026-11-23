@@ -1,0 +1,27 @@
+name: Run with an early CI diagnostic
+description: Publish the first source error while the command runs to completion
+inputs:
+  command:
+    description: Build or suite
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        PHASE: ${{ inputs.command }}
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
+      run: python3 "$GITHUB_ACTION_PATH/run.py" start "$PHASE"
+    - if: steps.run.outputs.diagnostic
+      uses: actions/upload-artifact@v4
+      continue-on-error: true
+      with:
+        name: first-failure-${{ github.run_attempt }}
+        path: ${{ steps.run.outputs.diagnostic }}
+        retention-days: 7
+    - if: ${{ !cancelled() && steps.run.outputs.diagnostic }}
+      shell: bash
+      env:
+        DIAGNOSTIC: ${{ steps.run.outputs.diagnostic }}
+      run: python3 "$GITHUB_ACTION_PATH/run.py" finish "$DIAGNOSTIC"

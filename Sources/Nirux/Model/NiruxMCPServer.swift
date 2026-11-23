@@ -56,7 +56,8 @@ enum NiruxMCPServer {
         Lead auto-start enabled, a clean preflight starts the queue. Use stop_merge_queue to stop it locally. Pass replace: true only when \
         the user asks to replace an idle Board selection. Other cadences: standard, batch_post_merge, express_disjoint. \
         Record reviews with record_review. When two tasks get the same kind of finding, use propose_rule for the user's decision. Close merged \
-        or abandoned tasks with close_task. Leave worktree and branch cleanup to Nirux. Stay in this space.
+        or abandoned tasks with close_task. Leave worktree and branch cleanup to Nirux. Create, edit or delete spaces, or move tasks \
+        between them, only when the user asks; otherwise stay in this space.
         """
 
     /// The instructions for whoever launched the server: the Lead's role
@@ -73,7 +74,8 @@ enum NiruxMCPServer {
     /// replays its launch line on restart. The `=` forms keep the variadic
     /// options from taking the next argument (a handover prompt). The
     /// tools don't ask: history_search only reads the project, and the
-    /// Lead's act through the app, within the Lead's space only.
+    /// Lead's act through the app, which refuses what it may not do and asks
+    /// the user before deleting a space.
     static func claudeArguments(executable: String) -> [String] {
         let server: [String: Any] = ["type": "stdio", "command": executable, "args": ["--hook", "claude", "--mcp"]]
         let config = json(["mcpServers": [serverName: server]]).flatMap { String(bytes: $0, encoding: .utf8) } ?? "{}"

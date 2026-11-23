@@ -277,8 +277,9 @@ New flow, built on the guarded typing `tell` already uses
     off), it opens the New sheet filled in, titled "Proposed by the Lead",
     without taking the keyboard or Return; the task reports to the Lead if
     the user starts it. One sheet at a time: later proposals wait their turn.
-  - `list_tasks()`: the space's tasks (title, branch, agent state, pull request
-    and checks, the question waiting or the result) and repositories.
+  - `list_tasks(space?)`: the space's tasks (title, branch, agent state, pull request
+    and checks, the question waiting or the result) and repositories; optional `space`
+    (name or `space:<id>`) reads another space as its own Lead would.
   - `tell(task, message)`, `reply(question, message | accept)`: Missions, 4,000
     characters at most (see mission-tell.md, "Longer messages"); `accept` sends
     the question's recommendation (docs/missions.md). A task is named
@@ -419,6 +420,24 @@ New flow, built on the guarded typing `tell` already uses
     daily pass, for its rules (see daily-pass.md). Recording a clean review
     (empty `findings`) also marks `.codeReview` on the task's current HEAD and
     branch, satisfying the Board's local review pass.
+  - `list_spaces()`, `create_space(name, color?, anchors?, move_anchors?)`,
+    `edit_space(space, name?, color?, add_anchors?, remove_anchors?, move_anchors?)`,
+    `delete_space(space, move_tasks_to?)` and
+    `move_task_to_space(task, to_space, from_space?)`, used only when the
+    user asks: nothing comes to the front. Anchors are absolute paths; a
+    path in a repository anchors that repository, never one holding the home
+    folder. One that belongs to another space moves only with
+    `move_anchors: true`; a space with a Lead or a running merge queue keeps
+    its own, as only Space Settings takes or removes them. `delete_space`
+    refuses General, the Lead's own space, the space on screen or open in
+    Space Settings, and a space with a Lead or a running merge queue;
+    otherwise it asks the user with the sidebar's alert, then moves the tasks
+    to `move_tasks_to` and deletes. `move_task_to_space` moves a task with
+    its sub-tasks. It refuses a task of another space that has a Lead of its
+    own, the task on screen, a Lead, a closing task, one waiting for a merge
+    (a held message or start reads the space it is in then), and one with an
+    open Mission to a workspace that stays (Lead and task tools reach their
+    own space only).
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state
@@ -426,8 +445,12 @@ New flow, built on the guarded typing `tell` already uses
   nobody claims within 15 s is taken back: nothing happens. A claimed one the
   app hasn't finished within its wait may still happen, and the Lead is told
   not to call again. Calls are answered off the server's read loop.
-- **No tool merges or reaches another space.** Only `close_task` removes a
-  worktree and a branch, once Clean Up Worktree…'s checks pass.
+- **Task work stays in its space.** Only the explicit space management tools
+  (`list_spaces`, `create_space`, `edit_space`, `delete_space`,
+  `move_task_to_space`, and `list_tasks` with `space`) inspect or organize
+  other spaces; no tool merges without opt-in/confirmation, and only
+  `close_task` removes a worktree and a branch, once Clean Up Worktree…'s
+  checks pass.
 - **Sub-tasks under their task** (shipped with S11c for Mission children): a
   workspace keeps the task it is a sub-task of (`parentWorkspaceID`, saved
   with it) when it opens from ⌘N's "Sub-task of", or from the worktree skill

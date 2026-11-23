@@ -20,7 +20,7 @@ _HEX_ADDR_RE = re.compile(r"0x[0-9a-fA-F]+")
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
-_SEED_TOKEN_RE = re.compile(r"\b(edit|restored)[0-9a-fA-F]{32}\b")
+_SEED_TOKEN_RE = re.compile(r"\b(edit|restored)[0-9a-fA-F]{32}\b|\b(ALPHA|BETA)-[0-9a-fA-F]{8,32}\b")
 _TIMESTAMP_RE = re.compile(
     r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\s*[+-]\d{2}:?\d{2})?"
 )
@@ -30,7 +30,8 @@ _GENERIC_TMP_RE = re.compile(r"(?:/private)?/tmp/[^\s'\",\]\)]+")
 _PID_LABELED_RE = re.compile(r"(?i)\b(pid|byPid)\s*[:= ]\s*\d+\b")
 _PROCESS_NUM_RE = re.compile(r"(?i)\bprocess\s+\d+\b")
 _DRIVER_PID_ARG_RE = re.compile(
-    r"(['\"](?:window|open-editor|editor-focus|terminal|editor|save|quit|text|command)['\"],\s*['\"])\d+(['\"])"
+    r"(['\"](?:window|open-editor|editor-focus|terminal|editor|save|quit|text|command|"
+    r"menu|window-frame|resize-window|ax-controls|press-control|shortcut)['\"],\s*['\"])\d+(['\"])"
 )
 _WHITESPACE_RE = re.compile(r"\s+")
 
@@ -54,7 +55,7 @@ def normalize_error_text(text):
     value = str(text)
     value = _TIMESTAMP_RE.sub("<timestamp>", value)
     value = _UUID_RE.sub("<uuid>", value)
-    value = _SEED_TOKEN_RE.sub(r"\1<seed>", value)
+    value = _SEED_TOKEN_RE.sub(lambda m: (m.group(1) or m.group(2) + "-") + "<seed>", value)
     value = _HEX_ADDR_RE.sub("<addr>", value)
     value = _CANARY_TMP_ROOT_RE.sub("<tmp>", value)
     value = _VAR_TMP_RE.sub("<tmp_path>", value)
