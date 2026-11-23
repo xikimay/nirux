@@ -145,6 +145,11 @@ extension MergeQueue {
             }
         }
 
+        /// Why a cadence can't be chosen: "Train unavailable. …".
+        var unavailableNotes: [String] {
+            [Cadence.expressDisjoint, .train].compactMap { cadence in refusal(for: cadence).map { "\(cadence.title) unavailable. " + $0 } }
+        }
+
         mutating func select(_ cadence: Cadence) {
             guard refusal(for: cadence) == nil else { return }
             self.cadence = cadence

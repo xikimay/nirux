@@ -120,7 +120,13 @@ extension MergeQueue {
             saved.status = .stopped
             saved.stopReason = reason
             for index in saved.entries.indices where saved.entries[index].step.isActive {
-                saved.entries[index].step = .stopped(reason)
+                // A train that landed brought their heads into the base.
+                if let part = train?.landedPart(saved.entries[index].number) {
+                    saved.entries[index].step = .done
+                    saved.entries[index].mergeCommit = saved.entries[index].mergeCommit ?? part.commit
+                } else {
+                    saved.entries[index].step = .stopped(reason)
+                }
             }
             return saved
         }
