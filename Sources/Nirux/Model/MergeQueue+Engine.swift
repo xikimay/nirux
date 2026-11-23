@@ -24,6 +24,8 @@ extension MergeQueue {
         /// After `gh pr merge`, the pull request must read MERGED within this.
         static let mergeConfirm: TimeInterval = 60
         static let mergeConfirmInterval: TimeInterval = 5
+        /// After a train lands, each of its pull requests must read MERGED within this.
+        static let trainMarkedMerged: TimeInterval = 3 * 60
         /// The post-merge run must show within this after the merge.
         static let postMergeRunAppears: TimeInterval = 5 * 60
         /// Reads retry with back-off for this long, then stop.
@@ -270,6 +272,7 @@ extension MergeQueue {
                 reason = StopReason(kind: reason.kind, message: reason.message + " The \(Self.describe(mutation)) was sent "
                     + "and GitHub didn’t show its effect yet: check \(shown) on GitHub.", url: reason.url)
             }
+            if cadence == .train { reason = reason.appending(trainLeftover) }
             note("Stopped: \(reason.message)")
             request = nil
             purpose = nil
@@ -573,34 +576,51 @@ extension MergeQueue {
         mutating func holdForLocal(
             _ local: LocalState, index: Int, now: TimeInterval, retry: (inout Engine) -> Void
         ) -> Bool {
-            let number = entries[index].number
-            if let worktree = local.worktrees.first(where: { if case .unreadable = $0.problem { return true }; return false }),
-               case .unreadable(let reason)? = worktree.problem {
-                stop(StopReason(kind: .local, message: "Nirux couldn’t check \(worktree.path): \(reason)"))
-                return true
+            holdForLocal([(index: index, local: local)], now: now, retry: retry)
+        }
+
+        /// The same for a train's entries at once: a busy agent in any of
+        /// them holds them all, on one clock; a problem stops on its entry.
+        mutating func holdForLocal(
+            _ locals: [(index: Int, local: LocalState)], now: TimeInterval, retry: (inout Engine) -> Void
+        ) -> Bool {
+            for (index, local) in locals {
+                if let worktree = local.worktrees.first(where: { if case .unreadable = $0.problem { return true }; return false }),
+                   case .unreadable(let reason)? = worktree.problem {
+                    current = index
+                    stop(StopReason(kind: .local, message: "Nirux couldn’t check \(worktree.path): \(reason)"))
+                    return true
+                }
             }
-            if !local.busyAgents.isEmpty {
-                let agents = local.busyAgents.joined(separator: ", ")
+            let busy = locals.filter { !$0.local.busyAgents.isEmpty }
+            if let first = busy.first {
+                let agents = busy.flatMap(\.local.busyAgents).joined(separator: ", ")
                 if clocks.agentBusySince == nil { note("Waiting up to 10 minutes for \(agents)") }
                 let since = clocks.agentBusySince ?? now
                 clocks.agentBusySince = since
                 guard now - since < Limits.agentWait else {
-                    stop(StopReason(kind: .agentBusy, message: "An agent of #\(number) is still busy after 10 minutes: \(agents)."))
+                    current = first.index
+                    stop(StopReason(kind: .agentBusy, message: "An agent of #\(entries[first.index].number) is still busy after "
+                        + "10 minutes: \(agents)."))
                     return true
                 }
                 retry(&self)
                 return true
             }
             clocks.agentBusySince = nil
-            if let worktree = local.worktrees.first(where: { $0.problem == .trackedChanges }) {
-                stop(StopReason(kind: .local, message: "\(worktree.path) has changes to tracked files: commit and push them, "
-                    + "or discard them, then start again."))
-                return true
-            }
-            if let worktree = local.worktrees.first(where: { $0.problem == .unpushed }) {
-                stop(StopReason(kind: .local, message: "\(worktree.path) has commits that aren’t on GitHub: push them, "
-                    + "then start again."))
-                return true
+            for (index, local) in locals {
+                if let worktree = local.worktrees.first(where: { $0.problem == .trackedChanges }) {
+                    current = index
+                    stop(StopReason(kind: .local, message: "\(worktree.path) has changes to tracked files: commit and push them, "
+                        + "or discard them, then start again."))
+                    return true
+                }
+                if let worktree = local.worktrees.first(where: { $0.problem == .unpushed }) {
+                    current = index
+                    stop(StopReason(kind: .local, message: "\(worktree.path) has commits that aren’t on GitHub: push them, "
+                        + "then start again."))
+                    return true
+                }
             }
             return false
         }

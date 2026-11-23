@@ -107,6 +107,8 @@ enum MQ {
         var baseRuns: [GitHub.WorkflowRun] = []
         var pushRuns: [String: [GitHub.WorkflowRun]] = [:]
         var local = MergeQueue.LocalState()
+        /// Each branch's own, where it differs from `local`.
+        var locals: [String: MergeQueue.LocalState] = [:]
         var rateLimit = MergeQueue.RateLimit(
             coreRemaining: 5000, coreReset: Date(timeIntervalSince1970: 0),
             graphQLRemaining: 5000, graphQLReset: Date(timeIntervalSince1970: 0)
@@ -137,7 +139,7 @@ enum MQ {
             case .commit(let sha): return commits[sha].map { .commit($0) }
             case .baseRuns: return .runs(baseRuns)
             case .pushRuns(let commit): return .runs(pushRuns[commit] ?? [])
-            case .local: return .local(local)
+            case .local(let branch, _): return .local(locals[branch] ?? local)
             case .branch(let name): return .branch(name == "main" ? mainTip : branches[name])
             case .pullRequests(let head):
                 return .pullRequests(pullRequests.values.filter { $0.headRefName == head }.sorted { $0.number > $1.number })

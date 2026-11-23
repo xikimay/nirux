@@ -167,6 +167,12 @@ extension MergeQueue {
         /// A page that shows the problem: two heads compared, a run.
         var url: String?
 
+        /// The same reason, its message followed by `text`.
+        func appending(_ text: String?) -> StopReason {
+            guard let text else { return self }
+            return StopReason(kind: kind, message: message + text, url: url, checksTimedOut: checksTimedOut)
+        }
+
         /// A token that a gh error echoes never reaches the saved queue.
         init(kind: Kind, message: String, url: String? = nil, checksTimedOut: Bool? = nil) {
             self.kind = kind
