@@ -431,19 +431,17 @@ extension MergeQueue.Engine {
         guard let runID = rerunnableRun(verdict), verdict.failed.allSatisfy({ $0.conclusion?.uppercased() == "CANCELLED" }) else {
             return stop(red)
         }
-        guard holdForRun(runID, checks: checks, head: head, now: now) else { return stop(red) }
+        if isRunning(runID, in: checks) {
+            guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else { return stop(red) }
+            train?.step = .waitingForChecks
+            return waitForTrainChecks(head: head, after: MergeQueue.Limits.pollInterval)
+        }
         rerun(runID, because: "was cancelled", head: head, checks: checks)
     }
 
-    /// GitHub reruns a run's failed jobs once all its jobs are done: false
-    /// once that wait is over; true when it may go on now.
-    private mutating func holdForRun(_ runID: Int, checks: MergeQueue.CommitChecks, head: String, now: TimeInterval) -> Bool {
-        guard MergeQueue.latestRuns(checks.runs).contains(where: { $0.workflowRunID == runID && $0.status.uppercased() != "COMPLETED" })
-        else { return true }
-        guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else { return false }
-        train?.step = .waitingForChecks
-        waitForTrainChecks(head: head, after: MergeQueue.Limits.pollInterval)
-        return false
+    /// GitHub reruns a run's failed jobs only once all its jobs are done.
+    private func isRunning(_ runID: Int, in checks: MergeQueue.CommitChecks) -> Bool {
+        MergeQueue.latestRuns(checks.runs).contains { $0.workflowRunID == runID && $0.status.uppercased() != "COMPLETED" }
     }
 
     private mutating func rerun(_ runID: Int, because why: String, head: String, checks: MergeQueue.CommitChecks) {

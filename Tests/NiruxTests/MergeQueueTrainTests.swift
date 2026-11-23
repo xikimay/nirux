@@ -378,6 +378,9 @@ final class MergeQueueTrainTests: XCTestCase {
         world.checks[head] = MQ.checks(MQ.checkRun(id: 9, conclusion: "CANCELLED"))
         var cancelled = TrainGitHub(world: world)
         cancelled.rerunsGreen = [head]
+        // Another job of the run still going: the rerun waits for it.
+        cancelled.trainChecks = [MQ.checks(MQ.checkRun(id: 9, conclusion: "CANCELLED"),
+                                           MQ.checkRun(id: 11, name: "lint", status: "IN_PROGRESS", conclusion: nil))]
         var first = queue()
         first.drive(&cancelled)
         XCTAssertEqual(first.phase, .finished)
@@ -513,7 +516,7 @@ private struct TrainGitHub {
     /// Reads of the train's branch that still show its tip before each merge.
     var lagReads = 0
     private(set) var staleTip: (tip: String, reads: Int)?
-    /// The train head's checks at each read of them; the last one stays.
+    /// The train head's checks at each read of them, then the world's.
     var trainChecks: [MergeQueue.CommitChecks] = []
     /// Who makes the merges into the train.
     var committer = "web-flow"
@@ -547,9 +550,8 @@ private struct TrainGitHub {
             shown.branches["nirux-train/queue"] = stale.tip
             staleTip = (stale.tip, stale.reads - 1)
         }
-        if let head = world.pullRequests[900]?.headOid, reads.contains(.checks(head)), let checks = trainChecks.first {
-            shown.checks[head] = checks
-            if trainChecks.count > 1 { trainChecks.removeFirst() }
+        if let head = world.pullRequests[900]?.headOid, reads.contains(.checks(head)), !trainChecks.isEmpty {
+            shown.checks[head] = trainChecks.removeFirst()
         }
         return shown
     }
