@@ -313,6 +313,10 @@ private struct TrainGitHub {
     private(set) var partCommits: [String: String] = [:]
     private var made = 0
 
+    init(world: MQ.World) {
+        self.world = world
+    }
+
     /// The `n`th commit GitHub makes: "0000001eee…".
     static func commit(_ number: Int) -> String {
         String(format: "%07x", number) + String(repeating: "e", count: 33)
