@@ -184,18 +184,24 @@ nothing into Codex (`CodexQueue`, `queueForCodex`).
 agy 1.5.12 has no queue of its own, so Nirux types into it, behind the same
 `promptRefusal` as Claude Code: a branch reads agy's OSC 7501 instead of
 hooks. Its prompt is free once the `agy` in front (the one sent to, or one
-resuming its conversation) reports `idle` or `done` from that process — either
-on its first idle prompt with no draft keys typed since the process started, or
-once its turn ended (`done`, or `idle` after it, at a key) and no key reached
-the terminal since its turn began (the Enter that sent its prompt, else its
-first `working`; another `working` after a dialog is the same turn's, a new
-prompt's Enter starts a new one even when the last turn's end was missed, and
-keys answering that dialog don't count, up to the one that answers it). A state
+resuming its conversation) said `done` and no key reached the terminal since
+its turn began (the Enter that sent its prompt, else its first `working`;
+another `working` after a dialog is the same turn's, a new prompt's Enter
+starts a new one even when the last turn's end was missed, and keys
+answering that dialog don't count, up to the one that answers it). A state
 read on an empty process table goes to the `agy` last seen in front. Seen live: agy says `idle` at
 the first key after `done`, but a key typed while it works stays in its box
-and it still says `done`. Its dialogs say `blocked`, `error` holds the
-message like a failed turn, and before it reports any OSC 7501 state since
-starting the message waits (`.noPromptYet`). A paste
+and it still says `done`. Its dialogs say `blocked`, and `error` holds the
+message like a failed turn. An `agy` that ran no turn since it started, as
+one Nirux resumed after a relaunch, is free once it says `idle` and no key
+that may leave a draft reached its terminal since the terminal started (keys
+typed while its shell loads wait there for it), keys answering its dialogs
+aside (`agyFirstPromptRefusal`, 2026-11-23). Probed on agy 1.5.15: its
+sign-in and folder trust screens say `blocked` and stay so until answered;
+`idle` comes with its empty prompt, under a "esc to dismiss" notice that
+leaves pasted text in the prompt; `--continue` and an unknown `--conversation`
+open an empty prompt too. One launched with a prompt (`-i`) says `idle` about
+a second before that prompt's `working`, so it waits for that turn. A paste
 and its Enter in one write go in (probed). A message goes only to the agent
 its Mission names, so one for a Claude Code child is never typed into an agy
 that took its terminal, nor a question into an agy parent, which polls with

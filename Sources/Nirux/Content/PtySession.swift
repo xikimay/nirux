@@ -758,15 +758,10 @@ final class PtySession: @unchecked Sendable {
         state.machine.codexFacts(now: now)
     }
 
-    func hasAgyTurn(in process: ProcessInstance) -> Bool {
-        state.machine.agyTurn?.process == process
-    }
-
-    func hasAgyPrompt(in process: ProcessInstance) -> Bool {
-        if hasAgyTurn(in: process) { return true }
-        guard let report = state.machine.programStatus,
-              report.isFrom(process), report.at >= process.startedAt else { return false }
-        return [.idle, .done].contains(report.status.state)
+    /// Whether `process`, the column's `agy`, ran a turn or sits at its
+    /// first prompt (`AgentStatusMachine.agyFirstPromptRefusal`).
+    func hasAgyPrompt(_ process: ForegroundProcess) -> Bool {
+        state.machine.agyTurn?.process == process.instance || state.machine.agyFirstPromptRefusal(process) == nil
     }
 
     func finishedMissionTurn(in foreground: ForegroundProcess, after sentAt: TimeInterval) -> Bool {

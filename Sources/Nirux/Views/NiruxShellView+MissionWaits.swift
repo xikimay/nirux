@@ -62,8 +62,8 @@ struct SidebarWaitingMessages: Hashable {
             "its \(name) restarted since, and Nirux types a message sent to the one before into no other"
         )
         case .noPromptYet? where agent == .agy: (
-            "no state from Antigravity yet",
-            "its Antigravity hasn't reported its state since it started; they go in once it reports idle or its turn over"
+            "not at its prompt yet",
+            "its Antigravity hasn't said it sits at its empty prompt since it started; they go in once it does, or once its first turn ends"
         )
         case .noPromptYet? where codex: (
             "no state from Codex yet",

@@ -1343,7 +1343,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             harness.shell.missionWaits.checkedAt = nil
             harness.shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + NiruxShellView.missionMessageStallAge + 1)
             let row = try XCTUnwrap(harness.shell.missionWaits.shown[byHand.column.id])
-            XCTAssertTrue(row.line.hasSuffix("· no state from Antigravity yet"), row.line)
+            XCTAssertTrue(row.line.hasSuffix("· not at its prompt yet"), row.line)
 
             // An agy resumed on the conversation a tell was for, after it: that tell is its.
             let resumedID = UUID().uuidString, resumedUUID = UUID().uuidString
@@ -1375,90 +1375,51 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
     }
 
-    /// A `tell` to a resumed `agy` sitting idle at its first prompt (OSC 7501
-    /// `idle` without a prior turn) delivers immediately, transitions cleanly
-    /// through `working` -> `done` for follow-up tells without double-typing,
-    /// and delivers automatically on `idle` when queued while `agy` was booting.
-    func testATellIsDeliveredToAResumedIdleAntigravityTask() throws {
+    /// A tell to an `agy` that ran no turn since it started, as one Nirux
+    /// resumed after a relaunch, goes in once it says it sits idle at its
+    /// prompt; the next one waits for the turn the first started.
+    func testATellReachesAResumedAntigravityAtItsFirstIdlePrompt() throws {
         try UIFlowHarness.run { harness in
             let lead = try harness.makeLead()
-            @MainActor func report(_ state: AgentProgramStatus.State, in column: ColumnState) {
+            let workspaceID = UUID().uuidString, agentUUID = UUID().uuidString
+            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "agy", branch: "feat/resumed-idle", reportsToLead: true
+            ), enabled: true))
+            harness.shell.addWorkspace(
+                title: "Resumed agy", cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID, missionID: mission.id,
+                reportsToLead: true
+            )
+            let workspace = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+            let agent = AgentStandIn()
+            defer { agent.remove() }
+            workspace.addColumn(
+                command: agent.command(named: "agy", arguments: ["--conversation", "conv-1"]), agentUUID: agentUUID, cwd: harness.worktree
+            )
+            let column = try XCTUnwrap(workspace.columns.first { $0.agentUUID == agentUUID })
+            column.onAgentAttention = { _ in }
+            let pty = try XCTUnwrap(column.pty)
+            harness.waitUntil("its agy, resumed") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
+            @MainActor func report(_ state: AgentProgramStatus.State) {
                 column.pty?.onProgramStatus?(AgentProgramStatus(state: state, kind: nil, message: nil, agent: .agy))
             }
-            @MainActor func instructions(of column: ColumnState) -> [MissionEvent] {
-                MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == column.agentUUID }
+            @MainActor func tell(_ message: String) throws {
+                let told = try harness.callLeadTool(LeadTools.tell, ["task": "Resumed agy", "message": message], lead: lead)
+                XCTAssertFalse(told.isError, told.text)
             }
 
-            // 1. Already resumed and idle at its first prompt -> tell types immediately.
-            let idleID = UUID().uuidString, idleUUID = UUID().uuidString
-            let idleMission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
-                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
-                childWorkspaceID: idleID, childAgentUUID: idleUUID, childAgentKind: "agy", branch: "feat/resumed-idle", reportsToLead: true
-            ), enabled: true))
-            harness.shell.addWorkspace(
-                title: "Idle resumed agy", cwd: harness.worktree, profileID: lead.space, workspaceID: idleID, missionID: idleMission.id,
-                reportsToLead: true
-            )
-            let idleWorkspace = try XCTUnwrap(harness.shell.workspaces.first { $0.id == idleID })
-            let idleAgent = AgentStandIn()
-            defer { idleAgent.remove() }
-            idleWorkspace.addColumn(
-                command: idleAgent.command(named: "agy", arguments: ["--conversation", "conv-idle"]), agentUUID: idleUUID, cwd: harness.worktree
-            )
-            let idleColumn = try XCTUnwrap(idleWorkspace.columns.first { $0.agentUUID == idleUUID })
-            idleColumn.onAgentAttention = { _ in }
-            let idlePty = try XCTUnwrap(idleColumn.pty)
-            harness.waitUntil("idle agy running") { idlePty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
-            report(.idle, in: idleColumn)
-
-            let first = try harness.callLeadTool(LeadTools.tell, ["task": "Idle resumed agy", "message": "First after restart."], lead: lead)
-            XCTAssertFalse(first.isError, first.text)
-            XCTAssertTrue(first.text.contains("Nirux typed it into"), first.text)
-            harness.waitUntil("first tell delivered") { idleAgent.input.contains("First after restart.") }
-            XCTAssertNotNil(instructions(of: idleColumn).last?.childConsumedAt)
-
-            // 2. Follow-up tell before `.working` does not double-type; waits through `.working` -> `.done`.
-            let second = try harness.callLeadTool(LeadTools.tell, ["task": "Idle resumed agy", "message": "Second after turn."], lead: lead)
-            XCTAssertFalse(second.isError, second.text)
-            XCTAssertFalse(second.text.contains("Nirux typed it into"), second.text)
-            XCTAssertNil(instructions(of: idleColumn).last?.childConsumedAt)
-            XCTAssertFalse(idleAgent.input.contains("Second after turn."))
-            report(.working, in: idleColumn)
+            try tell("First after relaunch.")
             harness.shell.typeMissionMessages()
-            XCTAssertFalse(idleAgent.input.contains("Second after turn."))
-            report(.done, in: idleColumn)
-            harness.waitUntil("second tell delivered after turn") { idleAgent.input.contains("Second after turn.") }
-            XCTAssertNotNil(instructions(of: idleColumn).last?.childConsumedAt)
+            XCTAssertEqual(agent.input, "", "no word from it yet")
+            report(.idle)
+            harness.waitUntil("typed at its first idle prompt") { agent.input.contains("First after relaunch.") }
 
-            // 3. Tell queued while resumed agy is still booting delivers once agy emits `idle` alone.
-            let bootID = UUID().uuidString, bootUUID = UUID().uuidString
-            let bootMission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
-                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
-                childWorkspaceID: bootID, childAgentUUID: bootUUID, childAgentKind: "agy", branch: "feat/resumed-boot", reportsToLead: true
-            ), enabled: true))
-            harness.shell.addWorkspace(
-                title: "Booting resumed agy", cwd: harness.worktree, profileID: lead.space, workspaceID: bootID, missionID: bootMission.id,
-                reportsToLead: true
-            )
-            let bootWorkspace = try XCTUnwrap(harness.shell.workspaces.first { $0.id == bootID })
-            let bootAgent = AgentStandIn()
-            defer { bootAgent.remove() }
-            bootWorkspace.addColumn(
-                command: "sleep 2; " + bootAgent.command(named: "agy", arguments: ["--conversation", "conv-boot"]), agentUUID: bootUUID,
-                cwd: harness.worktree
-            )
-            let bootColumn = try XCTUnwrap(bootWorkspace.columns.first { $0.agentUUID == bootUUID })
-            bootColumn.onAgentAttention = { _ in }
-            let queued = try harness.callLeadTool(LeadTools.tell, ["task": "Booting resumed agy", "message": "Deliver on idle."], lead: lead)
-            XCTAssertFalse(queued.isError, queued.text)
-            let bootTell = try XCTUnwrap(instructions(of: bootColumn).last)
-            XCTAssertTrue(MissionStore.shared.noteConversation("conv-boot", ofInstruction: bootTell.id))
-            let bootPty = try XCTUnwrap(bootColumn.pty)
-            harness.waitUntil("booting agy running") { bootPty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
-            XCTAssertEqual(bootAgent.input, "", "waits for OSC 7501 idle")
-            report(.idle, in: bootColumn)
-            harness.waitUntil("queued tell delivered on idle alone") { bootAgent.input.contains("Deliver on idle.") }
-            XCTAssertNotNil(instructions(of: bootColumn).last?.childConsumedAt)
+            try tell("Then this.")
+            harness.shell.typeMissionMessages()
+            XCTAssertFalse(agent.input.contains("Then this."), "never typed before agy takes the first")
+            report(.working)
+            report(.done)
+            harness.waitUntil("typed once that turn is done") { agent.input.contains("Then this.") }
         }
     }
 

@@ -39,7 +39,7 @@ final class ColumnState {
     /// The agent asks for the user (alert), with why when known.
     var onAgentAttention: ((AgentAttentionReason?) -> Void)?
     /// An agent that says its state (OSC 7501) reported its turn over:
-    /// Codex done or idle, Antigravity done. A Mission message may go to it.
+    /// Codex or Antigravity done or idle. A Mission message may go to it.
     var onProgramTurnOver: (() -> Void)?
     /// The user typed a prompt to its agent (`PtySession.onUserPrompt`).
     var onUserPrompt: ((TimeInterval) -> Void)?
