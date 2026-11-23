@@ -97,6 +97,12 @@ class FakeAgentTest(unittest.TestCase):
         self.assertEqual(log[0]["agentUUID"], "U-1")
         self.assertIn("hello\r", "".join(e["text"] for e in log if e["event"] == "input"))
 
+    def test_only_return_submits_a_line(self):
+        self.run_agent("claude", [], ["two\nlines", "exit"])
+        payloads, _ = self.hooks()
+        prompts = [p["prompt"] for p in payloads if p["hook_event_name"] == "UserPromptSubmit"]
+        self.assertEqual(prompts, ["two\nlines"])
+
     def test_agy_reports_its_state_and_stops_mid_work(self):
         output, comm = self.run_agent("agy", [], ["background:build", "go", "exit"])
         self.assertEqual(comm, "agy")
