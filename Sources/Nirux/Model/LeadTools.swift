@@ -569,7 +569,9 @@ enum LeadTools {
         case queueMerge:
             guard optionalFlag(arguments, "replace") != nil else { return "replace must be true or false." }
             guard pullRequestNumbers(arguments) != nil else { return "prs must list pull request numbers." }
-            return queueCadence(arguments) == nil ? "cadence must be standard, batch_post_merge or express_disjoint." : nil
+            let cadences = MergeQueue.Cadence.allCases.map(\.toolArgument)
+            return queueCadence(arguments) == nil
+                ? "cadence must be \(cadences.dropLast().joined(separator: ", ")) or \(cadences.last ?? "")." : nil
         case setTaskContext:
             guard string(arguments, "task") != nil else { return "task is missing." }
             let fields = ["next_step", "blocker"].map { ($0, contextText(arguments, $0)) }

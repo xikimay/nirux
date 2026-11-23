@@ -38,8 +38,27 @@ extension MergeQueue {
     /// Every field asked for must be there: a missing one would read as
     /// "no auto-merge" or "not a draft".
     static func parsePullRequest(_ data: Data) -> PullRequestSnapshot? {
-        guard let json = GitHub.dig(object(data), "data", "repository", "pullRequest") as? [String: Any],
-              let number = json["number"] as? Int,
+        (GitHub.dig(object(data), "data", "repository", "pullRequest") as? [String: Any]).flatMap(pullRequest)
+    }
+
+    /// `pullRequests(headRefName:)`: every node must read in full.
+    static func parsePullRequests(_ data: Data) -> [PullRequestSnapshot]? {
+        guard let nodes = GitHub.dig(object(data), "data", "repository", "pullRequests", "nodes") as? [[String: Any]] else { return nil }
+        let pullRequests = nodes.compactMap(pullRequest)
+        return pullRequests.count == nodes.count ? pullRequests : nil
+    }
+
+    /// `repository.ref(qualifiedName:)`: its commit, nil when the ref is
+    /// `null` (no such branch). A missing field is unreadable.
+    static func parseBranchTip(_ data: Data) -> String?? {
+        guard let repository = GitHub.dig(object(data), "data", "repository") as? [String: Any],
+              let ref = repository["ref"] else { return nil }
+        if ref is NSNull { return .some(nil) }
+        return GitHub.objectID(GitHub.dig(ref, "target", "oid")).map { .some($0) }
+    }
+
+    private static func pullRequest(_ json: [String: Any]) -> PullRequestSnapshot? {
+        guard let number = json["number"] as? Int,
               let isDraft = json["isDraft"] as? Bool,
               let isInMergeQueue = json["isInMergeQueue"] as? Bool,
               let autoMerge = json["autoMergeRequest"],

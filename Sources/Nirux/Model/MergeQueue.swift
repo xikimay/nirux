@@ -49,6 +49,8 @@ extension MergeQueue {
         case merging(String)
         /// Merged as this commit; the post-merge workflow runs on it.
         case waitingForPostMerge(String)
+        /// Its confirmed head is merged into the train, or about to be.
+        case inTrain
         case done
         case stopped(StopReason)
 
@@ -94,6 +96,7 @@ extension MergeQueue {
             case .merging: return "merging \(pr)"
             case .waitingForPostMerge:
                 return "waiting for the \(GitHub.workflowLabel(workflow)) of \(pr)"
+            case .inTrain: return "\(pr) in the train"
             case .done: return "\(pr) merged"
             case .stopped(let reason): return "\(pr) stopped: \(reason.message)"
             }
@@ -147,6 +150,8 @@ extension MergeQueue {
             case checks
             case merge
             case postMerge
+            /// Composing the train, or landing it.
+            case train
         }
 
         let kind: Kind
@@ -161,6 +166,12 @@ extension MergeQueue {
 
         /// A page that shows the problem: two heads compared, a run.
         var url: String?
+
+        /// The same reason, its message followed by `text`.
+        func appending(_ text: String?) -> StopReason {
+            guard let text else { return self }
+            return StopReason(kind: kind, message: message + text, url: url, checksTimedOut: checksTimedOut)
+        }
 
         /// A token that a gh error echoes never reaches the saved queue.
         init(kind: Kind, message: String, url: String? = nil, checksTimedOut: Bool? = nil) {
@@ -209,6 +220,10 @@ extension MergeQueue {
         case pushRuns(commit: String)
         /// The branch's local worktrees and the agents in them.
         case local(branch: String, head: String)
+        /// A branch's tip.
+        case branch(String)
+        /// The pull requests from this head branch, newest first.
+        case pullRequests(head: String)
     }
 
     enum ReadResult: Equatable, Sendable {
@@ -223,6 +238,9 @@ extension MergeQueue {
         case commit(CommitInfo)
         case runs([GitHub.WorkflowRun])
         case local(LocalState)
+        /// Nil: no such branch.
+        case branch(String?)
+        case pullRequests([PullRequestSnapshot])
     }
 
     /// Why a batch of reads failed.
@@ -246,6 +264,14 @@ extension MergeQueue {
         case rerun(runID: Int)
         /// `gh pr merge <n> --<method> --match-head-commit <sha>`.
         case merge(number: Int, head: String, method: BoardConfig.MergeMethod)
+        /// `POST git/refs`: a new branch at a commit; GitHub refuses an existing one.
+        case createBranch(name: String, commit: String)
+        /// `POST merges`: GitHub merges a commit into a branch, refusing a conflict (409).
+        case mergeIntoBranch(branch: String, head: String, message: String)
+        /// `POST pulls`.
+        case openPullRequest(base: String, head: String, title: String, body: String)
+        /// `DELETE git/refs/heads/{name}`: a train's own branch, once it landed or stopped.
+        case deleteBranch(name: String)
     }
 
     enum MutationResult: Equatable, Sendable {

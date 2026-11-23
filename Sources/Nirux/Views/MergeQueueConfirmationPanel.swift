@@ -186,7 +186,7 @@ final class MergeQueueConfirmationPanel: NSObject {
             for cadence in confirmation.offeredCadences {
                 picker.addItem(withTitle: cadence.title)
                 picker.lastItem?.representedObject = cadence.rawValue
-                picker.lastItem?.isEnabled = cadence != .expressDisjoint || confirmation.expressRefusal == nil
+                picker.lastItem?.isEnabled = confirmation.refusal(for: cadence) == nil
             }
             picker.selectItem(withTitle: confirmation.cadence.title)
             picker.target = self
@@ -197,11 +197,12 @@ final class MergeQueueConfirmationPanel: NSObject {
             cadencePicker = picker
             y += picker.frame.height + 4
             add(confirmation.summary, color: Self.primaryText)
-            if confirmation.cadence != .standard, confirmation.settings.postMergeWorkflow != nil, confirmation.items.count > 1 {
+            if [.batchPostMerge, .expressDisjoint].contains(confirmation.cadence), confirmation.settings.postMergeWorkflow != nil,
+               confirmation.items.count > 1 {
                 add("Intermediate pushes can still trigger workflows and publish releases.", color: Self.secondaryText, font: Theme.Font.caption)
             }
-            if let reason = confirmation.expressRefusal {
-                add("Express disjoint unavailable. " + reason, color: Self.secondaryText, font: Theme.Font.caption)
+            for note in confirmation.unavailableNotes {
+                add(note, color: Self.secondaryText, font: Theme.Font.caption)
             }
             heading("MERGES, IN THIS ORDER")
             for (index, item) in confirmation.items.enumerated() {

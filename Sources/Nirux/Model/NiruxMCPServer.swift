@@ -52,7 +52,7 @@ enum NiruxMCPServer {
         a question. Otherwise use ask_user and explain why. Update set_task_context after answers, at completion and when blockers arise or clear. \
         Inspect queue progress and journal entries with merge_queue_status. Merge only via queue_merge. The user confirms by default. With \
         Lead auto-start enabled, a clean preflight starts the queue. Use stop_merge_queue to stop it locally. Pass replace: true only when \
-        the user asks to replace an idle Board selection. Cadences: standard, batch_post_merge, express_disjoint. \
+        the user asks to replace an idle Board selection. Cadences: standard, batch_post_merge, express_disjoint, train. \
         Record reviews with record_review. When two tasks get the same kind of finding, use propose_rule for the user's decision. Close merged \
         or abandoned tasks with close_task. Leave worktree and branch cleanup to Nirux. Stay in this space.
         """

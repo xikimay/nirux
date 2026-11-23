@@ -2,13 +2,14 @@ import Foundation
 
 extension MergeQueue {
     enum Cadence: String, CaseIterable, Codable, Equatable, Sendable {
-        case standard, batchPostMerge, expressDisjoint
+        case standard, batchPostMerge, expressDisjoint, train
 
         var toolArgument: String {
             switch self {
             case .standard: "standard"
             case .batchPostMerge: "batch_post_merge"
             case .expressDisjoint: "express_disjoint"
+            case .train: "train"
             }
         }
 
@@ -17,6 +18,7 @@ extension MergeQueue {
             case .standard: "Standard"
             case .batchPostMerge: "Batch post-merge"
             case .expressDisjoint: "Express disjoint"
+            case .train: "Train"
             }
         }
     }

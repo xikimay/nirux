@@ -452,7 +452,7 @@ extension BoardStages {
         case .done: break
         case .preflight, .updating, .waitingForChecks, .rerunning:
             queue.step = .checks(sentence(ProjectBoard.queueStepLabel(entry.step, workflow: state.workflow)))
-        case .merging, .waitingForPostMerge:
+        case .merging, .waitingForPostMerge, .inTrain:
             queue.step = .merge(sentence(ProjectBoard.queueStepLabel(entry.step, workflow: state.workflow)))
         case .stopped(let reason):
             let isAnsweredByAPush = [.checks, .conflict, .merge, .update, .local, .agentBusy].contains(reason.kind)

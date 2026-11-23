@@ -328,8 +328,8 @@ New flow, built on the guarded typing `tell` already uses
     mergeability, workflow safety, local worktree cleanliness and post-merge
     health (the Board and manual confirmation sheets still show the warning).
     Dry runs and the developer live override always use the confirmation sheet.
-    `cadence` accepts `standard` (default), `batch_post_merge`, or
-    `express_disjoint`. The default protects the user's prepared list. When the
+    `cadence` accepts `standard` (default), `batch_post_merge`,
+    `express_disjoint` or `train`. The default protects the user's prepared list. When the
     user requests a replacement, an opted-in Lead can pass `replace: true`.
     The same preflight checks the requested order and cadence. A proposal that
     needs manual review opens the confirmation sheet. An open sheet, a running

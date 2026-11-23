@@ -55,7 +55,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
         let second = candidate(14, head: b, files: ["Sources/Other.swift"])
         let eligible = MergeQueue.confirmation(reading([first, second], settings: MQ.settings(postMergeWorkflow: nil)))
         XCTAssertNil(eligible.expressRefusal)
-        XCTAssertEqual(eligible.offeredCadences, [.standard, .expressDisjoint])
+        XCTAssertEqual(eligible.offeredCadences, [.standard, .expressDisjoint, .train])
         XCTAssertEqual(MergeQueue.confirmation(reading([first])).expressRefusal, "Express needs at least two pull requests.")
 
         let collision = candidate(14, head: b, files: ["Sources/Café.swift"])

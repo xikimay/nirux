@@ -96,7 +96,9 @@ extension MergeQueue {
             let name = GitHub.qualifiedName(name: run.name, workflow: run.workflow) ?? run.name
             if replaced.contains(run.id) {
                 verdict.pending.append("\(name) (rerun not started)")
-            } else if run.status.uppercased() == "COMPLETED", GitHub.isRedCheck(run.conclusion) {
+            } else if run.status.uppercased() == "COMPLETED", GitHub.isRedCheck(run.conclusion),
+                      // Only cancelled (a newer run replaced it, no runner came): no verdict on the code.
+                      run.conclusion?.uppercased() != "CANCELLED" {
                 verdict.otherFailures.append(name)
             }
         }
