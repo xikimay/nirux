@@ -8,7 +8,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     /// Open for a canary run only (see CanaryChannel).
     var canaryRequests: LeadRequestCenter?
     /// A canary run's copy never comes forward (CanaryPresentation).
-    var presence = AppPresence(launchEnvironment: [:])
+    var presence = AppPresence(launchEnvironment: [:], bringForward: NiruxApp.bringNiruxForward)
     var drivenByCanary: Bool { !presence.mayComeForward }
     var canaryObservers: [NSObjectProtocol] = []
     var shell: NiruxShellView? {
@@ -162,7 +162,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // A canary run drives this copy through its channel: behind the
         // user's windows, never taking the focus.
         let launchEnvironment = ProcessInfo.processInfo.environment
-        presence = AppPresence(launchEnvironment: launchEnvironment)
+        presence = AppPresence(launchEnvironment: launchEnvironment, bringForward: Self.bringNiruxForward)
         if drivenByCanary {
             canaryObservers = CanaryPresentation.keepHidden(on: .default) { NSApp.hide(nil) }
             NSApp.hide(nil)

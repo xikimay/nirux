@@ -264,8 +264,7 @@ final class CanaryChannelTests: XCTestCase {
         for (environment, comesForward) in [(canaryEnvironment, false), ([:], true)] {
             var brought = 0
             let app = NiruxApp()
-            app.presence = AppPresence(launchEnvironment: environment)
-            app.presence.bringForward = { brought += 1 }
+            app.presence = AppPresence(launchEnvironment: environment) { brought += 1 }
             app.mainWindow = window()
             var effects = ShellSideEffects()
             app.installPresence(on: &effects, notifier: nil)

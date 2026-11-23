@@ -250,6 +250,11 @@ extension NiruxApp {
         notifier?.comeForward = { [presence] in presence.comeForward() }
     }
 
+    static func bringNiruxForward() {
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     /// Nirux and its window come forward, unless a canary run drives it.
     func bringMainWindowForward() {
         guard presence.mayComeForward else { return }
