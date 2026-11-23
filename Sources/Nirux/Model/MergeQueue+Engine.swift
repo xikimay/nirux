@@ -159,7 +159,10 @@ extension MergeQueue {
             case .mutated(let id, let result):
                 guard let request, id == request.id, case .mutate(let mutation) = request.action, let purpose else { break }
                 self.request = nil
-                if phase == .stopping {
+                let closesTrain: Bool
+                if case .train(.close) = purpose { closesTrain = true } else { closesTrain = false }
+                // Closing the train ends in its own stop, whose reason a Stop mustn't hide.
+                if phase == .stopping, !closesTrain {
                     var message = stopMessage + " The \(Self.describe(mutation)), already sent, answered: "
                         + "\(Self.describe(result))."
                     if case .merge(let number, _, _) = mutation, result == .sent || result.isUncertain {
@@ -268,6 +271,7 @@ extension MergeQueue {
         mutating func stop(_ reason: StopReason) {
             if cadence == .train, let number = trainToClose(for: reason) {
                 note("Closing train #\(number)")
+                train?.step = .closing(reason)
                 return mutate(.closePullRequest(number: number), for: .train(.close(reason)))
             }
             var reason = reason

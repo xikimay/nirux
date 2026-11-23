@@ -18,6 +18,10 @@ extension MergeQueue {
             case verifying(String)
             case waitingForPostMerge(String)
             case done
+            /// A stop for this reason closes its pull request.
+            case closing(StopReason)
+            /// Its pull request is no longer open, merged by none of the queue's calls.
+            case closed
         }
 
         struct Part: Equatable, Codable, Sendable {
@@ -34,8 +38,6 @@ extension MergeQueue {
         /// Its pull request into the base, once open.
         var number: Int?
         var mergeCommit: String?
-        /// A stop closed its pull request.
-        var isClosed = false
         var step = Step.composing
 
         /// "train #781", or its branch until it has a pull request.
@@ -43,7 +45,7 @@ extension MergeQueue {
 
         /// Its pull request, open and never merged: named in a stop, so nobody merges it later.
         var leftOpen: String? {
-            guard let number, mergeCommit == nil, !isClosed else { return nil }
+            guard let number, mergeCommit == nil, step != .closed else { return nil }
             return " Train #\(number) stays open on GitHub: close it rather than merge it."
         }
 
@@ -56,6 +58,8 @@ extension MergeQueue {
             case .verifying: "checking that the pull requests of \(name) read merged"
             case .waitingForPostMerge: "waiting for the \(GitHub.workflowLabel(workflow)) of \(name)"
             case .done: "\(name) merged"
+            case .closing(let reason): "closing \(name): \(reason.message)"
+            case .closed: "\(name) closed"
             }
         }
     }
@@ -148,11 +152,12 @@ extension MergeQueue.Engine {
     }
 
     /// Every pull request left the train: the queue stops on the first.
-    private mutating func stopOnLeftOut() {
-        for index in entries.indices {
-            if case .stopped(let reason) = entries[index].step { return stop(reason, on: index) }
-        }
-        missingAnswer()
+    private mutating func stopOnLeftOut(adding text: String? = nil) {
+        let left = entries.indices.filter { if case .stopped = entries[$0].step { true } else { false } }
+        guard let first = left.first, case .stopped(let reason) = entries[first].step else { return missingAnswer() }
+        let others = left.dropFirst().map { entries[$0].number }
+        let too = others.isEmpty ? nil : " \(Self.numbers(others)) left the train too."
+        stop(reason.appending(too).appending(text), on: first)
     }
 
     /// A stop that is one pull request's own: the others go back to waiting.
@@ -326,6 +331,12 @@ extension MergeQueue.Engine {
         return MergeQueue.StopReason(kind: .conflict, message: "#\(number) conflicts with \(with).", url: url)
     }
 
+    /// Why the train's pull request can't go on; one no longer open is left as it is.
+    private mutating func trainProblem(_ pullRequest: MergeQueue.PullRequestSnapshot) -> MergeQueue.StopReason? {
+        if !pullRequest.isOpen { train?.step = .closed }
+        return problem(with: pullRequest)
+    }
+
     private func trainMoved(to head: String) -> MergeQueue.StopReason {
         let name = train?.name ?? "the train"
         let expected = train?.head ?? head
@@ -386,7 +397,7 @@ extension MergeQueue.Engine {
         guard let train, let number = train.number, let pullRequest = answers.pullRequest(number),
               let checks = answers.checks(head), let comparison = answers.comparison(base: settings.baseBranch, head: head)
         else { return missingAnswer() }
-        if let problem = problem(with: pullRequest) { return stop(problem) }
+        if let problem = trainProblem(pullRequest) { return stop(problem) }
         guard pullRequest.headOid == head else { return stop(trainMoved(to: pullRequest.headOid)) }
         if pullRequest.mergeable == "CONFLICTING" {
             return stop(MergeQueue.StopReason(kind: .train, message: "GitHub says \(train.name) conflicts with "
@@ -517,11 +528,7 @@ extension MergeQueue.Engine {
     private mutating func finishTrain() {
         train?.step = .done
         let landed = Self.numbers(entries.filter { $0.step == .done }.map(\.number))
-        for index in entries.indices {
-            if case .stopped(let reason) = entries[index].step {
-                return stop(reason.appending(train?.number.map { " Train #\($0) landed \(landed)." }), on: index)
-            }
-        }
+        if riders.count < entries.count { return stopOnLeftOut(adding: train?.number.map { " Train #\($0) landed \(landed)." }) }
         current = nil
         phase = .finished
         note("Finished: \(entries.filter { $0.step == .done }.count) merged")
@@ -584,7 +591,7 @@ extension MergeQueue.Engine {
                     + "\(train.branch): \(Self.describe(result))."))
             }
             self.train?.number = pullRequest.number
-            if let problem = problem(with: pullRequest) { return stop(problem) }
+            if let problem = trainProblem(pullRequest) { return stop(problem) }
             guard pullRequest.headOid == train.head else { return stop(trainMoved(to: pullRequest.headOid)) }
             self.train?.step = .waitingForChecks
             note("Opened for \(Self.numbers(riders.map { entries[$0].number }))")
@@ -594,7 +601,7 @@ extension MergeQueue.Engine {
             guard let number = train.number, let pullRequest = answers.pullRequest(number), let checks = answers.checks(head) else {
                 return missingAnswer()
             }
-            if let problem = problem(with: pullRequest) { return stop(problem) }
+            if let problem = trainProblem(pullRequest) { return stop(problem) }
             guard pullRequest.headOid == head else { return stop(trainMoved(to: pullRequest.headOid)) }
             // A push to a pull request of the batch makes the run moot: stop now, not at the merge.
             for index in riders {
@@ -652,7 +659,7 @@ extension MergeQueue.Engine {
             read([.pullRequests(head: train.branch)], for: .train(.opened(result)))
         case .close(let reason):
             guard let number = train.number else { return missingAnswer() }
-            if result == .sent { self.train?.isClosed = true }
+            if result == .sent { self.train?.step = .closed }
             stop(reason.appending(result == .sent ? " Nirux closed train #\(number)."
                 : " Nirux couldn’t close train #\(number): \(Self.describe(result))."))
         case .land(let head, let baseTip):

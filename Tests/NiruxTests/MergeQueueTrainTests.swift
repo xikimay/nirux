@@ -108,7 +108,7 @@ final class MergeQueueTrainTests: XCTestCase {
         both.conflicts = [a, b]
         var none = self.queue()
         none.drive(&both)
-        XCTAssertEqual(none.stopReason?.message, "#12 conflicts with main. It left the train.")
+        XCTAssertEqual(none.stopReason?.message, "#12 conflicts with main. It left the train. #14 left the train too.")
         XCTAssertNil(both.world.pullRequests[900], "nothing left to open")
     }
 
@@ -241,6 +241,50 @@ final class MergeQueueTrainTests: XCTestCase {
         XCTAssertEqual(second.stopReason?.kind, .changed)
         XCTAssertTrue(second.stopReason?.message.hasPrefix("Someone pushed to train #900") == true, second.stopReason?.message ?? "")
         XCTAssertEqual(second.mutations.last, .closePullRequest(number: 900), "no merge of the train")
+    }
+
+    func testAStopWhileClosingTheTrainKeepsItsReasonAndATrainMergedOutsideIsLeftAlone() throws {
+        var world = world()
+        world.checks[TrainGitHub.commit(2)] = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"))
+        var red = TrainGitHub(world: world)
+        var queue = queue()
+        while queue.pendingMutation != .closePullRequest(number: 900) {
+            if let mutation = queue.pendingMutation { queue.mutated(red.apply(mutation)) } else { queue.answer(red.world) }
+        }
+        XCTAssertTrue(queue.engine.statusText.hasPrefix("closing train #900: Required check Tests / test failed"),
+                      queue.engine.statusText)
+        let saved = MergeQueue.SavedQueue(engine: queue.engine, dryRun: false, savedAt: Date()).interrupted()
+        XCTAssertTrue(saved.stopReason?.message.hasPrefix("Interrupted while closing train #900: Required check") == true)
+        queue.send(.stop)
+        queue.mutated(red.apply(.closePullRequest(number: 900)))
+        let reason = try XCTUnwrap(queue.stopReason)
+        XCTAssertEqual(reason.kind, .checks)
+        XCTAssertTrue(reason.message.hasSuffix("Nirux closed train #900."), reason.message)
+
+        var outside = TrainGitHub(world: self.world())
+        var second = self.queue()
+        while second.engine.request.map({ request in
+            if case .read(let reads, _) = request.action { return !reads.contains(.checks(TrainGitHub.commit(2))) }
+            return true
+        }) == true {
+            if let mutation = second.pendingMutation { second.mutated(outside.apply(mutation)) } else { second.answer(outside.world) }
+        }
+        outside.world.merge(900, as: TrainGitHub.commit(9))
+        second.drive(&outside)
+        XCTAssertEqual(second.stopReason?.message, "#900 is merged, no longer open.")
+        XCTAssertFalse(second.mutations.contains(.closePullRequest(number: 900)))
+    }
+
+    func testEveryPullRequestThatLeftTheTrainIsNamed() throws {
+        var world = world()
+        world.pullRequests[16] = MQ.pullRequest(16, head: c)
+        var github = TrainGitHub(world: world)
+        github.conflicts = [b, c]
+        var queue = MQ.Harness(entries: [MQ.entry(12, head: a), MQ.entry(14, head: b), MQ.entry(16, head: c)], cadence: .train)
+        queue.start()
+        queue.drive(&github)
+        XCTAssertEqual(queue.stopReason?.message, "#14 conflicts with main or with #12, merged before it in the train. It left the "
+            + "train. #16 left the train too. Train #900 landed #12.")
     }
 
     func testARefusedMergeOfTheTrainClosesIt() throws {
