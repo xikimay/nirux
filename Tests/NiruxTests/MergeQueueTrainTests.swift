@@ -180,22 +180,70 @@ final class MergeQueueTrainTests: XCTestCase {
         XCTAssertTrue(queue.notes.contains { $0.message == "The nightly of train #900 succeeded" }, "the landed train's run is still read")
     }
 
-    func testStopWhileComposingStopsTheWholeTrain() throws {
+    func testStopWhileComposingStopsTheWholeTrainAndDeletesItsBranch() throws {
         var github = TrainGitHub(world: world())
         var queue = queue()
-        while let request = queue.engine.request {
-            guard case .mutate(let mutation) = request.action else {
-                queue.answer(github.world)
-                continue
-            }
-            if case .mergeIntoBranch(_, let head, _) = mutation, head == b { break }
-            queue.mutated(github.apply(mutation))
-        }
+        queue.run(&github) { if case .mergeIntoBranch(_, let head, _)? = $0.pendingMutation { head == b } else { false } }
         queue.send(.stop)
+        queue.mutated(github.apply(try XCTUnwrap(queue.pendingMutation)))
+        XCTAssertEqual(queue.pendingMutation, .deleteBranch(name: branch))
         queue.mutated(github.apply(try XCTUnwrap(queue.pendingMutation)))
         let reason = try XCTUnwrap(queue.stopReason)
         XCTAssertEqual(reason.kind, .user)
+        XCTAssertTrue(reason.message.hasSuffix("Nirux deleted the train’s branch \(branch)."), reason.message)
+        XCTAssertNil(github.world.branches[branch])
         XCTAssertEqual(queue.engine.entries.map(\.step), [.stopped(reason), .stopped(reason)])
+
+        // GitHub not answering mid-compose: the branch stays, named.
+        var failing = TrainGitHub(world: world())
+        var second = self.queue()
+        // The read after a part's merge: the train exists then.
+        second.run(&failing) { $0.engine.train != nil && $0.pendingReads?.contains(.branch(self.branch)) == true }
+        second.fail(.refused("HTTP 500"))
+        XCTAssertTrue(second.stopReason?.message.hasSuffix("The train’s branch \(branch) stays on GitHub.") == true,
+                      second.stopReason?.message ?? "")
+    }
+
+    func testAStopWhileTheTrainOpensWaitsForItOrNamesItsBranch() throws {
+        var late = TrainGitHub(world: world())
+        late.hidesTrainOnce = true
+        var first = queue()
+        first.run(&late) { if case .openPullRequest? = $0.pendingMutation { true } else { false } }
+        first.send(.stop)
+        first.mutated(late.apply(try XCTUnwrap(first.pendingMutation)))
+        first.drive(&late)
+        let named = try XCTUnwrap(first.stopReason?.message)
+        XCTAssertTrue(named.hasPrefix("Stopped by the user.") && named.hasSuffix("Train #900 stays open on GitHub: close it rather than merge it."),
+                      named)
+
+        let maybe = "A pull request of the train may be open from \(branch): close it rather than merge it."
+        var reading = TrainGitHub(world: world())
+        var second = queue()
+        second.run(&reading) { $0.pendingReads?.contains(.pullRequests(head: self.branch)) == true }
+        second.send(.stop)
+        XCTAssertEqual(second.stopReason?.message, "Stopped by the user. " + maybe)
+
+        var refusing = TrainGitHub(world: world())
+        var third = queue()
+        third.run(&refusing) { if case .openPullRequest? = $0.pendingMutation { true } else { false } }
+        third.send(.stop)
+        third.mutated(refusing.apply(try XCTUnwrap(third.pendingMutation)))
+        third.fail(.refused("HTTP 502: Bad Gateway"))
+        XCTAssertEqual(third.stopReason?.kind, .user)
+        XCTAssertTrue(third.stopReason?.message.hasSuffix(maybe) == true, third.stopReason?.message ?? "")
+    }
+
+    func testACallSentWhileTheBranchIsCreatedIsNamedOnAStopOrAQuit() throws {
+        var github = TrainGitHub(world: world())
+        var queue = queue()
+        queue.run(&github) { if case .createBranch? = $0.pendingMutation { true } else { false } }
+        let saved = MergeQueue.SavedQueue(engine: queue.engine, dryRun: false, savedAt: Date()).interrupted()
+        XCTAssertTrue(saved.stopReason?.message.hasSuffix("Its creation of branch \(branch) at 0000000 was sent but not answered: check it "
+            + "on GitHub.") == true, saved.stopReason?.message ?? "")
+        queue.mutated(.uncertain("gh timed out"))
+        queue.fail(.refused("HTTP 500"))
+        XCTAssertTrue(queue.stopReason?.message.contains("The creation of branch \(branch) at 0000000 was sent and GitHub didn’t show its "
+            + "effect yet: check it on GitHub.") == true, queue.stopReason?.message ?? "")
     }
 
     func testATrainLandsOnlyOnTheTipItWasTestedOnWithEveryHeadAsConfirmed() throws {
@@ -236,7 +284,8 @@ final class MergeQueueTrainTests: XCTestCase {
         var first = queue()
         first.drive(&foreign)
         XCTAssertEqual(first.stopReason?.kind, .train)
-        XCTAssertTrue(first.stopReason?.message.hasSuffix("someone else pushed to it.") == true, first.stopReason?.message ?? "")
+        XCTAssertTrue(first.stopReason?.message.hasSuffix("someone else pushed to it. The train’s branch \(branch) stays on GitHub.") == true,
+                      first.stopReason?.message ?? "")
 
         var pushed = TrainGitHub(world: world())
         pushed.pushToTrainAfterOpen = c
@@ -710,6 +759,21 @@ private final class Asked: @unchecked Sendable {
 }
 
 extension MQ.Harness {
+    /// Answers reads and makes calls on GitHub until `isDue`.
+    fileprivate mutating func run(_ github: inout TrainGitHub, until isDue: (MQ.Harness) -> Bool) {
+        for _ in 0..<500 {
+            if isDue(self) { return }
+            if let mutation = pendingMutation {
+                mutated(github.apply(mutation))
+            } else if let reads = pendingReads {
+                answer(github.world(for: reads))
+            } else {
+                return XCTFail("the queue ended first")
+            }
+        }
+        XCTFail("never got there")
+    }
+
     /// Answers reads from GitHub's world and makes each call there, until
     /// the queue ends.
     fileprivate mutating func drive(_ github: inout TrainGitHub, limit: Int = 500) {

@@ -177,6 +177,7 @@ extension MergeQueue {
                     // A train's pull request left open is named: its merge's answer is kept, and one just opened is looked up.
                     switch purpose {
                     case .train(.open):
+                        clocks.step = now
                         read([.pullRequests(head: trainBranch)], for: .train(.openedWhileStopping(message: message)))
                     case .train(.land(let head, let baseTip)):
                         self.purpose = .train(.landConfirm(head: head, baseTip: baseTip, result: result))
@@ -294,7 +295,7 @@ extension MergeQueue {
             }
             var reason = reason
             if reason.kind == .github || reason.kind == .setup, let mutation = unconfirmedMutation,
-               let shown = train?.name ?? currentEntry.map({ "#\($0.number)" }) {
+               case let shown = train?.name ?? currentEntry.map({ "#\($0.number)" }) ?? "it" {
                 reason = StopReason(kind: reason.kind, message: reason.message + " The \(Self.describe(mutation)) was sent "
                     + "and GitHub didn’t show its effect yet: check \(shown) on GitHub.", url: reason.url)
             }
@@ -354,6 +355,8 @@ extension MergeQueue {
         // MARK: Read failures (section 4)
 
         private mutating func readFailed(_ failure: ReadFailure, reads: [Read], purpose: Purpose, now: TimeInterval) {
+            // A Stop waited for this read only to name the train's pull request: the stop stays the user's.
+            if case .train(.openedWhileStopping(let message)) = purpose { return stop(StopReason(kind: .user, message: message)) }
             switch failure {
             case .ghMissing:
                 stop(StopReason(kind: .setup, message: "\(GitHub.CLI.missing): the queue can’t read GitHub."))

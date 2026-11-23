@@ -133,8 +133,10 @@ extension NiruxApp {
             guard let target else { return }
             shell?.openEditorFromURL(target)
         }
-        NSApp.activate(ignoringOtherApps: true)
-        mainWindow?.makeKeyAndOrderFront(nil)
+        if !drivenByCanary {
+            NSApp.activate(ignoringOtherApps: true)
+            mainWindow?.makeKeyAndOrderFront(nil)
+        }
     }
 
     /// Window-modal sheet, one at a time: unlike an app-modal alert it
@@ -208,8 +210,10 @@ extension NiruxApp {
             }
         }
 
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+        if !drivenByCanary {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
         alert.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
                 lifetime.ended = true

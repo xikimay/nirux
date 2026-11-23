@@ -86,7 +86,9 @@ jobs:
           key: deps-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
       - name: Build
-        run: swift build --build-tests
+        uses: ./.github/actions/ci-diagnostic
+        with:
+          command: build
 
       # The latest index the Coverage map workflow saved on main.
       - name: Coverage index
@@ -127,10 +129,7 @@ jobs:
         # A warning past it, not a failure: runners vary up to 4x.
         env:
           NIRUX_TESTS_BUDGET: 500
-          ONLY: ${{ steps.select.outputs.only }}
-        run: |
-          if [[ -n $ONLY ]]; then
-            scripts/run-tests.sh --only "$ONLY"
-          else
-            scripts/run-tests.sh
-          fi
+          NIRUX_TESTS_ONLY: ${{ steps.select.outputs.only }}
+        uses: ./.github/actions/ci-diagnostic
+        with:
+          command: suite

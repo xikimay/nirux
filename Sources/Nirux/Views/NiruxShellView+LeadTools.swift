@@ -30,7 +30,7 @@ extension NiruxShellView {
                 self.leadStartTask(arguments, selection: selection, in: space, parent: parent, answer: answer)
             }
         case LeadTools.setTaskAfter: changeWaitingTask(arguments, in: space, answer: answer)
-        case LeadTools.listTasks: answer(leadTaskList(in: space, lead: lead.id), false)
+        case LeadTools.listTasks: leadListTasks(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.tell: leadTell(arguments, in: space, lead: parent, answer: answer)
         case LeadTools.reply: leadReply(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.askUser: leadAskUser(arguments, in: space, lead: lead.id, answer: answer)
@@ -55,6 +55,11 @@ extension NiruxShellView {
         case LeadTools.interruptTask: leadInterruptTask(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.recordReview: leadRecordReview(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.dailyPass: leadDailyPass(in: space, lead: lead, answer: answer)
+        case LeadTools.listSpaces: answer(leadSpaceList(currentSpace: space), false)
+        case LeadTools.createSpace: leadCreateSpace(arguments, answer: answer)
+        case LeadTools.editSpace: leadEditSpace(arguments, answer: answer)
+        case LeadTools.deleteSpace: leadDeleteSpace(arguments, callerSpace: space, answer: answer)
+        case LeadTools.moveTaskToSpace: leadMoveTaskToSpace(arguments, callerSpace: space, answer: answer)
         default: answer("Unknown tool: \(request.tool)", true)
         }
     }
