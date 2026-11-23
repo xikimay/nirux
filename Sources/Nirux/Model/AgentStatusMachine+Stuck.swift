@@ -150,14 +150,13 @@ extension AgentStatusMachine {
         case .error?: return .failedTurn
         case .idle? where turn.ended == .error: return .failedTurn
         case .idle? where turn.ended != .done: return .draft
-        case .idle?, .done?: return lastDraftInputAt > turn.startedAt ? .draft : nil
+        case .idle?, .done?: return agyDraft(agy) == nil ? nil : .draft
         }
     }
 
     /// `agyPromptRefusal` for an `agy` that ran no turn since it started, as
-    /// one Nirux resumed: free once it says `idle` with no key since its
-    /// terminal started that may leave a draft (keys typed while its shell
-    /// loads wait there for it), its dialogs' answers aside. Its sign-in and
+    /// one Nirux resumed: free once it says `idle` with no draft (`agyDraft`),
+    /// its dialogs' answers aside. Its sign-in and
     /// folder trust screens say `blocked` (agy 1.5.15). Launched with a
     /// prompt (`-i`), it says `idle` a moment before that prompt's turn.
     func agyFirstPromptRefusal(_ agy: ForegroundProcess) -> AgentPromptRefusal? {
@@ -168,8 +167,18 @@ extension AgentStatusMachine {
         case .error?: return .failedTurn
         case .idle?, .done?:
             if AgyLaunch.hasLaunchPrompt(agy.arguments) { return .noPromptYet }
-            return lastDraftInputAt > 0 ? .draft : nil
+            return agyDraft(agy) == nil ? nil : .draft
         }
+    }
+
+    /// The key that may have left a draft in `agy`'s prompt: one since its
+    /// turn began, or, before its first, any since its terminal started
+    /// (keys typed while its shell loads wait there for it) but the launch
+    /// line Nirux typed before it started.
+    func agyDraft(_ agy: ForegroundProcess) -> TimeInterval? {
+        if let turn = agyTurn, turn.process == agy.instance { return lastDraftInputAt > turn.startedAt ? lastDraftInputAt : nil }
+        let launchLine = lastDraftInputAt == shellLaunchLineAt && lastDraftInputAt < agy.instance.startedAt
+        return lastDraftInputAt > 0 && !launchLine ? lastDraftInputAt : nil
     }
 
     /// Whether `process`, a `claude` that took no prompt since it started,
@@ -234,9 +243,9 @@ extension AgentStatusMachine {
     }
 
     /// What `promptRefusal` reads for an `agy`, for the log.
-    func agyFacts(now: TimeInterval) -> String {
+    func agyFacts(_ agy: ForegroundProcess?, now: TimeInterval) -> String {
         func age(_ time: TimeInterval?) -> String { time.map { String(Int(min(max(now - $0, 0), 1e7))) + "s" } ?? "-" }
-        let draft = lastDraftInputAt > (agyTurn?.startedAt ?? 0) ? age(lastDraftInputAt) : "-"
+        let draft = age(agy.flatMap(agyDraft))
         return "agy=\(programStatus?.status.state.rawValue ?? "-")/\(age(programStatus?.at)) "
             + "turn=\(age(agyTurn?.startedAt))/\(agyTurn?.ended?.rawValue ?? "open") draft=\(draft)"
     }

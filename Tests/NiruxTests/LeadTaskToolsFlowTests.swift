@@ -1274,7 +1274,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 )
                 let workspace = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
                 let agent = AgentStandIn()
-                workspace.addColumn(command: agent.command(named: "agy", launchPrompt: "Read .agy-handover.md"), agentUUID: agentUUID, cwd: harness.worktree)
+                workspace.addColumn(command: agent.command(named: "agy", arguments: ["-i", "Read .agy-handover.md"]), agentUUID: agentUUID, cwd: harness.worktree)
                 let column = try XCTUnwrap(workspace.columns.first { $0.agentUUID == agentUUID })
                 let pty = try XCTUnwrap(column.pty)
                 harness.waitUntil("its agy") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
@@ -1292,11 +1292,14 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             let agy = try task("Antigravity task", kind: "agy")
             defer { agy.agent.remove() }
             harness.shell.missionWaits.startWait = 0.2
-            report(.working, in: agy.column)
+            report(.idle, in: agy.column)
             let slash = try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity task", "message": "/clear"], lead: lead)
             XCTAssertTrue(slash.isError && slash.text.contains("slash command"), slash.text)
             let told = try harness.callLeadTool(LeadTools.tell, ["task": "Antigravity task", "message": "Review this."], lead: lead)
             XCTAssertFalse(told.isError, told.text)
+            harness.shell.typeMissionMessages()
+            XCTAssertEqual(agy.agent.input, "", "launched with -i, it says idle before that prompt's turn")
+            report(.working, in: agy.column)
             harness.shell.sweepWaitingInstructions(
                 now: Date().timeIntervalSince1970 + MissionEventCLI.instructionHeldNotice + 1, snapshot: ProcessSnapshot()
             )
@@ -1377,49 +1380,66 @@ final class LeadTaskToolsFlowTests: XCTestCase {
 
     /// A tell to an `agy` that ran no turn since it started, as one Nirux
     /// resumed after a relaunch, goes in once it says it sits idle at its
-    /// prompt; the next one waits for the turn the first started.
+    /// prompt; the next one waits for the turn the first started. The launch
+    /// line Nirux typed for one is its shell's, not a draft.
     func testATellReachesAResumedAntigravityAtItsFirstIdlePrompt() throws {
         try UIFlowHarness.run { harness in
             let lead = try harness.makeLead()
-            let workspaceID = UUID().uuidString, agentUUID = UUID().uuidString
-            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
-                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
-                childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "agy", branch: "feat/resumed-idle", reportsToLead: true
-            ), enabled: true))
-            harness.shell.addWorkspace(
-                title: "Resumed agy", cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID, missionID: mission.id,
-                reportsToLead: true
-            )
-            let workspace = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
-            let agent = AgentStandIn()
-            defer { agent.remove() }
-            workspace.addColumn(
-                command: agent.command(named: "agy", arguments: ["--conversation", "conv-1"]), agentUUID: agentUUID, cwd: harness.worktree
-            )
-            let column = try XCTUnwrap(workspace.columns.first { $0.agentUUID == agentUUID })
-            column.onAgentAttention = { _ in }
-            let pty = try XCTUnwrap(column.pty)
-            harness.waitUntil("its agy, resumed") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
-            @MainActor func report(_ state: AgentProgramStatus.State) {
+            @MainActor func resumedAgy(_ title: String, typed: Bool) throws -> (column: ColumnState, agent: AgentStandIn) {
+                let workspaceID = UUID().uuidString, agentUUID = UUID().uuidString
+                let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                    id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID, childWorkspaceID: workspaceID,
+                    childAgentUUID: agentUUID, childAgentKind: "agy", branch: "feat/\(workspaceID.prefix(8))", reportsToLead: true
+                ), enabled: true))
+                harness.shell.addWorkspace(
+                    title: title, cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID, missionID: mission.id, reportsToLead: true
+                )
+                let workspace = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+                let agent = AgentStandIn()
+                let command = agent.command(named: "agy", arguments: ["--conversation", "conv-\(workspaceID.prefix(8))"])
+                if typed {
+                    workspace.addColumn(agentUUID: agentUUID, cwd: harness.worktree)
+                } else {
+                    workspace.addColumn(command: command, agentUUID: agentUUID, cwd: harness.worktree)
+                }
+                let column = try XCTUnwrap(workspace.columns.first { $0.agentUUID == agentUUID })
+                column.onAgentAttention = { _ in }
+                let pty = try XCTUnwrap(column.pty)
+                if typed {
+                    harness.waitUntil("its shell") { pty.shellPID != nil }
+                    pty.sendShellLaunchCommand("(\(command))")
+                }
+                harness.waitUntil("its agy, resumed") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
+                return (column, agent)
+            }
+            @MainActor func report(_ state: AgentProgramStatus.State, in column: ColumnState) {
                 column.pty?.onProgramStatus?(AgentProgramStatus(state: state, kind: nil, message: nil, agent: .agy))
             }
-            @MainActor func tell(_ message: String) throws {
-                let told = try harness.callLeadTool(LeadTools.tell, ["task": "Resumed agy", "message": message], lead: lead)
+            @MainActor func tell(_ message: String, to task: String) throws {
+                let told = try harness.callLeadTool(LeadTools.tell, ["task": task, "message": message], lead: lead)
                 XCTAssertFalse(told.isError, told.text)
             }
 
-            try tell("First after relaunch.")
+            let restored = try resumedAgy("Resumed agy", typed: false)
+            defer { restored.agent.remove() }
+            try tell("First after relaunch.", to: "Resumed agy")
             harness.shell.typeMissionMessages()
-            XCTAssertEqual(agent.input, "", "no word from it yet")
-            report(.idle)
-            harness.waitUntil("typed at its first idle prompt") { agent.input.contains("First after relaunch.") }
+            XCTAssertEqual(restored.agent.input, "", "no word from it yet")
+            report(.idle, in: restored.column)
+            harness.waitUntil("typed at its first idle prompt") { restored.agent.input.contains("First after relaunch.") }
 
-            try tell("Then this.")
+            try tell("Then this.", to: "Resumed agy")
             harness.shell.typeMissionMessages()
-            XCTAssertFalse(agent.input.contains("Then this."), "never typed before agy takes the first")
-            report(.working)
-            report(.done)
-            harness.waitUntil("typed once that turn is done") { agent.input.contains("Then this.") }
+            XCTAssertFalse(restored.agent.input.contains("Then this."), "never typed before agy takes the first")
+            report(.working, in: restored.column)
+            report(.done, in: restored.column)
+            harness.waitUntil("typed once that turn is done") { restored.agent.input.contains("Then this.") }
+
+            let typed = try resumedAgy("Typed agy", typed: true)
+            defer { typed.agent.remove() }
+            report(.idle, in: typed.column)
+            try tell("Past its launch line.", to: "Typed agy")
+            harness.waitUntil("typed past the line Nirux launched it with") { typed.agent.input.contains("Past its launch line.") }
         }
     }
 

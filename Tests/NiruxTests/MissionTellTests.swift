@@ -611,6 +611,25 @@ final class MissionTellTests: XCTestCase {
         report(.idle, at: 11, in: &early)
         XCTAssertEqual(refusal(early), .draft, "typed while its shell loaded: it waits in the terminal for agy")
 
+        // The launch line Nirux typed before agy started is its shell's; a key after it waits in the terminal for agy.
+        var launched = AgentStatusMachine()
+        launched.noteKeystroke(now: at(9), keys: Data("agy --conversation c1\r".utf8))
+        launched.noteShellLaunchLine(afterDraft: false)
+        var typedAhead = launched
+        typedAhead.noteKeystroke(now: at(9.5), keys: Data("x".utf8))
+        report(.idle, at: 11, in: &launched)
+        XCTAssertNil(refusal(launched), "the launch line Nirux typed")
+        report(.idle, at: 11, in: &typedAhead)
+        XCTAssertEqual(refusal(typedAhead), .draft, "a key after the launch line, before agy started")
+
+        // The log reads the draft the refusal holds it for, not another agy's turn's.
+        var logged = AgentStatusMachine()
+        _ = logged.tick(fgName: "agy", isUserFocused: true, now: at(1))
+        logged.noteKeystroke(now: at(1.5), keys: Data("x".utf8))
+        report(.working, at: 2, from: ProcessInstance(pid: 76, startedAt: t0), in: &logged)
+        report(.idle, at: 11, in: &logged)
+        XCTAssertEqual(refusal(logged), .draft)
+        XCTAssertTrue(logged.agyFacts(agy, now: t0 + 20).hasSuffix("draft=18s"), logged.agyFacts(agy, now: t0 + 20))
         // An agy that left with its dialog open: the next one's keys are drafts.
         var restarted = AgentStatusMachine()
         _ = restarted.tick(fgName: "agy", isUserFocused: true, now: at(1))

@@ -278,6 +278,9 @@ struct AgentStatusMachine {
     /// (Enter, a number, Esc, Ctrl-C), the heartbeat dropping a `blocked`
     /// status at the first.
     private(set) var agyAnswering = false
+    /// The launch line Nirux typed into an empty shell
+    /// (`PtySession.sendShellLaunchCommand`): the shell's, not a draft.
+    private(set) var shellLaunchLineAt: TimeInterval?
 
     /// A turn of the `agy` `process`, from its first `working` (another
     /// after a dialog, or redrawn, is the same turn's) to `done`, `idle` or
@@ -1824,6 +1827,10 @@ struct AgentStatusMachine {
         turnFailure?.resumeSentAt = now
     }
 
+    mutating func noteShellLaunchLine(afterDraft: Bool) {
+        shellLaunchLineAt = afterDraft ? nil : lastDraftInputAt
+    }
+
     mutating func noteResumeTyped() {
         turnFailure?.resumeKeystrokeAt = lastDraftInputAt
     }
@@ -1836,6 +1843,7 @@ struct AgentStatusMachine {
         codexWorked = nil
         agyTurn = nil
         agyAnswering = false
+        shellLaunchLineAt = nil
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false

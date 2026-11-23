@@ -341,7 +341,7 @@ extension NiruxShellView {
                         + "agent=\(entry.column.agentUUID?.prefix(8) ?? "-") waited=\(waited)s reason=\(reason) messages=\(refused.count) "
                         + "fg=\(foreground.map { "\($0.name)/\(Int(max(now - $0.instance.startedAt, 0)))s" } ?? "-") "
                         + ((foreground?.agent == .codex ? pty?.codexFacts(now: now)
-                            : foreground?.agent == .agy ? pty?.agyFacts(now: now)
+                            : foreground?.agent == .agy ? pty?.agyFacts(foreground, now: now)
                             : pty?.missionPromptFacts(now: now, snapshot: snapshot, record: sessionRecord(of:))) ?? "")
                 )
             }

@@ -196,7 +196,7 @@ message like a failed turn. An `agy` that ran no turn since it started, as
 one Nirux resumed after a relaunch, is free once it says `idle` and no key
 that may leave a draft reached its terminal since the terminal started (keys
 typed while its shell loads wait there for it), keys answering its dialogs
-aside (`agyFirstPromptRefusal`, 2026-11-23). Probed on agy 1.5.15: its
+and the launch line Nirux typed before it started aside (`agyFirstPromptRefusal`, 2026-11-23). Probed on agy 1.5.15: its
 sign-in and folder trust screens say `blocked` and stay so until answered;
 `idle` comes with its empty prompt, under a "esc to dismiss" notice that
 leaves pasted text in the prompt; `--continue` and an unknown `--conversation`
