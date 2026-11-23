@@ -165,8 +165,9 @@ final class AgentProgramStatusTests: XCTestCase {
 
     /// Waiting on its own background task, agy stops its spinner and says
     /// nothing until the task ends: neither its silence nor a redraw reads
-    /// as a wait on the user. A restarted terminal forgets its status.
-    func testAgyWaitingOnItsBackgroundTaskStaysWorking() {
+    /// as a wait on the user, nor does it once ^Z and fg dropped its status.
+    /// A restarted terminal forgets its status.
+    func testAgyWaitingOnItsBackgroundTaskNeverWaitsOnTheUser() {
         var machine = AgentStatusMachine()
         _ = machine.tick(fgName: "agy", isUserFocused: false, now: t0)
         machine.noteUserInput(now: t0)
@@ -176,9 +177,14 @@ final class AgentProgramStatusTests: XCTestCase {
         machine.noteRead(now: t0 + 601)
         XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 610), .working)
         XCTAssertNil(machine.attentionReason)
-        _ = machine.noteProgramStatus(status(.error, "quota"), isUserFocused: false, now: t0 + 611)
+        _ = machine.tick(fgName: "zsh", isUserFocused: false, now: t0 + 611)
+        _ = machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 612)
+        machine.noteRead(now: t0 + 618)
+        XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 618.5), .working)
+        XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 630), .idle)
+        _ = machine.noteProgramStatus(status(.error, "quota"), isUserFocused: false, now: t0 + 631)
         let agy = ForegroundProcess(instance: ProcessInstance(pid: 42, startedAt: t0.timeIntervalSince1970), name: "agy", arguments: [])
-        XCTAssertEqual(machine.blockedWait(now: t0.timeIntervalSince1970 + 612, foreground: agy)?.reason, .apiError(kind: nil, detail: "quota"))
+        XCTAssertEqual(machine.blockedWait(now: t0.timeIntervalSince1970 + 632, foreground: agy)?.reason, .apiError(kind: nil, detail: "quota"))
         machine.reset()
         XCTAssertNil(machine.programStatus)
     }

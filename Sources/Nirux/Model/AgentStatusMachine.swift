@@ -1553,9 +1553,11 @@ struct AgentStatusMachine {
             if recentlyActive { startFallbackTurn(now: now) }
         case .working:
             if !recentlyActive {
-                state = isUserFocused ? .idle : .needsAttention
                 // Silence can be a finished turn or the agent's own
-                // approval prompt: no reason to claim.
+                // approval prompt: no reason to claim. An agy heard in this
+                // terminal says itself when it waits (its status went with
+                // a ^Z or a failed read).
+                state = isUserFocused || agent == .agy && agyTurn != nil ? .idle : .needsAttention
                 lastAttentionReason = nil
                 turnStartedAt = nil
             }
