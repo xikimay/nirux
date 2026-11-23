@@ -163,18 +163,22 @@ final class AgentProgramStatusTests: XCTestCase {
         XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: true, now: t0 + 5), .idle)
     }
 
-    /// A status Nirux missed can't hold a column working: past a minute of
-    /// silence its output says more. A restarted terminal forgets it.
-    func testAMissedStatusYieldsToTheOutput() {
+    /// Waiting on its own background task, agy stops its spinner and says
+    /// nothing until the task ends: neither its silence nor a redraw reads
+    /// as a wait on the user. A restarted terminal forgets its status.
+    func testAgyWaitingOnItsBackgroundTaskStaysWorking() {
         var machine = AgentStatusMachine()
         _ = machine.tick(fgName: "agy", isUserFocused: false, now: t0)
+        machine.noteUserInput(now: t0)
         _ = machine.noteProgramStatus(status(.working), isUserFocused: false, now: t0 + 1)
-        XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 30), .working)
-        XCTAssertNotEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 62), .working)
-        XCTAssertNil(machine.programStatus, "its next working is a new turn's")
-        _ = machine.noteProgramStatus(status(.error, "quota"), isUserFocused: false, now: t0 + 63)
+        machine.noteRead(now: t0 + 8)
+        XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 600), .working)
+        machine.noteRead(now: t0 + 601)
+        XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 610), .working)
+        XCTAssertNil(machine.attentionReason)
+        _ = machine.noteProgramStatus(status(.error, "quota"), isUserFocused: false, now: t0 + 611)
         let agy = ForegroundProcess(instance: ProcessInstance(pid: 42, startedAt: t0.timeIntervalSince1970), name: "agy", arguments: [])
-        XCTAssertEqual(machine.blockedWait(now: t0.timeIntervalSince1970 + 64, foreground: agy)?.reason, .apiError(kind: nil, detail: "quota"))
+        XCTAssertEqual(machine.blockedWait(now: t0.timeIntervalSince1970 + 612, foreground: agy)?.reason, .apiError(kind: nil, detail: "quota"))
         machine.reset()
         XCTAssertNil(machine.programStatus)
     }

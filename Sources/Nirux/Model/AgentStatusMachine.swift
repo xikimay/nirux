@@ -1702,15 +1702,14 @@ struct AgentStatusMachine {
     }
 
     /// The state Antigravity reported since it came to the front: it says
-    /// when it waits on the user, which its output can't.
+    /// when it waits on the user, which its output can't. A `working` holds
+    /// through silence: agy 1.5.15 waiting on its own background task (a
+    /// build, `gh pr checks --watch`) stops its spinner and says nothing
+    /// until the task ends and its turn goes on.
     private mutating func reportedState(isUserFocused: Bool, now: TimeInterval) -> AgentStatus? {
         guard let reported = programStatus else { return nil }
         let (status, at) = (reported.status, reported.at)
         switch status.state {
-        case .working where now - max(at, lastReadAt) > AgentProgramStatus.workingSilence:
-            // Its next `working` is a new turn's.
-            programStatus = nil
-            return nil
         case .working:
             if turnStartedAt == nil { turnStartedAt = at }
             state = .working

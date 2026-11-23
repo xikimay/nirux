@@ -534,9 +534,10 @@ final class MissionTellTests: XCTestCase {
         report(.working, at: 22.4)
         report(.done, at: 23)
         XCTAssertEqual(refusal(), .draft, "text typed once its dialog was answered")
-        // A turn whose end was missed (a silence dropped its status): the next prompt starts a new one.
+        // A turn whose end was missed (^Z and fg dropped its status): the next prompt starts a new one.
         report(.working, at: 24)
-        _ = machine.tick(fgName: "agy", isUserFocused: true, now: at(24 + AgentProgramStatus.workingSilence + 1))
+        _ = machine.tick(fgName: "zsh", isUserFocused: true, now: at(25))
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: at(26))
         machine.noteKeystroke(now: at(86), keys: Data("next".utf8))
         machine.noteKeystroke(now: at(86.1), keys: Data("\r".utf8))
         report(.working, at: 86.2)

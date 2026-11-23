@@ -22,9 +22,6 @@ struct AgentProgramStatus: Equatable, Sendable {
 
     /// Every launch says `blocked:kind=auth` for a moment while it signs in.
     static let signInGrace: TimeInterval = 5
-    /// agy's spinner never stops this long while it works: past it, a
-    /// reported `working` was ended by a status Nirux missed.
-    static let workingSilence: TimeInterval = 60
 
     static let prefix = "\u{1b}]7501;"
 
