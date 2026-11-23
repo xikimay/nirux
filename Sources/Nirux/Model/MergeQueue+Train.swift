@@ -40,6 +40,11 @@ extension MergeQueue {
         var mergeCommit: String?
         var step = Step.composing
 
+        /// Its part for this pull request, once the train landed.
+        func landedPart(_ number: Int) -> Part? {
+            mergeCommit == nil ? nil : parts.first { $0.number == number }
+        }
+
         /// "train #781", or its branch until it has a pull request.
         var name: String { number.map { "train #\($0)" } ?? "the train \(branch)" }
 
@@ -79,8 +84,8 @@ extension MergeQueue.Engine {
     enum TrainPurpose: Equatable, Sendable {
         case preflight
         case base
-        case create
-        case created(MergeQueue.MutationResult)
+        case create(base: String)
+        case created(base: String, result: MergeQueue.MutationResult)
         case part(index: Int, from: String)
         case partTip(index: Int, from: String, result: MergeQueue.MutationResult)
         case partCommit(index: Int, from: String, tip: String)
@@ -96,6 +101,11 @@ extension MergeQueue.Engine {
         case postMergeOutcome(commit: String, run: GitHub.WorkflowRun)
         /// The train's pull request closed before the queue stops for this.
         case close(MergeQueue.StopReason)
+        case deleteLanded(commit: String)
+        /// The train's branch deleted before the queue stops for this.
+        case cleanup(MergeQueue.StopReason)
+        /// A Stop came while the pull request opened: which one, to name it.
+        case openedWhileStopping(message: String)
     }
 
     /// "waiting for the checks of train #781 (#12, #14)".
@@ -111,10 +121,32 @@ extension MergeQueue.Engine {
 
     /// A stop leaves no pull request half-way: one stopped on its own sends
     /// the others back to waiting; a stop of the whole train stops them all.
+    /// Once the train landed, the others' heads are on the base: landed.
     mutating func settleTrainEntries(after reason: MergeQueue.StopReason) {
         for index in entries.indices where entries[index].step.isActive {
-            entries[index].step = current == nil ? .stopped(reason) : .waiting
+            if let part = train?.landedPart(entries[index].number) {
+                entries[index].step = .done
+                entries[index].mergeCommit = entries[index].mergeCommit ?? part.commit
+            } else {
+                entries[index].step = current == nil ? .stopped(reason) : .waiting
+            }
         }
+    }
+
+    /// The train's branch to delete before the queue stops: on a stop the
+    /// train found itself, once its pull request is closed or before it had
+    /// one (deleting it would close an open one), never after someone else
+    /// pushed to it.
+    func trainCleanup(for reason: MergeQueue.StopReason) -> MergeQueue.Mutation? {
+        switch purpose {
+        case .train(.cleanup)?, .train(.partCommit)?: return nil
+        default: break
+        }
+        // A push to the train's own branch: its head isn't the queue's any more.
+        if reason.kind == .changed, current == nil { return nil }
+        guard ![.user, .interrupted, .dryRun, .setup, .github].contains(reason.kind), let train,
+              train.number == nil || train.step == .closed else { return nil }
+        return .deleteBranch(name: train.branch)
     }
 
     /// A train's pull request that a stop leaves open, named so nobody merges it later.
@@ -167,9 +199,9 @@ extension MergeQueue.Engine {
     }
 
     func trainUnconfirmedMutation(_ step: TrainPurpose) -> MergeQueue.Mutation? {
+        if case .created(let base, _) = step { return .createBranch(name: trainBranch, commit: base) }
         guard let train else { return nil }
         switch step {
-        case .created: return .createBranch(name: train.branch, commit: train.base)
         case .partTip(let index, _, _): return partMutation(index, into: train.branch)
         case .opened: return openMutation(train)
         case .landConfirm(let head, _, _): return train.number.map { .merge(number: $0, head: head, method: .merge) }
@@ -266,9 +298,7 @@ extension MergeQueue.Engine {
         guard let tip else {
             return stop(MergeQueue.StopReason(kind: .github, message: "GitHub doesn’t know \(settings.baseBranch)."))
         }
-        train = MergeQueue.Train(branch: trainBranch, base: tip, head: tip)
-        note("Composing the train \(trainBranch) on \(settings.baseBranch) at \(Self.short(tip))")
-        mutate(.createBranch(name: trainBranch, commit: tip), for: .train(.create))
+        mutate(.createBranch(name: trainBranch, commit: tip), for: .train(.create(base: tip)))
     }
 
     /// The next pull request's head merged into the train, in the confirmed
@@ -490,25 +520,34 @@ extension MergeQueue.Engine {
                 guard pullRequest.headOid == entry.confirmedHead else {
                     return stop(MergeQueue.StopReason(kind: .merge, message: "#\(entry.number) reads merged at "
                         + "\(Self.short(pullRequest.headOid)), not at \(Self.short(entry.confirmedHead)), the head \(train.name) merged.",
-                        url: pullRequest.url))
+                        url: pullRequest.url), on: index)
                 }
                 entries[index].mergeCommit = pullRequest.mergeCommit
                 entries[index].step = .done
             case .open:
                 open.append(entry.number)
             case .closed:
-                return stop(MergeQueue.StopReason(kind: .merge, message: "#\(entry.number) was closed instead of reading merged once "
-                    + "\(train.name) landed as \(Self.short(commit)).", url: pullRequest.url))
+                return stop(MergeQueue.StopReason(kind: .merge, message: "#\(entry.number) was closed instead of reading merged "
+                    + "once \(train.name) landed as \(Self.short(commit)).", url: pullRequest.url), on: index)
             }
         }
         guard open.isEmpty else {
-            guard now - clocks.step < MergeQueue.Limits.trainMarkedMerged else { return stop(notMarkedMerged(open, commit: commit)) }
+            guard now - clocks.step < MergeQueue.Limits.trainMarkedMerged else {
+                // Open on GitHub though their heads landed: theirs is the stop, not a merge.
+                let reason = notMarkedMerged(open, commit: commit)
+                for index in entries.indices where open.contains(entries[index].number) { entries[index].step = .stopped(reason) }
+                return stop(reason)
+            }
             return read(open.map { .pullRequest($0) }, after: MergeQueue.Limits.mergeConfirmInterval,
                         for: .train(.landed(commit: commit)))
         }
         note("\(Self.numbers(entries.filter { $0.step == .done }.map(\.number))) read merged")
+        mutate(.deleteBranch(name: train.branch), for: .train(.deleteLanded(commit: commit)))
+    }
+
+    private mutating func trainPostMerge(_ commit: String, now: TimeInterval) {
         guard settings.postMergeWorkflow != nil else { return finishTrain() }
-        self.train?.step = .waitingForPostMerge(commit)
+        train?.step = .waitingForPostMerge(commit)
         clocks.step = now
         read([.pushRuns(commit: commit)], after: MergeQueue.Limits.firstRunPoll, for: .train(.postMerge(commit: commit)))
     }
@@ -540,21 +579,31 @@ extension MergeQueue.Engine {
         switch step {
         case .preflight: return trainPreflightRead(answers, now: now)
         case .base: return trainBaseRead(answers)
+        case .created(let base, let result):
+            guard case .branch(let tip)? = answers[.branch(trainBranch)] else { return missingAnswer() }
+            guard tip == base else {
+                if tip == nil, result == .sent || result.isUncertain, now - clocks.step < MergeQueue.Limits.mergeConfirm {
+                    return read([.branch(trainBranch)], after: MergeQueue.Limits.mergeConfirmInterval,
+                                for: .train(.created(base: base, result: result)))
+                }
+                let why = tip.map { "it is at \(Self.short($0))" } ?? Self.describe(result)
+                return stop(MergeQueue.StopReason(kind: .train, message: "GitHub didn’t create the train’s branch \(trainBranch) "
+                    + "at \(Self.short(base)): \(why)."))
+            }
+            // Only a branch the queue created is ever the train's, to delete.
+            train = MergeQueue.Train(branch: trainBranch, base: base, head: base)
+            note("Composing the train \(trainBranch) on \(settings.baseBranch) at \(Self.short(base))")
+            return mergeNextPart()
+        case .openedWhileStopping(let message):
+            guard case .pullRequests(let found)? = answers[.pullRequests(head: trainBranch)] else { return missingAnswer() }
+            let base = settings.baseBranch
+            let opened = found.first { $0.isOpen && $0.baseRefName == base }?.number
+            train?.number = opened
+            return stop(MergeQueue.StopReason(kind: .user, message: message))
         default: break
         }
         guard let train else { return missingAnswer() }
         switch step {
-        case .created(let result):
-            guard case .branch(let tip)? = answers[.branch(train.branch)] else { return missingAnswer() }
-            guard tip == train.base else {
-                if tip == nil, result == .sent || result.isUncertain, now - clocks.step < MergeQueue.Limits.mergeConfirm {
-                    return read([.branch(train.branch)], after: MergeQueue.Limits.mergeConfirmInterval, for: .train(.created(result)))
-                }
-                let why = tip.map { "it is at \(Self.short($0))" } ?? Self.describe(result)
-                return stop(MergeQueue.StopReason(kind: .train, message: "GitHub didn’t create the train’s branch \(train.branch) "
-                    + "at \(Self.short(train.base)): \(why)."))
-            }
-            mergeNextPart()
         case .partTip(let index, let from, let result):
             guard case .branch(let tip)? = answers[.branch(train.branch)] else { return missingAnswer() }
             guard let tip else {
@@ -563,7 +612,7 @@ extension MergeQueue.Engine {
             guard tip != from else {
                 // A merge may take a moment to show; still none: GitHub had
                 // nothing to merge, the head is in the train already.
-                if result == .sent || result.isUncertain, now - clocks.step < MergeQueue.Limits.mergeConfirmInterval {
+                if result == .sent || result.isUncertain, now - clocks.step < MergeQueue.Limits.mergeConfirm {
                     return read([.branch(train.branch)], after: MergeQueue.Limits.mergeConfirmInterval,
                                 for: .train(.partTip(index: index, from: from, result: result)))
                 }
@@ -635,18 +684,25 @@ extension MergeQueue.Engine {
                   let comparison = answers.comparison(base: commit, head: settings.baseBranch)
             else { return missingAnswer() }
             postMergeFailed(run, commit: commit, baseRuns: runs, comparison: comparison, subject: train.name)
-        case .preflight, .base, .create, .part, .open, .land, .close:
+        case .preflight, .base, .create, .created, .openedWhileStopping, .part, .open, .land, .close, .deleteLanded, .cleanup:
             missingAnswer()
         }
     }
 
     /// Whatever GitHub answered a train's call, a read says what it did.
     mutating func trainMutated(_ result: MergeQueue.MutationResult, _ step: TrainPurpose, now: TimeInterval) {
+        if case .create(let base) = step {
+            clocks.step = now
+            return read([.branch(trainBranch)], for: .train(.created(base: base, result: result)))
+        }
         guard let train else { return missingAnswer() }
         switch step {
-        case .create:
-            clocks.step = now
-            read([.branch(train.branch)], for: .train(.created(result)))
+        case .cleanup(let reason):
+            stop(reason.appending(result == .sent ? " Nirux deleted the train’s branch \(train.branch)."
+                : " Nirux couldn’t delete the train’s branch \(train.branch): \(Self.describe(result))."))
+        case .deleteLanded(let commit):
+            if result != .sent { note("Nirux couldn’t delete the train’s branch \(train.branch): \(Self.describe(result))") }
+            trainPostMerge(commit, now: now)
         case .part(let index, let from):
             clocks.step = now
             if case .refused(409?, _) = result {
