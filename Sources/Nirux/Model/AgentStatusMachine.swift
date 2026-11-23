@@ -273,6 +273,14 @@ struct AgentStatusMachine {
     private(set) var codexWorked: (at: TimeInterval, process: ProcessInstance?)?
     /// Antigravity's current or last turn (`promptRefusal`).
     private(set) var agyTurn: AgyTurn?
+    /// A dialog Antigravity said waits (`blocked`, its sign-in aside), in a
+    /// turn or before its first: keys answer it until one that answers
+    /// (Enter, a number, Esc, Ctrl-C), the heartbeat dropping a `blocked`
+    /// status at the first.
+    private(set) var agyAnswering = false
+    /// The launch line Nirux typed into an empty shell
+    /// (`PtySession.sendShellLaunchCommand`): the shell's, not a draft.
+    private(set) var shellLaunchLineAt: TimeInterval?
 
     /// A turn of the `agy` `process`, from its first `working` (another
     /// after a dialog, or redrawn, is the same turn's) to `done`, `idle` or
@@ -286,10 +294,6 @@ struct AgentStatusMachine {
         /// How it ended, nil while it runs: `done`, or `idle` when stopped
         /// with Esc, or `error`. A later state (`idle` at a key) keeps it.
         var ended: AgentProgramStatus.State?
-        /// A dialog of it waits: keys answer it until one that answers
-        /// (Enter, a number, Esc, Ctrl-C), the heartbeat dropping a
-        /// `blocked` status at the first.
-        var answering = false
     }
 
     /// What Antigravity reported, when, from which process, and whether its
@@ -1461,8 +1465,8 @@ struct AgentStatusMachine {
         lastInputAt = time
         // So does Antigravity's, which it reports itself (OSC 7501 blocked),
         // while that agy is in front, until a key answers it.
-        let answersAgy = lastForegroundName == CodingAgent.agy.rawValue && agyTurn?.answering == true
-        if answersAgy, keys.map(Self.answersApproval) ?? true { agyTurn?.answering = false }
+        let answersAgy = lastForegroundName == CodingAgent.agy.rawValue && agyAnswering
+        if answersAgy, keys.map(Self.answersApproval) ?? true { agyAnswering = false }
         if inFront == nil, !answersAgy, keys.map(Self.sendsPrompt) ?? true {
             submitKeys = Array((submitKeys + [time]).suffix(Self.promptMemory))
             if byNirux { niruxSubmitKeys = Array((niruxSubmitKeys + [time]).suffix(Self.promptMemory)) }
@@ -1635,9 +1639,10 @@ struct AgentStatusMachine {
             agyTurn = AgyTurn(startedAt: enter ?? time, process: process, saidAt: time)
         } else if turn != nil, turn?.ended == nil {
             agyTurn?.saidAt = time
-            agyTurn?.answering = status.state == .blocked
             if [.done, .idle, .error].contains(status.state) { agyTurn?.ended = status.state }
         }
+        // Before its first turn too: its folder trust screen.
+        agyAnswering = status.state == .blocked && status.kind != "auth" && turn?.ended == nil
         _ = reportedState(isUserFocused: isUserFocused, now: now.timeIntervalSince1970)
         guard !isUserFocused, state == .needsAttention, status.state != .working, status.state != .idle,
               status.kind != "auth" else { return nil }
@@ -1822,6 +1827,10 @@ struct AgentStatusMachine {
         turnFailure?.resumeSentAt = now
     }
 
+    mutating func noteShellLaunchLine(afterDraft: Bool) {
+        shellLaunchLineAt = afterDraft ? nil : lastDraftInputAt
+    }
+
     mutating func noteResumeTyped() {
         turnFailure?.resumeKeystrokeAt = lastDraftInputAt
     }
@@ -1833,6 +1842,8 @@ struct AgentStatusMachine {
         codexStatus = nil
         codexWorked = nil
         agyTurn = nil
+        agyAnswering = false
+        shellLaunchLineAt = nil
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false

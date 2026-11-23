@@ -247,6 +247,18 @@ enum AgyLaunch {
         return nil
     }
 
+    /// Whether `arguments` give agy its first prompt (`-i <prompt>`).
+    static func hasLaunchPrompt(_ arguments: [String]) -> Bool {
+        var args = arguments.makeIterator()
+        while let argument = args.next(), argument != "--" {
+            if ["-i", "--prompt-interactive"].contains(argument) || argument.hasPrefix("-i=") || argument.hasPrefix("--prompt-interactive=") {
+                return true
+            }
+            if optionsWithValue.contains(argument) { _ = args.next() }
+        }
+        return false
+    }
+
     /// Whether `arguments` includes `--continue`, or `-c` when not taking a
     /// shell script argument (such as `exec -a agy /bin/sh -c '...'`).
     static func hasContinueFlag(_ arguments: [String]) -> Bool {
