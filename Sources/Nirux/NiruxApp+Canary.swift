@@ -38,7 +38,7 @@ extension NiruxApp {
             }
             // Whether the view used them shows in what it does next, not here.
             answer("Sent, unconfirmed, to \(route).", false)
-            Self.send(keys, via: route, to: window)
+            send(keys, via: route, to: window)
         case "snapshot":
             answer(Self.snapshotJSON(of: windows), false)
         case "render":
@@ -126,7 +126,7 @@ extension NiruxApp {
     }
 
     /// Command chords off a terminal go to the menus first, as AppKit sends them.
-    static func send(_ keys: [CanaryKey], via route: KeyRoute, to window: NSWindow) {
+    func send(_ keys: [CanaryKey], via route: KeyRoute, to window: NSWindow) {
         for key in keys {
             let events = [NSEvent.EventType.keyDown, .keyUp].compactMap { type in
                 NSEvent.keyEvent(
@@ -138,7 +138,9 @@ extension NiruxApp {
             guard events.count == 2 else { continue }
             switch route {
             case .interceptor:
-                events.forEach(NSApp.sendEvent)
+                // Straight to the interceptor's routing: a synthesized event
+                // for a hidden window may not resolve to it.
+                _ = routeMainWindowKey(events[0])
             case .responder(let responder):
                 if key.modifiers.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: events[0]) == true { continue }
                 responder.keyDown(with: events[0])

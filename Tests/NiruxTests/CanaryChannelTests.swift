@@ -229,7 +229,7 @@ final class CanaryChannelTests: XCTestCase {
 
         XCTAssertTrue(window.makeFirstResponder(text))
         let route = try XCTUnwrap(NiruxApp.keyRoute(interceptorTakesKeys: false, in: window))
-        NiruxApp.send(NiruxApp.keys(typing: "aB"), via: route, to: window)
+        NiruxApp().send(NiruxApp.keys(typing: "aB"), via: route, to: window)
         XCTAssertEqual(text.string, "aB")
     }
 
