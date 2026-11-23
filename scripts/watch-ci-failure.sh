@@ -21,7 +21,7 @@ trap 'rm -rf "$tmp"' EXIT
 api() {
     local delay=5
     until gh api "$2" > "$tmp/$1" 2> "$tmp/error"; do
-        if ! grep -qiE 'HTTP (5[0-9]{2}|429)|rate limit|timeout|connection|EOF|no such host' "$tmp/error" ||
+        if ! grep -qiE 'HTTP (5[0-9]{2}|429)|rate limit|connect|timeout|deadline exceeded|reset by peer|EOF|no such host' "$tmp/error" ||
             (( SECONDS + delay > deadline )); then
             cat "$tmp/error" >&2
             exit 2
@@ -65,7 +65,7 @@ while true; do
         interval=15
     fi
     if (( SECONDS + interval > deadline )); then
-        echo "Run $run still $status after ${timeout}s" >&2
+        echo "No verdict on run $run within ${timeout}s: still $status" >&2
         exit 2
     fi
     sleep "$interval"
