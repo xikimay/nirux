@@ -758,8 +758,8 @@ final class PtySession: @unchecked Sendable {
     }
 
     /// See `AgentStatusMachine.agyFacts`.
-    func agyFacts(now: TimeInterval) -> String {
-        state.machine.agyFacts(now: now)
+    func agyFacts(_ agy: ForegroundProcess?, now: TimeInterval) -> String {
+        state.machine.agyFacts(agy, now: now)
     }
 
     /// See `AgentStatusMachine.codexFacts`.
@@ -767,8 +767,10 @@ final class PtySession: @unchecked Sendable {
         state.machine.codexFacts(now: now)
     }
 
-    func hasAgyTurn(in process: ProcessInstance) -> Bool {
-        state.machine.agyTurn?.process == process
+    /// Whether `process`, the column's `agy`, ran a turn or sits at its
+    /// first prompt (`AgentStatusMachine.agyFirstPromptRefusal`).
+    func hasAgyPrompt(_ process: ForegroundProcess) -> Bool {
+        state.machine.agyTurn?.process == process.instance || state.machine.agyFirstPromptRefusal(process) == nil
     }
 
     func finishedMissionTurn(in foreground: ForegroundProcess, after sentAt: TimeInterval) -> Bool {
@@ -1025,12 +1027,10 @@ final class PtySession: @unchecked Sendable {
         return state.machine.hasDraft
     }
 
-    private var shellLaunchInputAt: TimeInterval?
-
     func sendShellLaunchCommand(_ command: String) {
         let hadDraft = hasPromptDraft
         sendRaw("\(command)\n")
-        shellLaunchInputAt = hadDraft ? nil : state.machine.lastDraftInputAt
+        state.machine.noteShellLaunchLine(afterDraft: hadDraft)
     }
 
     /// A launch line Nirux sent to an empty shell before the worker started
@@ -1038,7 +1038,7 @@ final class PtySession: @unchecked Sendable {
     func taskResumeDraft(foreground: ProcessInstance?) -> TimeInterval? {
         guard !hasExited, hasPromptDraft else { return nil }
         let draft = state.machine.lastDraftInputAt
-        if draft == shellLaunchInputAt, let foreground, draft < foreground.startedAt { return nil }
+        if draft == state.machine.shellLaunchLineAt, let foreground, draft < foreground.startedAt { return nil }
         return draft
     }
 
