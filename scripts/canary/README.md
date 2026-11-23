@@ -1,13 +1,25 @@
 # Packaged app canary
 
-`ghostty-monaco-restore` exercises the release bundle on macOS. Run it from an unlocked graphical login with Command Line Tools installed and Accessibility permission for the launching terminal. It takes keyboard focus during the scenario.
+Exercises the release `Nirux.app` bundle on macOS in strict isolation against synthetic git worktrees and disposable state. Run from an unlocked graphical login with Command Line Tools installed and Accessibility permission for the launching terminal.
 
 ```sh
 swift build -c release
 scripts/bundle.sh 0.0.0 0
 
-# Single or multi-run smoke
-scripts/canary.sh Nirux.app --runs 3 --evidence-dir /tmp/nirux-evidence
+# List registered scenarios and their invariants
+scripts/canary.sh --list-scenarios
+
+# Run a specific scenario, all scenarios, or diff-targeted scenarios
+scripts/canary.sh Nirux.app --scenario ghostty-monaco-restore --evidence-dir /tmp/nirux-evidence
+scripts/canary.sh Nirux.app --scenario multi-agent-routing --evidence-dir /tmp/nirux-multi
+scripts/canary.sh Nirux.app --scenario sidebar-breakpoints --evidence-dir /tmp/nirux-sidebar
+scripts/canary.sh Nirux.app --scenario all --triage --evidence-dir /tmp/nirux-suite
+scripts/canary.sh Nirux.app --diff-base origin/main --triage --evidence-dir /tmp/nirux-diff
+
+# Inspect diff-targeted selection standalone (coverage index + explicit table fallback)
+git diff --no-renames --name-only -z origin/main HEAD | scripts/select-canary-scenarios.sh -z --json
+
+# Failure injection & deterministic replay
 scripts/canary.sh Nirux.app --inject-failure monaco --evidence-dir /tmp/nirux-injection
 scripts/canary.sh --replay /tmp/nirux-evidence/run-001-XXXXXXXX
 
@@ -24,34 +36,63 @@ scripts/canary.sh Nirux.app --qualify 5 --evidence-dir /tmp/nirux-qualify
 /usr/bin/python3 -B -m unittest discover -s scripts/canary -v
 ```
 
-The runner prints a JSON summary line to stdout with the report/triage/qualification path. Use an individual run directory for `--replay`, including after downloading a workflow artifact. Each iteration owns a fresh state folder (`NIRUX_STATE_DIR`), home, git repo, linked worktree, and isolated bundle copy. Replay checks the archived app's SHA-256 and uses its original fixture seed and injection in a new directory. Use evidence from a trusted build since replay executes its binary.
+The runner prints a JSON summary line to stdout with the report/triage/qualification/suite path. Use an individual run directory for `--replay`, including after downloading a workflow artifact. Each iteration owns a fresh state folder (`NIRUX_STATE_DIR`), home, git repo, linked worktree(s), and isolated bundle copy. Replay checks the archived app's SHA-256 and uses its original scenario, fixture seed, and injection in a new directory (supports both v1 and v2 manifests). Use evidence from a trusted build since replay executes its binary.
 
-## What a pass proves
+## Scenarios & step invariants
+
+Scenarios are declared in `scripts/canary/scenarios.py` with explicit step lists, effect steps, and per-step invariants recorded into `report.json` (`steps[].invariants` and `invariantsSummary`).
+
+### 1. `ghostty-monaco-restore` (tier: `core`)
 
 1. The signed, copied bundle launches a real zsh in the synthetic worktree. A PID-targeted keyboard event types a command and the runner verifies its relative file write.
 2. Accessibility presses **Columns → Open Editor**. The worktree's `README.md` is the app's standard starter file. The driver waits for the focused Monaco text area, types a marker and sends ⌘S. The file must acquire precisely that marker and retain its original text.
 3. ⌘1 returns focus to Ghostty. A second shell command must create a different file in the same worktree.
-4. ⌘Q must exit with status zero and release the child processes. The saved active workspace must contain its original terminal and its new editor tab. Relaunch uses the same state without reseeding it. A third shell command and a second edit/save through the restored column prove both are usable. The second launch also quits through AppKit.
+4. ⌘Q must exit with status zero and release all child processes (the quit step waits for zero children) and leave a valid state (`state-json-valid`). The saved active workspace must contain its original terminal and its new editor tab. Relaunch uses the same state without reseeding it. A third shell command and a second edit/save through the restored column prove both are usable.
 
-All input goes to the spawned PID. The driver uses AX to observe the key window and focused editor, and CGEvents for typing and shortcuts. Synchronization waits for the shell prompt, AX state, file contents and process exit. The app runs its normal event loop and persistence path.
+### 2. `multi-agent-routing` (tier: `targeted`)
+
+Exercises two Spaces (`Canary Alpha`, `Canary Beta`), two linked git worktrees, two workspaces with stable `agentUUID`s, and an active Mission between them:
+
+1. Runs a fake `claude` (`FakeAgent.swift`, built on first use and linked under the agent's name, since Nirux knows agents by their kernel process name) in each workspace. It logs every byte it reads, and plays one turn per line through Claude Code's hooks, sent from inside its own terminal.
+2. Types a seeded token into Beta and verifies byte-for-byte arrival in Beta's PTY with zero leakage into Alpha's PTY (`pty-isolation`).
+3. Exercises the packaged binary's own `--mission ask` and `--mission reply --accept` against the isolated `NIRUX_STATE_DIR` (`mission-no-double-delivery`). Then Beta's fake agent asks for a permission: the amber badge must appear, and a whole-word reason must be rendered in the AX tree (`amber-has-reason`).
+4. Switches back to Alpha via **Space → Previous Space**, types Alpha's token, and verifies byte-for-byte arrival in Alpha with zero cross-PTY leak to Beta.
+5. Quits cleanly and checks `state-json-valid`, `mission-no-double-delivery`, and `pty-isolation`.
+
+### 3. `sidebar-breakpoints` (tier: `targeted`)
+
+Metamorphic UI checks across the exact `SidebarFold` breakpoints (`NiruxShellView+SidebarFold.swift`) without brittle pixel golden images:
+
+1. Resizes the canary window via AX across the narrowing sweep `940 → 900 → 899 pt` and verifies stabilization to `expanded`, `expanded`, `folded` (icon rail).
+2. Resizes across the widening hysteresis sweep `899 → 900 → 939 → 940 pt` and verifies the sidebar stays `folded` at `900` and `939` before unfolding at `940`.
+3. Checks `ax-controls-reachable` at every breakpoint: named controls (`Search, Command P`, `Space: ...`, `History` when expanded, `New task` + `Board` when folded) stay enabled, non-empty, and inside the window bounds.
+4. Quits cleanly (verifying auto-fold never overwrote the user's persisted `sidebarExpanded: true`), toggles Reduce Motion (`animatesInterface: false` → `true`), relaunches, repeats the sweep, and asserts metamorphic equivalence of fold states and reachable named controls.
+
+## Diff-targeted selection
+
+`scripts/canary/selection.py` and `scripts/select-canary-scenarios.sh` map changed repository paths to scenarios:
+
+1. **Coverage index first** (`--coverage-index <path>`): reads `<source_path> <scenario_id>` lines (same format as `.build/coverage-index.txt` from `coverage-map.yml`, with `extract_lcov_mappings` for `llvm-cov` LCOV output).
+2. **Explicit path table fallback**: maps sidebar/rail, Mission/hooks/PTY/input, and editor/terminal/persistence globs when no coverage index is present or a changed file is newly added.
+3. **Global triggers & core fallback**: changes to the runner (`scripts/canary/*` but its README, `canary.yml`), the bundle (`Package.swift`, `NiruxCore/Package.swift`, `Resources/Info.plist`, `scripts/bundle.sh`) or `Persistence*.swift` select all scenarios; unmapped runtime sources fall back to `ghostty-monaco-restore`. Pure documentation diffs select zero scenarios and exit `4` (`nothing_selected`), never `pass`.
 
 ## Isolation and evidence
 
 The runner unpacks a copy under `/private/tmp` and launches its executable with the worktree as cwd. The app and fixture git commands start with an explicit environment allowlist. `NIRUX_STATE_DIR` is canonical and private. The temporary home and zsh startup directory, skipped hook installation, empty live-merge override and repo without remotes keep agent and git activity local. Sparkle automatic checks and downloads are disabled for each launch. A macOS sandbox denies outbound IP connections, access to the checkout and SwiftPM build directories, and access to the account's real Nirux state, Claude and Codex directories. This also covers SwiftPM resource accessors that try an absolute build path.
 
-Each run folder contains the exact signed app in `Nirux.app.zip`, a versioned `manifest.json`, `stdout.log`, `stderr.log` and `report.json`. Failures also retain regular files from synthetic state, the observed README when available, and any correlated `.ips` crash reports under `crashes/`. The report records step IDs, elapsed milliseconds, total `durationMs`, the failed step, preflight observations, process records (`pid`, `startedAt`, `endedAt`, `exitCode`, `killedByCleanup`), correlated `crashes`, `crashed` boolean, and failure `fingerprint` / `fingerprintComponents`. A negative exit code identifies a signal. A null key-window observation means preflight stopped before launch.
+All input goes to the spawned PID (`Driver.swift` guards every command on the canary app owning the focused key window). Never captures the global screen or posts synthetic events while another app is focused.
+
+Each run folder contains the exact signed app in `Nirux.app.zip`, a versioned `manifest.json` (v1 or v2), `stdout.log`, `stderr.log` and `report.json`. Failures also retain regular files from synthetic state, the observed README when available, and any correlated `.ips` crash reports under `crashes/`. Multi-scenario invocations also write `<evidence-dir>/suite.json`.
 
 ### Standard mode (`--runs N`) exit codes
 
 | Verdict | Exit | Meaning |
 | --- | --- | --- |
-| `pass` | 0 | Every iteration completed the roundtrip. |
-| `fail` | 1 | A bundle, scenario or cleanup check failed. |
+| `pass` | 0 | Every iteration completed cleanly. |
+| `fail` | 1 | A bundle, scenario, invariant or cleanup check failed. |
 | `infra_unavailable` | 2 | A display, unlocked console, event permission, focused window, CLT or bundle prerequisite was unavailable. |
-
-In a multi-run invocation a failure takes precedence over an infrastructure verdict. The runner traps interrupt, hangup and termination, cleans up, and exits with 128 plus the signal number. The app and its shells hold a run-specific file descriptor, so cleanup can identify a reparented shell without matching a process name. Temporary app copies and fixtures are removed after evidence collection.
-
-Use `--inject-failure preflight` to check failure attribution and replay on a locked machine. For terminal and editor steps, injection sends a wrong marker through the UI and lets the ordinary disk assertion catch it. Other injectable IDs appear in `--help`. An earlier missing prerequisite takes precedence over a later injection.
+| `nothing_selected` | 4 | The diff selected no scenario: nothing ran. |
+| usage error | 64 | Bad arguments or an unreadable `--diff-base`: nothing ran. |
 
 ## Triage mode: reproduction, classification & crash investigation
 
@@ -70,59 +111,13 @@ Pass `--triage` (or `--repro-runs N`, default `2`) to run deterministic triage:
 | `intermittent` (with crash) | 1 | Failed initially or partially with at least one observed crash (e.g. a 1-of-3 crash). | **Always Yes** (`single_crash_observed` / `multiple_crashes_observed`) |
 | `intermittent` (no crash) | 3 | Failed initially, passed on at least one fresh replay (or failed on a different surface/assertion) with no crash observed. | No |
 
-An observed crash is never silently dropped: even a 1-of-3 crash opens `<triage-dir>/investigation/investigation.json`, copies matched `.ips` files into `<triage-dir>/investigation/crashes/`, records the crash fingerprint in the incident ledger, and exits with code `1`.
+## Fingerprints, incident history, `.ips` correlation & qualification
 
-## Fingerprints & append-safe incident history
-
-Every non-passing run computes a deterministic fingerprint (`fp-<16-hex>`) from:
-
-```json
-{
-  "version": 1,
-  "scenario": "ghostty-monaco-restore",
-  "surface": "<failedStep>",
-  "errorKind": "<normalized assertion or crash:EXC:SIG>",
-  "frames": ["<image>:<normalized_symbol>", "..."]
-}
-```
-
-Normalization strips variable PIDs, temporary paths (`/private/tmp/nirux-*`, `/var/folders/.../T/...`), timestamps, UUIDs/seed tokens, and hex memory addresses (`0x...`), and drops raw symbol/image offsets from crash frames.
-
-The supervisor persists an append-safe incident ledger outside the mutable repo checkout (configurable via `--history-dir` or `NIRUX_CANARY_HISTORY_DIR`; defaults to `<tmpdir>/nirux-canary-history`):
-
-- `ledger.lock`: advisory `fcntl.flock` mutex preventing concurrent writers from corrupting state.
-- `events.jsonl`: append-only NDJSON event log (`O_APPEND` + `fsync`).
-- `incidents.json`: atomically replaced (`tempfile` + `fsync` + `os.replace`) materialized index (rebuildable from `events.jsonl`) tracking:
-  - Per-scenario `lastGreen` (`runId`, `timestamp`, `commit`, `bundleSHA256`).
-  - Per-fingerprint `firstSeen`, `lastSeen`, `occurrences`, `status` (`open`, `resolved`, `reopened`, `infra`), `counts` (`regression`, `intermittent`, `infra_unavailable`), `crashCount`, `lastKnownGreen`, `reopenCount`, and recent run `history`.
-  - A confirmed `pass` for a scenario updates `lastGreen` and transitions open/reopened incidents for that scenario to `resolved`. If the same fingerprint reappears after a confirmed green run, its status transitions to `reopened` (`reopened: true`, `reopenCount += 1`). `infra_unavailable` events never resolve open product bugs or falsely reopen resolved bugs.
-
-Pass `--commit <sha>` (or set `GITHUB_SHA`) to tag ledger entries; otherwise the runner attempts `git rev-parse HEAD`.
-
-## External `.ips` crash report correlation
-
-When any launched Nirux process exits unexpectedly (`exitCode != 0` and not `killedByCleanup`), the external Python supervisor scans `--crash-reports-dir` (defaulting to the real account's `~/Library/Logs/DiagnosticReports`, independent of in-app `CrashReportScanner`):
-
-- Filters for crash `.ips` reports (`bug_type == "309"`), matching process name (`Nirux`) and bundle ID (`com.xikimay.nirux`).
-- Correlates by PID (when present in the `.ips`) and launch/crash time window around the process's `startedAt`..`endedAt`.
-- Deduplicates duplicate incident files (preferring complete-body reports), copies matched `.ips` files into `<evidence>/crashes/`, and extracts top normalized frames (prioritizing `lastExceptionBacktrace`, faulting thread top frames, and the earliest `Nirux` app frames below runtime traps) into `report.json` and the failure fingerprint.
-
-## Qualification / soak check (`--qualify N`)
-
-Inspired by `flake-gate.yml`, `--qualify N` runs `N` consecutive isolated canary iterations and writes `<evidence-dir>/qualification.json`:
-
-- `qualified`: `true` iff all `N` consecutive runs passed cleanly (`passRate == 1.0`, exit `0`).
-- `verdict`: `qualified` (exit `0`), `infra_unavailable` (exit `2` when no failures occurred and infra blocked runs), or `unqualified` (exit `1`).
-- `passRate`, `passedRuns`, `failedRuns`, `infraRuns`, `consecutiveCleanPasses`, `longestCleanStreak`.
-- `timing` and per-step `stepTiming`: `count`, `minMs`, `maxMs`, `meanMs`, `medianMs`, `varianceMs`, `stddevMs`, `p95Ms`, `cv`.
-
-## Key JSON schemas
-
-- `report.json` (per attempt): `version`, `scenario`, `seed`, `bundleSHA256`, `verdict`, `failedStep`, `durationMs`, `steps`, `preflight`, `processes`, `crashes`, `crashed`, `fingerprint`, `fingerprintComponents`, `replay`.
-- `triage.json` (per `--triage` session): `version`, `runId`, `scenario`, `commit`, `bundleSHA256`, `classification`, `fingerprint`, `fingerprintComponents`, `hasCrash`, `crashCount`, `crashFingerprints`, `totalAttempts`, `replayCounts`, `investigationRequired`, `investigationReason`, `reopened`, `lastGreen`, `investigation`, `ledger`, `incident`, `attempts`.
-- `investigation/investigation.json`: `version`, `opened`, `reason`, `classification`, `fingerprint`, `fingerprintComponents`, `crashCount`, `totalAttempts`, `crashFingerprints`, `crashes`, `attempts`, `incident`.
-- `qualification.json`: `version`, `scenario`, `requestedRuns`, `completedRuns`, `passedRuns`, `failedRuns`, `infraRuns`, `consecutiveCleanPasses`, `longestCleanStreak`, `passRate`, `qualified`, `verdict`, `timing`, `stepTiming`, `runs`.
+- Deterministic fingerprint (`fp-<16-hex>`) over `(scenario, surface, errorKind, normalized_frames)`, stripping variable PIDs, temp paths, timestamps, UUIDs, seed tokens, and hex addresses.
+- Append-safe incident ledger outside the checkout (`ledger.lock`, `events.jsonl`, atomic `incidents.json`), tracking per-scenario `lastGreen`, deduplicated incidents, resolution on confirmed pass, and reopening on reappearance.
+- External `.ips` crash correlation from `--crash-reports-dir` (default `~/Library/Logs/DiagnosticReports`), independent of in-app `CrashReportScanner`.
+- `--qualify N` runs `N` consecutive isolated iterations and writes `qualification.json` with pass rate and per-step timing statistics.
 
 ## Workflow
 
-**Packaged app canary** (`.github/workflows/canary.yml`) is a manual Actions workflow supporting both `triage` (default) and `qualify` modes. It builds ad hoc, runs the canary runner unit tests, executes the canary, and uploads evidence and history artifacts even on failure. A hosted runner without an interactive desktop records an inconclusive `infra_unavailable` result in the job summary. The runner unit tests also run on every PR in `.github/workflows/tests.yml`.
+**Packaged app canary** (`.github/workflows/canary.yml`) is a manual Actions workflow supporting `triage` and `qualify` modes and single-scenario, `all`, or diff-targeted `selected` execution. It stays outside PR triggers to respect the 5-job macOS CI concurrency cap. The runner unit tests run on every PR in `.github/workflows/tests.yml` (job `core`).

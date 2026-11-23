@@ -1,4 +1,4 @@
-"""Run the packaged Ghostty/Monaco roundtrip. Python 3.9+, macOS."""
+"""Run packaged Nirux canary scenarios. Python 3.9+, macOS."""
 import argparse
 import contextlib
 import hashlib
@@ -26,6 +26,17 @@ from crash_correlator import (  # noqa: E402
 )
 from history import default_history_dir, IncidentLedger  # noqa: E402
 from qualify import evaluate_qualification, qualification_exit_code  # noqa: E402
+from scenarios import (  # noqa: E402
+    check_state_json_valid,
+    DEFAULT_SCENARIO,
+    get_scenario,
+    list_scenarios,
+    record_step_invariants,
+    run_multi_agent_routing,
+    run_sidebar_breakpoints,
+    SCENARIOS,
+)
+from selection import select_scenarios  # noqa: E402
 from triage import (  # noqa: E402
     attempt_has_crash,
     classify_attempts,
@@ -35,12 +46,34 @@ from triage import (  # noqa: E402
     triage_exit_code,
 )
 
-SCENARIO = "ghostty-monaco-restore"
-STEPS = ("bundle", "fixture", "preflight", "launch", "ghostty", "monaco",
-         "focus-back", "quit", "restore", "final-quit")
-EFFECT_STEPS = {"ghostty", "monaco", "focus-back", "restore"}
+SCENARIO = DEFAULT_SCENARIO
+STEPS = SCENARIOS[SCENARIO].steps
+EFFECT_STEPS = set(SCENARIOS[SCENARIO].effect_steps)
+ALL_INJECTABLE_STEPS = tuple(dict.fromkeys(
+    step_id for spec in list_scenarios() for step_id in spec.injectable_steps
+))
 INFRA = "infra_unavailable"
 DEFAULT_CRASH_WAIT_SECONDS = 2.0
+
+
+NOTHING_SELECTED = "nothing_selected"
+EXIT_NOTHING_SELECTED = 4
+EXIT_USAGE = 64
+# Reachable only with the canary in front: posted keys and its key window.
+FOCUS_PREREQUISITES = frozenset({"unlocked", "postEvents"})
+
+
+def missing_prerequisites(probes, requires_focus):
+    return [key for key, available in probes.items()
+            if not available and (requires_focus or key not in FOCUS_PREREQUISITES)]
+
+
+class UsageParser(argparse.ArgumentParser):
+    """Bad arguments exit EXIT_USAGE, never 2, which means infra_unavailable."""
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        self.exit(EXIT_USAGE, f"{self.prog}: error: {message}\n")
 
 
 class InfrastructureError(RuntimeError):
@@ -92,22 +125,42 @@ def fixture(work, env, seed):
     (work / "home/.zshrc").write_text('precmd() { print -r -- $$ > "$NIRUX_STATE_DIR/prompt"; }\n')
 
 
-def manifest(seed, injection):
-    return {"version": 1, "scenario": SCENARIO, "seed": seed, "injectFailure": injection,
-            "fixture": {"branch": "canary", "file": "README.md"}}
+def manifest(seed, injection, scenario=SCENARIO):
+    spec = get_scenario(scenario)
+    if spec.id == SCENARIO:
+        return {"version": 1, "scenario": spec.id, "seed": seed, "injectFailure": injection,
+                "fixture": {"branch": "canary", "file": "README.md"}}
+    return {
+        "version": 2,
+        "scenario": spec.id,
+        "seed": seed,
+        "injectFailure": injection,
+        "invariants": list(spec.invariants),
+        "fixture": {"scenario": spec.id},
+    }
 
 
-def read_replay(directory):
+def read_replay_manifest(directory):
+    """Read a v1 or v2 canary manifest and verify the archived bundle's SHA-256."""
     data = json.loads((directory / "manifest.json").read_text())
-    if data["version"] != 1 or data["scenario"] != SCENARIO:
+    version = data.get("version")
+    scenario_id = data.get("scenario")
+    if version not in (1, 2) or scenario_id not in SCENARIOS:
         raise ValueError("unsupported canary manifest")
+    spec = get_scenario(scenario_id)
     seed = str(uuid.UUID(data["seed"]))
     injection = data["injectFailure"]
-    if injection is not None and injection not in STEPS:
+    if injection is not None and injection not in spec.steps:
         raise ValueError("unknown injection in manifest")
     archive = directory / "Nirux.app.zip"
     if checksum(archive) != data["bundleSHA256"]:
         raise ValueError("bundle checksum differs from the recorded run")
+    return spec.id, seed, injection, archive
+
+
+def read_replay(directory):
+    """Backward-compatible replay reader returning (seed, injection, archive)."""
+    _, seed, injection, archive = read_replay_manifest(directory)
     return seed, injection, archive
 
 
@@ -121,16 +174,32 @@ def checksum(path):
 
 class Report:
     def __init__(self, metadata):
+        scenario_id = metadata.get("scenario") or SCENARIO
+        spec = SCENARIOS.get(scenario_id)
+        self._effect_steps = set(spec.effect_steps) if spec else EFFECT_STEPS
+        self._active_step = None
         self.data = dict(metadata, verdict="pass", failedStep=None, steps=[],
                          preflight={"keyWindow": None}, processes=[], crashes=[],
-                         crashed=False)
+                         crashed=False, invariantsSummary={"checked": 0, "failed": 0})
+
+    def record_invariants(self, step_id, records):
+        target = self._active_step
+        if target is None or target.get("id") != step_id:
+            target = next((s for s in reversed(self.data["steps"]) if s.get("id") == step_id), None)
+        if target is not None:
+            target.setdefault("invariants", []).extend(records)
+        summary = self.data["invariantsSummary"]
+        summary["checked"] += len(records)
+        summary["failed"] += sum(1 for r in records if not r.get("passed"))
 
     @contextlib.contextmanager
     def step(self, name):
         start = time.monotonic()
         row = {"id": name, "verdict": "pass"}
+        prev_active = self._active_step
+        self._active_step = row
         try:
-            if name == self.data["injectFailure"] and name not in EFFECT_STEPS:
+            if name == self.data["injectFailure"] and name not in self._effect_steps:
                 raise RuntimeError("injected failure")
             yield
         except Exception as error:
@@ -141,6 +210,7 @@ class Report:
         finally:
             row["durationMs"] = round((time.monotonic() - start) * 1000)
             self.data["steps"].append(row)
+            self._active_step = prev_active
 
 
 def wait_for(description, condition, alive=lambda: None, timeout=20):
@@ -166,6 +236,29 @@ class App:
         self.process = None
         self.lease = work / "children"
         self.lease.touch()
+
+    def fake_agent(self, name):
+        """A fake agent binary named `name` (FakeAgent.swift), built on first use."""
+        binary = self.work / "agents/fake-agent"
+        if not binary.exists():
+            binary.parent.mkdir(exist_ok=True)
+            subprocess.run(["/usr/bin/swiftc", HERE / "FakeAgent.swift", "-o", binary], check=True, timeout=120)
+        link = binary.parent / name
+        if not link.exists():
+            os.link(binary, link)
+        return link
+
+    def preflight(self, requires_focus):
+        try:
+            subprocess.run(["/usr/bin/swiftc", HERE / "Driver.swift", "-o", self.driver],
+                           check=True, timeout=90)
+        except FileNotFoundError as error:
+            raise InfrastructureError("Command Line Tools (swiftc) unavailable") from error
+        probes = json.loads(subprocess.check_output([self.driver, "preflight"], env=self.env, timeout=10))
+        self.report.data["preflight"].update(probes)
+        missing = missing_prerequisites(probes, requires_focus)
+        if missing:
+            raise InfrastructureError("requires " + ", ".join(missing))
 
     def launch(self):
         real_home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
@@ -219,6 +312,26 @@ class App:
         if not probe or result.returncode not in (0, 1, 3):
             result.check_returncode()
         return result.returncode == 0
+
+    def drive_json(self, action, *args):
+        self.alive()
+        result = subprocess.run([self.driver, action, str(self.process.pid), *args],
+                                cwd=self.work, env=self.env, capture_output=True, text=True, timeout=15)
+        self.alive()
+        if result.returncode == 3:
+            self.report.data["preflight"]["keyWindow"] = False
+            raise InfrastructureError("the canary lost its key window")
+        result.check_returncode()
+        return json.loads(result.stdout)
+
+    def window_frame(self):
+        return self.drive_json("window-frame")
+
+    def resize_window(self, width, height):
+        return self.drive_json("resize-window", str(width), str(height))
+
+    def ax_controls(self):
+        return self.drive_json("ax-controls")
 
     def check_window(self):
         if not self.drive("window", probe=True):
@@ -335,6 +448,36 @@ def snapshot(work, evidence):
         shutil.copyfile(file, evidence / "README.observed.md")
 
 
+def _run_ghostty_monaco_restore(app, work, report, step, seed, injection):
+    with step("fixture"):
+        fixture(work, app.env, seed)
+    with step("preflight"):
+        app.preflight(SCENARIOS["ghostty-monaco-restore"].requires_focus)
+    with step("launch"):
+        app.launch()
+    with step("ghostty"):
+        app.shell_marker("first", seed, injection == "ghostty")
+    with step("monaco"):
+        app.drive("open-editor")
+        app.edit("edit" + seed.replace("-", ""), injection == "monaco")
+    with step("focus-back"):
+        app.drive("terminal")
+        app.shell_marker("second", seed, injection == "focus-back")
+    with step("quit"):
+        app.quit()
+        verify_layout(work, seed)
+        record_step_invariants(report, "quit", [
+            ("state-json-valid", *check_state_json_valid(work / "state", expected_active_id=seed)),
+        ])
+    with step("restore"):
+        app.launch()
+        app.shell_marker("restored", seed, injection == "restore")
+        app.drive("editor")
+        app.edit("restored" + seed.replace("-", ""))
+    with step("final-quit"):
+        app.quit()
+
+
 def iteration(
     work,
     evidence,
@@ -349,6 +492,8 @@ def iteration(
     bundle_id=DEFAULT_BUNDLE_ID,
 ):
     started = time.monotonic()
+    scenario_id = metadata.get("scenario") or SCENARIO
+    get_scenario(scenario_id)
     report = Report(metadata)
     app = App(work, evidence, report, check_interrupt)
     seed = metadata["seed"]
@@ -370,39 +515,14 @@ def iteration(
         with step("bundle"):
             package(work, evidence, source, replay, metadata)
             report.data["bundleSHA256"] = metadata["bundleSHA256"]
-        with step("fixture"):
-            fixture(work, app.env, seed)
-        with step("preflight"):
-            try:
-                subprocess.run(["/usr/bin/swiftc", HERE / "Driver.swift", "-o", app.driver],
-                               check=True, timeout=90)
-            except FileNotFoundError as error:
-                raise InfrastructureError("Command Line Tools (swiftc) unavailable") from error
-            probes = json.loads(subprocess.check_output([app.driver, "preflight"], env=app.env, timeout=10))
-            report.data["preflight"].update(probes)
-            missing = [key for key, available in probes.items() if not available]
-            if missing:
-                raise InfrastructureError("requires " + ", ".join(missing))
-        with step("launch"):
-            app.launch()
-        with step("ghostty"):
-            app.shell_marker("first", seed, injection == "ghostty")
-        with step("monaco"):
-            app.drive("open-editor")
-            app.edit("edit" + seed.replace("-", ""), injection == "monaco")
-        with step("focus-back"):
-            app.drive("terminal")
-            app.shell_marker("second", seed, injection == "focus-back")
-        with step("quit"):
-            app.quit()
-            verify_layout(work, seed)
-        with step("restore"):
-            app.launch()
-            app.shell_marker("restored", seed, injection == "restore")
-            app.drive("editor")
-            app.edit("restored" + seed.replace("-", ""))
-        with step("final-quit"):
-            app.quit()
+        if scenario_id == "ghostty-monaco-restore":
+            _run_ghostty_monaco_restore(app, work, report, step, seed, injection)
+        elif scenario_id == "multi-agent-routing":
+            run_multi_agent_routing(app, work, report, step, seed, injection, wait_for)
+        elif scenario_id == "sidebar-breakpoints":
+            run_sidebar_breakpoints(app, work, report, step, seed, injection, wait_for)
+        else:
+            raise ValueError(f"unsupported scenario {scenario_id!r}")
     except Exception:
         if report.data["failedStep"] is None:
             raise
@@ -462,6 +582,19 @@ def detect_commit(explicit_commit=None):
     except (OSError, subprocess.SubprocessError):
         pass
     return None
+
+
+def detect_changed_files_from_git(diff_base, repo=HERE.parents[1]):
+    """What HEAD changed since it left diff_base: the diff from their merge base."""
+    result = subprocess.run(
+        ["/usr/bin/git", "diff", "--no-renames", "--name-only", "-z", f"{diff_base}...HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=15,
+    )
+    return [item for item in result.stdout.split("\0") if item]
 
 
 def run_triage(
@@ -635,14 +768,53 @@ def run_qualification(
     return summary
 
 
+def combine_exit_codes(codes):
+    """Combine per-scenario exit codes: 1 (regression/fail) > 3 (intermittent) > 2 (infra) > 0 (pass)."""
+    if not codes:
+        return 0
+    if 1 in codes:
+        return 1
+    if 3 in codes:
+        return 3
+    if 2 in codes:
+        return 2
+    return 0
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    inputs = parser.add_mutually_exclusive_group(required=True)
+    parser = UsageParser(description=__doc__)
+    inputs = parser.add_mutually_exclusive_group(required=False)
     inputs.add_argument("app", type=Path, nargs="?")
     inputs.add_argument("--replay", type=Path, help="a run directory containing manifest.json and Nirux.app.zip")
+    parser.add_argument("--list-scenarios", action="store_true", help="print registered canary scenarios as JSON and exit")
+    parser.add_argument(
+        "--scenario",
+        type=str,
+        default=None,
+        choices=[*(s.id for s in list_scenarios()), "all"],
+        help=f"scenario to run, or 'all' (default: {SCENARIO})",
+    )
+    parser.add_argument(
+        "--changed-files",
+        type=Path,
+        default=None,
+        help="file listing changed repository paths (one per line) for diff-targeted scenario selection",
+    )
+    parser.add_argument(
+        "--diff-base",
+        type=str,
+        default=None,
+        help="git ref to diff against HEAD for diff-targeted scenario selection",
+    )
+    parser.add_argument(
+        "--coverage-index",
+        type=Path,
+        default=None,
+        help="optional '<source> <scenario>' coverage index for diff-targeted selection",
+    )
     parser.add_argument("--evidence-dir", type=Path, help="parent directory for new run directories")
     parser.add_argument("--runs", type=int, default=1)
-    parser.add_argument("--inject-failure", choices=STEPS[1:])
+    parser.add_argument("--inject-failure", choices=ALL_INJECTABLE_STEPS)
     parser.add_argument(
         "--triage",
         action="store_true",
@@ -681,6 +853,13 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.list_scenarios:
+        print(json.dumps([spec.to_dict() for spec in list_scenarios()], indent=2, sort_keys=True))
+        return 0
+
+    if not args.app and not args.replay:
+        parser.error("one of the arguments app --replay is required")
+
     triage_mode = args.triage or (args.repro_runs is not None)
     repro_runs = 2 if args.repro_runs is None else args.repro_runs
 
@@ -694,18 +873,50 @@ def main():
         parser.error("--triage/--repro-runs and --qualify are mutually exclusive")
     if (triage_mode or args.qualify is not None) and args.runs != 1:
         parser.error("--runs cannot be combined with --triage or --qualify")
+    if args.changed_files and args.diff_base:
+        parser.error("--changed-files and --diff-base are mutually exclusive")
+    if args.scenario and (args.changed_files or args.diff_base):
+        parser.error("--scenario cannot be combined with --changed-files or --diff-base")
 
+    selection_info = None
     if args.replay:
         try:
-            seed, injection, source = read_replay(args.replay.resolve())
+            replay_scenario, seed, injection, source = read_replay_manifest(args.replay.resolve())
         except (OSError, KeyError, TypeError, ValueError) as error:
             parser.error(str(error))
         if args.inject_failure is not None:
             parser.error("replay uses the injection recorded in the manifest")
+        if args.scenario is not None or args.changed_files is not None or args.diff_base is not None:
+            parser.error("replay uses the scenario recorded in the manifest")
+        selected_scenarios = [replay_scenario]
     else:
         seed, injection, source = None, args.inject_failure, args.app.resolve()
         if source.name != "Nirux.app" or not source.is_dir():
             parser.error("provide a packaged Nirux.app directory")
+        if args.changed_files or args.diff_base:
+            if args.changed_files:
+                paths = [line.strip() for line in args.changed_files.read_text(encoding="utf-8").splitlines() if line.strip()]
+            else:
+                try:
+                    paths = detect_changed_files_from_git(args.diff_base)
+                except (OSError, subprocess.SubprocessError) as error:
+                    parser.error(f"failed to read git diff from {args.diff_base}: {error}")
+            selection_info = select_scenarios(
+                paths,
+                available_scenarios=[s.id for s in list_scenarios()],
+                coverage_index=args.coverage_index,
+            )
+            selected_scenarios = selection_info["scenarios"]
+        elif args.scenario == "all":
+            selected_scenarios = [s.id for s in list_scenarios()]
+        else:
+            selected_scenarios = [args.scenario or SCENARIO]
+
+    if injection is not None:
+        for scenario_id in selected_scenarios:
+            spec = get_scenario(scenario_id)
+            if injection not in spec.injectable_steps:
+                parser.error(f"--inject-failure {injection!r} is not valid for scenario {scenario_id!r}")
 
     interrupted = []
 
@@ -719,82 +930,136 @@ def main():
     evidence_root.mkdir(parents=True, exist_ok=True)
     crash_dir = args.crash_reports_dir.resolve() if args.crash_reports_dir else None
 
-    def execute_single(evidence_dir, run_source, is_archive_replay):
+    if not selected_scenarios:
+        suite_path = evidence_root.resolve() / "suite.json"
+        payload = {"version": 1, "scenarios": [], "selection": selection_info, "verdict": NOTHING_SELECTED}
+        write_json(suite_path, payload)
+        print(json.dumps({"verdict": NOTHING_SELECTED, "scenarios": [], "suite": str(suite_path)}), flush=True)
+        return EXIT_NOTHING_SELECTED
+
+    def execute_single(scenario_id, evidence_dir, run_source, is_archive_replay):
         with tempfile.TemporaryDirectory(dir="/private/tmp", prefix="nirux-canary-") as folder:
             iteration(
                 Path(folder),
                 evidence_dir,
                 run_source,
                 is_archive_replay,
-                manifest(seed or str(uuid.uuid4()), injection),
+                manifest(seed or str(uuid.uuid4()), injection, scenario=scenario_id),
                 check_interrupt,
                 crash_reports_dir=crash_dir,
             )
         return json.loads((evidence_dir / "report.json").read_text(encoding="utf-8"))
 
-    if triage_mode:
-        triage_dir = Path(tempfile.mkdtemp(dir=evidence_root.resolve(), prefix="triage-"))
-        history_dir = args.history_dir.resolve() if args.history_dir else default_history_dir()
-        ledger = IncidentLedger(history_dir)
-        commit = detect_commit(args.commit)
+    multi_scenario = len(selected_scenarios) > 1 or selection_info is not None
 
-        def execute_attempt(label, attempt_dir, archive_override):
-            use_source = archive_override if archive_override is not None else source
-            is_archive = bool(args.replay) or (archive_override is not None)
-            return execute_single(attempt_dir, use_source, is_archive)
+    def run_for_scenario(scenario_id, target_root):
+        if triage_mode:
+            triage_dir = Path(tempfile.mkdtemp(dir=target_root.resolve(), prefix="triage-"))
+            history_dir = args.history_dir.resolve() if args.history_dir else default_history_dir()
+            ledger = IncidentLedger(history_dir)
+            commit = detect_commit(args.commit)
 
-        summary = run_triage(
-            execute_attempt,
-            triage_dir,
-            repro_runs=repro_runs,
-            ledger=ledger,
-            commit=commit,
-            scenario=SCENARIO,
-            is_interrupted=lambda: bool(interrupted),
-        )
-        print(json.dumps({
-            "classification": summary["classification"],
-            "fingerprint": summary["fingerprint"],
-            "hasCrash": summary["hasCrash"],
-            "reopened": summary["reopened"],
-            "investigation": summary["investigation"],
-            "triage": str(triage_dir / "triage.json"),
-        }), flush=True)
+            def execute_attempt(label, attempt_dir, archive_override):
+                use_source = archive_override if archive_override is not None else source
+                is_archive = bool(args.replay) or (archive_override is not None)
+                return execute_single(scenario_id, attempt_dir, use_source, is_archive)
+
+            summary = run_triage(
+                execute_attempt,
+                triage_dir,
+                repro_runs=repro_runs,
+                ledger=ledger,
+                commit=commit,
+                scenario=scenario_id,
+                is_interrupted=lambda: bool(interrupted),
+            )
+            line = {
+                "scenario": scenario_id,
+                "classification": summary["classification"],
+                "fingerprint": summary["fingerprint"],
+                "hasCrash": summary["hasCrash"],
+                "reopened": summary["reopened"],
+                "investigation": summary["investigation"],
+                "triage": str(triage_dir / "triage.json"),
+            }
+            if not multi_scenario:
+                del line["scenario"]
+            print(json.dumps(line), flush=True)
+            code = triage_exit_code(summary["classification"], has_crash=summary["hasCrash"])
+            return code, dict(line, scenario=scenario_id)
+
+        if args.qualify is not None:
+            summary = run_qualification(
+                lambda index, run_dir: execute_single(scenario_id, run_dir, source, bool(args.replay)),
+                target_root,
+                qualify_runs=args.qualify,
+                scenario=scenario_id,
+                is_interrupted=lambda: bool(interrupted),
+            )
+            line = {
+                "scenario": scenario_id,
+                "verdict": summary["verdict"],
+                "qualified": summary["qualified"],
+                "passRate": summary["passRate"],
+                "passedRuns": summary["passedRuns"],
+                "requestedRuns": summary["requestedRuns"],
+                "timing": summary["timing"],
+                "qualification": str(target_root.resolve() / "qualification.json"),
+            }
+            if not multi_scenario:
+                del line["scenario"]
+            print(json.dumps(line), flush=True)
+            return qualification_exit_code(summary), dict(line, scenario=scenario_id)
+
+        verdicts = []
+        reports = []
+        for index in range(args.runs):
+            evidence = Path(tempfile.mkdtemp(dir=target_root.resolve(), prefix=f"run-{index + 1:03d}-"))
+            report_data = execute_single(scenario_id, evidence, source, bool(args.replay))
+            verdict = report_data["verdict"]
+            line = {"verdict": verdict, "report": str(evidence / "report.json")}
+            if multi_scenario:
+                line["scenario"] = scenario_id
+            print(json.dumps(line), flush=True)
+            verdicts.append(verdict)
+            reports.append(str(evidence / "report.json"))
+            if interrupted:
+                break
+        code = 1 if "fail" in verdicts else 2 if INFRA in verdicts else 0
+        return code, {"scenario": scenario_id, "verdicts": verdicts, "reports": reports}
+
+    if not multi_scenario:
+        code, _ = run_for_scenario(selected_scenarios[0], evidence_root)
         if interrupted:
             return 128 + interrupted[0]
-        return triage_exit_code(summary["classification"], has_crash=summary["hasCrash"])
+        return code
 
-    if args.qualify is not None:
-        summary = run_qualification(
-            lambda index, run_dir: execute_single(run_dir, source, bool(args.replay)),
-            evidence_root,
-            qualify_runs=args.qualify,
-            scenario=SCENARIO,
-            is_interrupted=lambda: bool(interrupted),
-        )
-        print(json.dumps({
-            "verdict": summary["verdict"],
-            "qualified": summary["qualified"],
-            "passRate": summary["passRate"],
-            "passedRuns": summary["passedRuns"],
-            "requestedRuns": summary["requestedRuns"],
-            "timing": summary["timing"],
-            "qualification": str(evidence_root.resolve() / "qualification.json"),
-        }), flush=True)
+    codes = []
+    results = []
+    for scenario_id in selected_scenarios:
+        scenario_root = evidence_root.resolve() / scenario_id
+        scenario_root.mkdir(parents=True, exist_ok=True)
+        code, record = run_for_scenario(scenario_id, scenario_root)
+        codes.append(code)
+        results.append(dict(record, exitCode=code))
         if interrupted:
             return 128 + interrupted[0]
-        return qualification_exit_code(summary)
 
-    verdicts = []
-    for index in range(args.runs):
-        evidence = Path(tempfile.mkdtemp(dir=evidence_root.resolve(), prefix=f"run-{index + 1:03d}-"))
-        report_data = execute_single(evidence, source, bool(args.replay))
-        verdict = report_data["verdict"]
-        print(json.dumps({"verdict": verdict, "report": str(evidence / "report.json")}), flush=True)
-        verdicts.append(verdict)
-        if interrupted:
-            return 128 + interrupted[0]
-    return 1 if "fail" in verdicts else 2 if INFRA in verdicts else 0
+    final_code = combine_exit_codes(codes)
+    suite_path = evidence_root.resolve() / "suite.json"
+    write_json(suite_path, {
+        "version": 1,
+        "scenarios": selected_scenarios,
+        "selection": selection_info,
+        "results": results,
+        "exitCode": final_code,
+    })
+    print(json.dumps({
+        "scenarios": selected_scenarios,
+        "exitCode": final_code,
+        "suite": str(suite_path),
+    }), flush=True)
+    return final_code
 
 
 if __name__ == "__main__":
