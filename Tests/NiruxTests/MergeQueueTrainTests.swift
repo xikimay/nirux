@@ -126,7 +126,8 @@ final class MergeQueueTrainTests: XCTestCase {
         XCTAssertEqual(reason.message, "#14 moved to ccccccc after train #900’s last check: the train landed bbbbbbb, and #14 stays "
             + "open with the commits after it.")
         XCTAssertEqual(queue.engine.entries.map(\.step), [.done, .stopped(reason)])
-        XCTAssertFalse(queue.notes.contains { $0.message.contains("read merged") })
+        XCTAssertTrue(queue.notes.contains { $0.message == "#12 read merged" })
+        XCTAssertTrue(queue.notes.contains { $0.message == "The nightly of train #900 succeeded" }, "the landed train's run is still read")
     }
 
     func testStopWhileComposingStopsTheWholeTrain() throws {
@@ -194,6 +195,16 @@ final class MergeQueueTrainTests: XCTestCase {
         XCTAssertEqual(second.mutations.count, 4, "no merge of the train")
     }
 
+    func testARefusedMergeOfTheTrainNamesItsPullRequestToClose() throws {
+        var github = TrainGitHub(world: world())
+        github.refusesMerge = true
+        var queue = queue()
+        queue.drive(&github)
+        let reason = try XCTUnwrap(queue.stopReason)
+        XCTAssertEqual(reason.kind, .merge)
+        XCTAssertTrue(reason.message.hasSuffix("Train #900 stays open on GitHub: close it rather than merge it."), reason.message)
+    }
+
     func testADryRunStopsBeforeCreatingTheTrainsBranch() {
         var queue = queue()
         XCTAssertEqual(queue.run(world()), .createBranch(name: branch, commit: MQ.sha("0")))
@@ -218,6 +229,16 @@ final class MergeQueueTrainTests: XCTestCase {
         XCTAssertTrue(message.hasSuffix("was sent but not answered: check train #900 on GitHub."), message)
         XCTAssertEqual(saved.entries.map(\.step), [.stopped(try XCTUnwrap(saved.stopReason)), .stopped(try XCTUnwrap(saved.stopReason))])
 
+        var waiting = self.queue()
+        var github2 = TrainGitHub(world: world())
+        while case .read(let reads, _)? = waiting.engine.request?.action, !reads.contains(.checks(TrainGitHub.commit(2))) {
+            waiting.answer(github2.world)
+            if let mutation = waiting.pendingMutation { waiting.mutated(github2.apply(mutation)) }
+        }
+        let waitingSaved = MergeQueue.SavedQueue(engine: waiting.engine, dryRun: false, savedAt: Date()).interrupted()
+        XCTAssertEqual(waitingSaved.stopReason?.message, "Interrupted while waiting for the checks of train #900: Nirux quit. "
+            + "Train #900 stays open on GitHub: close it rather than merge it.")
+
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("train-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
         saved.save(to: url)
@@ -231,6 +252,13 @@ final class MergeQueueTrainTests: XCTestCase {
             + "commits, which a squash would replace.")
         let merge = MergeQueue.confirmation(MergeQueue.ConfirmationReading(settings: MQ.settings(), isDryRun: false))
         XCTAssertNil(merge.refusal(for: .train))
+
+        var red = MergeQueue.ConfirmationReading.Candidate(number: 14)
+        red.checks = MQ.checks(MQ.checkRun(id: 2, conclusion: "FAILURE"))
+        XCTAssertEqual(MergeQueue.trainCandidateRefusal(for: [red], settings: MQ.settings()),
+                       "A train only takes pull requests whose checks are green: test isn’t green on #14.")
+        red.checks = MQ.checks(MQ.checkRun(id: 2, status: "IN_PROGRESS", conclusion: nil))
+        XCTAssertNil(MergeQueue.trainCandidateRefusal(for: [red], settings: MQ.settings()), "the train waits for running checks")
     }
 
     func testTheTrainsCallsAndReadsSpeakGitHubsAPI() {
@@ -273,6 +301,8 @@ private struct TrainGitHub {
     /// Agents' pushes once the train's pull request is open.
     var pushesAfterOpen: [Int: String] = [:]
     var pushToTrainAfterOpen: String?
+    /// Branch protection refuses the train's merge.
+    var refusesMerge = false
     /// Agents' pushes between the last check and the train's merge.
     var pushesAfterLanding: [Int: String] = [:]
     /// The first read of the train's pull request misses it.
@@ -310,6 +340,7 @@ private struct TrainGitHub {
             world.pullRequests[900] = MQ.pullRequest(900, head: pushToTrainAfterOpen ?? tip, branch: head)
             for (number, pushed) in pushesAfterOpen { world.pullRequests[number] = MQ.pullRequest(number, head: pushed) }
         case .merge(let number, _, _):
+            if refusesMerge { return .refused(status: 405, message: "At least 1 approving review is required") }
             let base = world.mainTip
             let merged = newCommit()
             world.merge(number, as: merged)

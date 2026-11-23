@@ -116,6 +116,8 @@ extension MergeQueue {
         let refusals: [String]
 
         let expressRefusal: String?
+        /// A train only takes green pull requests: why not, when one is red.
+        let trainRefusal: String?
         private(set) var cadence: Cadence = .standard
 
         var offeredCadences: [Cadence] {
@@ -124,7 +126,11 @@ extension MergeQueue {
 
         func refusal(for cadence: Cadence) -> String? {
             if let reason = Self.unavailability(of: cadence, settings: settings) { return reason }
-            return cadence == .expressDisjoint ? expressRefusal : nil
+            switch cadence {
+            case .expressDisjoint: return expressRefusal
+            case .train: return trainRefusal
+            case .standard, .batchPostMerge: return nil
+            }
         }
 
         /// Why these settings don't offer a cadence.
@@ -287,8 +293,23 @@ extension MergeQueue {
             excluded: excluded,
             warnings: reading.setupError == nil ? baseWarnings(reading.baseRuns, settings: settings) : [],
             refusals: refusals,
-            expressRefusal: strictCandidateRefusal(for: joining, settings: settings, requireDisjoint: true)
+            expressRefusal: strictCandidateRefusal(for: joining, settings: settings, requireDisjoint: true),
+            trainRefusal: trainCandidateRefusal(for: joining, settings: settings)
         )
+    }
+
+    /// The first pull request a red check keeps out of a train. Checks not
+    /// read yet don't refuse it: the train reads them again.
+    static func trainCandidateRefusal(for candidates: [ConfirmationReading.Candidate], settings: BoardConfig.QueueSettings) -> String? {
+        for candidate in candidates {
+            guard let checks = candidate.checks else { continue }
+            let verdict = judge(checks, required: settings.requiredChecks)
+            let red = verdict.failed.map(\.name) + verdict.failedStatuses + verdict.notGreen + verdict.otherFailures
+            if let first = red.first {
+                return "A train only takes pull requests whose checks are green: \(first) isn’t green on #\(candidate.number)."
+            }
+        }
+        return nil
     }
 
     /// The last post-merge run on the base failed: the base may already be

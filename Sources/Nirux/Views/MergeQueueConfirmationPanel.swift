@@ -186,7 +186,7 @@ final class MergeQueueConfirmationPanel: NSObject {
             for cadence in confirmation.offeredCadences {
                 picker.addItem(withTitle: cadence.title)
                 picker.lastItem?.representedObject = cadence.rawValue
-                picker.lastItem?.isEnabled = cadence != .expressDisjoint || confirmation.expressRefusal == nil
+                picker.lastItem?.isEnabled = confirmation.refusal(for: cadence) == nil
             }
             picker.selectItem(withTitle: confirmation.cadence.title)
             picker.target = self
@@ -203,6 +203,9 @@ final class MergeQueueConfirmationPanel: NSObject {
             }
             if let reason = confirmation.expressRefusal {
                 add("Express disjoint unavailable. " + reason, color: Self.secondaryText, font: Theme.Font.caption)
+            }
+            if let reason = confirmation.trainRefusal {
+                add("Train unavailable. " + reason, color: Self.secondaryText, font: Theme.Font.caption)
             }
             heading("MERGES, IN THIS ORDER")
             for (index, item) in confirmation.items.enumerated() {

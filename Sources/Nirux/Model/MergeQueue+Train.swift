@@ -39,6 +39,12 @@ extension MergeQueue {
         /// "train #781", or its branch until it has a pull request.
         var name: String { number.map { "train #\($0)" } ?? "the train \(branch)" }
 
+        /// Its pull request, open and never merged: named in a stop, so nobody merges it later.
+        var leftOpen: String? {
+            guard let number, mergeCommit == nil else { return nil }
+            return " Train #\(number) stays open on GitHub: close it rather than merge it."
+        }
+
         func stepDescription(workflow: String?) -> String {
             switch step {
             case .composing: "composing \(name)"
@@ -105,10 +111,11 @@ extension MergeQueue.Engine {
 
     /// A train's pull request that a stop leaves open, named so nobody merges it later.
     var trainLeftover: String? {
-        guard let train, let number = train.number, train.mergeCommit == nil else { return nil }
         switch purpose {
-        case .train(.land)?, .train(.landConfirm)?: return nil
-        default: return " Train #\(number) stays open on GitHub: close it rather than merge it."
+        // The merge may have landed.
+        case .train(.land)?: return nil
+        case .train(.landConfirm(_, _, let result))? where result == .sent || result.isUncertain: return nil
+        default: return train?.leftOpen
         }
     }
 
@@ -414,7 +421,7 @@ extension MergeQueue.Engine {
 
     /// GitHub marks a pull request merged once its head reaches the base.
     /// That is observed, not documented: a pull request that doesn't read
-    /// merged within a minute stops the queue loudly.
+    /// merged in time stops the queue loudly.
     private mutating func trainLandedRead(_ answers: [MergeQueue.Read: MergeQueue.ReadResult], commit: String, now: TimeInterval) {
         guard let train else { return missingAnswer() }
         current = nil
@@ -449,10 +456,7 @@ extension MergeQueue.Engine {
             return read(open.map { .pullRequest($0) }, after: MergeQueue.Limits.mergeConfirmInterval,
                         for: .train(.landed(commit: commit)))
         }
-        for index in entries.indices {
-            if case .stopped(let reason) = entries[index].step { return stop(reason, on: index) }
-        }
-        note("\(Self.numbers(entries.map(\.number))) read merged")
+        note("\(Self.numbers(entries.filter { $0.step == .done }.map(\.number))) read merged")
         guard settings.postMergeWorkflow != nil else { return finishTrain() }
         self.train?.step = .waitingForPostMerge(commit)
         clocks.step = now
@@ -469,8 +473,13 @@ extension MergeQueue.Engine {
             + "find out why before starting another train.")
     }
 
+    /// The end, once the post-merge run is read: a pull request stopped after
+    /// the train landed stops the queue there.
     private mutating func finishTrain() {
         train?.step = .done
+        for index in entries.indices {
+            if case .stopped(let reason) = entries[index].step { return stop(reason, on: index) }
+        }
         current = nil
         phase = .finished
         note("Finished: \(entries.filter { $0.step == .done }.count) merged")
@@ -489,6 +498,9 @@ extension MergeQueue.Engine {
         case .created(let result):
             guard case .branch(let tip)? = answers[.branch(train.branch)] else { return missingAnswer() }
             guard tip == train.base else {
+                if tip == nil, result == .sent || result.isUncertain, now - clocks.step < MergeQueue.Limits.mergeConfirm {
+                    return read([.branch(train.branch)], after: MergeQueue.Limits.mergeConfirmInterval, for: .train(.created(result)))
+                }
                 let why = tip.map { "it is at \(Self.short($0))" } ?? Self.describe(result)
                 return stop(MergeQueue.StopReason(kind: .train, message: "GitHub didn’t create the train’s branch \(train.branch) "
                     + "at \(Self.short(train.base)): \(why)."))
@@ -500,7 +512,12 @@ extension MergeQueue.Engine {
                 return stop(MergeQueue.StopReason(kind: .train, message: "The train’s branch \(train.branch) is gone."))
             }
             guard tip != from else {
-                // GitHub had nothing to merge: the head is in the train already.
+                // A merge may take a moment to show; still none: GitHub had
+                // nothing to merge, the head is in the train already.
+                if result == .sent || result.isUncertain, now - clocks.step < MergeQueue.Limits.mergeConfirmInterval {
+                    return read([.branch(train.branch)], after: MergeQueue.Limits.mergeConfirmInterval,
+                                for: .train(.partTip(index: index, from: from, result: result)))
+                }
                 guard result == .sent else {
                     return stop(MergeQueue.StopReason(kind: .train, message: "GitHub didn’t merge #\(entries[index].number) into the "
                         + "train: \(Self.describe(result))."), on: index)
@@ -571,8 +588,10 @@ extension MergeQueue.Engine {
         guard let train else { return missingAnswer() }
         switch step {
         case .create:
+            clocks.step = now
             read([.branch(train.branch)], for: .train(.created(result)))
         case .part(let index, let from):
+            clocks.step = now
             if case .refused(409?, _) = result { return stop(partConflict(index, after: train.parts), on: index) }
             read([.branch(train.branch)], for: .train(.partTip(index: index, from: from, result: result)))
         case .open:
