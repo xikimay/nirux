@@ -92,6 +92,8 @@ struct AXControlPayload: Encodable {
 struct AXSnapshotPayload: Encodable {
     let window: AXRectPayload
     let controls: [AXControlPayload]
+    /// The walk stopped at its node budget: controls may be missing.
+    let truncated: Bool
 }
 
 func writeJSON<T: Encodable>(_ value: T) {
@@ -113,12 +115,12 @@ func collectControls(
     windowFrame: CGRect,
     maxDepth: Int = 14,
     maxNodes: Int = 700
-) -> [(AXUIElement, AXControlPayload)] {
+) -> (controls: [(AXUIElement, AXControlPayload)], truncated: Bool) {
     var results: [(AXUIElement, AXControlPayload)] = []
     var stack: [(AXUIElement, Int)] = [(root, 0)]
     var visited = 0
     let paddedWindow = windowFrame.insetBy(dx: -2, dy: -2)
-    while let (node, depth) = stack.popLast(), visited < maxNodes {
+    while visited < maxNodes, let (node, depth) = stack.popLast() {
         visited += 1
         let role = attribute(node, kAXRoleAttribute) as? String ?? ""
         let desc = attribute(node, kAXDescriptionAttribute) as? String ?? ""
@@ -145,7 +147,7 @@ func collectControls(
             stack.append((child, depth + 1))
         }
     }
-    return results
+    return (results, !stack.isEmpty)
 }
 
 func pressMenuItem(_ app: AXUIElement, menuTitle: String, itemTitle: String) -> Bool {
@@ -230,14 +232,14 @@ func run(_ args: [String]) -> Int32 {
         writeJSON(AXRectPayload(rect))
     case "ax-controls":
         guard let rect = frameOf(win) else { return 1 }
-        let items = collectControls(win, windowFrame: rect).map(\.1)
-        writeJSON(AXSnapshotPayload(window: AXRectPayload(rect), controls: items))
+        let walk = collectControls(win, windowFrame: rect)
+        writeJSON(AXSnapshotPayload(window: AXRectPayload(rect), controls: walk.controls.map(\.1), truncated: walk.truncated))
     case "press-control":
         guard args.count == 3 || (args.count == 4 && args[2] == "--prefix") else { return 2 }
         let prefixMode = args.count == 4
         let needle = prefixMode ? args[3] : args[2]
         guard let rect = frameOf(win) else { return 1 }
-        let match = collectControls(win, windowFrame: rect).first { _, payload in
+        let match = collectControls(win, windowFrame: rect).controls.first { _, payload in
             guard payload.enabled else { return false }
             if prefixMode { return payload.label.hasPrefix(needle) }
             return payload.label == needle

@@ -47,17 +47,17 @@ Scenarios are declared in `scripts/canary/scenarios.py` with explicit step lists
 1. The signed, copied bundle launches a real zsh in the synthetic worktree. A PID-targeted keyboard event types a command and the runner verifies its relative file write.
 2. Accessibility presses **Columns → Open Editor**. The worktree's `README.md` is the app's standard starter file. The driver waits for the focused Monaco text area, types a marker and sends ⌘S. The file must acquire precisely that marker and retain its original text.
 3. ⌘1 returns focus to Ghostty. A second shell command must create a different file in the same worktree.
-4. ⌘Q must exit with status zero and release all child processes (`no-orphan-children`, `state-json-valid`). The saved active workspace must contain its original terminal and its new editor tab. Relaunch uses the same state without reseeding it. A third shell command and a second edit/save through the restored column prove both are usable.
+4. ⌘Q must exit with status zero and release all child processes (the quit step waits for zero children) and leave a valid state (`state-json-valid`). The saved active workspace must contain its original terminal and its new editor tab. Relaunch uses the same state without reseeding it. A third shell command and a second edit/save through the restored column prove both are usable.
 
 ### 2. `multi-agent-routing` (tier: `targeted`)
 
 Exercises two Spaces (`Canary Alpha`, `Canary Beta`), two linked git worktrees, two workspaces with stable `agentUUID`s, and an active Mission between them:
 
-1. Launches a raw-PTY `AgentStandIn` (`stty -icanon min 1 time 0; exec -a claude /bin/cat > <capture>`) in each workspace. Nirux knows agents by their kernel process name, so it sees `cat`, not an agent: this scenario checks where bytes land and what the Mission files hold, not agent state.
+1. Runs a fake `claude` (`FakeAgent.swift`, built on first use and linked under the agent's name, since Nirux knows agents by their kernel process name) in each workspace. It logs every byte it reads, and plays one turn per line through Claude Code's hooks, sent from inside its own terminal.
 2. Types a seeded token into Beta and verifies byte-for-byte arrival in Beta's PTY with zero leakage into Alpha's PTY (`pty-isolation`).
-3. Exercises the packaged binary's own `--mission ask`, `--hook claude` (permission notification), and `--mission reply --accept` against the isolated `NIRUX_STATE_DIR`, verifying Mission persistence (`mission-no-double-delivery`) and that any active amber waiting badge is backed by a rendered reason in the AX tree (`amber-has-reason`).
+3. Exercises the packaged binary's own `--mission ask` and `--mission reply --accept` against the isolated `NIRUX_STATE_DIR` (`mission-no-double-delivery`). Then Beta's fake agent asks for a permission: the amber badge must appear, and a whole-word reason must be rendered in the AX tree (`amber-has-reason`).
 4. Switches back to Alpha via **Space → Previous Space**, types Alpha's token, and verifies byte-for-byte arrival in Alpha with zero cross-PTY leak to Beta.
-5. Quits cleanly and checks `no-orphan-children`, `state-json-valid`, `mission-no-double-delivery`, and `pty-isolation`.
+5. Quits cleanly and checks `state-json-valid`, `mission-no-double-delivery`, and `pty-isolation`.
 
 ### 3. `sidebar-breakpoints` (tier: `targeted`)
 
@@ -74,7 +74,7 @@ Metamorphic UI checks across the exact `SidebarFold` breakpoints (`NiruxShellVie
 
 1. **Coverage index first** (`--coverage-index <path>`): reads `<source_path> <scenario_id>` lines (same format as `.build/coverage-index.txt` from `coverage-map.yml`, with `extract_lcov_mappings` for `llvm-cov` LCOV output).
 2. **Explicit path table fallback**: maps sidebar/rail, Mission/hooks/PTY/input, and editor/terminal/persistence globs when no coverage index is present or a changed file is newly added.
-3. **Global triggers & core fallback**: changes to `Package.swift`, `scripts/bundle.sh`, `scripts/canary/*`, or `Persistence*.swift` select all scenarios; unmapped runtime sources fall back to `ghostty-monaco-restore`; pure documentation diffs select zero scenarios.
+3. **Global triggers & core fallback**: changes to the runner (`scripts/canary/*` but its README, `canary.yml`), the bundle (`Package.swift`, `NiruxCore/Package.swift`, `Resources/Info.plist`, `scripts/bundle.sh`) or `Persistence*.swift` select all scenarios; unmapped runtime sources fall back to `ghostty-monaco-restore`. Pure documentation diffs select zero scenarios and exit `4` (`nothing_selected`), never `pass`.
 
 ## Isolation and evidence
 
@@ -91,6 +91,8 @@ Each run folder contains the exact signed app in `Nirux.app.zip`, a versioned `m
 | `pass` | 0 | Every iteration completed cleanly. |
 | `fail` | 1 | A bundle, scenario, invariant or cleanup check failed. |
 | `infra_unavailable` | 2 | A display, unlocked console, event permission, focused window, CLT or bundle prerequisite was unavailable. |
+| `nothing_selected` | 4 | The diff selected no scenario: nothing ran. |
+| usage error | 64 | Bad arguments or an unreadable `--diff-base`: nothing ran. |
 
 ## Triage mode: reproduction, classification & crash investigation
 

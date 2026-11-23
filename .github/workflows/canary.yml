@@ -76,7 +76,7 @@ jobs:
             for qual in $(find "$RUNNER_TEMP/evidence" -name qualification.json | sort); do
               python3 -c 'import json,sys; q=json.load(open(sys.argv[1])); print(f"- `{q[\"scenario\"]}`: **{q[\"verdict\"]}** passRate={q[\"passRate\"]} ({q[\"passedRuns\"]}/{q[\"requestedRuns\"]}) mean={q[\"timing\"][\"meanMs\"]}ms stddev={q[\"timing\"][\"stddevMs\"]}ms")' "$qual" >> "$GITHUB_STEP_SUMMARY"
             done
-            if [[ $status == 2 ]]; then
+            if [[ $status == 2 ]] && python3 scripts/canary/verdicts.py infra qualification.json verdict "$RUNNER_TEMP/evidence"; then
               echo "::warning::Canary qualification inconclusive. See the graphical session preflight in report.json."
               exit 0
             fi
@@ -88,10 +88,13 @@ jobs:
             for triage in $(find "$RUNNER_TEMP/evidence" -name triage.json | sort); do
               python3 -c 'import json,sys; t=json.load(open(sys.argv[1])); extra=f" fp={t[\"fingerprint\"]}" if t.get("fingerprint") else ""; crash=" (crash observed)" if t.get("hasCrash") else ""; reopened=" [REOPENED]" if t.get("reopened") else ""; print(f"- `{t[\"scenario\"]}`: **{t[\"classification\"]}**{extra}{crash}{reopened}")' "$triage" >> "$GITHUB_STEP_SUMMARY"
             done
-            if [[ $status == 2 ]]; then
+            if [[ $status == 2 ]] && python3 scripts/canary/verdicts.py infra triage.json classification "$RUNNER_TEMP/evidence"; then
               echo "::warning::Canary inconclusive. See the graphical session preflight in report.json."
               exit 0
             fi
+          fi
+          if [[ $status == 4 ]]; then
+            echo "::error::No scenario selected for this diff: nothing ran."
           fi
           exit "$status"
       - name: Upload evidence

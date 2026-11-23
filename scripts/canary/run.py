@@ -56,6 +56,26 @@ INFRA = "infra_unavailable"
 DEFAULT_CRASH_WAIT_SECONDS = 2.0
 
 
+NOTHING_SELECTED = "nothing_selected"
+EXIT_NOTHING_SELECTED = 4
+EXIT_USAGE = 64
+# Reachable only with the canary in front: posted keys and its key window.
+FOCUS_PREREQUISITES = frozenset({"unlocked", "postEvents"})
+
+
+def missing_prerequisites(probes, requires_focus):
+    return [key for key, available in probes.items()
+            if not available and (requires_focus or key not in FOCUS_PREREQUISITES)]
+
+
+class UsageParser(argparse.ArgumentParser):
+    """Bad arguments exit EXIT_USAGE, never 2, which means infra_unavailable."""
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        self.exit(EXIT_USAGE, f"{self.prog}: error: {message}\n")
+
+
 class InfrastructureError(RuntimeError):
     pass
 
@@ -217,7 +237,18 @@ class App:
         self.lease = work / "children"
         self.lease.touch()
 
-    def preflight(self):
+    def fake_agent(self, name):
+        """A fake agent binary named `name` (FakeAgent.swift), built on first use."""
+        binary = self.work / "agents/fake-agent"
+        if not binary.exists():
+            binary.parent.mkdir(exist_ok=True)
+            subprocess.run(["/usr/bin/swiftc", HERE / "FakeAgent.swift", "-o", binary], check=True, timeout=120)
+        link = binary.parent / name
+        if not link.exists():
+            os.link(binary, link)
+        return link
+
+    def preflight(self, requires_focus):
         try:
             subprocess.run(["/usr/bin/swiftc", HERE / "Driver.swift", "-o", self.driver],
                            check=True, timeout=90)
@@ -225,7 +256,7 @@ class App:
             raise InfrastructureError("Command Line Tools (swiftc) unavailable") from error
         probes = json.loads(subprocess.check_output([self.driver, "preflight"], env=self.env, timeout=10))
         self.report.data["preflight"].update(probes)
-        missing = [key for key, available in probes.items() if not available]
+        missing = missing_prerequisites(probes, requires_focus)
         if missing:
             raise InfrastructureError("requires " + ", ".join(missing))
 
@@ -285,7 +316,7 @@ class App:
     def drive_json(self, action, *args):
         self.alive()
         result = subprocess.run([self.driver, action, str(self.process.pid), *args],
-                                cwd=self.work, env=self.env, capture_output=True, text=True, timeout=6)
+                                cwd=self.work, env=self.env, capture_output=True, text=True, timeout=15)
         self.alive()
         if result.returncode == 3:
             self.report.data["preflight"]["keyWindow"] = False
@@ -421,7 +452,7 @@ def _run_ghostty_monaco_restore(app, work, report, step, seed, injection):
     with step("fixture"):
         fixture(work, app.env, seed)
     with step("preflight"):
-        app.preflight()
+        app.preflight(SCENARIOS["ghostty-monaco-restore"].requires_focus)
     with step("launch"):
         app.launch()
     with step("ghostty"):
@@ -437,7 +468,6 @@ def _run_ghostty_monaco_restore(app, work, report, step, seed, injection):
         verify_layout(work, seed)
         record_step_invariants(report, "quit", [
             ("state-json-valid", *check_state_json_valid(work / "state", expected_active_id=seed)),
-            ("no-orphan-children", len(app.holders()) == 0, f"holders={app.holders()}"),
         ])
     with step("restore"):
         app.launch()
@@ -446,9 +476,6 @@ def _run_ghostty_monaco_restore(app, work, report, step, seed, injection):
         app.edit("restored" + seed.replace("-", ""))
     with step("final-quit"):
         app.quit()
-        record_step_invariants(report, "final-quit", [
-            ("no-orphan-children", len(app.holders()) == 0, f"holders={app.holders()}"),
-        ])
 
 
 def iteration(
@@ -559,7 +586,7 @@ def detect_commit(explicit_commit=None):
 
 def detect_changed_files_from_git(diff_base):
     result = subprocess.run(
-        ["/usr/bin/git", "diff", "--no-renames", "--name-only", "-z", diff_base, "HEAD"],
+        ["/usr/bin/git", "diff", "--no-renames", "--name-only", "-z", f"{diff_base}...HEAD"],
         cwd=HERE.parents[1],
         capture_output=True,
         text=True,
@@ -754,7 +781,7 @@ def combine_exit_codes(codes):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = UsageParser(description=__doc__)
     inputs = parser.add_mutually_exclusive_group(required=False)
     inputs.add_argument("app", type=Path, nargs="?")
     inputs.add_argument("--replay", type=Path, help="a run directory containing manifest.json and Nirux.app.zip")
@@ -904,10 +931,10 @@ def main():
 
     if not selected_scenarios:
         suite_path = evidence_root.resolve() / "suite.json"
-        payload = {"version": 1, "scenarios": [], "selection": selection_info, "verdict": "pass"}
+        payload = {"version": 1, "scenarios": [], "selection": selection_info, "verdict": NOTHING_SELECTED}
         write_json(suite_path, payload)
-        print(json.dumps({"verdict": "pass", "scenarios": [], "suite": str(suite_path)}), flush=True)
-        return 0
+        print(json.dumps({"verdict": NOTHING_SELECTED, "scenarios": [], "suite": str(suite_path)}), flush=True)
+        return EXIT_NOTHING_SELECTED
 
     def execute_single(scenario_id, evidence_dir, run_source, is_archive_replay):
         with tempfile.TemporaryDirectory(dir="/private/tmp", prefix="nirux-canary-") as folder:

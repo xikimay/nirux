@@ -97,7 +97,7 @@ SCENARIOS = {
             "metamorphic equivalence of visible, reachable controls after settling—without golden images."
         ),
         tier="targeted",
-        requires_focus=False,
+        requires_focus=True,
         steps=("bundle", "fixture", "preflight", "launch", "narrow-sweep",
                "widen-hysteresis", "reduce-motion-metamorphic", "final-quit"),
         effect_steps=frozenset({"narrow-sweep", "widen-hysteresis", "reduce-motion-metamorphic"}),
@@ -125,18 +125,20 @@ def write_json(path, data):
 # AgentStandIn oracle helpers
 # ---------------------------------------------------------------------------
 
-def agent_stand_in_command(output_path, name="claude"):
-    """Shell command matching Tests/NiruxTests/AgentStandIn.swift (raw PTY byte capture)."""
-    if "'" in str(output_path) or "'" in str(name):
-        raise ValueError("AgentStandIn paths and names must not contain single quotes")
-    return f"stty -icanon min 1 time 0; exec -a {name} /bin/cat > '{output_path}'"
+def agent_stand_in_command(log_path, executable):
+    """Runs a fake agent (FakeAgent.swift) in place of the shell; it logs every typed byte to log_path."""
+    if "'" in str(log_path) or "'" in str(executable):
+        raise ValueError("AgentStandIn paths must not contain single quotes")
+    return f"NIRUX_CANARY_AGENT_LOG='{log_path}' exec '{executable}'"
 
 
 def read_pty_capture(path):
+    """Every byte a fake agent read, from its log."""
     target = Path(path)
     if not target.is_file():
         return ""
-    return target.read_bytes().decode("utf-8", errors="replace")
+    events = (json.loads(line) for line in target.read_text(encoding="utf-8").splitlines() if line.strip())
+    return "".join(event.get("text", "") for event in events if event.get("event") == "input")
 
 
 # ---------------------------------------------------------------------------
@@ -220,45 +222,39 @@ def check_mission_no_double_delivery(state_dir, mission_id=None):
     return True, "no duplicate mission deliveries"
 
 
-def check_amber_has_reason(ax_snapshot):
-    """Invariant: amber waiting count > 0 must have a rendered reason in the AX tree."""
-    controls = (ax_snapshot or {}).get("controls") or []
-    waiting_count = 0
-    for ctrl in controls:
-        label = ctrl.get("label") or ""
-        match = _WAITING_BADGE_RE.match(label)
+def waiting_badge_count(ax_snapshot):
+    """The count on the command bar's waiting badge, read from that element only."""
+    for ctrl in (ax_snapshot or {}).get("controls") or []:
+        match = _WAITING_BADGE_RE.match(ctrl.get("label") or "")
         if match:
-            waiting_count = int(match.group(1))
-            break
-    if waiting_count == 0:
-        return True, "no amber waiting badge active"
+            return int(match.group(1))
+    return 0
 
-    # A rendered reason appears as permission text/buttons, Mission question/reply,
-    # waiting status on a task row/rail item, or "An agent waits for you in ...".
-    reason_markers = (
-        "Allow once ",
-        "Deny ",
-        "Reply to:",
-        "Claude asks:",
-        "An agent waits for you in ",
-        "waiting",
-        "Permission",
-        "asks",
-        "question",
-    )
-    for ctrl in controls:
+
+# Whole words, so "Archived tasks" never reads as "asks".
+_AMBER_REASON_RE = re.compile(r"\b(permission|allow|approve|asks?|question)\b", re.IGNORECASE)
+
+
+def check_amber_has_reason(ax_snapshot, expect_waiting=False):
+    """Invariant: an amber badge comes with a rendered reason; expect_waiting also requires the amber itself."""
+    waiting = waiting_badge_count(ax_snapshot)
+    if waiting == 0:
+        if expect_waiting:
+            return False, "no amber waiting badge appeared"
+        return True, "no amber waiting badge active"
+    for ctrl in (ax_snapshot or {}).get("controls") or []:
         label = ctrl.get("label") or ""
-        value = ctrl.get("value") or ""
         if _WAITING_BADGE_RE.match(label):
             continue
-        combined = f"{label} {value}"
-        if any(marker.lower() in combined.lower() for marker in reason_markers):
-            return True, f"waiting={waiting_count} backed by AX reason {label!r}"
-    return False, f"amber badge reports {waiting_count} waiting agent(s) with no rendered reason in AX tree"
+        if _AMBER_REASON_RE.search(f"{label} {ctrl.get('value') or ''}"):
+            return True, f"waiting={waiting} backed by AX reason {label!r}"
+    return False, f"amber badge reports {waiting} waiting agent(s) with no rendered reason in AX tree"
 
 
 def check_ax_controls_reachable(ax_snapshot, required_labels=(), required_prefixes=()):
     """Verify named AX controls are present, enabled, non-empty, and inside the window."""
+    if (ax_snapshot or {}).get("truncated"):
+        return False, "accessibility snapshot truncated: controls may be missing"
     controls = (ax_snapshot or {}).get("controls") or []
     missing = []
     unreachable = []
@@ -534,8 +530,8 @@ def fixture_multi_agent(work, env, seed):
         "missionID": mission_id,
         "treeAlpha": tree_alpha,
         "treeBeta": tree_beta,
-        "ptyAlpha": work / "state/pty-alpha.txt",
-        "ptyBeta": work / "state/pty-beta.txt",
+        "ptyAlpha": work / "state/agent-alpha.jsonl",
+        "ptyBeta": work / "state/agent-beta.jsonl",
     }
 
 
@@ -609,7 +605,7 @@ def run_multi_agent_routing(app, work, report, step, seed, injection, wait_for):
         app.tree = ctx["treeAlpha"]
 
     with step("preflight"):
-        app.preflight()
+        app.preflight(SCENARIOS["multi-agent-routing"].requires_focus)
 
     with step("launch"):
         app.launch()
@@ -631,7 +627,7 @@ def run_multi_agent_routing(app, work, report, step, seed, injection, wait_for):
     pty_beta = ctx["ptyBeta"]
 
     with step("standin-start"):
-        app.drive("command", agent_stand_in_command(pty_alpha, name="claude"))
+        app.drive("command", agent_stand_in_command(pty_alpha, app.fake_agent("claude")))
         wait_for("Alpha AgentStandIn output file not created", pty_alpha.is_file, app.check_window)
 
         app.drive("menu", "Space", "Next Space")
@@ -640,7 +636,7 @@ def run_multi_agent_routing(app, work, report, step, seed, injection, wait_for):
             (work / f"state/prompt-{ctx['wsBetaID']}").is_file,
             app.check_window,
         )
-        app.drive("command", agent_stand_in_command(pty_beta, name="claude"))
+        app.drive("command", agent_stand_in_command(pty_beta, app.fake_agent("claude")))
         wait_for("Beta AgentStandIn output file not created", pty_beta.is_file, app.check_window)
 
     with step("routing-beta"):
@@ -691,26 +687,6 @@ def run_multi_agent_routing(app, work, report, step, seed, injection, wait_for):
 
         wait_for("Mission question not persisted in missions.json", mission_has_question, app.check_window)
 
-        # Feed a real Claude PermissionRequest hook event into the isolated queue for Alpha.
-        hook_env = dict(
-            app.env,
-            NIRUX_WORKSPACE_ID=ctx["wsAlphaID"],
-            NIRUX_AGENT_UUID=ctx["agentAlphaID"],
-        )
-        hook_payload = json.dumps({
-            "hook_event_name": "Notification",
-            "notification_type": "permission_prompt",
-            "message": "Claude needs permission to run echo canary",
-            "session_id": f"canary-sess-{seed[:8]}",
-            "cwd": str(ctx["treeAlpha"]),
-        })
-        hook_res = subprocess.run(
-            [nirux_bin, "--hook", "claude"],
-            input=hook_payload, env=hook_env, capture_output=True, text=True, timeout=10,
-        )
-        if hook_res.returncode != 0:
-            raise RuntimeError(f"packaged CLI --hook claude failed ({hook_res.returncode}): {hook_res.stderr.strip()}")
-
         # Parent replies via packaged CLI accepting the child's recommendation.
         missions = json.loads((work / "state/missions.json").read_text(encoding="utf-8"))
         q_event = next(
@@ -744,9 +720,15 @@ def run_multi_agent_routing(app, work, report, step, seed, injection, wait_for):
             return False
 
         wait_for("Mission reply not persisted in missions.json", mission_has_response, app.check_window)
+
+        # Beta's fake claude asks for a permission through its own hook, from inside its terminal.
+        app.drive("command", "permission:canary")
+        wait_for("no amber appeared for Beta's permission prompt",
+                 lambda: waiting_badge_count(app.ax_controls()) > 0, app.check_window)
         ax_snap = app.ax_controls()
+        app.drive("command", "y")
         record_step_invariants(report, "mission-and-permission", [
-            ("amber-has-reason", *check_amber_has_reason(ax_snap)),
+            ("amber-has-reason", *check_amber_has_reason(ax_snap, expect_waiting=True)),
             ("mission-no-double-delivery", *check_mission_no_double_delivery(work / "state", ctx["missionID"])),
             ("pty-isolation", *check_pty_isolation({
                 "alpha": {"path": pty_alpha, "required": [], "forbidden": [token_beta]},
@@ -781,7 +763,6 @@ def run_multi_agent_routing(app, work, report, step, seed, injection, wait_for):
     with step("quit-and-verify"):
         app.quit()
         record_step_invariants(report, "quit-and-verify", [
-            ("no-orphan-children", len(app.holders()) == 0, f"holders={app.holders()}"),
             ("state-json-valid", *check_state_json_valid(
                 work / "state",
                 expected_workspace_ids=[ctx["wsAlphaID"], ctx["wsBetaID"]],
@@ -794,33 +775,30 @@ def run_multi_agent_routing(app, work, report, step, seed, injection, wait_for):
         ])
 
 
+# The same fold state this many reads in a row, whatever it is, counts as settled.
+SETTLED_READS = 3
+
+
 def _resize_and_assert_breakpoint(app, width, expected_folded, wait_for, inject=False):
     """Resize the canary window to `width` and wait for stabilized AX state."""
     expected_state = "folded" if expected_folded else "expanded"
     if inject:
         expected_state = "expanded" if expected_folded else "folded"
     app.resize_window(width, SIDEBAR_WINDOW_HEIGHT)
-
-    observed = {}
+    reads = []
 
     def settled():
         snap = app.ax_controls()
-        actual_w = round(float((snap.get("window") or {}).get("width", 0.0)))
-        if abs(actual_w - width) > 2:
-            return False
-        state = classify_sidebar_state(snap)
-        if state != expected_state:
-            return False
-        observed["snap"] = snap
-        return True
+        on_width = abs(round(float((snap.get("window") or {}).get("width", 0.0))) - width) <= 2
+        reads.append((classify_sidebar_state(snap) if on_width else None, snap))
+        last = [state for state, _ in reads[-SETTLED_READS:]]
+        return len(last) == SETTLED_READS and last[0] is not None and len(set(last)) == 1
 
-    wait_for(
-        f"sidebar did not settle to {expected_state} at {width}pt",
-        settled,
-        app.check_window,
-        timeout=10,
-    )
-    return observed["snap"]
+    wait_for(f"sidebar did not settle at {width}pt", settled, app.check_window, timeout=10)
+    state, snap = reads[-1]
+    if state != expected_state:
+        raise RuntimeError(f"sidebar settled {state} at {width}pt, expected {expected_state}")
+    return snap
 
 
 def run_sidebar_breakpoints(app, work, report, step, seed, injection, wait_for):
@@ -830,7 +808,7 @@ def run_sidebar_breakpoints(app, work, report, step, seed, injection, wait_for):
         app.tree = ctx["tree"]
 
     with step("preflight"):
-        app.preflight()
+        app.preflight(SCENARIOS["sidebar-breakpoints"].requires_focus)
 
     with step("launch"):
         app.launch()
@@ -907,6 +885,3 @@ def run_sidebar_breakpoints(app, work, report, step, seed, injection, wait_for):
 
     with step("final-quit"):
         app.quit()
-        record_step_invariants(report, "final-quit", [
-            ("no-orphan-children", len(app.holders()) == 0, f"holders={app.holders()}"),
-        ])

@@ -38,6 +38,7 @@ from scenarios import (  # noqa: E402
     fixture_sidebar_breakpoints,
     get_scenario,
     list_scenarios,
+    read_pty_capture,
     record_step_invariants,
     SCENARIOS,
     SIDEBAR_BREAKPOINTS,
@@ -204,11 +205,17 @@ class MultiAgentAndInvariantTests(unittest.TestCase):
             (self.work / name).mkdir()
         self.seed = str(uuid.uuid4())
 
-    def test_agent_stand_in_command_matches_raw_pty_contract(self):
-        cmd = agent_stand_in_command("/tmp/pty-alpha.txt", name="claude")
-        self.assertEqual(cmd, "stty -icanon min 1 time 0; exec -a claude /bin/cat > '/tmp/pty-alpha.txt'")
+    def test_agent_stand_in_runs_the_fake_agent_and_reads_its_log(self):
+        cmd = agent_stand_in_command("/tmp/agent-alpha.jsonl", "/tmp/agents/claude")
+        self.assertEqual(cmd, "NIRUX_CANARY_AGENT_LOG='/tmp/agent-alpha.jsonl' exec '/tmp/agents/claude'")
         with self.assertRaises(ValueError):
-            agent_stand_in_command("/tmp/bad'path.txt")
+            agent_stand_in_command("/tmp/bad'path.jsonl", "/tmp/agents/claude")
+        log = self.work / "agent.jsonl"
+        log.write_text("\n".join(json.dumps(e) for e in [
+            {"event": "start", "argv": []}, {"event": "input", "text": "BETA-1"}, {"event": "hook", "hook": "Stop"},
+            {"event": "input", "text": "\r"},
+        ]) + "\n", encoding="utf-8")
+        self.assertEqual(read_pty_capture(log), "BETA-1\r")
 
     def test_multi_agent_fixture_creates_two_spaces_worktrees_and_active_mission(self):
         ctx = fixture_multi_agent(self.work, environment(self.work), self.seed)
@@ -239,8 +246,8 @@ class MultiAgentAndInvariantTests(unittest.TestCase):
     def test_pty_isolation_invariant_detects_cross_pty_leak(self):
         pty_alpha = self.work / "state/pty-alpha.txt"
         pty_beta = self.work / "state/pty-beta.txt"
-        pty_alpha.write_text("ALPHA-111\n")
-        pty_beta.write_text("BETA-222\n")
+        pty_alpha.write_text(json.dumps({"event": "input", "text": "ALPHA-111\n"}) + "\n")
+        pty_beta.write_text(json.dumps({"event": "input", "text": "BETA-222\n"}) + "\n")
 
         ok, _ = check_pty_isolation({
             "alpha": {"path": pty_alpha, "required": ["ALPHA-111"], "forbidden": ["BETA-222"]},
@@ -249,7 +256,7 @@ class MultiAgentAndInvariantTests(unittest.TestCase):
         self.assertTrue(ok)
 
         # Simulate a focus/routing bug where ALPHA keystrokes leak into BETA's PTY.
-        pty_beta.write_text("BETA-222\nALPHA-111\n")
+        pty_beta.write_text(json.dumps({"event": "input", "text": "BETA-222\nALPHA-111\n"}) + "\n")
         ok_leak, detail = check_pty_isolation({
             "alpha": {"path": pty_alpha, "required": ["ALPHA-111"], "forbidden": ["BETA-222"]},
             "beta": {"path": pty_beta, "required": ["BETA-222"], "forbidden": ["ALPHA-111"]},
@@ -497,11 +504,12 @@ class DiffTargetedSelectionTests(unittest.TestCase):
                 ],
                 capture_output=True,
                 text=True,
-                check=True,
+                check=False,
                 timeout=10,
             )
+            self.assertEqual(run_res.returncode, 4)
             summary = json.loads(run_res.stdout.strip())
-            self.assertEqual(summary["verdict"], "pass")
+            self.assertEqual(summary["verdict"], "nothing_selected")
             self.assertEqual(summary["scenarios"], [])
             self.assertTrue((ev / "suite.json").is_file())
 
@@ -575,7 +583,7 @@ class EndToEndScenarioFlowTests(unittest.TestCase):
             work.mkdir()
             evidence.mkdir()
             seed = str(uuid.uuid4())
-            active = {"space": "alpha", "pty_alpha": None, "pty_beta": None}
+            active = {"space": "alpha", "pty_alpha": None, "pty_beta": None, "waiting": 0}
 
             def fake_package(w, ev, src, replay, meta):
                 meta["bundleSHA256"] = "b" * 64
@@ -598,22 +606,26 @@ class EndToEndScenarioFlowTests(unittest.TestCase):
                     return True
                 if action == "command":
                     cmd = args[0]
-                    if "pty-alpha.txt" in cmd:
-                        active["pty_alpha"] = work / "state/pty-alpha.txt"
+                    if "agent-alpha.jsonl" in cmd:
+                        active["pty_alpha"] = work / "state/agent-alpha.jsonl"
                         active["pty_alpha"].write_text("")
-                    elif "pty-beta.txt" in cmd:
-                        active["pty_beta"] = work / "state/pty-beta.txt"
+                    elif "agent-beta.jsonl" in cmd:
+                        active["pty_beta"] = work / "state/agent-beta.jsonl"
                         active["pty_beta"].write_text("")
                     else:
+                        active["waiting"] = {"permission:canary": 1, "y": 0}.get(cmd, active["waiting"])
                         target = active["pty_beta"] if active["space"] == "beta" else active["pty_alpha"]
                         with target.open("a", encoding="utf-8") as stream:
-                            stream.write(cmd + "\n")
+                            stream.write(json.dumps({"event": "input", "text": cmd + "\r"}) + "\n")
                     return True
                 return True
 
             def fake_ax(app_self):
                 label = "Space: Canary Alpha" if active["space"] == "alpha" else "Space: Canary Beta"
-                snap = _ax_snapshot(1200, folded=False, waiting_count=0)
+                reason = {"role": "AXStaticText", "label": "Claude needs your permission to use Bash", "title": "",
+                          "value": "", "enabled": True, "frame": {"x": 0, "y": 0, "width": 10, "height": 10}, "inWindow": True}
+                snap = _ax_snapshot(1200, folded=False, waiting_count=active["waiting"],
+                                    extra_controls=[reason] if active["waiting"] else None)
                 snap["controls"][1]["label"] = label
                 return snap
 
@@ -650,6 +662,7 @@ class EndToEndScenarioFlowTests(unittest.TestCase):
             with patch("run.package", side_effect=fake_package), \
                     patch("scenarios.subprocess.run", side_effect=fake_subproc), \
                     patch.object(App, "preflight", return_value=None), \
+                    patch.object(App, "fake_agent", return_value=Path("/tmp/agents/claude")), \
                     patch.object(App, "launch", autospec=True, side_effect=fake_launch), \
                     patch.object(App, "drive", autospec=True, side_effect=fake_drive), \
                     patch.object(App, "ax_controls", autospec=True, side_effect=fake_ax), \
@@ -667,6 +680,96 @@ class EndToEndScenarioFlowTests(unittest.TestCase):
             self.assertEqual([s["id"] for s in report["steps"]], list(SCENARIOS["multi-agent-routing"].steps))
             self.assertEqual(report["invariantsSummary"]["failed"], 0)
             self.assertGreaterEqual(report["invariantsSummary"]["checked"], 8)
+
+
+
+class ReviewRoundOneTests(unittest.TestCase):
+    """Each check fails on a bad state (Lead review of #777, round 1)."""
+
+    def test_amber_needs_the_amber_and_a_whole_word_reason(self):
+        archived = [{"role": "AXStaticText", "label": "Archived tasks", "title": "", "value": "", "enabled": True,
+                     "frame": {"x": 0, "y": 0, "width": 10, "height": 10}, "inWindow": True}]
+        ok, detail = check_amber_has_reason(_ax_snapshot(940, folded=False, waiting_count=1, extra_controls=archived))
+        self.assertFalse(ok, detail)
+        ok, detail = check_amber_has_reason(_ax_snapshot(940, folded=False, waiting_count=0), expect_waiting=True)
+        self.assertFalse(ok)
+        self.assertIn("no amber", detail)
+        reason = [dict(archived[0], label="Claude needs your permission to use Bash")]
+        self.assertTrue(check_amber_has_reason(_ax_snapshot(940, folded=False, waiting_count=1, extra_controls=reason),
+                                               expect_waiting=True)[0])
+
+    def test_a_truncated_snapshot_never_reads_as_reachable(self):
+        snapshot = dict(_ax_snapshot(940, folded=False), truncated=True)
+        ok, detail = check_ax_controls_reachable(snapshot, required_labels=["Search, Command P"])
+        self.assertFalse(ok)
+        self.assertIn("truncated", detail)
+
+    def test_a_breakpoint_settled_in_the_wrong_state_fails(self):
+        from scenarios import _resize_and_assert_breakpoint
+
+        class FakeApp:
+            def __init__(self, folded):
+                self.folded = folded
+
+            def resize_window(self, width, height):
+                self.width = width
+
+            def ax_controls(self):
+                return _ax_snapshot(self.width, folded=self.folded)
+
+            def check_window(self):
+                pass
+
+        def wait_for(description, condition, alive=None, timeout=10):
+            for _ in range(10):
+                if condition():
+                    return
+            raise TimeoutError(description)
+
+        self.assertEqual(classify_sidebar_state(_resize_and_assert_breakpoint(FakeApp(True), 899, True, wait_for)), "folded")
+        with self.assertRaisesRegex(RuntimeError, "settled expanded at 899pt, expected folded"):
+            _resize_and_assert_breakpoint(FakeApp(False), 899, True, wait_for)
+
+    def test_scenarios_driven_through_the_key_window_require_focus(self):
+        from run import missing_prerequisites
+
+        for spec in SCENARIOS.values():
+            self.assertTrue(spec.requires_focus, spec.id)
+        probes = {"accessibility": True, "unlocked": False, "postEvents": False}
+        self.assertEqual(missing_prerequisites(probes, requires_focus=True), ["unlocked", "postEvents"])
+        self.assertEqual(missing_prerequisites(probes, requires_focus=False), [])
+        self.assertEqual(missing_prerequisites(dict(probes, accessibility=False), requires_focus=False), ["accessibility"])
+
+    def test_runner_and_bundle_changes_select_every_scenario(self):
+        everything = sorted(SCENARIOS)
+        for path in ["scripts/canary/triage.py", "scripts/canary/qualify.py", "scripts/canary/history.py",
+                     "scripts/canary/crash_correlator.py", "scripts/canary/selection.py", "scripts/canary/FakeAgent.swift",
+                     ".github/workflows/canary.yml", "Resources/Info.plist", "NiruxCore/Package.swift"]:
+            self.assertEqual(sorted(select_scenarios([path], available_scenarios=everything)["scenarios"]), everything, path)
+        self.assertEqual(select_scenarios(["scripts/canary/README.md"], available_scenarios=everything)["scenarios"], [])
+
+    def test_bad_arguments_exit_with_their_own_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_app = Path(tmp) / "Nirux.app"
+            fake_app.mkdir()
+            res = subprocess.run([sys.executable, str(HERE / "run.py"), str(fake_app), "--diff-base", "no-such-ref"],
+                                 capture_output=True, text=True, timeout=20)
+            self.assertEqual(res.returncode, 64, res.stderr)
+            res = subprocess.run([sys.executable, str(HERE / "run.py"), "--no-such-flag"], capture_output=True, text=True, timeout=20)
+            self.assertEqual(res.returncode, 64, res.stderr)
+
+    def test_only_an_infra_verdict_reads_as_inconclusive(self):
+        from verdicts import any_infra
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertFalse(any_infra(root, "triage.json", "classification"), "no evidence at all")
+            (root / "a").mkdir()
+            (root / "b").mkdir()
+            write_json(root / "a/triage.json", {"classification": "pass"})
+            self.assertFalse(any_infra(root, "triage.json", "classification"))
+            write_json(root / "b/triage.json", {"classification": "infra_unavailable"})
+            self.assertTrue(any_infra(root, "triage.json", "classification"))
 
 
 if __name__ == "__main__":
