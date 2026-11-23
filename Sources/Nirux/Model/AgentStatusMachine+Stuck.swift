@@ -137,12 +137,11 @@ extension AgentStatusMachine {
     /// that turn began (`AgyTurn`): a key typed while it works stays in its
     /// box (agy 1.5.12), keys that answer its dialogs don't. Stopped with Esc
     /// (`idle` without `done`), its box may hold its prompt again. Before its
-    /// first turn ends it may show a screen no state tells of: one that ended
-    /// none since it started waits for that.
+    /// first turn: `agyFirstPromptRefusal`.
     private func agyPromptRefusal(_ agy: ForegroundProcess?, runningSince time: TimeInterval) -> AgentPromptRefusal? {
         guard let agy, agy.interactiveAgent == .agy else { return .noClaude }
         guard agy.instance.startedAt <= time else { return .restarted }
-        guard let turn = agyTurn, turn.process == agy.instance else { return .noPromptYet }
+        guard let turn = agyTurn, turn.process == agy.instance else { return agyFirstPromptRefusal(agy) }
         // Its last word, else how its turn ended (another process in front, or
         // a silence, drops the status, not the turn).
         switch programStatus.flatMap({ $0.process == agy.instance ? $0.status.state : nil }) ?? turn.ended {
@@ -151,8 +150,35 @@ extension AgentStatusMachine {
         case .error?: return .failedTurn
         case .idle? where turn.ended == .error: return .failedTurn
         case .idle? where turn.ended != .done: return .draft
-        case .idle?, .done?: return lastDraftInputAt > turn.startedAt ? .draft : nil
+        case .idle?, .done?: return agyDraft(agy) == nil ? nil : .draft
         }
+    }
+
+    /// `agyPromptRefusal` for an `agy` that ran no turn since it started, as
+    /// one Nirux resumed: free once it says `idle` with no draft (`agyDraft`),
+    /// its dialogs' answers aside. Its sign-in and
+    /// folder trust screens say `blocked` (agy 1.5.15). Launched with a
+    /// prompt (`-i`), it says `idle` a moment before that prompt's turn.
+    func agyFirstPromptRefusal(_ agy: ForegroundProcess) -> AgentPromptRefusal? {
+        switch programStatus.flatMap({ $0.process == agy.instance ? $0.status.state : nil }) {
+        case nil: return .noPromptYet
+        case .working?: return .working
+        case .blocked?: return .dialog
+        case .error?: return .failedTurn
+        case .idle?, .done?:
+            if AgyLaunch.hasLaunchPrompt(agy.arguments) { return .noPromptYet }
+            return agyDraft(agy) == nil ? nil : .draft
+        }
+    }
+
+    /// The key that may have left a draft in `agy`'s prompt: one since its
+    /// turn began, or, before its first, any since its terminal started
+    /// (keys typed while its shell loads wait there for it) but the launch
+    /// line Nirux typed before it started.
+    func agyDraft(_ agy: ForegroundProcess) -> TimeInterval? {
+        if let turn = agyTurn, turn.process == agy.instance { return lastDraftInputAt > turn.startedAt ? lastDraftInputAt : nil }
+        let launchLine = lastDraftInputAt == shellLaunchLineAt && lastDraftInputAt < agy.instance.startedAt
+        return lastDraftInputAt > 0 && !launchLine ? lastDraftInputAt : nil
     }
 
     /// Whether `process`, a `claude` that took no prompt since it started,
@@ -217,9 +243,9 @@ extension AgentStatusMachine {
     }
 
     /// What `promptRefusal` reads for an `agy`, for the log.
-    func agyFacts(now: TimeInterval) -> String {
+    func agyFacts(_ agy: ForegroundProcess?, now: TimeInterval) -> String {
         func age(_ time: TimeInterval?) -> String { time.map { String(Int(min(max(now - $0, 0), 1e7))) + "s" } ?? "-" }
-        let draft = lastDraftInputAt > (agyTurn?.startedAt ?? 0) ? age(lastDraftInputAt) : "-"
+        let draft = age(agy.flatMap(agyDraft))
         return "agy=\(programStatus?.status.state.rawValue ?? "-")/\(age(programStatus?.at)) "
             + "turn=\(age(agyTurn?.startedAt))/\(agyTurn?.ended?.rawValue ?? "open") draft=\(draft)"
     }
@@ -275,7 +301,8 @@ enum AgentPromptRefusal: String, Equatable, Sendable {
     case restarted
     /// Its `claude` took no prompt since it started, and doesn't say it
     /// sits at its prompt (see `AgentStatusMachine.sitsAtFirstPrompt`); its
-    /// `codex` reported no state since it started.
+    /// `codex` reported no state since it started; its `agy` doesn't sit at
+    /// its first prompt yet (`AgentStatusMachine.agyFirstPromptRefusal`).
     case noPromptYet
     /// Nirux doesn't know which conversation its `codex` runs: one its
     /// launch prompt started, or one it resumed (`ForegroundSessionTracker`).
