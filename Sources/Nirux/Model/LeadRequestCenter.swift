@@ -73,10 +73,13 @@ final class LeadRequestCenter {
         guard let stateDirectory else { return }
         for request in LeadChannel.waitingRequests(stateDirectory: stateDirectory, root: root)
         where owns(request) && LeadChannel.claim(request, stateDirectory: stateDirectory, root: root) {
-            guard request.createdAt >= startedAt else { continue }
             let answer: @MainActor (String, Bool) -> Void = { [root] text, isError in
                 let response = LeadChannel.Response(id: request.id, text: text, isError: isError)
                 LeadChannel.respond(response, stateDirectory: stateDirectory, root: root)
+            }
+            guard request.createdAt >= startedAt else {
+                answer("Written before this Nirux started: nothing was done.", true)
+                continue
             }
             guard let handler else {
                 answer("Nirux isn't ready yet: try again in a moment.", true)

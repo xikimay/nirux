@@ -157,7 +157,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         NSApp.setActivationPolicy(.regular)
         // A canary run drives this copy through its channel: behind the
         // user's windows, never taking the focus.
-        let drivenByCanary = CanaryChannel.token(in: ProcessInfo.processInfo.environment) != nil
+        let launchEnvironment = CanaryChannel.takeLaunchEnvironment()
+        let drivenByCanary = CanaryChannel.token(in: launchEnvironment) != nil
         setupKeyInterceptor()
         setupClickToFocus()
         setupMenus()
@@ -258,9 +259,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             shellView?.workspaces.contains { $0.id == request.workspaceID } == true
         }
         leadRequests.start()
-        canaryRequests = CanaryChannel.start(
-            environment: ProcessInfo.processInfo.environment, stateDirectory: Persistence.stateDirectory
-        ) { [weak self] request, answer in
+        canaryRequests = CanaryChannel.start(environment: launchEnvironment, stateDirectory: Persistence.stateDirectory) { [weak self] request, answer in
             guard let self else { return answer("Nirux is closing.", true) }
             self.performCanaryRequest(request, answer: answer)
         }

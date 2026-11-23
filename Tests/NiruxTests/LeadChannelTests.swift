@@ -114,6 +114,10 @@ final class LeadChannelTests: XCTestCase {
         center.start(stateDirectory: stateDirectory)
         defer { center.stop() }
         XCTAssertEqual(handled, [], "an earlier launch's request")
+        XCTAssertEqual(
+            LeadChannel.take(LeadChannel.Response.self, id: left.id, from: LeadChannel.responsesFolder(stateDirectory: stateDirectory))?.isError,
+            true, "refused, not left waiting"
+        )
         let mine = request(createdAt: Date().timeIntervalSince1970 + 1)
         for item in [mine, foreign] { XCTAssertTrue(LeadChannel.write(item, id: item.id, in: folder)) }
         center.drain()

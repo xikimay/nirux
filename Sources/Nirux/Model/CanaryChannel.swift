@@ -20,6 +20,14 @@ enum CanaryChannel {
         return token
     }
 
+    /// The environment this launch started with. The token leaves the
+    /// process's own, so nothing Nirux starts (git, hooks, helpers) inherits it.
+    static func takeLaunchEnvironment() -> [String: String] {
+        let environment = ProcessInfo.processInfo.environment
+        unsetenv(tokenKey)
+        return environment
+    }
+
     /// Whether `request` carries `token` (its `token` argument), compared
     /// in constant time.
     static func isAuthorized(_ request: LeadChannel.Request, token: String) -> Bool {
@@ -30,8 +38,10 @@ enum CanaryChannel {
     }
 
     /// Opens the channel when `environment` allows it: requests carrying
-    /// the run's token go to `perform`, others are refused. Nil, with
-    /// nothing written, for any other launch.
+    /// the run's token go to `perform`, others are refused. Each runs from
+    /// the run loop rather than inside the request's dispatch block, so an
+    /// action that opens a modal alert doesn't hold back the next request.
+    /// Nil, with nothing written, for any other launch.
     @MainActor
     static func start(
         environment: [String: String],
@@ -44,7 +54,9 @@ enum CanaryChannel {
             guard isAuthorized(request, token: token) else {
                 return answer("This request doesn't carry the run's canary token.", true)
             }
-            perform(request, answer)
+            RunLoop.main.perform(inModes: [.common]) {
+                MainActor.assumeIsolated { perform(request, answer) }
+            }
         }
         center.start(stateDirectory: stateDirectory)
         return center
