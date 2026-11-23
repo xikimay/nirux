@@ -39,6 +39,15 @@ struct ClaudeUsageTests {
         #expect(reader.events.compactMap(\.subagentID).sorted() == ["agent-a", "agent-b"])
     }
 
+    @Test func aColumnHeadersParserKeepsTheUsageAlone() {
+        var parser = ClaudeTranscriptUsageParser()
+        for index in 0..<100 {
+            parser.consume(line: Data(UsageFixture.claudeResponse(id: "m\(index)", time: "2026-11-20T10:00:00Z", cacheRead: 1_000).utf8))
+        }
+        #expect(parser.usage.responses == 100)
+        #expect(parser.events.isEmpty)
+    }
+
     @Test func aLinkIsNeverRead() throws {
         let folder = UsageFixture.temporaryFolder()
         defer { try? FileManager.default.removeItem(atPath: folder) }

@@ -55,7 +55,8 @@ public struct UsageAttribution: Hashable, Sendable {
 }
 
 /// Attributes a session to the task it was recorded in, else to the
-/// innermost task folder or space anchor holding its working directory.
+/// innermost task folder, space anchor or worktree of a space's repository
+/// holding its working directory.
 struct UsageAttributor: Sendable {
     private let tasksByID: [String: UsageCatalog.Task]
     private let sessionTasks: [UsageSessionKey: String]
@@ -67,10 +68,7 @@ struct UsageAttributor: Sendable {
         tasksByID = Dictionary(catalog.tasks.map { ($0.id, $0) }) { first, _ in first }
         sessionTasks = catalog.sessionTasks
         tasksByFolder = Dictionary(catalog.tasks.compactMap { task in task.folder.map { (Self.normalized($0), task) } }) { first, _ in first }
-        // Longest first: `/x/app.ios.feat` is a worktree of `/x/app.ios`, not of `/x/app`.
-        repositories = catalog.spaces
-            .flatMap { space in space.repositories.map { (Self.normalized($0), space.id) } }
-            .sorted { $0.checkout.count > $1.checkout.count }
+        repositories = catalog.spaces.flatMap { space in space.repositories.map { (Self.normalized($0), space.id) } }
         let folders = catalog.spaces.flatMap { space in space.folders.map { (Self.normalized($0), space.id) } }
         spacesByFolder = Dictionary(repositories + folders) { first, _ in first }
     }
@@ -94,8 +92,16 @@ struct UsageAttributor: Sendable {
         return UsageAttribution()
     }
 
+    /// A live worktree beside a checkout (`<checkout>.<name>`, as Nirux
+    /// names them) whose `.git` file points into that checkout's git folder:
+    /// a clone named alike is not one.
     private func worktreeSpace(_ folder: String) -> String? {
-        repositories.first { folder.hasPrefix($0.checkout + ".") && !folder.dropFirst($0.checkout.count).contains("/") }?.spaceID
+        guard repositories.contains(where: { folder.hasPrefix($0.checkout + ".") && !folder.dropFirst($0.checkout.count).contains("/") }),
+              let data = RegularFileRead.read(URL(fileURLWithPath: folder + "/.git"), maxBytes: 4096).contents,
+              let line = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              line.hasPrefix("gitdir: ") else { return nil }
+        let gitDirectory = Self.normalized(String(line.dropFirst("gitdir: ".count)))
+        return repositories.first { gitDirectory.hasPrefix($0.checkout + "/.git/worktrees/") }?.spaceID
     }
 }
 

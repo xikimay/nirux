@@ -26,7 +26,7 @@ struct UsageLedgerTests {
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -30 * 86_400)], ofItemAtPath: old)
         let usage = ["input_tokens": 20_000, "cached_input_tokens": 15_000, "output_tokens": 200]
         try UsageFixture.write([
-            UsageFixture.json(["type": "session_meta", "payload": ["id": "codex-1", "cwd": "/Users/dev/app.feat-a"]]),
+            UsageFixture.json(["type": "session_meta", "payload": ["id": "codex-1", "cwd": "/Users/dev/app/Sources"]]),
             UsageFixture.codexTokenCount(time: "2026-11-21T11:00:10.000Z", last: usage, total: usage)
         ], to: sources.codexSessions + "/2026/11/21/rollout-2026-11-21-codex-1.jsonl")
         try UsageFixture.write(
@@ -57,16 +57,26 @@ struct UsageLedgerTests {
         #expect(ledger.sessions.isEmpty)
     }
 
-    @Test func aSessionGoesToItsRecordedTaskElseToTheInnermostTaskOrSpaceFolder() {
+    @Test func aSessionGoesToItsRecordedTaskElseToTheInnermostTaskSpaceFolderOrWorktree() throws {
+        let root = UsageFixture.temporaryFolder()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        // A worktree's .git file points into its checkout's git folder; a clone has a .git folder of its own.
+        func worktree(_ name: String, of checkout: String) throws {
+            try FileManager.default.createDirectory(atPath: "\(root)/\(checkout)/.git/worktrees/\(name)", withIntermediateDirectories: true)
+            try UsageFixture.write(["gitdir: \(root)/\(checkout)/.git/worktrees/\(name)"], to: "\(root)/\(checkout).\(name)/.git")
+        }
+        try worktree("feat-a", of: "app")
+        try worktree("feat-b", of: "app.ios")
+        try FileManager.default.createDirectory(atPath: "\(root)/app.v1/.git", withIntermediateDirectories: true)
         let catalog = UsageCatalog(
             spaces: [
-                .init(id: "space", repositories: ["/repos/app"], folders: ["/sites/web"]),
-                .init(id: "ios", repositories: ["/repos/app.ios"])
+                .init(id: "space", repositories: ["\(root)/app"], folders: ["/sites/web"]),
+                .init(id: "ios", repositories: ["\(root)/app.ios"])
             ],
             tasks: [
-                .init(id: "lead", spaceID: "space", folder: "/repos/app"),
-                .init(id: "feature", spaceID: "space", folder: "/repos/app.feat-a"),
-                .init(id: "closed", spaceID: "space", folder: "/repos/app.feat-a"),
+                .init(id: "lead", spaceID: "space", folder: "\(root)/app"),
+                .init(id: "feature", spaceID: "space", folder: "\(root)/app.feat-x"),
+                .init(id: "closed", spaceID: "space", folder: "\(root)/app.feat-x"),
                 .init(id: "bound", spaceID: "other", folder: "/elsewhere")
             ],
             sessionTasks: [UsageSessionKey(.codex, "recorded"): "bound"]
@@ -75,13 +85,16 @@ struct UsageLedgerTests {
         func attribution(_ cwd: String?, session: String = "any") -> UsageAttribution {
             attributor.attribution(UsageSessionKey(.codex, session), cwd: cwd)
         }
-        #expect(attribution("/repos/app/Sources", session: "recorded") == UsageAttribution(spaceID: "other", taskID: "bound"))
-        #expect(attribution("/repos/app/Sources") == UsageAttribution(spaceID: "space", taskID: "lead"))
-        #expect(attribution("/repos/app.feat-a/Sources") == UsageAttribution(spaceID: "space", taskID: "feature"))
-        #expect(attribution("/repos/app.feat-gone") == UsageAttribution(spaceID: "space"))
-        #expect(attribution("/repos/app.ios.feat-b/Sources") == UsageAttribution(spaceID: "ios"))
+        #expect(attribution("\(root)/app/Sources", session: "recorded") == UsageAttribution(spaceID: "other", taskID: "bound"))
+        #expect(attribution("\(root)/app/Sources") == UsageAttribution(spaceID: "space", taskID: "lead"))
+        // A task's folder counts once it is gone; a worktree only while git says it is one.
+        #expect(attribution("\(root)/app.feat-x/Sources") == UsageAttribution(spaceID: "space", taskID: "feature"))
+        #expect(attribution("\(root)/app.feat-a/Sources") == UsageAttribution(spaceID: "space"))
+        #expect(attribution("\(root)/app.ios.feat-b") == UsageAttribution(spaceID: "ios"))
+        #expect(attribution("\(root)/app.v1") == UsageAttribution())
+        #expect(attribution("\(root)/app.feat-gone") == UsageAttribution())
         #expect(attribution("/sites/web/blog") == UsageAttribution(spaceID: "space"))
-        #expect(attribution("/repos/app2") == UsageAttribution())
+        #expect(attribution("\(root)/app2") == UsageAttribution())
         #expect(attribution(nil) == UsageAttribution())
     }
 

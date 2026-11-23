@@ -63,23 +63,40 @@ public struct ClaudeSessionUsage: Equatable, Sendable {
 /// times and the working directory are kept — never message content.
 public struct ClaudeTranscriptUsageParser: TranscriptLineParser, Sendable {
     public private(set) var usage = ClaudeSessionUsage()
+    /// Kept only when recording: a column header needs the usage alone.
     public private(set) var events: [UsageEvent] = []
     /// The working directory the session started in.
     public private(set) var cwd: String?
     public let subagentID: String?
-    private var eventIndexByID: [String: Int] = [:]
+    public let recordsEvents: Bool
+    /// Response whose later blocks may still come: its counts are in
+    /// `usage.totals`, and a later line replaces them instead of adding.
+    private var latest: (id: String, counts: TokenCounts)?
+    /// Responses already counted, most recent last. Bounded: a repeat only
+    /// ever follows its response closely.
+    private var countedIDs: [String] = []
+    private static let countedIDLimit = 64
 
     /// Keys a line must contain to matter; others skip JSON parsing.
     private static let usageMarker = Data("\"usage\"".utf8)
     private static let compactMarker = Data("compact_boundary".utf8)
     private static let cwdMarker = Data("\"cwd\"".utf8)
 
+    /// The usage only.
     public init() {
         subagentID = nil
+        recordsEvents = false
     }
 
-    public init(subagentID: String) {
+    private init(recordingEventsOf subagentID: String?) {
         self.subagentID = subagentID
+        recordsEvents = true
+    }
+
+    /// The usage and every response, of a session's transcript or of its
+    /// subagent `subagentID`'s.
+    public static func recordingEvents(subagentID: String? = nil) -> Self {
+        Self(recordingEventsOf: subagentID)
     }
 
     public mutating func consume(line: Data) {
@@ -117,17 +134,21 @@ public struct ClaudeTranscriptUsageParser: TranscriptLineParser, Sendable {
         )
 
         let id = (message["id"] as? String) ?? (object["requestId"] as? String)
-        if let id, let index = eventIndexByID[id] {
-            // A later block of the latest response, or a stray repeat of an
-            // earlier one, already counted.
-            guard index == events.count - 1 else { return }
-            usage.totals += counts - events[index].counts
-            events[index] = event
+        if let id, let latest, latest.id == id {
+            usage.totals += counts - latest.counts
+            self.latest = (id, counts)
+            if recordsEvents { events[events.count - 1] = event }
+        } else if let id, countedIDs.contains(id) {
+            return // a stray repeat of a response already counted
         } else {
-            if let id { eventIndexByID[id] = events.count }
-            events.append(event)
             usage.totals += counts
             usage.responses += 1
+            if recordsEvents { events.append(event) }
+            latest = id.map { ($0, counts) }
+            if let id {
+                countedIDs.append(id)
+                if countedIDs.count > Self.countedIDLimit { countedIDs.removeFirst() }
+            }
         }
         if let model, let previous = usage.model, model != previous { usage.peakContextTokens = 0 }
         usage.contextTokens = context
@@ -179,7 +200,7 @@ public struct ClaudeSessionReader: Sendable {
     private var listedSubagentsAt: TimeInterval?
 
     public init(path: String) {
-        main = TranscriptLineReader(path: path)
+        main = TranscriptLineReader(path: path, parser: .recordingEvents())
     }
 
     public var sessionID: String { URL(fileURLWithPath: main.path).deletingPathExtension().lastPathComponent }
@@ -215,7 +236,7 @@ public struct ClaudeSessionReader: Sendable {
             let id = String(name.dropLast(".jsonl".count))
             if subagents[id] == nil {
                 subagents[id] = TranscriptLineReader(
-                    path: folder + "/" + name, parser: ClaudeTranscriptUsageParser(subagentID: id)
+                    path: folder + "/" + name, parser: .recordingEvents(subagentID: id)
                 )
             }
         }
