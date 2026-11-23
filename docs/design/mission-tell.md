@@ -184,16 +184,18 @@ nothing into Codex (`CodexQueue`, `queueForCodex`).
 agy 1.5.12 has no queue of its own, so Nirux types into it, behind the same
 `promptRefusal` as Claude Code: a branch reads agy's OSC 7501 instead of
 hooks. Its prompt is free once the `agy` in front (the one sent to, or one
-resuming its conversation) said `done` and no key reached the terminal since
-its turn began (the Enter that sent its prompt, else its first `working`;
-another `working` after a dialog is the same turn's, a new prompt's Enter
-starts a new one even when the last turn's end was missed, and keys
-answering that dialog don't count, up to the one that answers it). A state
+resuming its conversation) reports `idle` or `done` from that process — either
+on its first idle prompt with no draft keys typed since the process started, or
+once its turn ended (`done`, or `idle` after it, at a key) and no key reached
+the terminal since its turn began (the Enter that sent its prompt, else its
+first `working`; another `working` after a dialog is the same turn's, a new
+prompt's Enter starts a new one even when the last turn's end was missed, and
+keys answering that dialog don't count, up to the one that answers it). A state
 read on an empty process table goes to the `agy` last seen in front. Seen live: agy says `idle` at
 the first key after `done`, but a key typed while it works stays in its box
 and it still says `done`. Its dialogs say `blocked`, `error` holds the
-message like a failed turn, and before its first turn ends (a resumed agy) it
-may show a screen no state tells of: the message waits for that turn. A paste
+message like a failed turn, and before it reports any OSC 7501 state since
+starting the message waits (`.noPromptYet`). A paste
 and its Enter in one write go in (probed). A message goes only to the agent
 its Mission names, so one for a Claude Code child is never typed into an agy
 that took its terminal, nor a question into an agy parent, which polls with

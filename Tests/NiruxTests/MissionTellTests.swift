@@ -464,8 +464,9 @@ final class MissionTellTests: XCTestCase {
         }
         XCTAssertEqual(refusal(ForegroundProcess(instance: claudeProcess, name: "agy", arguments: ["agy", "-p", "Go"])), .noClaude,
                        "a one-shot run")
+        XCTAssertEqual(refusal(), .noPromptYet, "no state reported yet")
         report(.idle, at: 1)
-        XCTAssertEqual(refusal(), .noPromptYet, "ready, but no turn ended since it started")
+        XCTAssertNil(refusal(), "idle at its first prompt with no draft")
         report(.working, at: 2)
         XCTAssertEqual(refusal(), .working)
         report(.blocked, kind: "permission", at: 3)
@@ -514,9 +515,12 @@ final class MissionTellTests: XCTestCase {
         XCTAssertNil(refusal(), "its turn ended done")
         report(.error, at: 12)
         XCTAssertEqual(refusal(), .failedTurn)
-        report(.done, at: 13, from: ProcessInstance(pid: 9, startedAt: t0))
-        XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: t0), name: "agy", arguments: ["agy"])),
-                       .noPromptYet, "its own turn, not another agy's")
+        let otherAgy = ProcessInstance(pid: 9, startedAt: t0 + 12.5)
+        XCTAssertEqual(refusal(ForegroundProcess(instance: otherAgy, name: "agy", arguments: ["agy"])),
+                       .noPromptYet, "its own status, not another agy's")
+        report(.done, at: 13, from: otherAgy)
+        XCTAssertNil(refusal(ForegroundProcess(instance: otherAgy, name: "agy", arguments: ["agy"])),
+                     "a fresh agy reporting done with no post-start draft")
 
         func at(_ offset: TimeInterval) -> Date { Date(timeIntervalSince1970: t0 + offset) }
         // Keys typed after the Enter that sent its prompt, before its working is read, stay in its box.
@@ -558,6 +562,64 @@ final class MissionTellTests: XCTestCase {
         _ = after.tick(fgName: "claude", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 3))
         after.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 4), keys: Data("x".utf8))
         XCTAssertTrue(after.hasDraft, "Claude Code's draft")
+    }
+
+    /// A freshly resumed `agy` sitting idle at its first prompt (OSC 7501
+    /// `idle`/`done`, no `agyTurn` yet) accepts a `tell` unless it has not
+    /// reported yet, is blocked/working/errored, or has post-start draft keys.
+    func testResumedAntigravityPromptIsFreeWhenIdleWithNoTurnYet() {
+        let resumed = ProcessInstance(pid: 77, startedAt: t0 + 10)
+        let agy = ForegroundProcess(instance: resumed, name: "agy", arguments: ["agy", "--conversation", "c1"])
+        func at(_ offset: TimeInterval) -> Date { Date(timeIntervalSince1970: t0 + offset) }
+        func status(_ state: AgentProgramStatus.State, kind: String? = nil) -> AgentProgramStatus {
+            AgentProgramStatus(state: state, kind: kind, message: nil, agent: .agy)
+        }
+        func refusal(_ machine: AgentStatusMachine, since: TimeInterval = t0 + 100) -> AgentPromptRefusal? {
+            machine.promptRefusal(foreground: agy, runningSince: since, agent: .agy)
+        }
+
+        // No OSC 7501 yet, or status from before start / another process -> .noPromptYet.
+        var booting = AgentStatusMachine()
+        XCTAssertEqual(refusal(booting), .noPromptYet)
+        _ = booting.noteProgramStatus(status(.idle), from: nil, isUserFocused: true, now: at(5))
+        XCTAssertEqual(refusal(booting), .noPromptYet, "idle before agy started (nil process)")
+        _ = booting.noteProgramStatus(status(.idle), from: resumed, isUserFocused: true, now: at(9))
+        XCTAssertEqual(refusal(booting), .noPromptYet, "idle stamped before agy started")
+        let older = ProcessInstance(pid: 76, startedAt: t0)
+        _ = booting.noteProgramStatus(status(.idle), from: older, isUserFocused: true, now: at(11))
+        XCTAssertEqual(refusal(booting), .noPromptYet, "idle from another agy process")
+
+        // Launch command before process start is no draft; blocked/working/error still refuse.
+        var machine = AgentStatusMachine()
+        machine.noteKeystroke(now: at(9), keys: Data("command agy --conversation c1\n".utf8))
+        _ = machine.tick(fgName: "agy", isUserFocused: true, now: at(10.5))
+        _ = machine.noteProgramStatus(status(.blocked, kind: "auth"), from: resumed, isUserFocused: true, now: at(11))
+        XCTAssertEqual(refusal(machine), .dialog)
+        _ = machine.noteProgramStatus(status(.blocked, kind: "permission"), from: resumed, isUserFocused: true, now: at(11.5))
+        XCTAssertEqual(refusal(machine), .dialog)
+        _ = machine.noteProgramStatus(status(.error), from: resumed, isUserFocused: true, now: at(12))
+        XCTAssertEqual(refusal(machine), .failedTurn)
+        _ = machine.noteProgramStatus(status(.idle), from: resumed, isUserFocused: true, now: at(13))
+        XCTAssertNil(refusal(machine), "launch command before startedAt does not block idle prompt")
+        XCTAssertTrue(machine.agyFacts(now: t0 + 20).contains("draft=-"), machine.agyFacts(now: t0 + 20))
+
+        // Navigation key leaves no text; real post-start draft blocks.
+        machine.noteKeystroke(now: at(13.5), keys: Data("\u{1B}[5~".utf8))
+        XCTAssertNil(refusal(machine), "Page Up leaves no draft")
+        var withDraft = machine
+        withDraft.noteKeystroke(now: at(14), keys: Data("draft".utf8))
+        XCTAssertEqual(refusal(withDraft), .draft)
+        _ = withDraft.noteProgramStatus(status(.done), from: resumed, isUserFocused: true, now: at(14.5))
+        XCTAssertEqual(refusal(withDraft), .draft, "done with post-start draft still refuses")
+
+        // Typing a tell into an idle resumed agy blocks double-typing, then transitions cleanly into agyTurn.
+        machine.noteKeystroke(now: at(15), keys: Data("\u{1B}[200~Go on\u{1B}[201~\r".utf8), byNirux: true)
+        XCTAssertEqual(refusal(machine), .draft, "no double-typing before agy reports working")
+        _ = machine.noteProgramStatus(status(.working), from: resumed, isUserFocused: true, now: at(15.2))
+        XCTAssertEqual(machine.agyTurn?.startedAt, t0 + 15)
+        XCTAssertEqual(refusal(machine), .working)
+        _ = machine.noteProgramStatus(status(.done), from: resumed, isUserFocused: true, now: at(20))
+        XCTAssertNil(refusal(machine), "subsequent tell waits for turn end, then goes in")
     }
 
     func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {

@@ -132,20 +132,33 @@ extension AgentStatusMachine {
 
     /// `promptRefusal` for `agy`, the column's interactive Antigravity,
     /// already running at `time`, which says its state itself (OSC 7501):
-    /// its prompt is free once its turn ended (`done`, or `idle` after it,
-    /// at a key) and no key that may leave text reached the terminal since
-    /// that turn began (`AgyTurn`): a key typed while it works stays in its
-    /// box (agy 1.5.12), keys that answer its dialogs don't. Stopped with Esc
-    /// (`idle` without `done`), its box may hold its prompt again. Before its
-    /// first turn ends it may show a screen no state tells of: one that ended
-    /// none since it started waits for that.
+    /// its prompt is free once it reports `idle` or `done` from this
+    /// process — either on a fresh/resumed first prompt with no draft keys
+    /// typed since it started, or once its turn ended (`done`, or `idle`
+    /// after it, at a key) and no key that may leave text reached the
+    /// terminal since that turn began (`AgyTurn`): a key typed while it
+    /// works stays in its box (agy 1.5.12), keys that answer its dialogs
+    /// don't. Stopped with Esc (`idle` without `done`), its box may hold
+    /// its prompt again. Before any OSC 7501 status arrives from this
+    /// process it waits (`.noPromptYet`).
     private func agyPromptRefusal(_ agy: ForegroundProcess?, runningSince time: TimeInterval) -> AgentPromptRefusal? {
         guard let agy, agy.interactiveAgent == .agy else { return .noClaude }
         guard agy.instance.startedAt <= time else { return .restarted }
-        guard let turn = agyTurn, turn.process == agy.instance else { return .noPromptYet }
+        let reported = programStatus.flatMap {
+            $0.isFrom(agy.instance) && $0.at >= agy.instance.startedAt ? $0.status.state : nil
+        }
+        guard let turn = agyTurn, turn.process == agy.instance else {
+            switch reported {
+            case nil: return .noPromptYet
+            case .working?: return .working
+            case .blocked?: return .dialog
+            case .error?: return .failedTurn
+            case .idle?, .done?: return lastDraftInputAt > agy.instance.startedAt ? .draft : nil
+            }
+        }
         // Its last word, else how its turn ended (another process in front, or
         // a silence, drops the status, not the turn).
-        switch programStatus.flatMap({ $0.process == agy.instance ? $0.status.state : nil }) ?? turn.ended {
+        switch reported ?? turn.ended {
         case .working?, nil: return .working
         case .blocked?: return .dialog
         case .error?: return .failedTurn
@@ -219,7 +232,8 @@ extension AgentStatusMachine {
     /// What `promptRefusal` reads for an `agy`, for the log.
     func agyFacts(now: TimeInterval) -> String {
         func age(_ time: TimeInterval?) -> String { time.map { String(Int(min(max(now - $0, 0), 1e7))) + "s" } ?? "-" }
-        let draft = lastDraftInputAt > (agyTurn?.startedAt ?? 0) ? age(lastDraftInputAt) : "-"
+        let draftSince = agyTurn?.startedAt ?? programStatus?.process?.startedAt ?? 0
+        let draft = lastDraftInputAt > draftSince ? age(lastDraftInputAt) : "-"
         return "agy=\(programStatus?.status.state.rawValue ?? "-")/\(age(programStatus?.at)) "
             + "turn=\(age(agyTurn?.startedAt))/\(agyTurn?.ended?.rawValue ?? "open") draft=\(draft)"
     }
@@ -275,7 +289,7 @@ enum AgentPromptRefusal: String, Equatable, Sendable {
     case restarted
     /// Its `claude` took no prompt since it started, and doesn't say it
     /// sits at its prompt (see `AgentStatusMachine.sitsAtFirstPrompt`); its
-    /// `codex` reported no state since it started.
+    /// `codex` or `agy` reported no state since it started.
     case noPromptYet
     /// Nirux doesn't know which conversation its `codex` runs: one its
     /// launch prompt started, or one it resumed (`ForegroundSessionTracker`).

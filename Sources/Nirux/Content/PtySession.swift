@@ -762,6 +762,13 @@ final class PtySession: @unchecked Sendable {
         state.machine.agyTurn?.process == process
     }
 
+    func hasAgyPrompt(in process: ProcessInstance) -> Bool {
+        if hasAgyTurn(in: process) { return true }
+        guard let report = state.machine.programStatus,
+              report.isFrom(process), report.at >= process.startedAt else { return false }
+        return [.idle, .done].contains(report.status.state)
+    }
+
     func finishedMissionTurn(in foreground: ForegroundProcess, after sentAt: TimeInterval) -> Bool {
         switch foreground.interactiveAgent {
         case .agy:

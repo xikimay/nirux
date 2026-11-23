@@ -462,7 +462,7 @@ final class ColumnState {
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
                 onAgentAttention?(reason)
             }
-            if status.state == .done { onProgramTurnOver?() }
+            if [.done, .idle].contains(status.state) { onProgramTurnOver?() }
         }
 
         ptySession.onLocalServerURL = { [weak self] url in
