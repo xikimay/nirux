@@ -180,9 +180,13 @@ extension MergeQueue {
                     }
                     // A train's pull request left open is named: its merge's answer is kept, and one just opened is looked up.
                     switch purpose {
-                    case .train(.open):
+                    case .train(.open) where result == .sent || result.isUncertain:
                         clocks.step = now
                         read([.pullRequests(head: trainBranch)], for: .train(.openedWhileStopping(message: message)))
+                    case .train(.open):
+                        // GitHub opened none: the branch is deleted as before any pull request.
+                        train?.step = .composing
+                        stop(StopReason(kind: .user, message: message))
                     case .train(.land(let head, let baseTip)):
                         self.purpose = .train(.landConfirm(head: head, baseTip: baseTip, result: result))
                         stop(StopReason(kind: .user, message: message))
@@ -294,13 +298,16 @@ extension MergeQueue {
             if cadence == .train, let number = trainToClose(for: reason) {
                 note("Closing train #\(number)")
                 train?.step = .closing(reason)
+                phase = .stopping
                 return mutate(.closePullRequest(number: number), for: .train(.close(reason)))
             }
             if cadence == .train, let cleanup = trainCleanup(for: reason) {
+                phase = .stopping
                 return mutate(cleanup, for: .train(.cleanup(reason)))
             }
             var reason = reason
-            if reason.kind == .github || reason.kind == .setup, let mutation = unconfirmedMutation,
+            // A Stop says it too in a train, whose calls leave branches and pull requests.
+            if reason.kind == .github || reason.kind == .setup || (cadence == .train && reason.kind == .user), let mutation = unconfirmedMutation,
                case let shown = train?.name ?? currentEntry.map({ "#\($0.number)" }) ?? "it" {
                 reason = StopReason(kind: reason.kind, message: reason.message + " The \(Self.describe(mutation)) was sent "
                     + "and GitHub didn’t show its effect yet: check \(shown) on GitHub.", url: reason.url)

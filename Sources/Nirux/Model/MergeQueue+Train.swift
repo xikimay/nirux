@@ -211,13 +211,21 @@ extension MergeQueue.Engine {
         return train?.number
     }
 
-    /// Every pull request left the train: the queue stops on the first.
-    private mutating func stopOnLeftOut(adding text: String? = nil) {
-        let left = entries.indices.filter { if case .stopped = entries[$0].step { true } else { false } }
-        guard let first = left.first, case .stopped(let reason) = entries[first].step else { return missingAnswer() }
-        let others = left.dropFirst().map { entries[$0].number }
+    /// The queue stops on a pull request that left the train, a conflict
+    /// first (Ask Agent to Resolve offers it); one stopped after its head
+    /// landed (pushed after the last check) only if none left. Those the
+    /// train landed are named.
+    private mutating func stopOnLeftOut() {
+        let stopped = entries.indices.filter { if case .stopped = entries[$0].step { true } else { false } }
+        let partNumbers = Set(train?.parts.map(\.number) ?? [])
+        let left = stopped.filter { !partNumbers.contains(entries[$0].number) }
+        guard let first = left.first ?? stopped.first, case .stopped(let reason) = entries[first].step else { return missingAnswer() }
+        let others = left.filter { $0 != first }.map { entries[$0].number }
         let too = others.isEmpty ? nil : " \(Self.numbers(others)) left the train too."
-        stop(reason.appending(too).appending(text), on: first)
+        let landed = train.flatMap { train in
+            train.mergeCommit == nil ? nil : train.number.map { " Train #\($0) landed \(Self.numbers(train.parts.map(\.number)))." }
+        }
+        stop(reason.appending(too).appending(landed), on: first)
     }
 
     /// A stop that is one pull request's own: the others go back to waiting.
@@ -662,8 +670,7 @@ extension MergeQueue.Engine {
     /// the train landed stops the queue there.
     private mutating func finishTrain() {
         train?.step = .done
-        let landed = Self.numbers(entries.filter { $0.step == .done }.map(\.number))
-        if riders.count < entries.count { return stopOnLeftOut(adding: train?.number.map { " Train #\($0) landed \(landed)." }) }
+        if riders.count < entries.count { return stopOnLeftOut() }
         current = nil
         phase = .finished
         note("Finished: \(entries.filter { $0.step == .done }.count) merged")
@@ -824,6 +831,8 @@ extension MergeQueue.Engine {
     mutating func trainMutated(_ result: MergeQueue.MutationResult, _ step: TrainPurpose, now: TimeInterval) {
         if case .create(let base) = step {
             clocks.step = now
+            // GitHub created it: the train's, to delete on a stop, even before it shows.
+            if result == .sent { train = MergeQueue.Train(branch: trainBranch, base: base, head: base) }
             return read([.branch(trainBranch)], for: .train(.created(base: base, result: result)))
         }
         guard let train else { return missingAnswer() }

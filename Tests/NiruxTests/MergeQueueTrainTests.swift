@@ -174,7 +174,7 @@ final class MergeQueueTrainTests: XCTestCase {
         let reason = try XCTUnwrap(queue.stopReason)
         XCTAssertEqual(reason.kind, .changed)
         XCTAssertEqual(reason.message, "#14 moved to ccccccc after train #900’s last check: the train landed bbbbbbb, and #14 stays "
-            + "open with the commits after it. Train #900 landed #12.")
+            + "open with the commits after it. Train #900 landed #12, #14.")
         XCTAssertEqual(queue.engine.entries.map(\.step), [.done, .stopped(reason)])
         XCTAssertTrue(queue.notes.contains { $0.message == "#12 read merged" })
         XCTAssertTrue(queue.notes.contains { $0.message == "The nightly of train #900 succeeded" }, "the landed train's run is still read")
@@ -221,7 +221,8 @@ final class MergeQueueTrainTests: XCTestCase {
         var second = queue()
         second.run(&reading) { $0.pendingReads?.contains(.pullRequests(head: self.branch)) == true }
         second.send(.stop)
-        XCTAssertEqual(second.stopReason?.message, "Stopped by the user. " + maybe)
+        let stopped = try XCTUnwrap(second.stopReason?.message)
+        XCTAssertTrue(stopped.hasPrefix("Stopped by the user.") && stopped.hasSuffix(maybe), stopped)
 
         var refusing = TrainGitHub(world: world())
         var third = queue()
@@ -231,6 +232,60 @@ final class MergeQueueTrainTests: XCTestCase {
         third.fail(.refused("HTTP 502: Bad Gateway"))
         XCTAssertEqual(third.stopReason?.kind, .user)
         XCTAssertTrue(third.stopReason?.message.hasSuffix(maybe) == true, third.stopReason?.message ?? "")
+    }
+
+    func testAConflictThatLeftTheTrainIsWhatTheQueueStopsOnAfterALandingWithALatePush() throws {
+        let d = MQ.sha("d")
+        var world = world()
+        world.pullRequests[16] = MQ.pullRequest(16, head: c)
+        var github = TrainGitHub(world: world)
+        github.conflicts = [c]
+        github.pushesAfterLanding = [14: d]
+        var queue = MQ.Harness(entries: [], cadence: .train)
+        queue.engine = MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(12, head: a), MQ.entry(14, head: b), MQ.entry(16, head: c)],
+                                         cadence: .train)
+        queue.start()
+        queue.drive(&github)
+        let reason = try XCTUnwrap(queue.stopReason)
+        XCTAssertEqual(reason.message, "#16 conflicts with main or with #12, #14, merged before it in the train. It left the train. "
+            + "Train #900 landed #12, #14.")
+        let saved = MergeQueue.SavedQueue(engine: queue.engine, dryRun: false, savedAt: Date())
+        XCTAssertEqual(MergeQueue.Conflict(saved: saved, repository: MQ.widgets, dryRun: false)?.number, 16)
+        guard case .stopped(let moved) = queue.engine.entries[1].step else { return XCTFail("#14 isn't stopped") }
+        XCTAssertEqual(moved.kind, .changed)
+    }
+
+    func testAStopWhileTheBranchIsCreatedDeletesItOrSaysItWasSent() throws {
+        var sent = TrainGitHub(world: world())
+        var first = queue()
+        first.run(&sent) { if case .createBranch? = $0.pendingMutation { true } else { false } }
+        first.mutated(sent.apply(try XCTUnwrap(first.pendingMutation)))
+        first.send(.stop)
+        XCTAssertEqual(first.phase, .stopping, "deleting the branch")
+        first.mutated(sent.apply(try XCTUnwrap(first.pendingMutation)))
+        XCTAssertEqual(first.stopReason?.message, "Stopped by the user. Nirux deleted the train’s branch \(branch).")
+        XCTAssertNil(sent.world.branches[branch])
+
+        var uncertain = TrainGitHub(world: world())
+        var second = queue()
+        second.run(&uncertain) { if case .createBranch? = $0.pendingMutation { true } else { false } }
+        second.mutated(.uncertain("gh timed out"))
+        second.send(.stop)
+        XCTAssertEqual(second.stopReason?.message, "Stopped by the user. The creation of branch \(branch) at 0000000 was sent and "
+            + "GitHub didn’t show its effect yet: check it on GitHub.")
+    }
+
+    func testAStopAfterGitHubRefusedToOpenTheTrainDeletesItsBranchAtOnce() throws {
+        var github = TrainGitHub(world: world())
+        var queue = queue()
+        queue.run(&github) { if case .openPullRequest? = $0.pendingMutation { true } else { false } }
+        queue.send(.stop)
+        queue.mutated(.refused(status: 422, message: "Validation Failed"))
+        XCTAssertEqual(queue.pendingMutation, .deleteBranch(name: branch), "no minute spent looking for a pull request")
+        queue.mutated(github.apply(try XCTUnwrap(queue.pendingMutation)))
+        let message = try XCTUnwrap(queue.stopReason?.message)
+        XCTAssertTrue(message.hasSuffix("answered: HTTP 422: Validation Failed. Nirux deleted the train’s branch \(branch)."), message)
+        XCTAssertFalse(message.contains("may be open"))
     }
 
     func testACallSentWhileTheBranchIsCreatedIsNamedOnAStopOrAQuit() throws {
