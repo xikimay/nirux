@@ -376,12 +376,19 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   checks still running are waited for. Nirux composes the train on GitHub: a
   branch `nirux-train/<UTC time>` at the base's tip (`POST git/refs`), then
   one merge commit per PR head in the confirmed order (`POST merges`, made by
-  `web-flow`, each verified on top of the previous one). A 409 is a conflict
-  and stops on that PR. A pull request of the train into the base runs the
+  `web-flow`, each verified on top of the previous one). A PR that conflicts
+  (CONFLICTING at preflight, or GitHub's 409 while composing) leaves the
+  train, which lands the others; the queue then stops on it, so Ask Agent to
+  Resolve offers its agent a merge of the base that now holds them. A pull
+  request of the train into the base runs the
   required checks once, on a commit up to date by construction, so the strict
   "up to date" rule stays. Before merging it, the queue checks the base still
   sits at the train's tip and every PR is still at its head, then merges it
-  pinned to its head. The PRs' heads never change. GitHub marks each PR merged
+  pinned to its head. Each look at the train's checks reads the PRs again: a
+  push to one stops the train at once. A stop the train finds itself (red
+  checks, the base moved, a push) closes the train's PR first; a user Stop or
+  GitHub not answering leaves it open, and the stop names it. The PRs' heads
+  never change. GitHub marks each PR merged
   once its head lands, with the train's merge commit for it: observed on a
   throwaway base (#779–#792), not documented. So the queue reads every PR and
   stops loudly if one doesn't read merged within 3 minutes. The post-merge
