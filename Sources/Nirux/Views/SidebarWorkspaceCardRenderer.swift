@@ -146,6 +146,12 @@ final class SidebarWorkspaceCardRenderer {
             append(trailing)
             maxX = trailing.frame.minX - Theme.Space.sm
         }
+        if let usage = usageLabel() {
+            let width = usage.fittingSize.width
+            usage.frame = NSRect(x: maxX - width, y: rowY, width: width, height: Metrics.titleRowHeight)
+            append(usage)
+            maxX = usage.frame.minX - Theme.Space.sm
+        }
         let badge = menuButton(frame: NSRect(
             x: maxX - Metrics.menuButtonWidth, y: rowY + (Metrics.titleRowHeight - Metrics.menuButtonHeight) / 2,
             width: Metrics.menuButtonWidth, height: Metrics.menuButtonHeight
@@ -182,6 +188,21 @@ final class SidebarWorkspaceCardRenderer {
         }
         label.toolTip = description
         label.setAccessibilityLabel(description)
+        return label
+    }
+
+    /// "142k · 4.2M": the context of its latest session, in amber once
+    /// worth compacting, then what the task spent over the week.
+    private func usageLabel() -> NSTextField? {
+        guard let usage = workspace.usage else { return nil }
+        let label = textLabel(
+            usage.text, font: Theme.Font.captionDigits,
+            color: usage.isContextHeavy ? .niruxWarning : Theme.Color.textTertiary
+        )
+        label.alignment = .right
+        let toolTip = usage.toolTip(now: Date().timeIntervalSince1970)
+        label.toolTip = toolTip
+        label.setAccessibilityLabel("Token usage: " + toolTip.replacingOccurrences(of: "\n", with: ", "))
         return label
     }
 
@@ -997,6 +1018,12 @@ final class SidebarWorkspaceCardRenderer {
             )
             append(host)
             maxX = host.frame.minX - Theme.Space.sm
+        }
+        if let usage = usageLabel() {
+            let size = usage.fittingSize
+            usage.frame = NSRect(x: maxX - size.width, y: midY - ceil(size.height) / 2, width: size.width, height: ceil(size.height))
+            append(usage)
+            maxX = usage.frame.minX - Theme.Space.sm
         }
         let badge = menuButton(frame: NSRect(
             x: maxX - Metrics.menuButtonWidth, y: midY - Metrics.menuButtonHeight / 2,

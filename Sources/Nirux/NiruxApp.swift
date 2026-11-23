@@ -184,6 +184,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // bar's height: even margins all round.
         window.setFrame(rect, display: false)
         setUpUsageLimits(window: window)
+        shellView.startUsageMonitor { [weak self] report in
+            self?.usageLimitsIndicator?.update(codex: report.codexLimits, now: Date().timeIntervalSince1970)
+        }
         setUpKeepAwake(window: window, shell: shellView)
         setupStatusBarNotices()
         // Copies of a branch an Explain run left when Nirux quit or crashed.

@@ -75,6 +75,12 @@ extension NiruxShellView {
                 self?.showGlobalSearch()
             },
             PaletteAction(
+                icon: .symbol("chart.bar.xaxis"), title: "Token Usage",
+                subtitle: "Where the agents’ tokens went, by agent, day, task and space", shortcut: .usage
+            ) { [weak self] in
+                self?.showUsageWindow()
+            },
+            PaletteAction(
                 icon: .symbol("plus.forwardslash.minus"), title: "Toggle Editor Diff", subtitle: "Show the diff for the active editor file",
                 shortcut: .toggleEditorDiff
             ) { [weak self] in

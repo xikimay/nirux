@@ -110,7 +110,8 @@ extension NiruxShellView {
                     ? infos.compactMap(\.attention).max()
                     : profileWorkspaces.compactMap {
                         Self.attention(of: $0, blockedWaits: blockedWaits, missionQuestions: missionQuestions)
-                    }.max()
+                    }.max(),
+                weekTokens: usageMonitor?.report?.week.spaces[profile.id]?.weightedTokens
             )
         }
         sidebar.catchUp = sidebarCatchUp(infos: infos)
@@ -206,7 +207,7 @@ extension NiruxShellView {
         if let wait = workspace.waitingStart, let start = wait.pendingStart, let state = wait.waitingState {
             workspace.columns.first?.waitingTask?.configure(.init(state: state, repository: start.repository, description: start.description))
         }
-        return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
+        var info = WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
                       profileID: workspace.profileID, isInactive: workspace.isInactive,
                       columnCount: workspace.columns.count,
                       focusedColumn: workspace.focusedIndex,
@@ -230,6 +231,8 @@ extension NiruxShellView {
                       dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil,
                       followUp: followUpRow(of: workspace),
                       heldMessages: SidebarHeldMessages(workspace.mergeWaits), waitingTask: workspace.waitingStart?.waitingState)
+        info.usage = usageMonitor?.report.flatMap { SidebarTaskUsage($0, taskID: workspace.id) }
+        return info
     }
 
     /// Every column's foreground process, shown or not, and what follows
