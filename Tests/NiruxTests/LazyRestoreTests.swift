@@ -75,7 +75,7 @@ final class LazyRestoreTests: XCTestCase {
                 workspace("a", [
                     Self.claude(Self.sessionA, cwd: root),
                     Self.claude(Self.sessionB, cwd: root),
-                    Self.claude(Self.sessionC, title: "✳ Fix the login form", status: .working, cwd: root)
+                    Self.claude(Self.sessionC, title: "✳ Fix the login form", status: .needsAttention, cwd: root)
                 ]),
                 workspace("b", [Self.codex(Self.thread, cwd: root)]),
                 workspace("c", [Self.claude(nil, cwd: root, width: 1)])
@@ -174,7 +174,7 @@ final class LazyRestoreTests: XCTestCase {
             XCTAssertEqual(saved.workspaces[1].columns[0].codexSessionID, Self.thread)
             XCTAssertEqual(saved.workspaces[2].columns[0].claudeSessionIsUnprompted, true)
             XCTAssertEqual(saved.workspaces[0].columns[2].lastAgentTitle, "✳ Fix the login form")
-            XCTAssertEqual(saved.workspaces[0].columns[2].lastAgentStatus, .working)
+            XCTAssertEqual(saved.workspaces[0].columns[2].lastAgentStatus, .needsAttention)
 
             shell.switchToWorkspace(1)
             settle(shell)
@@ -190,6 +190,84 @@ final class LazyRestoreTests: XCTestCase {
             ))
             XCTAssertTrue(try column(shell, 2, 0).isAwaitingResume)
             XCTAssertEqual(shell.deferredAgentCount, 1)
+        }
+    }
+
+    /// After a relaunch (an update at night), the Lead and an agent last
+    /// seen working start on their own, wherever they are; an idle one waits
+    /// for its column. Those mid-turn are told once to go on, the Lead too.
+    /// The space's switch off, they all wait, as before.
+    func testARelaunchResumesTheWorkThatWasGoingOn() throws {
+        func state() -> PersistedState {
+            let lead = Self.claude(Self.sessionA, status: .working, cwd: root, width: 1)
+            var leadSpace = workspace("lead", [lead])
+            leadSpace.isLead = true
+            leadSpace.leadAgentUUID = lead.agentUUID
+            leadSpace.profileID = "side"
+            var state = PersistedState(workspaces: [
+                workspace("shown", [Self.codex(Self.thread, cwd: root)]),
+                leadSpace,
+                workspace("tasks", [
+                    Self.claude(Self.sessionB, status: .working, cwd: root), Self.claude(Self.sessionC, status: .idle, cwd: root)
+                ])
+            ], activeWorkspaceIndex: 0)
+            state.workspaceProfiles = [WorkspaceProfile.defaultProfile, WorkspaceProfile(id: "side", name: "side", colorHex: "#E0AF68")]
+            return state
+        }
+        try withRestoredShell(state()) { shell, recorder in
+            XCTAssertFalse(try column(shell, 1, 0).isAwaitingResume, "the Lead")
+            XCTAssertFalse(try column(shell, 2, 0).isAwaitingResume, "last seen working")
+            XCTAssertTrue(try column(shell, 2, 1).isAwaitingResume, "idle, nothing waits for it")
+            let lead = "command claude --resume '\(Self.sessionA)' --permission-mode auto "
+                + "'--settings=\(ClaudeSpaceSettings.fileURL(spaceID: "side")?.path ?? "")'"
+            XCTAssertEqual(Set(recorder.commands), [lead, Self.resume(Self.sessionB), "command codex resume '\(Self.thread)'"])
+            let told = shell.pendingLeadNotices.filter { $0.text == "[Nirux Mission] " + RelaunchResume.continueText }
+            XCTAssertEqual(told.map(\.agentUUID).sorted(), [try column(shell, 1, 0).agentUUID, try column(shell, 2, 0).agentUUID].compactMap { $0 }.sorted(),
+                           "once each, typed when their prompt is free")
+            XCTAssertEqual(Set(told.compactMap(\.forSessionID)), [Self.sessionA, Self.sessionB], "for the conversation it resumed")
+        }
+
+        // The user quit Nirux: nothing resumes but what shows.
+        var quit = state()
+        quit.quitByUser = true
+        try withRestoredShell(quit) { shell, recorder in
+            XCTAssertTrue(try column(shell, 2, 0).isAwaitingResume)
+            XCTAssertEqual(recorder.commands, ["command codex resume '\(Self.thread)'"])
+            XCTAssertTrue(shell.pendingLeadNotices.isEmpty)
+        }
+        // All at once: every agent resumes; after an unclean exit those
+        // mid-turn are told to go on, after a Quit none is.
+        var allAtOnce = state()
+        var settings = PersistedSettings()
+        settings.agentResumeOnLaunch = .allAtOnce
+        allAtOnce.settings = settings
+        try withRestoredShell(allAtOnce) { shell, _ in
+            XCTAssertFalse(try column(shell, 2, 1).isAwaitingResume)
+            XCTAssertEqual(shell.pendingLeadNotices.filter { $0.text.hasSuffix(RelaunchResume.continueText) }.count, 2)
+        }
+        allAtOnce.quitByUser = true
+        try withRestoredShell(allAtOnce) { shell, _ in
+            XCTAssertFalse(try column(shell, 2, 1).isAwaitingResume)
+            XCTAssertTrue(shell.pendingLeadNotices.isEmpty)
+            // Only the user's Quit writes it; any other save leaves it out.
+            shell.saveState()
+            XCTAssertNil(Persistence.load()?.quitByUser)
+            shell.quitsByUser = true
+            shell.saveState()
+            XCTAssertEqual(Persistence.load()?.quitByUser, true)
+        }
+
+        var off = SpaceDefaults()
+        off.resumeWorkOnRelaunch = false
+        for space in [WorkspaceProfile.defaultID, "side"] {
+            let store = try XCTUnwrap(SpaceDefaultsStore(spaceID: space, stateDirectory: URL(fileURLWithPath: root + "/state")))
+            guard case .success = store.save(off) else { return XCTFail("defaults not saved") }
+        }
+        try withRestoredShell(state()) { shell, recorder in
+            XCTAssertTrue(try column(shell, 1, 0).isAwaitingResume)
+            XCTAssertTrue(try column(shell, 2, 0).isAwaitingResume)
+            XCTAssertEqual(recorder.commands, ["command codex resume '\(Self.thread)'"], "only the column on screen")
+            XCTAssertTrue(shell.pendingLeadNotices.isEmpty)
         }
     }
 

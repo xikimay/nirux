@@ -121,13 +121,25 @@ final class BranchReviewExplainRunTests: XCTestCase {
             Self.assistant(id: "m2", usage: (5, 2_000, 0, 30), tools: ["t2"]),
             Self.result(Self.answer, usage: (200, 3_000, 50, 60), cost: 0.59, turns: 3)
         ])
-        let ended = BranchReview.runExplain(try Self.input(), in: folder, cli: cli)
+        let usageFolder = folder.deletingLastPathComponent().appendingPathComponent("usage-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: usageFolder) }
+        let ended = BranchReview.runExplain(try Self.input(), in: folder, cli: cli, usageFolder: usageFolder)
         XCTAssertEqual(ended.usage.tokensRead, 3_250)
         XCTAssertEqual(ended.usage.outputTokens, 60)
         XCTAssertEqual(ended.usage.costUSD, 0.59)
         XCTAssertEqual(ended.usage.turns, 3)
         XCTAssertTrue(ended.usage.isComplete)
         XCTAssertEqual(ended.models, ["claude-opus-5-5"])
+        // Logged with Nirux's own runs: the total, at its largest request's context.
+        let logs = try FileManager.default.contentsOfDirectory(atPath: usageFolder)
+        XCTAssertEqual(logs.count, 1)
+        var log = NiruxOneShotUsageParser()
+        for line in try String(contentsOfFile: usageFolder + "/" + logs[0], encoding: .utf8).split(separator: "\n") {
+            log.consume(line: Data(line.utf8))
+        }
+        XCTAssertEqual(log.events.map(\.counts), [TokenCounts(input: 200, output: 60, cacheWrite: 50, cacheRead: 3_000)])
+        XCTAssertEqual(log.events.map(\.contextTokens), [2_005])
+        XCTAssertEqual(log.events.map(\.model), ["claude-opus-5-5"])
 
         try events([
             Self.assistant(id: "m1", usage: (100, 1_000, 50, 20), tools: ["t1"]),

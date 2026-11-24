@@ -5,8 +5,8 @@ import AppKit
 /// follow-up (docs/design/pr-follow-up.md), whether its tasks manage spaces
 /// (SpaceToolCaller), and environment variables for new shells. Each
 /// change is written at once (SpaceDefaultsStore); a variable list with a
-/// problem isn't, until it's fixed. A launch takes an explicit choice first, then these, then
-/// Settings.
+/// problem isn't, until it's fixed. A launch takes an explicit choice
+/// first, then these, then Settings.
 @MainActor
 final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     struct Actions {
@@ -34,6 +34,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     let codexPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let agyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let followUpSwitch = NSSwitch()
+    let relaunchSwitch = NSSwitch()
     let manageSpacesSwitch = NSSwitch()
     let tableView = NSTableView()
     let addButton = NSButton(title: "Add Variable", target: nil, action: nil)
@@ -65,10 +66,12 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fillPopups()
         tableView.reloadData()
         let writable = loaded.isWritable
-        for control in [agentPopup, claudePopup, codexPopup, agyPopup, followUpSwitch, manageSpacesSwitch, addButton, tableView] as [NSControl] {
+        for control in [agentPopup, claudePopup, codexPopup, agyPopup, followUpSwitch, relaunchSwitch, manageSpacesSwitch, addButton, tableView]
+            as [NSControl] {
             control.isEnabled = writable
         }
         followUpSwitch.state = loaded.defaults.followsUpPullRequests ? .on : .off
+        relaunchSwitch.state = loaded.defaults.resumesWorkOnRelaunch ? .on : .off
         manageSpacesSwitch.state = loaded.defaults.tasksCanManageSpaces(inSpace: spaceID) ? .on : .off
         updateRemoveButton()
         let banner = message ?? loaded.problem
@@ -148,6 +151,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         guard let raw = sender.selectedItem?.representedObject as? String else { return }
         var defaults = loaded.defaults
         defaults.agyLaunchMode = AgyLaunchMode(rawValue: raw)
+        guard defaults != loaded.defaults else { return }
+        write(defaults)
+    }
+
+    @objc func relaunchChanged(_ sender: NSSwitch) {
+        var defaults = loaded.defaults
+        // On is the default: nothing is written for it.
+        defaults.resumeWorkOnRelaunch = sender.state == .on ? nil : false
         guard defaults != loaded.defaults else { return }
         write(defaults)
     }
@@ -335,6 +346,11 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
                 + "with the base, a failed check that isn’t a likely flake, new review feedback. Three rounds per pull "
                 + "request, then it’s yours. On by default; it spends your Claude usage on its own."
         )
+        let relaunch = switchRow(
+            relaunchSwitch, action: #selector(relaunchChanged(_:)), title: "Resume work after a relaunch",
+            hint: "When Nirux comes back (an update, a crash), the Lead, the tasks that were working and those a "
+                + "Mission message waits for start again on their own. Off, each waits for Resume."
+        )
         let manageSpaces = switchRow(
             manageSpacesSwitch, action: #selector(manageSpacesChanged(_:)), title: "Tasks can manage spaces",
             hint: "When you ask, a task’s agent lists, creates, edits and deletes spaces and moves tasks between them, as "
@@ -393,7 +409,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         environment.alignment = .leading
         environment.spacing = 8
 
-        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, manageSpaces, environment])
+        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, relaunch, manageSpaces, environment])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14

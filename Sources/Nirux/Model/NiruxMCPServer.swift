@@ -33,7 +33,9 @@ enum NiruxMCPServer {
         result only once the sub-tasks you need are done. A sub-task can't start sub-tasks of its own. Where \
         start_task answers that the workspace isn't a task, use the nirux-worktree skill. When you ask the agent \
         that started you with --mission ask, add --kind (decision, access or spec-mismatch) and --recommend: the \
-        answer you'd pick, or for access exactly what is needed and where.
+        answer you'd pick, or for access exactly what is needed and where. When Nirux's merge queue lands your pull \
+        request, merge the base branch into yours only when it conflicts, the queue left it out of a red train, or you \
+        build on what just landed: the queue lands it up to date.
         """
 
     /// Added for a task whose space lets its tasks manage spaces.
@@ -57,9 +59,12 @@ enum NiruxMCPServer {
         Don't edit, commit or switch branches in this checkout. End your turn after starting or telling tasks. Their questions and results \
         arrive as [Nirux Mission] messages while you are idle. Don't poll or sleep. Use reply when the brief, code or conversation answers \
         a question. Otherwise use ask_user and explain why. Update set_task_context after answers, at completion and when blockers arise or clear. \
-        Inspect queue progress and journal entries with merge_queue_status. Merge only via queue_merge. The user confirms by default. With \
+        Inspect queue progress and journal entries with merge_queue_status. Merge only via queue_merge, with cadence train: one CI run \
+        per batch, so never tell a task to merge the base branch unless its pull request conflicts, the queue left it out of a red \
+        train, or it builds on what just landed. Use standard when train is \
+        refused (a squash-merge repository, a red check). The user confirms by default. With \
         Lead auto-start enabled, a clean preflight starts the queue. Use stop_merge_queue to stop it locally. Pass replace: true only when \
-        the user asks to replace an idle Board selection. Cadences: standard, batch_post_merge, express_disjoint, train. \
+        the user asks to replace an idle Board selection. Other cadences: standard, batch_post_merge, express_disjoint. \
         Record reviews with record_review. When two tasks get the same kind of finding, use propose_rule for the user's decision. Close merged \
         or abandoned tasks with close_task. Leave worktree and branch cleanup to Nirux. Create, edit or delete spaces, or move tasks \
         between them, only when the user asks; otherwise stay in this space.
