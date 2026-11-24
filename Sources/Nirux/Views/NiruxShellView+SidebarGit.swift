@@ -58,7 +58,7 @@ extension NiruxShellView {
                 )
                 info.isLeadTerminal = col === leadTerminal
                 info.contextOffer = contextOffer(
-                    for: col, in: workspace, foreground: foregroundProcess, status: info.agentStatus, snapshot: snapshot, now: now
+                    for: col, in: workspace, foreground: foregroundProcess, atRest: info.isAtRest, snapshot: snapshot, now: now
                 )
                 return info
             }

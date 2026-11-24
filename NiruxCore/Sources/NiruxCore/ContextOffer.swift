@@ -28,6 +28,16 @@ public struct ContextOffer: Hashable, Sendable {
         self.choices = choices
     }
 
+    /// Under a column at rest whose Claude session `sessionID` is its
+    /// task's latest; `startsFresh` is asked only then.
+    public init?(
+        _ latest: UsageReport.LatestSession?, ofSession sessionID: String?, atRest: Bool,
+        startsFresh: @autoclosure () -> Bool, now: TimeInterval
+    ) {
+        guard atRest, let latest, let sessionID, latest.key == UsageSessionKey(.claude, sessionID) else { return nil }
+        self.init(latest, now: now, startsFresh: startsFresh())
+    }
+
     /// Nil under both thresholds, and for another agent's session.
     public init?(_ session: UsageReport.LatestSession, now: TimeInterval, startsFresh: Bool = true) {
         guard session.key.agent == .claude, let context = session.contextTokens else { return nil }

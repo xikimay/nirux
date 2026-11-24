@@ -65,8 +65,10 @@ extension NiruxShellView {
         }
         let foreground = pty.foregroundProcess(snapshot: snapshot)
         let current = column.missionAgent(snapshot: snapshot)
-        if current == choice.agent, !column.isAwaitingResume, !freshStart {
-            return answer("This task already runs \(choice.agent.rawValue). Choose another CLI.", true)
+        if let refusal = Self.taskSwitchRefusal(
+            current: current, choice: choice.agent, awaitingResume: column.isAwaitingResume, freshStart: freshStart
+        ) {
+            return answer(refusal, true)
         }
         guard !snapshot.isEmpty || column.isAwaitingResume || pty.hasExited else {
             return answer("Nirux couldn’t read the terminal’s running processes. Try again.", true)
@@ -95,8 +97,7 @@ extension NiruxShellView {
                                           confirmTitle: "Discard Draft and Resume")
             else { return finish("Kept the draft and the current worker.", false) }
         }
-        let previous = profiles.flatMap { sessionLedger.sessions(inSpace: $0.id) }
-            .filter { $0.workspaceID == id && $0.agentUUID == uuid }.max { $0.lastActivityAt < $1.lastActivityAt }
+        let previous = previousSession(of: task, agentUUID: uuid)
         Self.offMain({
             TaskResumeHandover.localContext(workspaceID: id, spaceID: spaceID, previous: previous)
         }) { [self] context in
@@ -145,6 +146,19 @@ extension NiruxShellView {
                 return true
             }
         }
+    }
+
+    /// Why a task's worker can't switch to `choice`: it runs that CLI
+    /// already, unless it waits for its resume or starts afresh.
+    static func taskSwitchRefusal(current: CodingAgent?, choice: CodingAgent, awaitingResume: Bool, freshStart: Bool) -> String? {
+        guard current == choice, !awaitingResume, !freshStart else { return nil }
+        return "This task already runs \(choice.rawValue). Choose another CLI."
+    }
+
+    /// The latest conversation `agentUUID` had in `workspace`.
+    func previousSession(of workspace: WorkspaceState, agentUUID: String) -> AgentSessionRecord? {
+        profiles.flatMap { sessionLedger.sessions(inSpace: $0.id) }
+            .filter { $0.workspaceID == workspace.id && $0.agentUUID == agentUUID }.max { $0.lastActivityAt < $1.lastActivityAt }
     }
 
     private func confirmTaskLaunch(

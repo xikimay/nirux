@@ -66,55 +66,111 @@ extension NiruxShellView {
     /// latest (`ContextOffer`). Fresh start where it hands the work over:
     /// the Lead's terminal, a Nirux task's worker.
     func contextOffer(
-        for column: ColumnState, in workspace: WorkspaceState, foreground: ForegroundProcess?, status: AgentStatus,
+        for column: ColumnState, in workspace: WorkspaceState, foreground: ForegroundProcess?, atRest: Bool,
         snapshot: ProcessSnapshot, now: TimeInterval
     ) -> ContextOffer? {
-        guard status != .working, let foreground, foreground.interactiveAgent == .claude,
-              let id = column.claudeSessionID(of: foreground),
-              let session = usageMonitor?.report?.latestSessions[workspace.id], session.key == UsageSessionKey(.claude, id)
-        else { return nil }
-        let startsFresh = workspace.isLead
-            ? column === workspace.leadTerminal
-            : Self.isTask(workspace) && workspace.missionID != nil && taskWorker(workspace, snapshot: snapshot) === column
-        return ContextOffer(session, now: now, startsFresh: startsFresh)
+        ContextOffer(
+            usageMonitor?.report?.latestSessions[workspace.id],
+            ofSession: foreground.flatMap { $0.interactiveAgent == .claude ? column.claudeSessionID(of: $0) : nil },
+            atRest: atRest,
+            startsFresh: workspace.isLead
+                ? column === workspace.leadTerminal
+                : Self.isTask(workspace) && workspace.missionID != nil && taskWorker(workspace, snapshot: snapshot) === column,
+            now: now
+        )
     }
 
-    /// A Claude Lead at rest past its cache with a heavy context starts a
-    /// new conversation where its space allows (`ContextOffer.restartsLead`):
-    /// its next message would write the whole context again. Never over a
-    /// draft, a dialog or a turn.
+    /// A Claude Lead cold with a heavy context starts a new conversation
+    /// where its space allows (`ColdLead`), handed its previous one: its
+    /// next message would write the whole context again.
     func startColdLeadsAfresh(now: TimeInterval) {
         let snapshot = ProcessSnapshot()
-        for lead in workspaces where lead.isLead && !lead.isClosing {
-            guard let column = lead.leadTerminal, !column.isRestartingShell, let pty = column.pty,
-                  let foreground = pty.foregroundProcess(snapshot: snapshot), foreground.interactiveAgent == .claude,
-                  let id = column.claudeSessionID(of: foreground),
-                  let session = usageMonitor?.report?.latestSessions[lead.id], session.key == UsageSessionKey(.claude, id),
-                  ContextOffer.restartsLead(session, runningSince: foreground.instance.startedAt, now: now),
-                  column.liveAgent(snapshot: snapshot)?.status == .idle, !pty.hasPromptDraft,
-                  SpaceDefaultsStore.defaults(forSpace: lead.profileID).leadStartsFreshWhenCold
-            else { continue }
-            restartLead(lead, agent: .claude, focus: false)
-            let space = profiles.first { $0.id == lead.profileID }?.name ?? lead.title
-            showToast("The Lead of “\(space)” started a new conversation: idle for an hour with \(UsageText.tokens(session.contextTokens ?? 0)) of context.")
+        for lead in workspaces where lead.isLead && startsFresh(lead, snapshot: snapshot, now: now) {
+            let context = usageMonitor?.report?.latestSessions[lead.id]?.contextTokens ?? 0
+            leadHandover(lead) { [weak self] handover in
+                // Read again: the user may have typed meanwhile.
+                guard let self, self.startsFresh(lead, snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970) else { return }
+                self.restartLead(lead, agent: .claude, handover: handover, focus: false) { [weak self] launched in
+                    guard launched, let self else { return }
+                    let space = self.profiles.first { $0.id == lead.profileID }?.name ?? lead.title
+                    self.showToast("The Lead of “\(space)” started a new conversation: idle for an hour with \(UsageText.tokens(context)) of context.")
+                }
+            }
         }
     }
 
-    /// Compact types /compact as the user would. Fresh start restarts the
-    /// Lead, or resumes a task on Claude in a new conversation with a
-    /// handover.
+    private func startsFresh(_ lead: WorkspaceState, snapshot: ProcessSnapshot, now: TimeInterval) -> Bool {
+        guard !lead.isClosing, let column = lead.leadTerminal, !column.isRestartingShell, let pty = column.pty,
+              let foreground = pty.foregroundProcess(snapshot: snapshot), foreground.interactiveAgent == .claude else { return false }
+        return ColdLead.startsFresh(
+            latest: usageMonitor?.report?.latestSessions[lead.id], sessionID: column.claudeSessionID(of: foreground),
+            runningSince: foreground.instance.startedAt, now: now,
+            spaceAllows: SpaceDefaultsStore.defaults(forSpace: lead.profileID).leadStartsFreshWhenCold,
+            holdings: leadHoldings(lead, column: column, pty: pty, foreground: foreground, snapshot: snapshot)
+        )
+    }
+
+    func leadHoldings(
+        _ lead: WorkspaceState, column: ColumnState, pty: PtySession, foreground: ForegroundProcess, snapshot: ProcessSnapshot
+    ) -> LeadHoldings {
+        let status = column.liveAgent(snapshot: snapshot)?.status
+        return LeadHoldings(
+            isBusy: status != .idle,
+            hasDialog: pty.pendingAgentDialog != nil || pty.agentVisibleDialog(foreground: foreground) != nil,
+            hasQuestion: pty.agentQuestion(foreground: foreground) != nil
+                || Self.sidebarTurnQuestion(of: column, status: status ?? .working, foreground: foreground) != nil,
+            hasDraft: pty.hasPromptDraft,
+            owesMissionReply: MissionStore.shared.missions.contains { $0.awaitsReply(from: lead.id) },
+            runsItsQueue: mergeQueues.contains { key, queue in
+                key.projectID == lead.profileID && queue.isRunning && queue.engine?.startedByLead == true
+            }
+        )
+    }
+
+    /// What a fresh Lead is handed after its restart prompt: its previous
+    /// conversation's last entry and where to read the rest. Read off the
+    /// main thread.
+    func leadHandover(_ lead: WorkspaceState, then done: @escaping @MainActor @Sendable ([String]) -> Void) {
+        let previous = lead.leadAgentUUID.flatMap { previousSession(of: lead, agentUUID: $0) }
+        let (id, spaceID) = (lead.id, lead.profileID)
+        Self.offMain({ TaskResumeHandover.localContext(workspaceID: id, spaceID: spaceID, previous: previous) }) { context in
+            done(Self.leadHandoverLines(previous: previous, context: context))
+        }
+    }
+
+    nonisolated static func leadHandoverLines(previous: AgentSessionRecord?, context: [String]) -> [String] {
+        guard let previous else { return context }
+        return context + [
+            "Previous conversation in Session History: \(previous.agent.rawValue) \(previous.sessionID). "
+                + "Before acting, look there (history_search) for open threads, promises and decisions."
+        ]
+    }
+
+    /// Compact types /compact as the user would, never after a draft. Fresh
+    /// start asks to restart the Lead, or resumes a task's worker on Claude,
+    /// on its model, in a new conversation with a handover.
     func takeContextOffer(_ choice: ContextOffer.Choice, workspaceIndex: Int, columnIndex: Int) {
         guard let workspace = workspaces[safe: workspaceIndex], let column = workspace.columns[safe: columnIndex],
-              let uuid = column.agentUUID else { return }
-        switch choice {
-        case .compact:
+              let uuid = column.agentUUID, let pty = column.pty else { return }
+        let foreground = pty.foregroundProcess(snapshot: ProcessSnapshot())
+        let action = ContextOfferAction.of(
+            choice, hasDraft: pty.hasPromptDraft, isLead: workspace.isLead,
+            workerModel: foreground.flatMap { AgentModels.launchModel(arguments: $0.arguments) }
+        )
+        switch action {
+        case .refuse(let message):
+            showToast(message, tone: .error)
+        case .typeCompact:
             guard case .sent = sendTypedPrompt(agentUUID: uuid, prompt: "/compact") else {
                 return showToast("Couldn’t type /compact: claude’s prompt isn’t free.", tone: .error)
             }
-        case .freshStart where workspace.isLead:
-            restartLead(workspace, agent: .claude)
-        case .freshStart:
-            resumeTask(workspace, with: TaskAgentChoice(agent: .claude, model: nil), interactive: true, freshStart: true) { [weak self] message, failed in
+        case .confirmLeadRestart:
+            let spaceID = workspace.profileID
+            leadHandover(workspace) { [weak self] handover in
+                self?.requestRestartLead(spaceID: spaceID, handover: handover)
+            }
+        case .resumeTask(let model):
+            resumeTask(workspace, with: TaskAgentChoice(agent: .claude, model: model), interactive: true, freshStart: true) { [weak self] message, failed in
                 self?.showToast(message, tone: failed ? .error : .info)
             }
         }

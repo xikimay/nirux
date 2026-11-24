@@ -77,6 +77,126 @@ final class UsageDisplayTests: XCTestCase {
         )
     }
 
+    @MainActor func testAColumnIsAtRestOnlyAtItsPromptAskingNothing() throws {
+        let idle = ColumnInfo(
+            index: 0, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
+            webTitle: nil, terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil
+        )
+        XCTAssertTrue(idle.isAtRest)
+        var working = idle
+        working.agentStatus = .working
+        var asked = idle
+        asked.openDialog = .askedInReply("Queue #824 now or wait?")
+        var turn = idle
+        turn.turnQuestion = SidebarTurnQuestion(text: "Queue #824 now or wait?", turnEndedAt: 1, isYesNo: false, columnID: UUID())
+        var failed = idle
+        failed.stuck = .silent(duration: "4h45m", since: 100, interruptible: true)
+        var request = AgentPermissionRequest(toolName: "Bash", summary: "x", key: "k", agentID: nil, sessionID: "lead", requestedAt: 0)
+        request.approval = PermissionApprovalTicket(requestID: "r", deadline: 100, text: "rm -rf build")
+        var approval = idle
+        approval.permissionApproval = try XCTUnwrap(SidebarPermissionApproval(request, now: 1))
+        for (column, why) in [(working, "working"), (asked, "its reply asks"), (turn, "its turn asked"), (failed, "a failed turn"),
+                              (approval, "a permission prompt")] {
+            XCTAssertFalse(column.isAtRest, why)
+        }
+    }
+
+    func testAClickOnTheOfferNeverTypesOverADraftAndKeepsTheWorkersModel() {
+        XCTAssertEqual(ContextOfferAction.of(.compact, hasDraft: false, isLead: false, workerModel: nil), .typeCompact)
+        XCTAssertEqual(ContextOfferAction.of(.compact, hasDraft: true, isLead: false, workerModel: nil), .refuse(ContextOfferAction.draftRefusal))
+        XCTAssertEqual(ContextOfferAction.of(.freshStart, hasDraft: true, isLead: true, workerModel: nil), .confirmLeadRestart, "Restart Lead asks")
+        XCTAssertEqual(ContextOfferAction.of(.freshStart, hasDraft: false, isLead: false, workerModel: "sonnet"), .resumeTask(model: "sonnet"))
+        XCTAssertEqual(AgentModels.launchModel(arguments: ["--model", "sonnet", "Continue the task"]), "sonnet")
+    }
+
+    @MainActor func testATaskTakesItsOwnCLIAgainOnlyForAFreshStart() {
+        XCTAssertEqual(
+            NiruxShellView.taskSwitchRefusal(current: .claude, choice: .claude, awaitingResume: false, freshStart: false),
+            "This task already runs claude. Choose another CLI."
+        )
+        XCTAssertNil(NiruxShellView.taskSwitchRefusal(current: .claude, choice: .claude, awaitingResume: false, freshStart: true))
+        XCTAssertNil(NiruxShellView.taskSwitchRefusal(current: .claude, choice: .claude, awaitingResume: true, freshStart: false))
+        XCTAssertNil(NiruxShellView.taskSwitchRefusal(current: .codex, choice: .claude, awaitingResume: false, freshStart: false))
+    }
+
+    /// Cold, heavy, its own session, allowed by its space, holding nothing:
+    /// each missing one keeps the Lead's conversation.
+    func testAColdLeadStartsAfreshOnlyWhenItHoldsNothing() throws {
+        let session = UsageSession(
+            key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "lead"), contextTokens: 300_000,
+            events: [event(7_200, input: 300_000, context: 300_000)]
+        )
+        let latest = try XCTUnwrap(UsageReport(sessions: [session], now: now).latestSessions["lead"])
+        func starts(
+            _ sessionID: String? = "s", runningSince: TimeInterval = 0, context: Int = 300_000, spaceAllows: Bool = true,
+            _ holdings: LeadHoldings = LeadHoldings()
+        ) -> Bool {
+            var latest = latest
+            latest.contextTokens = context
+            return ColdLead.startsFresh(
+                latest: latest, sessionID: sessionID, runningSince: runningSince, now: now, spaceAllows: spaceAllows, holdings: holdings
+            )
+        }
+        XCTAssertTrue(starts())
+        XCTAssertFalse(starts("other"), "another conversation runs in its terminal")
+        XCTAssertFalse(starts(nil), "its hooks haven't named it")
+        XCTAssertFalse(starts(runningSince: now - 60), "just resumed")
+        XCTAssertFalse(starts(context: 150_000))
+        XCTAssertFalse(starts(spaceAllows: false))
+        let held: [(WritableKeyPath<LeadHoldings, Bool>, String)] = [
+            (\.isBusy, "working"), (\.hasDialog, "a dialog"), (\.hasQuestion, "a question to the user"), (\.hasDraft, "a draft"),
+            (\.owesMissionReply, "a task's question"), (\.runsItsQueue, "the queue it started")
+        ]
+        for (key, why) in held {
+            var holdings = LeadHoldings()
+            holdings[keyPath: key] = true
+            XCTAssertFalse(starts(holdings), why)
+        }
+    }
+
+    func testALeadOwesAReplyToItsTasksQuestionUntilItAnswers() {
+        let question = MissionEvent(
+            id: "q", missionID: "m", childWorkspaceID: "task", childAgentUUID: "agent", kind: .question,
+            message: "Queue it now?", inReplyTo: nil, timestamp: now - 7_200
+        )
+        func mission(_ events: [MissionEvent], status: Mission.Status = .active) -> Mission {
+            Mission(
+                id: "m", parentWorkspaceID: "lead", parentAgentUUID: "lead-agent", childWorkspaceID: "task", childAgentUUID: "agent",
+                childAgentKind: "claude", branch: "feat/x", status: status, createdAt: now - 9_000, updatedAt: now, events: events,
+                reportsToLead: true
+            )
+        }
+        XCTAssertTrue(mission([question]).awaitsReply(from: "lead"))
+        XCTAssertFalse(mission([question]).awaitsReply(from: "other"))
+        let answer = MissionEvent(
+            id: "a", missionID: "m", childWorkspaceID: "task", childAgentUUID: "agent", kind: .response,
+            message: "Yes", inReplyTo: "q", timestamp: now - 60
+        )
+        XCTAssertFalse(mission([question, answer]).awaitsReply(from: "lead"))
+        var handed = question
+        handed.handedToUserBecause = "a decision"
+        XCTAssertFalse(mission([handed]).awaitsReply(from: "lead"), "the user answers it")
+        XCTAssertFalse(mission([question], status: .completed).awaitsReply(from: "lead"))
+    }
+
+    /// The fresh Lead learns where its previous conversation is; its first
+    /// prompt still reads as a restart.
+    func testAFreshLeadIsHandedItsPreviousConversation() {
+        XCTAssertEqual(NiruxShellView.leadHandoverLines(previous: nil, context: ["Last conversation entry: Queue #824 when green."]),
+                       ["Last conversation entry: Queue #824 when green."])
+        let record = AgentSessionRecord(
+            schemaVersion: 1, agent: .claude, sessionID: "s1", startedAt: 0, lastStartAt: 0, lastActivityAt: 0, status: .idle, hasConversation: true
+        )
+        XCTAssertEqual(NiruxShellView.leadHandoverLines(previous: record, context: []).first?.hasPrefix(
+            "Previous conversation in Session History: claude s1."
+        ), true)
+        let prompt = ([NiruxShellView.leadRestartPrompt(for: .claude)] + ["Last conversation entry: Queue #824 when green."])
+            .joined(separator: "\n")
+        XCTAssertTrue(NiruxShellView.isLeadRestart(prompt: prompt, agent: .claude))
+        XCTAssertTrue(NiruxShellView.isLeadRestart(prompt: NiruxShellView.leadRelaunchPrompt(for: .claude), agent: .claude))
+        XCTAssertFalse(NiruxShellView.isLeadRestart(prompt: "Fix the build", agent: .claude))
+    }
+
     func testATaskRowReadsItsLatestSessionsContextAndItsWeek() throws {
         let session = UsageSession(
             key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "task"), contextTokens: 300_000,

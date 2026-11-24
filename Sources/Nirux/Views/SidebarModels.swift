@@ -62,6 +62,12 @@ struct ColumnInfo: Hashable {
     /// Its Claude session at rest costs to go on with: Compact / Fresh start.
     var contextOffer: ContextOffer?
 
+    /// At its prompt, asking nothing: no turn, dialog, permission prompt,
+    /// question or failed turn.
+    var isAtRest: Bool {
+        agentStatus == .idle && permissionApproval == nil && openDialog == nil && turnQuestion == nil && stuck == nil
+    }
+
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
     /// seconds: the sidebar's render-signature gate would otherwise see a
