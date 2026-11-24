@@ -426,10 +426,11 @@ extension MergeQueue.Engine {
         return MergeQueue.StopReason(kind: .conflict, message: "#\(number) conflicts with \(with).", url: url)
     }
 
-    /// Why the train's pull request can't go on; one no longer open is left as it is.
+    /// Why the train's pull request can't go on; one no longer open is left
+    /// as it is. Auto-merge armed on it is the backstop's.
     private mutating func trainProblem(_ pullRequest: MergeQueue.PullRequestSnapshot) -> MergeQueue.StopReason? {
         if !pullRequest.isOpen { train?.step = .closed }
-        return problem(with: pullRequest)
+        return problem(with: pullRequest, allowingAutoMerge: true)
     }
 
     private func trainMoved(to head: String) -> MergeQueue.StopReason {
@@ -632,15 +633,34 @@ extension MergeQueue.Engine {
     // MARK: Landed: each pull request must read merged
 
     /// The train's pull request merged at the train's own head by someone
-    /// else, GitHub's auto-merge armed as a backstop say: landed all the same.
+    /// else, GitHub's auto-merge armed as a backstop say: checked as the
+    /// queue's own merge is, then landed.
     private mutating func landedOutside(_ pullRequest: MergeQueue.PullRequestSnapshot, now: TimeInterval) -> Bool {
-        guard let train, pullRequest.state == .merged, pullRequest.headOid == train.head, let commit = pullRequest.mergeCommit else {
-            return false
-        }
-        note("\(train.name) was merged on GitHub at its head, as \(Self.short(commit))")
-        self.train?.mergeCommit = commit
-        trainLanded(commit, now: now)
+        guard let train, pullRequest.state == .merged, pullRequest.headOid == train.head else { return false }
+        note("\(train.name) was merged on GitHub at its head")
+        self.train?.step = .closed
+        clocks.step = now
+        confirmLanding(pullRequest, head: train.head, baseTip: train.base, result: .sent, now: now)
         return true
+    }
+
+    /// The train lands as a merge commit of its head on the tip it was
+    /// tested on. Once its head is merged, on any tip, its pull requests'
+    /// heads are in the base; a squash or a rebase leaves them out.
+    private mutating func confirmLanding(
+        _ pullRequest: MergeQueue.PullRequestSnapshot, head: String, baseTip: String, result: MergeQueue.MutationResult, now: TimeInterval
+    ) {
+        let mergesHead = pullRequest.mergeCommitParents.count == 2 && pullRequest.mergeCommitParents[1] == head
+        if pullRequest.state == .merged, mergesHead { train?.mergeCommit = pullRequest.mergeCommit }
+        confirmMerge(pullRequest, head: head, baseTip: baseTip, result: result, now: now,
+                     poll: .train(.landConfirm(head: head, baseTip: baseTip, result: result))) { engine, commit in
+            guard mergesHead else {
+                return engine.stop(MergeQueue.StopReason(kind: .merge, message: "#\(pullRequest.number) was merged as "
+                    + "\(Self.short(commit)), which isn’t a merge commit of its head: a squash or a rebase left the heads of its pull "
+                    + "requests out of \(engine.settings.baseBranch).", url: pullRequest.url))
+            }
+            engine.trainLanded(commit, now: now)
+        }
     }
 
     private mutating func trainLanded(_ commit: String, now: TimeInterval) {
@@ -912,11 +932,7 @@ extension MergeQueue.Engine {
             if !waitForTrainBaseRuns(runs, head: head, now: now) { trainMergeChecks(head: head) }
         case .landConfirm(let head, let baseTip, let result):
             guard let number = train.number, let pullRequest = answers.pullRequest(number) else { return missingAnswer() }
-            if pullRequest.state == .merged { self.train?.mergeCommit = pullRequest.mergeCommit }
-            confirmMerge(pullRequest, head: head, baseTip: baseTip, result: result, now: now,
-                         poll: .train(.landConfirm(head: head, baseTip: baseTip, result: result))) { engine, commit in
-                engine.trainLanded(commit, now: now)
-            }
+            confirmLanding(pullRequest, head: head, baseTip: baseTip, result: result, now: now)
         case .landed(let commit):
             trainLandedRead(answers, commit: commit, now: now)
         case .postMerge(let commit):

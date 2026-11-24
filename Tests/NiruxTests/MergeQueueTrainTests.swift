@@ -388,6 +388,52 @@ final class MergeQueueTrainTests: XCTestCase {
         XCTAssertFalse(second.mutations.contains(.closePullRequest(number: 900)))
     }
 
+    func testATrainMergedOnGitHubLandsOnlyAsAMergeOfItsHeadOnTheTipItWasTestedOn() throws {
+        let head = TrainGitHub.commit(2)
+        func merged(_ change: (inout TrainGitHub) -> Void) -> MQ.Harness {
+            var github = TrainGitHub(world: world())
+            var queue = queue()
+            queue.run(&github) { $0.pendingReads?.contains(.checks(head)) == true }
+            change(&github)
+            queue.drive(&github)
+            return queue
+        }
+        // Auto-merge landed it after main moved: main holds a tree no check ran on.
+        let moved = merged { github in
+            github.world.mainTip = MQ.sha("9")
+            _ = github.apply(.merge(number: 900, head: head, method: .merge))
+        }
+        XCTAssertTrue(moved.stopReason?.message.hasPrefix("#900 merged onto an untested base: its merge commit 0000003 sits on "
+            + "9999999, not on 0000000") == true, moved.stopReason?.message ?? "")
+        XCTAssertEqual(moved.engine.entries.map(\.step), [.done, .done], "their heads are in main all the same")
+
+        let squashed = merged { github in
+            github.world.pullRequests[900] = MQ.pullRequest(900, head: head, branch: self.branch, state: .merged,
+                                                            mergeCommit: TrainGitHub.commit(9), parents: [MQ.sha("0")])
+        }
+        let reason = try XCTUnwrap(squashed.stopReason)
+        XCTAssertEqual(reason.message, "#900 was merged as 0000009, which isn’t a merge commit of its head: a squash or a rebase left "
+            + "the heads of its pull requests out of main. Nirux deleted the train’s branch \(branch).")
+        XCTAssertFalse(squashed.mutations.contains(.closePullRequest(number: 900)), "it is merged")
+        XCTAssertEqual(squashed.engine.entries.map(\.step), [.stopped(reason), .stopped(reason)])
+
+        // GitHub shows it merged before it gives the merge commit; auto-merge armed but not fired is the backstop's.
+        var late = TrainGitHub(world: world())
+        var third = queue()
+        third.run(&late) { $0.pendingReads?.contains(.checks(head)) == true }
+        late.world.pullRequests[900] = MQ.pullRequest(900, head: head, branch: branch, state: .merged)
+        third.answer(late.world)
+        _ = late.apply(.merge(number: 900, head: head, method: .merge))
+        third.drive(&late)
+        XCTAssertEqual(third.phase, .finished, String(describing: third.stopReason))
+
+        let armed = merged { github in
+            github.world.pullRequests[900] = MQ.pullRequest(900, head: head, branch: self.branch, autoMerge: true)
+        }
+        XCTAssertEqual(armed.phase, .finished, String(describing: armed.stopReason))
+        XCTAssertTrue(armed.mutations.contains(.merge(number: 900, head: head, method: .merge)), "the queue merged it itself")
+    }
+
     func testATrainMergedOnGitHubAtItsOwnHeadHasLanded() throws {
         let head = TrainGitHub.commit(2)
         // Seen while the checks run, or at the last look before the merge.
@@ -399,7 +445,8 @@ final class MergeQueueTrainTests: XCTestCase {
             _ = github.apply(.merge(number: 900, head: head, method: .merge))
             queue.drive(&github)
             XCTAssertEqual(queue.phase, .finished, String(describing: queue.stopReason))
-            XCTAssertTrue(queue.noted("train #900 was merged on GitHub at its head, as 0000003"))
+            XCTAssertTrue(queue.noted("train #900 was merged on GitHub at its head"))
+            XCTAssertTrue(queue.noted("Merged as 0000003"))
             XCTAssertFalse(queue.mutations.contains { if case .merge = $0 { true } else { false } }, "the queue merged nothing itself")
             XCTAssertEqual(queue.engine.entries.map(\.step), [.done, .done])
             XCTAssertNil(github.world.branches[branch])

@@ -420,7 +420,11 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   branch once it landed, or when the train stops before it has a pull request
   (never one someone else pushed to). A train's pull request merged at the
   train's own head by someone else (GitHub's auto-merge armed as a backstop)
-  is its landing all the same; merged at another head, it stops the queue. A
+  is its landing all the same, checked as the queue's own merge is: a merge
+  commit of that head on the tip the train was tested on. On another tip, or
+  as a squash or a rebase, the queue stops and says so; merged at another
+  head, it stops too. Auto-merge armed on the train's own pull request
+  doesn't stop it. A
   stop that leaves the train's pull request open leaves its branch too. Agents' branches are never deleted.
 
 For each PR in Standard, in order:
