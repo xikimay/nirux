@@ -390,11 +390,24 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   came in GitHub's wait) runs again, once, after its run's other jobs end.
   Other failures of one workflow run go to the CI triage (ci-failure-triage.md,
   rules only, no model) when it was on at Start: likely flaky, the run's failed
-  jobs run again, once; anything else stops the train, saying what the triage
-  did (a verdict, a run it couldn't read twice, the triage turned off). The
-  triage gets 3 minutes; the run's other jobs, 10 minutes. Each look at the train's
-  checks reads the PRs again: a
-  push to one stops the train at once. A stop the train finds itself (red
+  jobs run again, once; anything else makes the train red, saying what the
+  triage did (a verdict, a run it couldn't read twice, the triage turned off).
+  The triage gets 3 minutes; the run's other jobs, 10 minutes. A red train of
+  several PRs closes, its branch goes, and its batch rides again in two
+  halves, one at a time, the first half first (`nirux-train/<UTC time>-2`,
+  `-3`…), each on the base's tip as it is then. A PR alone on a red train
+  leaves it, and the halves after it still ride; the queue stops on it at the
+  end, a conflict first. PRs that left a red train for a conflict ride again
+  with its batch: they may conflict only with a PR that won't land. A batch
+  whose PRs all left lets the next one ride. A Start's batch of one stops the
+  queue, and so does a required check cancelled again after its rerun (no
+  runner came). A train whose head has the tree of a train that failed holds
+  the same files: several PRs split again without a run, so a first half that
+  lands sends its second half to a split; one PR alone gets a run of its own.
+  When every PR failed alone and none landed, the stop says the base itself
+  may fail the checks. Each
+  look at the train's checks reads the PRs again: a push to one stops the
+  train at once. A stop the train finds itself (red
   checks, the base moved, a push) closes the train's PR first; a user Stop or
   GitHub not answering leaves it open, and the stop names it (by its branch
   while GitHub hasn't shown its number). A Stop while the train is still being
@@ -403,7 +416,7 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   once its head lands, with the train's merge commit for it: observed on a
   throwaway base (#779–#792), not documented. So the queue reads every PR and
   stops loudly if one doesn't read merged within 3 minutes. The post-merge
-  workflow runs once, on the train's merge. Nirux deletes the train's
+  workflow runs once per train, on its merge. Nirux deletes the train's
   branch once it landed, or when the train stops before it has a pull request
   (never one someone else pushed to); a stop that leaves the train's pull
   request open leaves its branch too. Agents' branches are never deleted.
