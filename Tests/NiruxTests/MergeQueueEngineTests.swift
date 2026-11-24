@@ -255,6 +255,13 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertTrue(queue.noted("#52 leaves the queue"))
         XCTAssertEqual(queue.phase, .running)
         XCTAssertGreaterThanOrEqual(queue.now - start, 600)
+
+        for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
+            var other = MQ.Harness(entries: [MQ.entry(52, head: a), MQ.entry(53, head: b)], cadence: cadence)
+            other.start()
+            XCTAssertEqual(other.run(world), .merge(number: 53, head: b, method: .merge), "\(cadence)")
+            XCTAssertTrue(other.noted("#52 leaves the queue"), "\(cadence)")
+        }
     }
 
     func testAnOpenDialogInAFocusedColumnCountsAsBusy() {

@@ -107,7 +107,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
         XCTAssertNil(refusal(waits), "a nightly running, an agent at work")
         XCTAssertEqual(MergeQueue.confirmation(waits).items.last?.notes, [
             "claude working in “api”: the queue waits up to 10 minutes for it to be back at its prompt before merging, "
-                + "then leaves it for the next queue."
+                + "then leaves it for the next queue (a train goes on without it)."
         ])
         XCTAssertNotNil(refusal(good, .expressDisjoint), "both PRs change the same path")
         var distinct = good

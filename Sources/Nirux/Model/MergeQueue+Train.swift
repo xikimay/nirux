@@ -197,7 +197,7 @@ extension MergeQueue.Engine {
 
     /// A pull request that conflicts leaves the train, which goes on without
     /// it; once the train lands, the queue stops on it for its agent.
-    private mutating func drop(_ index: Int, _ reason: MergeQueue.StopReason) {
+    mutating func drop(_ index: Int, _ reason: MergeQueue.StopReason) {
         entries[index].step = .stopped(reason.appending(" It left the train."))
         note("#\(entries[index].number) left the train: \(reason.message)")
     }

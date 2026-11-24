@@ -421,7 +421,9 @@ For each PR in Standard, in order:
    - no agent working or waiting on a dialog (section 2), in any workspace of
      the row, or in any other workspace with a shell inside the worktree (as
      cleanup's foreign agents). If one is, the queue waits up to 10 minutes
-     for it to go idle, then stops;
+     for it to go idle, then that pull request leaves the queue for the next
+     one and the others go on (a train goes on without it; once composed, a
+     train stops instead: its branch holds the rider's commits);
    - if the branch has a local worktree: no unpushed commits, and no changes to
      tracked files. Untracked files, such as the handover, don't count. Unpushed
      means REST `compare/{PR head}...{local HEAD}` answers `ahead_by > 0`, or
@@ -772,8 +774,9 @@ pull request.
   It is the list of its queue's repository: once board.json names another,
   the board shows that one's, and no longer marks rows with the last queue's
   steps. A row
-  the queue would stop on at once (a draft, another base, a conflict, a busy
-  agent) says why instead; the sheet checks the rest. The list doesn't change
+  the queue would stop on at once (a draft, another base, a conflict) says
+  why instead; a busy agent doesn't, the queue waits for it. The sheet checks
+  the rest. The list doesn't change
   while a queue runs, here or in another Nirux, nor while the sheet is open or
   Nirux is quitting. A Start makes it the confirmed list: what the sheet left
   out leaves it, and each pull request leaves it once merged. A pull request
