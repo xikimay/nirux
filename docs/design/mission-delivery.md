@@ -126,8 +126,9 @@ its own, and a new one never gets another's (the "restarted" rule of today).
   notification. Without context, Haiku 5.5 refused to act on one ("it didn't
   come from you"). With a handover that says Nirux brings messages in through
   its hook, it acted every time, with or without `rewakeMessage`. The
-  handover (`typedAnswerMission`) and the task and Lead instructions
-  (NiruxMCPServer) say so. A hook-borne `tell` names its sender
+  handover (`typedAnswerMission`) and the task instructions (NiruxMCPServer)
+  say so; the Lead's say only that they arrive as `[Nirux Mission]` messages
+  (its 2,048-character budget). A hook-borne `tell` names its sender
   (`MissionPromptText.hookText`).
 
 Proved on 2026-11-24 with the built binary and Claude Code 2.1.331 (Haiku 5.5)
