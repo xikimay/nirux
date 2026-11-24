@@ -799,7 +799,10 @@ pull request.
   stop it first. The board keeps its queue line, and Stop, while a queue runs,
   even when board.json can't be read.
 - **Warnings and refusals.** Besides section 4's: a post-merge run going on the
-  base (the first merge waits for it), a red check that isn't required (the
+  base is said, not warned of (the first merge waits for it, and the Lead's
+  `queue_merge` starts all the same), nor is an agent at work in a pull
+  request's worktree (it joins; the queue waits for it before merging, up to
+  10 minutes), a red check that isn't required (the
   queue never merges with one), a required check that ended skipped or neutral,
   more than 100 changed files. "The last post-merge run" is the last completed
   one. Nothing that can join refuses Start too.

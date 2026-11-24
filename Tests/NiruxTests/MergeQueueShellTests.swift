@@ -65,6 +65,38 @@ final class MergeQueueShellTests: XCTestCase {
         return queue
     }
 
+    /// queue_merge from an unattended Lead takes the pull request while a
+    /// nightly runs on the base and the task's agent works, and waits: a
+    /// refusal would be lost, nothing tries again.
+    @MainActor
+    func testTheLeadsQueueTakesThePullRequestAndWaitsForTheNightly() throws {
+        var world = readyWorld()
+        world.baseRuns = [MQ.run(2, head: MQ.sha("c"), status: "in_progress", conclusion: nil), MQ.run(1, head: MQ.sha("b"))]
+        world.local = MergeQueue.LocalState(busyAgents: ["claude working in “api”"])
+        let shell = makeShell(FakeQueueClient(world: world))
+        let queue = shell.mergeQueue(projectID: "project", repository: MQ.widgets)
+        queue.beginActivity = { NSObject() }
+        queue.endActivity = { _ in }
+        var candidate = MergeQueue.ConfirmationReading.Candidate(number: 52)
+        candidate.pullRequest = world.pullRequests[52]
+        candidate.details = MergeQueue.PullRequestDetails(
+            title: "Change", files: ["Sources/app.swift"], hasMoreFiles: false, head: MQ.sha("a"), baseBranch: "main", allPathsKnown: true
+        )
+        candidate.checks = world.checks[MQ.sha("a")]
+        candidate.comparison = .some(MergeQueue.Comparison(status: "ahead", aheadBy: 1, behindBy: 0, baseCommit: MQ.sha("0")))
+        candidate.local = world.local
+        var reading = MergeQueue.ConfirmationReading(settings: MQ.settings(), isDryRun: false)
+        reading.rateLimit = world.rateLimit
+        reading.baseMergeQueue = false
+        reading.baseRuns = world.baseRuns
+        reading.candidates = [candidate]
+
+        XCTAssertNil(queue.startFromLead(reading, numbers: [52], cadence: .standard, allowWithoutLocalReview: true))
+        XCTAssertTrue(queue.isRunning)
+        XCTAssertTrue(waitUntil("the wait for the nightly") { queue.engine?.statusText.contains("waiting for the nightly") == true })
+        queue.stop()
+    }
+
     // MARK: - Status bar
 
     @MainActor
