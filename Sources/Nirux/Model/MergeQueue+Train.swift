@@ -241,7 +241,12 @@ extension MergeQueue.Engine {
         let others = left.filter { $0 != first }.map { entries[$0].number }
         let too = others.isEmpty ? nil : " \(Self.numbers(others)) left the train too."
         let named = landed.compactMap { train in train.number.map { " Train #\($0) landed \(Self.numbers(train.parts.map(\.number)))." } }
-        stop(reason.appending(too).appending(named.isEmpty ? nil : named.joined()), on: first)
+        let allRed = landed.isEmpty && left.count > 1 && left.allSatisfy { index in
+            if case .stopped(let reason) = entries[index].step { reason.kind == .checks } else { false }
+        }
+        let base = settings.baseBranch
+        let hint = allRed ? " Each failed alone on \(base): \(base) itself may fail the checks." : nil
+        stop(reason.appending(too).appending(named.isEmpty ? nil : named.joined()).appending(hint), on: first)
     }
 
     /// A stop that is one pull request's own: the others go back to waiting.
@@ -390,7 +395,8 @@ extension MergeQueue.Engine {
 
     private mutating func openTrain() {
         guard let train else { return missingAnswer() }
-        if let tree = train.tree, let red = redTrees[tree] {
+        // Several pull requests split without a run; one alone leaves only on a run of its own.
+        if let tree = train.tree, let red = redTrees[tree], riders.count > 1 {
             let batch = Self.numbers(riders.map { entries[$0].number })
             note("\(batch) on \(settings.baseBranch) at \(Self.short(train.base)) gives the files of a red train: not run again")
             return redTrain(red.appending(" \(batch) on \(settings.baseBranch) at \(Self.short(train.base)) gives the same files, so "
@@ -484,7 +490,8 @@ extension MergeQueue.Engine {
     private mutating func rerunOrStop(
         _ red: MergeQueue.StopReason, verdict: MergeQueue.ChecksVerdict, checks: MergeQueue.CommitChecks, head: String, now: TimeInterval
     ) {
-        let cancelled = verdict.failed.allSatisfy { $0.conclusion?.uppercased() == "CANCELLED" }
+        let cancelled = !verdict.failed.isEmpty && verdict.failedStatuses.isEmpty
+            && verdict.failed.allSatisfy { $0.conclusion?.uppercased() == "CANCELLED" }
         guard let runID = rerunnableRun(verdict), let number = train?.number, cancelled || triagesFlakes else {
             // Cancelled again: no runner came, which no split mends.
             return cancelled ? stop(red) : redTrain(red)

@@ -402,8 +402,10 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   whose PRs all left lets the next one ride. A Start's batch of one stops the
   queue, and so does a required check cancelled again after its rerun (no
   runner came). A train whose head has the tree of a train that failed holds
-  the same files: it doesn't run again and counts as red, so a first half that
-  lands sends its second half to a split (or out, alone) without a run. Each
+  the same files: several PRs split again without a run, so a first half that
+  lands sends its second half to a split; one PR alone gets a run of its own.
+  When every PR failed alone and none landed, the stop says the base itself
+  may fail the checks. Each
   look at the train's checks reads the PRs again: a push to one stops the
   train at once. A stop the train finds itself (red
   checks, the base moved, a push) closes the train's PR first; a user Stop or
