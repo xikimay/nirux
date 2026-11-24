@@ -245,7 +245,7 @@ extension MergeQueue.Engine {
             if case .stopped(let reason) = entries[index].step { reason.kind == .checks } else { false }
         }
         let base = settings.baseBranch
-        let hint = allRed ? " Each failed alone on \(base): \(base) itself may fail the checks." : nil
+        let hint = allRed ? " Each failed alone on \(base): each may have its own failure, or \(base) itself may fail the checks." : nil
         stop(reason.appending(too).appending(named.isEmpty ? nil : named.joined()).appending(hint), on: first)
     }
 

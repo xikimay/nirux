@@ -589,7 +589,7 @@ final class MergeQueueTrainTests: XCTestCase {
         var second = queue()
         second.drive(&red)
         XCTAssertEqual(second.stopReason?.message, "Required check Tests / test failed on train #901 at 0000003. It left the train. "
-            + "#14 left the train too. Each failed alone on main: main itself may fail the checks.")
+            + "#14 left the train too. Each failed alone on main: each may have its own failure, or main itself may fail the checks.")
     }
 
     func testAStopOrARefusedCloseWhileARedTrainSplitsStopsTheQueue() throws {
