@@ -498,7 +498,8 @@ final class WebAddressFieldTests: XCTestCase {
     }
 
     /// Editing starts from the whole URL; ⌘L or a click on the box's margin
-    /// while editing keeps what was typed; leaving puts the page's back.
+    /// while editing keeps what was typed, the click going no further (a
+    /// header would drag its column); leaving puts the page's back.
     func testEditingKeepsWhatWasTyped() throws {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 100), styleMask: [.titled],
                               backing: .buffered, defer: true)
@@ -507,7 +508,9 @@ final class WebAddressFieldTests: XCTestCase {
         let field = AddressField()
         let box = AddressBox(frame: NSRect(x: 10, y: 10, width: 320, height: 22))
         box.field = field
-        window.contentView?.addSubview(box)
+        let header = PressCounter(frame: NSRect(x: 0, y: 0, width: 400, height: 40))
+        window.contentView?.addSubview(header)
+        header.addSubview(box)
         field.url = "https://github.com/acme"
         XCTAssertEqual(field.stringValue, "github.com/acme")
 
@@ -524,10 +527,17 @@ final class WebAddressFieldTests: XCTestCase {
         ))
         box.mouseDown(with: click)
         XCTAssertEqual(field.currentEditor()?.string, "localhost:30", "a click on the margin keeps it")
+        XCTAssertEqual(header.presses, 0, "and goes no further")
 
         XCTAssertTrue(window.makeFirstResponder(nil))
         XCTAssertEqual(field.stringValue, "github.com/acme", "the page's URL again")
     }
+}
+
+/// Counts the presses that reach it.
+private final class PressCounter: NSView {
+    var presses = 0
+    override func mouseDown(with event: NSEvent) { presses += 1 }
 }
 
 /// The Project Board's header: the post-merge run's pill, what went wrong

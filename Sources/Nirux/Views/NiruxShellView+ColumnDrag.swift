@@ -24,14 +24,16 @@ extension NiruxShellView {
                 let pointer = event.locationInWindow
                 if !isDragging {
                     let start = press.locationInWindow
-                    guard hypot(pointer.x - start.x, pointer.y - start.y) > HeldPress.dragThreshold else { return }
+                    guard hypot(pointer.x - start.x, pointer.y - start.y) > HeldPress.dragThreshold, liftColumn(at: index, in: workspace)
+                    else { return }
                     isDragging = true
-                    liftColumn(at: index, in: workspace)
                     grab = workspace.stripPoint(fromWindow: pointer).x - column.view.frame.minX
                 }
-                let inViewport = viewport.convert(pointer, from: nil)
-                let outside = !viewport.bounds.contains(inViewport)
-                workspace.dragPan(outside ? 0 : WorkspaceState.edgePan(at: inViewport.x, width: viewport.bounds.width), isTick: isTick)
+                // From where the viewport rests: passing under the rail, it
+                // reaches past its edge.
+                let rest = viewportRestFrame, inShell = convert(pointer, from: nil)
+                let outside = !rest.contains(inShell)
+                workspace.dragPan(outside ? 0 : WorkspaceState.edgePan(at: inShell.x - rest.minX, width: rest.width), isTick: isTick)
                 if workspace.dragColumn(to: workspace.stripPoint(fromWindow: pointer).x - grab, outside: outside) {
                     relayout(animated: true)
                 }
@@ -45,13 +47,15 @@ extension NiruxShellView {
 
     /// The card at `index` rises under the pointer, its shadow to the
     /// floating level (`applyCardEdges`); the drag's ticks pan the strip
-    /// while the pointer holds near an edge.
-    private func liftColumn(at index: Int, in workspace: WorkspaceState) {
-        workspace.beginColumnDrag(at: index)
+    /// while the pointer holds near an edge. False for a card on its way
+    /// out (closed during the press).
+    private func liftColumn(at index: Int, in workspace: WorkspaceState) -> Bool {
+        guard workspace.beginColumnDrag(at: index) else { return false }
         workspace.columns[index].raise(animated: agentLightsMayMove)
         NSCursor.closedHand.set()
         sideEffects.runsDragTicks(true)
         relayout(animated: true)
+        return true
     }
 
     /// Let go, the card glides to its slot, or back to the one it came from,
