@@ -68,7 +68,7 @@ extension NiruxShellView {
     /// a terminal while its program owns the mouse (vim, tmux). A web page
     /// says so itself, but for the history its own swipe goes through.
     static func reach(
-        under view: NSView, in workspace: NSView, ownsMouse: (TerminalView) -> Bool = { $0.isMouseCaptured }
+        under view: NSView, in workspace: NSView, ownsMouse: @MainActor (TerminalView) -> Bool = { $0.isMouseCaptured }
     ) -> (toStart: StripSwipe.Reach, toEnd: StripSwipe.Reach) {
         var reach = (toStart: StripSwipe.Reach.cannot, toEnd: StripSwipe.Reach.cannot)
         for view in sequence(first: view, next: \.superview).prefix(while: { $0 !== workspace }) {

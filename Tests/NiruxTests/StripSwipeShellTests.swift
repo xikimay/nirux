@@ -70,9 +70,10 @@ final class StripSwipeShellTests: XCTestCase {
     private func swipe(
         _ shell: NiruxShellView, over hit: NSView?, _ dx: [CGFloat], from start: TimeInterval = 0, lifts: Bool = true
     ) -> [Bool] {
-        var taken = dx.enumerated().map { index, dx in
+        var taken: [Bool] = []
+        for (index, dx) in dx.enumerated() {
             let time = start + TimeInterval(index) * 0.01
-            return shell.scrolled(.init(dx: dx, phase: index == 0 && start == 0 ? .began : .changed, time: time), over: hit)
+            taken.append(shell.scrolled(.init(dx: dx, phase: index == 0 && start == 0 ? .began : .changed, time: time), over: hit))
         }
         if lifts {
             taken.append(shell.scrolled(.init(dx: 0, phase: .ended, time: start + TimeInterval(dx.count) * 0.01), over: hit))
@@ -273,7 +274,11 @@ final class StripSwipeShellTests: XCTestCase {
     }
 
     private static func page(in view: NSView) -> WKWebView? {
-        (view as? WKWebView) ?? view.subviews.lazy.compactMap(page(in:)).first
+        if let page = view as? WKWebView { return page }
+        for subview in view.subviews {
+            if let page = page(in: subview) { return page }
+        }
+        return nil
     }
 
     /// A scroll event of no window, its phase as `CGScrollPhase` gives it.
