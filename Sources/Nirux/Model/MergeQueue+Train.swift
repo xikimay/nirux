@@ -557,6 +557,7 @@ extension MergeQueue.Engine {
         guard let train, let number = train.number, let pullRequest = answers.pullRequest(number),
               let checks = answers.checks(head), let comparison = answers.comparison(base: settings.baseBranch, head: head)
         else { return missingAnswer() }
+        if landedOutside(pullRequest, now: now) { return }
         if let problem = trainProblem(pullRequest) { return stop(problem) }
         guard pullRequest.headOid == head else { return stop(trainMoved(to: pullRequest.headOid)) }
         if pullRequest.mergeable == "CONFLICTING" {
@@ -622,6 +623,18 @@ extension MergeQueue.Engine {
     }
 
     // MARK: Landed: each pull request must read merged
+
+    /// The train's pull request merged at the train's own head by someone
+    /// else, GitHub's auto-merge armed as a backstop say: landed all the same.
+    private mutating func landedOutside(_ pullRequest: MergeQueue.PullRequestSnapshot, now: TimeInterval) -> Bool {
+        guard let train, pullRequest.state == .merged, pullRequest.headOid == train.head, let commit = pullRequest.mergeCommit else {
+            return false
+        }
+        note("\(train.name) was merged on GitHub at its head, as \(Self.short(commit))")
+        self.train?.mergeCommit = commit
+        trainLanded(commit, now: now)
+        return true
+    }
 
     private mutating func trainLanded(_ commit: String, now: TimeInterval) {
         train?.step = .verifying(commit)
@@ -845,6 +858,7 @@ extension MergeQueue.Engine {
             guard let number = train.number, let pullRequest = answers.pullRequest(number), let checks = answers.checks(head) else {
                 return missingAnswer()
             }
+            if landedOutside(pullRequest, now: now) { return }
             if let problem = trainProblem(pullRequest) { return stop(problem) }
             guard pullRequest.headOid == head else { return stop(trainMoved(to: pullRequest.headOid)) }
             // A push to a pull request of the batch makes the run moot: stop now, not at the merge.

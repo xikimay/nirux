@@ -355,7 +355,7 @@ final class MergeQueueTrainTests: XCTestCase {
         XCTAssertEqual(second.mutations.last, .closePullRequest(number: 900), "no merge of the train, nor a deletion of a branch someone pushed to")
     }
 
-    func testAStopWhileClosingTheTrainKeepsItsReasonAndATrainMergedOutsideIsLeftAlone() throws {
+    func testAStopWhileClosingTheTrainKeepsItsReasonAndATrainMergedOutsideAtAnotherHeadIsLeftAlone() throws {
         var world = world()
         world.checks[TrainGitHub.commit(1)] = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"))
         var red = TrainGitHub(world: world)
@@ -382,10 +382,28 @@ final class MergeQueueTrainTests: XCTestCase {
         }) == true {
             if let mutation = second.pendingMutation { second.mutated(outside.apply(mutation)) } else { second.answer(outside.world) }
         }
-        outside.world.merge(900, as: TrainGitHub.commit(9))
+        outside.world.pullRequests[900] = MQ.pullRequest(900, head: c, branch: branch, state: .merged, mergeCommit: TrainGitHub.commit(9))
         second.drive(&outside)
         XCTAssertEqual(second.stopReason?.message, "#900 is merged, no longer open. Nirux deleted the train’s branch \(branch).")
         XCTAssertFalse(second.mutations.contains(.closePullRequest(number: 900)))
+    }
+
+    func testATrainMergedOnGitHubAtItsOwnHeadHasLanded() throws {
+        let head = TrainGitHub.commit(2)
+        // Seen while the checks run, or at the last look before the merge.
+        for moment in [MergeQueue.Read.checks(head), .compare(base: "main", head: head)] {
+            var github = TrainGitHub(world: world())
+            var queue = queue()
+            queue.run(&github) { $0.pendingReads?.contains(moment) == true }
+            // GitHub's auto-merge, armed as a backstop, merges it before the queue does.
+            _ = github.apply(.merge(number: 900, head: head, method: .merge))
+            queue.drive(&github)
+            XCTAssertEqual(queue.phase, .finished, String(describing: queue.stopReason))
+            XCTAssertTrue(queue.noted("train #900 was merged on GitHub at its head, as 0000003"))
+            XCTAssertFalse(queue.mutations.contains { if case .merge = $0 { true } else { false } }, "the queue merged nothing itself")
+            XCTAssertEqual(queue.engine.entries.map(\.step), [.done, .done])
+            XCTAssertNil(github.world.branches[branch])
+        }
     }
 
     func testEveryPullRequestThatLeftTheTrainIsNamed() throws {
