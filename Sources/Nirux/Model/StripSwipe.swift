@@ -11,7 +11,7 @@ struct StripSwipe {
         /// Where in its gesture the event lies: the fingers' (`mayBegin`
         /// to `ended` or `cancelled`), their momentum after, or none (a
         /// mouse's wheel).
-        enum Phase { case mayBegin, began, changed, ended, cancelled, momentum, none }
+        enum Phase { case mayBegin, began, changed, ended, cancelled, momentum, momentumEnded, none }
 
         var dx: CGFloat
         var dy: CGFloat = 0
@@ -48,8 +48,14 @@ struct StripSwipe {
     private enum Owner { case undecided, content, strip }
     private var owner = Owner.undecided
     private var settled = false
-    private var declined = false
+    /// The fingers' travel, to tell which way they mean.
     private var moved = (dx: CGFloat(0), dy: CGFloat(0))
+    /// The sideways travel of each event the content had, while undecided.
+    private var passed: [(time: TimeInterval, dx: CGFloat)] = []
+    /// When a page first left a sideways scroll it couldn't take, each way.
+    private var declinedSince: (toStart: TimeInterval?, toEnd: TimeInterval?) = (nil, nil)
+    /// The travel the strip follows, from when it took the swipe.
+    private var travel: CGFloat = 0
     private var latest: TimeInterval
     /// The camera before the rubber band, over the last `speedWindow`.
     private var samples: [(time: TimeInterval, camera: CGFloat)]
@@ -80,48 +86,54 @@ struct StripSwipe {
         samples = [(began, start)]
     }
 
-    /// Whether the strip has the swipe.
-    var isStrips: Bool { owner == .strip }
     /// Whether the fingers hold the strip.
     var holdsCamera: Bool { owner == .strip && !settled }
-
-    /// The strip lets go before the swipe's end: nothing more of it moves it.
-    mutating func letGo() {
-        settled = true
-    }
+    /// The gesture is over: its momentum ended, or its fingers left one the
+    /// strip didn't have.
+    private(set) var isOver = false
 
     mutating func scrolled(_ scroll: Scroll) -> Step {
         switch scroll.phase {
         case .none, .mayBegin: return .pass
-        case .momentum: return owner == .strip ? .swallow : .pass
+        case .momentum, .momentumEnded:
+            if scroll.phase == .momentumEnded { isOver = true }
+            return owner == .strip ? .swallow : .pass
         case .began, .changed, .ended, .cancelled: break
         }
         latest = max(latest, scroll.time)
         let lifted = scroll.phase == .ended || scroll.phase == .cancelled
         switch owner {
         case .content:
+            isOver = lifted
             return .pass
         case .undecided:
             moved.dx += scroll.dx
             moved.dy += scroll.dy
+            passed.append((scroll.time, scroll.dx))
             guard !lifted else {
                 owner = .content
+                isOver = true
                 return .pass
             }
             decide()
             return owner == .strip ? follow() : .pass
         case .strip:
             guard !settled else { return .swallow }
-            moved.dx += scroll.dx
+            travel += scroll.dx
             return lifted ? settle(cancelled: scroll.phase == .cancelled) : follow()
         }
     }
 
-    /// The content left an event of the swipe (WebKit didn't handle it): it
-    /// can't scroll that way, so the strip may take the swipe at once.
-    mutating func declined(at time: TimeInterval) -> Step {
-        guard time >= began, owner == .undecided else { return .pass }
-        declined = true
+    /// The content left a sideways event of the swipe (WebKit didn't handle
+    /// it): it can't scroll that way, so the strip may take the swipe, its
+    /// travel counted from that event.
+    mutating func declined(_ scroll: Scroll) -> Step {
+        guard scroll.time >= began, owner == .undecided, abs(scroll.dx) > abs(scroll.dy) else { return .pass }
+        if scroll.dx > 0 {
+            declinedSince.toStart = min(declinedSince.toStart ?? scroll.time, scroll.time)
+        } else {
+            declinedSince.toEnd = min(declinedSince.toEnd ?? scroll.time, scroll.time)
+        }
         decide()
         return owner == .strip ? follow() : .pass
     }
@@ -132,14 +144,23 @@ struct StripSwipe {
             owner = .content
             return
         }
-        switch moved.dx > 0 ? reach.toStart : reach.toEnd {
-        case .can: owner = .content
-        case .cannot: owner = .strip
-        case .asks: if declined { owner = .strip }
+        let toStart = moved.dx > 0
+        switch toStart ? reach.toStart : reach.toEnd {
+        case .can:
+            owner = .content
+        case .cannot:
+            owner = .strip
+            travel = moved.dx
+        case .asks:
+            guard let since = toStart ? declinedSince.toStart : declinedSince.toEnd else { return }
+            owner = .strip
+            travel = passed.filter { $0.time >= since }.reduce(0) { $0 + $1.dx }
+            samples = [(since, start)]
         }
+        passed = []
     }
 
-    private var camera: CGFloat { start - moved.dx }
+    private var camera: CGFloat { start - travel }
 
     private mutating func follow() -> Step {
         samples.append((latest, camera))

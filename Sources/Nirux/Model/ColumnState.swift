@@ -33,7 +33,7 @@ final class ColumnState {
     }
     /// The width a fit to the window (`toggleFit`) comes back to, while
     /// the column stays fitted.
-    private var unfitFraction: CGFloat?
+    private(set) var unfitFraction: CGFloat?
     private(set) var pty: PtySession?
     /// Close in flight: ⌘W removes the column after its exit animation.
     var isClosing = false
@@ -601,6 +601,12 @@ final class ColumnState {
     /// (`ColumnWidth.fitToggled`).
     func toggleFit() {
         (widthFraction, unfitFraction) = ColumnWidth.fitToggled(widthFraction, unfit: unfitFraction)
+    }
+
+    /// A saved width, and the one its fit comes back to.
+    func restoreWidth(_ fraction: CGFloat, unfit: CGFloat?) {
+        widthFraction = fraction
+        unfitFraction = fraction == ColumnWidth.full.fraction ? unfit : nil
     }
 
     /// AgentHookCenter entry point: the agent in this column just asked for

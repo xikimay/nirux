@@ -49,28 +49,55 @@ final class StripSwipeTests: XCTestCase {
         XCTAssertEqual(move(&towardStart, [10, 10]), [.follow(camera: 390), .follow(camera: 380)])
     }
 
+    /// What WebKit left of the swipe: one sideways event at `time`.
+    private func left(_ dx: CGFloat, dy: CGFloat = 0, at time: TimeInterval) -> StripSwipe.Scroll {
+        .init(dx: dx, dy: dy, phase: .changed, time: time)
+    }
+
     /// A web page says itself what it can't scroll: WebKit leaves the
     /// event, and the strip takes the swipe then, caught up with the fingers.
     func testAPageKeepsTheSwipeUntilItLeavesIt() {
         var swipe = swipe((toStart: .asks, toEnd: .asks))
         XCTAssertEqual(move(&swipe, [-10, -10]), [.pass, .pass])
-        XCTAssertEqual(swipe.declined(at: 9.5), .pass, "a decline from an earlier gesture")
-        XCTAssertEqual(swipe.declined(at: 10), .follow(camera: 420))
+        XCTAssertEqual(swipe.declined(left(-10, at: 9.5)), .pass, "a decline from an earlier gesture")
+        XCTAssertEqual(swipe.declined(left(-10, at: 10)), .follow(camera: 420))
         XCTAssertEqual(move(&swipe, [-10], from: 10.02), [.follow(camera: 430)])
+    }
+
+    /// A page that scrolled to its end, then left the rest: the strip
+    /// travels from the first event the page left, not from the start.
+    func testAPageThatScrolledToItsEndHandsOnWithoutAJump() {
+        var swipe = swipe((toStart: .asks, toEnd: .asks))
+        _ = move(&swipe, Array(repeating: -10, count: 30))
+        XCTAssertEqual(swipe.declined(left(-10, at: 10.24)), .follow(camera: 460))
+        guard case .settle(_, let camera, let velocity) = swipe.scrolled(.init(dx: 0, phase: .ended, time: 10.3)) else {
+            return XCTFail("settles")
+        }
+        XCTAssertEqual(camera, 460)
+        XCTAssertEqual(velocity, 1000, accuracy: 50, "60 points since the page left them, none of what it scrolled")
+    }
+
+    /// Each way stands on its own: a nudge up a page left, or a scroll
+    /// toward the start, gives the strip no swipe toward the end.
+    func testAPageLeavingOneWayKeepsTheOthers() {
+        var swipe = swipe((toStart: .asks, toEnd: .asks))
+        XCTAssertEqual(swipe.declined(left(0, dy: 3, at: 10)), .pass)
+        XCTAssertEqual(swipe.declined(left(5, at: 10)), .pass)
+        XCTAssertEqual(move(&swipe, [-10, -10], from: 10.01), [.pass, .pass])
     }
 
     func testADeclineBeforeTheFingersShowTheirWayWaitsForThem() {
         var swipe = swipe((toStart: .asks, toEnd: .asks))
         XCTAssertEqual(move(&swipe, [-2]), [.pass])
-        XCTAssertEqual(swipe.declined(at: 10), .pass)
+        XCTAssertEqual(swipe.declined(left(-2, at: 10)), .pass)
         XCTAssertEqual(move(&swipe, [-10], from: 10.01), [.follow(camera: 412)])
         var upward = self.swipe((toStart: .asks, toEnd: .asks))
-        _ = upward.declined(at: 10)
+        _ = upward.declined(left(0, dy: 10, at: 10))
         XCTAssertEqual(move(&upward, [0, 0], dy: 10), [.pass, .pass], "a page leaving a scroll up or down")
         var lifted = self.swipe((toStart: .asks, toEnd: .asks))
         _ = move(&lifted, [-20])
         _ = lifted.scrolled(.init(dx: 0, phase: .ended, time: 10.01))
-        XCTAssertEqual(lifted.declined(at: 10), .pass, "the fingers gone before the page answered")
+        XCTAssertEqual(lifted.declined(left(-20, at: 10)), .pass, "the fingers gone before the page answered")
     }
 
     func testPastItsEndsTheStripFollowsLessAndLess() throws {
@@ -141,16 +168,15 @@ final class StripSwipeTests: XCTestCase {
         _ = move(&content, [-20, -20])
         _ = content.scrolled(.init(dx: 0, phase: .ended, time: 10.02))
         XCTAssertEqual(content.scrolled(.init(dx: -30, phase: .momentum, time: 10.03)), .pass)
-        // Let go before its end (the cards changed): the rest stays the strip's.
-        var gone = swipe()
-        _ = move(&gone, [-20])
-        gone.letGo()
-        XCTAssertFalse(gone.holdsCamera)
-        XCTAssertEqual(gone.scrolled(.init(dx: -20, phase: .changed, time: 10.01)), .swallow)
+        XCTAssertFalse(strip.isOver, "its momentum goes on")
+        XCTAssertEqual(strip.scrolled(.init(dx: -1, phase: .momentumEnded, time: 10.06)), .swallow)
+        XCTAssertTrue(strip.isOver)
+        XCTAssertTrue(content.isOver, "lifted, a swipe the content had is over")
         // Lifted before showing a way: the content's.
         var tap = swipe()
         _ = move(&tap, [-2])
         XCTAssertEqual(tap.scrolled(.init(dx: 0, phase: .ended, time: 10.01)), .pass)
+        XCTAssertTrue(tap.isOver)
         XCTAssertEqual(tap.scrolled(.init(dx: -30, phase: .momentum, time: 10.02)), .pass)
     }
 

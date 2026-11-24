@@ -1161,9 +1161,14 @@ extension WorkspaceState {
     /// The strip, laid out at its place, glides there on a spring from where
     /// the camera was at `x`, leaving at `velocity` (camera points a
     /// second); while the interface may not `move`, it is there at once.
-    func glideStrip(fromCamera x: CGFloat, velocity: CGFloat, moves: Bool) {
+    /// How long the glide lasts; nil without one.
+    @discardableResult
+    func glideStrip(fromCamera x: CGFloat, velocity: CGFloat, moves: Bool) -> CFTimeInterval? {
         let offset = -x - stripView.frame.origin.x
-        guard moves, let layer = stripView.layer, abs(offset) >= 0.5 else { return endSlide() }
+        guard moves, let layer = stripView.layer, abs(offset) >= 0.5 else {
+            endSlide()
+            return nil
+        }
         let glide = CASpringAnimation(perceptualDuration: Self.slideDuration, bounce: 0)
         glide.keyPath = "transform.translation.x"
         glide.fromValue = offset
@@ -1173,6 +1178,7 @@ extension WorkspaceState {
         glide.initialVelocity = min(velocity / offset, 2 * .pi / Self.slideDuration)
         glide.duration = glide.settlingDuration
         layer.add(glide, forKey: Self.slideKey)
+        return glide.duration
     }
 
     /// A slide on its way is where it goes at once.

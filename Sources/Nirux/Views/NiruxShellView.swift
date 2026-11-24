@@ -733,7 +733,7 @@ final class NiruxShellView: NSView {
 
     /// A scroll the views under the pointer leave (see `contentLeft(at:)`).
     override func scrollWheel(with event: NSEvent) {
-        contentLeft(at: event.timestamp)
+        contentLeft(StripSwipe.Scroll(event))
         super.scrollWheel(with: event)
     }
 

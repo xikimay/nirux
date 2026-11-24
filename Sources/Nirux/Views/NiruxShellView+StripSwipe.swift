@@ -26,15 +26,12 @@ extension NiruxShellView {
         }
         guard var swipe = stripSwipe else { return false }
         guard let workspace = activeWorkspace, workspace.columns.map(\.id) == swipe.columns else {
-            // The cards changed under the fingers: the strip lets go, and
-            // keeps the rest of a swipe it had from the content.
-            releaseHold(of: swipe)
-            swipe.letGo()
-            stripSwipe = swipe
-            return swipe.isStrips
+            // The cards changed under the fingers.
+            letGoOfStrip()
+            return false
         }
         let step = swipe.scrolled(scroll)
-        stripSwipe = swipe
+        stripSwipe = swipe.isOver ? nil : swipe
         apply(step, to: workspace)
         return step != .pass
     }
@@ -42,9 +39,9 @@ extension NiruxShellView {
     /// A scroll the views under the pointer left (a web page's, see
     /// `WKWebView.passOnUnhandled`): what lies under the fingers can't
     /// scroll that way.
-    func contentLeft(at time: TimeInterval) {
+    func contentLeft(_ scroll: StripSwipe.Scroll) {
         guard var swipe = stripSwipe, let workspace = activeWorkspace, workspace.columns.map(\.id) == swipe.columns else { return }
-        let step = swipe.declined(at: time)
+        let step = swipe.declined(scroll)
         stripSwipe = swipe
         apply(step, to: workspace)
     }
@@ -108,7 +105,11 @@ extension NiruxShellView {
         case .settle(let index, let camera, let velocity):
             workspace.heldCamera = nil
             if index == workspace.focusedIndex { relayout(animated: true) } else { focusColumnByIndex(index) }
-            workspace.glideStrip(fromCamera: camera, velocity: velocity, moves: agentLightsMayMove)
+            // The layout's pass under the rail lasts as long as the glide.
+            if let glide = workspace.glideStrip(fromCamera: camera, velocity: velocity, moves: agentLightsMayMove),
+               passingUnderRail === workspace {
+                passUnderRail(workspace, for: glide)
+            }
         }
     }
 
@@ -118,24 +119,22 @@ extension NiruxShellView {
         return workspaces.first { $0.columns.contains { swipe.columns.contains($0.id) } }
     }
 
-    /// A swipe gone before its end (fingers down again): the camera goes
-    /// where the strip wants it.
+    /// A swipe gone before its end (fingers down again, the cards changed):
+    /// the camera goes where the strip wants it.
     private func letGoOfStrip() {
-        guard let swipe = stripSwipe else { return }
-        releaseHold(of: swipe)
+        let held = swipedWorkspace
         stripSwipe = nil
-    }
-
-    private func releaseHold(of swipe: StripSwipe) {
-        guard swipe.holdsCamera, let workspace = swipedWorkspace else { return }
-        workspace.heldCamera = nil
+        guard let held else { return }
+        held.heldCamera = nil
         relayout(animated: true)
     }
 }
 
 extension StripSwipe.Scroll {
     init(_ event: NSEvent) {
-        let phase: Phase = if !event.momentumPhase.isEmpty {
+        let phase: Phase = if !event.momentumPhase.isDisjoint(with: [.ended, .cancelled]) {
+            .momentumEnded
+        } else if !event.momentumPhase.isEmpty {
             .momentum
         } else if event.phase.contains(.mayBegin) {
             .mayBegin

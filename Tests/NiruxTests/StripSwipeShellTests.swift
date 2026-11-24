@@ -155,15 +155,67 @@ final class StripSwipeShellTests: XCTestCase {
             swipe(shell, over: hit, [-20, -20], from: 0, lifts: false)
             XCTAssertNotNil(workspace.heldCamera)
             workspace.addColumn()
-            XCTAssertTrue(shell.scrolled(.init(dx: -20, phase: .changed, time: 0.03), over: hit), "the rest stays the strip's")
+            XCTAssertFalse(shell.scrolled(.init(dx: -20, phase: .changed, time: 0.03), over: hit))
             XCTAssertNil(workspace.heldCamera)
-            XCTAssertTrue(shell.scrolled(.init(dx: -20, phase: .momentum, time: 0.04), over: hit))
+            XCTAssertFalse(shell.scrolled(.init(dx: -20, phase: .momentum, time: 0.04), over: hit))
 
             // Fingers down over another window.
             swipe(shell, over: try terminal(workspace, 1), [-20, -20], from: 0, lifts: false)
             XCTAssertNotNil(workspace.heldCamera)
             XCTAssertFalse(shell.scrolled(try scrollEvent(phase: 128)))
             XCTAssertNil(workspace.heldCamera)
+        }
+    }
+
+    /// A mouse's wheel always scrolls what lies under the pointer: after a
+    /// swipe the strip had, its cards changed or not.
+    func testAMouseWheelIsNeverTheStrips() throws {
+        try withShell { shell, workspace in
+            let wheel = StripSwipe.Scroll(dx: -10, dy: 0, phase: .none, time: 1)
+            let hit = try terminal(workspace, 2)
+            swipe(shell, over: try terminal(workspace, 1), Array(repeating: -10, count: 10))
+            XCTAssertFalse(shell.scrolled(wheel, over: hit))
+            XCTAssertTrue(shell.scrolled(.init(dx: -1, phase: .momentumEnded, time: 1), over: hit))
+            XCTAssertNil(shell.stripSwipe, "over with its momentum")
+            swipe(shell, over: hit, Array(repeating: -10, count: 10))
+            workspace.addColumn()
+            XCTAssertFalse(shell.scrolled(wheel, over: hit))
+            XCTAssertFalse(shell.scrolled(.init(dx: -10, phase: .momentum, time: 1), over: hit))
+        }
+    }
+
+    /// Under the folded glass rail, the cards pass under it as long as the
+    /// glide lasts.
+    func testTheGlidePassesUnderTheRailToItsEnd() throws {
+        try withShell { shell, workspace in
+            shell.sideEffects.drawsGlass = { true }
+            shell.sideEffects.drawnTransparency = { $0 }
+            shell.interfaceTransparency = .tinted
+            shell.sidebar.isExpanded = false
+            shell.relayout(animated: false)
+            let steps = TimedSteps(on: shell)
+            swipe(shell, over: try terminal(workspace, 1), Array(repeating: -10, count: 10))
+            let glide = try XCTUnwrap(try strip(workspace).animation(forKey: "colSlide") as? CASpringAnimation)
+            XCTAssertGreaterThan(glide.duration, WorkspaceState.slideDuration)
+            while steps.durations.first.map({ $0 != glide.duration }) == true { steps.runNext() }
+            XCTAssertTrue(shell.passingUnderRail === workspace, "still under the rail")
+            XCTAssertTrue(steps.runNext())
+            XCTAssertNil(shell.passingUnderRail, "the edge closes once the glide ends")
+        }
+    }
+
+    /// A column fitted to the window comes back to its width after a restart.
+    func testAFittedColumnComesBackToItsWidthAfterARestart() throws {
+        try withShell { shell, workspace in
+            XCTAssertTrue(shell.fitColumn(over: try terminal(workspace, 1)))
+            XCTAssertEqual(shell.persistedState().workspaces.first { $0.id == workspace.id }?.columns[1].unfitPreset, 0.4)
+            shell.saveState()
+            shell.restoreState()
+            let restored = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(restored.id, workspace.id)
+            XCTAssertEqual(restored.columns[1].widthFraction, 1)
+            XCTAssertTrue(shell.fitColumn(over: try terminal(restored, 1)))
+            XCTAssertEqual(restored.columns[1].widthFraction, 0.4, accuracy: 0.000_1)
         }
     }
 
@@ -193,7 +245,7 @@ final class StripSwipeShellTests: XCTestCase {
             XCTAssertEqual(swipe(shell, over: page, [-20, -20], lifts: false), [false, false])
             XCTAssertNil(workspace.heldCamera)
 
-            page.passOnUnhandled(try scrollEvent(phase: 2))
+            page.passOnUnhandled(try scrollEvent(phase: 2, at: 0))
             XCTAssertEqual(workspace.lastCameraX, start + 40, "caught up with the fingers")
             XCTAssertTrue(shell.scrolled(.init(dx: -10, phase: .changed, time: 0.03), over: page))
             XCTAssertEqual(workspace.lastCameraX, start + 50)
@@ -214,7 +266,7 @@ final class StripSwipeShellTests: XCTestCase {
 
     func testScrollEventsReadAsTheirPhase() throws {
         let phases: [(Int64, Int64, StripSwipe.Scroll.Phase)] = [
-            (128, 0, .mayBegin), (1, 0, .began), (2, 0, .changed), (4, 0, .ended), (8, 0, .cancelled), (0, 1, .momentum), (0, 2, .momentum), (0, 0, .none)
+            (128, 0, .mayBegin), (1, 0, .began), (2, 0, .changed), (4, 0, .ended), (8, 0, .cancelled), (0, 1, .momentum), (0, 2, .momentum), (0, 3, .momentumEnded), (0, 0, .none)
         ]
         for (phase, momentum, read) in phases {
             XCTAssertEqual(StripSwipe.Scroll(try scrollEvent(phase: phase, momentum: momentum)).phase, read, "\(phase) \(momentum)")
@@ -292,8 +344,12 @@ final class StripSwipeShellTests: XCTestCase {
 
     /// A scroll event of no window, its phases as `CGScrollPhase` and
     /// `CGMomentumScrollPhase` give them.
-    private func scrollEvent(phase: Int64, momentum: Int64 = 0) throws -> NSEvent {
+    /// Ten points toward the strip's end, at `time` (seconds since startup).
+    private func scrollEvent(phase: Int64, momentum: Int64 = 0, at time: TimeInterval = 0) throws -> NSEvent {
         let event = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: 0, wheel2: -10, wheel3: 0))
+        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: -10)
+        event.timestamp = CGEventTimestamp(time * 1_000_000_000)
         event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
         event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum)
         return try XCTUnwrap(NSEvent(cgEvent: event))
