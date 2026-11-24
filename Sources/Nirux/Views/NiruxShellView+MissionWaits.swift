@@ -62,8 +62,8 @@ struct SidebarWaitingMessages: Hashable {
             "its \(name) restarted since, and Nirux types a message sent to the one before into no other"
         )
         case .noPromptYet? where agent == .agy: (
-            "no turn ended since it started",
-            "its Antigravity hasn't ended a turn since it started, where a screen of its own may be up; they go in after its first one"
+            "not at its prompt yet",
+            "its Antigravity hasn't said it sits at its empty prompt since it started; they go in once it does, or once its first turn ends"
         )
         case .noPromptYet? where codex: (
             "no state from Codex yet",
@@ -341,7 +341,7 @@ extension NiruxShellView {
                         + "agent=\(entry.column.agentUUID?.prefix(8) ?? "-") waited=\(waited)s reason=\(reason) messages=\(refused.count) "
                         + "fg=\(foreground.map { "\($0.name)/\(Int(max(now - $0.instance.startedAt, 0)))s" } ?? "-") "
                         + ((foreground?.agent == .codex ? pty?.codexFacts(now: now)
-                            : foreground?.agent == .agy ? pty?.agyFacts(now: now)
+                            : foreground?.agent == .agy ? pty?.agyFacts(foreground, now: now)
                             : pty?.missionPromptFacts(now: now, snapshot: snapshot, record: sessionRecord(of:))) ?? "")
                 )
             }

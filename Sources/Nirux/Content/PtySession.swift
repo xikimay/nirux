@@ -38,23 +38,29 @@ final class PtySession: @unchecked Sendable {
         set { state.onProgramStatus = newValue }
     }
 
+    /// The time its agent's status is read at; a test moves it.
+    var clock: @Sendable () -> Date {
+        get { state.clock }
+        set { state.clock = newValue }
+    }
+
     /// Takes in Antigravity's status: the reason to alert with, if any (see
     /// `AgentStatusMachine.noteProgramStatus`).
     func applyProgramStatus(
         _ status: AgentProgramStatus, from process: ProcessInstance?, isUserFocused: Bool
     ) -> AgentAttentionReason? {
-        state.machine.noteProgramStatus(status, from: process, isUserFocused: isUserFocused, now: Date())
+        state.machine.noteProgramStatus(status, from: process, isUserFocused: isUserFocused, now: state.now)
     }
 
     /// A sign-in wait past its grace, once (see
     /// `AgentStatusMachine.takeLateSignInAlert`).
     func takeLateSignInAlert(isUserFocused: Bool) -> AgentAttentionReason? {
-        state.machine.takeLateSignInAlert(isUserFocused: isUserFocused, now: Date().timeIntervalSince1970)
+        state.machine.takeLateSignInAlert(isUserFocused: isUserFocused, now: state.now.timeIntervalSince1970)
     }
 
     /// Takes in Codex's status (see `AgentStatusMachine.codexQueueRefusal`).
     func noteCodexStatus(_ status: AgentProgramStatus, from process: ProcessInstance?) {
-        state.machine.noteCodexStatus(status, from: process, now: Date().timeIntervalSince1970)
+        state.machine.noteCodexStatus(status, from: process, now: state.now.timeIntervalSince1970)
     }
 
     func codexStatus(of process: ProcessInstance) -> AgentProgramStatus? {
@@ -115,6 +121,9 @@ final class PtySession: @unchecked Sendable {
     /// See `AgentStatusMachine.circlingHint`.
     var agentCirclingHint: AgentCirclingHint? { state.machine.circlingHint }
 
+    /// See `AgentStatusMachine.agyQuietFor`.
+    var agentQuietFor: TimeInterval? { state.machine.agyQuietFor(now: state.now.timeIntervalSince1970) }
+
     /// A Claude turn end that hasn't alerted (see
     /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
     var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
@@ -128,7 +137,7 @@ final class PtySession: @unchecked Sendable {
     /// Esc, as the key, but no draft (see `noteInterruptSent`): the prompt
     /// whose turn it interrupts.
     func sendInterrupt() -> TimeInterval? {
-        guard let promptAt = state.machine.noteInterruptSent(now: Date().timeIntervalSince1970) else { return nil }
+        guard let promptAt = state.machine.noteInterruptSent(now: state.now.timeIntervalSince1970) else { return nil }
         state.writeToPty(Data([0x1B]))
         return promptAt
     }
@@ -140,7 +149,7 @@ final class PtySession: @unchecked Sendable {
 
     /// Claude confirmed the interrupt of `promptAt`'s turn: it is over.
     func noteInterrupted(promptAt: TimeInterval) -> Bool {
-        state.machine.noteInterrupted(promptAt: promptAt, now: Date().timeIntervalSince1970)
+        state.machine.noteInterrupted(promptAt: promptAt, now: state.now.timeIntervalSince1970)
     }
 
     /// When a key or paste last reached the terminal.
@@ -210,7 +219,7 @@ final class PtySession: @unchecked Sendable {
     func typeQuickAnswer(_ terminalInput: String, to turnEndedAt: TimeInterval, foreground: ForegroundProcess?) -> Bool {
         readTranscriptPrompts()
         guard !hasExited, state.machine.acceptsQuickAnswer(
-            to: turnEndedAt, foreground: foreground, now: Date().timeIntervalSince1970
+            to: turnEndedAt, foreground: foreground, now: state.now.timeIntervalSince1970
         ) else { return false }
         typePromptFromUser(terminalInput)
         return true
@@ -749,8 +758,8 @@ final class PtySession: @unchecked Sendable {
     }
 
     /// See `AgentStatusMachine.agyFacts`.
-    func agyFacts(now: TimeInterval) -> String {
-        state.machine.agyFacts(now: now)
+    func agyFacts(_ agy: ForegroundProcess?, now: TimeInterval) -> String {
+        state.machine.agyFacts(agy, now: now)
     }
 
     /// See `AgentStatusMachine.codexFacts`.
@@ -758,8 +767,10 @@ final class PtySession: @unchecked Sendable {
         state.machine.codexFacts(now: now)
     }
 
-    func hasAgyTurn(in process: ProcessInstance) -> Bool {
-        state.machine.agyTurn?.process == process
+    /// Whether `process`, the column's `agy`, ran a turn or sits at its
+    /// first prompt (`AgentStatusMachine.agyFirstPromptRefusal`).
+    func hasAgyPrompt(_ process: ForegroundProcess) -> Bool {
+        state.machine.agyTurn?.process == process.instance || state.machine.agyFirstPromptRefusal(process) == nil
     }
 
     func finishedMissionTurn(in foreground: ForegroundProcess, after sentAt: TimeInterval) -> Bool {
@@ -858,7 +869,7 @@ final class PtySession: @unchecked Sendable {
         if processTableRead { state.machine.keepProgramStatus(of: foregroundProcess?.instance) }
         readTranscriptPrompts()
         return state.machine.tick(
-            fgName: fgName, claudeFiredHooks: claudeFiredHooks, isUserFocused: isUserFocused, now: Date()
+            fgName: fgName, claudeFiredHooks: claudeFiredHooks, isUserFocused: isUserFocused, now: state.now
         )
     }
 
@@ -1016,12 +1027,10 @@ final class PtySession: @unchecked Sendable {
         return state.machine.hasDraft
     }
 
-    private var shellLaunchInputAt: TimeInterval?
-
     func sendShellLaunchCommand(_ command: String) {
         let hadDraft = hasPromptDraft
         sendRaw("\(command)\n")
-        shellLaunchInputAt = hadDraft ? nil : state.machine.lastDraftInputAt
+        state.machine.noteShellLaunchLine(afterDraft: hadDraft)
     }
 
     /// A launch line Nirux sent to an empty shell before the worker started
@@ -1029,7 +1038,7 @@ final class PtySession: @unchecked Sendable {
     func taskResumeDraft(foreground: ProcessInstance?) -> TimeInterval? {
         guard !hasExited, hasPromptDraft else { return nil }
         let draft = state.machine.lastDraftInputAt
-        if draft == shellLaunchInputAt, let foreground, draft < foreground.startedAt { return nil }
+        if draft == state.machine.shellLaunchLineAt, let foreground, draft < foreground.startedAt { return nil }
         return draft
     }
 
@@ -1222,6 +1231,13 @@ private final class PtyState: @unchecked Sendable {
     var onLocalServerURL: ((LocalServerURL) -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
+    /// Read from the read queue too.
+    private let clockLock = OSAllocatedUnfairLock<@Sendable () -> Date>(initialState: { Date() })
+    var clock: @Sendable () -> Date {
+        get { clockLock.withLock { $0 } }
+        set { clockLock.withLock { $0 = newValue } }
+    }
+    var now: Date { clock() }
     /// Main thread only, as the hook events that feed it.
     var lifeSigns = AgentLifeSigns()
     /// The transcript the `claude` in front writes, as far as read (main
@@ -1257,7 +1273,7 @@ private final class PtyState: @unchecked Sendable {
 
     func noteTypedInput(_ data: Data, byNirux: Bool = false) {
         guard data != Self.redrawNudge else { return }
-        machine.noteKeystroke(now: Date(), keys: data, byNirux: byNirux)
+        machine.noteKeystroke(now: now, keys: data, byNirux: byNirux)
         hasTypedInput = true
     }
 
@@ -1290,9 +1306,9 @@ private final class PtyState: @unchecked Sendable {
         }
         for data in writes {
             if PtySession.isUserText(data) {
-                machine.noteKeystroke(now: Date(), keys: data)
+                machine.noteKeystroke(now: now, keys: data)
             } else {
-                machine.notePromptRecall(now: Date())
+                machine.notePromptRecall(now: now)
             }
         }
     }
@@ -1393,7 +1409,7 @@ private final class PtyState: @unchecked Sendable {
     /// number go to another file, while the write goes on.
     func descriptorForWrite(of data: Data) -> Int32? {
         noteTypedInput(data)
-        machine.noteUserInput(now: Date())
+        machine.noteUserInput(now: now)
         return duplicateDescriptor()
     }
 
@@ -1407,7 +1423,7 @@ private final class PtyState: @unchecked Sendable {
     }
 
     func writeToPty(_ data: Data) {
-        machine.noteUserInput(now: Date())
+        machine.noteUserInput(now: now)
         guard ptyFd >= 0 else { return }
         data.withUnsafeBytes { buf in
             guard let ptr = buf.baseAddress else { return }
@@ -1475,7 +1491,7 @@ private final class PtyState: @unchecked Sendable {
             return
         }
         NiruxDebugLog.log("pty fd=\(ptyFd) pid=\(childPid) TIOCSWINSZ cols=\(cols) rows=\(rows) (was \(lastCols)x\(lastRows))")
-        machine.noteInteraction(now: Date())
+        machine.noteInteraction(now: now)
         lastCols = cols
         lastRows = rows
         var ws = winsize()
@@ -1485,7 +1501,7 @@ private final class PtyState: @unchecked Sendable {
     }
 
     func markTerminalRedraw() {
-        machine.noteInteraction(now: Date())
+        machine.noteInteraction(now: now)
     }
 
     func readFromPty(into session: InMemoryTerminalSession) {
@@ -1499,7 +1515,7 @@ private final class PtyState: @unchecked Sendable {
             return
         }
         let data = Data(buffer[0..<bytesRead])
-        machine.noteRead(now: Date())
+        machine.noteRead(now: now)
         session.receive(data)
         if let str = String(bytes: data, encoding: .utf8),
            str.contains("\u{1b}]") {

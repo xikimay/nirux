@@ -39,7 +39,7 @@ final class ColumnState {
     /// The agent asks for the user (alert), with why when known.
     var onAgentAttention: ((AgentAttentionReason?) -> Void)?
     /// An agent that says its state (OSC 7501) reported its turn over:
-    /// Codex done or idle, Antigravity done. A Mission message may go to it.
+    /// Codex or Antigravity done or idle. A Mission message may go to it.
     var onProgramTurnOver: (() -> Void)?
     /// The user typed a prompt to its agent (`PtySession.onUserPrompt`).
     var onUserPrompt: ((TimeInterval) -> Void)?
@@ -462,7 +462,7 @@ final class ColumnState {
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
                 onAgentAttention?(reason)
             }
-            if status.state == .done { onProgramTurnOver?() }
+            if [.done, .idle].contains(status.state) { onProgramTurnOver?() }
         }
 
         ptySession.onLocalServerURL = { [weak self] url in

@@ -39,6 +39,9 @@ struct ColumnInfo: Hashable {
     /// (`AgentCirclingHint`), which the row says while it works; nil with
     /// the hint turned off in Settings.
     var circling: AgentCirclingHint?
+    /// How long its agy at work has said nothing, as shown ("25m"), past
+    /// `AgentProgramStatus.quietNotice`.
+    var quietFor: String?
     /// The question this column's Claude ended its turn on, while it waits
     /// at a quiet prompt: Yes / No / Reply… answer it from the card.
     var turnQuestion: SidebarTurnQuestion?
@@ -97,6 +100,7 @@ struct ColumnInfo: Hashable {
             && lhs.questionAskedAt == rhs.questionAskedAt
             && lhs.dialog == rhs.dialog
             && lhs.circling == rhs.circling
+            && lhs.quietFor == rhs.quietFor
             && lhs.waitingMessages == rhs.waitingMessages
             && lhs.isLeadTerminal == rhs.isLeadTerminal
     }
@@ -127,6 +131,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(questionAskedAt)
         hasher.combine(dialog)
         hasher.combine(circling)
+        hasher.combine(quietFor)
         hasher.combine(waitingMessages)
         hasher.combine(isLeadTerminal)
     }
