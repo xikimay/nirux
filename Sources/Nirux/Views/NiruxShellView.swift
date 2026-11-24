@@ -317,6 +317,8 @@ final class NiruxShellView: NSView {
     var mergeQueues: [MergeQueueKey: MergeQueueController] = [:]
     /// Each queue's phase at its last change (`noticeLeadOfEndedQueues`).
     var mergeQueuePhases: [ObjectIdentifier: MergeQueue.Phase] = [:]
+    /// When the Lead last heard of each stop, by repository, pull request and kind.
+    var leadQueueStopNotices: [String: TimeInterval] = [:]
     /// Where live queues lock their repository. Tests use their own.
     var mergeQueueLockFolder = MergeQueueLock.defaultFolder
     /// The merge queue's confirmation sheet: one at a time.

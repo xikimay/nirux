@@ -42,14 +42,24 @@ extension MergeQueue {
     /// asked for (a person's, the Lead's or the user's, is theirs to tell),
     /// or its list done. Nil for anything else. Its own words only: a
     /// stop's message can carry GitHub's.
-    static func leadEndNotice(repository: String, phase: Phase, startedByLead: Bool, merged: Int) -> String? {
-        guard startedByLead else { return nil }
+    /// `current`: the pull request it stopped on; `merged`: those that
+    /// landed before. A stop that waiting can't fix (an agent busy, GitHub
+    /// not answering) asks for no new queue.
+    static func leadEndNotice(repository: String, phase: Phase, isLeads: Bool, merged: [Int], current: Int?) -> String? {
+        guard isLeads else { return nil }
         switch phase {
         case .stopped(let reason) where reason.kind != .user:
-            return "The merge queue of \(repository) stopped (\(reason.kind.rawValue)). Read merge_queue_status, fix what "
-                + "stopped it, then queue_merge again."
+            let next = switch reason.kind {
+            case .agentBusy: " Its agent stayed busy: queue it again only once that agent is back at its prompt."
+            case .github: " GitHub didn't answer: nothing to fix, merge_queue_status has the journal."
+            default: " Read merge_queue_status, fix what stopped it, then queue_merge again."
+            }
+            let landed = merged.isEmpty ? "" : " " + merged.map { "#\($0)" }.joined(separator: ", ")
+                + " landed: close their tasks with close_task."
+            return "The merge queue of \(repository) stopped" + (current.map { " on #\($0)" } ?? "")
+                + " (\(reason.kind.rawValue))." + next + landed
         case .finished:
-            return "The merge queue of \(repository) finished: \(merged) merged. Close the merged tasks with close_task."
+            return "The merge queue of \(repository) finished: \(merged.count) merged. Close the merged tasks with close_task."
         default:
             return nil
         }

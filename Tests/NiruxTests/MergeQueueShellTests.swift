@@ -100,16 +100,25 @@ final class MergeQueueShellTests: XCTestCase {
         client.update { $0.pullRequests[52] = MQ.pullRequest(52, head: MQ.sha("a"), state: .closed) }
         run(byLead: false) { _ in }
         XCTAssertEqual(notices(), [], "the user's queue, stopped by GitHub")
-        run(byLead: true) { _ in }
+        // Auto-start off: the user starts what the Lead proposed, the Lead's.
+        shell.leadQueueProposals["project acme/widgets"] = [52]
+        run(byLead: false) { _ in }
         XCTAssertEqual(notices().count, 1)
-        XCTAssertTrue(notices().first?.contains("The merge queue of acme/widgets stopped (") == true, "\(notices())")
+        XCTAssertTrue(notices().first?.contains("The merge queue of acme/widgets stopped on #52 (") == true, "\(notices())")
         XCTAssertTrue(notices().first?.contains("). Read merge_queue_status, fix what stopped it") == true, "\(notices())")
         shell.mergeQueueDidChange(projectID: "project")
-        XCTAssertEqual(notices().count, 1, "once")
+        run(byLead: true) { _ in }
+        XCTAssertEqual(notices().count, 1, "the same stop of the same pull request, once")
         XCTAssertEqual(
-            MergeQueue.leadEndNotice(repository: "acme/widgets", phase: .finished, startedByLead: true, merged: 2),
+            MergeQueue.leadEndNotice(repository: "acme/widgets", phase: .finished, isLeads: true, merged: [51, 52], current: nil),
             "The merge queue of acme/widgets finished: 2 merged. Close the merged tasks with close_task."
         )
+        let busy = MergeQueue.leadEndNotice(
+            repository: "acme/widgets", phase: .stopped(MergeQueue.StopReason(kind: .agentBusy, message: "busy")),
+            isLeads: true, merged: [51], current: 52
+        )
+        XCTAssertEqual(busy, "The merge queue of acme/widgets stopped on #52 (agentBusy). Its agent stayed busy: queue it again only "
+            + "once that agent is back at its prompt. #51 landed: close their tasks with close_task.")
     }
 
     // MARK: - Status bar
