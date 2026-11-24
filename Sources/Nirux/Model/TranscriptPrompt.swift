@@ -3,16 +3,19 @@ import Foundation
 /// A prompt a Claude transcript records: typed at the box (or queued there
 /// while Claude worked), or taken in by Claude from elsewhere (a peer, a
 /// task notification). With the `prompt_id` its UserPromptSubmit carried,
-/// which a prompt queued mid-turn doesn't record.
+/// which a prompt queued mid-turn doesn't record: its line is stamped when
+/// it was submitted.
 struct TranscriptPrompt: Equatable, Sendable {
     let promptID: String?
     let at: TimeInterval
     let typed: Bool
+    let sessionID: String?
 
-    init(promptID: String?, at: TimeInterval, typed: Bool) {
+    init(promptID: String?, at: TimeInterval, typed: Bool, sessionID: String? = nil) {
         self.promptID = promptID
         self.at = at
         self.typed = typed
+        self.sessionID = sessionID
     }
 
     /// Nil for any other line. Older lines, which name no origin, aren't
@@ -38,6 +41,7 @@ struct TranscriptPrompt: Equatable, Sendable {
         guard let kind = origin?["kind"] as? String else { return nil }
         self.at = at
         typed = kind == "human"
+        sessionID = object["sessionId"] as? String
     }
 
     private static let originMarker = Array(#""origin":{"#.utf8)
