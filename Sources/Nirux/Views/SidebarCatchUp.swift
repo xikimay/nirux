@@ -177,7 +177,10 @@ struct SidebarCatchUpCardRenderer {
         dismiss.setAccessibilityElement(true)
         dismiss.setAccessibilityRole(.button)
         dismiss.setAccessibilityLabel("Dismiss what happened while you were away")
-        dismiss.onPress = { press(.dismiss) }
+        dismiss.onPress = {
+            press(.dismiss)
+            return true
+        }
         views.append(dismiss)
         hitAreas.append(SidebarHitArea(frame: dismissFrame.insetBy(dx: -3, dy: -1), region: .catchUp(.dismiss)))
 
