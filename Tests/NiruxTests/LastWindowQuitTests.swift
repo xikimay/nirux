@@ -9,10 +9,11 @@ final class LastWindowQuitTests: XCTestCase {
     /// window does.
     @MainActor
     func testOnlyClosingTheShownWindowQuits() {
+        let app = NSApplication.shared
         let question = LastWindowQuestion(nirux: NiruxApp())
-        let previousDelegate = NSApp.delegate
-        NSApp.delegate = question
-        defer { NSApp.delegate = previousDelegate }
+        let previousDelegate = app.delegate
+        app.delegate = question
+        defer { app.delegate = previousDelegate }
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled, .closable], backing: .buffered, defer: false
         )
@@ -23,12 +24,12 @@ final class LastWindowQuitTests: XCTestCase {
             window.orderFront(nil)
             panel.orderFront(nil)
             waitUntil("both windows on screen") { window.isVisible && panel.isVisible }
-            NSApp.hide(nil)
-            waitUntil("the app hidden") { NSApp.isHidden }
+            app.hide(nil)
+            waitUntil("the app hidden") { app.isHidden }
             panel.close()
             waitUntil("AppKit's question after the panel closed") { question.answers.count == 1 }
-            NSApp.unhideWithoutActivation()
-            waitUntil("the window back on screen") { !NSApp.isHidden && window.isVisible }
+            app.unhideWithoutActivation()
+            waitUntil("the window back on screen") { !app.isHidden && window.isVisible }
             window.close()
             waitUntil("AppKit's question after the window closed") { question.answers.count == 2 }
         }
@@ -38,19 +39,20 @@ final class LastWindowQuitTests: XCTestCase {
     /// AppKit asks only while the app runs, which an xctest process doesn't.
     @MainActor
     private func whileTheAppRuns(_ body: @escaping @MainActor () -> Void) {
+        let app = NSApplication.shared
         Timer.scheduledTimer(withTimeInterval: 0, repeats: false) { _ in
             MainActor.assumeIsolated {
                 body()
-                NSApp.stop(nil)
+                app.stop(nil)
                 // The run ends after its next event.
                 let event = NSEvent.otherEvent(
                     with: .applicationDefined, location: .zero, modifierFlags: [], timestamp: 0,
                     windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0
                 )
-                event.map { NSApp.postEvent($0, atStart: false) }
+                event.map { app.postEvent($0, atStart: false) }
             }
         }
-        NSApp.run()
+        app.run()
     }
 }
 
