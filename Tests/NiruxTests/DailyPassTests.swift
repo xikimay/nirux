@@ -311,7 +311,7 @@ final class DailyPassTests: XCTestCase {
 
     /// The morning line: what landed, then what waits and on whom, first in
     /// the digest, quiet or not.
-    func testTheDigestOpensWithTheMorningLine() {
+    func testTheDigestOpensWithTheMorningLine() throws {
         var facts = facts()
         XCTAssertEqual(DailyPass.morningLine(facts), "Overnight: landed #611, nothing waits.")
         var red = PRInfo(number: 812, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil,
@@ -330,6 +330,24 @@ final class DailyPassTests: XCTestCase {
         facts.repositories = []
         facts.findings = []
         XCTAssertTrue(DailyPass.digest(facts, timeZone: utc).text.contains("Overnight: landed nothing; waiting on you"), "quiet too")
+        XCTAssertTrue(facts.hasNews, "a task waiting on the user: the pass runs, its line says so")
+
+        var unread = facts
+        unread.repositories = [DailyPass.RepositoryReport(name: "acme/one", problems: ["merged pull requests: timed out"], readsAgain: true)]
+        XCTAssertTrue(DailyPass.morningLine(unread).hasPrefix("Overnight: landed nothing GitHub could say;"), DailyPass.morningLine(unread))
+
+        // Too long, the sections after the rules go first: never the rules.
+        var long = self.facts()
+        long.missions = (0..<40).map { index in
+            DailyPass.MissionFact(kind: .held, message: "tell \(index) " + String(repeating: "x", count: 200), sentAt: now - 30 * hour,
+                                  at: now - 20 * hour + Double(index) * 60, detail: "typed late", excerpt: "")
+        }
+        let full = DailyPass.digest(long, timeZone: utc, budget: .max).text
+        let rules = try XCTUnwrap(full.range(of: "## Rules waiting for the user"))
+        let budget = full.distance(from: full.startIndex, to: rules.upperBound) + 20
+        let cut = DailyPass.digest(long, timeZone: utc, budget: budget).text
+        XCTAssertTrue(cut.contains("## Rules waiting for the user"), "the rules aren't left out to fit")
+        XCTAssertTrue(cut.hasPrefix("# Daily pass · Nirux"), String(cut.prefix(200)))
     }
 
     /// What to propose (the free slots under the pending limit), the kinds

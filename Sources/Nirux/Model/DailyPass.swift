@@ -470,6 +470,8 @@ enum DailyPass {
                 || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty || !threadWaits.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }
                 || forgottenTasks(tasks, now: window.end).contains { !reported.contains($0.key) }
+                // The morning line's "waiting on you".
+                || tasks.contains { $0.waitsOnUser != nil || $0.question?.handedToUser == true }
         }
 
         /// GitHub may answer next time: the window isn't marked read.
@@ -515,9 +517,18 @@ enum DailyPass {
         var waitRows = 0
         /// The forgotten tasks it lists.
         var listed: [String] = []
+        /// Never left out to fit: the morning line, what to do, what GitHub
+        /// didn't say, the rules (decided and dismissed ones vanish otherwise).
+        var isKept = false
+
+        func kept() -> Part {
+            var part = self
+            part.isKept = true
+            return part
+        }
     }
 
-    static func digest(_ facts: Facts, timeZone: TimeZone = .current) -> Digest {
+    static func digest(_ facts: Facts, timeZone: TimeZone = .current, budget: Int = maxCharacters) -> Digest {
         let window = facts.window
         let since = clock(window.start, timeZone: timeZone)
         let header = "# Daily pass · \(facts.spaceName) · since \(since)"
@@ -536,19 +547,20 @@ enum DailyPass {
         var parts: [Part] = []
         for limit in limits {
             parts = [
-                Part(text: morningSection(facts)), Part(text: instructions(facts)), Part(text: gitHubSection(facts)), rulesSection(facts, limit),
+                Part(text: morningSection(facts)).kept(), Part(text: instructions(facts)).kept(), Part(text: gitHubSection(facts)).kept(),
+                rulesSection(facts, limit).kept(),
                 forgottenSection(forgotten, reported: facts.reported, limit), findingsSection(facts, limit),
                 pullRequestsSection(facts, limit), ciSection(facts, limit, timeZone: timeZone), missionsSection(facts, limit, timeZone: timeZone),
                 threadWaitsSection(facts, limit)
             ]
-            if joined(header, parts).count <= maxCharacters { break }
+            if joined(header, parts).count <= budget { break }
         }
         // Still too long: the last sections go whole, their facts left out.
-        for index in parts.indices.reversed().dropLast(3) where joined(header, parts).count > maxCharacters {
+        for index in parts.indices.reversed() where !parts[index].isKept && joined(header, parts).count > budget {
             parts[index] = Part(text: nil, leftOut: parts[index].times)
         }
         var text = joined(header, parts)
-        if text.count > maxCharacters { text = String(text.prefix(maxCharacters)) + "\n… (cut at \(maxCharacters) characters)" }
+        if text.count > budget { text = String(text.prefix(budget)) + "\n… (cut at \(budget) characters)" }
         // Always later than the window's start: a read that couldn't move
         // would show the same facts every day.
         let readUntil = parts.flatMap(\.leftOut).filter { $0 > window.start }.min().map { min($0, window.end) } ?? window.end
@@ -574,7 +586,9 @@ enum DailyPass {
             .map { "\($0.title) (#\($0.pullRequest?.number ?? 0))" }
         let waits = [("waiting on you", onUser), ("on the Lead", onLead), ("red CI, on the task", red)]
             .filter { !$0.1.isEmpty }.map { "\($0.0): \(listed($0.1))" }
-        return "Overnight: landed \(landed.isEmpty ? "nothing" : listed(landed))"
+        let unread = facts.repositories.contains { !$0.problems.isEmpty }
+        let what = landed.isEmpty ? (unread ? "nothing GitHub could say" : "nothing") : listed(landed) + (unread ? " (GitHub said part only)" : "")
+        return "Overnight: landed \(what)"
             + (waits.isEmpty ? ", nothing waits." : "; " + waits.joined(separator: "; ") + ".")
     }
 
