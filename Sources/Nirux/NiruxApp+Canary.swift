@@ -138,8 +138,8 @@ extension NiruxApp {
 
     /// Every key goes through the interceptor's routing, as a typed key does.
     /// What it hands back goes where AppKit would send it: command chords to
-    /// the menus, then the view with the keyboard (the canary's window is
-    /// never key, so AppKit itself would drop it).
+    /// the window's views, then the menus; the rest to the view with the
+    /// keyboard (the canary's window is never key, so AppKit would drop it).
     func send(_ keys: [CanaryKey], to window: NSWindow) {
         for key in keys {
             let events = [NSEvent.EventType.keyDown, .keyUp].compactMap { type in
@@ -150,7 +150,10 @@ extension NiruxApp {
                 )
             }
             guard events.count == 2, let handedBack = routeMainWindowKey(events[0]) else { continue }
-            if key.modifiers.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: handedBack) == true { continue }
+            if key.modifiers.contains(.command),
+               window.performKeyEquivalent(with: handedBack) || NSApp.mainMenu?.performKeyEquivalent(with: handedBack) == true {
+                continue
+            }
             guard let responder = window.firstResponder, responder !== window else { continue }
             responder.keyDown(with: handedBack)
             responder.keyUp(with: events[1])
@@ -243,11 +246,21 @@ extension NiruxApp {
 }
 
 extension NiruxApp {
-    /// What brings Nirux forward goes through `presence`: the shell's
-    /// questions, quick answers, notifications.
-    func installPresence(on sideEffects: inout ShellSideEffects, notifier: NiruxNotifier?) {
-        sideEffects.comeToFront = { [presence] in presence.comeForward() }
-        notifier?.comeForward = { [presence] in presence.comeForward() }
+    /// The launch's ties between the main shell and the notifier: whatever
+    /// brings Nirux forward (the shell's questions, a clicked notification)
+    /// goes through `presence`, and a click lands on its workspace or column.
+    func connect(_ shellView: NiruxShellView, to notifier: NiruxNotifier) {
+        shellView.sideEffects.comeToFront = { [presence] in presence.comeForward() }
+        notifier.comeForward = { [presence] in presence.comeForward() }
+        notifier.onActivate = { [weak shellView] workspaceID, columnIndex in
+            shellView?.focusWorkspace(id: workspaceID, column: columnIndex)
+        }
+        notifier.onCIFailureAction = { [weak shellView] workspaceID, action in
+            shellView?.handleCIFailureAction(action, workspaceID: workspaceID)
+        }
+        notifier.onQuickReply = { [weak shellView] target, text, workspaceID, columnIndex in
+            shellView?.replyFromNotification(text, to: target, workspaceID: workspaceID, columnIndex: columnIndex)
+        }
     }
 
     static func bringNiruxForward() {

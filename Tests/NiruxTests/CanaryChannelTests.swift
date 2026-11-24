@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import XCTest
 @testable import Nirux
 
@@ -221,21 +222,59 @@ final class CanaryChannelTests: XCTestCase {
         XCTAssertTrue(nowhere["frame"] is NSNull)
     }
 
-    /// A terminal's keys go through the key interceptor, as typed keys do;
-    /// other keys go to the view with the keyboard; with neither, refused.
+    /// The canary's keys take a typed key's route, with the app's menus: a
+    /// terminal's through the key interceptor to its PTY; in an editor, ⌘Z
+    /// reaches Monaco before Edit › Undo, and ⌘W closes the tab, not the
+    /// column.
     @MainActor
     func testKeysTakeTheRouteATypedKeyWould() throws {
-        let window = window()
-        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
-        window.contentView?.addSubview(text)
-        guard case .interceptor? = NiruxApp.keyRoute(interceptorTakesKeys: true, in: window) else { return XCTFail("a terminal's keys") }
-        XCTAssertNil(NiruxApp.keyRoute(interceptorTakesKeys: false, in: window), "nothing focused")
+        XCTAssertNil(NiruxApp.keyRoute(interceptorTakesKeys: false, in: window()), "nothing has the keyboard")
+        try UIFlowHarness.run { harness in
+            try harness.withApp {
+                let app = NiruxApp()
+                app.shell = harness.shell
+                app.mainWindow = harness.window
+                guard case .interceptor? = NiruxApp.keyRoute(interceptorTakesKeys: app.interceptorTakesKeys, in: harness.window) else {
+                    return XCTFail("a terminal's keys")
+                }
+                let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+                let terminal = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.pty)
+                let standIn = AgentStandIn()
+                defer { standIn.remove() }
+                harness.waitUntil("the terminal's shell") { terminal.shellPID != nil }
+                terminal.sendRaw(standIn.command(named: "cat") + "\n")
+                harness.waitUntil("the stand-in") { terminal.foregroundProcess(snapshot: ProcessSnapshot())?.name == "cat" }
+                app.send(NiruxApp.keys(typing: "hi"), to: harness.window)
+                harness.waitUntil("the keys in the terminal") { standIn.input == "hi" }
+                harness.shell.openEditorColumn()
+                let editor = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
+                harness.waitUntil("the editor to open README.md") { editor.activePath == harness.repo + "/README.md" }
+                let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+                harness.window.makeFirstResponder(webView)
+                harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
+                guard case .responder(let responder)? = NiruxApp.keyRoute(interceptorTakesKeys: app.interceptorTakesKeys, in: harness.window) else {
+                    return XCTFail("the editor's keys")
+                }
+                XCTAssertIdentical(responder, webView)
 
-        XCTAssertTrue(window.makeFirstResponder(text))
-        guard case .responder? = NiruxApp.keyRoute(interceptorTakesKeys: false, in: window) else { return XCTFail("the text view") }
-        // No shell: the interceptor hands every key back, and the view with the keyboard gets it.
-        NiruxApp().send(NiruxApp.keys(typing: "aB"), to: window)
-        XCTAssertEqual(text.string, "aB")
+                let monaco = "monaco.editor.getEditors().filter(function (e) { return e.hasTextFocus(); })[0]"
+                let text = "(function () { var e = \(monaco); return e ? e.getValue() : ''; })()"
+                var original = ""
+                UIFlowHarness.waitForAnswer("Monaco's text", to: text, in: webView) {
+                    original = $0
+                    return !$0.isEmpty
+                }
+                UIFlowHarness.run("\(monaco).trigger('keyboard', 'type', {text: 'typed'})", in: webView)
+                UIFlowHarness.waitForAnswer("the typed text", to: text, in: webView) { $0 != original }
+                app.send([("z", 0x06, .command)], to: harness.window)
+                UIFlowHarness.waitForAnswer("⌘Z to undo it in Monaco", to: text, in: webView) { $0 == original }
+
+                let columns = workspace.columns.count
+                app.send([("w", 0x0D, .command)], to: harness.window)
+                harness.waitUntil("⌘W to close the tab") { editor.openPaths.isEmpty }
+                XCTAssertEqual(workspace.columns.count, columns, "the column stays")
+            }
+        }
     }
 
     /// Text answers "sent, unconfirmed" before any key is sent, so a key
@@ -257,22 +296,51 @@ final class CanaryChannelTests: XCTestCase {
         XCTAssertEqual(text.string, "hi")
     }
 
-    /// A canary launch never comes forward: not for a link, a question of
-    /// the shell's, nor a notification; a normal launch does.
+    /// What brings Nirux forward goes through its presence, as the launch
+    /// connects it: a clicked notification, a reply that couldn't go in (a
+    /// question of the shell's), a link's confirmation and the link. A
+    /// canary launch never comes forward; a normal launch does each time.
     @MainActor
-    func testACanaryLaunchNeverComesForward() {
+    func testACanaryLaunchNeverComesForward() throws {
         for (environment, comesForward) in [(canaryEnvironment, false), ([:], true)] {
-            var brought = 0
-            let app = NiruxApp()
-            app.presence = AppPresence(launchEnvironment: environment) { brought += 1 }
-            app.mainWindow = window()
-            var effects = ShellSideEffects()
-            app.installPresence(on: &effects, notifier: nil)
-            effects.comeToFront()
-            app.bringMainWindowForward()
-            XCTAssertEqual(brought, comesForward ? 2 : 0, "\(environment)")
-            XCTAssertEqual(app.mainWindow?.isVisible, comesForward, "\(environment)")
-            app.mainWindow?.orderOut(nil)
+            try UIFlowHarness.run { harness in
+                var brought = 0
+                let app = NiruxApp()
+                app.presence = AppPresence(launchEnvironment: environment) { brought += 1 }
+                app.shell = harness.shell
+                app.mainWindow = harness.window
+                let notifier = NiruxNotifier()
+                app.connect(harness.shell, to: notifier)
+                let workspaceID = try XCTUnwrap(harness.shell.activeWorkspace?.id)
+                var link = URLComponents()
+                link.scheme = "nirux"
+                link.host = "new-workspace"
+                link.queryItems = [URLQueryItem(name: "cwd", value: harness.worktree), URLQueryItem(name: "title", value: "Linked")]
+                let reply = NiruxNotifier.QuickReplyTarget(agentUUID: UUID().uuidString, turnEndedAt: 0).userInfo
+                let steps: [(String, @MainActor () throws -> Void)] = [
+                    ("a clicked notification", {
+                        notifier.open(.init(userInfo: ["workspaceID": workspaceID], actionIdentifier: "", userText: nil))
+                    }),
+                    ("a reply for an agent gone", {
+                        notifier.open(.init(
+                            userInfo: reply.merging(["workspaceID": workspaceID]) { $1 },
+                            actionIdentifier: NiruxNotifier.quickReplyAction, userText: ""
+                        ))
+                    }),
+                    ("a link's confirmation", {
+                        app.application(NSApp, open: [try XCTUnwrap(link.url)])
+                        harness.waitUntil("the link's confirmation") { harness.window.attachedSheet != nil }
+                    }),
+                    ("the link, confirmed", {
+                        harness.window.endSheet(try XCTUnwrap(harness.window.attachedSheet), returnCode: .alertFirstButtonReturn)
+                        harness.waitUntil("the linked workspace") { harness.shell.workspaces.contains { $0.title == "Linked" } }
+                    }),
+                ]
+                for (index, (what, step)) in steps.enumerated() {
+                    try step()
+                    XCTAssertEqual(brought, comesForward ? index + 1 : 0, "\(what), \(comesForward ? "normal" : "canary") launch")
+                }
+            }
         }
     }
 

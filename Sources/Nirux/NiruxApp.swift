@@ -179,7 +179,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         let shellView = NiruxShellView(frame: rect)
         window.contentView = MainWindowContent(shell: shellView)
         shell = shellView
-        installPresence(on: &shellView.sideEffects, notifier: NiruxNotifier.shared)
+        connect(shellView, to: NiruxNotifier.shared)
         shellView.applyInterfaceTransparency()
         shellView.installCommandBar(in: window)
         // The frame the screen leaves, now that the toolbar set the title
@@ -193,17 +193,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // Telegram Remote Access is gone: so is its bot token (Keychain).
         LegacyTelegramToken.removeAtLaunch()
 
-        // Native notifications: click focuses the originating workspace/column.
         NiruxNotifier.shared.setup()
-        NiruxNotifier.shared.onActivate = { [weak shellView] workspaceID, columnIndex in
-            shellView?.focusWorkspace(id: workspaceID, column: columnIndex)
-        }
-        NiruxNotifier.shared.onCIFailureAction = { [weak shellView] workspaceID, action in
-            shellView?.handleCIFailureAction(action, workspaceID: workspaceID)
-        }
-        NiruxNotifier.shared.onQuickReply = { [weak shellView] target, text, workspaceID, columnIndex in
-            shellView?.replyFromNotification(text, to: target, workspaceID: workspaceID, columnIndex: columnIndex)
-        }
 
         if drivenByCanary { window.orderBack(nil) } else { window.makeKeyAndOrderFront(nil) }
         mainWindow = window
