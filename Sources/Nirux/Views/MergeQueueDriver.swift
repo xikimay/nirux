@@ -66,14 +66,45 @@ final class MergeQueueDriver {
 
     func start() { send(.start) }
 
-    func stop(byLead: Bool = false) { send(byLead ? .stopByLead : .stop) }
+    /// A quit leaves GitHub's auto-merge armed: what lands while Nirux is
+    /// closed is the backstop. Any other stop calls it off.
+    private var keepsAutoMerge = false
+    /// The pull requests whose auto-merge was called off.
+    private var calledOff: Set<Int> = []
+
+    func stop(byLead: Bool = false, keepingAutoMerge: Bool = false) {
+        keepsAutoMerge = keepingAutoMerge
+        send(byLead ? .stopByLead : .stop)
+    }
 
     func send(_ event: MergeQueue.Event) {
         let output = engine.handle(event, now: clock.now())
         // The request goes out before anyone hears of the step: a Stop from
         // a listener finds a mutation already sent, never one about to be.
         if let request = output.request { run(request) }
+        disarmAutoMerge()
         onUpdate?(engine, output.notes)
+    }
+
+    /// The pull requests the queue armed that didn't land, once the queue
+    /// stops (not for a quit) or they leave it: GitHub would merge them
+    /// later, outside the queue.
+    private func disarmAutoMerge() {
+        let client = self.client
+        let settings = engine.settings
+        let queueStopped = if case .stopped = engine.phase { !keepsAutoMerge } else { false }
+        for entry in engine.entries where entry.autoMerge?.isArmed == true && entry.mergeCommit == nil
+            && !calledOff.contains(entry.number) {
+            let left = if case .stopped = entry.step { !keepsAutoMerge } else { false }
+            guard queueStopped || left else { continue }
+            calledOff.insert(entry.number)
+            let mutation = MergeQueue.Mutation.disarmAutoMerge(number: entry.number)
+            let command = client.commandLine(mutation, settings: settings)
+            onMutation?(mutation, command, nil)
+            Self.runOffMain({ client.mutate(mutation, settings: settings) }, then: { [weak self] result in
+                self?.onMutation?(mutation, command, result)
+            })
+        }
     }
 
     private func run(_ request: MergeQueue.Request) {

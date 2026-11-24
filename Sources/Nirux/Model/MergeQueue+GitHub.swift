@@ -294,6 +294,9 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
                 parse(call(Self.mergeQueueArguments(repository: repository, branch: settings.baseBranch)),
                       MergeQueue.parseMergeQueue).map { .baseMergeQueue(hasRule || $0) }
             }
+        case .baseRequiredChecks:
+            return parse(call(Self.rulesArguments(repository: repository, branch: settings.baseBranch)),
+                         MergeQueue.parseRulesRequiredChecks).map { .baseRequiredChecks($0) }
         case .pullRequest(let number):
             return parse(call(Self.pullRequestArguments(repository: repository, number: number)),
                          MergeQueue.parsePullRequest).map { .pullRequest($0) }
@@ -340,10 +343,28 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
     // MARK: Mutations
 
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
-        switch gh(.init(Self.mutationArguments(mutation, repository: settings.repository), timeout: Self.mutationTimeout))
-            .flatMap(\.result) {
+        if case .armAutoMerge(let number, let head, let method) = mutation {
+            return armAutoMerge(number: number, head: head, method: method, repository: settings.repository)
+        }
+        return send(Self.mutationArguments(mutation, repository: settings.repository))
+    }
+
+    private func send(_ arguments: [String]) -> MergeQueue.MutationResult {
+        switch gh(.init(arguments, timeout: Self.mutationTimeout)).flatMap(\.result) {
         case .success: return .sent
         case .failure(let error): return Self.mutationResult(error)
+        }
+    }
+
+    /// GraphQL's `enablePullRequestAutoMerge` refuses a pull request GitHub
+    /// can merge now, where `gh pr merge --auto` merges it. It takes the
+    /// pull request's node id, read first: unread, nothing is armed.
+    private func armAutoMerge(
+        number: Int, head: String, method: BoardConfig.MergeMethod, repository: String
+    ) -> MergeQueue.MutationResult {
+        switch parse(call(Self.pullRequestIDArguments(repository: repository, number: number)), MergeQueue.parsePullRequestID) {
+        case .failure(let error): return .refused(status: nil, message: "#\(number)’s id unread: \(error.message)")
+        case .success(let id): return send(Self.armAutoMergeArguments(pullRequestID: id, head: head, method: method))
         }
     }
 
@@ -419,6 +440,16 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         GitHub.CLI.graphQL(mergeQueueQuery, strings: GitHub.CLI.repositoryVariables(repository) + [("branch", branch)])
     }
 
+    static func pullRequestIDArguments(repository: String, number: Int) -> [String] {
+        GitHub.CLI.graphQL(pullRequestIDQuery, strings: GitHub.CLI.repositoryVariables(repository), integers: [("number", number)])
+    }
+
+    static func armAutoMergeArguments(pullRequestID: String, head: String, method: BoardConfig.MergeMethod) -> [String] {
+        GitHub.CLI.graphQL(enableAutoMergeMutation, strings: [
+            ("pullRequestId", pullRequestID), ("mergeMethod", method.rawValue.uppercased()), ("expectedHeadOid", head)
+        ])
+    }
+
     static func pullRequestArguments(repository: String, number: Int) -> [String] {
         GitHub.CLI.graphQL(pullRequestQuery, strings: GitHub.CLI.repositoryVariables(repository), integers: [("number", number)])
     }
@@ -457,8 +488,8 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         return arguments + ["--json", GitHub.WorkflowRun.fields]
     }
 
-    /// Never `--admin`, `--auto`, `--delete-branch` or `--rebase`; a merge
-    /// and a branch update always carry the SHA they were decided on.
+    /// Never `--admin`, `--delete-branch` or `--rebase`; a merge, auto or
+    /// not, and a branch update always carry the SHA they were decided on.
     static func mutationArguments(_ mutation: MergeQueue.Mutation, repository: String) -> [String] {
         switch mutation {
         case .updateBranch(let number, let head):
@@ -469,6 +500,11 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         case .merge(let number, let head, let method):
             return ["pr", "merge", "\(number)", "--repo", "\(GitHub.host)/\(repository)", "--\(method.rawValue)",
                     "--match-head-commit", head]
+        case .armAutoMerge(let number, let head, let method):
+            // For the journal: the client reads the id first (`armAutoMerge`).
+            return armAutoMergeArguments(pullRequestID: "<id of #\(number)>", head: head, method: method)
+        case .disarmAutoMerge(let number):
+            return ["pr", "merge", "\(number)", "--repo", "\(GitHub.host)/\(repository)", "--disable-auto"]
         case .createBranch(let name, let commit):
             return ["api", "--hostname", GitHub.host, "--method", "POST", "repos/\(repository)/git/refs",
                     "-f", "ref=refs/heads/\(name)", "-f", "sha=\(commit)"]
@@ -520,6 +556,20 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
     mergeable isInMergeQueue \
     autoMergeRequest { enabledAt } \
     mergeCommit { oid parents(first: 2) { nodes { oid } } }
+    """
+
+    static let pullRequestIDQuery = """
+    query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } }
+    }
+    """
+
+    static let enableAutoMergeMutation = """
+    mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!, $expectedHeadOid: GitObjectID!) {
+      enablePullRequestAutoMerge(input: {
+        pullRequestId: $pullRequestId, mergeMethod: $mergeMethod, expectedHeadOid: $expectedHeadOid
+      }) { pullRequest { number } }
+    }
     """
 
     static let pullRequestQuery = """
