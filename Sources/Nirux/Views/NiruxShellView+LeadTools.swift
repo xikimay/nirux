@@ -856,8 +856,10 @@ extension NiruxShellView {
         typeMissionMessages()
         updateSidebar()
         let title = workspaces.first { $0.id == mission.childWorkspaceID }?.title ?? mission.branch
+        let handed = accepted.map { missionWaits.handedToHooks[$0.event.id] != nil } ?? false
         answer((accepts ? "Its recommendation sent as your answer" : "Answer sent")
-            + ": Nirux types it into “\(title)”’s prompt once its turn is over.", false)
+            + (handed ? ": Nirux handed it to “\(title)”’s Claude Code, which takes it at its next step."
+                : ": Nirux types it into “\(title)”’s prompt once its turn is over."), false)
     }
 
     private func leadAskUser(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {

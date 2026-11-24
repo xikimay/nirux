@@ -66,8 +66,10 @@ enum MissionPromptText {
         guard let text = text(for: delivery, childTitle: childTitle, parentTitle: parentTitle) else { return nil }
         guard delivery.event.kind == .instruction, !text.hasPrefix(prefix) else { return text }
         guard !startsWithSlashCommand(text) else { return nil }
-        let parent = parentTitle.map { "\"\(String(String.UnicodeScalarView(quoted($0).unicodeScalars.prefix(maxNameScalars))))\", " } ?? ""
-        return "\(prefix) From \(parent)the task that started yours:\n" + text
+        let sender = parentTitle.map {
+            "\"\(String(String.UnicodeScalarView(quoted($0).unicodeScalars.prefix(maxNameScalars))))\", which started this task"
+        } ?? "the agent that started this task"
+        return "\(prefix) From \(sender):\n" + text
     }
 
     /// Under an answer that is the child's own recommendation.

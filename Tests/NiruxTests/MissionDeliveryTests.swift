@@ -175,11 +175,11 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertEqual(MissionPromptText.text(for: tell, childTitle: nil, parentTitle: "web-main"), "Now the docs.")
         XCTAssertEqual(
             MissionPromptText.hookText(for: tell, childTitle: nil, parentTitle: "web-main"),
-            "[Nirux Mission] From \"web-main\", the task that started yours:\nNow the docs."
+            "[Nirux Mission] From \"web-main\", which started this task:\nNow the docs."
         )
         XCTAssertEqual(
             MissionPromptText.hookText(for: tell, childTitle: nil, parentTitle: nil),
-            "[Nirux Mission] From the task that started yours:\nNow the docs."
+            "[Nirux Mission] From the agent that started this task:\nNow the docs."
         )
         let review = try XCTUnwrap(store.accept(parentEvent(.instruction, "/code-review high", at: 21), enabled: true))
         XCTAssertNil(MissionPromptText.hookText(for: review, childTitle: nil, parentTitle: "web-main"))
