@@ -923,6 +923,7 @@ final class MissionTellTests: XCTestCase {
         try record(#"{"type":"queue-operation","operation":"enqueue","timestamp":""# + now() + #"","sessionId":"lead","content":"then this"}"#)
         hook(.userPromptSubmit, promptID: "turn")
         hook(.stop, promptID: "turn")
+        XCTAssertTrue(pty.hasPromptDraft, "read while its line isn't written yet")
         try record(#"{"type":"queue-operation","operation":"dequeue","timestamp":""# + now() + #"","sessionId":"lead"}"#)
         try record(#"{"type":"user","origin":{"kind":"human"},"promptId":"next","promptSource":"queued","sessionId":"lead","timestamp":""#
             + now() + #"","message":{"role":"user","content":"then this"}}"#)

@@ -14,7 +14,9 @@ struct TranscriptPrompt: Equatable, Sendable {
     let sessionID: String?
     /// When a prompt queued while Claude worked was submitted.
     var submittedAt: TimeInterval?
-    /// A queued user line's text, to find its enqueue line (`TranscriptPromptParser`).
+    /// A user line queued while Claude worked, and its plain text: what
+    /// finds its enqueue line (`TranscriptPromptParser`).
+    fileprivate var isQueuedLater = false
     fileprivate var queuedText: Int?
 
     init(promptID: String?, at: TimeInterval, typed: Bool, sessionID: String? = nil, submittedAt: TimeInterval? = nil) {
@@ -38,6 +40,7 @@ struct TranscriptPrompt: Equatable, Sendable {
             origin = object["origin"] as? [String: Any]
             promptID = object["promptId"] as? String
             if object["promptSource"] as? String == "queued" {
+                isQueuedLater = true
                 queuedText = ((object["message"] as? [String: Any])?["content"] as? String)?.hashValue
             }
         case "attachment":
@@ -62,8 +65,9 @@ struct TranscriptPrompt: Equatable, Sendable {
 struct TranscriptPromptParser: TranscriptLineParser {
     private(set) var prompts: [TranscriptPrompt] = []
     /// The last prompts queued while Claude worked (`queue-operation`
-    /// enqueue lines): their text and when they were submitted.
-    private var enqueued: [(text: Int, at: TimeInterval)] = []
+    /// enqueue lines), across reads: their text (none for a paste or an
+    /// image) and when they were submitted.
+    private var enqueued: [(text: Int?, at: TimeInterval)] = []
 
     mutating func consume(line: Data) {
         if let enqueue = Self.enqueue(line) {
@@ -71,20 +75,28 @@ struct TranscriptPromptParser: TranscriptLineParser {
             return
         }
         guard var prompt = TranscriptPrompt(line: line) else { return }
-        if let text = prompt.queuedText, let index = enqueued.lastIndex(where: { $0.text == text && $0.at <= prompt.at }) {
-            prompt.submittedAt = enqueued.remove(at: index).at
+        if prompt.isQueuedLater {
+            // Its own text, else the last enqueue that has none (a paste, an image).
+            let index = prompt.queuedText.flatMap { text in enqueued.lastIndex { $0.text == text && $0.at <= prompt.at } }
+                ?? enqueued.lastIndex { $0.text == nil && $0.at <= prompt.at }
+            if let index { prompt.submittedAt = enqueued.remove(at: index).at }
         }
         prompts.append(prompt)
     }
 
-    private static func enqueue(_ line: Data) -> (text: Int, at: TimeInterval)? {
+    /// The prompts read since the last call; the enqueues stay for lines to come.
+    mutating func takePrompts() -> [TranscriptPrompt] {
+        defer { prompts = [] }
+        return prompts
+    }
+
+    private static func enqueue(_ line: Data) -> (text: Int?, at: TimeInterval)? {
         guard line.withUnsafeBytes({ TranscriptSearch.contains($0, enqueueMarker) }),
               let object = line.withUnsafeBytes(TranscriptSearch.object),
               object["type"] as? String == "queue-operation", object["operation"] as? String == "enqueue",
-              let text = object["content"] as? String,
               let at = (object["timestamp"] as? String).flatMap(TranscriptSearch.date)?.timeIntervalSince1970
         else { return nil }
-        return (text.hashValue, at)
+        return ((object["content"] as? String)?.hashValue, at)
     }
 
     private static let enqueueMarker = Array(#""operation":"enqueue""#.utf8)
