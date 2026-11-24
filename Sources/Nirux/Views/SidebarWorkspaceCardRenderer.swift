@@ -196,7 +196,7 @@ final class SidebarWorkspaceCardRenderer {
     private func usageLabel() -> NSTextField? {
         guard let usage = workspace.usage else { return nil }
         let label = textLabel(
-            usage.text, font: Theme.Font.captionDigits,
+            usage.isContextHeavy ? usage.text.asWarning : usage.text, font: Theme.Font.captionDigits,
             color: usage.isContextHeavy ? .niruxWarning : Theme.Color.textTertiary
         )
         label.alignment = .right

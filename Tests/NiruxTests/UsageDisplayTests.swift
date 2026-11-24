@@ -35,7 +35,7 @@ final class UsageDisplayTests: XCTestCase {
         let report = UsageReport(sessions: [session], now: now)
         XCTAssertNil(SidebarTaskUsage(report, taskID: "other"))
         let usage = try XCTUnwrap(SidebarTaskUsage(report, taskID: "task"))
-        XCTAssertEqual(usage.text, "⚠︎ 300k · 4.3M")
+        XCTAssertEqual(usage.text, "300k · 4.3M")
         XCTAssertTrue(usage.isContextHeavy)
         let lines = usage.toolTip(now: now).components(separatedBy: "\n")
         XCTAssertTrue(lines.contains("Idle for 2h: its cache expired, the next message writes it again"))
