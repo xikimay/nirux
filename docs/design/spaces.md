@@ -331,8 +331,9 @@ New flow, built on the guarded typing `tell` already uses
     Dry runs and the developer live override always use the confirmation sheet.
     `cadence` accepts `standard` (default), `batch_post_merge`,
     `express_disjoint` or `train`. The Lead's instructions ask for `train`
-    and never to have a task merge main unless its pull request conflicts;
-    a task's instructions say to merge the base only on a conflict. The default protects the user's prepared list. When the
+    and never to have a task merge main unless its pull request conflicts or
+    the queue left it out of a red train; a task's instructions say to merge
+    the base only then. The default protects the user's prepared list. When the
     user requests a replacement, an opted-in Lead can pass `replace: true`.
     The same preflight checks the requested order and cadence. A proposal that
     needs manual review opens the confirmation sheet. An open sheet, a running

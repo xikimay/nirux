@@ -62,10 +62,11 @@ final class NiruxMCPServerTests: XCTestCase {
     func testTheMergeRulesReachTheLeadAndTheTasks() {
         let lead = NiruxMCPServer.leadInstructions
         XCTAssertTrue(lead.contains("Merge only via queue_merge, with cadence train"))
-        XCTAssertTrue(lead.contains("never tell a task to merge the base branch unless its pull request conflicts"))
+        XCTAssertTrue(lead.contains("never tell a task to merge the base branch unless its pull request conflicts or the queue left it "
+            + "out of a red train"))
         XCTAssertTrue(lead.contains("Use standard when train is refused"))
         XCTAssertTrue(NiruxMCPServer.taskInstructions.contains("When Nirux's merge queue lands your pull request, merge the base "
-            + "branch into yours only when it conflicts"))
+            + "branch into yours only when it conflicts or the queue left it out of a red train"))
         XCTAssertFalse(LeadTools.afterDescription.contains("merge origin/main"), "the rule bans merging the base without a conflict")
     }
 
