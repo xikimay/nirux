@@ -1284,7 +1284,7 @@ extension WorkspaceState {
     static let columnGap = Theme.Space.sm
     static let columnInset = Theme.Space.sm
     private static let resizeHandleWidth: CGFloat = 9
-    private static let slideKey = "colSlide"
+    static let slideKey = "colSlide"
     /// The strip's slide to a card.
     static let slideDuration: CFTimeInterval = 0.3
 
@@ -1477,14 +1477,18 @@ extension WorkspaceState {
         stripView.convert(point, from: nil)
     }
 
-    /// The pointer takes the card at `index`: it has the focus, and the
-    /// camera holds until it is let go.
+    /// The pointer takes the card at `index` where it shows: a slide of the
+    /// strip, or a glide of the card, on its way stops there. It has the
+    /// focus, and the camera holds until it is let go.
     func beginColumnDrag(at index: Int) {
         guard let column = columns[safe: index] else { return }
         focusedIndex = index
         holdCamera(for: index)
         heldCamera?.isDrag = true
-        draggedColumn = ColumnDrag(column: column.id, origin: index, x: column.view.frame.minX)
+        let x = column.shownPlace.x
+        column.cardLayers.forEach { $0.removeAnimation(forKey: ColumnState.glideKey) }
+        draggedColumn = ColumnDrag(column: column.id, origin: index, x: x)
+        place(column, at: x)
     }
 
     /// The pointer holding the card brought its left edge to `x`: the card
@@ -1498,7 +1502,7 @@ extension WorkspaceState {
         let column = columns[from]
         drag.x = max(Self.columnInset, min(x, stripView.frame.width - Self.columnInset - column.view.frame.width))
         draggedColumn = drag
-        for view in [column.view, column.light, column.shadow].compactMap({ $0 }) { view.frame.origin.x = drag.x }
+        place(column, at: drag.x)
         let to = outside
             ? min(drag.origin, columns.count - 1)
             : Self.slot(nearest: drag.x, among: columns.filter { $0 !== column }.map(\.view.frame.width))
@@ -1508,14 +1512,42 @@ extension WorkspaceState {
     }
 
     /// Let go, the card keeps the slot it took, or goes back to the one it
-    /// came from when `cancelled`; the camera goes where the strip wants it.
+    /// came from when `cancelled`, and has the focus, whatever column
+    /// opened or closed meanwhile; the camera goes where the strip wants it.
     func endColumnDrag(cancelled: Bool) {
         guard let drag = draggedColumn else { return }
         draggedColumn = nil
         heldCamera = nil
-        if cancelled, let from = columns.firstIndex(where: { $0.id == drag.column }) {
-            moveColumn(at: from, to: min(drag.origin, columns.count - 1))
-        }
+        guard let from = columns.firstIndex(where: { $0.id == drag.column }) else { return }
+        moveColumn(at: from, to: cancelled ? min(drag.origin, columns.count - 1) : from)
+    }
+
+    /// The camera a drag holds pans `dx` points, within a strip wider than
+    /// the viewport: the cards out of view come to the pointer.
+    func panDragCamera(by dx: CGFloat) {
+        let viewport = containerView.bounds.width
+        guard draggedColumn != nil, var held = heldCamera, dx != 0, stripView.frame.width > viewport else { return }
+        held.x = max(0, min(held.x + dx, stripView.frame.width - viewport))
+        heldCamera = held
+        lastCameraX = held.x
+        stripView.frame.origin.x = -held.x
+    }
+
+    /// How far a drag's camera pans at each of its ticks, for a pointer at
+    /// `x` in a viewport `width` wide: only within `panEdge` of either
+    /// edge, faster nearer it.
+    static func edgePan(at x: CGFloat, width: CGFloat) -> CGFloat {
+        if x < panEdge { return -panStep * (panEdge - max(x, 0)) / panEdge }
+        if x > width - panEdge { return panStep * (min(x, width) - (width - panEdge)) / panEdge }
+        return 0
+    }
+
+    static let panEdge: CGFloat = 48
+    static let panStep: CGFloat = 24
+
+    /// The card, its light and its shadow with their left edge at `x`.
+    private func place(_ column: ColumnState, at x: CGFloat) {
+        for view in [column.view, column.light, column.shadow].compactMap({ $0 }) { view.frame.origin.x = x }
     }
 
     /// Among cards `widths` wide, the slot whose left edge lies nearest `x`

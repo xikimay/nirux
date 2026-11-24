@@ -494,9 +494,13 @@ the text stays flat and sharp.
 - **Dragging a card** (same study, W7): a press on a column's header, off
   its controls, drags the card once it moves 4 pt (`HeldPress`, as a
   task's row does), and the header no longer moves the window (the title
-  bar's strip does). The card rises to 102 % over its neighbours, its shadow
-  at the floating level, and follows the pointer along the strip, which
-  holds still. It takes the slot whose place lies nearest it, so the others
+  bar's strip does). Taken where it shows (a slide or a glide on its way
+  stops there), the card rises to 102 % over its neighbours, its shadow at
+  the floating level, and follows the pointer along the strip, which holds
+  still; within 48 pt of the viewport's left or right edge the strip pans
+  at the drag's ticks, up to 24 pt each, faster nearer the edge, so the
+  cards out of view come to it. It takes the slot whose place lies nearest
+  it, so the others
   glide aside as it passes; let go, it glides into that slot, moved by
   `WorkspaceState.moveColumn(at:to:)` as ⇧⌘← and ⇧⌘→ move it, and the
   camera brings it to the middle. Escape, the pointer out of the viewport

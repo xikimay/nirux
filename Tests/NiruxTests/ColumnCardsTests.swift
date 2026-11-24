@@ -1163,6 +1163,72 @@ final class ColumnCardsTests: XCTestCase {
         workspace.endColumnDrag(cancelled: true)
         XCTAssertEqual(order(), [cards[1], cards[2], cards[0]].map(ObjectIdentifier.init), "cancelled: back")
         XCTAssertEqual(workspace.focusedIndex, 2)
+
+        workspace.beginColumnDrag(at: 0)
+        workspace.addColumn()
+        XCTAssertFalse(workspace.columns[workspace.focusedIndex] === cards[1])
+        workspace.endColumnDrag(cancelled: false)
+        XCTAssertTrue(workspace.columns[workspace.focusedIndex] === cards[1], "the focus stays with it, whatever opened meanwhile")
+    }
+
+    /// A drag's camera pans only near the viewport's edges, faster nearer
+    /// them, within a strip wider than the viewport, and holds there.
+    func testADragsCameraPansNearTheEdges() throws {
+        let edge = WorkspaceState.panEdge, step = WorkspaceState.panStep
+        XCTAssertEqual(WorkspaceState.edgePan(at: 500, width: 1000), 0)
+        XCTAssertEqual(WorkspaceState.edgePan(at: edge, width: 1000), 0)
+        XCTAssertEqual(WorkspaceState.edgePan(at: 1000 - edge, width: 1000), 0)
+        XCTAssertEqual(WorkspaceState.edgePan(at: -20, width: 1000), -step)
+        XCTAssertEqual(WorkspaceState.edgePan(at: edge / 2, width: 1000), -step / 2)
+        XCTAssertEqual(WorkspaceState.edgePan(at: 1000 - edge / 2, width: 1000), step / 2)
+        XCTAssertEqual(WorkspaceState.edgePan(at: 1020, width: 1000), step)
+
+        let workspace = workspace(columns: 3)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let strip = try strip(of: workspace)
+        workspace.beginColumnDrag(at: 0)
+        workspace.panDragCamera(by: -50)
+        XCTAssertEqual(workspace.lastCameraX, 0, "at the strip's start")
+        workspace.panDragCamera(by: 100)
+        XCTAssertEqual(workspace.lastCameraX, 100)
+        XCTAssertEqual(strip.frame.minX, -100)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.lastCameraX, 100, "held there")
+        workspace.panDragCamera(by: 5_000)
+        XCTAssertEqual(workspace.lastCameraX, strip.frame.width - 1000, "at its end")
+        workspace.endColumnDrag(cancelled: true)
+
+        let narrow = self.workspace(columns: 1)
+        narrow.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let centred = narrow.lastCameraX
+        narrow.beginColumnDrag(at: 0)
+        narrow.panDragCamera(by: 100)
+        XCTAssertEqual(narrow.lastCameraX, centred, "a strip that fits stays")
+    }
+
+    /// Taken mid-glide, a card stops where it shows.
+    func testACardTakenMidGlideStopsWhereItShows() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { true }
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addColumn()
+            shell.relayout(animated: false)
+            let card = workspace.columns[1], x = card.view.frame.minX
+            card.glide(by: 200)
+            for layer in card.cardLayers {
+                let glide = try XCTUnwrap(layer.animation(forKey: ColumnState.glideKey)?.copy() as? CABasicAnimation)
+                glide.speed = 0
+                layer.add(glide, forKey: ColumnState.glideKey)
+            }
+            CATransaction.flush()
+            waitUntil("it shows 200 pt away", timeout: 2) { abs(card.shownPlace.x - (x + 200)) < 1 }
+
+            workspace.beginColumnDrag(at: 1)
+            XCTAssertEqual(card.view.frame.minX, x + 200, accuracy: 1)
+            XCTAssertEqual(try XCTUnwrap(workspace.draggedColumn).x, x + 200, accuracy: 1)
+            XCTAssertTrue(card.cardLayers.allSatisfy { $0.animation(forKey: ColumnState.glideKey) == nil })
+            workspace.endColumnDrag(cancelled: true)
+        }
     }
 
     /// Taken by its header, a card rises over its neighbours, a little
@@ -1214,7 +1280,7 @@ final class ColumnCardsTests: XCTestCase {
             shell.agentLights.isDisplayAsleep = false
             shell.animatesInterface = true
             let workspace = try XCTUnwrap(shell.activeWorkspace)
-            let cards = try threeCardsFromTheLeft(shell)
+            let cards = try halfCardsFromTheLeft(shell)
             let header = try XCTUnwrap(cards[0].header)
             XCTAssertFalse(header.mouseDownCanMoveWindow)
             let start = header.convert(NSPoint(x: 4, y: header.bounds.midY), to: nil)
@@ -1236,13 +1302,64 @@ final class ColumnCardsTests: XCTestCase {
         }
     }
 
+    /// Taken while the strip slides, a card doesn't jump: the slide stops
+    /// where it shows, and a small drag lands it back in its own slot.
+    func testAHeaderTakenWhileTheStripSlidesDoesNotJump() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let cards = try halfCardsFromTheLeft(shell)
+            workspace.focusedIndex = 2
+            shell.relayout(animated: true)
+            let strip = try XCTUnwrap(try strip(of: workspace).layer)
+            let slide = try XCTUnwrap(strip.animation(forKey: WorkspaceState.slideKey)?.copy() as? CABasicAnimation)
+            slide.speed = 0
+            strip.add(slide, forKey: WorkspaceState.slideKey)
+            CATransaction.flush()
+            let offset = try XCTUnwrap(slide.fromValue as? CGFloat)
+            XCTAssertGreaterThan(offset, 200, "a slide of more than half a card")
+            waitUntil("the strip shows where it was", timeout: 2) {
+                abs(CGFloat((strip.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber)?.doubleValue ?? 0) - offset) < 1
+            }
+
+            let header = try XCTUnwrap(cards[2].header)
+            let start = header.convert(NSPoint(x: 4, y: header.bounds.midY), to: nil)
+            try press(header, at: start, events: [
+                (.leftMouseDragged, NSPoint(x: start.x + 10, y: start.y)),
+                (.leftMouseDragged, NSPoint(x: start.x + 20, y: start.y)),
+                (.leftMouseUp, NSPoint(x: start.x + 20, y: start.y))
+            ])
+            XCTAssertEqual(workspace.columns.map(ObjectIdentifier.init), cards.map(ObjectIdentifier.init), "back in its own slot")
+        }
+    }
+
+    /// Held near an edge, the strip pans at each of the drag's ticks, so a
+    /// card reaches a slot that was out of view.
+    func testADragNearAnEdgeReachesSlotsOutOfView() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { true }
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let cards = try halfCardsFromTheLeft(shell, count: 4)
+            XCTAssertGreaterThan(cards[3].view.frame.minX, shell.viewport.frame.width, "the last slot is out of view")
+            let header = try XCTUnwrap(cards[0].header)
+            let start = header.convert(NSPoint(x: 4, y: header.bounds.midY), to: nil)
+            let edge = NSPoint(x: shell.viewport.frame.maxX - 2, y: start.y)
+            try press(header, at: start, events: [(.leftMouseDragged, NSPoint(x: start.x + 10, y: start.y)), (.leftMouseDragged, edge)]
+                + Array(repeating: (.periodic, edge), count: 80) + [(.leftMouseUp, edge)])
+            XCTAssertTrue(workspace.columns.last === cards[0], "it reached the end of the row")
+            XCTAssertEqual(workspace.focusedIndex, 3)
+        }
+    }
+
     /// A press that doesn't pass the threshold moves nothing; Escape, or a
     /// drop outside the viewport, puts the card back where it came from.
     func testAHeaderDragCancelsWithEscapeOrOutside() throws {
         try withShell { shell in
             shell.sideEffects.reducesMotion = { true }
             let workspace = try XCTUnwrap(shell.activeWorkspace)
-            let cards = try threeCardsFromTheLeft(shell)
+            let cards = try halfCardsFromTheLeft(shell)
             let order = cards.map(ObjectIdentifier.init)
             let header = try XCTUnwrap(cards[0].header)
             let start = header.convert(NSPoint(x: 4, y: header.bounds.midY), to: nil)
@@ -1266,12 +1383,11 @@ final class ColumnCardsTests: XCTestCase {
         }
     }
 
-    /// Three half-width cards, the first focused: the strip shows from its
+    /// `count` half-width cards, the first focused: the strip shows from its
     /// left end.
-    private func threeCardsFromTheLeft(_ shell: NiruxShellView) throws -> [ColumnState] {
+    private func halfCardsFromTheLeft(_ shell: NiruxShellView, count: Int = 3) throws -> [ColumnState] {
         let workspace = try XCTUnwrap(shell.activeWorkspace)
-        shell.addColumn()
-        shell.addColumn()
+        while workspace.columns.count < count { shell.addColumn() }
         for column in workspace.columns { column.widthFraction = 0.5 }
         workspace.focusedIndex = 0
         shell.relayout(animated: false)
@@ -1280,7 +1396,8 @@ final class ColumnCardsTests: XCTestCase {
     }
 
     /// Presses `header` at `start` (hit-tested, as AppKit does) after
-    /// posting `events` (an Escape for a key): the press reads them in order.
+    /// posting `events` (an Escape for a key, a drag's tick for a periodic
+    /// one): the press reads them in order.
     private func press(_ header: ColumnHeaderView, at start: NSPoint, events: [(NSEvent.EventType, NSPoint)]) throws {
         let window = try XCTUnwrap(header.window), content = try XCTUnwrap(window.contentView)
         NSApplication.shared.discardEvents(matching: .any, before: nil)
@@ -1291,6 +1408,13 @@ final class ColumnCardsTests: XCTestCase {
             ))
         }
         for (type, point) in events {
+            if type == .periodic {
+                NSApp.postEvent(try XCTUnwrap(NSEvent.otherEvent(
+                    with: .periodic, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0
+                )), atStart: false)
+                continue
+            }
             let event = type == .keyDown
                 ? try XCTUnwrap(NSEvent.keyEvent(
                     with: .keyDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
