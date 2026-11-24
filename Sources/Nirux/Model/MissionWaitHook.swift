@@ -11,8 +11,13 @@ enum MissionWaitHook {
     /// The first Claude Code it was proven on. One that doesn't run it in the
     /// background would wait on it for a day at each session start.
     static let claudeVersion = ClaudeCodeVersion(major: 2, minor: 1, patch: 331)
-    /// Claude Code's timeout for one waiter, in seconds.
+    /// Claude Code's timeout for one waiter, in seconds. The waiter leaves a
+    /// minute before: one Claude Code kills could have claimed a message
+    /// it never printed.
     static let timeout = 86_400
+    /// A turn that takes in a claimed message calls the model after the
+    /// claim: a Stop closer to it ends the turn that was finishing.
+    static let turnAfterClaim: TimeInterval = 1
     /// What the user sees of a message in the agent's terminal: its text is
     /// behind ctrl+o.
     static let summary = "Nirux Mission message"
@@ -47,8 +52,8 @@ enum MissionWaitHook {
     }
 
     /// Waits on the letters of its payload's session while its `claude`
-    /// runs: 2 with them on stderr, else 0. A second waiter on the session
-    /// leaves at once.
+    /// runs it: 2 with them on stderr, else 0. A second waiter on the
+    /// session leaves at once.
     static func run(mailbox root: String) -> Int32 {
         let parent = getppid()
         let payload = FileHandle.standardInput.readDataToEndOfFile()
@@ -56,9 +61,11 @@ enum MissionWaitHook {
               let session = ((try? JSONSerialization.jsonObject(with: payload)) as? [String: Any])?["session_id"] as? String
         else { return 0 }
         let mailbox = MissionMailbox(root: URL(fileURLWithPath: root, isDirectory: true))
+        // The waiter of a conversation this claude left (/clear, /resume) leaves.
+        try? mailbox.noteRunning(session, in: parent)
         guard let waiter = try? mailbox.arm(session) else { return 0 }
         let letters = withExtendedLifetime(waiter) {
-            mailbox.letters(for: session, whileRunning: parent, until: Date() + TimeInterval(timeout))
+            mailbox.letters(for: session, whileRunning: parent, until: Date() + TimeInterval(timeout - 60))
         }
         guard !letters.isEmpty else { return 0 }
         FileHandle.standardError.write(Data(letters.map(\.text).joined(separator: "\n\n").utf8))

@@ -191,8 +191,7 @@ extension NiruxShellView {
         var givenUp: [(delivery: MissionStore.AcceptedEvent, text: String)] = []
         // Read once, and only for a notice that names what holds a message.
         lazy var handoffsEnabled = missionWaits.handoffsEnabled?.enabled ?? Self.currentMissionHandoffsEnabled()
-        for delivery in store.untypedInstructions()
-        where !missionWaits.typing.contains(delivery.event.id) && missionWaits.handedToHooks[delivery.event.id] == nil {
+        for delivery in store.untypedInstructions() where !missionWaits.typing.contains(delivery.event.id) {
             let (mission, event) = (delivery.mission, delivery.event)
             guard !resumingTasks.contains(mission.childWorkspaceID) else { continue }
             let child = missionEnd(mission, parent: false)
@@ -206,6 +205,8 @@ extension NiruxShellView {
                 givenUp.append((delivery, "\(yours) was never typed: its agent's terminal closed first."))
                 continue
             }
+            // Its hook has it, or will at the next step.
+            guard missionWaits.handedToHooks[event.id] == nil else { continue }
             let since = runningSince(of: event, in: column, snapshot: snapshot, now: now)
             let agent = mission.deliveryAgent
             let refusal = agent == .codex ? column.codexMissionRefusal(runningSince: since, snapshot: snapshot)

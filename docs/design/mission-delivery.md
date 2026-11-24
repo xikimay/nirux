@@ -87,14 +87,21 @@ its own, and a new one never gets another's (the "restarted" rule of today).
   (flock), and a second waiter, as each turn end starts one, leaves at once.
   `isArmed` is that lock, seen from Nirux. The waiter waits on the session's
   `waiting` folder (kqueue) and on its `claude` (`NOTE_EXIT`), claims what
-  comes, prints it to stderr and exits 2.
+  comes, prints it to stderr and exits 2. Each waiter notes the session its
+  `claude` runs (`noteRunning`): after `/clear` or `/resume`, which keep
+  the earlier session's waiter alive, that one leaves. It also leaves a
+  minute before Claude Code's own timeout, so a kill never lands between a
+  claim and its print.
 - **Nirux's side** (`NiruxShellView.leaveToHook`,
   `MissionDeliveryPolicy.hookStep`): a message for a `claude` posts to the
   conversation that `claude` confirmed, while a waiter waits there. A posted
   letter whose waiter left is taken back and typed. A claim counts as
-  delivered (`markTyped`) at the next main-thread Stop of its session; a
-  SessionEnd first frees it to go again. At launch, claims count as
-  delivered and waiting letters are taken back (`settleMissionMailbox`).
+  delivered (`markTyped`) at a main-thread Stop of its session at least a
+  second after it (`turnAfterClaim`: an earlier one ends the turn that was
+  finishing), from the `claude` that ran then, when Nirux still delivered
+  the message at the claim. A SessionEnd first, or a `claude` started since
+  the claim, frees it to go again. At launch, claims count as delivered and
+  waiting letters are taken back (`settleMissionMailbox`).
 - **What stays typed:** a `tell` that starts with a slash command, Lead
   notices, PR follow-ups, and every message for a session with no waiter.
 - **Trust.** Claude Code shows the message to the model as a system
@@ -109,7 +116,8 @@ Proved on 2026-11-24 with the built binary and Claude Code 2.1.331 (Haiku 5.5)
 in a PTY, `env -i` and `--setting-sources project`. Idle: woke the model.
 Mid-turn, posted during a `sleep 15`: in the same turn's answer. A draft
 stayed in the prompt. Posted while closed: delivered on `claude --resume`.
-One waiter per session after several turns. No waiter left after `/exit`.
+One waiter per session after several turns, and after `/clear`. No waiter
+left after `/exit`. A waiter takes about 10 MB.
 
 ## Not in this version
 

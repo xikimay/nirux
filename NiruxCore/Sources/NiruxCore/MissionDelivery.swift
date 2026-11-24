@@ -101,7 +101,7 @@ public struct MissionMailbox: Sendable {
     public func post(_ letter: Letter, to conversation: String) throws -> Bool {
         let waiting = try folder(.waiting, of: conversation), claimed = try folder(.claimed, of: conversation)
         try Self.requireName(letter.id)
-        guard !Self.names(in: claimed).contains(where: { $0.hasSuffix("-\(letter.id).json") }) else { return false }
+        guard !Self.names(in: claimed).contains(where: { $0.split(separator: "-", maxSplits: 1).last == "\(letter.id).json" }) else { return false }
         let manager = FileManager.default
         try manager.createDirectory(at: drafts, withIntermediateDirectories: true)
         try manager.createDirectory(at: waiting, withIntermediateDirectories: true)
@@ -203,16 +203,29 @@ public struct MissionMailbox: Sendable {
     /// `isArmed` takes the lock for an instant: a few tries ride it out.
     public func arm(_ conversation: String) throws -> Waiter? {
         let lock = try lockFile(of: conversation)
-        try FileManager.default.createDirectory(at: try folder(.waiting, of: conversation), withIntermediateDirectories: true)
-        let descriptor = open(lock.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
-        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         for attempt in 1...5 {
-            if flock(descriptor, LOCK_EX | LOCK_NB) == 0 { return Waiter(descriptor: descriptor) }
-            guard errno == EWOULDBLOCK, attempt < 5 else { break }
-            usleep(20_000)
+            try FileManager.default.createDirectory(at: try folder(.waiting, of: conversation), withIntermediateDirectories: true)
+            let descriptor = open(lock.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+            guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            // Still the file at its path: `prune` may have removed the one it opened.
+            if flock(descriptor, LOCK_EX | LOCK_NB) == 0, Self.isFile(descriptor, at: lock.path) { return Waiter(descriptor: descriptor) }
+            close(descriptor)
+            if attempt < 5 { usleep(20_000) }
         }
-        close(descriptor)
         return nil
+    }
+
+    /// Marks `conversation` as the one `process` runs now: a waiter on its
+    /// earlier one leaves (`letters`), as after `/clear`.
+    public func noteRunning(_ conversation: String, in process: pid_t) throws {
+        try Self.requireName(conversation)
+        try FileManager.default.createDirectory(at: processes, withIntermediateDirectories: true)
+        try Data(conversation.utf8).write(to: processes.appendingPathComponent(String(process)), options: .atomic)
+    }
+
+    /// The conversation `process` runs, as its last waiter noted it.
+    public func running(in process: pid_t) -> String? {
+        (try? Data(contentsOf: processes.appendingPathComponent(String(process)))).flatMap { String(data: $0, encoding: .utf8) }
     }
 
     /// Whether a waiter waits on `conversation` now.
@@ -225,24 +238,25 @@ public struct MissionMailbox: Sendable {
     }
 
     /// Claims `conversation`'s letters once there are any, waiting while
-    /// `parent` runs, until `deadline`; empty when it stopped first.
+    /// `parent` runs it (`noteRunning`), until `deadline`; empty when it
+    /// stopped first.
     public func letters(for conversation: String, whileRunning parent: pid_t, until deadline: Date) -> [Letter] {
         guard let waiting = try? folder(.waiting, of: conversation),
-              (try? FileManager.default.createDirectory(at: waiting, withIntermediateDirectories: true)) != nil
+              (try? FileManager.default.createDirectory(at: waiting, withIntermediateDirectories: true)) != nil,
+              (try? FileManager.default.createDirectory(at: processes, withIntermediateDirectories: true)) != nil
         else { return [] }
         let queue = kqueue()
         guard queue >= 0 else { return [] }
         defer { close(queue) }
-        let watched = open(waiting.path, O_EVTONLY | O_CLOEXEC)
-        guard watched >= 0 else { return [] }
-        defer { close(watched) }
-        var changes = [
-            kevent(ident: UInt(watched), filter: Int16(EVFILT_VNODE), flags: UInt16(EV_ADD | EV_CLEAR), fflags: UInt32(NOTE_WRITE), data: 0, udata: nil),
-            kevent(ident: UInt(parent), filter: Int16(EVFILT_PROC), flags: UInt16(EV_ADD | EV_ONESHOT), fflags: UInt32(NOTE_EXIT), data: 0, udata: nil)
-        ]
+        let watched = [waiting, processes].map { open($0.path, O_EVTONLY | O_CLOEXEC) }
+        defer { watched.filter { $0 >= 0 }.forEach { close($0) } }
+        guard watched.allSatisfy({ $0 >= 0 }) else { return [] }
+        var changes = watched.map {
+            kevent(ident: UInt($0), filter: Int16(EVFILT_VNODE), flags: UInt16(EV_ADD | EV_CLEAR), fflags: UInt32(NOTE_WRITE), data: 0, udata: nil)
+        } + [kevent(ident: UInt(parent), filter: Int16(EVFILT_PROC), flags: UInt16(EV_ADD | EV_ONESHOT), fflags: UInt32(NOTE_EXIT), data: 0, udata: nil)]
         // ESRCH: the parent is gone already.
         guard kevent(queue, &changes, Int32(changes.count), nil, 0, nil) == 0 else { return [] }
-        while true {
+        while running(in: parent).map({ $0 == conversation }) ?? true {
             let letters = claim(conversation, at: Date().timeIntervalSince1970)
             let left = deadline.timeIntervalSinceNow
             guard letters.isEmpty, left > 0 else { return letters }
@@ -253,14 +267,25 @@ public struct MissionMailbox: Sendable {
             if count < 0, errno != EINTR { return [] }
             if count > 0, event.filter == Int16(EVFILT_PROC) { return [] }
         }
+        return []
     }
 
-    /// Removes the folders of conversations with no letter, claim or waiter.
+    /// Removes the folders of conversations with no letter, claim or
+    /// waiter, holding each one's lock meanwhile, and the notes of processes
+    /// gone.
     public func prune() {
-        for conversation in conversations() where !isArmed(conversation) {
+        for conversation in conversations() {
+            guard let lock = try? lockFile(of: conversation) else { continue }
+            let descriptor = open(lock.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+            guard descriptor >= 0 else { continue }
+            defer { close(descriptor) }
             let states = [State.waiting, .claimed].compactMap { try? folder($0, of: conversation) }
-            guard states.allSatisfy({ Self.names(in: $0).isEmpty }) else { continue }
+            guard flock(descriptor, LOCK_EX | LOCK_NB) == 0, states.allSatisfy({ Self.names(in: $0).isEmpty }) else { continue }
             try? FileManager.default.removeItem(at: root.appendingPathComponent(conversation, isDirectory: true))
+        }
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: processes.path)) ?? [] {
+            guard let process = pid_t(name), kill(process, 0) != 0, errno == ESRCH else { continue }
+            try? FileManager.default.removeItem(at: processes.appendingPathComponent(name))
         }
     }
 
@@ -274,6 +299,7 @@ public struct MissionMailbox: Sendable {
     }
 
     private var drafts: URL { root.appendingPathComponent(".drafts", isDirectory: true) }
+    private var processes: URL { root.appendingPathComponent(".processes", isDirectory: true) }
 
     private func conversations() -> [String] {
         ((try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []).filter(Self.isName)
@@ -312,6 +338,11 @@ public struct MissionMailbox: Sendable {
     /// rename(2) that leaves an existing `destination` alone: 0, or the errno.
     private static func move(_ source: URL, to destination: URL) -> Int32 {
         renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 ? 0 : errno
+    }
+
+    private static func isFile(_ descriptor: Int32, at path: String) -> Bool {
+        var opened = stat(), named = stat()
+        return fstat(descriptor, &opened) == 0 && stat(path, &named) == 0 && opened.st_ino == named.st_ino && opened.st_dev == named.st_dev
     }
 
     private static func names(in folder: URL) -> [String] {

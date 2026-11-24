@@ -165,6 +165,26 @@ struct MissionDeliveryTests {
         #expect(mailbox.waiting(for: "session").map(\.id) == ["kept"])
     }
 
+    @Test func aWaiterLeavesOnceItsProcessRunsAnotherConversation() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let box = mailbox
+        try box.noteRunning("first", in: getpid())
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { try? box.noteRunning("first", in: getpid()) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) { try? box.noteRunning("cleared", in: getpid()) }
+        let started = Date()
+        #expect(box.letters(for: "first", whileRunning: getpid(), until: started + 20).isEmpty)
+        #expect(Date().timeIntervalSince(started) > 0.3, "the same conversation again keeps it")
+        #expect(Date().timeIntervalSince(started) < 10)
+        #expect(box.running(in: getpid()) == "cleared")
+    }
+
+    @Test func aClaimedLetterMatchesItsWholeID() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        try mailbox.post(Letter(id: "a-b", text: "", postedAt: 1), to: "session")
+        _ = mailbox.claim("session", at: 2)
+        #expect(try mailbox.post(Letter(id: "b", text: "", postedAt: 3), to: "session"))
+    }
+
     @Test func pruningKeepsConversationsWithLettersClaimsOrAWaiter() throws {
         defer { try? FileManager.default.removeItem(at: root) }
         try mailbox.post(Letter(id: "a", text: "", postedAt: 1), to: "waiting")
@@ -177,6 +197,9 @@ struct MissionDeliveryTests {
         let left = try FileManager.default.contentsOfDirectory(atPath: root.path).filter { !$0.hasPrefix(".") }.sorted()
         #expect(left == ["armed", "claimed", "waiting"])
         withExtendedLifetime(waiter) {}
+        // A conversation pruned is armed again from scratch.
+        #expect(try mailbox.arm("done") != nil)
+        #expect(mailbox.isArmed("done") == false)
     }
 }
 

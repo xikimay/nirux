@@ -65,9 +65,9 @@ extension NiruxShellView {
         guard !ends.isEmpty else { return }
         let mailbox = MissionWaitHook.mailbox
         for claim in mailbox.claims() {
-            guard let end = ends.first(where: {
-                $0.sessionID == claim.conversation && $0.timestamp >= claim.claimedAt
-                    && $0.emitterProcess.map { $0.startedAt <= claim.claimedAt } ?? true
+            guard let end = ends.first(where: { end in
+                end.sessionID == claim.conversation && end.emitterProcess.map { $0.startedAt <= claim.claimedAt } ?? true
+                    && end.timestamp >= claim.claimedAt + (end.name == .stop ? MissionWaitHook.turnAfterClaim : 0)
             }) else { continue }
             if end.name == .stop { recordHookDelivery(of: claim) }
             try? mailbox.forget(claim)
@@ -88,23 +88,37 @@ extension NiruxShellView {
         mailbox.prune()
     }
 
-    /// Takes back the letters of messages handed to hooks that Nirux no
-    /// longer delivers (`pending`: the ones it does): expired, given up, or
-    /// their Mission closed.
+    /// Takes back the waiting letters of messages Nirux no longer delivers
+    /// (`pending`: the ones it does): expired, given up, or their Mission
+    /// closed. A claim waits for its turn's end, which records it.
     func withdrawStaleLetters(pending: Set<String>) {
         let stale = Set(missionWaits.handedToHooks.keys).subtracting(pending)
         guard !stale.isEmpty else { return }
         let mailbox = MissionWaitHook.mailbox
-        for (id, place) in mailbox.places() where stale.contains(id) {
-            if case .waiting(let conversation) = place { _ = try? mailbox.retract(id, from: conversation) }
+        let places = mailbox.places()
+        for id in stale {
+            switch places[id] {
+            case .waiting(let conversation)?:
+                // False: a waiter claimed it meanwhile. A disk error tries again.
+                guard (try? mailbox.retract(id, from: conversation)) == true else { continue }
+            case .claimed?:
+                continue
+            case nil:
+                break
+            }
+            missionWaits.handedToHooks[id] = nil
         }
-        for claim in mailbox.claims() where stale.contains(claim.letter.id) { try? mailbox.forget(claim) }
-        missionWaits.handedToHooks = missionWaits.handedToHooks.filter { !stale.contains($0.key) }
     }
 
+    /// Records `claim`'s message as delivered, if Nirux still delivered it
+    /// when the hook took it: a question older than an hour then is no
+    /// longer typed, but one claimed sooner counts.
     private func recordHookDelivery(of claim: MissionMailbox.Claim) {
-        guard let delivery = MissionStore.shared.pendingPromptDeliveries().first(where: { $0.event.id == claim.letter.id }) else { return }
-        finishTyping(delivery, .sent, at: claim.claimedAt)
+        guard let mission = MissionStore.shared.missions.first(where: { $0.events.contains { $0.id == claim.letter.id } }),
+              let event = mission.events.first(where: { $0.id == claim.letter.id }),
+              MissionStore.isPendingDelivery(event, in: mission, now: claim.claimedAt)
+        else { return }
+        finishTyping(.init(mission: mission, event: event), .sent, at: claim.claimedAt)
         updateSidebar()
     }
 }

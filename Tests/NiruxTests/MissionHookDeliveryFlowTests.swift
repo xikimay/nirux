@@ -27,13 +27,13 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
 
         /// A hook of the Lead's `claude`, as the column takes it in.
         @discardableResult
-        func hook(_ name: AgentHookEvent.Name) throws -> AgentHookEvent {
+        func hook(_ name: AgentHookEvent.Name, at time: TimeInterval = Date().timeIntervalSince1970) throws -> AgentHookEvent {
             let pty = try XCTUnwrap(column.pty)
             let snapshot = ProcessSnapshot()
             let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: snapshot))
             let event = AgentHookEvent(
                 kind: .claude, name: name, agentUUID: column.agentUUID, sessionID: session, emitterProcess: claude.instance,
-                source: name == .sessionStart ? "startup" : nil, timestamp: Date().timeIntervalSince1970
+                source: name == .sessionStart ? "startup" : nil, timestamp: time
             )
             _ = column.admitClaudeHook(event, foregroundProcess: claude, snapshot: snapshot)
             _ = pty.applyAgentHook(event, isUserFocused: false)
@@ -108,6 +108,9 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
             XCTAssertNil(parent.deliveredAt)
 
             parent.shell.settleHookClaims(after: [try parent.hook(.stop)])
+            XCTAssertNil(parent.deliveredAt, "that Stop ends the turn that was finishing as the waiter took it")
+
+            parent.shell.settleHookClaims(after: [try parent.hook(.stop, at: Date().timeIntervalSince1970 + MissionWaitHook.turnAfterClaim + 1)])
             XCTAssertNotNil(parent.deliveredAt)
             XCTAssertTrue(mailbox.claims().isEmpty)
             parent.shell.typeMissionMessages()
