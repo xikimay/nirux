@@ -57,19 +57,21 @@ final class NiruxMCPServerTests: XCTestCase {
         }
     }
 
-    /// The Lead's Claude learns its role from the server, from its
-    /// workspace's `NIRUX_LEAD=1`; any other agent doesn't.
+    /// The train's rules: the Lead merges through it, and a task merges the
+    /// base branch only on a conflict, a red train, or what it builds on.
     func testTheMergeRulesReachTheLeadAndTheTasks() {
         let lead = NiruxMCPServer.leadInstructions
         XCTAssertTrue(lead.contains("Merge only via queue_merge, with cadence train"))
-        XCTAssertTrue(lead.contains("never tell a task to merge the base branch unless its pull request conflicts or the queue left it "
-            + "out of a red train"))
+        XCTAssertTrue(lead.contains("never tell a task to merge the base branch unless its pull request conflicts, the queue left it "
+            + "out of a red train, or it builds on what just landed"))
         XCTAssertTrue(lead.contains("Use standard when train is refused"))
         XCTAssertTrue(NiruxMCPServer.taskInstructions.contains("When Nirux's merge queue lands your pull request, merge the base "
-            + "branch into yours only when it conflicts or the queue left it out of a red train"))
-        XCTAssertFalse(LeadTools.afterDescription.contains("merge origin/main"), "the rule bans merging the base without a conflict")
+            + "branch into yours only when it conflicts, the queue left it out of a red train, or you build on what just landed"))
+        XCTAssertFalse(LeadTools.afterDescription.contains("merge origin/main"), "tell's after example builds on what landed instead")
     }
 
+    /// The Lead's Claude learns its role from the server, from its
+    /// workspace's `NIRUX_LEAD=1`; any other agent doesn't.
     func testOnlyTheLeadGetsTheLeadsRole() throws {
         var lead = context
         lead.environment["NIRUX_LEAD"] = "1"
