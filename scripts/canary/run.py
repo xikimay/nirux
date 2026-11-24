@@ -18,6 +18,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+from channel import ChannelError  # noqa: E402
 from crash_correlator import (  # noqa: E402
     correlate_crash_reports,
     DEFAULT_BUNDLE_ID,
@@ -260,7 +261,7 @@ class App:
         if missing:
             raise InfrastructureError("requires " + ", ".join(missing))
 
-    def launch(self):
+    def launch(self, channel=None):
         real_home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
         protected = {"CHECKOUT": HERE.parents[1], "STATE": real_home / "Library/Application Support/nirux",
                      "CLAUDE": real_home / ".claude", "CODEX": real_home / ".codex"}
@@ -282,6 +283,10 @@ class App:
             "exitCode": None,
             "killedByCleanup": False,
         })
+        if channel is not None:
+            # A hidden copy (CanaryPresentation) has no key window: its channel answers.
+            wait_for("the canary channel never answered", lambda: answers(channel), self.alive, timeout=60)
+            return
         try:
             wait_for("no focused window", lambda: self.drive("window", probe=True), self.alive)
         except TimeoutError as error:
@@ -395,6 +400,14 @@ class App:
             except ProcessLookupError:
                 pass
         wait_for("could not reap canary children", lambda: not self.holders(), timeout=5)
+
+
+def answers(channel):
+    try:
+        channel.call("snapshot")
+    except ChannelError:
+        return False
+    return True
 
 
 def verify_layout(work, seed):

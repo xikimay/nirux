@@ -143,7 +143,10 @@ final class CanaryChannelTests: XCTestCase {
         let bar = NSMenu()
         let space = NSMenu(title: "Space")
         space.autoenablesItems = false
-        bar.addItem(withTitle: "Space", action: nil, keyEquivalent: "").submenu = space
+        // As the app builds its menu bar: the item untitled, its menu titled.
+        let spaceItem = NSMenuItem()
+        spaceItem.submenu = space
+        bar.addItem(spaceItem)
         for (title, enabled) in [("Previous Space", true), ("Next Space", false)] {
             let item = space.addItem(withTitle: title, action: #selector(Target.pick(_:)), keyEquivalent: "")
             item.target = target
@@ -179,6 +182,14 @@ final class CanaryChannelTests: XCTestCase {
 
         NiruxApp.press(try XCTUnwrap(NiruxApp.pressTarget(label: "Board", in: [window])))
         XCTAssertNil(NiruxApp.pressTarget(label: "Merge", in: [window]), "disabled")
+        // A custom view's AXEnabled reads false, yet a person clicks it.
+        let custom = PressableView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        window.contentView?.addSubview(custom)
+        let snapshotted = NiruxApp.accessibilitySnapshot(of: window)["elements"] as? [[String: Any]] ?? []
+        XCTAssertEqual(snapshotted.first { $0["label"] as? String == "Custom" }?["control"] as? Bool, false)
+        XCTAssertEqual(buttons.map { $0["control"] as? Bool }, [true, true])
+        NiruxApp.press(try XCTUnwrap(NiruxApp.pressTarget(label: "Custom", in: [window])))
+        XCTAssertEqual(custom.presses, 1)
         XCTAssertNil(NiruxApp.pressTarget(label: "Missing", in: [window]))
         XCTAssertEqual(target.picked, ["Board"])
     }
@@ -344,6 +355,48 @@ final class CanaryChannelTests: XCTestCase {
         }
     }
 
+    /// Every open terminal's text, the focused one marked, as the app's
+    /// global search reads it.
+    @MainActor
+    func testTerminalTextAnswersEachTerminal() throws {
+        try UIFlowHarness.run { harness in
+            let app = NiruxApp()
+            app.shell = harness.shell
+            app.mainWindow = harness.window
+            let terminal = try XCTUnwrap(harness.shell.activeWorkspace?.columns.first?.pty)
+            harness.waitUntil("the terminal's shell") { terminal.shellPID != nil }
+            terminal.sendRaw("echo canary-$((6 * 7))\n")
+            var answers: [(text: String, isError: Bool)] = []
+            var asked = 0
+            harness.waitUntil("the command's output in the answer") {
+                guard answers.count == asked else { return false }
+                if answers.last?.text.contains("canary-42") == true { return true }
+                asked += 1
+                app.performCanaryRequest(request(token: token, tool: "terminal")) { answers.append(($0, $1)) }
+                return false
+            }
+            let answer = try XCTUnwrap(answers.last)
+            XCTAssertFalse(answer.isError)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(answer.text.utf8)) as? [String: Any])
+            let focused = try XCTUnwrap(json["terminals"] as? [[String: Any]]).filter { $0["focused"] as? Bool == true }
+            XCTAssertEqual(focused.count, 1)
+            XCTAssertEqual(focused.first?["workspace"] as? String, harness.shell.activeWorkspace?.title)
+            XCTAssertEqual(focused.first?["active"] as? Bool, true)
+            XCTAssertTrue((focused.first?["text"] as? String)?.contains("canary-42") == true)
+        }
+    }
+
+    /// A canary copy is hidden, so a popover closing never reads as its last
+    /// window closing and quits it; a normal launch quits with its window.
+    @MainActor
+    func testOnlyANormalLaunchQuitsWithItsLastWindow() {
+        for (environment, quits) in [(canaryEnvironment, false), ([:], true)] {
+            let app = NiruxApp()
+            app.presence = AppPresence(launchEnvironment: environment) {}
+            XCTAssertEqual(app.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared), quits, "\(environment)")
+        }
+    }
+
     /// Text is typed with each character's US key code and Shift, as KeyMapper expects.
     @MainActor
     func testTextTypesEachCharactersKey() {
@@ -359,6 +412,17 @@ private final class Target: NSObject {
 
     @objc func pick(_ sender: Any) {
         picked.append((sender as? NSMenuItem)?.title ?? (sender as? NSButton)?.title ?? "")
+    }
+}
+
+private final class PressableView: NSView {
+    var presses = 0
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityLabel() -> String? { "Custom" }
+    override func accessibilityPerformPress() -> Bool {
+        presses += 1
+        return true
     }
 }
 

@@ -319,7 +319,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        // A canary copy is hidden: AppKit counts no window of it as visible,
+        // so a popover closing would read as its last window closing.
+        !drivenByCanary
     }
 
     /// Unsaved changes and a running merge queue ask first, an update's

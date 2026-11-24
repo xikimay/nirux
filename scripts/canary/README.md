@@ -118,6 +118,20 @@ Pass `--triage` (or `--repro-runs N`, default `2`) to run deterministic triage:
 - External `.ips` crash correlation from `--crash-reports-dir` (default `~/Library/Logs/DiagnosticReports`), independent of in-app `CrashReportScanner`.
 - `--qualify N` runs `N` consecutive isolated iterations and writes `qualification.json` with pass rate and per-step timing statistics.
 
+## Explorer: Claude drives a hidden copy
+
+```sh
+scripts/canary.sh Nirux.app --explore [--goal TEXT]... [--episodes 4] [--calls 50] [--episode-calls 12] \
+  [--renders 6] [--minutes 20] [--model opus] --evidence-dir /tmp/nirux-explore
+scripts/canary.sh Nirux.app --explore --replay-trace /tmp/nirux-explore/explore-XXXXXXXX/trace.jsonl
+```
+
+The copy runs hidden through the canary channel (no focus taken, nothing in front, no Accessibility permission) in the two-space world of `multi-agent-routing`, a fake claude in each task's terminal. Each episode is a fresh `claude -p` toward one goal, with the explorer's MCP server (`explorer_mcp.py`) as its only tools: `--strict-mcp-config`, `--tools ""`, hooks off, the runner's environment without API keys. The tools act as a person does (`look`, `press`, `menu`, `key`, `type`, `terminal`, `render`, `note`).
+
+After each action the server runs the oracles and says what failed: the app exited, didn't answer, an amber badge without a rendered reason (or the Space button's "waits for you in"), `state.json` unreadable, a fatal line in the app's stderr, typed text that showed in a terminal other than the focused one. The runner adds a quit nobody asked for, children that outlive the quit, and `.ips` crash reports. `budget.json` caps the run's calls and renders; the runner stops the last episode at the deadline.
+
+The run folder keeps `report.json` (episodes, tokens, cost, findings), `trace.jsonl` (every call, with its answer and failed checks), `findings.jsonl`, and `digest.md` (the agent's notes: to verify by a person, never in the ledger). Each distinct finding goes to the incident ledger as `intermittent`; `--replay-trace` runs a trace again without a model, and a finding it brings back is a `regression`.
+
 ## Workflow
 
 **Packaged app canary** (`.github/workflows/canary.yml`) is a manual Actions workflow supporting `triage` and `qualify` modes and single-scenario, `all`, or diff-targeted `selected` execution. It stays outside PR triggers to respect the 5-job macOS CI concurrency cap. The runner unit tests run on every PR in `.github/workflows/tests.yml` (job `core`).
