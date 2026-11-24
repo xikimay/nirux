@@ -410,10 +410,10 @@ final class KeepAwakeControllerTests: XCTestCase {
             return info
         }
         var watch = ChecksWatch()
-        func awaits(_ pullRequest: PRInfo?, readAt: TimeInterval = 0, pushed: Bool = false, now: TimeInterval) -> Bool {
-            watch.awaits([ChecksWatch.Read(id: "t", pullRequest: pullRequest, readAt: readAt, pushedRecently: pushed)], now: now)
+        func awaits(_ pullRequest: PRInfo?, readAt: TimeInterval = 0, push: ChecksWatch.Push? = nil, now: TimeInterval) -> Bool {
+            watch.awaits([ChecksWatch.Read(id: "t", pullRequest: pullRequest, readAt: readAt, push: push)], now: now)
         }
-        XCTAssertTrue(awaits(nil, pushed: true, now: 1), "a push before any read")
+        XCTAssertTrue(awaits(nil, push: .init(headBefore: nil), now: 1), "a push before any read")
         XCTAssertFalse(awaits(pr("SUCCESS"), now: 1))
         XCTAssertTrue(awaits(pr("PENDING"), readAt: 100, now: 100))
         XCTAssertFalse(awaits(pr("PENDING"), readAt: 100, now: 100 + ChecksWatch.readWindow), "a stale read")
@@ -425,14 +425,16 @@ final class KeepAwakeControllerTests: XCTestCase {
         XCTAssertTrue(awaits(pr("FAILURE", head: "b"), readAt: late + 300, now: late + 300))
         XCTAssertFalse(awaits(pr("FAILURE", head: "b"), readAt: late + 300 + ChecksWatch.failureLimit,
                               now: late + 300 + ChecksWatch.failureLimit), "red long enough for its round")
-        XCTAssertFalse(awaits(pr("SUCCESS", head: "d"), readAt: late + 2_000, pushed: true, now: late + 2_000),
+        XCTAssertFalse(awaits(pr("SUCCESS", head: "d"), readAt: late + 2_000, push: .init(headBefore: "c"), now: late + 2_000),
                        "a fetch of a branch whose checks settled")
+        XCTAssertTrue(awaits(pr("SUCCESS", head: "d"), readAt: late + 2_000, push: .init(headBefore: "d"), now: late + 2_000),
+                      "green, but read before the push")
 
         // A red pull request in the background is read every 10 minutes: the
         // stale moment between two reads keeps its clock.
         var red = ChecksWatch()
         func redAwaits(readAt: TimeInterval, now: TimeInterval) -> Bool {
-            red.awaits([ChecksWatch.Read(id: "r", pullRequest: pr("FAILURE", head: "c"), readAt: readAt, pushedRecently: false)], now: now)
+            red.awaits([ChecksWatch.Read(id: "r", pullRequest: pr("FAILURE", head: "c"), readAt: readAt, push: nil)], now: now)
         }
         XCTAssertTrue(redAwaits(readAt: 0, now: 0))
         XCTAssertFalse(redAwaits(readAt: 0, now: ChecksWatch.readWindow), "stale")
@@ -660,14 +662,16 @@ final class KeepAwakeShellTests: XCTestCase {
             let task = WorkspaceState(id: "task", title: "task", cwd: repo)
             shell.workspaceStore.appendWorkspace(task, activate: false)
             XCTAssertTrue(task.updateGitContext(context))
-            final class Answer { var ciStatus = "PENDING"; var reads = 0 }
+            final class Answer { var ciStatus = "PENDING"; var head = "a"; var reads = 0 }
             let answer = Answer()
             shell.fetchPullRequest = { _, _, _, done in
                 answer.reads += 1
-                done(.success(context: context, info: PRInfo(
+                var info = PRInfo(
                     number: 7, state: .open, isDraft: false, ciStatus: answer.ciStatus, checks: [], reviewDecision: nil,
                     mergeable: "MERGEABLE", url: "https://example.invalid/o/r/pull/7", additions: nil, deletions: nil, changedFiles: nil
-                )))
+                )
+                info.headRefOid = answer.head
+                done(.success(context: context, info: info))
             }
             shell.isOnACPower = { false }
             shell.refreshStuckAgents(appIsActive: false)
@@ -682,6 +686,16 @@ final class KeepAwakeShellTests: XCTestCase {
             XCTAssertTrue(waitUntil("a read of the ended checks") {
                 shell.refreshPRInfo(for: [task])
                 return task.prInfo?.ciStatus == "SUCCESS" && !controller.isAwaitingChecks
+            })
+
+            // A push: the green read of the head before it says nothing of the pushed one's checks.
+            shell.gitRefresh.noteChange(.remoteBranch, for: task)
+            shell.updateKeepAwake()
+            XCTAssertTrue(controller.isAwaitingChecks, "the read is from before the push")
+            answer.head = "b"
+            XCTAssertTrue(waitUntil("a read of the pushed head") {
+                shell.refreshPRInfo(for: [task])
+                return task.prInfo?.headRefOid == "b" && !controller.isAwaitingChecks
             })
         }
     }
