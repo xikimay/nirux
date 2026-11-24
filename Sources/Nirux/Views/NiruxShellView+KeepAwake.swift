@@ -7,6 +7,10 @@ extension NiruxShellView {
         Persistence.load()?.settings?.keepMacAwakeWhileAgentsWork ?? true
     }
 
+    static func currentKeepMacAwakeForChecksEnabled() -> Bool {
+        Persistence.load()?.settings?.keepMacAwakeWhileChecksRun ?? true
+    }
+
     /// Agents mid-turn in every workspace, other spaces included, as of the
     /// last sidebar refresh (which ticks them all). An agent waiting on the
     /// user is not working.
@@ -24,6 +28,13 @@ extension NiruxShellView {
 
     func updateKeepAwake() {
         keepAwake?.update(workingAgentCount: workingAgentCount)
+        let reads = workspaces.map { workspace in
+            ChecksWatch.Read(
+                id: workspace.id, pullRequest: workspace.prInfo, readAt: workspace.pullRequestReadAt,
+                pushedRecently: gitRefresh.pushedRecently(workspace)
+            )
+        }
+        keepAwake?.update(awaitingChecks: checksWatch.awaits(reads, now: Date().timeIntervalSince1970))
     }
 
     /// Longer than the heartbeat's 2 s, with slack for a busy main thread.

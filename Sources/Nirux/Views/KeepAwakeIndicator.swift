@@ -35,22 +35,27 @@ final class KeepAwakeIndicator: NSTitlebarAccessoryViewController {
         view = container
     }
 
-    func update(isActive: Bool, workingAgentCount: Int, isMergeQueueRunning: Bool = false) {
+    func update(isActive: Bool, workingAgentCount: Int, isMergeQueueRunning: Bool = false, isAwaitingChecks: Bool = false) {
         view.isHidden = !isActive
         view.frame.size.width = isActive ? Self.size.width : 0
         relayOutTitleBar()
-        let text = Self.toolTip(workingAgentCount: workingAgentCount, isMergeQueueRunning: isMergeQueueRunning)
+        let text = Self.toolTip(
+            workingAgentCount: workingAgentCount, isMergeQueueRunning: isMergeQueueRunning, isAwaitingChecks: isAwaitingChecks
+        )
         view.toolTip = text
         imageView.setAccessibilityLabel(text)
     }
 
-    static func toolTip(workingAgentCount count: Int, isMergeQueueRunning: Bool = false) -> String {
-        let agents = count == 1 ? "1 agent works" : "\(count) agents work"
-        switch (count, isMergeQueueRunning) {
-        case (0, false): return "Keeping your Mac awake: no agent is working now, sleep is allowed again in about a minute."
-        case (0, true): return "Keeping your Mac awake while a merge queue runs."
-        case (_, false): return "Keeping your Mac awake while \(agents)."
-        case (_, true): return "Keeping your Mac awake while a merge queue runs and \(agents)."
+    static func toolTip(workingAgentCount count: Int, isMergeQueueRunning: Bool = false, isAwaitingChecks: Bool = false) -> String {
+        let reasons = [
+            isMergeQueueRunning ? "a merge queue runs" : nil,
+            count == 0 ? nil : count == 1 ? "1 agent works" : "\(count) agents work",
+            isAwaitingChecks ? "pull request checks run" : nil
+        ].compactMap { $0 }
+        guard let last = reasons.last else {
+            return "Keeping your Mac awake: no agent is working now, sleep is allowed again in about a minute."
         }
+        let listed = reasons.count == 1 ? last : reasons.dropLast().joined(separator: ", ") + " and " + last
+        return "Keeping your Mac awake while \(listed)."
     }
 }

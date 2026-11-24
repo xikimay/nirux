@@ -309,6 +309,47 @@ final class DailyPassTests: XCTestCase {
         )
     }
 
+    /// The morning line: what landed, then what waits and on whom, first in
+    /// the digest, quiet or not.
+    func testTheDigestOpensWithTheMorningLine() throws {
+        var facts = facts()
+        XCTAssertEqual(DailyPass.morningLine(facts), "Overnight: landed #611, nothing waits.")
+        var red = PRInfo(number: 812, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil,
+                         mergeable: nil, url: "u", additions: nil, deletions: nil, changedFiles: nil)
+        red.headRefOid = "a"
+        facts.tasks = [
+            DailyPass.TaskActivity(id: "1", title: "Login", waitsOnUser: "a login"),
+            DailyPass.TaskActivity(id: "2", title: "Canary", question: .init(id: "q")),
+            DailyPass.TaskActivity(id: "3", title: "Picker", question: .init(id: "q2", handedToUser: true)),
+            DailyPass.TaskActivity(id: "4", title: "Awake", pullRequest: red),
+            DailyPass.TaskActivity(id: "5", title: "Landed", question: .init(id: "q3"), mergedLately: true)
+        ]
+        let line = "Overnight: landed #611; waiting on you: Login, Picker; on the Lead: Canary; red CI, on the task: Awake (#812)."
+        XCTAssertEqual(DailyPass.morningLine(facts), line)
+        XCTAssertTrue(DailyPass.digest(facts, timeZone: utc).text.contains("## Morning line\nOpen your answer to the user with this line, as it is:\n" + line))
+        facts.repositories = []
+        facts.findings = []
+        XCTAssertTrue(DailyPass.digest(facts, timeZone: utc).text.contains("Overnight: landed nothing; waiting on you"), "quiet too")
+        XCTAssertTrue(facts.needsPass, "a task waiting: the pass runs, its line says so")
+
+        var unread = facts
+        unread.repositories = [DailyPass.RepositoryReport(name: "acme/one", problems: ["merged pull requests: timed out"], readsAgain: true)]
+        XCTAssertTrue(DailyPass.morningLine(unread).hasPrefix("Overnight: landed nothing GitHub could say;"), DailyPass.morningLine(unread))
+
+        // Too long, the sections after the rules go first: never the rules.
+        var long = self.facts()
+        long.missions = (0..<40).map { index in
+            DailyPass.MissionFact(kind: .held, message: "tell \(index) " + String(repeating: "x", count: 200), sentAt: now - 30 * hour,
+                                  at: now - 20 * hour + Double(index) * 60, detail: "typed late", excerpt: "")
+        }
+        let full = DailyPass.digest(long, timeZone: utc, budget: .max).text
+        let rules = try XCTUnwrap(full.range(of: "## Rules waiting for the user"))
+        let budget = full.distance(from: full.startIndex, to: rules.upperBound) + 20
+        let cut = DailyPass.digest(long, timeZone: utc, budget: budget).text
+        XCTAssertTrue(cut.contains("## Rules waiting for the user"), "the rules aren't left out to fit")
+        XCTAssertTrue(cut.hasPrefix("# Daily pass · Nirux"), String(cut.prefix(200)))
+    }
+
     /// What to propose (the free slots under the pending limit), the kinds
     /// the window saw with where else they showed up, each pull request's
     /// rounds (its recorded reviews count), reruns, and the rules to avoid.
@@ -354,6 +395,24 @@ final class DailyPassTests: XCTestCase {
         let said = DailyPass.digest(unread, timeZone: utc).text
         XCTAssertTrue(said.contains("Nothing happened since 01-14 08:00: no review recorded, no CI failure,"), said)
         XCTAssertTrue(said.contains("## What GitHub didn’t say\n- acme/one: merged pull requests: timed out\nThe next pass reads this window again."), said)
+        XCTAssertFalse(quiet.needsPass)
+
+        // Waits only, each kind alone: the pass runs, quiet, proposing no rule.
+        var red = PRInfo(number: 812, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil,
+                         mergeable: nil, url: "u", additions: nil, deletions: nil, changedFiles: nil)
+        red.headRefOid = "a"
+        for task in [DailyPass.TaskActivity(id: "1", title: "Login", waitsOnUser: "a login"),
+                     DailyPass.TaskActivity(id: "2", title: "Canary", question: .init(id: "q")),
+                     DailyPass.TaskActivity(id: "4", title: "Awake", pullRequest: red)] {
+            var waiting = quiet
+            waiting.tasks = [task]
+            XCTAssertTrue(waiting.needsPass, task.title)
+            XCTAssertFalse(waiting.hasNews, task.title)
+            let text = DailyPass.digest(waiting, timeZone: utc).text
+            XCTAssertTrue(text.contains("Nothing happened since 01-14 08:00"), task.title)
+            XCTAssertFalse(text.contains("propose_rule"), task.title)
+            XCTAssertEqual(text.contains("no CI failure"), task.title != "Awake", "a red CI isn't \"no CI failure\"")
+        }
         quiet.proposals.append(proposal("Added today.", addedAt: now - hour))
         XCTAssertTrue(quiet.hasNews, "a rule decided is news")
 

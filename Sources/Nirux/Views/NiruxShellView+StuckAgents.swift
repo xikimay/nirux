@@ -94,8 +94,8 @@ extension NiruxShellView {
         noteMissionQuestionHandOffs(missionQuestions(foreground: { $0.pty?.foregroundProcess(snapshot: snapshot) }, now: now))
         // The log, and one more try, away too.
         checkMissionWaits(snapshot: snapshot, now: now)
-        // A merge a message waits for, away too.
-        refreshAwaitedPullRequests()
+        // Pull requests, the ones a merge wait follows among them, away too.
+        refreshPullRequestsAway()
         sweepMergeWaits(now: now)
     }
 
