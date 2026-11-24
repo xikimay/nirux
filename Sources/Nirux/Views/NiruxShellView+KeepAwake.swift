@@ -11,19 +11,6 @@ extension NiruxShellView {
         Persistence.load()?.settings?.keepMacAwakeWhileChecksRun ?? true
     }
 
-    /// An open pull request of a workspace runs checks, as a read of the last
-    /// `checksReadWindow` says. An older read tells nothing: an archived
-    /// workspace's, or `gh` failing.
-    static func awaitsChecks(_ workspaces: [WorkspaceState], now: TimeInterval) -> Bool {
-        workspaces.contains { workspace in
-            guard let pullRequest = workspace.prInfo, let readAt = workspace.pullRequestReadAt else { return false }
-            return pullRequest.state == .open && pullRequest.ciStatus == "PENDING" && now - readAt < checksReadWindow
-        }
-    }
-
-    /// A few of a background pull request's reads while its checks run.
-    static let checksReadWindow: TimeInterval = 600
-
     /// Agents mid-turn in every workspace, other spaces included, as of the
     /// last sidebar refresh (which ticks them all). An agent waiting on the
     /// user is not working.
@@ -41,7 +28,13 @@ extension NiruxShellView {
 
     func updateKeepAwake() {
         keepAwake?.update(workingAgentCount: workingAgentCount)
-        keepAwake?.update(awaitingChecks: Self.awaitsChecks(workspaces, now: Date().timeIntervalSince1970))
+        let reads = workspaces.map { workspace in
+            ChecksWatch.Read(
+                id: workspace.id, pullRequest: workspace.prInfo, readAt: workspace.pullRequestReadAt,
+                pushedRecently: gitRefresh.pushedRecently(workspace)
+            )
+        }
+        keepAwake?.update(awaitingChecks: checksWatch.awaits(reads, now: Date().timeIntervalSince1970))
     }
 
     /// Longer than the heartbeat's 2 s, with slack for a busy main thread.

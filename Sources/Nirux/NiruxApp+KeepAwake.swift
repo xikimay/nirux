@@ -14,9 +14,10 @@ extension NiruxApp {
         )
         controller.onChange = { [weak controller, weak indicator] in
             guard let controller else { return }
+            let held = controller.heldFor
             indicator?.update(
-                isActive: controller.isActive, workingAgentCount: controller.workingAgentCount,
-                isMergeQueueRunning: controller.isMergeQueueRunning, isAwaitingChecks: controller.isAwaitingChecks
+                isActive: controller.isActive, workingAgentCount: held.agents,
+                isMergeQueueRunning: held.queue, isAwaitingChecks: held.checks
             )
         }
         controller.onRefresh = { [weak shell] in

@@ -283,8 +283,8 @@ struct PersistedSettings: Codable {
     var sidebarApprovalsEnabled: Bool = true
     /// See `KeepAwakeController`. On by default: missing decodes to true.
     var keepMacAwakeWhileAgentsWork: Bool = true
-    /// `KeepAwakeController.isAwaitingChecks`, on the power adapter. On by
-    /// default: missing decodes to true.
+    /// `KeepAwakeController.isAwaitingChecks`, on the power adapter. Missing,
+    /// it follows `keepMacAwakeWhileAgentsWork`.
     var keepMacAwakeWhileChecksRun: Bool = true
     /// Lights that breathe and pulse, and the other animations of the
     /// interface. Off, states show without moving. On by default: missing
@@ -428,7 +428,7 @@ struct PersistedSettings: Codable {
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? true
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? true
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
-        keepMacAwakeWhileChecksRun = (try? container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileChecksRun)) ?? true
+        keepMacAwakeWhileChecksRun = (try? container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileChecksRun)) ?? keepMacAwakeWhileAgentsWork
         animatesInterface = (try? container.decodeIfPresent(Bool.self, forKey: .animatesInterface)) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true

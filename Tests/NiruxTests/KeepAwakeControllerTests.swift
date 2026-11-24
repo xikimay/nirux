@@ -374,6 +374,12 @@ final class KeepAwakeControllerTests: XCTestCase {
         controller.update(awaitingChecks: true)
         XCTAssertTrue(controller.isActive)
 
+        var refreshes = 0
+        controller.onRefresh = { refreshes += 1 }
+        clock.advance(by: KeepAwakeController.pollInterval)
+        XCTAssertEqual(refreshes, 1, "polls under the checks' setting alone: a stale read must end")
+        XCTAssertTrue(controller.heldFor == (0, false, true), "the agents' setting off: their count isn't a reason")
+
         controller.setEnabled(true)
         controller.setEnabled(false)
         XCTAssertTrue(controller.isActive, "the agents' setting off leaves the checks' reason")
@@ -391,11 +397,41 @@ final class KeepAwakeControllerTests: XCTestCase {
         )
     }
 
+    /// A pull request holds a result Nirux waits for: a push not read yet,
+    /// checks running (a while per head: some never end), a red read for the
+    /// time a follow-up round takes. Not a stale read, nor a closed one.
+    func testChecksWatchCountsEachHeadForAWhile() {
+        func pr(_ status: String?, head: String = "a", state: GitHub.PullRequestState = .open) -> PRInfo {
+            var info = PRInfo(number: 7, state: state, isDraft: false, ciStatus: status, checks: [], reviewDecision: nil,
+                              mergeable: nil, url: "u", additions: nil, deletions: nil, changedFiles: nil)
+            info.headRefOid = head
+            return info
+        }
+        var watch = ChecksWatch()
+        func awaits(_ pullRequest: PRInfo?, readAt: TimeInterval = 0, pushed: Bool = false, now: TimeInterval) -> Bool {
+            watch.awaits([ChecksWatch.Read(id: "t", pullRequest: pullRequest, readAt: readAt, pushedRecently: pushed)], now: now)
+        }
+        XCTAssertTrue(awaits(nil, pushed: true, now: 1), "a push before any read")
+        XCTAssertFalse(awaits(pr("SUCCESS"), now: 1))
+        XCTAssertTrue(awaits(pr("PENDING"), readAt: 100, now: 100))
+        XCTAssertFalse(awaits(pr("PENDING"), readAt: 100, now: 100 + ChecksWatch.readWindow), "a stale read")
+        XCTAssertFalse(awaits(pr("PENDING", state: .closed), readAt: 100, now: 100))
+        let late = 100 + ChecksWatch.pendingLimit
+        XCTAssertTrue(awaits(pr("PENDING"), readAt: 200, now: 200))
+        XCTAssertFalse(awaits(pr("PENDING"), readAt: late + 100, now: late + 100), "checks that never end")
+        XCTAssertTrue(awaits(pr("PENDING", head: "b"), readAt: late + 200, now: late + 200), "a new head")
+        XCTAssertTrue(awaits(pr("FAILURE", head: "b"), readAt: late + 300, now: late + 300))
+        XCTAssertFalse(awaits(pr("FAILURE", head: "b"), readAt: late + 300 + ChecksWatch.failureLimit,
+                              now: late + 300 + ChecksWatch.failureLimit), "red long enough for its round")
+    }
+
     func testSettingDefaultsToOnInOlderStateFiles() throws {
         let older = try JSONDecoder().decode(PersistedSettings.self, from: Data("{}".utf8))
         XCTAssertTrue(older.keepMacAwakeWhileAgentsWork)
         XCTAssertTrue(older.keepMacAwakeWhileChecksRun)
         XCTAssertTrue(PersistedSettings().keepMacAwakeWhileAgentsWork)
+        let agentsOff = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"keepMacAwakeWhileAgentsWork":false}"#.utf8))
+        XCTAssertFalse(agentsOff.keepMacAwakeWhileChecksRun, "a user who turned keep-awake off isn't opted back in")
         var checksOff = PersistedSettings()
         checksOff.keepMacAwakeWhileChecksRun = false
         XCTAssertFalse(try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(checksOff)).keepMacAwakeWhileChecksRun)
@@ -615,14 +651,12 @@ final class KeepAwakeShellTests: XCTestCase {
                 answer.reads += 1
                 done(.success(context: context, info: PRInfo(
                     number: 7, state: .open, isDraft: false, ciStatus: answer.ciStatus, checks: [], reviewDecision: nil,
-                    mergeable: "MERGEABLE", url: "https://github.com/o/r/pull/7", additions: nil, deletions: nil, changedFiles: nil
+                    mergeable: "MERGEABLE", url: "https://example.invalid/o/r/pull/7", additions: nil, deletions: nil, changedFiles: nil
                 )))
             }
             shell.refreshStuckAgents(appIsActive: false)
             XCTAssertTrue(waitUntil("the read") { task.prInfo?.number == 7 && controller.isActive })
             XCTAssertTrue(controller.isAwaitingChecks)
-            let readAt = try XCTUnwrap(task.pullRequestReadAt)
-            XCTAssertFalse(NiruxShellView.awaitsChecks([task], now: readAt + NiruxShellView.checksReadWindow), "a read that old tells nothing")
 
             answer.ciStatus = "SUCCESS"
             XCTAssertTrue(waitUntil("a read of the ended checks") {

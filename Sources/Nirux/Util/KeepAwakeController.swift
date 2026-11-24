@@ -103,6 +103,11 @@ final class KeepAwakeController {
 
     private var isPolling: Bool { isEnabled || waitsForChecks }
 
+    /// What holds the Mac awake now, as the settings allow: the indicator's words.
+    var heldFor: (agents: Int, queue: Bool, checks: Bool) {
+        (isEnabled ? workingAgentCount : 0, isEnabled && isMergeQueueRunning, waitsForChecks && isAwaitingChecks && isOnACPower())
+    }
+
     init(
         enabled: Bool,
         waitsForChecks: Bool = false,
