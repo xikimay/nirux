@@ -172,7 +172,8 @@ extension NiruxShellView {
     /// needs: no tick keeps it current meanwhile.
     func refreshPullRequestsAway() {
         let awaited = awaitedWorkspaceIDs
-        let tiers = gitRefreshTiers
+        // On battery, those a merge wait follows only.
+        let tiers = isOnACPower() ? gitRefreshTiers : gitRefreshTiers.filter { awaited.contains($0.workspace.id) }
         let due = gitRefresh.pullRequestsDue(tiers, awaited: awaited)
         for (workspace, tier) in tiers where due.contains(where: { $0 === workspace }) {
             gitRefresh.refreshNow(workspace, tier: tier)

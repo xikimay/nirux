@@ -129,6 +129,8 @@ final class NiruxShellView: NSView {
     /// Owned by NiruxApp; nil in tests, which never touch power settings.
     weak var keepAwake: KeepAwakeController?
     var checksWatch = ChecksWatch()
+    /// The power source the away reads ask (`refreshPullRequestsAway`); tests answer for it.
+    var isOnACPower: @MainActor () -> Bool = { isOnPowerAdapter() }
 
     /// First-launch checklist state; nil for a user set up before it existed
     /// (see OnboardingChecklist.launchState).

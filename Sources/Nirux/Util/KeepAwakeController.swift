@@ -143,7 +143,11 @@ final class KeepAwakeController {
         change { $0.isAwaitingChecks = awaiting }
     }
 
-    private var reasons: [AnyHashable] { [isActive, workingAgentCount, isMergeQueueRunning, isAwaitingChecks] }
+    /// What the indicator says: the reasons the settings and the power source let hold.
+    private var reasons: [AnyHashable] {
+        let held = heldFor
+        return [isActive, held.agents, held.queue, held.checks]
+    }
 
     private func change(_ body: (KeepAwakeController) -> Void) {
         guard !isShutDown else { return }
@@ -170,7 +174,7 @@ final class KeepAwakeController {
 
     private func setSetting(_ setting: ReferenceWritableKeyPath<KeepAwakeController, Bool>, _ value: Bool) {
         guard !isShutDown, self[keyPath: setting] != value else { return }
-        let wasActive = isActive
+        let previous = reasons
         let wasPolling = isPolling
         self[keyPath: setting] = value
         if isPolling != wasPolling {
@@ -182,7 +186,7 @@ final class KeepAwakeController {
         } else if !value {
             release()
         }
-        if isActive != wasActive { onChange?() }
+        if reasons != previous { onChange?() }
     }
 
     /// App termination: release for good; later updates are ignored.

@@ -38,15 +38,16 @@ struct ChecksWatch: Equatable, Sendable {
         var next: [String: Seen] = [:]
         var awaits = false
         for read in reads {
-            if read.pushedRecently { awaits = true }
-            guard let pullRequest = read.pullRequest, pullRequest.state == .open,
-                  let readAt = read.readAt, now - readAt < Self.readWindow,
+            // Until a read says its checks settled (a fetch moves the branch too).
+            if read.pushedRecently, read.pullRequest?.ciStatus.map({ Self.limit($0) != nil }) ?? true { awaits = true }
+            guard let pullRequest = read.pullRequest, pullRequest.state == .open, let readAt = read.readAt,
                   let status = pullRequest.ciStatus, let limit = Self.limit(status)
             else { continue }
             let state = (pullRequest.headRefOid ?? pullRequest.url) + " " + status
+            // A stale read holds nothing, but keeps when its state was first seen.
             let first = seen[read.id].flatMap { $0.state == state ? $0.at : nil } ?? readAt
             next[read.id] = Seen(state: state, at: first)
-            if now - first < limit { awaits = true }
+            if now - readAt < Self.readWindow, now - first < limit { awaits = true }
         }
         seen = next
         return awaits

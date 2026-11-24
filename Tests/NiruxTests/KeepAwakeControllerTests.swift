@@ -380,7 +380,9 @@ final class KeepAwakeControllerTests: XCTestCase {
         XCTAssertEqual(refreshes, 1, "polls under the checks' setting alone: a stale read must end")
         XCTAssertTrue(controller.heldFor == (0, false, true), "the agents' setting off: their count isn't a reason")
 
+        let shown = harness.changes
         controller.setEnabled(true)
+        XCTAssertGreaterThan(harness.changes, shown, "the indicator names the agents again")
         controller.setEnabled(false)
         XCTAssertTrue(controller.isActive, "the agents' setting off leaves the checks' reason")
         controller.setWaitsForChecks(false)
@@ -423,6 +425,19 @@ final class KeepAwakeControllerTests: XCTestCase {
         XCTAssertTrue(awaits(pr("FAILURE", head: "b"), readAt: late + 300, now: late + 300))
         XCTAssertFalse(awaits(pr("FAILURE", head: "b"), readAt: late + 300 + ChecksWatch.failureLimit,
                               now: late + 300 + ChecksWatch.failureLimit), "red long enough for its round")
+        XCTAssertFalse(awaits(pr("SUCCESS", head: "d"), readAt: late + 2_000, pushed: true, now: late + 2_000),
+                       "a fetch of a branch whose checks settled")
+
+        // A red pull request in the background is read every 10 minutes: the
+        // stale moment between two reads keeps its clock.
+        var red = ChecksWatch()
+        func redAwaits(readAt: TimeInterval, now: TimeInterval) -> Bool {
+            red.awaits([ChecksWatch.Read(id: "r", pullRequest: pr("FAILURE", head: "c"), readAt: readAt, pushedRecently: false)], now: now)
+        }
+        XCTAssertTrue(redAwaits(readAt: 0, now: 0))
+        XCTAssertFalse(redAwaits(readAt: 0, now: ChecksWatch.readWindow), "stale")
+        XCTAssertTrue(redAwaits(readAt: ChecksWatch.readWindow + 5, now: ChecksWatch.readWindow + 5))
+        XCTAssertFalse(redAwaits(readAt: ChecksWatch.failureLimit, now: ChecksWatch.failureLimit), "its 15 minutes, from its first read")
     }
 
     func testSettingDefaultsToOnInOlderStateFiles() throws {
@@ -654,6 +669,11 @@ final class KeepAwakeShellTests: XCTestCase {
                     mergeable: "MERGEABLE", url: "https://example.invalid/o/r/pull/7", additions: nil, deletions: nil, changedFiles: nil
                 )))
             }
+            shell.isOnACPower = { false }
+            shell.refreshStuckAgents(appIsActive: false)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            XCTAssertEqual(answer.reads, 0, "on battery, only the pull requests a merge wait follows")
+            shell.isOnACPower = { true }
             shell.refreshStuckAgents(appIsActive: false)
             XCTAssertTrue(waitUntil("the read") { task.prInfo?.number == 7 && controller.isActive })
             XCTAssertTrue(controller.isAwaitingChecks)
