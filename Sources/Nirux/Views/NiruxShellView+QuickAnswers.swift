@@ -36,7 +36,7 @@ extension NiruxShellView {
         _ text: String, to target: NiruxNotifier.QuickReplyTarget, workspaceID: String, columnIndex: Int?
     ) {
         if answerTurnQuestion(agentUUID: target.agentUUID, turnEndedAt: target.turnEndedAt, answer: text) { return }
-        NSApp.activate(ignoringOtherApps: true)
+        sideEffects.comeToFront()
         // Where that agent is now (columns may have moved since the banner).
         if let place = liveColumn(where: { $0.agentUUID == target.agentUUID }) {
             focusWorkspace(id: place.workspace.id, column: place.columnIndex)
