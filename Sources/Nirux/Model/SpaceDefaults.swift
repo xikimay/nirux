@@ -40,6 +40,9 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Space Settings › Defaults, "Follow up on pull requests"
     /// (docs/design/pr-follow-up.md). Nil: on; only false turns it off.
     var prFollowUp: Bool?
+    /// Space Settings › Defaults, "Resume work after a relaunch"
+    /// (`RelaunchResume`). Nil: on; only false turns it off.
+    var resumeWorkOnRelaunch: Bool?
     /// Space Settings › Safety, one per `ClaudeSpaceSettings.Part`. Nil:
     /// its default.
     var claudeTrustsRepositories: Bool?
@@ -59,6 +62,7 @@ struct SpaceDefaults: Equatable, Sendable {
     var dailyPassHour: Int { leadDailyPassHour ?? DailyPass.defaultHour }
     /// Whether Nirux types the rounds its tasks' pull requests need.
     var followsUpPullRequests: Bool { prFollowUp ?? true }
+    var resumesWorkOnRelaunch: Bool { resumeWorkOnRelaunch ?? true }
 
     func isOn(_ part: ClaudeSpaceSettings.Part) -> Bool { self[keyPath: part.key] ?? part.isOnByDefault }
 
@@ -96,6 +100,7 @@ struct SpaceDefaults: Equatable, Sendable {
             (\.leadDailyPass, .leadDailyPass, false),
             (\.leadFreshStart, .leadFreshStart, false),
             (\.prFollowUp, .prFollowUp, false),
+            (\.resumeWorkOnRelaunch, .resumeWorkOnRelaunch, false),
             (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
             (\.claudeDeniesIrreversible, .claudeDeniesIrreversible, true),
             (\.claudeSandbox, .claudeSandbox, true)
@@ -208,7 +213,7 @@ struct SpaceDefaults: Equatable, Sendable {
 extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion, agent, leadAgent, claudeLaunchMode, codexLaunchMode, agyLaunchMode, environment
-        case leadStartsTasks, leadStartsMergeQueue, leadStartsMergeQueueWithoutLocalReview, leadDailyPass, leadDailyPassHour, prFollowUp
+        case leadStartsTasks, leadStartsMergeQueue, leadStartsMergeQueueWithoutLocalReview, leadDailyPass, leadDailyPassHour, prFollowUp, resumeWorkOnRelaunch
         case leadFreshStart
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
@@ -236,6 +241,7 @@ extension SpaceDefaults: Codable {
         leadDailyPassHour = ((try? container.decodeIfPresent(Int.self, forKey: .leadDailyPassHour)) ?? nil).flatMap { (0...23).contains($0) ? $0 : nil }
         prFollowUp = (try? container.decodeIfPresent(Bool.self, forKey: .prFollowUp)) ?? nil
         leadFreshStart = (try? container.decodeIfPresent(Bool.self, forKey: .leadFreshStart)) ?? nil
+        resumeWorkOnRelaunch = (try? container.decodeIfPresent(Bool.self, forKey: .resumeWorkOnRelaunch)) ?? nil
         claudeTrustsRepositories = (try? container.decodeIfPresent(Bool.self, forKey: .claudeTrustsRepositories)) ?? nil
         claudeDeniesIrreversible = (try? container.decodeIfPresent(Bool.self, forKey: .claudeDeniesIrreversible)) ?? nil
         claudeSandbox = (try? container.decodeIfPresent(Bool.self, forKey: .claudeSandbox)) ?? nil
@@ -263,6 +269,7 @@ extension SpaceDefaults: Codable {
         try container.encodeIfPresent(leadDailyPassHour, forKey: .leadDailyPassHour)
         try container.encodeIfPresent(prFollowUp, forKey: .prFollowUp)
         try container.encodeIfPresent(leadFreshStart, forKey: .leadFreshStart)
+        try container.encodeIfPresent(resumeWorkOnRelaunch, forKey: .resumeWorkOnRelaunch)
         try container.encodeIfPresent(claudeTrustsRepositories, forKey: .claudeTrustsRepositories)
         try container.encodeIfPresent(claudeDeniesIrreversible, forKey: .claudeDeniesIrreversible)
         try container.encodeIfPresent(claudeSandbox, forKey: .claudeSandbox)

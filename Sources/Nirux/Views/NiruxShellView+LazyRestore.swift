@@ -139,11 +139,56 @@ extension NiruxShellView {
     /// Resume All Agents (palette, Workspaces menu). True when one started.
     @discardableResult
     func resumeAllDeferredAgents() -> Bool {
+        resumeDeferredAgents { _, _ in true }
+    }
+
+    /// At launch: every deferred agent with "All at once"; after an unclean
+    /// exit, also the agents `RelaunchResume` names in the spaces whose
+    /// switch is on, and, either way, those last seen mid-turn are told once
+    /// to go on: a Lead notice for the resumed session, typed once its
+    /// prompt is free, never over a draft.
+    @discardableResult
+    func resumeAfterLaunch(
+        all: Bool, afterUncleanExit: Bool, store: MissionStore = .shared, now: TimeInterval = Date().timeIntervalSince1970
+    ) -> Bool {
+        let waiting = afterUncleanExit && store.ensureLoaded() ? RelaunchResume.waitingAgents(store.pendingPromptDeliveries()) : []
+        var spaceResumes: [String: Bool] = [:]
+        var continuing: [LeadNotice] = []
+        let resumed = resumeDeferredAgents { column, workspace in
+            let resumesWork = afterUncleanExit && (spaceResumes[workspace.profileID] ?? {
+                let value = SpaceDefaultsStore.defaults(forSpace: workspace.profileID).resumesWorkOnRelaunch
+                spaceResumes[workspace.profileID] = value
+                return value
+            }())
+            let candidate = RelaunchResume.Candidate(
+                agentUUID: column.agentUUID, lastStatus: column.deferredAgent?.lastStatus,
+                isLead: workspace.isLead && column.agentUUID != nil && column.agentUUID == workspace.leadAgentUUID
+            )
+            let resumes = all || (resumesWork && RelaunchResume.resumes(candidate, messageWaitsFor: waiting))
+            if resumes, resumesWork, RelaunchResume.continues(candidate), let agentUUID = column.agentUUID {
+                var notice = LeadNotice(
+                    workspaceID: workspace.id, agentUUID: agentUUID, text: "\(MissionPromptText.prefix) \(RelaunchResume.continueText)",
+                    queuedAt: now
+                )
+                notice.forSessionID = column.deferredAgent?.launch.sessionID
+                continuing.append(notice)
+            }
+            return resumes
+        }
+        pendingLeadNotices += continuing
+        if !continuing.isEmpty { typeLeadNotices() }
+        return resumed
+    }
+
+    /// The deferred agents `include` takes, but a Codex whose launch mode
+    /// would ask first.
+    private func resumeDeferredAgents(where include: (ColumnState, WorkspaceState) -> Bool) -> Bool {
         var resumed = false
         let liveSessions = Self.liveSessionIDs(in: workspaces)
         let settingsFiles = claudeSpaceSettingsFiles(for: workspaces.filter { $0.columns.contains(where: \.isAwaitingResume) })
         for workspace in workspaces {
-            for column in workspace.columns where column.isAwaitingResume && !needsCodexModeConfirmation(column, in: workspace) {
+            for column in workspace.columns where column.isAwaitingResume && !needsCodexModeConfirmation(column, in: workspace)
+                && include(column, workspace) {
                 resumed = resumeDeferredAgent(column, in: workspace, liveSessions: liveSessions, settingsFiles: settingsFiles) || resumed
             }
         }
