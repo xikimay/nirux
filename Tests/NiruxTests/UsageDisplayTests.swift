@@ -78,13 +78,15 @@ final class UsageDisplayTests: XCTestCase {
     }
 
     @MainActor func testAColumnIsAtRestOnlyAtItsPromptAskingNothing() throws {
-        let idle = ColumnInfo(
-            index: 0, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
-            webTitle: nil, terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil
-        )
+        func column(_ status: AgentStatus) -> ColumnInfo {
+            ColumnInfo(
+                index: 0, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
+                webTitle: nil, terminalTitle: nil, agentStatus: status, isEditor: false, editorFileName: nil
+            )
+        }
+        let idle = column(.idle)
         XCTAssertTrue(idle.isAtRest)
-        var working = idle
-        working.agentStatus = .working
+        let working = column(.working)
         var asked = idle
         asked.openDialog = .askedInReply("Queue #824 now or wait?")
         var turn = idle
@@ -129,7 +131,7 @@ final class UsageDisplayTests: XCTestCase {
         let latest = try XCTUnwrap(UsageReport(sessions: [session], now: now).latestSessions["lead"])
         func starts(
             _ sessionID: String? = "s", runningSince: TimeInterval = 0, context: Int = 300_000, spaceAllows: Bool = true,
-            _ holdings: LeadHoldings = LeadHoldings()
+            holdings: LeadHoldings = LeadHoldings()
         ) -> Bool {
             var latest = latest
             latest.contextTokens = context
@@ -150,7 +152,7 @@ final class UsageDisplayTests: XCTestCase {
         for (key, why) in held {
             var holdings = LeadHoldings()
             holdings[keyPath: key] = true
-            XCTAssertFalse(starts(holdings), why)
+            XCTAssertFalse(starts(holdings: holdings), why)
         }
     }
 
