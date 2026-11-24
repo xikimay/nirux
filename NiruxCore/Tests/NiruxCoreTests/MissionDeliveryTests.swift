@@ -2,10 +2,20 @@ import Foundation
 @testable import NiruxCore
 import Testing
 
+/// Serialized: the waiter tests time a wait the racing tests' threads would starve.
+@Suite(.serialized)
 struct MissionDeliveryTests {
     typealias Letter = MissionMailbox.Letter
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     var mailbox: MissionMailbox { MissionMailbox(root: root) }
+
+    /// `body` on a thread of its own, `delay` from now: no queue's width holds it back.
+    static func after(_ delay: TimeInterval, _ body: @escaping @Sendable () -> Void) {
+        Thread.detachNewThread {
+            Thread.sleep(forTimeInterval: delay)
+            body()
+        }
+    }
 
     @Test(arguments: [
         ([], false, nil),
@@ -230,7 +240,7 @@ struct MissionDeliveryTests {
     @Test func aWaiterGetsWhatIsPostedWhileItWaits() throws {
         defer { try? FileManager.default.removeItem(at: root) }
         let box = mailbox
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) {
+        Self.after(0.2) {
             _ = try? box.post(Letter(id: "late", text: "hello", postedAt: 1), to: "session")
         }
         let letters = box.letters(for: "session", whileRunning: getpid(), until: Date() + 10)
@@ -244,7 +254,7 @@ struct MissionDeliveryTests {
         parent.executableURL = URL(fileURLWithPath: "/bin/sleep")
         parent.arguments = ["30"]
         try parent.run()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { parent.terminate() }
+        Self.after(0.2) { parent.terminate() }
         let started = Date()
         #expect(mailbox.letters(for: "session", whileRunning: parent.processIdentifier, until: started + 20).isEmpty)
         #expect(Date().timeIntervalSince(started) < 10)
@@ -257,8 +267,8 @@ struct MissionDeliveryTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let box = mailbox
         try box.noteRunning("first", in: getpid())
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { try? box.noteRunning("first", in: getpid()) }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) { try? box.noteRunning("cleared", in: getpid()) }
+        Self.after(0.2) { try? box.noteRunning("first", in: getpid()) }
+        Self.after(0.4) { try? box.noteRunning("cleared", in: getpid()) }
         let started = Date()
         #expect(box.letters(for: "first", whileRunning: getpid(), until: started + 20).isEmpty)
         #expect(Date().timeIntervalSince(started) > 0.3, "the same conversation again keeps it")

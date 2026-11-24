@@ -66,6 +66,8 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
         let agentUUID = UUID().uuidString
         lead.workspace.addColumn(command: standIn.command(), agentUUID: agentUUID, cwd: harness.repo)
         let column = try XCTUnwrap(lead.workspace.columns.first { $0.agentUUID == agentUUID })
+        // A turn's end would post a system notification, which xctest can't.
+        column.onAgentAttention = { _ in }
         harness.waitUntil("its claude") { column.pty?.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
         let workspaceID = UUID().uuidString
         let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
@@ -164,6 +166,7 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
             defer { standIn.remove() }
             task.addColumn(command: standIn.command(), agentUUID: mission.childAgentUUID, cwd: harness.repo)
             let column = try XCTUnwrap(task.columns.first { $0.agentUUID == mission.childAgentUUID })
+            column.onAgentAttention = { _ in }
             harness.waitUntil("its claude") { column.pty?.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
             let session = UUID().uuidString
             for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit, .stop] {
