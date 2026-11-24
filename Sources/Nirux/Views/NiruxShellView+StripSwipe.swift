@@ -1,4 +1,5 @@
 import AppKit
+import GhosttyTerminal
 import WebKit
 
 /// Two fingers over the columns, as in a scrolling window manager. Sideways,
@@ -9,7 +10,11 @@ extension NiruxShellView {
     /// The window's scroll events, before the view under the pointer: true
     /// when the strip takes this one.
     func scrolled(_ event: NSEvent) -> Bool {
-        guard event.window === window, let superview else { return false }
+        guard event.window === window, let superview else {
+            // Fingers down over another window: a swipe whose end never came lets go.
+            if !event.phase.isDisjoint(with: [.mayBegin, .began]) { letGoOfStrip() }
+            return false
+        }
         return scrolled(StripSwipe.Scroll(event), over: self.hitTest(superview.convert(event.locationInWindow, from: nil)))
     }
 
@@ -21,8 +26,12 @@ extension NiruxShellView {
         }
         guard var swipe = stripSwipe else { return false }
         guard let workspace = activeWorkspace, workspace.columns.map(\.id) == swipe.columns else {
-            letGoOfStrip()
-            return false
+            // The cards changed under the fingers: the strip lets go, and
+            // keeps the rest of a swipe it had from the content.
+            releaseHold(of: swipe)
+            swipe.letGo()
+            stripSwipe = swipe
+            return swipe.isStrips
         }
         let step = swipe.scrolled(scroll)
         stripSwipe = swipe
@@ -43,10 +52,10 @@ extension NiruxShellView {
     /// Two fingers double-tapping a column whose content leaves them (a
     /// terminal does, and a page that doesn't zoom): the column takes the
     /// focus and fills the window or, filling it, goes back to its width.
-    /// False away from the columns.
-    func fitColumn(at point: NSPoint) -> Bool {
-        guard let workspace = activeWorkspace, viewport.frame.contains(convert(point, from: nil)),
-              let index = workspace.columns.firstIndex(where: { !$0.isClosing && $0.view.bounds.contains($0.view.convert(point, from: nil)) })
+    /// False over anything else (the sidebar, the space plan).
+    func fitColumn(over hit: NSView?) -> Bool {
+        guard let workspace = activeWorkspace, let hit,
+              let index = workspace.columns.firstIndex(where: { !$0.isClosing && hit.isDescendant(of: $0.view) })
         else { return false }
         workspace.columns[index].toggleFit()
         if index == workspace.focusedIndex { relayout(animated: true) } else { focusColumnByIndex(index) }
@@ -55,11 +64,15 @@ extension NiruxShellView {
     }
 
     /// What the content under the fingers can do sideways, from `view` up
-    /// to the workspace. A scroll view can while it isn't at that end. A web
-    /// page says so itself, but for the history its own swipe goes through.
-    static func reach(under view: NSView, in workspace: NSView) -> (toStart: StripSwipe.Reach, toEnd: StripSwipe.Reach) {
+    /// to the workspace. A scroll view can while it isn't at that end, and
+    /// a terminal while its program owns the mouse (vim, tmux). A web page
+    /// says so itself, but for the history its own swipe goes through.
+    static func reach(
+        under view: NSView, in workspace: NSView, ownsMouse: (TerminalView) -> Bool = { $0.isMouseCaptured }
+    ) -> (toStart: StripSwipe.Reach, toEnd: StripSwipe.Reach) {
         var reach = (toStart: StripSwipe.Reach.cannot, toEnd: StripSwipe.Reach.cannot)
         for view in sequence(first: view, next: \.superview).prefix(while: { $0 !== workspace }) {
+            if let terminal = view as? TerminalView, ownsMouse(terminal) { return (.can, .can) }
             if let web = view as? WKWebView {
                 let history = web.allowsBackForwardNavigationGestures
                 return (history && web.canGoBack ? .can : .asks, history && web.canGoForward ? .can : .asks)
@@ -95,26 +108,27 @@ extension NiruxShellView {
         case .settle(let index, let camera, let velocity):
             workspace.heldCamera = nil
             if index == workspace.focusedIndex { relayout(animated: true) } else { focusColumnByIndex(index) }
-            glideStrip(of: workspace, fromCamera: camera, velocity: velocity)
+            workspace.glideStrip(fromCamera: camera, velocity: velocity, moves: agentLightsMayMove)
         }
     }
 
-    /// The fingers' glide off the strip, while the interface may move; else
-    /// the strip is at its place at once.
-    private func glideStrip(of workspace: WorkspaceState, fromCamera x: CGFloat, velocity: CGFloat) {
-        guard agentLightsMayMove else { return workspace.endSlide() }
-        workspace.glideStrip(fromCamera: x, velocity: velocity)
+    /// The workspace whose camera the fingers hold.
+    var swipedWorkspace: WorkspaceState? {
+        guard let swipe = stripSwipe, swipe.holdsCamera else { return nil }
+        return workspaces.first { $0.columns.contains { swipe.columns.contains($0.id) } }
     }
 
-    /// A swipe gone before its end (another workspace on screen, a card
-    /// added or closed, fingers down again): the camera goes where the strip
-    /// wants it.
+    /// A swipe gone before its end (fingers down again): the camera goes
+    /// where the strip wants it.
     private func letGoOfStrip() {
         guard let swipe = stripSwipe else { return }
+        releaseHold(of: swipe)
         stripSwipe = nil
-        let held = workspaces.filter { $0.columns.contains { swipe.columns.contains($0.id) } && $0.heldCamera?.isDrag == true }
-        guard swipe.holdsCamera, !held.isEmpty else { return }
-        for workspace in held { workspace.heldCamera = nil }
+    }
+
+    private func releaseHold(of swipe: StripSwipe) {
+        guard swipe.holdsCamera, let workspace = swipedWorkspace else { return }
+        workspace.heldCamera = nil
         relayout(animated: true)
     }
 }

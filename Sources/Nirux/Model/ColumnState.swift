@@ -28,8 +28,11 @@ final class ColumnState {
     /// Column width as a fraction of the columns viewport (0.15…2.0).
     /// Freeform (drag the resize handles); the ColumnWidth presets are just
     /// named stops the width cycler snaps to.
-    var widthFraction: CGFloat = ColumnWidth.half.fraction
-    /// The width a fit to the window (`toggleFit`) comes back to.
+    var widthFraction: CGFloat = ColumnWidth.half.fraction {
+        didSet { if oldValue == ColumnWidth.full.fraction { unfitFraction = nil } }
+    }
+    /// The width a fit to the window (`toggleFit`) comes back to, while
+    /// the column stays fitted.
     private var unfitFraction: CGFloat?
     private(set) var pty: PtySession?
     /// Close in flight: ⌘W removes the column after its exit animation.

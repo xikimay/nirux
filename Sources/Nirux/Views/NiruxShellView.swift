@@ -739,7 +739,8 @@ final class NiruxShellView: NSView {
 
     /// A two-finger double tap the views under the fingers leave.
     override func smartMagnify(with event: NSEvent) {
-        if !fitColumn(at: event.locationInWindow) { super.smartMagnify(with: event) }
+        let hit = superview.flatMap { hitTest($0.convert(event.locationInWindow, from: nil)) }
+        if !fitColumn(over: hit) { super.smartMagnify(with: event) }
     }
 
     override func viewDidMoveToWindow() {
@@ -1242,8 +1243,8 @@ extension NiruxShellView {
         let wait = NSEvent.pressedMouseButtons & 1 != 0
             ? NSEvent.doubleClickInterval : NSEvent.doubleClickInterval - sideEffects.secondsSinceMouseUp()
         guard wait <= 0 else { return scheduleCameraRelease(after: wait) }
-        // A dragged edge's or a swipe's hold ends with them.
-        let held = workspaces.filter { $0.heldCamera.map { !$0.isDrag } ?? false }
+        // A swipe under way keeps its hold.
+        let held = workspaces.filter { $0.heldCamera != nil && $0 !== swipedWorkspace }
         guard !held.isEmpty else { return }
         for workspace in held { workspace.heldCamera = nil }
         relayout(animated: true)

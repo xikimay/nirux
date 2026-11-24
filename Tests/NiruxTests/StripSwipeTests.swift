@@ -86,6 +86,16 @@ final class StripSwipeTests: XCTestCase {
         XCTAssertGreaterThan(StripSwipe.band(-1_000_000, viewport: 1000), -1000)
     }
 
+    /// Caught on its way back from past an end, the strip goes on from
+    /// where it shows.
+    func testAStripCaughtPastItsEndGoesOnFromWhereItShows() throws {
+        var swipe = swipe(camera: 1028, focus: 4)
+        guard case .follow(let camera) = move(&swipe, [-8]).first else { return XCTFail("follows") }
+        XCTAssertGreaterThan(camera, 1028)
+        XCTAssertLessThan(camera, 1036)
+        XCTAssertEqual(StripSwipe.band(StripSwipe.unband(-300, viewport: 1000), viewport: 1000), -300, accuracy: 0.001)
+    }
+
     func testLetGoSettlesOnTheCardTheFingersSpeedCarriesTo() {
         // Slowly, a quarter of the way, and still before lifting: back.
         var short = swipe()
@@ -131,6 +141,12 @@ final class StripSwipeTests: XCTestCase {
         _ = move(&content, [-20, -20])
         _ = content.scrolled(.init(dx: 0, phase: .ended, time: 10.02))
         XCTAssertEqual(content.scrolled(.init(dx: -30, phase: [], momentum: .began, time: 10.03)), .pass)
+        // Let go before its end (the cards changed): the rest stays the strip's.
+        var gone = swipe()
+        _ = move(&gone, [-20])
+        gone.letGo()
+        XCTAssertFalse(gone.holdsCamera)
+        XCTAssertEqual(gone.scrolled(.init(dx: -20, phase: .changed, time: 10.01)), .swallow)
         // Lifted before showing a way: the content's.
         var tap = swipe()
         _ = move(&tap, [-2])

@@ -106,6 +106,16 @@ final class StripSwipeShellTests: XCTestCase {
         }
     }
 
+    /// Lifted just short of its card at speed, the strip leaves no faster
+    /// than its spring's pace, which would carry it past the card.
+    func testTheGlideNeverPassesItsCard() throws {
+        try withShell { _, workspace in
+            workspace.glideStrip(fromCamera: camera(workspace, focus: 1) - 10, velocity: 1000, moves: true)
+            let glide = try XCTUnwrap(try strip(workspace).animation(forKey: "colSlide") as? CASpringAnimation)
+            XCTAssertEqual(glide.initialVelocity, 2 * .pi / WorkspaceState.slideDuration, accuracy: 0.000_1)
+        }
+    }
+
     func testWithReduceMotionTheStripIsAtItsCardAtOnce() throws {
         try withShell(reducesMotion: true) { shell, workspace in
             swipe(shell, over: try terminal(workspace, 1), Array(repeating: -10, count: 10))
@@ -144,8 +154,28 @@ final class StripSwipeShellTests: XCTestCase {
             swipe(shell, over: hit, [-20, -20], from: 0, lifts: false)
             XCTAssertNotNil(workspace.heldCamera)
             workspace.addColumn()
-            XCTAssertFalse(shell.scrolled(.init(dx: -20, phase: .changed, time: 0.03), over: hit))
+            XCTAssertTrue(shell.scrolled(.init(dx: -20, phase: .changed, time: 0.03), over: hit), "the rest stays the strip's")
             XCTAssertNil(workspace.heldCamera)
+            XCTAssertTrue(shell.scrolled(.init(dx: -20, phase: [], momentum: .began, time: 0.04), over: hit))
+
+            // Fingers down over another window.
+            swipe(shell, over: try terminal(workspace, 1), [-20, -20], from: 0, lifts: false)
+            XCTAssertNotNil(workspace.heldCamera)
+            XCTAssertFalse(shell.scrolled(try scrollEvent(phase: 128)))
+            XCTAssertNil(workspace.heldCamera)
+        }
+    }
+
+    /// A program that owns the mouse (vim, tmux) keeps a sideways scroll.
+    func testATerminalWhoseProgramOwnsTheMouseKeepsTheSwipe() throws {
+        try withShell { _, workspace in
+            let terminal = try terminal(workspace, 1)
+            let owned = NiruxShellView.reach(under: terminal, in: workspace.containerView) { _ in true }
+            XCTAssertEqual(owned.toStart, .can)
+            XCTAssertEqual(owned.toEnd, .can)
+            let plain = NiruxShellView.reach(under: terminal, in: workspace.containerView)
+            XCTAssertEqual(plain.toStart, .cannot)
+            XCTAssertEqual(plain.toEnd, .cannot)
         }
     }
 
@@ -162,7 +192,7 @@ final class StripSwipeShellTests: XCTestCase {
             XCTAssertEqual(swipe(shell, over: page, [-20, -20], lifts: false), [false, false])
             XCTAssertNil(workspace.heldCamera)
 
-            page.passOnUnhandled(try scrollEvent())
+            page.passOnUnhandled(try scrollEvent(phase: 2))
             XCTAssertEqual(workspace.lastCameraX, start + 40, "caught up with the fingers")
             XCTAssertTrue(shell.scrolled(.init(dx: -10, phase: .changed, time: 0.03), over: page))
             XCTAssertEqual(workspace.lastCameraX, start + 50)
@@ -198,31 +228,34 @@ final class StripSwipeShellTests: XCTestCase {
 
     func testTwoFingersDoubleTappingFitAColumnToTheWindowAndBack() throws {
         try withShell { shell, workspace in
-            let focused = workspace.columns[1].view
-            XCTAssertTrue(shell.fitColumn(at: focused.convert(NSPoint(x: focused.bounds.midX, y: focused.bounds.midY), to: nil)))
+            XCTAssertTrue(shell.fitColumn(over: try terminal(workspace, 1)))
             XCTAssertEqual(workspace.columns[1].widthFraction, 1)
-            XCTAssertTrue(shell.fitColumn(at: focused.convert(NSPoint(x: focused.bounds.midX, y: focused.bounds.midY), to: nil)))
+            XCTAssertTrue(shell.fitColumn(over: workspace.columns[1].header))
             XCTAssertEqual(workspace.columns[1].widthFraction, 0.4)
 
-            // A card partly in view takes the focus too.
-            let next = workspace.columns[2].view
-            let point = next.convert(NSPoint(x: 20, y: next.bounds.midY), to: nil)
-            XCTAssertTrue(shell.viewport.frame.contains(shell.convert(point, from: nil)))
-            XCTAssertTrue(shell.fitColumn(at: point))
+            // Another card takes the focus too.
+            XCTAssertTrue(shell.fitColumn(over: try terminal(workspace, 2)))
             XCTAssertEqual(workspace.focusedIndex, 2)
             XCTAssertEqual(workspace.columns[2].widthFraction, 1)
+            // Left at full width some other way, it forgets the width it had.
+            workspace.columns[2].widthFraction = 2.0 / 3
+            workspace.columns[2].widthFraction = 1
+            XCTAssertTrue(shell.fitColumn(over: try terminal(workspace, 2)))
+            XCTAssertEqual(workspace.columns[2].widthFraction, 0.5)
 
-            // The first card's left part, out of view under the sidebar.
-            let hidden = workspace.columns[0].view
-            let under = hidden.convert(NSPoint(x: 10, y: hidden.bounds.midY), to: nil)
-            XCTAssertFalse(shell.viewport.frame.contains(shell.convert(under, from: nil)))
-            XCTAssertFalse(shell.fitColumn(at: under), "away from the columns in view")
-            XCTAssertEqual(workspace.columns[0].widthFraction, 0.4)
+            // Over what lies on the work (the space plan) or beside it.
+            let middle = NSPoint(x: shell.viewport.bounds.midX, y: shell.viewport.bounds.midY)
+            let overlay = NSView(frame: NSRect(x: middle.x - 50, y: middle.y - 50, width: 100, height: 100))
+            shell.viewport.addSubview(overlay)
+            for view in [overlay, shell.sidebar] {
+                XCTAssertFalse(shell.fitColumn(over: view))
+            }
+            XCTAssertEqual(workspace.columns.map(\.widthFraction), [0.4, 0.4, 0.5, 0.4, 0.4, 0.4])
         }
     }
 
-    /// A click's hold lets go once the click is over; fingers swiping
-    /// meanwhile keep theirs.
+    /// Holds let go once a click is over; fingers swiping meanwhile keep
+    /// theirs.
     func testAClicksReleaseLeavesTheFingersHold() throws {
         try withShell { shell, workspace in
             shell.addWorkspace(title: "other", cwd: NSTemporaryDirectory())
@@ -230,10 +263,11 @@ final class StripSwipeShellTests: XCTestCase {
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }))
             shell.relayout(animated: false)
             shell.sideEffects.secondsSinceMouseUp = { .infinity }
-            other.holdCamera(for: 0)
+            // A dragged edge's hold that missed its end goes with the click's.
+            other.heldCamera = WorkspaceState.CameraHold(x: 0, column: other.columns[0].id, isDrag: true)
             shell.clickBegan(onColumn: nil)
             swipe(shell, over: try terminal(workspace, 1), [-20, -20], lifts: false)
-            waitUntil("the click's hold let go", timeout: NSEvent.doubleClickInterval + 3) { other.heldCamera == nil }
+            waitUntil("the other hold let go", timeout: NSEvent.doubleClickInterval + 3) { other.heldCamera == nil }
             XCTAssertEqual(workspace.heldCamera?.isDrag, true)
         }
     }
@@ -242,9 +276,10 @@ final class StripSwipeShellTests: XCTestCase {
         (view as? WKWebView) ?? view.subviews.lazy.compactMap(page(in:)).first
     }
 
-    private func scrollEvent() throws -> NSEvent {
+    /// A scroll event of no window, its phase as `CGScrollPhase` gives it.
+    private func scrollEvent(phase: Int64) throws -> NSEvent {
         let event = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: 0, wheel2: -10, wheel3: 0))
-        event.setIntegerValueField(.scrollWheelEventScrollPhase, value: 2)
+        event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
         return try XCTUnwrap(NSEvent(cgEvent: event))
     }
 }

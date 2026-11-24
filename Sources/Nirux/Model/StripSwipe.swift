@@ -65,6 +65,8 @@ struct StripSwipe {
     /// Toward the strip's start (`dx` > 0: what lies left comes into view)
     /// and toward its end.
     let reach: (toStart: Reach, toEnd: Reach)
+    /// The camera where the swipe found it, before the rubber band: a strip
+    /// caught on its way back from past an end goes on from where it shows.
     let start: CGFloat
     /// Each card's camera (`WorkspaceState.camera(for:focus:viewport:)`).
     let stops: [CGFloat]
@@ -77,13 +79,23 @@ struct StripSwipe {
         began: TimeInterval, reach: (toStart: Reach, toEnd: Reach), camera: CGFloat,
         stops: [CGFloat], focus: Int, viewport: CGFloat, columns: [UUID] = []
     ) {
-        (self.began, self.latest, self.reach, self.start) = (began, began, reach, camera)
+        (self.began, self.latest, self.reach) = (began, began, reach)
         (self.stops, self.focus, self.viewport, self.columns) = (stops, focus, viewport, columns)
-        samples = [(began, camera)]
+        let low = stops.min() ?? camera, high = stops.max() ?? camera
+        let held = min(max(camera, low), high)
+        start = held + Self.unband(camera - held, viewport: viewport)
+        samples = [(began, start)]
     }
 
+    /// Whether the strip has the swipe.
+    var isStrips: Bool { owner == .strip }
     /// Whether the fingers hold the strip.
     var holdsCamera: Bool { owner == .strip && !settled }
+
+    /// The strip lets go before the swipe's end: nothing more of it moves it.
+    mutating func letGo() {
+        settled = true
+    }
 
     mutating func scrolled(_ scroll: Scroll) -> Step {
         // A mouse's wheel has no phase: the content's.
@@ -176,5 +188,12 @@ struct StripSwipe {
         let reach = max(viewport, 1)
         let shown = (1 - 1 / (abs(past) * 0.55 / reach + 1)) * reach
         return past < 0 ? -shown : shown
+    }
+
+    /// How far past its end a strip shown `shown` past it was pulled.
+    static func unband(_ shown: CGFloat, viewport: CGFloat) -> CGFloat {
+        let reach = max(viewport, 1), distance = min(abs(shown), reach - 1)
+        let past = distance * reach / ((reach - distance) * 0.55)
+        return shown < 0 ? -past : past
     }
 }

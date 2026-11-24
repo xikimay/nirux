@@ -1159,16 +1159,18 @@ extension WorkspaceState {
     var shownCameraX: CGFloat { -shownStripX }
 
     /// The strip, laid out at its place, glides there on a spring from where
-    /// the camera was at `x`, leaving at `velocity` (camera points a second).
-    func glideStrip(fromCamera x: CGFloat, velocity: CGFloat) {
+    /// the camera was at `x`, leaving at `velocity` (camera points a
+    /// second); while the interface may not `move`, it is there at once.
+    func glideStrip(fromCamera x: CGFloat, velocity: CGFloat, moves: Bool) {
         let offset = -x - stripView.frame.origin.x
-        guard let layer = stripView.layer, abs(offset) >= 0.5 else { return endSlide() }
+        guard moves, let layer = stripView.layer, abs(offset) >= 0.5 else { return endSlide() }
         let glide = CASpringAnimation(perceptualDuration: Self.slideDuration, bounce: 0)
         glide.keyPath = "transform.translation.x"
         glide.fromValue = offset
         glide.toValue = 0
-        // In lengths of the way a second, toward its end.
-        glide.initialVelocity = velocity / offset
+        // In lengths of the way a second, toward its end; faster than the
+        // spring's own pace, it would pass the card.
+        glide.initialVelocity = min(velocity / offset, 2 * .pi / Self.slideDuration)
         glide.duration = glide.settlingDuration
         layer.add(glide, forKey: Self.slideKey)
     }
