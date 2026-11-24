@@ -418,8 +418,14 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   stops loudly if one doesn't read merged within 3 minutes. The post-merge
   workflow runs once per train, on its merge. Nirux deletes the train's
   branch once it landed, or when the train stops before it has a pull request
-  (never one someone else pushed to); a stop that leaves the train's pull
-  request open leaves its branch too. Agents' branches are never deleted.
+  (never one someone else pushed to). A train's pull request merged at the
+  train's own head by someone else (GitHub's auto-merge armed as a backstop)
+  is its landing all the same, checked as the queue's own merge is: a merge
+  commit of that head on the tip the train was tested on. On another tip, or
+  as a squash or a rebase, the queue stops and says so; merged at another
+  head, it stops too. Auto-merge armed on the train's own pull request
+  doesn't stop it. A
+  stop that leaves the train's pull request open leaves its branch too. Agents' branches are never deleted.
 
 For each PR in Standard, in order:
 

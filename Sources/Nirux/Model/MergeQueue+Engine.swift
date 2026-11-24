@@ -538,7 +538,7 @@ extension MergeQueue {
 
         /// Why a pull request can't go on, at any step: not open, a draft,
         /// another base, a fork, auto-merge, GitHub's merge queue.
-        func problem(with pullRequest: PullRequestSnapshot) -> StopReason? {
+        func problem(with pullRequest: PullRequestSnapshot, allowingAutoMerge: Bool = false) -> StopReason? {
             let number = "#\(pullRequest.number)"
             let url = pullRequest.url
             if !pullRequest.isOpen {
@@ -555,7 +555,7 @@ extension MergeQueue {
                 return StopReason(kind: .notMergeable, message: "\(number) comes from another repository (a fork): the queue "
                     + "only merges branches of \(settings.repository).", url: url)
             }
-            if pullRequest.hasAutoMerge {
+            if pullRequest.hasAutoMerge, !allowingAutoMerge {
                 return StopReason(kind: .notMergeable, message: "\(number) is set to auto-merge: GitHub could merge it at any "
                     + "moment, without waiting for the post-merge workflow. Disable auto-merge (gh pr merge "
                     + "\(pullRequest.number) --disable-auto), then start again.", url: url)
