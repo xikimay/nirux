@@ -156,6 +156,19 @@ struct ShellSideEffects {
     }
     var stopWatchingUserInput: @MainActor (Any) -> Void = { NSEvent.removeMonitor($0) }
 
+    /// Hands each scroll the app receives to `takes` before the view under
+    /// the pointer; one it takes goes no further (`StripSwipe`). Stopped by
+    /// `stopWatchingUserInput`.
+    var watchScrolls: @MainActor (@escaping @MainActor (NSEvent) -> Bool) -> Any? = { takes in
+        NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            MainActor.assumeIsolated { takes(event) } ? nil : event
+        }
+    }
+
+    /// Whether System Settings' "Swipe between pages" scrolls with two
+    /// fingers, which the strip's swipe follows.
+    var swipesBetweenPages: @MainActor () -> Bool = { NSEvent.isSwipeTrackingFromScrollEventsEnabled }
+
     /// Tells a column's terminal whether it is on screen, so it draws or
     /// rests (see `NiruxShellView.syncTerminalOcclusion`).
     var setSurfaceVisible: @MainActor (ColumnState, Bool) -> Void = { column, visible in

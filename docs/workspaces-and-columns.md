@@ -31,6 +31,8 @@ In a row's `⋯` menu:
 
 A workspace's columns sit side by side. `Cmd+T` adds a terminal, `Cmd+B` a browser, and `Open Editor` in the command palette an editor. Drag an edge of the column you work in to resize it: in the middle of the window it grows on both sides and its two neighbours give way alike; elsewhere the neighbour across that edge does. It stops at a third, a half and two thirds of the window, and a double-click sets it back to half. `Cmd+E` steps through preset widths. When the columns don't fit in the window, the one you work in comes to the middle; at either end of the row, the row stops at the window's edge.
 
+On a trackpad, two fingers moving sideways over the columns slide the row. It follows your fingers, stretches at either end, and settles on the column your fingers' speed carries it to, which becomes the one you work in. What lies under your fingers scrolls first: a long line in the editor, a wide page or table, the browser's back and forward. Only a scroll it can't take moves the row. The row slides only while System Settings › Trackpad › More Gestures › Swipe between pages scrolls with two fingers. Double-tapping with two fingers (Smart zoom, in Scroll & Zoom) fits the column under them to the window, and a second double tap sets it back.
+
 ### Terminals
 
 Terminals are drawn by Ghostty's engine and follow the appearance settings of your [Ghostty configuration](terminal-appearance.md).

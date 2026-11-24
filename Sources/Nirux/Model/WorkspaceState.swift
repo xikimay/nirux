@@ -1128,9 +1128,9 @@ extension WorkspaceState {
 
     /// Where the camera stays while the pointer works on a card. A click's
     /// (`NiruxShellView.clickBegan`) lasts until the click is over, while
-    /// its card has the focus, within the strip; a dragged edge's lasts
-    /// until let go, past the strip's ends too, so that its last edge
-    /// dragged in stays under the pointer.
+    /// its card has the focus, within the strip; a dragged edge's, or
+    /// swiping fingers', lasts until let go, past the strip's ends too, so
+    /// that its last edge dragged in stays under the pointer.
     struct CameraHold {
         var x: CGFloat
         var column: UUID
@@ -1144,6 +1144,38 @@ extension WorkspaceState {
         stripView.layer?.removeAnimation(forKey: Self.slideKey)
         lastCameraX = -stripView.frame.origin.x
         heldCamera = columns[safe: index].map { CameraHold(x: lastCameraX, column: $0.id) }
+    }
+
+    /// Fingers swiping hold the camera at `x` (`StripSwipe`), past the
+    /// strip's ends too: a slide on its way stops there.
+    func holdCamera(at x: CGFloat) {
+        endSlide()
+        stripView.frame.origin.x = -x
+        lastCameraX = x
+        heldCamera = columns[safe: focusedIndex].map { CameraHold(x: x, column: $0.id, isDrag: true) }
+    }
+
+    /// Where the camera shows, a slide on its way included.
+    var shownCameraX: CGFloat { -shownStripX }
+
+    /// The strip, laid out at its place, glides there on a spring from where
+    /// the camera was at `x`, leaving at `velocity` (camera points a second).
+    func glideStrip(fromCamera x: CGFloat, velocity: CGFloat) {
+        let offset = -x - stripView.frame.origin.x
+        guard let layer = stripView.layer, abs(offset) >= 0.5 else { return endSlide() }
+        let glide = CASpringAnimation(perceptualDuration: Self.slideDuration, bounce: 0)
+        glide.keyPath = "transform.translation.x"
+        glide.fromValue = offset
+        glide.toValue = 0
+        // In lengths of the way a second, toward its end.
+        glide.initialVelocity = velocity / offset
+        glide.duration = glide.settlingDuration
+        layer.add(glide, forKey: Self.slideKey)
+    }
+
+    /// A slide on its way is where it goes at once.
+    func endSlide() {
+        stripView.layer?.removeAnimation(forKey: Self.slideKey)
     }
 
     /// Where the strip shows: its place, plus a slide's offset on its way.

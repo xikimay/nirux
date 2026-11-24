@@ -29,6 +29,8 @@ final class ColumnState {
     /// Freeform (drag the resize handles); the ColumnWidth presets are just
     /// named stops the width cycler snaps to.
     var widthFraction: CGFloat = ColumnWidth.half.fraction
+    /// The width a fit to the window (`toggleFit`) comes back to.
+    private var unfitFraction: CGFloat?
     private(set) var pty: PtySession?
     /// Close in flight: ⌘W removes the column after its exit animation.
     var isClosing = false
@@ -592,6 +594,12 @@ final class ColumnState {
         NiruxDebugLog.log("cycleWidth -> \(widthFraction)")
     }
 
+    /// Fills the window or, filling it, goes back to the width it had
+    /// (`ColumnWidth.fitToggled`).
+    func toggleFit() {
+        (widthFraction, unfitFraction) = ColumnWidth.fitToggled(widthFraction, unfit: unfitFraction)
+    }
+
     /// AgentHookCenter entry point: the agent in this column just asked for
     /// attention — forward to the workspace-level notification wiring.
     func notifyAgentAttention(reason: AgentAttentionReason?) {
@@ -974,6 +982,12 @@ extension ColumnState: TerminalSurfaceHoverLinkDelegate {
 
 enum ColumnWidth: CaseIterable {
     case full, twoThirds, half, third, quarter
+
+    /// A fit's width, and the one to come back to: a column filling the
+    /// window goes back to `unfit` (half without one); any other fills it.
+    static func fitToggled(_ fraction: CGFloat, unfit: CGFloat?) -> (fraction: CGFloat, unfit: CGFloat?) {
+        abs(fraction - full.fraction) < 0.001 ? (unfit ?? half.fraction, nil) : (full.fraction, fraction)
+    }
 
     var fraction: CGFloat {
         switch self {
