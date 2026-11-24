@@ -1469,6 +1469,9 @@ struct ColumnDrag {
     let origin: Int
     /// Its left edge in the strip.
     var x: CGFloat
+    /// The pointer has come off the viewport's edges since the card was
+    /// taken: holding it near one pans (`dragPan`).
+    var mayPan = false
 }
 
 extension WorkspaceState {
@@ -1522,12 +1525,28 @@ extension WorkspaceState {
         moveColumn(at: from, to: cancelled ? min(drag.origin, columns.count - 1) : from)
     }
 
+    /// The pan the pointer asks for where it lies (`edgePan`), at one of the
+    /// drag's events or `isTick` one of its ticks: the camera pans at its
+    /// ticks only, at a pace of its own, and only once the pointer has come
+    /// off the edges since the card was taken, so that a card taken at an
+    /// edge stays.
+    func dragPan(_ pan: CGFloat, isTick: Bool) {
+        guard var drag = draggedColumn else { return }
+        if pan == 0 {
+            drag.mayPan = true
+            draggedColumn = drag
+        } else if isTick, drag.mayPan {
+            panDragCamera(by: pan)
+        }
+    }
+
     /// The camera a drag holds pans `dx` points, within a strip wider than
-    /// the viewport: the cards out of view come to the pointer.
+    /// the viewport (from where it was, if outside it): the cards out of
+    /// view come to the pointer.
     func panDragCamera(by dx: CGFloat) {
         let viewport = containerView.bounds.width
         guard draggedColumn != nil, var held = heldCamera, dx != 0, stripView.frame.width > viewport else { return }
-        held.x = max(0, min(held.x + dx, stripView.frame.width - viewport))
+        held.x = min(max(held.x + dx, min(0, held.x)), max(stripView.frame.width - viewport, held.x))
         heldCamera = held
         lastCameraX = held.x
         stripView.frame.origin.x = -held.x

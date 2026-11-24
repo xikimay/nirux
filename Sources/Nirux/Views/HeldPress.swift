@@ -33,12 +33,12 @@ struct HeldPress {
     ]
 
     /// Follows the press to its end, told once to `ended`. Each drag goes
-    /// to `moved`, and again at each of the drag's own ticks while
-    /// `isDragging`, so that autoscroll goes on while the pointer holds
-    /// still. Keys go on to the app until the press drags; then Escape
-    /// cancels it (the rest of the press swallowed after `ended`), and the
-    /// other keys are swallowed.
-    func follow(isDragging: () -> Bool, moved: (NSEvent) -> Void, ended: (End) -> Void) {
+    /// to `moved`, and the last one again at each of the drag's own ticks
+    /// while `isDragging` (`isTick`), so that autoscroll goes on while the
+    /// pointer holds still. Keys go on to the app until the press drags;
+    /// then Escape cancels it (the rest of the press swallowed after
+    /// `ended`), and the other keys are swallowed.
+    func follow(isDragging: () -> Bool, moved: (_ event: NSEvent, _ isTick: Bool) -> Void, ended: (End) -> Void) {
         var lastDrag: NSEvent?
         // The ticks in a row that found the press gone, its mouse-up not
         // here.
@@ -54,12 +54,12 @@ struct HeldPress {
                 // say (events posted to the app move no button).
                 ticksGone = 0
                 lastDrag = event
-                moved(event)
+                moved(event, false)
             case .periodic:
                 // A drag's own ticks keep the timeout above from ever
                 // coming.
                 if isLost(atTimeout: false, ticksGone: &ticksGone) { return ended(.lost) }
-                if isDragging(), let lastDrag { moved(lastDrag) }
+                if isDragging(), let lastDrag { moved(lastDrag, true) }
             case .leftMouseUp:
                 // A later press's: this one's went elsewhere.
                 return ended(answersALaterPress(event) ? .lost : .released)

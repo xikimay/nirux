@@ -1197,6 +1197,17 @@ final class ColumnCardsTests: XCTestCase {
         workspace.panDragCamera(by: 5_000)
         XCTAssertEqual(workspace.lastCameraX, strip.frame.width - 1000, "at its end")
         workspace.endColumnDrag(cancelled: true)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+
+        workspace.beginColumnDrag(at: 0)
+        workspace.dragPan(10, isTick: true)
+        XCTAssertEqual(workspace.lastCameraX, 0, "taken at an edge, it stays")
+        workspace.dragPan(0, isTick: false)
+        workspace.dragPan(10, isTick: false)
+        XCTAssertEqual(workspace.lastCameraX, 0, "at the drag's ticks only")
+        workspace.dragPan(10, isTick: true)
+        XCTAssertEqual(workspace.lastCameraX, 10)
+        workspace.endColumnDrag(cancelled: true)
 
         let narrow = self.workspace(columns: 1)
         narrow.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
@@ -1204,6 +1215,12 @@ final class ColumnCardsTests: XCTestCase {
         narrow.beginColumnDrag(at: 0)
         narrow.panDragCamera(by: 100)
         XCTAssertEqual(narrow.lastCameraX, centred, "a strip that fits stays")
+        narrow.addColumn()
+        narrow.addColumn()
+        narrow.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(narrow.lastCameraX, centred, "held as columns open")
+        narrow.panDragCamera(by: 20)
+        XCTAssertEqual(narrow.lastCameraX, centred + 20, "from where it was, without a jump")
     }
 
     /// Taken mid-glide, a card stops where it shows.
@@ -1337,16 +1354,26 @@ final class ColumnCardsTests: XCTestCase {
 
     /// Held near an edge, the strip pans at each of the drag's ticks, so a
     /// card reaches a slot that was out of view.
+    /// Drags at the edge alone pan nothing: the pace is the ticks'.
     func testADragNearAnEdgeReachesSlotsOutOfView() throws {
         try withShell { shell in
             shell.sideEffects.reducesMotion = { true }
+            shell.sideEffects.runsDragTicks = { _ in }
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             let cards = try halfCardsFromTheLeft(shell, count: 4)
             XCTAssertGreaterThan(cards[3].view.frame.minX, shell.viewport.frame.width, "the last slot is out of view")
             let header = try XCTUnwrap(cards[0].header)
             let start = header.convert(NSPoint(x: 4, y: header.bounds.midY), to: nil)
-            let edge = NSPoint(x: shell.viewport.frame.maxX - 2, y: start.y)
-            try press(header, at: start, events: [(.leftMouseDragged, NSPoint(x: start.x + 10, y: start.y)), (.leftMouseDragged, edge)]
+            let middle = NSPoint(x: shell.viewport.frame.midX, y: start.y), edge = NSPoint(x: shell.viewport.frame.maxX - 2, y: start.y)
+            let toTheEdge: [(NSEvent.EventType, NSPoint)] = [(.leftMouseDragged, NSPoint(x: start.x + 10, y: start.y)), (.leftMouseDragged, middle)]
+
+            try press(header, at: start, events: toTheEdge + Array(repeating: (.leftMouseDragged, edge), count: 80) + [(.leftMouseUp, edge)])
+            XCTAssertTrue(workspace.columns[2] === cards[0], "as far as the cards in view")
+
+            shell.relayout(animated: false)
+            workspace.moveColumn(at: 2, to: 0)
+            shell.relayout(animated: false)
+            try press(header, at: start, events: toTheEdge + [(.leftMouseDragged, edge)]
                 + Array(repeating: (.periodic, edge), count: 80) + [(.leftMouseUp, edge)])
             XCTAssertTrue(workspace.columns.last === cards[0], "it reached the end of the row")
             XCTAssertEqual(workspace.focusedIndex, 3)

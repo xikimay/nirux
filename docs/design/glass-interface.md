@@ -498,8 +498,10 @@ the text stays flat and sharp.
   stops there), the card rises to 102 % over its neighbours, its shadow at
   the floating level, and follows the pointer along the strip, which holds
   still; within 48 pt of the viewport's left or right edge the strip pans
-  at the drag's ticks, up to 24 pt each, faster nearer the edge, so the
-  cards out of view come to it. It takes the slot whose place lies nearest
+  at the drag's ticks (not its events, whose rate is the mouse's), up to
+  24 pt each, faster nearer the edge, once the pointer has come there from
+  further in (a card taken at an edge stays), so the cards out of view come
+  to it. It takes the slot whose place lies nearest
   it, so the others
   glide aside as it passes; let go, it glides into that slot, moved by
   `WorkspaceState.moveColumn(at:to:)` as ⇧⌘← and ⇧⌘→ move it, and the

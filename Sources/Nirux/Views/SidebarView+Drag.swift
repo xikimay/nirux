@@ -56,7 +56,7 @@ extension SidebarView {
         workspaceDrag = drag
         HeldPress(window: window, holds: rowPressHolds).follow(
             isDragging: { drag.isDragging },
-            moved: { event in
+            moved: { event, _ in
                 dragMoved(event, drag: &drag)
                 workspaceDrag = drag
             },

@@ -17,7 +17,7 @@ extension NiruxShellView {
         var grab: CGFloat = 0
         HeldPress(window: window).follow(
             isDragging: { isDragging },
-            moved: { event in
+            moved: { event, isTick in
                 // A column closed meanwhile, or another task on screen, is
                 // left as it lies.
                 guard workspace === activeWorkspace, let index = workspace.columns.firstIndex(where: { $0 === column }) else { return }
@@ -31,7 +31,7 @@ extension NiruxShellView {
                 }
                 let inViewport = viewport.convert(pointer, from: nil)
                 let outside = !viewport.bounds.contains(inViewport)
-                if !outside { workspace.panDragCamera(by: WorkspaceState.edgePan(at: inViewport.x, width: viewport.bounds.width)) }
+                workspace.dragPan(outside ? 0 : WorkspaceState.edgePan(at: inViewport.x, width: viewport.bounds.width), isTick: isTick)
                 if workspace.dragColumn(to: workspace.stripPoint(fromWindow: pointer).x - grab, outside: outside) {
                     relayout(animated: true)
                 }
@@ -50,7 +50,7 @@ extension NiruxShellView {
         workspace.beginColumnDrag(at: index)
         workspace.columns[index].raise(animated: agentLightsMayMove)
         NSCursor.closedHand.set()
-        NSEvent.startPeriodicEvents(afterDelay: 0.15, withPeriod: HeldPress.tickPeriod)
+        sideEffects.runsDragTicks(true)
         relayout(animated: true)
     }
 
@@ -58,7 +58,7 @@ extension NiruxShellView {
     /// and lies with the others again; the strip goes where it wants, and the
     /// keyboard to the column, as after Move Left/Right.
     private func dropColumn(_ column: ColumnState, in workspace: WorkspaceState, cancelled: Bool) {
-        NSEvent.stopPeriodicEvents()
+        sideEffects.runsDragTicks(false)
         workspace.endColumnDrag(cancelled: cancelled)
         column.settle(animated: agentLightsMayMove)
         NSCursor.arrow.set()
