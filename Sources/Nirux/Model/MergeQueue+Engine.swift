@@ -61,17 +61,24 @@ extension MergeQueue {
         let settings: BoardConfig.QueueSettings
         let cadence: Cadence
         let startedByLead: Bool
-        /// The branch a Train cadence composes its batch on: new for each Start.
-        let trainBranch: String
+        /// The branch of a Train cadence's first train: new for each Start.
+        let firstTrainBranch: String
         /// The CI triage was on at Start: a red train may be rerun once.
         let triagesFlakes: Bool
-        private var stopMessage = "Stopped by the user."
+        private(set) var stopMessage = "Stopped by the user."
         // The train's flow (MergeQueue+Train) writes the state below too.
         var entries: [Entry]
         var phase: Phase = .idle
         /// The entry being worked on.
         var current: Int?
         var train: Train?
+        /// This Start's trains before `train`: landed, or red and closed.
+        var pastTrains: [Train] = []
+        /// The batches still to ride, by entry, the train's own first: a red
+        /// train's batch rides again in two halves.
+        var groups: [[Int]]
+        /// Why a train failed, by the tree it ran on: the same files fail the same way.
+        var redTrees: [String: StopReason] = [:]
         /// The request whose answer the engine waits for. An answer to any
         /// other is ignored: it comes from before a Stop.
         private(set) var request: Request?
@@ -95,10 +102,11 @@ extension MergeQueue {
         ) {
             self.startedByLead = startedByLead
             self.cadence = cadence
-            self.trainBranch = trainBranch
+            firstTrainBranch = trainBranch
             self.triagesFlakes = triagesFlakes
             self.settings = settings
             self.entries = entries.map(Entry.init)
+            groups = [Array(entries.indices)]
         }
 
         var currentEntry: Entry? { current.map { entries[$0] } }
@@ -172,10 +180,10 @@ extension MergeQueue {
                 self.request = nil
                 let endsInItsStop: Bool
                 switch purpose {
-                case .train(.close), .train(.cleanup): endsInItsStop = true
+                case .train(.close), .train(.cleanup), .train(.redClose), .train(.leave): endsInItsStop = true
                 default: endsInItsStop = false
                 }
-                // Closing or deleting the train ends in its own stop, whose reason a Stop mustn't hide.
+                // Closing or deleting the train reads its own answer, which a Stop mustn't hide.
                 if phase == .stopping, !endsInItsStop {
                     var message = stopMessage + " The \(Self.describe(mutation)), already sent, answered: "
                         + "\(Self.describe(result))."
@@ -222,6 +230,7 @@ extension MergeQueue {
             case checks(head: String)
             case rerun(head: String, replaced: Set<Int>)
             case rerunCheck(head: String, replaced: Set<Int>, message: String)
+            case fullRun(head: String)
             case mergeChecks(head: String)
             /// Only the base's runs, until those step 4 waits for end.
             case baseRunWait(head: String)
@@ -247,6 +256,10 @@ extension MergeQueue {
             var redSince: TimeInterval?
             /// Failed check runs a rerun replaces: pending until their new run shows.
             var replacedChecks: Set<Int> = []
+            /// The head whose full run a label asked for, and whether an
+            /// unclear answer was asked again.
+            var fullRunAsked: String?
+            var fullRunAskedAgain = false
             var readFailingSince: TimeInterval?
             var readFailures = 0
             var secondaryLimits = 0
@@ -498,7 +511,7 @@ extension MergeQueue {
                       let comparison = answers.comparison(base: commit, head: settings.baseBranch)
                 else { return missingAnswer() }
                 postMergeFailed(run, commit: commit, baseRuns: runs, comparison: comparison, subject: "#\(number)")
-            case .start, .update, .rerun, .merge, .train:
+            case .start, .update, .rerun, .fullRun, .merge, .train:
                 missingAnswer()
             }
         }
@@ -538,7 +551,7 @@ extension MergeQueue {
 
         /// Why a pull request can't go on, at any step: not open, a draft,
         /// another base, a fork, auto-merge, GitHub's merge queue.
-        func problem(with pullRequest: PullRequestSnapshot) -> StopReason? {
+        func problem(with pullRequest: PullRequestSnapshot, allowingAutoMerge: Bool = false) -> StopReason? {
             let number = "#\(pullRequest.number)"
             let url = pullRequest.url
             if !pullRequest.isOpen {
@@ -555,7 +568,7 @@ extension MergeQueue {
                 return StopReason(kind: .notMergeable, message: "\(number) comes from another repository (a fork): the queue "
                     + "only merges branches of \(settings.repository).", url: url)
             }
-            if pullRequest.hasAutoMerge {
+            if pullRequest.hasAutoMerge, !allowingAutoMerge {
                 return StopReason(kind: .notMergeable, message: "\(number) is set to auto-merge: GitHub could merge it at any "
                     + "moment, without waiting for the post-merge workflow. Disable auto-merge (gh pr merge "
                     + "\(pullRequest.number) --disable-auto), then start again.", url: url)
@@ -798,6 +811,16 @@ extension MergeQueue {
                     + "isn’t green on \(Self.short(head)): neutral and skipped don’t count."))
             }
             guard verdict.pending.isEmpty else {
+                if clocks.fullRunAsked == head || MergeQueue.ranSelectedOnly(checks, required: settings.requiredChecks) {
+                    // A red check would still block the merge after the full run.
+                    guard verdict.otherFailures.isEmpty else { return stop(redChecks(verdict, head: head)) }
+                    if clocks.fullRunAsked != head {
+                        clocks.fullRunAsked = head
+                        note("Only the selected tests ran on \(Self.short(head)): labelling #\(entries[index].number) "
+                            + "\(MergeQueue.fullRunLabel) for the full run")
+                        return mutate(.addLabel(number: entries[index].number, label: MergeQueue.fullRunLabel), for: .fullRun(head: head))
+                    }
+                }
                 guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else {
                     let advice = verdict.pending.contains { $0.hasSuffix("(not started)") }
                         ? "A check that never starts may be misspelled: check the names in Board Settings."
@@ -810,6 +833,11 @@ extension MergeQueue {
                             for: .checks(head: head))
             }
             mergeChecks(head: head, index: index)
+        }
+
+        private func redChecks(_ verdict: ChecksVerdict, head: String) -> StopReason {
+            StopReason(kind: .checks, message: "\(verdict.otherFailures.joined(separator: ", ")) failed on \(Self.short(head)): "
+                + "any red check blocks the merge, required or not.")
         }
 
         /// A failed required check is rerun once per pull request per
@@ -897,10 +925,7 @@ extension MergeQueue {
                 }
                 return decide(on: checks, head: head, index: index, now: now)
             }
-            guard verdict.otherFailures.isEmpty else {
-                return stop(StopReason(kind: .checks, message: "\(verdict.otherFailures.joined(separator: ", ")) failed on "
-                    + "\(Self.short(head)): any red check blocks the merge, required or not."))
-            }
+            guard verdict.otherFailures.isEmpty else { return stop(redChecks(verdict, head: head)) }
             // An agent may have gone back to work since preflight.
             let isHeld = holdForLocal(local, index: index, now: now) { engine in
                 engine.mergeChecks(head: head, index: index, after: Limits.pollInterval)
@@ -1176,6 +1201,23 @@ extension MergeQueue {
                 case .dryRun:
                     break
                 }
+            case .fullRun(let head):
+                switch result {
+                case .sent, .uncertain:
+                    // Asked once more on the next look: a label it already has starts no run.
+                    if result.isUncertain, !clocks.fullRunAskedAgain {
+                        clocks.fullRunAskedAgain = true
+                        clocks.fullRunAsked = nil
+                    }
+                    // The full run takes the checks' whole time.
+                    clocks.step = now
+                    read([.pullRequest(number), .checks(head)], after: Limits.pollInterval, for: .checks(head: head))
+                case .refused(_, let message), .rateLimited(let message):
+                    stop(StopReason(kind: .checks, message: "GitHub refused the label \(MergeQueue.fullRunLabel) on #\(number), "
+                        + "which asks for the full run of its required checks: \(message)"))
+                case .dryRun:
+                    break
+                }
             case .merge(let head, let baseTip):
                 // Whatever gh said, GitHub says what happened.
                 clocks.step = now
@@ -1214,6 +1256,7 @@ extension MergeQueue {
             case .openPullRequest(let base, let head, _, _): return "pull request of \(head) into \(base)"
             case .closePullRequest(let number): return "close of #\(number)"
             case .deleteBranch(let name): return "deletion of branch \(name)"
+            case .addLabel(let number, let label): return "label \(label) on #\(number)"
             }
         }
 

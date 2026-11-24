@@ -34,6 +34,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     let codexPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let agyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let followUpSwitch = NSSwitch()
+    let relaunchSwitch = NSSwitch()
     let tableView = NSTableView()
     let addButton = NSButton(title: "Add Variable", target: nil, action: nil)
     let removeButton = NSButton(title: "Remove", target: nil, action: nil)
@@ -62,10 +63,12 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fillPopups()
         tableView.reloadData()
         let writable = loaded.isWritable
-        for control in [agentPopup, claudePopup, codexPopup, agyPopup, followUpSwitch, addButton, tableView] as [NSControl] {
+        for control in [agentPopup, claudePopup, codexPopup, agyPopup, followUpSwitch, relaunchSwitch, addButton, tableView]
+            as [NSControl] {
             control.isEnabled = writable
         }
         followUpSwitch.state = loaded.defaults.followsUpPullRequests ? .on : .off
+        relaunchSwitch.state = loaded.defaults.resumesWorkOnRelaunch ? .on : .off
         updateRemoveButton()
         let banner = message ?? loaded.problem
         bannerLabel.stringValue = banner?.asWarning ?? ""
@@ -144,6 +147,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         guard let raw = sender.selectedItem?.representedObject as? String else { return }
         var defaults = loaded.defaults
         defaults.agyLaunchMode = AgyLaunchMode(rawValue: raw)
+        guard defaults != loaded.defaults else { return }
+        write(defaults)
+    }
+
+    @objc func relaunchChanged(_ sender: NSSwitch) {
+        var defaults = loaded.defaults
+        // On is the default: nothing is written for it.
+        defaults.resumeWorkOnRelaunch = sender.state == .on ? nil : false
         guard defaults != loaded.defaults else { return }
         write(defaults)
     }
@@ -391,12 +402,33 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         environment.alignment = .leading
         environment.spacing = 8
 
-        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, environment])
+        relaunchSwitch.target = self
+        relaunchSwitch.action = #selector(relaunchChanged(_:))
+        relaunchSwitch.setAccessibilityLabel("Resume work after a relaunch")
+        let relaunchTitle = NSTextField(labelWithString: "Resume work after a relaunch")
+        relaunchTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        relaunchTitle.setAccessibilityElement(false)
+        let relaunchHint = Self.hint(
+            "When Nirux comes back (an update, a crash), the Lead, the tasks that were working and those a "
+                + "Mission message waits for start again on their own. Off, each waits for Resume."
+        )
+        relaunchHint.preferredMaxLayoutWidth = Self.contentWidth - 60
+        relaunchSwitch.setAccessibilityHelp(relaunchHint.stringValue)
+        let relaunchTexts = NSStackView(views: [relaunchTitle, relaunchHint])
+        relaunchTexts.orientation = .vertical
+        relaunchTexts.alignment = .leading
+        relaunchTexts.spacing = 3
+        let relaunch = NSStackView(views: [relaunchSwitch, relaunchTexts])
+        relaunch.orientation = .horizontal
+        relaunch.alignment = .top
+        relaunch.spacing = 12
+        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, relaunch, environment])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14
         stack.setCustomSpacing(22, after: formHint)
-        stack.setCustomSpacing(22, after: followUp)
+        stack.setCustomSpacing(14, after: followUp)
+        stack.setCustomSpacing(22, after: relaunch)
         stack.edgeInsets = Self.insets
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
@@ -413,7 +445,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
             warningsLabel.widthAnchor.constraint(equalToConstant: Self.contentWidth),
             envHint.widthAnchor.constraint(equalToConstant: Self.contentWidth),
             formHint.widthAnchor.constraint(equalToConstant: Self.contentWidth),
-            followUpHint.widthAnchor.constraint(equalToConstant: Self.contentWidth - 60)
+            followUpHint.widthAnchor.constraint(equalToConstant: Self.contentWidth - 60),
+            relaunchHint.widthAnchor.constraint(equalToConstant: Self.contentWidth - 60)
         ])
     }
 

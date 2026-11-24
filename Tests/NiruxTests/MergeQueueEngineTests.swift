@@ -86,6 +86,76 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertEqual(MergeQueue.judge(cancelledRequired, required: ["test"]).failed.map(\.id), [1], "a required one still counts")
     }
 
+    /// The repository's CI runs `test` in full on a pull request labelled
+    /// full-test, and "test (selected)" otherwise.
+    func testAHeadThatRanOnlySelectedTestsIsLabelledOnceForItsFullRun() {
+        let selected = MQ.checkRun(id: 2, name: "test (selected)", runID: 899)
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = MQ.checks(selected)
+        var queue = MQ.Harness(entries: [MQ.entry(52, head: a)])
+        queue.start()
+        XCTAssertEqual(queue.run(world), .addLabel(number: 52, label: "full-test"))
+        XCTAssertTrue(queue.noted("Only the selected tests ran on aaaaaaa: labelling #52 full-test for the full run"))
+        queue.mutated(.sent)
+        queue.answer(world)
+        XCTAssertNotNil(queue.pendingReads, "its full run hasn't shown yet: no second label")
+
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 2, name: "test (selected)", runID: 899, conclusion: "CANCELLED"), MQ.checkRun(id: 3))
+        XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
+        XCTAssertEqual(queue.mutations.count, 2)
+
+        var refused = MQ.Harness(entries: [MQ.entry(52, head: a)])
+        refused.start()
+        world.checks[a] = MQ.checks(selected)
+        XCTAssertEqual(refused.run(world), .addLabel(number: 52, label: "full-test"))
+        refused.mutated(.refused(status: 403, message: "Resource not accessible by integration"))
+        XCTAssertEqual(refused.stopReason?.message, "GitHub refused the label full-test on #52, which asks for the full run of its "
+            + "required checks: Resource not accessible by integration")
+
+        var unstarted = MQ.Harness(entries: [MQ.entry(52, head: a)])
+        unstarted.start()
+        world.checks[a] = MergeQueue.CommitChecks()
+        XCTAssertNil(unstarted.run(world), "no label where no selected run shows")
+        XCTAssertTrue(unstarted.stopReason?.message.contains("test (not started)") == true)
+    }
+
+    /// A full run can't unblock a head a red check blocks.
+    func testARedCheckStopsTheQueueRatherThanWaitForTheFullRun() {
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 2, name: "test (selected)", runID: 899, conclusion: "FAILURE"))
+        var red = MQ.Harness(entries: [MQ.entry(52, head: a)])
+        red.start()
+        XCTAssertNil(red.run(world))
+        XCTAssertEqual(red.stopReason?.message, "Tests / test (selected) failed on aaaaaaa: any red check blocks the merge, required or not.")
+        XCTAssertEqual(red.mutations, [], "no label")
+
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 2, name: "test (selected)", runID: 899))
+        var redLater = MQ.Harness(entries: [MQ.entry(52, head: a)])
+        redLater.start()
+        XCTAssertEqual(redLater.run(world), .addLabel(number: 52, label: "full-test"))
+        redLater.mutated(.sent)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 3, status: "IN_PROGRESS", conclusion: nil),
+                                    MQ.checkRun(id: 4, name: "core", runID: 901, conclusion: "FAILURE"))
+        XCTAssertNil(redLater.run(world))
+        XCTAssertEqual(redLater.stopReason?.message, "Tests / core failed on aaaaaaa: any red check blocks the merge, required or not.")
+    }
+
+    func testAnUnclearAnswerToTheLabelIsAskedOnceMore() {
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 2, name: "test (selected)", runID: 899))
+        var queue = MQ.Harness(entries: [MQ.entry(52, head: a)])
+        queue.start()
+        XCTAssertEqual(queue.run(world), .addLabel(number: 52, label: "full-test"))
+        queue.mutated(.uncertain("timed out"))
+        XCTAssertEqual(queue.run(world), .addLabel(number: 52, label: "full-test"))
+        queue.mutated(.uncertain("timed out"))
+        queue.answer(world)
+        XCTAssertNotNil(queue.pendingReads, "asked twice at most")
+    }
+
     func testFastCadencesVerifyOnlyTheLastMergeAndStillRespectExternalRuns() {
         for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
             var world = readyWorld()

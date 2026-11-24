@@ -251,7 +251,7 @@ extension NiruxShellView {
                 else { return }
                 var next = self.dailyPassState(inSpace: space.id)
                 let readsAgain = self.dailyPassRereads[space.id, default: DailyPass.Rereads()].readsAgain(facts.readsAgain)
-                let hasNews = facts.hasNews || next.nextWaitPage != nil
+                let hasNews = facts.needsPass || next.nextWaitPage != nil
                 if readsAgain && !hasNews {
                     self.dailyPassRetryAt[space.id] = now + DailyPass.retryAfter
                 } else if !hasNews {

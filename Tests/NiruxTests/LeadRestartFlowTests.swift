@@ -654,6 +654,8 @@ final class LeadRestartFlowTests: XCTestCase {
             let folder = harness.root + "/worktree"
             try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: false)
             state.workspaces[saved].columns[claudeColumn].cwd = folder
+            // After the user's Quit: the Lead waits for Resume.
+            state.quitByUser = true
             XCTAssertTrue(Persistence.save(state))
             shell.restoreState()
             let restored = try XCTUnwrap(shell.leadWorkspace(inSpace: lead.space))

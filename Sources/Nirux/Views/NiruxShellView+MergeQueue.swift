@@ -134,6 +134,32 @@ extension NiruxShellView {
         updateMergeQueueStatusBar()
         keepAwake?.update(mergeQueueRunning: !runningMergeQueues.isEmpty)
         settleMergeQueueQuit()
+        noticeLeadOfEndedQueues(projectID: projectID)
+    }
+
+    /// A queue the space's Lead started ended without a person's word: it
+    /// hears it once, as it happens, though no user wakes it.
+    /// A queue is the Lead's when it started it, or the user started what it
+    /// proposed (`queue_merge` with auto-start off). Each run tells its end
+    /// once.
+    private func noticeLeadOfEndedQueues(projectID: String) {
+        for controller in mergeQueues(of: projectID) {
+            guard let engine = controller.engine else { continue }
+            let was = mergeQueuePhases.updateValue(engine.phase, forKey: ObjectIdentifier(controller))
+            let repository = controller.queueRepository.ownerAndName
+            let proposal = Set(leadQueueProposals[projectID + " " + repository] ?? [])
+            let isLeads = engine.startedByLead || (!proposal.isEmpty && Set(engine.entries.map(\.number)).isSubset(of: proposal))
+            let current = engine.current.flatMap { engine.entries[safe: $0]?.number }
+            let left = engine.entries.filter { entry in
+                guard entry.number != current, case .stopped = entry.step else { return false }
+                return true
+            }.map(\.number)
+            guard was?.isActive == true, let text = MergeQueue.leadEndNotice(
+                repository: repository, phase: engine.phase, isLeads: isLeads,
+                merged: engine.entries.filter { $0.step == .done }.map(\.number), left: left, current: current
+            ), let lead = leadMissionParent(inSpace: projectID) else { continue }
+            tellProposer(lead, text)
+        }
     }
 
     // MARK: The board
@@ -516,6 +542,8 @@ extension NiruxShellView {
                 + "\(Int(Self.mergeQueueQuitTimeout)) seconds at most. Nothing resumes by itself at the "
                 + "next launch: the board shows where \(one ? "it" : "each") stopped.")
         let confirm = one ? "Stop Queue and Quit" : "Stop Queues and Quit"
+        // Quit from the Dock while Nirux is hidden: the question must show.
+        sideEffects.comeToFront()
         sideEffects.confirmQuitWithMergeQueue(message, details.joined(separator: "\n"), confirm, window) { [weak self] confirmed in
             guard let self, self.mergeQueueQuit === quit else { return }
             guard confirmed else {

@@ -59,14 +59,21 @@ final class KeepAwakeHarness {
     let assertions: FakeSleepAssertions
     let clock: ManualSchedule
     let controller: KeepAwakeController
+    let power = Power()
     var changes = 0
 
-    init(enabled: Bool = true) {
+    final class Power { var onAdapter = true }
+
+    init(enabled: Bool = true, waitsForChecks: Bool = false) {
         let assertions = FakeSleepAssertions()
         let clock = ManualSchedule()
         self.assertions = assertions
         self.clock = clock
-        controller = KeepAwakeController(enabled: enabled, assertions: assertions, schedule: clock.schedule)
+        let power = power
+        controller = KeepAwakeController(
+            enabled: enabled, waitsForChecks: waitsForChecks, assertions: assertions, schedule: clock.schedule,
+            isOnACPower: { power.onAdapter }
+        )
         controller.onChange = { [weak self] in self?.changes += 1 }
     }
 }
@@ -348,10 +355,101 @@ final class KeepAwakeControllerTests: XCTestCase {
 
     // MARK: - Setting
 
+    /// Checks Nirux waits on keep the Mac awake on the power adapter only,
+    /// under their own setting, whatever the agents' one says.
+    func testRunningChecksKeepTheMacAwakeOnThePowerAdapter() {
+        let harness = KeepAwakeHarness(enabled: false, waitsForChecks: true)
+        let (controller, assertions, clock) = (harness.controller, harness.assertions, harness.clock)
+        controller.update(workingAgentCount: 2)
+        XCTAssertFalse(controller.isActive, "agents count under their own setting")
+        controller.update(awaitingChecks: true)
+        XCTAssertTrue(controller.isActive)
+
+        harness.power.onAdapter = false
+        clock.advance(by: KeepAwakeController.pollInterval)
+        controller.update(awaitingChecks: true)
+        clock.advance(by: KeepAwakeController.gracePeriod)
+        XCTAssertFalse(controller.isActive, "not on battery")
+        harness.power.onAdapter = true
+        controller.update(awaitingChecks: true)
+        XCTAssertTrue(controller.isActive)
+
+        var refreshes = 0
+        controller.onRefresh = { refreshes += 1 }
+        clock.advance(by: KeepAwakeController.pollInterval)
+        XCTAssertEqual(refreshes, 1, "polls under the checks' setting alone: a stale read must end")
+        XCTAssertTrue(controller.heldFor == (0, false, true), "the agents' setting off: their count isn't a reason")
+
+        let shown = harness.changes
+        controller.setEnabled(true)
+        XCTAssertGreaterThan(harness.changes, shown, "the indicator names the agents again")
+        controller.setEnabled(false)
+        XCTAssertTrue(controller.isActive, "the agents' setting off leaves the checks' reason")
+        controller.setWaitsForChecks(false)
+        XCTAssertFalse(controller.isActive, "off releases at once")
+        XCTAssertTrue(assertions.held.isEmpty)
+        controller.setWaitsForChecks(true)
+        XCTAssertTrue(controller.isActive)
+        controller.update(awaitingChecks: false)
+        clock.advance(by: KeepAwakeController.gracePeriod)
+        XCTAssertFalse(controller.isActive)
+        XCTAssertEqual(
+            KeepAwakeIndicator.toolTip(workingAgentCount: 2, isMergeQueueRunning: true, isAwaitingChecks: true),
+            "Keeping your Mac awake while a merge queue runs, 2 agents work and pull request checks run."
+        )
+    }
+
+    /// A pull request holds a result Nirux waits for: a push not read yet,
+    /// checks running (a while per head: some never end), a red read for the
+    /// time a follow-up round takes. Not a stale read, nor a closed one.
+    func testChecksWatchCountsEachHeadForAWhile() {
+        func pr(_ status: String?, head: String = "a", state: GitHub.PullRequestState = .open) -> PRInfo {
+            var info = PRInfo(number: 7, state: state, isDraft: false, ciStatus: status, checks: [], reviewDecision: nil,
+                              mergeable: nil, url: "u", additions: nil, deletions: nil, changedFiles: nil)
+            info.headRefOid = head
+            return info
+        }
+        var watch = ChecksWatch()
+        func awaits(_ pullRequest: PRInfo?, readAt: TimeInterval = 0, pushed: Bool = false, now: TimeInterval) -> Bool {
+            watch.awaits([ChecksWatch.Read(id: "t", pullRequest: pullRequest, readAt: readAt, pushedRecently: pushed)], now: now)
+        }
+        XCTAssertTrue(awaits(nil, pushed: true, now: 1), "a push before any read")
+        XCTAssertFalse(awaits(pr("SUCCESS"), now: 1))
+        XCTAssertTrue(awaits(pr("PENDING"), readAt: 100, now: 100))
+        XCTAssertFalse(awaits(pr("PENDING"), readAt: 100, now: 100 + ChecksWatch.readWindow), "a stale read")
+        XCTAssertFalse(awaits(pr("PENDING", state: .closed), readAt: 100, now: 100))
+        let late = 100 + ChecksWatch.pendingLimit
+        XCTAssertTrue(awaits(pr("PENDING"), readAt: 200, now: 200))
+        XCTAssertFalse(awaits(pr("PENDING"), readAt: late + 100, now: late + 100), "checks that never end")
+        XCTAssertTrue(awaits(pr("PENDING", head: "b"), readAt: late + 200, now: late + 200), "a new head")
+        XCTAssertTrue(awaits(pr("FAILURE", head: "b"), readAt: late + 300, now: late + 300))
+        XCTAssertFalse(awaits(pr("FAILURE", head: "b"), readAt: late + 300 + ChecksWatch.failureLimit,
+                              now: late + 300 + ChecksWatch.failureLimit), "red long enough for its round")
+        XCTAssertFalse(awaits(pr("SUCCESS", head: "d"), readAt: late + 2_000, pushed: true, now: late + 2_000),
+                       "a fetch of a branch whose checks settled")
+
+        // A red pull request in the background is read every 10 minutes: the
+        // stale moment between two reads keeps its clock.
+        var red = ChecksWatch()
+        func redAwaits(readAt: TimeInterval, now: TimeInterval) -> Bool {
+            red.awaits([ChecksWatch.Read(id: "r", pullRequest: pr("FAILURE", head: "c"), readAt: readAt, pushedRecently: false)], now: now)
+        }
+        XCTAssertTrue(redAwaits(readAt: 0, now: 0))
+        XCTAssertFalse(redAwaits(readAt: 0, now: ChecksWatch.readWindow), "stale")
+        XCTAssertTrue(redAwaits(readAt: ChecksWatch.readWindow + 5, now: ChecksWatch.readWindow + 5))
+        XCTAssertFalse(redAwaits(readAt: ChecksWatch.failureLimit, now: ChecksWatch.failureLimit), "its 15 minutes, from its first read")
+    }
+
     func testSettingDefaultsToOnInOlderStateFiles() throws {
         let older = try JSONDecoder().decode(PersistedSettings.self, from: Data("{}".utf8))
         XCTAssertTrue(older.keepMacAwakeWhileAgentsWork)
+        XCTAssertTrue(older.keepMacAwakeWhileChecksRun)
         XCTAssertTrue(PersistedSettings().keepMacAwakeWhileAgentsWork)
+        let agentsOff = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"keepMacAwakeWhileAgentsWork":false}"#.utf8))
+        XCTAssertFalse(agentsOff.keepMacAwakeWhileChecksRun, "a user who turned keep-awake off isn't opted back in")
+        var checksOff = PersistedSettings()
+        checksOff.keepMacAwakeWhileChecksRun = false
+        XCTAssertFalse(try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(checksOff)).keepMacAwakeWhileChecksRun)
 
         var off = PersistedSettings()
         off.keepMacAwakeWhileAgentsWork = false
@@ -540,6 +638,52 @@ final class KeepAwakeShellTests: XCTestCase {
         _ = hookedClaude.applyAgentHook(AgentHookEvent(kind: .claude, name: .stop, timestamp: 2), isUserFocused: false)
         XCTAssertEqual(hookedClaude.hookAgent, .claude)
         XCTAssertFalse(NiruxShellView.needsBackgroundRefresh(hookedClaude))
+    }
+
+    /// Away from Nirux the heartbeat stops; the background pass still reads
+    /// a task's pull request, though no merge wait follows it (a follow-up
+    /// round or the Lead acts on its checks), and checks it reads running
+    /// keep the Mac awake, until a read says they ended.
+    func testPullRequestsAreReadAwayAndTheirRunningChecksKeepTheMacAwake() throws {
+        try withShell { shell in
+            let controller = KeepAwakeController(
+                enabled: true, waitsForChecks: true, assertions: FakeSleepAssertions(), schedule: ManualSchedule().schedule,
+                isOnACPower: { true }
+            )
+            shell.keepAwake = controller
+            let repo = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-away-\(UUID().uuidString)").path
+            try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(atPath: repo) }
+            try UIFlowHarness.git(["init", "-q", "-b", "feat/task"], at: repo)
+            try UIFlowHarness.git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "init"], at: repo)
+            guard case .observed(let context) = GitDetect.observe(at: repo) else { return XCTFail("no repository") }
+            let task = WorkspaceState(id: "task", title: "task", cwd: repo)
+            shell.workspaceStore.appendWorkspace(task, activate: false)
+            XCTAssertTrue(task.updateGitContext(context))
+            final class Answer { var ciStatus = "PENDING"; var reads = 0 }
+            let answer = Answer()
+            shell.fetchPullRequest = { _, _, _, done in
+                answer.reads += 1
+                done(.success(context: context, info: PRInfo(
+                    number: 7, state: .open, isDraft: false, ciStatus: answer.ciStatus, checks: [], reviewDecision: nil,
+                    mergeable: "MERGEABLE", url: "https://example.invalid/o/r/pull/7", additions: nil, deletions: nil, changedFiles: nil
+                )))
+            }
+            shell.isOnACPower = { false }
+            shell.refreshStuckAgents(appIsActive: false)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            XCTAssertEqual(answer.reads, 0, "on battery, only the pull requests a merge wait follows")
+            shell.isOnACPower = { true }
+            shell.refreshStuckAgents(appIsActive: false)
+            XCTAssertTrue(waitUntil("the read") { task.prInfo?.number == 7 && controller.isActive })
+            XCTAssertTrue(controller.isAwaitingChecks)
+
+            answer.ciStatus = "SUCCESS"
+            XCTAssertTrue(waitUntil("a read of the ended checks") {
+                shell.refreshPRInfo(for: [task])
+                return task.prInfo?.ciStatus == "SUCCESS" && !controller.isAwaitingChecks
+            })
+        }
     }
 
     private func withShell(_ body: (NiruxShellView) throws -> Void) throws {

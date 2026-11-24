@@ -1,0 +1,70 @@
+import AppKit
+
+// MARK: - Token usage
+
+extension NiruxShellView {
+    /// Starts reading what the agents spend; `onReport` follows each read.
+    func startUsageMonitor(onReport: @escaping (UsageReport) -> Void) {
+        let monitor = UsageMonitor(
+            sources: UsageSources(niruxOneShots: ClaudeOneShotRunner.usageFolder),
+            catalog: { [weak self] in self?.usageCatalog() ?? UsageCatalog() }
+        )
+        monitor.onReport = { [weak self] report in
+            if let self, let window = usageWindow, window.window?.isVisible == true {
+                window.update(report: report, names: usageNames())
+            }
+            onReport(report)
+        }
+        usageMonitor = monitor
+        monitor.start()
+    }
+
+    func showUsageWindow() {
+        let controller = usageWindow ?? UsageWindowController()
+        usageWindow = controller
+        controller.update(report: usageMonitor?.report, names: usageNames())
+        controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Nirux's spaces and tasks, for the ledger to credit each session: a
+    /// session Nirux recorded goes to its task, another by its folder. A
+    /// task's folder is the one Nirux made for it, else its repository's
+    /// root (its worktree, the Lead's checkout); Leads come first, so a
+    /// checkout's sessions go to its Lead.
+    func usageCatalog() -> UsageCatalog {
+        let profiles = workspaceStore.profiles
+        let tasks = workspaces.sorted { $0.isLead && !$1.isLead }.compactMap { workspace in
+            (workspace.taskFolder ?? workspace.gitContext?.identity.repositoryRoot).map {
+                UsageCatalog.Task(id: workspace.id, spaceID: workspace.profileID, folder: $0)
+            }
+        }
+        let recorded = profiles.flatMap { sessionLedger.sessions(inSpace: $0.id) }.compactMap { record in
+            record.workspaceID.flatMap { workspaceID in
+                UsageAgent(rawValue: record.agent.rawValue).map { (UsageSessionKey($0, record.sessionID), workspaceID) }
+            }
+        }
+        return UsageCatalog(
+            spaces: profiles.map { profile in
+                UsageCatalog.Space(
+                    id: profile.id,
+                    repositories: profile.anchors.compactMap { anchor in
+                        if case .gitRepository = anchor.kind { anchor.folder } else { nil }
+                    },
+                    folders: profile.anchors.compactMap { anchor in
+                        if case .folder(let path) = anchor.kind { path } else { nil }
+                    }
+                )
+            },
+            tasks: tasks,
+            sessionTasks: Dictionary(recorded) { first, _ in first }
+        )
+    }
+
+    func usageNames() -> UsageNames {
+        UsageNames(
+            tasks: Dictionary(workspaces.map { ($0.id, UsageNames.Task(title: $0.title, isLead: $0.isLead)) }) { first, _ in first },
+            spaces: Dictionary(workspaceStore.profiles.map { ($0.id, $0.name) }) { first, _ in first }
+        )
+    }
+}

@@ -77,6 +77,38 @@ final class ClaudeTranscriptReaderTests: XCTestCase {
         XCTAssertEqual(reader.takePrompts(), [])
     }
 
+    /// A prompt queued during Claude's last answer: its enqueue line comes
+    /// in one read, its user line ("queued") in a later one, after the turn.
+    /// The enqueue gives its submit time: by its text, else (a paste, an
+    /// image, parts) the last enqueue that has none.
+    func testAQueuedLineTakesItsEnqueueFromAnEarlierRead() throws {
+        try write("")
+        var reader = TranscriptPromptReader(path: file.path, tailBytes: 1_000)
+        func append(_ line: String) throws {
+            let handle = try FileHandle(forWritingTo: file)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((line + "\n").utf8))
+        }
+        func queued(_ content: String, at time: String) -> String {
+            #"{"type":"user","origin":{"kind":"human"},"promptId":"q","promptSource":"queued","timestamp":""# + time
+                + #"","message":{"role":"user","content":\#(content)}}"#
+        }
+        try append(#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-24T10:00:01.000Z","content":"then this"}"#)
+        try append(#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-24T10:00:02.000Z"}"#)
+        XCTAssertTrue(reader.readAppended())
+        XCTAssertEqual(reader.takePrompts(), [])
+
+        try append(queued(#""then this""#, at: "2026-11-24T10:00:09.000Z"))
+        try append(queued(#"[{"type":"text","text":"look"},{"type":"image","source":{}}]"#, at: "2026-11-24T10:00:10.000Z"))
+        XCTAssertTrue(reader.readAppended())
+        let submitted = reader.takePrompts().map(\.submittedAt)
+        XCTAssertEqual(submitted, [
+            TranscriptSearch.date("2026-11-24T10:00:01.000Z")?.timeIntervalSince1970,
+            TranscriptSearch.date("2026-11-24T10:00:02.000Z")?.timeIntervalSince1970
+        ])
+    }
+
     func testBudgetSplitsACatchUpAcrossReads() throws {
         let lines = (1...50).map { TranscriptLine.response(id: "msg_\($0)", cacheRead: $0 * 1_000, output: 1) }
         try write(lines.joined(separator: "\n") + "\n")

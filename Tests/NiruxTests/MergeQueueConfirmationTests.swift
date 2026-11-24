@@ -445,7 +445,8 @@ final class MergeQueueConfirmationTests: XCTestCase {
             "In this order, for each pull request:",
             "• If its branch is behind main, merge main into it on GitHub (never a rebase or a force push), at most 2 times.",
             "• Wait for the required checks on its head: test (up to 30 minutes). A failed one is rerun once; a second "
-                + "failure stops the queue.",
+                + "failure stops the queue. One that ran only as “<name> (selected)” gets the label full-test, which asks for "
+                + "its full run.",
             "• Merge it with a merge commit, pinned to the head shown here, or to the queue’s own updates of it "
                 + "(gh pr merge --merge --match-head-commit).",
             "• Wait for nightly.yml on main (up to 30 minutes), then go on to the next one.",

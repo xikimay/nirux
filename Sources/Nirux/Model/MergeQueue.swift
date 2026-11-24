@@ -293,6 +293,8 @@ extension MergeQueue {
         case closePullRequest(number: Int)
         /// `DELETE git/refs/heads/{name}`: a train's own branch, once it landed or stopped.
         case deleteBranch(name: String)
+        /// `POST issues/{n}/labels`.
+        case addLabel(number: Int, label: String)
     }
 
     enum MutationResult: Equatable, Sendable {
@@ -434,6 +436,8 @@ extension MergeQueue {
         /// a GitHub account's.
         let committerLogin: String?
         let parents: [String]
+        /// Two commits with the same tree hold the same files.
+        var tree: String?
     }
 
     struct RateLimit: Equatable, Sendable {

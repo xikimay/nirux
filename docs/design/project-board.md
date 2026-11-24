@@ -376,8 +376,8 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   the last merge made is the one verified before the queue finishes.
 - **Train** lands the batch with one CI run and one merge into the base: one
   writer on the base. It needs the merge method `merge`. Each PR must be open
-  at its confirmed head, free of conflicts, with idle agents and green checks;
-  checks still running are waited for. Nirux composes the train on GitHub: a
+  at its confirmed head, free of conflicts, with idle agents and no red check;
+  its required checks aren't awaited, since the train runs them. Nirux composes the train on GitHub: a
   branch `nirux-train/<UTC time>` at the base's tip (`POST git/refs`), then
   one merge commit per PR head in the confirmed order (`POST merges`, made by
   `web-flow`, each verified on top of the previous one). A PR that conflicts
@@ -392,11 +392,24 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   came in GitHub's wait) runs again, once, after its run's other jobs end.
   Other failures of one workflow run go to the CI triage (ci-failure-triage.md,
   rules only, no model) when it was on at Start: likely flaky, the run's failed
-  jobs run again, once; anything else stops the train, saying what the triage
-  did (a verdict, a run it couldn't read twice, the triage turned off). The
-  triage gets 3 minutes; the run's other jobs, 10 minutes. Each look at the train's
-  checks reads the PRs again: a
-  push to one stops the train at once. A stop the train finds itself (red
+  jobs run again, once; anything else makes the train red, saying what the
+  triage did (a verdict, a run it couldn't read twice, the triage turned off).
+  The triage gets 3 minutes; the run's other jobs, 10 minutes. A red train of
+  several PRs closes, its branch goes, and its batch rides again in two
+  halves, one at a time, the first half first (`nirux-train/<UTC time>-2`,
+  `-3`…), each on the base's tip as it is then. A PR alone on a red train
+  leaves it, and the halves after it still ride; the queue stops on it at the
+  end, a conflict first. PRs that left a red train for a conflict ride again
+  with its batch: they may conflict only with a PR that won't land. A batch
+  whose PRs all left lets the next one ride. A Start's batch of one stops the
+  queue, and so does a required check cancelled again after its rerun (no
+  runner came). A train whose head has the tree of a train that failed holds
+  the same files: several PRs split again without a run, so a first half that
+  lands sends its second half to a split; one PR alone gets a run of its own.
+  When every PR failed alone and none landed, the stop says the base itself
+  may fail the checks. Each
+  look at the train's checks reads the PRs again: a push to one stops the
+  train at once. A stop the train finds itself (red
   checks, the base moved, a push) closes the train's PR first; a user Stop or
   GitHub not answering leaves it open, and the stop names it (by its branch
   while GitHub hasn't shown its number). A Stop while the train is still being
@@ -405,10 +418,16 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   once its head lands, with the train's merge commit for it: observed on a
   throwaway base (#779–#792), not documented. So the queue reads every PR and
   stops loudly if one doesn't read merged within 3 minutes. The post-merge
-  workflow runs once, on the train's merge. Nirux deletes the train's
+  workflow runs once per train, on its merge. Nirux deletes the train's
   branch once it landed, or when the train stops before it has a pull request
-  (never one someone else pushed to); a stop that leaves the train's pull
-  request open leaves its branch too. Agents' branches are never deleted.
+  (never one someone else pushed to). A train's pull request merged at the
+  train's own head by someone else (GitHub's auto-merge armed as a backstop)
+  is its landing all the same, checked as the queue's own merge is: a merge
+  commit of that head on the tip the train was tested on. On another tip, or
+  as a squash or a rebase, the queue stops and says so; merged at another
+  head, it stops too. Auto-merge armed on the train's own pull request
+  doesn't stop it. A
+  stop that leaves the train's pull request open leaves its branch too. Agents' branches are never deleted.
 
 For each PR in Standard, in order:
 
@@ -458,6 +477,11 @@ For each PR in Standard, in order:
    - When all are green, go to step 4. A required check still missing after the
      timeout (default 30 minutes) stops the queue, so a misspelled name can't
      pass.
+   - A required check that ran only as `<name> (selected)` (CI that tests
+     less on pull requests): the queue adds the label `full-test` once per
+     head (once more after an unclear answer), which asks that CI for the full
+     run, and the timeout starts again. A red check stops the queue at once
+     instead: it would still block the merge after the full run.
    - **Flaky tests:** a failed required check is rerun once
      (`gh run rerun <run id> --repo <owner/name> --failed`), once per PR per
      Start. Right after a
