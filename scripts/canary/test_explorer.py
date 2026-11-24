@@ -217,6 +217,23 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(calls, [("menu", {"path": ["Space", "Next Space"]}), ("press", {"label": "New…"})])
         self.assertEqual(pauses, [0.0, 0.5, 3.0])
 
+    def test_ddmin_keeps_only_the_calls_the_failure_needs(self):
+        tried = []
+
+        def reproduces(calls):
+            tried.append(calls)
+            return {3, 7} <= set(calls)
+
+        self.assertEqual(explore.ddmin(list(range(1, 13)), reproduces), [3, 7])
+        self.assertLess(len(tried), 40)
+        self.assertEqual(explore.ddmin([5], lambda calls: True), [5])
+
+    def test_the_goals_the_diff_touches_come_first(self):
+        texts = {name: text for name, _, text in explore.GOALS}
+        picked = explore.pick_goals(["Sources/Nirux/Views/EditorColumn.swift", "README.md"], 2)
+        self.assertEqual(picked, [texts["columns"], texts["keys"]])
+        self.assertEqual(explore.pick_goals([], 4), [text for _, _, text in explore.GOALS])
+
     def test_an_episode_reads_its_result_and_notes_make_the_digest(self):
         with tempfile.TemporaryDirectory() as folder:
             log = Path(folder) / "claude.jsonl"

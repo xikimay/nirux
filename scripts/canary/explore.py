@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -34,27 +35,65 @@ if str(HERE) not in sys.path:
 
 from channel import Channel, ChannelError, new_token  # noqa: E402
 from crash_correlator import correlate_crash_reports, is_unexpected_process_exit  # noqa: E402
-from explorer_mcp import Explorer  # noqa: E402
+from explorer_mcp import ACTIONS, Explorer  # noqa: E402
 from history import IncidentLedger, default_history_dir  # noqa: E402
-from run import App, InfrastructureError, Report, detect_commit, package, wait_for, write_json  # noqa: E402
+from run import (  # noqa: E402
+    App, InfrastructureError, Report, detect_changed_files_from_git, detect_commit, package, wait_for, write_json,
+)
 from scenarios import fixture_multi_agent  # noqa: E402
 from triage import normalize_error_text  # noqa: E402
 
 SCENARIO = "explore"
 EXIT_FINDINGS = 1
+# After a replay's last call, what it set off has this long to happen.
+SETTLE_SECONDS = 3
 EXIT_INFRA = 2
 
+# Each goal with the paths whose change puts it first (pick_goals).
 GOALS = (
-    "Move between the two spaces and their tasks with keyboard shortcuts and the menus while the agents work. "
-    "Type into each agent and check that what you type always reaches the terminal that has the keyboard.",
-    "Make one agent ask a question (type 'ask: Shall I merge?' then Return) and the other ask a permission "
-    "('permission: Bash'). Answer them from the sidebar and from the terminal; the amber state must come and go "
-    "with a visible reason.",
-    "Open an editor column and a browser column beside an agent, move between columns, close and reopen them, "
-    "and check that the keyboard follows the focus.",
-    "Use the command palette (shift-command-P), the Space and Workspace menus: open, rename, close and reopen "
-    "tasks, and check that the sidebar stays consistent.",
+    ("keys", r"KeyHandling|/Input/|KeyMapper|Canary|Terminal",
+     "Move between the two spaces and their tasks with keyboard shortcuts and the menus while the agents work. "
+     "Type into each agent and check that what you type always reaches the terminal that has the keyboard."),
+    ("waiting", r"Agent|Mission|Hook|Permission|TurnEnd|Attention",
+     "Make one agent ask a question (type 'ask: Shall I merge?' then Return) and the other ask a permission "
+     "('permission: Bash'). Answer them from the sidebar and from the terminal; the amber state must come and go "
+     "with a visible reason."),
+    ("columns", r"Editor|WebView|Column|Monaco|BranchReview",
+     "Open an editor column and a browser column beside an agent, move between columns, close and reopen them, "
+     "and check that the keyboard follows the focus."),
+    ("tasks", r"Palette|Workspace|Space|Sidebar|Menu",
+     "Use the command palette (shift-command-P), the Space and Workspace menus: open, rename, close and reopen "
+     "tasks, and check that the sidebar stays consistent."),
 )
+
+
+def pick_goals(changed, count):
+    """The goals the changed paths touch first, then the others, in order."""
+    touched = [goal for goal in GOALS if any(re.search(goal[1], path) for path in changed)]
+    return [text for _, _, text in touched + [goal for goal in GOALS if goal not in touched]][:count]
+
+
+def ddmin(items, reproduces):
+    """A 1-minimal subsequence of `items` for which `reproduces` holds (Zeller's ddmin)."""
+    granularity = 2
+    while len(items) >= 2:
+        size = -(-len(items) // granularity)
+        chunks = [items[start:start + size] for start in range(0, len(items), size)]
+        smaller = next((chunk for chunk in chunks if reproduces(chunk)), None)
+        if smaller is not None:
+            items, granularity = smaller, 2
+            continue
+        complements = ([item for other, chunk in enumerate(chunks) if other != index for item in chunk]
+                       for index in range(len(chunks)))
+        smaller = next((complement for complement in complements if reproduces(complement)), None)
+        if smaller is not None:
+            items, granularity = smaller, max(granularity - 1, 2)
+        elif granularity >= len(items):
+            break
+        else:
+            granularity = min(len(items), granularity * 2)
+    return items
+
 
 SYSTEM_PROMPT = """You test Nirux, a macOS app where coding agents run in terminal columns, grouped in tasks \
 (workspaces) and spaces, with a sidebar of tasks and a command bar. You reach a copy of it only through the canary \
@@ -197,26 +236,26 @@ def quit_hidden(app, channel):
     return True
 
 
-def explore(args, evidence, work):
+def explore(args, evidence, work, trace=None):
+    """One run: Claude's episodes, or `trace` replayed without a model."""
     claude = shutil.which("claude")
     if not claude:
         raise InfrastructureError("claude is not on PATH")
     seed = str(uuid.uuid4())
     metadata = {"version": 2, "scenario": SCENARIO, "seed": seed, "injectFailure": None,
-                "goals": args.goal or list(GOALS[:args.episodes]), "model": args.model,
+                "goals": args.goal or pick_goals(changed_paths(args), args.episodes), "model": args.model,
                 "budget": {"calls": args.calls, "episodeCalls": args.episode_calls, "renders": args.renders,
                            "minutes": args.minutes}}
     report = Report(metadata)
     app = App(work, evidence, report, lambda: None)
     for name in ("stdout.log", "stderr.log"):
         (evidence / name).touch()
-    package(work, evidence, args.app, False, metadata)
+    package(work, evidence, args.app, args.app.suffix == ".zip", metadata)
     report.data["bundleSHA256"] = metadata["bundleSHA256"]
     build_world(app, work, seed)
     token = new_token()
     app.env["NIRUX_CANARY_TOKEN"] = token
     channel = Channel(work / "state", token)
-    trace = read_jsonl(args.replay_trace) if args.replay_trace else None
     calls, renders = (len(trace), len(trace)) if trace is not None else (args.calls, args.renders)
     write_json(evidence / "budget.json", {"calls": 0, "callLimit": calls, "renders": 0, "renderLimit": renders})
     deadline = time.monotonic() + args.minutes * 60
@@ -231,6 +270,7 @@ def explore(args, evidence, work):
         goals = metadata["goals"]
         if trace is not None:
             replay(trace, Explorer(dict(server_environment, CANARY_EPISODE_ACTIONS=str(len(trace))), channel=channel))
+            time.sleep(SETTLE_SECONDS)
         for index in range(1, 0 if trace is not None else args.episodes + 1):
             budget = json.loads((evidence / "budget.json").read_text())
             if budget["calls"] >= budget["callLimit"] or time.monotonic() >= deadline or app.process.poll() is not None:
@@ -263,6 +303,40 @@ def explore(args, evidence, work):
     return report.data
 
 
+def changed_paths(args):
+    return detect_changed_files_from_git(args.diff_base) if args.diff_base else []
+
+
+def reduce(args, root):
+    """The trace's fewest calls that still bring back its finding (by rule), as reduced.jsonl."""
+    trace = [record for record in read_jsonl(args.reduce) if record["tool"] != "note" and not record.get("refused")]
+    findings = json.loads((args.reduce.parent / "report.json").read_text()).get("findings") or [{}]
+    rule = args.rule or findings[0].get("rule")
+    attempts = []
+
+    def reproduces(calls):
+        evidence = Path(tempfile.mkdtemp(dir=root, prefix="reduce-"))
+        with tempfile.TemporaryDirectory(dir="/private/tmp", prefix="nirux-canary-") as folder:
+            data = explore(args, evidence, Path(folder), trace=calls)
+        write_json(evidence / "report.json", data)
+        attempts.append({"calls": [call["call"] for call in calls], "reproduced": any(
+            finding["rule"] == rule for finding in data["findings"])})
+        return attempts[-1]["reproduced"]
+
+    if not reproduces(trace):
+        reduced = None
+    else:
+        # Looks change nothing as a rule: one replay may drop them all.
+        actions = [record for record in trace if record["tool"] in ACTIONS]
+        reduced = ddmin(actions if len(actions) < len(trace) and reproduces(actions) else trace, reproduces)
+    result = {"rule": rule, "from": len(trace), "reduced": [r["call"] for r in reduced] if reduced else None,
+              "replays": len(attempts), "attempts": attempts}
+    write_json(root / "reduction.json", result)
+    if reduced:
+        (root / "reduced.jsonl").write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in reduced))
+    return result
+
+
 def record(ledger, data, evidence, commit, reproduced=()):
     """A finding a replay brought back is a regression; one exploration's, intermittent."""
     run_id = evidence.name
@@ -291,6 +365,9 @@ def parser():
     root.add_argument("--evidence-dir", type=Path)
     root.add_argument("--history-dir", type=Path)
     root.add_argument("--replay-trace", type=Path, help="replay a run's trace.jsonl without a model")
+    root.add_argument("--reduce", type=Path, help="shrink a run's trace.jsonl to the calls that bring back its finding")
+    root.add_argument("--rule", help="with --reduce: the finding's rule (default: the run's first finding)")
+    root.add_argument("--diff-base", help="put first the goals that the files changed since this ref touch")
     return root
 
 
@@ -298,10 +375,15 @@ def main(argv=None):
     args = parser().parse_args(argv)
     root = args.evidence_dir or Path(tempfile.mkdtemp(prefix="nirux-evidence-"))
     root.mkdir(parents=True, exist_ok=True)
+    if args.reduce:
+        result = reduce(args, root.resolve())
+        print(json.dumps({key: result[key] for key in ("rule", "from", "reduced", "replays")}))
+        return 0 if result["reduced"] else EXIT_FINDINGS
     evidence = Path(tempfile.mkdtemp(dir=root.resolve(), prefix="explore-"))
+    trace = read_jsonl(args.replay_trace) if args.replay_trace else None
     with tempfile.TemporaryDirectory(dir="/private/tmp", prefix="nirux-canary-") as folder:
         try:
-            data = explore(args, evidence, Path(folder))
+            data = explore(args, evidence, Path(folder), trace=trace)
         except InfrastructureError as error:
             write_json(evidence / "report.json", {"scenario": SCENARIO, "verdict": "infra_unavailable", "error": str(error)})
             print(json.dumps({"report": str(evidence / "report.json"), "verdict": "infra_unavailable", "error": str(error)}))

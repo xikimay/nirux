@@ -132,6 +132,16 @@ After each action the server runs the oracles and says what failed: the app exit
 
 The run folder keeps `report.json` (episodes, tokens, cost, findings), `trace.jsonl` (every call, with its answer and failed checks), `findings.jsonl`, and `digest.md` (the agent's notes: to verify by a person, never in the ledger). Each distinct finding goes to the incident ledger as `intermittent`; `--replay-trace` runs a trace again without a model, and a finding it brings back is a `regression`.
 
+```sh
+# Shrink a run's trace to the calls that bring its finding back (ddmin, one fresh copy per replay)
+scripts/canary.sh /tmp/nirux-explore/explore-XXXXXXXX/Nirux.app.zip --explore \
+  --reduce /tmp/nirux-explore/explore-XXXXXXXX/trace.jsonl [--rule app-alive] --evidence-dir /tmp/nirux-reduce
+# A kept trace is a regression check that needs no model
+scripts/canary.sh Nirux.app --explore --replay-trace scripts/canary/traces/hidden-copy-quits-when-a-popover-closes.jsonl
+```
+
+`--diff-base REF` puts first the goals that the files changed since REF touch. `traces/` keeps reduced traces: `hidden-copy-quits-when-a-popover-closes` (4 of the first run's 21 calls, 178 replays) quit the hidden copy before it stopped counting a closing popover as its last window.
+
 ## Workflow
 
 **Packaged app canary** (`.github/workflows/canary.yml`) is a manual Actions workflow supporting `triage` and `qualify` modes and single-scenario, `all`, or diff-targeted `selected` execution. It stays outside PR triggers to respect the 5-job macOS CI concurrency cap. The runner unit tests run on every PR in `.github/workflows/tests.yml` (job `core`).
