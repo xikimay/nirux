@@ -5,6 +5,12 @@ import Sparkle
 
 extension NiruxApp {
     func setupUpdater() {
+        // Nor is a shutdown's or a restart's: the Mac's update at night.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.quitIsUsers = false }
+        }
         guard Bundle.main.infoDictionary?["SUFeedURL"] != nil else { return }
 
         updaterController = SPUStandardUpdaterController(
@@ -27,6 +33,13 @@ extension NiruxApp {
             self.isManualUpdateCheck = false
             self.showUpdateAvailable(version: version)
         }
+    }
+
+    /// The quit that follows isn't the user's: a relaunch resumes the work
+    /// that was going on (`RelaunchResume`). Sparkle calls it on the main
+    /// thread, before it terminates the app.
+    nonisolated func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        MainActor.assumeIsolated { self.quitIsUsers = false }
     }
 
     nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {

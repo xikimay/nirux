@@ -128,7 +128,7 @@ extension BranchReview {
             let input = context.map(part.addingEarlierParts) ?? part
             let run = runExplain(
                 input, in: copy.folder, cli: job.cli, settings: job.settings, requiresSubscription: job.requiresSubscription,
-                cancellation: cancellation
+                cancellation: cancellation, usageFolder: ClaudeOneShotRunner.usageFolder
             ) { runProgress in
                 progress?(ExplainJobProgress(part: index + 1, parts: inputs.count, run: runProgress))
             }

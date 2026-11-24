@@ -119,6 +119,28 @@ public struct UsageSession: Equatable, Sendable {
     public var rateLimits: CodexRateLimits?
     /// Its responses, then each subagent's, each in time order.
     public var events: [UsageEvent]
+
+    public init(
+        key: UsageSessionKey,
+        cwd: String? = nil,
+        attribution: UsageAttribution = UsageAttribution(),
+        model: String? = nil,
+        contextTokens: Int? = nil,
+        contextWindow: Int? = nil,
+        subagents: Int = 0,
+        rateLimits: CodexRateLimits? = nil,
+        events: [UsageEvent]
+    ) {
+        self.key = key
+        self.cwd = cwd
+        self.attribution = attribution
+        self.model = model
+        self.contextTokens = contextTokens
+        self.contextWindow = contextWindow
+        self.subagents = subagents
+        self.rateLimits = rateLimits
+        self.events = events
+    }
 }
 
 /// Usage summed over responses.
@@ -132,6 +154,9 @@ public struct UsageSummary: Equatable, Sendable {
     /// Responses that rewrote a cold cache, and what they cost.
     public var coldRewrites = 0
     public var coldRewriteWeightedTokens = 0.0
+    /// The part of `weightedTokens` spent with a context of
+    /// `heavyContextTokens` or more.
+    public var heavyContextWeightedTokens = 0.0
     public var lastActivity: TimeInterval = 0
     public private(set) var sessions: Set<UsageSessionKey> = []
     /// As `<session ID>/<subagent ID>`.
@@ -146,6 +171,8 @@ public struct UsageSummary: Equatable, Sendable {
     /// From this many tokens rewritten: cache writes for Claude, uncached
     /// input for Codex and agy.
     public static let coldRewriteTokens = 20_000
+    /// The context past which Nirux offers a compaction or a fresh start.
+    public static let heavyContextTokens = 280_000
 
     mutating func add(_ event: UsageEvent, of session: UsageSessionKey, afterCacheExpiry: Bool) {
         let weighted = event.counts.weighted(model: event.model)
@@ -155,13 +182,14 @@ public struct UsageSummary: Equatable, Sendable {
         peakContextTokens = max(peakContextTokens, event.contextTokens)
         lastActivity = max(lastActivity, event.timestamp)
         sessions.insert(session)
+        if event.contextTokens >= Self.heavyContextTokens { heavyContextWeightedTokens += weighted }
         if let subagentID = event.subagentID {
             subagentWeightedTokens += weighted
             subagents.insert(session.id + "/" + subagentID)
         }
-        let rewrite = session.agent == .claude
-            ? TokenCounts(cacheWrite: event.counts.cacheWrite, hourCacheWrite: event.counts.hourCacheWrite)
-            : TokenCounts(input: event.counts.input)
+        let rewrite = [.codex, .agy].contains(session.agent)
+            ? TokenCounts(input: event.counts.input)
+            : TokenCounts(cacheWrite: event.counts.cacheWrite, hourCacheWrite: event.counts.hourCacheWrite)
         if afterCacheExpiry, rewrite.context >= Self.coldRewriteTokens {
             coldRewrites += 1
             coldRewriteWeightedTokens += rewrite.weighted(model: event.model)
@@ -207,11 +235,14 @@ public struct UsageSources: Equatable, Sendable {
     public var claudeProjects: String
     public var codexSessions: String
     public var agyBrain: String
+    /// `NiruxOneShotLog`'s folder, when Nirux's runs are counted.
+    public var niruxOneShots: String?
 
-    public init(home: String = NSHomeDirectory()) {
+    public init(home: String = NSHomeDirectory(), niruxOneShots: String? = nil) {
         claudeProjects = home + "/.claude/projects"
         codexSessions = home + "/.codex/sessions"
         agyBrain = home + "/.gemini/antigravity-cli/brain"
+        self.niruxOneShots = niruxOneShots
     }
 }
 
@@ -227,6 +258,7 @@ public struct UsageLedger: Sendable {
     private var claude: [String: ClaudeSessionReader] = [:]
     private var codex: [String: TranscriptLineReader<CodexRolloutUsageParser>] = [:]
     private var agy: [String: TranscriptLineReader<AgyTranscriptUsageParser>] = [:]
+    private var oneShots: [String: TranscriptLineReader<NiruxOneShotUsageParser>] = [:]
 
     public init(sources: UsageSources = UsageSources(), catalog: UsageCatalog = UsageCatalog()) {
         self.sources = sources
@@ -246,6 +278,9 @@ public struct UsageLedger: Sendable {
             .filter { ($0 as NSString).lastPathComponent.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") }
             .map { sources.codexSessions + "/" + $0 }
         let agyFiles = Self.entries(of: sources.agyBrain).map { $0 + "/.system_generated/logs/transcript_full.jsonl" }
+        let oneShotFiles = (sources.niruxOneShots.map(Self.entries(of:)) ?? []).filter {
+            ($0 as NSString).lastPathComponent.hasPrefix(NiruxOneShotLog.filePrefix) && $0.hasSuffix(".jsonl")
+        }
         let isRecent = { (path: String) in FileStatus(path).map { $0.isFile && $0.modifiedAt >= since } ?? false }
         // A subagent can run on while its session's own transcript waits.
         let isRecentSession = { (path: String) in
@@ -255,11 +290,13 @@ public struct UsageLedger: Sendable {
         claude = Self.follow(claudeFiles.filter(isRecentSession), readers: claude, make: ClaudeSessionReader.init(path:))
         codex = Self.follow(codexFiles.filter(isRecent), readers: codex) { TranscriptLineReader(path: $0) }
         agy = Self.follow(agyFiles.filter(isRecent), readers: agy) { TranscriptLineReader(path: $0) }
+        oneShots = Self.follow(oneShotFiles.filter(isRecent), readers: oneShots) { TranscriptLineReader(path: $0) }
         var budget = budget
         let caughtUp = [
             Self.read(&claude) { $0.readAppended(budget: &budget) },
             Self.read(&codex) { $0.readAppended(budget: &budget) },
-            Self.read(&agy) { $0.readAppended(budget: &budget) }
+            Self.read(&agy) { $0.readAppended(budget: &budget) },
+            Self.read(&oneShots) { $0.readAppended(budget: &budget) }
         ]
         return !caughtUp.contains(false)
     }
@@ -293,7 +330,14 @@ public struct UsageLedger: Sendable {
                 model: events.last?.model, contextTokens: events.last?.contextTokens
             )
         }
-        return (claudeSessions + codexSessions + agySessions).filter { !$0.events.isEmpty }
+        // A run per line: a day's runs share no session, nor a cache.
+        let oneShotSessions = oneShots.values.flatMap { reader in
+            let day = URL(fileURLWithPath: reader.path).deletingPathExtension().lastPathComponent
+            return reader.parser.events.enumerated().map { index, event in
+                session(UsageSessionKey(.nirux, "\(day)#\(index)"), cwd: nil, events: [event], model: event.model, contextTokens: nil)
+            }
+        }
+        return (claudeSessions + codexSessions + agySessions + oneShotSessions).filter { !$0.events.isEmpty }
     }
 
     private func session(

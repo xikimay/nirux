@@ -214,7 +214,8 @@ extension MergeQueue {
                         + "at most \(Limits.maxUpdates) times.",
                     "• Wait for the required checks on its head: \(settings.requiredChecks.joined(separator: ", ")) "
                         + "(up to \(settings.checksTimeoutMinutes) minutes). A failed one is rerun once; a second failure stops "
-                        + "the queue.",
+                        + "the queue. One that ran only as “<name> (selected)” gets the label \(fullRunLabel), which asks for "
+                        + "its full run.",
                     "• \(method), pinned to the head shown here, or to the queue’s own updates of it "
                         + "(gh pr merge --\(settings.mergeMethod.rawValue) --match-head-commit).",
                 ]
@@ -238,13 +239,16 @@ extension MergeQueue {
             let checks = "\(settings.requiredChecks.joined(separator: ", ")) (up to \(settings.checksTimeoutMinutes) minutes)"
             return [
                 "In one train, in this order:",
-                "• Check each pull request: open, at the head shown here, its own checks green: \(checks).",
+                "• Check each pull request: open, at the head shown here, none of its checks red. Its required checks aren’t "
+                    + "awaited: the train runs them.",
                 "• On GitHub, start a branch nirux-train/… at the tip of \(base) and merge each head into it. The heads stay as "
                     + "shown: no branch update, rebase or force push.",
                 "• Open a pull request of the train into \(base) and wait for its required checks: \(checks).",
                 "• Merge it with a merge commit, pinned to its head (gh pr merge --merge --match-head-commit), if \(base) hasn’t "
                     + "moved and each pull request is still at its head. Each pull request then reads merged; the queue checks it.",
-                settings.postMergeWorkflow.map { "• Then wait up to \(settings.postMergeTimeoutMinutes) minutes for \($0), once." }
+                "• A red train closes, and its pull requests ride again in two halves, one train at a time. A pull request alone "
+                    + "on a red train leaves it; the others still ride.",
+                settings.postMergeWorkflow.map { "• Then wait up to \(settings.postMergeTimeoutMinutes) minutes for \($0), after each train that lands." }
                     ?? "• No post-merge workflow: done once they read merged."
             ]
         }
@@ -304,13 +308,12 @@ extension MergeQueue {
     }
 
     /// The first pull request a red check keeps out of a train. Checks not
-    /// read yet don't refuse it: the train reads them again.
+    /// read yet don't refuse it: the train reads them again. Required ones
+    /// missing or running don't either: the train runs them.
     static func trainCandidateRefusal(for candidates: [ConfirmationReading.Candidate], settings: BoardConfig.QueueSettings) -> String? {
         for candidate in candidates {
             guard let checks = candidate.checks else { continue }
-            let verdict = judge(checks, required: settings.requiredChecks)
-            let red = verdict.failed.map(\.name) + verdict.failedStatuses + verdict.notGreen + verdict.otherFailures
-            if let first = red.first {
+            if let first = judge(checks, required: []).otherFailures.first {
                 return "A train only takes pull requests whose checks are green: \(first) isn’t green on #\(candidate.number)."
             }
         }

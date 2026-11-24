@@ -133,10 +133,7 @@ extension NiruxApp {
             guard let target else { return }
             shell?.openEditorFromURL(target)
         }
-        if !drivenByCanary {
-            NSApp.activate(ignoringOtherApps: true)
-            mainWindow?.makeKeyAndOrderFront(nil)
-        }
+        bringMainWindowForward()
     }
 
     /// Window-modal sheet, one at a time: unlike an app-modal alert it
@@ -210,10 +207,7 @@ extension NiruxApp {
             }
         }
 
-        if !drivenByCanary {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-        }
+        bringMainWindowForward()
         alert.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
                 lifetime.ended = true

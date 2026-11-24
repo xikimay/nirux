@@ -37,5 +37,13 @@ extension NiruxApp {
         claudeStatusLineInstaller(enabled)
         if !enabled { ClaudeUsageLimitsFile.remove() }
         usageLimitsMonitor?.setEnabled(enabled)
+        showCodexLimits()
+    }
+
+    /// Codex's limits as the latest usage read found them, while the option
+    /// is on.
+    func showCodexLimits() {
+        let limits = usageLimitsMonitor?.isEnabled == true ? shell?.usageMonitor?.report?.codexLimits : nil
+        usageLimitsIndicator?.update(codex: limits, now: Date().timeIntervalSince1970)
     }
 }

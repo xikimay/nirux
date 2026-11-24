@@ -186,13 +186,21 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
     private var failureRestUntil: TimeInterval = 0
     private let runProcess: @Sendable (BranchReview.ClaudeCLI, [String], Data) -> BoundedProcess.Outcome?
     private let now: @Sendable () -> TimeInterval
+    /// Where each run's token counts go (`NiruxOneShotLog`), for the usage
+    /// ledger: the runs leave no transcript.
+    private let usageFolder: String?
+
+    /// Nirux's state folder's `usage`.
+    static var usageFolder: String { Persistence.stateDirectory.appendingPathComponent("usage").path }
 
     init(
         client: Client,
         account: Account = .shared,
         runProcess: (@Sendable (BranchReview.ClaudeCLI, [String], Data) -> BoundedProcess.Outcome?)? = nil,
+        usageFolder: String? = ClaudeOneShotRunner.usageFolder,
         now: @escaping @Sendable () -> TimeInterval = { Date().timeIntervalSince1970 }
     ) {
+        self.usageFolder = usageFolder
         self.client = client
         self.account = account
         self.runProcess = runProcess ?? Self.defaultRun(timeout: client.timeout, folderName: client.folderName)
@@ -218,6 +226,9 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
     private func answerNow<Answer>(to input: Data, read: (String) -> Answer?) -> Answer? {
         guard lock.withLock({ now() >= failureRestUntil }), case .ready(let cli) = account.setup() else { return nil }
         let report = Self.report(from: runProcess(cli, Self.arguments(for: client), input))
+        if let usage = report.usage, let usageFolder {
+            NiruxOneShotLog.append(client: client.folderName, model: report.model ?? client.model, counts: usage, at: now(), in: usageFolder)
+        }
         let answer = report.text.flatMap(read)
         // Paid already: the answer of a billed run is kept.
         if report.billedPerCall { account.restAfterBilledRun(resetsAt: report.overageResetsAt) }
@@ -276,6 +287,10 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
     /// it, or the plan's extra usage.
     struct RunReport: Equatable {
         var text: String?
+        /// What the run spent, from its result, and the model its first
+        /// event named.
+        var usage: TokenCounts?
+        var model: String?
         var billedPerCall = false
         /// When the limit that put the run on extra usage resets (epoch
         /// seconds), when the run said.
@@ -291,6 +306,7 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
             switch event["type"] as? String {
             case "system":
                 if refusesAccount(of: event) { report.billedPerCall = true }
+                if event["subtype"] as? String == "init" { report.model = event["model"] as? String }
             case "rate_limit_event":
                 let info = event["rate_limit_info"] as? [String: Any]
                 if info?["isUsingOverage"] as? Bool == true || info?["overageInUse"] as? Bool == true {
@@ -299,6 +315,7 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
                 }
             case "result":
                 result = event
+                report.usage = (event["usage"] as? [String: Any]).flatMap(TokenCounts.init(claudeUsage:))
             default:
                 break
             }

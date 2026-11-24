@@ -330,7 +330,11 @@ New flow, built on the guarded typing `tell` already uses
     health (the Board and manual confirmation sheets still show the warning).
     Dry runs and the developer live override always use the confirmation sheet.
     `cadence` accepts `standard` (default), `batch_post_merge`,
-    `express_disjoint` or `train`. The default protects the user's prepared list. When the
+    `express_disjoint` or `train`. The Lead's instructions ask for `train`
+    and never to have a task merge the base branch unless its pull request
+    conflicts, the queue left it out of a red train, or it builds on what just
+    landed; a task's instructions say to merge the base only then. The default
+    protects the user's prepared list. When the
     user requests a replacement, an opted-in Lead can pass `replace: true`.
     The same preflight checks the requested order and cadence. A proposal that
     needs manual review opens the confirmation sheet. An open sheet, a running
