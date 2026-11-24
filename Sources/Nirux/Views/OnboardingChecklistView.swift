@@ -485,6 +485,8 @@ final class OnboardingChecklistButton: NSView {
         onPress()
     }
 
+    override func isAccessibilityEnabled() -> Bool { true }
+
     override func accessibilityPerformPress() -> Bool {
         onPress()
         return true

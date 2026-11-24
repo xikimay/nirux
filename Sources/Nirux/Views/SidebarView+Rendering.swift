@@ -559,7 +559,6 @@ extension SidebarView {
         addExpandedView(titleLabel)
         let control = SidebarSectionToggleView(frame: frame)
         control.setAccessibilityLabel(label)
-        control.setAccessibilityEnabled(press != nil)
         control.acceptsFirstClick = press != nil
         control.toolTip = tip
         control.onPress = press

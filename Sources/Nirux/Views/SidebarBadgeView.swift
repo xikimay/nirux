@@ -44,6 +44,8 @@ final class SidebarBadgeView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    override func isAccessibilityEnabled() -> Bool { true }
+
     override func accessibilityPerformPress() -> Bool {
         guard let onPress else { return false }
         onPress()

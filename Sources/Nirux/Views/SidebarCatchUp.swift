@@ -248,6 +248,8 @@ struct SidebarCatchUpCardRenderer {
 final class SidebarCatchUpPressable: NSView {
     var onPress: (() -> Void)?
 
+    override func isAccessibilityEnabled() -> Bool { onPress != nil }
+
     override func accessibilityPerformPress() -> Bool {
         onPress?()
         return onPress != nil
