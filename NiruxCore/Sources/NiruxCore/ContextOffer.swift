@@ -13,20 +13,23 @@ public struct ContextOffer: Hashable, Sendable {
     public var contextTokens: Int
     /// Its latest response: a later one offers again.
     public var lastResponseAt: TimeInterval
+    /// Fresh start only where Nirux can hand the work over.
+    public var choices: [Choice]
 
     public static let coldContextTokens = 150_000
     /// From there, a Lead at rest past its cache starts afresh where its
     /// space allows (`restartsLead`).
     public static let coldLeadContextTokens = 200_000
 
-    public init(reason: Reason, contextTokens: Int, lastResponseAt: TimeInterval) {
+    public init(reason: Reason, contextTokens: Int, lastResponseAt: TimeInterval, choices: [Choice] = [.compact, .freshStart]) {
         self.reason = reason
         self.contextTokens = contextTokens
         self.lastResponseAt = lastResponseAt
+        self.choices = choices
     }
 
     /// Nil under both thresholds, and for another agent's session.
-    public init?(_ session: UsageReport.LatestSession, now: TimeInterval) {
+    public init?(_ session: UsageReport.LatestSession, now: TimeInterval, startsFresh: Bool = true) {
         guard session.key.agent == .claude, let context = session.contextTokens else { return nil }
         let reason: Reason
         if now - session.lastResponseAt >= UsageSummary.hourCacheLifetime, context >= Self.coldContextTokens {
@@ -36,7 +39,10 @@ public struct ContextOffer: Hashable, Sendable {
         } else {
             return nil
         }
-        self.init(reason: reason, contextTokens: context, lastResponseAt: session.lastResponseAt)
+        self.init(
+            reason: reason, contextTokens: context, lastResponseAt: session.lastResponseAt,
+            choices: startsFresh ? [.compact, .freshStart] : [.compact]
+        )
     }
 
     /// Whether a Lead's Claude session is worth a fresh start: past its

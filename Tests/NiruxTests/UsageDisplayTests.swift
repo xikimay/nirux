@@ -65,6 +65,15 @@ final class UsageDisplayTests: XCTestCase {
         later.lastResponseAt = 200
         XCTAssertNil(click(.contextOffer(workspaceIndex: 0, columnIndex: 0, offer: later, choice: .compact)), "another response came")
         XCTAssertNil(click(compact, count: 2))
+
+        // Where Nirux can't hand the work over: Compact alone.
+        column.contextOffer = ContextOffer(reason: .heavy, contextTokens: 312_000, lastResponseAt: 100, choices: [.compact])
+        var plain = info
+        plain.columns = [column]
+        XCTAssertEqual(
+            Array(SidebarWorkspaceCardRenderer(workspace: plain, sidebarWidth: 260, yOffset: 800).render().approvalButtons.keys),
+            [SidebarHoverTarget.contextOfferButtonKey(workspaceIndex: 0, columnIndex: 0, offer: column.contextOffer!, choice: .compact)]
+        )
     }
 
     func testATaskRowReadsItsLatestSessionsContextAndItsWeek() throws {

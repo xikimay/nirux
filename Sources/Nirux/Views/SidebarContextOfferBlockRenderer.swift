@@ -26,7 +26,7 @@ struct SidebarContextOfferBlockRenderer {
         var buttons: [String: SidebarBadgeView] = [:]
         let bottom = top - metrics.height(of: .contextOffer(columnIndex: columnIndex, offer), width: width, textWidth: width)
         var right = x + width
-        for choice in [ContextOffer.Choice.freshStart, .compact] {
+        for choice in offer.choices.reversed() {
             let button = SidebarActionButton.secondary(choice.title, label: choice.accessibilityLabel)
             button.toolTip = ContextOffer.toolTip
             button.frame = NSRect(x: right - button.fittingWidth, y: bottom, width: button.fittingWidth, height: metrics.buttonHeight)

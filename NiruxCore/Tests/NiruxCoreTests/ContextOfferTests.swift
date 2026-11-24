@@ -19,6 +19,7 @@ struct ContextOfferTests {
         #expect(ContextOffer(session(context: 149_999, idle: 7_200), now: now) == nil)
         #expect(ContextOffer(session(context: nil, idle: 7_200), now: now) == nil, "compacted: no response since")
         #expect(ContextOffer(session(.codex, context: 400_000, idle: 60), now: now) == nil)
+        #expect(ContextOffer(session(context: 300_000, idle: 60), now: now, startsFresh: false)?.choices == [.compact])
     }
 
     @Test func aLeadStartsAfreshOnceColdWithAHeavyContextOnly() {

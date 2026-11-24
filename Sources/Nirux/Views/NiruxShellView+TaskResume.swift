@@ -1,7 +1,7 @@
 import AppKit
 
 extension NiruxShellView {
-    private func taskWorker(_ task: WorkspaceState, snapshot: ProcessSnapshot) -> ColumnState? {
+    func taskWorker(_ task: WorkspaceState, snapshot: ProcessSnapshot) -> ColumnState? {
         let terminals = task.columns.filter { $0.pty != nil && !$0.isClosing }
         if let missionID = task.missionID {
             guard let mission = MissionStore.shared.missions.first(where: { $0.id == missionID && $0.childWorkspaceID == task.id })

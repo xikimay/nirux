@@ -63,15 +63,20 @@ extension NiruxShellView {
     }
 
     /// The offer under a Claude column at rest whose session is its task's
-    /// latest (`ContextOffer`).
+    /// latest (`ContextOffer`). Fresh start where it hands the work over:
+    /// the Lead's terminal, a Nirux task's worker.
     func contextOffer(
-        for column: ColumnState, in workspace: WorkspaceState, foreground: ForegroundProcess?, status: AgentStatus, now: TimeInterval
+        for column: ColumnState, in workspace: WorkspaceState, foreground: ForegroundProcess?, status: AgentStatus,
+        snapshot: ProcessSnapshot, now: TimeInterval
     ) -> ContextOffer? {
         guard status != .working, let foreground, foreground.interactiveAgent == .claude,
               let id = column.claudeSessionID(of: foreground),
               let session = usageMonitor?.report?.latestSessions[workspace.id], session.key == UsageSessionKey(.claude, id)
         else { return nil }
-        return ContextOffer(session, now: now)
+        let startsFresh = workspace.isLead
+            ? column === workspace.leadTerminal
+            : Self.isTask(workspace) && workspace.missionID != nil && taskWorker(workspace, snapshot: snapshot) === column
+        return ContextOffer(session, now: now, startsFresh: startsFresh)
     }
 
     /// A Claude Lead at rest past its cache with a heavy context starts a
