@@ -456,7 +456,9 @@ For each PR in Standard, in order:
      pass.
    - A required check that ran only as `<name> (selected)` (CI that tests
      less on pull requests): the queue adds the label `full-test` once per
-     head, which asks that CI for the full run, and the timeout starts again.
+     head (once more after an unclear answer), which asks that CI for the full
+     run, and the timeout starts again. A red check stops the queue at once
+     instead: it would still block the merge after the full run.
    - **Flaky tests:** a failed required check is rerun once
      (`gh run rerun <run id> --repo <owner/name> --failed`), once per PR per
      Start. Right after a

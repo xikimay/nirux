@@ -239,7 +239,8 @@ extension MergeQueue {
             let checks = "\(settings.requiredChecks.joined(separator: ", ")) (up to \(settings.checksTimeoutMinutes) minutes)"
             return [
                 "In one train, in this order:",
-                "• Check each pull request: open, at the head shown here, its own checks green: \(checks).",
+                "• Check each pull request: open, at the head shown here, none of its checks red. Its required checks aren’t "
+                    + "awaited: the train runs them.",
                 "• On GitHub, start a branch nirux-train/… at the tip of \(base) and merge each head into it. The heads stay as "
                     + "shown: no branch update, rebase or force push.",
                 "• Open a pull request of the train into \(base) and wait for its required checks: \(checks).",

@@ -694,8 +694,10 @@ final class MergeQueueTrainTests: XCTestCase {
                        "A train only takes pull requests whose checks are green: Tests / test isn’t green on #14.")
         red.checks = MQ.checks(MQ.checkRun(id: 2, status: "IN_PROGRESS", conclusion: nil))
         XCTAssertNil(MergeQueue.trainCandidateRefusal(for: [red], settings: MQ.settings()), "the train runs it")
-        red.checks = MQ.checks(MQ.checkRun(id: 2, name: "test (selected)"))
-        XCTAssertNil(MergeQueue.trainCandidateRefusal(for: [red], settings: MQ.settings()), "the train runs the full one")
+        red.checks = MQ.checks(MQ.checkRun(id: 2, conclusion: "CANCELLED"))
+        XCTAssertNil(MergeQueue.trainCandidateRefusal(for: [red], settings: MQ.settings()), "the train runs it")
+        red.checks = MQ.checks(MQ.checkRun(id: 2, conclusion: "SKIPPED"))
+        XCTAssertNil(MergeQueue.trainCandidateRefusal(for: [red], settings: MQ.settings()), "the train runs it")
     }
 
     func testTheTrainsCallsAndReadsSpeakGitHubsAPI() {

@@ -244,8 +244,10 @@ extension MergeQueue {
             var redSince: TimeInterval?
             /// Failed check runs a rerun replaces: pending until their new run shows.
             var replacedChecks: Set<Int> = []
-            /// The head whose full run a label asked for.
+            /// The head whose full run a label asked for, and whether an
+            /// unclear answer was asked again.
             var fullRunAsked: String?
+            var fullRunAskedAgain = false
             var readFailingSince: TimeInterval?
             var readFailures = 0
             var secondaryLimits = 0
@@ -773,11 +775,15 @@ extension MergeQueue {
                     + "isn’t green on \(Self.short(head)): neutral and skipped don’t count."))
             }
             guard verdict.pending.isEmpty else {
-                if clocks.fullRunAsked != head, MergeQueue.ranSelectedOnly(checks, required: settings.requiredChecks) {
-                    clocks.fullRunAsked = head
-                    note("Only the selected tests ran on \(Self.short(head)): labelling #\(entries[index].number) "
-                        + "\(MergeQueue.fullRunLabel) for the full run")
-                    return mutate(.addLabel(number: entries[index].number, label: MergeQueue.fullRunLabel), for: .fullRun(head: head))
+                if clocks.fullRunAsked == head || MergeQueue.ranSelectedOnly(checks, required: settings.requiredChecks) {
+                    // A red check would still block the merge after the full run.
+                    guard verdict.otherFailures.isEmpty else { return stop(redChecks(verdict, head: head)) }
+                    if clocks.fullRunAsked != head {
+                        clocks.fullRunAsked = head
+                        note("Only the selected tests ran on \(Self.short(head)): labelling #\(entries[index].number) "
+                            + "\(MergeQueue.fullRunLabel) for the full run")
+                        return mutate(.addLabel(number: entries[index].number, label: MergeQueue.fullRunLabel), for: .fullRun(head: head))
+                    }
                 }
                 guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else {
                     let advice = verdict.pending.contains { $0.hasSuffix("(not started)") }
@@ -791,6 +797,11 @@ extension MergeQueue {
                             for: .checks(head: head))
             }
             mergeChecks(head: head, index: index)
+        }
+
+        private func redChecks(_ verdict: ChecksVerdict, head: String) -> StopReason {
+            StopReason(kind: .checks, message: "\(verdict.otherFailures.joined(separator: ", ")) failed on \(Self.short(head)): "
+                + "any red check blocks the merge, required or not.")
         }
 
         /// A failed required check is rerun once per pull request per
@@ -878,10 +889,7 @@ extension MergeQueue {
                 }
                 return decide(on: checks, head: head, index: index, now: now)
             }
-            guard verdict.otherFailures.isEmpty else {
-                return stop(StopReason(kind: .checks, message: "\(verdict.otherFailures.joined(separator: ", ")) failed on "
-                    + "\(Self.short(head)): any red check blocks the merge, required or not."))
-            }
+            guard verdict.otherFailures.isEmpty else { return stop(redChecks(verdict, head: head)) }
             // An agent may have gone back to work since preflight.
             let isHeld = holdForLocal(local, index: index, now: now) { engine in
                 engine.mergeChecks(head: head, index: index, after: Limits.pollInterval)
@@ -1153,6 +1161,11 @@ extension MergeQueue {
             case .fullRun(let head):
                 switch result {
                 case .sent, .uncertain:
+                    // Asked once more on the next look: a label it already has starts no run.
+                    if result.isUncertain, !clocks.fullRunAskedAgain {
+                        clocks.fullRunAskedAgain = true
+                        clocks.fullRunAsked = nil
+                    }
                     // The full run takes the checks' whole time.
                     clocks.step = now
                     read([.pullRequest(number), .checks(head)], after: Limits.pollInterval, for: .checks(head: head))
