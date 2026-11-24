@@ -111,10 +111,10 @@ extension MergeQueue {
             var saved = self
             let entry = current.flatMap { entries[safe: $0] }
             var message = "Interrupted while " + stepDescription + ": Nirux quit."
-            if let inFlight, let shown = train?.name ?? entry.map({ "#\($0.number)" }) {
-                message += " Its \(inFlight) was sent but not answered: check \(shown) on GitHub."
-            } else if let leftOpen = train?.leftOpen {
-                message += leftOpen
+            if let inFlight {
+                message += " Its \(inFlight) was sent but not answered: check \(train?.name ?? entry.map { "#\($0.number)" } ?? "it") on GitHub."
+            } else if let leftBehind = train?.leftBehind {
+                message += leftBehind
             }
             let reason = StopReason(kind: .interrupted, message: message)
             saved.status = .stopped

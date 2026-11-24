@@ -792,6 +792,50 @@ final class NewTaskFlowTests: UIFlowTestCase {
         }
     }
 
+    /// agy waiting on its own background task (a build, CI checks) says
+    /// working and goes quiet until the task ends: through ten minutes of
+    /// that silence its row says Working, never Needs you, past twenty
+    /// minutes it adds how long agy said nothing, and only its turn's end
+    /// alerts.
+    func testAgyWaitingOnItsBackgroundTaskNeverNeedsTheUser() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let taskEnded = NSTemporaryDirectory() + "agy-task-\(UUID().uuidString)"
+            defer { try? FileManager.default.removeItem(atPath: taskEnded) }
+            let finished = Data("Finished.".utf8).base64EncodedString()
+            // No echo: a key typed in it prints nothing, as agy waiting.
+            let script = "stty -echo; sleep 1; printf '\\033]7501;state=working:app=antigravity\\007'; "
+                + "while [ ! -e \(taskEnded) ]; do sleep 0.1; done; "
+                + "printf '\\033]7501;state=done:app=antigravity:msg=\(finished)\\007'; sleep 600"
+            workspace.addColumn(command: "exec -a agy /bin/sh -c \"\(script)\"", cwd: harness.repo)
+            let column = try XCTUnwrap(workspace.columns.last)
+            let pty = try XCTUnwrap(column.pty)
+            let skew = OSAllocatedUnfairLock(initialState: TimeInterval(0))
+            pty.clock = { Date().addingTimeInterval(skew.withLock { $0 }) }
+            var alerts: [AgentAttentionReason?] = []
+            column.onAgentAttention = { alerts.append($0) }
+            // The user looks at another column.
+            workspace.focusedIndex = 0
+            shell.relayout(animated: false)
+            @MainActor func status() -> String? {
+                shell.updateSidebar()
+                return shell.sidebar.displayedWorkspaceInfos.first { $0.id == workspace.id }?.rowSummary.status.text
+            }
+            UIFlowHarness.waitUntil("agy works (\(status() ?? "nil"))") { status() == "Working" }
+            // The user typed in it: silence may then read as a wait.
+            pty.sendRaw("x")
+            skew.withLock { $0 = 600 }
+            XCTAssertEqual(status(), "Working")
+            skew.withLock { $0 = 1530 }
+            XCTAssertEqual(status(), "Working · no word for 25m")
+            XCTAssertEqual(alerts, [])
+            FileManager.default.createFile(atPath: taskEnded, contents: nil)
+            UIFlowHarness.waitUntil("its turn ended") { pty.agentAttentionReason == .turnFinished }
+            XCTAssertEqual(alerts, [.turnFinished])
+        }
+    }
+
     /// agy's Stop binds its column to the conversation, which the state file
     /// keeps for the restore; it never drives the column's status.
     func testAgyStartBindsTheConversationARestoreResumes() throws {

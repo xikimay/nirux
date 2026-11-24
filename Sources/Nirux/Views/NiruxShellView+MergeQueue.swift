@@ -29,7 +29,22 @@ extension NiruxShellView {
                 busyAgents: { [weak self] worktrees, allWorktrees in
                     self?.mergeQueueBusyAgents(in: worktrees, allWorktrees: allWorktrees) ?? []
                 },
-                reviewTasks: { [weak self] in Self.reviewTasks(of: self?.projectWorkspaces(of: projectID) ?? []) }
+                reviewTasks: { [weak self] in Self.reviewTasks(of: self?.projectWorkspaces(of: projectID) ?? []) },
+                triage: { [weak self] run, pullRequest, checks in
+                    guard let self, self.ciTriageCenter.isEnabled else { return .off }
+                    let request = CITriageInvestigation.Request(
+                        run: run, pullRequest: pullRequest, repositoryRoot: nil, isModelAllowed: false,
+                        knownFlaky: self.ciTriageCenter.store.knownFlaky(in: run.repository, now: Date().timeIntervalSince1970),
+                        redChecks: checks
+                    )
+                    let center = self.ciTriageCenter
+                    let investigate = self.sideEffects.investigateCIFailure
+                    // It may wait behind other triages: a train doesn't wait for it past its deadline.
+                    return await MergeQueue.answer(within: MergeQueue.Limits.triageTimeout, or: .unread("no answer within 3 minutes")) {
+                        MergeQueue.TriageAnswer(await investigate(request) { await MainActor.run { center.isEnabled } })
+                    }
+                },
+                isTriageOn: { [weak self] in self?.ciTriageCenter.isEnabled ?? false }
             ),
             lockFolder: mergeQueueLockFolder
         )

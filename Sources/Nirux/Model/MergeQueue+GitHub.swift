@@ -326,6 +326,8 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
                          GitHub.parseWorkflowRuns).map { .runs($0) }
         case .local:
             return .failure(.unreadable("the local worktrees aren’t a GitHub read"))
+        case .triage:
+            return .failure(.unreadable("the CI triage isn’t a GitHub read"))
         case .branch(let name):
             return parse(call(Self.branchArguments(repository: repository, branch: name)), MergeQueue.parseBranchTip)
                 .map { .branch($0) }
@@ -476,6 +478,8 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         case .openPullRequest(let base, let head, let title, let body):
             return ["api", "--hostname", GitHub.host, "--method", "POST", "repos/\(repository)/pulls",
                     "-f", "base=\(base)", "-f", "head=\(head)", "-f", "title=\(title)", "-f", "body=\(body)"]
+        case .closePullRequest(let number):
+            return ["api", "--hostname", GitHub.host, "--method", "PATCH", "repos/\(repository)/pulls/\(number)", "-f", "state=closed"]
         case .deleteBranch(let name):
             return ["api", "--hostname", GitHub.host, "--method", "DELETE", "repos/\(repository)/git/refs/heads/\(name)"]
         }
