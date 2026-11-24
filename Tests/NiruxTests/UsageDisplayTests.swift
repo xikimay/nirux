@@ -29,19 +29,22 @@ final class UsageDisplayTests: XCTestCase {
 
     /// Under the column, never imposed: why, then Compact and Fresh start,
     /// which arm like Allow / Deny and click only for that offer.
-    func testAHeavyClaudeColumnOffersACompactionOrAFreshStart() throws {
+    @MainActor func testAHeavyClaudeColumnOffersACompactionOrAFreshStart() throws {
         let offer = ContextOffer(reason: .heavy, contextTokens: 312_000, lastResponseAt: 100)
         var column = ColumnInfo(
             index: 0, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
             webTitle: nil, terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil
         )
         column.contextOffer = offer
-        let info = WorkspaceInfo(
-            id: "ws", index: 0, title: "check-video", profileID: WorkspaceProfile.defaultID, isInactive: false,
-            columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
-            columns: [column], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
-            phase: .active, lastSummary: nil, lastActivityAt: nil
-        )
+        func card(_ column: ColumnInfo) -> WorkspaceInfo {
+            WorkspaceInfo(
+                id: "ws", index: 0, title: "check-video", profileID: WorkspaceProfile.defaultID, isInactive: false,
+                columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
+                columns: [column], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+                phase: .active, lastSummary: nil, lastActivityAt: nil
+            )
+        }
+        let info = card(column)
         XCTAssertEqual(info.cardActions, [.contextOffer(columnIndex: 0, offer)])
         XCTAssertEqual(offer.text, "Each message rereads 312k")
         XCTAssertEqual(
@@ -68,10 +71,8 @@ final class UsageDisplayTests: XCTestCase {
 
         // Where Nirux can't hand the work over: Compact alone.
         column.contextOffer = ContextOffer(reason: .heavy, contextTokens: 312_000, lastResponseAt: 100, choices: [.compact])
-        var plain = info
-        plain.columns = [column]
         XCTAssertEqual(
-            Array(SidebarWorkspaceCardRenderer(workspace: plain, sidebarWidth: 260, yOffset: 800).render().approvalButtons.keys),
+            Array(SidebarWorkspaceCardRenderer(workspace: card(column), sidebarWidth: 260, yOffset: 800).render().approvalButtons.keys),
             [SidebarHoverTarget.contextOfferButtonKey(workspaceIndex: 0, columnIndex: 0, offer: column.contextOffer!, choice: .compact)]
         )
     }
