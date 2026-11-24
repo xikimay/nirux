@@ -140,9 +140,9 @@ extension NiruxShellView {
     /// A queue the space's Lead started ended without a person's word: it
     /// hears it once, as it happens, though no user wakes it.
     /// A queue is the Lead's when it started it, or the user started what it
-    /// proposed (`queue_merge` with auto-start off). The same stop of the
-    /// same pull request is told once in `leadQueueStopNoticeInterval`.
-    private func noticeLeadOfEndedQueues(projectID: String, now: TimeInterval = Date().timeIntervalSince1970) {
+    /// proposed (`queue_merge` with auto-start off). Each run tells its end
+    /// once.
+    private func noticeLeadOfEndedQueues(projectID: String) {
         for controller in mergeQueues(of: projectID) {
             guard let engine = controller.engine else { continue }
             let was = mergeQueuePhases.updateValue(engine.phase, forKey: ObjectIdentifier(controller))
@@ -150,20 +150,17 @@ extension NiruxShellView {
             let proposal = Set(leadQueueProposals[projectID + " " + repository] ?? [])
             let isLeads = engine.startedByLead || (!proposal.isEmpty && Set(engine.entries.map(\.number)).isSubset(of: proposal))
             let current = engine.current.flatMap { engine.entries[safe: $0]?.number }
+            let left = engine.entries.filter { entry in
+                guard entry.number != current, case .stopped = entry.step else { return false }
+                return true
+            }.map(\.number)
             guard was?.isActive == true, let text = MergeQueue.leadEndNotice(
                 repository: repository, phase: engine.phase, isLeads: isLeads,
-                merged: engine.entries.filter { $0.step == .done }.map(\.number), current: current
+                merged: engine.entries.filter { $0.step == .done }.map(\.number), left: left, current: current
             ), let lead = leadMissionParent(inSpace: projectID) else { continue }
-            if case .stopped(let reason) = engine.phase {
-                let key = "\(repository) \(current ?? 0) \(reason.kind.rawValue)"
-                if let sent = leadQueueStopNotices[key], now - sent < Self.leadQueueStopNoticeInterval { continue }
-                leadQueueStopNotices[key] = now
-            }
             tellProposer(lead, text)
         }
     }
-
-    static let leadQueueStopNoticeInterval: TimeInterval = 6 * 3_600
 
     // MARK: The board
 

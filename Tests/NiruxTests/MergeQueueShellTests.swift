@@ -107,11 +107,13 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertTrue(notices().first?.contains("The merge queue of acme/widgets stopped on #52 (") == true, "\(notices())")
         XCTAssertTrue(notices().first?.contains("). Read merge_queue_status, fix what stopped it") == true, "\(notices())")
         shell.mergeQueueDidChange(projectID: "project")
+        XCTAssertEqual(notices().count, 1, "once per run")
         run(byLead: true) { _ in }
-        XCTAssertEqual(notices().count, 1, "the same stop of the same pull request, once")
+        XCTAssertEqual(notices().count, 2, "another run, its own end")
         XCTAssertEqual(
-            MergeQueue.leadEndNotice(repository: "acme/widgets", phase: .finished, isLeads: true, merged: [51, 52], current: nil),
-            "The merge queue of acme/widgets finished: 2 merged. Close the merged tasks with close_task."
+            MergeQueue.leadEndNotice(repository: "acme/widgets", phase: .finished, isLeads: true, merged: [51, 52], left: [53], current: nil),
+            "The merge queue of acme/widgets finished: 2 merged. #53 left it, an agent still busy: queue it again once that agent "
+                + "is back at its prompt. Close the merged tasks with close_task."
         )
         let busy = MergeQueue.leadEndNotice(
             repository: "acme/widgets", phase: .stopped(MergeQueue.StopReason(kind: .agentBusy, message: "busy")),

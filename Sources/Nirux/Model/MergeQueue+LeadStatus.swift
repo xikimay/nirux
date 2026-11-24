@@ -43,9 +43,12 @@ extension MergeQueue {
     /// or its list done. Nil for anything else. Its own words only: a
     /// stop's message can carry GitHub's.
     /// `current`: the pull request it stopped on; `merged`: those that
-    /// landed before. A stop that waiting can't fix (an agent busy, GitHub
-    /// not answering) asks for no new queue.
-    static func leadEndNotice(repository: String, phase: Phase, isLeads: Bool, merged: [Int], current: Int?) -> String? {
+    /// landed before; `left`: those that left it (an agent stayed busy). A
+    /// stop that waiting can't fix (an agent busy, GitHub not answering) asks
+    /// for no new queue.
+    static func leadEndNotice(
+        repository: String, phase: Phase, isLeads: Bool, merged: [Int], left: [Int] = [], current: Int?
+    ) -> String? {
         guard isLeads else { return nil }
         switch phase {
         case .stopped(let reason) where reason.kind != .user:
@@ -59,7 +62,9 @@ extension MergeQueue {
             return "The merge queue of \(repository) stopped" + (current.map { " on #\($0)" } ?? "")
                 + " (\(reason.kind.rawValue))." + next + landed
         case .finished:
-            return "The merge queue of \(repository) finished: \(merged.count) merged. Close the merged tasks with close_task."
+            let leftIt = left.isEmpty ? "" : " " + left.map { "#\($0)" }.joined(separator: ", ")
+                + " left it, an agent still busy: queue it again once that agent is back at its prompt."
+            return "The merge queue of \(repository) finished: \(merged.count) merged." + leftIt + " Close the merged tasks with close_task."
         default:
             return nil
         }
