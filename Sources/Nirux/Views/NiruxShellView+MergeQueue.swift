@@ -134,6 +134,21 @@ extension NiruxShellView {
         updateMergeQueueStatusBar()
         keepAwake?.update(mergeQueueRunning: !runningMergeQueues.isEmpty)
         settleMergeQueueQuit()
+        noticeLeadOfEndedQueues(projectID: projectID)
+    }
+
+    /// A queue the space's Lead started ended without its word: it hears it
+    /// once, as it happens, though no user wakes it.
+    private func noticeLeadOfEndedQueues(projectID: String) {
+        for controller in mergeQueues(of: projectID) {
+            guard let engine = controller.engine else { continue }
+            let was = mergeQueuePhases.updateValue(engine.phase, forKey: ObjectIdentifier(controller))
+            guard was?.isActive == true, let text = MergeQueue.leadEndNotice(
+                repository: controller.queueRepository.ownerAndName, phase: engine.phase,
+                startedByLead: engine.startedByLead, status: engine.statusText
+            ), let lead = leadMissionParent(inSpace: projectID) else { continue }
+            tellProposer(lead, text)
+        }
     }
 
     // MARK: The board

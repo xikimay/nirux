@@ -65,6 +65,46 @@ final class MergeQueueShellTests: XCTestCase {
         return queue
     }
 
+    // MARK: - Lead
+
+    /// A queue the Lead started tells it once when it ends without its word
+    /// (here the user stops it): CI results wake no agent, so a stop at
+    /// night would wait for the morning. Its own stop tells it nothing.
+    @MainActor
+    func testTheLeadHearsOnceWhenAQueueItStartedEndsWithoutIt() throws {
+        let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
+        shell.workspaceStore.replaceProfiles(
+            [WorkspaceProfile.defaultProfile, WorkspaceProfile(id: "project", name: "project", colorHex: "#E0AF68")],
+            activeProfileID: WorkspaceProfile.defaultID
+        )
+        shell.addWorkspace(title: "Lead", cwd: root.path, profileID: "project", isLead: true)
+        XCTAssertNotNil(shell.leadMissionParent(inSpace: "project"))
+        let queue = shell.mergeQueue(projectID: "project", repository: MQ.widgets)
+        queue.beginActivity = { NSObject() }
+        queue.endActivity = { _ in }
+        func notices() -> [String] { shell.pendingLeadNotices.map(\.text).filter { $0.contains("merge queue of") } }
+
+        XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(52, head: MQ.sha("a"))]))
+        queue.stop()
+        XCTAssertTrue(waitUntil("the user's queue to stop") { queue.isRunning == false })
+        XCTAssertEqual(notices(), [], "a queue the user started")
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(52, head: MQ.sha("a"))], cadence: .standard, startedByLead: true))
+        XCTAssertEqual(notices(), [])
+        queue.stop()
+        XCTAssertTrue(waitUntil("the Lead's notice") { notices().count == 1 })
+        XCTAssertTrue(notices()[0].contains("acme/widgets ended. Stopped: Stopped by the user. Fix"), notices()[0])
+        shell.mergeQueueDidChange(projectID: "project")
+        XCTAssertEqual(notices().count, 1, "once")
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(52, head: MQ.sha("a"))], cadence: .standard, startedByLead: true))
+        queue.stop(byLead: true)
+        XCTAssertTrue(waitUntil("the queue to stop") { queue.isRunning == false })
+        XCTAssertEqual(notices().count, 1, "the Lead's own stop")
+    }
+
     // MARK: - Status bar
 
     @MainActor

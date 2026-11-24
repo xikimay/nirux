@@ -38,6 +38,21 @@ extension MergeQueue {
         return lines.joined(separator: "\n")
     }
 
+    /// What the Lead hears when a queue it started ends: a stop it didn't
+    /// ask for, or its list done. Nil for anything else.
+    static func leadEndNotice(repository: String, phase: Phase, startedByLead: Bool, status: String) -> String? {
+        guard startedByLead else { return nil }
+        let ended = "The merge queue of \(repository) ended. " + (status.hasSuffix(".") ? status : status + ".")
+        switch phase {
+        case .stopped(let reason) where reason.message != StopReason.byLead:
+            return ended + " Fix what stopped it, then queue_merge again (merge_queue_status has the journal)."
+        case .finished:
+            return ended + " Close the merged tasks with close_task."
+        default:
+            return nil
+        }
+    }
+
     private static func phaseDescription(_ status: SavedQueue.Status) -> String {
         switch status {
         case .running: "running"
