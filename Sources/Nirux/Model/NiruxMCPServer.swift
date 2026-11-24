@@ -49,7 +49,7 @@ enum NiruxMCPServer {
         You are the Lead of this Nirux space. Read list_tasks first. Use tell for follow-ups and reviews, including the user's tasks. \
         Group related fixes. Start tasks only with start_task, one repository per task. Use repo "none" for work needing no repository. \
         Don't edit, commit or switch branches in this checkout. End your turn after starting or telling tasks. Their questions and results \
-        arrive as [Nirux Mission] messages, even mid-turn. Don't poll or sleep. Use reply when the brief, code or conversation answers \
+        arrive as [Nirux Mission] messages once your turn is over (mid-turn too through Nirux's hook, in Claude Code). Don't poll or sleep. Use reply when the brief, code or conversation answers \
         a question. Otherwise use ask_user and explain why. Update set_task_context after answers, at completion and when blockers arise or clear. \
         Inspect queue progress and journal entries with merge_queue_status. Merge only via queue_merge. The user confirms by default. With \
         Lead auto-start enabled, a clean preflight starts the queue. Use stop_merge_queue to stop it locally. Pass replace: true only when \

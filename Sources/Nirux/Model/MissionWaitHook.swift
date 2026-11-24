@@ -15,9 +15,6 @@ enum MissionWaitHook {
     /// minute before: one Claude Code kills could have claimed a message
     /// it never printed.
     static let timeout = 86_400
-    /// A turn that takes in a claimed message calls the model after the
-    /// claim: a Stop closer to it ends the turn that was finishing.
-    static let turnAfterClaim: TimeInterval = 1
     /// What the user sees of a message in the agent's terminal: its text is
     /// behind ctrl+o.
     static let summary = "Nirux Mission message"
@@ -34,14 +31,15 @@ enum MissionWaitHook {
 
     /// The hooks a space's Claude settings run, for the oldest `claude` a
     /// terminal could run (`version`) and Nirux at `executable`; nil
-    /// without either.
+    /// without either, or with the pilot off in Settings (`enabled`).
     @MainActor
     static func claudeHooks(
         executable: String? = NiruxShellView.niruxExecutable,
         version: ClaudeCodeVersion? = ClaudeCodeVersion.detect(),
-        mailbox: URL = mailbox.root
+        mailbox: URL = mailbox.root,
+        enabled: Bool = NiruxShellView.currentClaudeMissionHook()
     ) -> [String: [ClaudeSpaceSettings.File.HookGroup]]? {
-        guard let executable, let version, version >= claudeVersion else { return nil }
+        guard enabled, let executable, let version, version >= claudeVersion else { return nil }
         let path = AgentHookInstaller.shellQuoted(executable)
         let command = #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x \#(path) ]; then exec \#(path) --hook mission-wait "#
             + AgentHookInstaller.shellQuoted(mailbox.path) + "; else /bin/cat >/dev/null; fi"
@@ -51,24 +49,83 @@ enum MissionWaitHook {
         return ["SessionStart": [waiter], "Stop": [waiter]]
     }
 
-    /// Waits on the letters of its payload's session while its `claude`
-    /// runs it: 2 with them on stderr, else 0. A second waiter on the
-    /// session leaves at once.
+    /// The command: Claude Code's payload on stdin, its `claude` as the parent.
     static func run(mailbox root: String) -> Int32 {
-        let parent = getppid()
-        let payload = FileHandle.standardInput.readDataToEndOfFile()
-        guard parent > 1, AgentHookCLI.isFromNiruxTerminal(env: ProcessInfo.processInfo.environment),
-              let session = ((try? JSONSerialization.jsonObject(with: payload)) as? [String: Any])?["session_id"] as? String
+        run(
+            mailbox: MissionMailbox(root: URL(fileURLWithPath: root, isDirectory: true)),
+            payload: FileHandle.standardInput.readDataToEndOfFile(), environment: ProcessInfo.processInfo.environment,
+            parent: getppid(), until: Date() + TimeInterval(timeout - 60)
+        ) { FileHandle.standardError.write(Data($0.utf8)) }
+    }
+
+    /// Waits on the letters of `payload`'s session while `parent` runs it,
+    /// until `deadline` (a minute before Claude Code's timeout, so a kill
+    /// never lands between a claim and its print): 2 with them printed, else
+    /// 0. A second waiter on the session leaves at once.
+    static func run(
+        mailbox: MissionMailbox, payload: Data, environment: [String: String], parent: pid_t, until deadline: Date,
+        print: (String) -> Void
+    ) -> Int32 {
+        guard parent > 1, AgentHookCLI.isFromNiruxTerminal(env: environment),
+              let fields = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any],
+              let session = fields["session_id"] as? String
         else { return 0 }
-        let mailbox = MissionMailbox(root: URL(fileURLWithPath: root, isDirectory: true))
         // The waiter of a conversation this claude left (/clear, /resume) leaves.
         try? mailbox.noteRunning(session, in: parent)
-        guard let waiter = try? mailbox.arm(session) else { return 0 }
-        let letters = withExtendedLifetime(waiter) {
-            mailbox.letters(for: session, whileRunning: parent, until: Date() + TimeInterval(timeout - 60))
+        if let transcript = (fields["transcript_path"] as? String).flatMap(AgentHookEvent.validTranscriptPath) {
+            try? mailbox.noteTranscript(transcript, of: session)
         }
+        guard let waiter = try? mailbox.arm(session) else { return 0 }
+        let letters = withExtendedLifetime(waiter) { mailbox.letters(for: session, whileRunning: parent, until: deadline) }
         guard !letters.isEmpty else { return 0 }
-        FileHandle.standardError.write(Data(letters.map(\.text).joined(separator: "\n\n").utf8))
+        print(letters.map(\.text).joined(separator: "\n\n"))
         return 2
+    }
+
+    /// Whether the model took `letter`, claimed at `claimedAt`, in: a line of
+    /// the turn that read it holds its text in `transcript`. Claude Code
+    /// writes it as the model reads it, mid-turn too; the line it queues the
+    /// hook's output with doesn't count.
+    static func modelRead(_ letter: MissionMailbox.Letter, claimedAt: TimeInterval, transcript path: String?) -> Bool {
+        guard let path, let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped) else { return false }
+        let needle = Data(jsonEscaped(String(String.UnicodeScalarView(letter.text.unicodeScalars.prefix(200)))).utf8)
+        guard !needle.isEmpty else { return false }
+        var start = data.startIndex
+        while start < data.endIndex, let found = data.range(of: needle, in: start..<data.endIndex) {
+            let lineStart = data[..<found.lowerBound].lastIndex(of: 0x0A).map { $0 + 1 } ?? data.startIndex
+            let lineEnd = data[found.upperBound...].firstIndex(of: 0x0A) ?? data.endIndex
+            if let line = (try? JSONSerialization.jsonObject(with: data[lineStart..<lineEnd])) as? [String: Any],
+               ["user", "attachment"].contains(line["type"] as? String),
+               (line["timestamp"] as? String).flatMap(transcriptTime).map({ $0 >= claimedAt - 1 }) ?? false {
+                return true
+            }
+            start = lineEnd
+        }
+        return false
+    }
+
+    /// `text` as JSON.stringify writes it in a transcript, without quotes.
+    static func jsonEscaped(_ text: String) -> String {
+        var escaped = ""
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "\"": escaped += "\\\""
+            case "\\": escaped += "\\\\"
+            case "\n": escaped += "\\n"
+            case "\r": escaped += "\\r"
+            case "\t": escaped += "\\t"
+            case "\u{08}": escaped += "\\b"
+            case "\u{0C}": escaped += "\\f"
+            case _ where scalar.value < 0x20: escaped += String(format: "\\u%04x", scalar.value)
+            default: escaped.unicodeScalars.append(scalar)
+            }
+        }
+        return escaped
+    }
+
+    private static func transcriptTime(_ text: String) -> TimeInterval? {
+        let format = ISO8601DateFormatter()
+        format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return format.date(from: text)?.timeIntervalSince1970
     }
 }

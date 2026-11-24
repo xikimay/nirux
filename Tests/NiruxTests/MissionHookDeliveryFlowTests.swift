@@ -6,7 +6,7 @@ import XCTest
 /// Mission messages a waiter hook takes in place of typing
 /// (NiruxShellView+MissionHooks, docs/design/mission-delivery.md): a task's
 /// question for its Lead, whose `claude` is a stand-in, in a real window on
-/// throwaway state (see UIFlowHarness).
+/// throwaway state (see UIFlowHarness). Hook events go through the real drain.
 @MainActor
 final class MissionHookDeliveryFlowTests: XCTestCase {
     @MainActor
@@ -17,6 +17,9 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
         let session: String
         let mission: Mission
         let question: MissionEvent
+        let transcript: URL
+
+        var mailbox: MissionMailbox { MissionWaitHook.mailbox }
 
         /// When Nirux recorded the question as in the Lead's hands.
         var deliveredAt: TimeInterval? {
@@ -25,19 +28,31 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
 
         var typed: Bool { standIn.input.contains("Keep the old date= parameter?") }
 
-        /// A hook of the Lead's `claude`, as the column takes it in.
-        @discardableResult
-        func hook(_ name: AgentHookEvent.Name, at time: TimeInterval = Date().timeIntervalSince1970) throws -> AgentHookEvent {
-            let pty = try XCTUnwrap(column.pty)
-            let snapshot = ProcessSnapshot()
-            let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: snapshot))
+        var claude: ForegroundProcess? { column.pty?.foregroundProcess(snapshot: ProcessSnapshot()) }
+
+        /// A hook of the Lead's `claude`, through the app's drain.
+        func hook(_ name: AgentHookEvent.Name) throws {
+            let claude = try XCTUnwrap(claude)
             let event = AgentHookEvent(
                 kind: .claude, name: name, agentUUID: column.agentUUID, sessionID: session, emitterProcess: claude.instance,
-                source: name == .sessionStart ? "startup" : nil, timestamp: time
+                source: name == .sessionStart ? "startup" : nil, timestamp: Date().timeIntervalSince1970
             )
-            _ = column.admitClaudeHook(event, foregroundProcess: claude, snapshot: snapshot)
-            _ = pty.applyAgentHook(event, isUserFocused: false)
-            return event
+            shell.applyAgentHookEvents([try XCTUnwrap(AgentHookCenter.shared.dispatch(event))])
+        }
+
+        /// The Lead's waiter claims what waits, as its claude runs the session.
+        func claim() throws -> MissionMailbox.Letter {
+            try mailbox.noteRunning(session, in: try XCTUnwrap(claude).instance.pid)
+            try mailbox.noteTranscript(transcript.path, of: session)
+            return try XCTUnwrap(mailbox.claim(session, at: Date().timeIntervalSince1970).first)
+        }
+
+        /// The model reads `letter`: its turn's line in the transcript.
+        func read(_ letter: MissionMailbox.Letter) throws {
+            let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .gmt, formatOptions: [.withInternetDateTime, .withFractionalSeconds])
+            let line: [String: Any] = ["type": "user", "timestamp": stamp, "content": MissionWaitHook.preamble + " " + letter.text]
+            try (String(decoding: try JSONSerialization.data(withJSONObject: line, options: [.withoutEscapingSlashes]), as: UTF8.self) + "\n")
+                .write(to: transcript, atomically: true, encoding: .utf8)
         }
     }
 
@@ -45,6 +60,8 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
     /// conversation, and a question from one of its tasks.
     private func makeParent(_ harness: UIFlowHarness, standIn: AgentStandIn) throws -> Parent {
         let shell = harness.shell
+        AgentHookCenter.shared.resolver = { [weak shell] in shell?.resolveAgentColumn(uuid: $0) }
+        addTeardownBlock { @MainActor in AgentHookCenter.shared.resolver = nil }
         let lead = try harness.makeLead()
         let agentUUID = UUID().uuidString
         lead.workspace.addColumn(command: standIn.command(), agentUUID: agentUUID, cwd: harness.repo)
@@ -65,88 +82,163 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
             childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
             kind: .question, message: "Keep the old date= parameter?", timestamp: Date().timeIntervalSince1970
         )
-        guard case .accepted = MissionStore.shared.process(question, enabled: false) else {
-            throw XCTSkip("the question wasn't recorded")
-        }
+        guard case .accepted = MissionStore.shared.process(question, enabled: false) else { throw XCTSkip("the question wasn't recorded") }
         let parent = Parent(
-            shell: shell, column: column, standIn: standIn, session: UUID().uuidString, mission: mission, question: question
+            shell: shell, column: column, standIn: standIn, session: UUID().uuidString, mission: mission, question: question,
+            transcript: URL(fileURLWithPath: harness.root + "/transcript-\(UUID().uuidString).jsonl")
         )
         try parent.hook(.sessionStart)
         try parent.hook(.userPromptSubmit)
         try parent.hook(.stop)
-        XCTAssertEqual(shell.conversation(of: column, foreground: column.pty?.foregroundProcess(snapshot: ProcessSnapshot())), parent.session)
+        XCTAssertEqual(shell.conversation(of: column, foreground: parent.claude), parent.session)
         return parent
     }
 
     /// Posted while a waiter waits on the Lead's conversation, never typed;
-    /// in its hands once a turn of that conversation ends after the claim.
-    func testAQuestionGoesToTheWaiterAndCountsOnceTheTurnThatTookItEnds() throws {
+    /// in its hands once a turn's end finds it read in the transcript.
+    func testAQuestionTheWaiterTookCountsOnceTheModelReadIt() throws {
         try UIFlowHarness.run { harness in
             let standIn = AgentStandIn()
             defer { standIn.remove() }
             let parent = try makeParent(harness, standIn: standIn)
-            let mailbox = MissionWaitHook.mailbox
-            var waiter = try mailbox.arm(parent.session)
+            var waiter = try parent.mailbox.arm(parent.session)
             parent.shell.typeMissionMessages()
-            XCTAssertEqual(mailbox.places()[parent.question.id], .waiting(conversation: parent.session))
+            XCTAssertEqual(parent.mailbox.places()[parent.question.id], .waiting(conversation: parent.session))
             XCTAssertFalse(parent.typed, "nothing typed into a free prompt")
-            XCTAssertNil(parent.deliveredAt)
 
-            let taken = mailbox.claim(parent.session, at: Date().timeIntervalSince1970)
-            XCTAssertTrue(taken.first?.text.hasPrefix("[Nirux Mission] Question from") == true, taken.first?.text ?? "nothing")
+            let letter = try parent.claim()
+            XCTAssertTrue(letter.text.hasPrefix("[Nirux Mission] Question from"), letter.text)
             waiter = nil
             parent.shell.typeMissionMessages()
+            try parent.hook(.stop)
             XCTAssertFalse(parent.typed, "the hook has it")
-            XCTAssertNil(parent.deliveredAt, "not before its turn ends")
+            XCTAssertNil(parent.deliveredAt, "a turn that didn't read it proves nothing")
 
-            // A claude started since then never got it: its turn proves nothing.
-            let resumed = ProcessInstance(pid: 1, startedAt: Date().timeIntervalSince1970 + 60)
-            parent.shell.settleHookClaims(after: [AgentHookEvent(
-                kind: .claude, name: .stop, agentUUID: parent.column.agentUUID, sessionID: parent.session, emitterProcess: resumed,
-                timestamp: Date().timeIntervalSince1970 + 61
-            )])
-            XCTAssertNil(parent.deliveredAt)
-
-            parent.shell.settleHookClaims(after: [try parent.hook(.stop)])
-            XCTAssertNil(parent.deliveredAt, "that Stop ends the turn that was finishing as the waiter took it")
-
-            parent.shell.settleHookClaims(after: [try parent.hook(.stop, at: Date().timeIntervalSince1970 + MissionWaitHook.turnAfterClaim + 1)])
+            try parent.read(letter)
+            try parent.hook(.stop)
             XCTAssertNotNil(parent.deliveredAt)
-            XCTAssertTrue(mailbox.claims().isEmpty)
+            XCTAssertTrue(parent.mailbox.claims().isEmpty)
             parent.shell.typeMissionMessages()
             XCTAssertFalse(parent.typed, "delivered once")
             XCTAssertNil(waiter)
         }
     }
 
-    /// A waiter that leaves before it claims hands the question back to
-    /// typing; a claim whose session ends before a turn does goes again.
-    func testWhatNoWaiterTookGoesBackToTyping() throws {
+    /// Esc ends the turn that read it with no Stop: the session's end
+    /// records it rather than sending it again.
+    func testASessionEndRecordsAClaimTheModelReadAndFreesOneItDidnt() throws {
         try UIFlowHarness.run { harness in
             let standIn = AgentStandIn()
             defer { standIn.remove() }
             let parent = try makeParent(harness, standIn: standIn)
-            let mailbox = MissionWaitHook.mailbox
-            var waiter = try mailbox.arm(parent.session)
+            let waiter = try parent.mailbox.arm(parent.session)
             parent.shell.typeMissionMessages()
-            XCTAssertEqual(mailbox.places()[parent.question.id], .waiting(conversation: parent.session))
-            _ = mailbox.claim(parent.session, at: Date().timeIntervalSince1970)
-            parent.shell.settleHookClaims(after: [try parent.hook(.sessionEnd)])
-            XCTAssertNil(mailbox.places()[parent.question.id], "its session ended first: it goes again")
-            XCTAssertNil(parent.deliveredAt)
+            let letter = try parent.claim()
+            try parent.read(letter)
+            try parent.hook(.sessionEnd)
+            XCTAssertNotNil(parent.deliveredAt)
+            XCTAssertTrue(parent.mailbox.claims().isEmpty)
+            withExtendedLifetime(waiter) {}
+        }
+    }
 
-            // Resumed, and back at its prompt.
-            try parent.hook(.sessionStart)
-            try parent.hook(.userPromptSubmit)
-            try parent.hook(.stop)
+    /// Ctrl-Z: the task's claude whose waiter took a tell is stopped, the
+    /// shell in front; the tell isn't typed too once it is back.
+    func testAStoppedClaudeKeepsTheTellItsWaiterTook() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            AgentHookCenter.shared.resolver = { [weak shell] in shell?.resolveAgentColumn(uuid: $0) }
+            defer { AgentHookCenter.shared.resolver = nil }
+            let lead = try harness.makeLead()
+            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: UUID().uuidString,
+                childWorkspaceID: UUID().uuidString, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+                branch: "feat/export", reportsToLead: true
+            ), enabled: true))
+            shell.addWorkspace(
+                title: "Export CSV", cwd: harness.repo, profileID: lead.space, workspaceID: mission.childWorkspaceID,
+                missionID: mission.id, reportsToLead: true
+            )
+            let task = try XCTUnwrap(shell.workspaces.first { $0.id == mission.childWorkspaceID })
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            task.addColumn(command: standIn.command(), agentUUID: mission.childAgentUUID, cwd: harness.repo)
+            let column = try XCTUnwrap(task.columns.first { $0.agentUUID == mission.childAgentUUID })
+            harness.waitUntil("its claude") { column.pty?.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            let session = UUID().uuidString
+            for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit, .stop] {
+                let claude = try XCTUnwrap(column.pty?.foregroundProcess(snapshot: ProcessSnapshot()))
+                shell.applyAgentHookEvents([try XCTUnwrap(AgentHookCenter.shared.dispatch(AgentHookEvent(
+                    kind: .claude, name: name, agentUUID: mission.childAgentUUID, sessionID: session, emitterProcess: claude.instance,
+                    source: name == .sessionStart ? "startup" : nil, timestamp: Date().timeIntervalSince1970
+                )))])
+            }
+            let tell = MissionEvent(
+                id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
+                parentWorkspaceID: mission.parentWorkspaceID, parentAgentUUID: mission.parentAgentUUID,
+                kind: .instruction, message: "Now the docs.", timestamp: Date().timeIntervalSince1970
+            )
+            guard case .accepted = MissionStore.shared.process(tell, enabled: true) else { return XCTFail("the tell wasn't recorded") }
+            let mailbox = MissionWaitHook.mailbox
+            let waiter = try mailbox.arm(session)
+            shell.typeMissionMessages()
+            XCTAssertEqual(mailbox.places()[tell.id], .waiting(conversation: session))
+            // Stands for that claude: a process started before the claim, then stopped.
+            let suspended = Process()
+            suspended.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            suspended.arguments = ["60"]
+            try suspended.run()
+            defer {
+                kill(suspended.processIdentifier, SIGCONT)
+                suspended.terminate()
+            }
+            try mailbox.noteRunning(session, in: suspended.processIdentifier)
+            XCTAssertEqual(mailbox.claim(session, at: Date().timeIntervalSince1970).count, 1)
+            kill(suspended.processIdentifier, SIGSTOP)
+            kill(try XCTUnwrap(column.pty?.foregroundProcess(snapshot: ProcessSnapshot())).instance.pid, SIGTERM)
+            harness.waitUntil("the shell in front") { column.pty?.foregroundProcess(snapshot: ProcessSnapshot())?.agent != .claude }
+            shell.typeMissionMessages()
+            guard case .claimed? = mailbox.places()[tell.id] else {
+                return XCTFail("the claim went: \(String(describing: mailbox.places()[tell.id]))")
+            }
+            withExtendedLifetime(waiter) {}
+        }
+    }
+
+    /// A waiter that leaves before it claims hands the question back to
+    /// typing, and the letter Nirux took back goes once typed.
+    func testWhatNoWaiterTookIsTypedAndLeavesNothingOwed() throws {
+        try UIFlowHarness.run { harness in
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            let parent = try makeParent(harness, standIn: standIn)
+            var waiter = try parent.mailbox.arm(parent.session)
             parent.shell.typeMissionMessages()
-            XCTAssertEqual(mailbox.places()[parent.question.id], .waiting(conversation: parent.session))
+            XCTAssertEqual(parent.mailbox.places()[parent.question.id], .waiting(conversation: parent.session))
             waiter = nil
             XCTAssertNil(waiter)
             parent.shell.typeMissionMessages()
-            XCTAssertNil(mailbox.places()[parent.question.id], "taken back from a conversation no waiter waits on")
             harness.waitUntil("the question typed into its prompt") { parent.typed }
             XCTAssertNotNil(parent.deliveredAt)
+            XCTAssertNil(parent.mailbox.places()[parent.question.id])
+        }
+    }
+
+    /// At launch, a claim whose claude went with the last run, unread, goes
+    /// again; the Lead's resumed waiter or typing carries it.
+    func testAtLaunchAClaimNoModelReadGoesAgain() throws {
+        try UIFlowHarness.run { harness in
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            let parent = try makeParent(harness, standIn: standIn)
+            let waiter = try parent.mailbox.arm(parent.session)
+            parent.shell.typeMissionMessages()
+            try parent.mailbox.noteTranscript(parent.transcript.path, of: parent.session)
+            XCTAssertEqual(parent.mailbox.claim(parent.session, at: Date().timeIntervalSince1970).count, 1, "no claude noted: it's gone")
+            parent.shell.restoreState()
+            XCTAssertTrue(parent.mailbox.claims().isEmpty)
+            XCTAssertNil(parent.deliveredAt)
+            withExtendedLifetime(waiter) {}
         }
     }
 }

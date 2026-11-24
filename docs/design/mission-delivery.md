@@ -36,23 +36,35 @@ A draft in the prompt stays untouched by every carrier but typing.
 
 ## 2. Mailbox
 
-`MissionMailbox` keeps the letters waiting for a conversation's hook (a Claude
-session, a Codex thread, an agy conversation id):
+`MissionMailbox` keeps the letters for a conversation's hook (a Claude
+session, a Codex thread, an agy conversation):
 
-    <root>/<conversation>/waiting/<event id>.json
-    <root>/<conversation>/claimed/<claimed ms>-<event id>.json
+    <root>/<conversation>/ids/<id>                 the letter is here
+    <root>/<conversation>/waiting/<id>.json        for its hook
+    <root>/<conversation>/claimed/<ms>-<id>.json   its hook took it
+    <root>/<conversation>/owed/<id>.json           Nirux took it back to type it
 
-- `post` writes the letter under `.drafts`, then renames it into `waiting`
-  without replacing anything: a reader never sees half a letter, and a letter
-  waiting or claimed (not yet forgotten) isn't posted twice.
-- `claim` (the hook) reads each waiting letter, then renames it into
-  `claimed`; a letter another claim took is skipped, and one it can't read
-  stays waiting, for typing.
-- `retract` (Nirux, before typing) renames it out of `waiting`; false means
-  a hook has it (or it never was there), and Nirux doesn't type it. Any other
-  failure throws, so a disk error never reads as "a hook has it".
+- `post` creates the id's marker exclusively (O_EXCL), then writes the letter
+  under `.drafts` and renames it into `waiting`: a reader never sees half a
+  letter, and a letter of that id waiting, claimed or owed isn't posted
+  again, whatever a hook does meanwhile. A post that fails leaves nothing
+  behind and throws, for Nirux to type it.
+- `claim` (the hook) renames each waiting letter into `claimed`; a letter
+  another claim took is skipped, and one it can't read stays waiting.
+- `retract` (Nirux, before typing) says one of three things. `.retracted`:
+  the letter moved into `owed`, where it stays until Nirux typed it
+  (`markTyped`), so a crash in between loses nothing (`owed` lists it at the
+  next launch). `.claimed`: a hook has it, and Nirux doesn't type it.
+  `.unknown`: nothing of that id, so it was never posted, a post failed, or
+  Nirux is done with it, and Nirux's own record decides. Any other failure
+  throws, so a disk error never reads as a hook's.
 - `claims` lists what hooks took, for Nirux to record the delivery (today's
-  `parentTypedAt`); `forget` drops a recorded one.
+  `parentTypedAt`); `forget` drops a recorded one, and its marker.
+- `sweep` drops what is a day old (`lifetime`, like typed Missions): letters
+  waiting or owed, with their text, and claims. Then a draft or a marker
+  with no letter a crash left a minute ago, and folders once empty (rmdir,
+  which leaves one something just went into). `claim` creates nothing when
+  nothing waits.
 
 rename(2) moves each letter once, so it is delivered once: by a hook, or by
 typing after a retract. Letters go by conversation, so a resumed session gets
@@ -94,14 +106,20 @@ its own, and a new one never gets another's (the "restarted" rule of today).
   claim and its print.
 - **Nirux's side** (`NiruxShellView.leaveToHook`,
   `MissionDeliveryPolicy.hookStep`): a message for a `claude` posts to the
-  conversation that `claude` confirmed, while a waiter waits there. A posted
-  letter whose waiter left is taken back and typed. A claim counts as
-  delivered (`markTyped`) at a main-thread Stop of its session at least a
-  second after it (`turnAfterClaim`: an earlier one ends the turn that was
-  finishing), from the `claude` that ran then, when Nirux still delivered
-  the message at the claim. A SessionEnd first, or a `claude` started since
-  the claim, frees it to go again. At launch, claims count as delivered and
-  waiting letters are taken back (`settleMissionMailbox`).
+  conversation that `claude` confirmed, while a waiter waits there and the
+  pilot is on (Settings › Agents, `claudeMissionHook`, on by default). A
+  posted letter whose waiter left is taken back, owed, and typed; typing it
+  ends the debt (`markTyped`).
+- **Delivered on proof.** A claim counts as delivered (`markTyped` in the
+  store) once the session's transcript, which the waiter notes, holds the
+  letter in a line of the turn that read it (`MissionWaitHook.modelRead`):
+  Claude Code writes it as the model reads it, mid-turn too, and the line
+  queuing the hook's output doesn't count. Nirux looks at each Stop and
+  SessionEnd of the session (`settleHookClaims`, the hook drain), and at
+  launch (`settleMissionMailbox`, from `restoreState`). A claim the model
+  didn't read goes again once its session ended, or once no `claude`
+  started before the claim runs that conversation any more: a stopped one
+  (Ctrl-Z) still does (`MissionMailbox.processes(running:)`).
 - **What stays typed:** a `tell` that starts with a slash command, Lead
   notices, PR follow-ups, and every message for a session with no waiter.
 - **Trust.** Claude Code shows the message to the model as a system

@@ -33,6 +33,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsCodexLaunchModePopup: NSPopUpButton?
     weak var settingsAgyLaunchModePopup: NSPopUpButton?
     weak var settingsMissionHandoffsCheckbox: NSButton?
+    weak var settingsClaudeMissionHookCheckbox: NSButton?
     weak var settingsSidebarApprovalsCheckbox: NSButton?
     weak var settingsStuckAgentPopup: NSPopUpButton?
     weak var settingsCirclingHintCheckbox: NSButton?
@@ -257,7 +258,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             shellView?.handleMissionEvent(mission, event: event) ?? false
         }
         missionEvents.start()
-        shellView.settleMissionMailbox()
 
         // The Lead's tools (see LeadChannel).
         let leadRequests = LeadRequestCenter.shared

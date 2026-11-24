@@ -301,6 +301,7 @@ extension NiruxShellView {
         let now = Date().timeIntervalSince1970
         var typedAny = false
         lazy var places = MissionWaitHook.mailbox.places()
+        lazy var hooksOn = Self.currentClaudeMissionHook()
         for delivery in MissionStore.shared.pendingPromptDeliveries(now: now)
         where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
             let mission = delivery.mission
@@ -318,7 +319,7 @@ extension NiruxShellView {
             }
             guard !missionWaits.typing.contains(delivery.event.id) else { continue }
             if agent == .claude, leaveToHook(
-                delivery, in: recipient, foreground: pty.foregroundProcess(snapshot: snapshot), snapshot: snapshot, places: places, now: now,
+                delivery, in: recipient, foreground: pty.foregroundProcess(snapshot: snapshot), places: places, now: now, enabled: hooksOn,
                 text: {
                     MissionStore.shared.pendingPromptDelivery(delivery).flatMap {
                         MissionPromptText.hookText(for: $0, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title)
@@ -508,6 +509,7 @@ extension NiruxShellView {
             guard recorded else {
                 return MissionWaitLog.logger.error("A typed Mission message wasn't recorded: id=\(id.prefix(8), privacy: .public)")
             }
+            letterTyped(id)
         }
         missionWaits.typing.remove(id)
     }

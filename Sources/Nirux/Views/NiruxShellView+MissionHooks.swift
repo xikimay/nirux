@@ -3,43 +3,50 @@ import NiruxCore
 
 /// Mission messages a hook of the agent takes instead of typing
 /// (docs/design/mission-delivery.md): posted to the mailbox while a waiter
-/// waits on the recipient's conversation, recorded once the turn that took
-/// one ends.
+/// waits on the recipient's conversation, recorded once its transcript shows
+/// the model took one in.
 extension NiruxShellView {
     /// Leaves `delivery` to the waiter hook of `column`'s `claude`
     /// (`foreground`); false when typing carries it. `places`: the mailbox's
-    /// at the start of the pass; `text`: the letter's, read only to post it.
+    /// at the start of the pass; `text`: the letter's, read only to post it;
+    /// `enabled`: the pilot is on in Settings, else nothing new is posted.
     func leaveToHook(
-        _ delivery: MissionStore.AcceptedEvent, in column: ColumnState, foreground: ForegroundProcess?, snapshot: ProcessSnapshot,
-        places: [String: MissionLetterPlace], now: TimeInterval, text: () -> String?
+        _ delivery: MissionStore.AcceptedEvent, in column: ColumnState, foreground: ForegroundProcess?,
+        places: [String: MissionLetterPlace], now: TimeInterval, enabled: Bool, text: () -> String?
     ) -> Bool {
         let mailbox = MissionWaitHook.mailbox
         let id = delivery.event.id
-        let runsClaude = foreground?.agent == .claude
-        let startedAt = foreground?.instance.startedAt
-        let recipient = runsClaude ? conversation(of: column, foreground: foreground) : nil
+        let recipient = foreground?.agent == .claude ? conversation(of: column, foreground: foreground) : nil
         let sentTo = delivery.event.kind == .instruction ? delivery.event.childSessionID : nil
         var place = places[id]
         while true {
-            // Only on proof: none in front, one on another conversation, or one started since the claim.
             let ended = place.map { place in
-                guard case .claimed(let conversation, let claimedAt) = place, !snapshot.isEmpty else { return false }
-                return !runsClaude || recipient.map { $0 != conversation } ?? false || startedAt.map { $0 > claimedAt } ?? false
+                guard case .claimed(let conversation, let claimedAt) = place else { return false }
+                return !Self.claudeRuns(conversation, since: claimedAt, in: mailbox)
             } ?? false
-            switch MissionDeliveryPolicy.hookStep(place: place, recipient: recipient, ended: ended, sentTo: sentTo, isArmed: mailbox.isArmed) {
+            let step = MissionDeliveryPolicy.hookStep(
+                place: place, recipient: recipient, ended: ended, sentTo: sentTo, isArmed: { enabled && mailbox.isArmed($0) }
+            )
+            switch step {
             case .leave:
                 missionWaits.handedToHooks[id] = missionWaits.handedToHooks[id] ?? now
                 return true
             case .release:
-                if let claim = mailbox.claims().first(where: { $0.letter.id == id }) { try? mailbox.forget(claim) }
+                guard let claim = mailbox.claims().first(where: { $0.letter.id == id }) else {
+                    place = nil
+                    continue
+                }
+                if settle(claim, sessionEnded: true) == .recorded { return true }
                 place = nil
             case .retract(let conversation):
-                // False: a waiter claimed it meanwhile. A disk error tries again next pass.
-                guard (try? mailbox.retract(id, from: conversation)) == true else {
+                switch try? mailbox.retract(id, from: conversation) {
+                case .retracted?: place = .owed(conversation: conversation)
+                case .unknown?: place = nil
+                // A waiter claimed it meanwhile; a disk error tries again next pass.
+                case .claimed?, nil:
                     missionWaits.handedToHooks[id] = missionWaits.handedToHooks[id] ?? now
                     return true
                 }
-                place = nil
             case .post(let conversation):
                 guard let text = text(), (try? mailbox.post(.init(id: id, text: text, postedAt: now), to: conversation)) != nil else {
                     missionWaits.handedToHooks[id] = nil
@@ -54,43 +61,69 @@ extension NiruxShellView {
         }
     }
 
-    /// Records each message a hook took once a turn of its session ended
-    /// after it (a main-thread Stop of the `claude` that ran then), and
-    /// frees one whose session ended first to go again, through the next
-    /// waiter or typing.
+    /// Settles the claims of each session a hook event of `events` ends a
+    /// turn of, or ends: see `settle`.
     func settleHookClaims(after events: [AgentHookEvent]) {
         let ends = events.filter {
-            $0.kind == .claude && $0.agentID == nil && $0.sessionID != nil && ($0.name == .stop || $0.name == .sessionEnd)
+            $0.kind == .claude && $0.agentID == nil && $0.sessionID != nil && [.stop, .stopFailure, .sessionEnd].contains($0.name)
         }
         guard !ends.isEmpty else { return }
-        let mailbox = MissionWaitHook.mailbox
-        for claim in mailbox.claims() {
-            guard let end = ends.first(where: { end in
-                end.sessionID == claim.conversation && end.emitterProcess.map { $0.startedAt <= claim.claimedAt } ?? true
-                    && end.timestamp >= claim.claimedAt + (end.name == .stop ? MissionWaitHook.turnAfterClaim : 0)
-            }) else { continue }
-            if end.name == .stop { recordHookDelivery(of: claim) }
-            try? mailbox.forget(claim)
-            missionWaits.handedToHooks[claim.letter.id] = nil
+        for claim in MissionWaitHook.mailbox.claims() {
+            let later = ends.filter { $0.sessionID == claim.conversation && $0.timestamp >= claim.claimedAt }
+            guard !later.isEmpty else { continue }
+            settle(claim, sessionEnded: later.contains { $0.name == .sessionEnd })
         }
     }
 
-    /// At launch: what hooks took while Nirux was away counts as delivered;
-    /// what still waited goes again, through this run's waiters or typing.
+    /// At launch: each claim the model took in counts as delivered; the
+    /// rest, whose claude went with the last run, go again (`settle`).
     func settleMissionMailbox() {
         guard MissionStore.shared.ensureLoaded() else { return }
         let mailbox = MissionWaitHook.mailbox
         for claim in mailbox.claims() {
-            recordHookDelivery(of: claim)
-            try? mailbox.forget(claim)
+            settle(claim, sessionEnded: !Self.claudeRuns(claim.conversation, since: claim.claimedAt, in: mailbox))
         }
-        for case let (id, .waiting(conversation)) in mailbox.places() { _ = try? mailbox.retract(id, from: conversation) }
-        mailbox.prune()
+        mailbox.sweep(now: Date().timeIntervalSince1970)
     }
 
-    /// Takes back the waiting letters of messages Nirux no longer delivers
-    /// (`pending`: the ones it does): expired, given up, or their Mission
-    /// closed. A claim waits for its turn's end, which records it.
+    enum ClaimSettlement: Equatable {
+        /// The model took it in: delivered.
+        case recorded
+        /// Its session ended first: it goes again.
+        case released
+        /// Its turn may still read it.
+        case kept
+    }
+
+    /// Records `claim` as delivered once its session's transcript shows the
+    /// model read it; else frees it to go again when `sessionEnded`.
+    @discardableResult
+    func settle(_ claim: MissionMailbox.Claim, sessionEnded: Bool) -> ClaimSettlement {
+        let mailbox = MissionWaitHook.mailbox
+        let read = MissionWaitHook.modelRead(claim.letter, claimedAt: claim.claimedAt, transcript: mailbox.transcript(of: claim.conversation))
+        guard read || sessionEnded else { return .kept }
+        if read { recordHookDelivery(of: claim) }
+        try? mailbox.forget(claim)
+        missionWaits.handedToHooks[claim.letter.id] = nil
+        return read ? .recorded : .released
+    }
+
+    /// Whether a `claude` started before `claimedAt` still runs
+    /// `conversation`, stopped (Ctrl-Z) too: the one whose waiter claimed.
+    nonisolated static func claudeRuns(_ conversation: String, since claimedAt: TimeInterval, in mailbox: MissionMailbox) -> Bool {
+        mailbox.processes(running: conversation).contains { ProcessInstance.running(pid: $0).map { $0.startedAt <= claimedAt } ?? false }
+    }
+
+    /// Done with the letter of `id` Nirux took back, once typed.
+    func letterTyped(_ id: String) {
+        let mailbox = MissionWaitHook.mailbox
+        guard case .owed(let conversation)? = mailbox.places()[id] else { return }
+        try? mailbox.markTyped(id, in: conversation)
+    }
+
+    /// Drops the letters of messages Nirux no longer delivers (`pending`:
+    /// the ones it does): expired, given up, or their Mission closed. A claim
+    /// waits for its turn's end, which settles it.
     func withdrawStaleLetters(pending: Set<String>) {
         let stale = Set(missionWaits.handedToHooks.keys).subtracting(pending)
         guard !stale.isEmpty else { return }
@@ -99,8 +132,11 @@ extension NiruxShellView {
         for id in stale {
             switch places[id] {
             case .waiting(let conversation)?:
-                // False: a waiter claimed it meanwhile. A disk error tries again.
-                guard (try? mailbox.retract(id, from: conversation)) == true else { continue }
+                // A waiter that claimed it meanwhile keeps it; a disk error tries again.
+                guard (try? mailbox.retract(id, from: conversation)) == .retracted else { continue }
+                try? mailbox.markTyped(id, in: conversation)
+            case .owed(let conversation)?:
+                try? mailbox.markTyped(id, in: conversation)
             case .claimed?:
                 continue
             case nil:

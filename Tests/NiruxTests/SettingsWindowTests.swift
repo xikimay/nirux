@@ -103,6 +103,7 @@ final class SettingsWindowTests: XCTestCase {
                     try self.choose(AgentResumeOnLaunch.allAtOnce.rawValue, in: app.settingsAgentResumePopup)
                 }),
                 ("missionHandoffsEnabled", { try self.click(app.settingsMissionHandoffsCheckbox) }),
+                ("claudeMissionHook", { try self.click(app.settingsClaudeMissionHookCheckbox) }),
                 ("alertOnlyWhenClaudeAsks", { try self.click(app.settingsAlertOnlyWhenClaudeAsksCheckbox) }),
                 ("generateTaskNames", { try self.click(app.settingsTaskNamesCheckbox) }),
                 ("showTurnStatus", { try self.click(app.settingsTurnStatusCheckbox) }),
@@ -304,6 +305,29 @@ final class SettingsWindowTests: XCTestCase {
             try click(app.settingsSidebarApprovalsCheckbox)
             XCTAssertFalse(hooks.approvalsEnabled)
             XCTAssertFalse(PermissionApprovalChannel.standard.isAppListening())
+        }
+    }
+
+    // MARK: - Claude Mission hook
+
+    /// On by default; off and back on are saved, and Settings shows what is
+    /// saved when it opens again.
+    @MainActor
+    func testTheClaudeMissionHookCheckboxSavesItsChoice() throws {
+        try withIsolatedState {
+            let app = try openSettings()
+            XCTAssertEqual(app.settingsClaudeMissionHookCheckbox?.state, .on)
+            try click(app.settingsClaudeMissionHookCheckbox)
+            XCTAssertEqual(Persistence.load()?.settings?.claudeMissionHook, false)
+            XCTAssertFalse(NiruxShellView.currentClaudeMissionHook())
+            close(app)
+
+            let reopened = try openSettings()
+            defer { close(reopened) }
+            XCTAssertEqual(reopened.settingsClaudeMissionHookCheckbox?.state, .off)
+            try click(reopened.settingsClaudeMissionHookCheckbox)
+            XCTAssertEqual(Persistence.load()?.settings?.claudeMissionHook, true)
+            XCTAssertTrue(NiruxShellView.currentClaudeMissionHook())
         }
     }
 
