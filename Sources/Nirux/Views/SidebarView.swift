@@ -43,6 +43,7 @@ final class SidebarView: NSView {
     /// Interrupt clicked under a silent turn: workspace, column, and the
     /// silence it aims at.
     var onAgentInterrupt: ((Int, Int, TimeInterval) -> Void)?
+    var onContextOffer: ((Int, Int, ContextOffer.Choice) -> Void)?
     /// Type it now clicked on a row of waiting Mission messages:
     /// (workspaceIndex, columnIndex, since).
     var onMissionTypeNow: ((Int, Int, TimeInterval) -> Void)?
@@ -721,7 +722,7 @@ final class SidebarView: NSView {
         case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _),
              .agentInterrupt(let workspaceIndex, _, _), .missionTypeNow(let workspaceIndex, _, _),
              .deferredAgentResume(let workspaceIndex, _, _), .turnAnswer(let workspaceIndex, _, _, _),
-             .missionAnswer(let workspaceIndex, _, _, _):
+             .missionAnswer(let workspaceIndex, _, _, _), .contextOffer(let workspaceIndex, _, _, _):
             clearHover()
             if let key = Self.armedButtonKey(for: area.region) {
                 setHoverTarget(.approvalButton(workspaceIndex: workspaceIndex, key: key))
@@ -799,7 +800,7 @@ final class SidebarView: NSView {
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
         case .permissionDecision, .agentResume, .agentInterrupt, .missionTypeNow, .deferredAgentResume, .turnAnswer, .missionAnswer,
-             .actionBlock, .inert:
+             .contextOffer, .actionBlock, .inert:
             break // buttons go through trackApprovalClick; the block is inert
         }
     }
@@ -1003,7 +1004,8 @@ final class SidebarView: NSView {
                  .missionTypeNow(let workspaceIndex, let columnIndex, _),
                  .deferredAgentResume(let workspaceIndex, let columnIndex, _),
                  .turnAnswer(let workspaceIndex, let columnIndex, _, _),
-                 .missionAnswer(let workspaceIndex, let columnIndex, _, _):
+                 .missionAnswer(let workspaceIndex, let columnIndex, _, _),
+                 .contextOffer(let workspaceIndex, let columnIndex, _, _):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                  .actionBlock(let workspaceIndex):

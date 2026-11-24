@@ -61,6 +61,38 @@ extension NiruxShellView {
         )
     }
 
+    /// The offer under a Claude column at rest whose session is its task's
+    /// latest (`ContextOffer`).
+    func contextOffer(
+        for column: ColumnState, in workspace: WorkspaceState, foreground: ForegroundProcess?, status: AgentStatus, now: TimeInterval
+    ) -> ContextOffer? {
+        guard status != .working, let foreground, foreground.interactiveAgent == .claude,
+              let id = column.claudeSessionID(of: foreground),
+              let session = usageMonitor?.report?.latestSessions[workspace.id], session.key == UsageSessionKey(.claude, id)
+        else { return nil }
+        return ContextOffer(session, now: now)
+    }
+
+    /// Compact types /compact as the user would. Fresh start restarts the
+    /// Lead, or resumes a task on Claude in a new conversation with a
+    /// handover.
+    func takeContextOffer(_ choice: ContextOffer.Choice, workspaceIndex: Int, columnIndex: Int) {
+        guard let workspace = workspaces[safe: workspaceIndex], let column = workspace.columns[safe: columnIndex],
+              let uuid = column.agentUUID else { return }
+        switch choice {
+        case .compact:
+            guard case .sent = sendTypedPrompt(agentUUID: uuid, prompt: "/compact") else {
+                return showToast("Couldn’t type /compact: claude’s prompt isn’t free.", tone: .error)
+            }
+        case .freshStart where workspace.isLead:
+            restartLead(workspace, agent: .claude)
+        case .freshStart:
+            resumeTask(workspace, with: TaskAgentChoice(agent: .claude, model: nil), interactive: true, freshStart: true) { [weak self] message, failed in
+                self?.showToast(message, tone: failed ? .error : .info)
+            }
+        }
+    }
+
     func usageNames() -> UsageNames {
         UsageNames(
             tasks: Dictionary(workspaces.map { ($0.id, UsageNames.Task(title: $0.title, isLead: $0.isLead)) }) { first, _ in first },

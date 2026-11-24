@@ -45,6 +45,37 @@ enum UsageText {
     }
 }
 
+extension ContextOffer {
+    /// "Each message rereads 312k".
+    var text: String {
+        switch reason {
+        case .heavy: "Each message rereads \(UsageText.tokens(contextTokens))"
+        case .cold: "Cache expired: \(UsageText.tokens(contextTokens)) to write again"
+        }
+    }
+
+    static let toolTip = """
+        Compact: Claude sums up this conversation and goes on from the summary.
+        Fresh start: a new conversation, handed the task's request, progress and next step.
+        """
+}
+
+extension ContextOffer.Choice {
+    var title: String {
+        switch self {
+        case .compact: "Compact"
+        case .freshStart: "Fresh start"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .compact: "Compact: type /compact in claude's prompt"
+        case .freshStart: "Fresh start: a new Claude conversation with a handover"
+        }
+    }
+}
+
 /// A task row's usage: its latest session's context, and what it spent
 /// over the week (`UsageReport`).
 struct SidebarTaskUsage: Hashable {

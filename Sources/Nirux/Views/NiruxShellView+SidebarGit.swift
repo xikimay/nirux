@@ -57,6 +57,9 @@ extension NiruxShellView {
                     waitingMessages: missionWaits.shown[col.id]
                 )
                 info.isLeadTerminal = col === leadTerminal
+                info.contextOffer = contextOffer(
+                    for: col, in: workspace, foreground: foregroundProcess, status: info.agentStatus, now: now
+                )
                 return info
             }
             var info = sidebarWorkspaceInfo(

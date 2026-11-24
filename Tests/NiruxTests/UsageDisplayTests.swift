@@ -27,6 +27,46 @@ final class UsageDisplayTests: XCTestCase {
         XCTAssertEqual(UsageText.codexWindows(limits, now: now + 61).map(\.name), ["7d"])
     }
 
+    /// Under the column, never imposed: why, then Compact and Fresh start,
+    /// which arm like Allow / Deny and click only for that offer.
+    func testAHeavyClaudeColumnOffersACompactionOrAFreshStart() throws {
+        let offer = ContextOffer(reason: .heavy, contextTokens: 312_000, lastResponseAt: 100)
+        var column = ColumnInfo(
+            index: 0, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
+            webTitle: nil, terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil
+        )
+        column.contextOffer = offer
+        let info = WorkspaceInfo(
+            id: "ws", index: 0, title: "check-video", profileID: WorkspaceProfile.defaultID, isInactive: false,
+            columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
+            columns: [column], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+            phase: .active, lastSummary: nil, lastActivityAt: nil
+        )
+        XCTAssertEqual(info.cardActions, [.contextOffer(columnIndex: 0, offer)])
+        XCTAssertEqual(offer.text, "Each message rereads 312k")
+        XCTAssertEqual(
+            ContextOffer(reason: .cold, contextTokens: 160_000, lastResponseAt: 100).text, "Cache expired: 160k to write again"
+        )
+
+        let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 800).render()
+        let keys = [ContextOffer.Choice.compact, .freshStart].map {
+            SidebarHoverTarget.contextOfferButtonKey(workspaceIndex: 0, columnIndex: 0, offer: offer, choice: $0)
+        }
+        XCTAssertEqual(Set(result.approvalButtons.keys), Set(keys))
+        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260), accuracy: 0.5)
+
+        let compact = SidebarHitRegion.contextOffer(workspaceIndex: 0, columnIndex: 0, offer: offer, choice: .compact)
+        func click(_ released: SidebarHitRegion?, count: Int = 1) -> SidebarContextOfferClick? {
+            SidebarView.contextOfferClick(pressed: compact, released: released, clickCount: count, armedAtPress: true, armedAtRelease: true)
+        }
+        XCTAssertEqual(click(compact), SidebarContextOfferClick(workspaceIndex: 0, columnIndex: 0, choice: .compact))
+        XCTAssertNil(click(.contextOffer(workspaceIndex: 0, columnIndex: 0, offer: offer, choice: .freshStart)), "released on the other")
+        var later = offer
+        later.lastResponseAt = 200
+        XCTAssertNil(click(.contextOffer(workspaceIndex: 0, columnIndex: 0, offer: later, choice: .compact)), "another response came")
+        XCTAssertNil(click(compact, count: 2))
+    }
+
     func testATaskRowReadsItsLatestSessionsContextAndItsWeek() throws {
         let session = UsageSession(
             key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "task"), contextTokens: 300_000,

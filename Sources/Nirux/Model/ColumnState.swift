@@ -712,6 +712,11 @@ final class ColumnState {
         codexSessionTracker.provenSessionID(for: process)
     }
 
+    /// The session `foreground`, this column's `claude`, reported in its hooks.
+    func claudeSessionID(of foreground: ForegroundProcess) -> String? {
+        claudeSessionTracker.boundSessionID(for: foreground.instance)
+    }
+
     func prepareClaudeResume(sessionID: String) {
         claudeSessionTracker.prepareResume(sessionID: sessionID)
     }

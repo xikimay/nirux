@@ -47,7 +47,11 @@ extension NiruxShellView {
         }
     }
 
-    func resumeTask(_ task: WorkspaceState, with choice: TaskAgentChoice, interactive: Bool = false, answer: @escaping LeadAnswer) {
+    /// `freshStart`: the same CLI may take over, in a new conversation.
+    func resumeTask(
+        _ task: WorkspaceState, with choice: TaskAgentChoice, interactive: Bool = false, freshStart: Bool = false,
+        answer: @escaping LeadAnswer
+    ) {
         guard !task.isClosing, !task.isInactive, workspaces.contains(where: { $0 === task }), Self.isTask(task),
               Self.existingDirectory(task.cwd) != nil else { return answer("The task or its folder is no longer open.", true) }
         guard !resumingTasks.contains(task.id) else { return answer("This task is already switching CLI.", true) }
@@ -61,7 +65,7 @@ extension NiruxShellView {
         }
         let foreground = pty.foregroundProcess(snapshot: snapshot)
         let current = column.missionAgent(snapshot: snapshot)
-        if current == choice.agent, !column.isAwaitingResume {
+        if current == choice.agent, !column.isAwaitingResume, !freshStart {
             return answer("This task already runs \(choice.agent.rawValue). Choose another CLI.", true)
         }
         guard !snapshot.isEmpty || column.isAwaitingResume || pty.hasExited else {
