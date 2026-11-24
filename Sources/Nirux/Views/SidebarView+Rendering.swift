@@ -309,6 +309,17 @@ extension SidebarView {
             addExpandedView(amber)
             maxX = amber.frame.minX - Theme.Space.sm
         }
+        let spentNote = profile.weekTokens.flatMap { weekTokens in
+            weekTokens > 0 ? "Spent over the last 7 days: \(UsageText.tokens(weekTokens)) tokens, \(UsageText.unitNote)" : nil
+        }
+        if let weekTokens = profile.weekTokens, spentNote != nil {
+            let spent = textLabel(UsageText.tokens(weekTokens), font: Theme.Font.captionDigits, color: Theme.Color.textTertiary)
+            spent.setAccessibilityElement(false)
+            let size = spent.fittingSize
+            spent.frame = NSRect(x: maxX - size.width, y: frame.midY - ceil(size.height) / 2, width: size.width, height: ceil(size.height))
+            addExpandedView(spent)
+            maxX = spent.frame.minX - Theme.Space.sm
+        }
 
         let nameX = Metrics.textX
         let name = textLabel(profile.name, font: Theme.Font.display, color: Theme.Color.textPrimary)
@@ -328,6 +339,10 @@ extension SidebarView {
             let note = "An agent waits for you in \(ListFormatter.localizedString(byJoining: waitingElsewhere.map(\.name)))"
             value += ". \(note)"
             button.toolTip = note
+        }
+        if let spentNote {
+            value += ". \(spentNote)"
+            button.toolTip = [button.toolTip, spentNote].compactMap { $0 }.joined(separator: "\n")
         }
         button.setAccessibilityValue(value)
         button.onPress = { [weak self] in self?.showSpacePicker() }

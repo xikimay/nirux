@@ -308,8 +308,9 @@ extension BranchReview {
     /// instruction file, no saved session. Its first event says how it
     /// started: a run on another account than a subscription's (when
     /// `requiresSubscription`), or with other tools or an MCP server, is
-    /// stopped before its first request. Waits for the run: call it off
-    /// the main thread, with a `ClaudeCLI.locate` binary.
+    /// stopped before its first request. Its tokens go with Nirux's own
+    /// runs (`NiruxOneShotLog`) in `usageFolder`. Waits for the run: call it
+    /// off the main thread, with a `ClaudeCLI.locate` binary.
     static func runExplain(
         _ input: ExplainInput,
         in folder: URL,
@@ -319,6 +320,7 @@ extension BranchReview {
         requiresSubscription: Bool = true,
         environment base: [String: String] = ProcessInfo.processInfo.environment,
         cancellation: BoundedProcess.Cancellation? = nil,
+        usageFolder: String? = nil,
         progress: (@Sendable (ExplainProgress) -> Void)? = nil
     ) -> ExplainRun {
         let stopped = BoundedProcess.Cancellation(parent: cancellation)
@@ -342,6 +344,16 @@ extension BranchReview {
         stream.finish()
         var usage = stream.usage
         usage.duration = Date().timeIntervalSince(startedAt)
+        if let usageFolder, usage.tokensRead + usage.outputTokens > 0 {
+            NiruxOneShotLog.append(
+                client: "NiruxExplain", model: stream.setup?.model ?? settings.checked.model,
+                counts: TokenCounts(
+                    input: usage.inputTokens, output: usage.outputTokens,
+                    cacheWrite: usage.cacheCreationTokens, cacheRead: usage.cacheReadTokens
+                ),
+                contextTokens: stream.peakContextTokens, at: Date().timeIntervalSince1970, in: usageFolder
+            )
+        }
         func run(_ outcome: ExplainRun.Outcome) -> ExplainRun {
             ExplainRun(outcome: outcome, usage: usage, models: stream.models, setup: stream.setup)
         }
@@ -551,6 +563,9 @@ private final class ExplainStream: @unchecked Sendable {
     }
 
     var result: [String: JSONValue]? { lock.withLock { storedResult } }
+
+    /// The largest context one of its requests sent.
+    var peakContextTokens: Int? { lock.withLock { messageUsage.values.map(\.tokensRead).max() } }
 
     /// Set when a rate limit rejected the run, with when it resets.
     var usageLimit: Date?? { lock.withLock { storedUsageLimit } }
