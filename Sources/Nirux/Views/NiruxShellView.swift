@@ -320,6 +320,8 @@ final class NiruxShellView: NSView {
     /// Each project's merge queues, one per repository (see
     /// `mergeQueue(projectID:repository:)`).
     var mergeQueues: [MergeQueueKey: MergeQueueController] = [:]
+    /// Each queue's phase at its last change (`noticeLeadOfEndedQueues`).
+    var mergeQueuePhases: [ObjectIdentifier: MergeQueue.Phase] = [:]
     /// Where live queues lock their repository. Tests use their own.
     var mergeQueueLockFolder = MergeQueueLock.defaultFolder
     /// The merge queue's confirmation sheet: one at a time.
