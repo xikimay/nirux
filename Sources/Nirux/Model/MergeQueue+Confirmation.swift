@@ -246,7 +246,7 @@ extension MergeQueue {
                     + "moved and each pull request is still at its head. Each pull request then reads merged; the queue checks it.",
                 "• A red train closes, and its pull requests ride again in two halves, one train at a time. A pull request alone "
                     + "on a red train leaves it; the others still ride.",
-                settings.postMergeWorkflow.map { "• Then wait up to \(settings.postMergeTimeoutMinutes) minutes for \($0), once." }
+                settings.postMergeWorkflow.map { "• Then wait up to \(settings.postMergeTimeoutMinutes) minutes for \($0), after each train that lands." }
                     ?? "• No post-merge workflow: done once they read merged."
             ]
         }

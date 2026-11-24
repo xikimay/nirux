@@ -8,6 +8,7 @@ final class MergeQueueTrainTests: XCTestCase {
     private let a = MQ.sha("a")
     private let b = MQ.sha("b")
     private let c = MQ.sha("c")
+    private let d = MQ.sha("d")
     private let branch = "nirux-train/queue"
 
     private func world() -> MQ.World {
@@ -15,12 +16,13 @@ final class MergeQueueTrainTests: XCTestCase {
         world.pullRequests[12] = MQ.pullRequest(12, head: a)
         world.pullRequests[14] = MQ.pullRequest(14, head: b)
         world.pullRequests[16] = MQ.pullRequest(16, head: c)
+        world.pullRequests[18] = MQ.pullRequest(18, head: d)
         world.defaultChecks = MQ.checks(MQ.checkRun(id: 1))
         return world
     }
 
     private func queue(_ numbers: [Int] = [12, 14], triagesFlakes: Bool = false) -> MQ.Harness {
-        let heads = [12: a, 14: b, 16: c]
+        let heads = [12: a, 14: b, 16: c, 18: d]
         var queue = MQ.Harness(entries: [], cadence: .train)
         queue.engine = MergeQueue.Engine(settings: MQ.settings(), entries: numbers.map { MQ.entry($0, head: heads[$0] ?? a) },
                                          cadence: .train, triagesFlakes: triagesFlakes)
@@ -452,10 +454,45 @@ final class MergeQueueTrainTests: XCTestCase {
         conflicting.conflicts = [c]
         var second = self.queue([12, 14, 16])
         second.drive(&conflicting)
-        XCTAssertEqual(second.stopReason?.message, "#16 conflicts with main or with #12, #14, merged before it in the train. It left the "
-            + "train. #12 left the train too. Train #902 landed #14.")
+        XCTAssertEqual(second.stopReason?.message, "#16 conflicts with main. It left the train. #12 left the train too. Train #902 "
+            + "landed #14. Nirux deleted the train’s branch \(branch)-5.")
         let saved = MergeQueue.SavedQueue(engine: second.engine, dryRun: false, savedAt: Date())
         XCTAssertEqual(MergeQueue.Conflict(saved: saved, repository: MQ.widgets, dryRun: false)?.number, 16)
+
+        // The Start's batch was two: the red one leaves, the conflict is tried again and offered.
+        var world = world()
+        world.pullRequests[14] = MQ.pullRequest(14, head: b, mergeable: "CONFLICTING")
+        var preflight = TrainGitHub(world: world)
+        preflight.failing = [a]
+        var third = self.queue()
+        third.drive(&preflight)
+        XCTAssertEqual(third.stopReason?.message, "#14 conflicts with main. It left the train. #12 left the train too.")
+        let stopped = MergeQueue.SavedQueue(engine: third.engine, dryRun: false, savedAt: Date())
+        XCTAssertEqual(MergeQueue.Conflict(saved: stopped, repository: MQ.widgets, dryRun: false)?.number, 14)
+    }
+
+    func testABatchWhosePullRequestsAllLeftLetsTheNextOneRide() throws {
+        // They conflict when composed, or already at the preflight.
+        for atPreflight in [false, true] {
+            var world = world()
+            if atPreflight {
+                world.pullRequests[16] = MQ.pullRequest(16, head: c, mergeable: "CONFLICTING")
+                world.pullRequests[18] = MQ.pullRequest(18, head: d, mergeable: "CONFLICTING")
+            }
+            var github = TrainGitHub(world: world)
+            github.conflicts = [c, d]
+            github.failing = [b]
+            var queue = queue([16, 18, 12, 14])
+            queue.drive(&github)
+
+            let reason = try XCTUnwrap(queue.stopReason)
+            XCTAssertEqual(reason.message, "#16 conflicts with main. It left the train. #18, #14 left the train too. Train #901 landed #12.")
+            XCTAssertTrue(queue.noted("Splitting the batch: #16, #18 first, then #12, #14"), "the conflicts ride again")
+            XCTAssertTrue(queue.noted("Splitting the batch: #12 first, then #14"), "#12, #14 gave #900’s files: split without a run")
+            XCTAssertEqual(github.trainNumber, 901, "two runs for four pull requests")
+            XCTAssertEqual(github.world.pullRequests[12]?.state, .merged)
+            XCTAssertEqual(github.world.branches, [:])
+        }
     }
 
     func testAStopOrARefusedCloseWhileARedTrainSplitsStopsTheQueue() throws {
@@ -704,6 +741,15 @@ final class MergeQueueTrainTests: XCTestCase {
             + "its rerun.") == true, second.stopReason?.message ?? "")
         XCTAssertEqual(second.mutations.filter { if case .rerun = $0 { true } else { false } }.count, 1)
 
+        // Cancelled again: no runner, so no split either.
+        var noRunner = TrainGitHub(world: world)
+        noRunner.rerunConclusion = "CANCELLED"
+        var stuck = queue()
+        stuck.drive(&noRunner)
+        XCTAssertTrue(stuck.stopReason?.message.hasSuffix("again after its rerun. Nirux closed train #900. Nirux deleted the train’s "
+            + "branch \(branch).") == true, stuck.stopReason?.message ?? "")
+        XCTAssertEqual(noRunner.trainNumber, 900)
+
         world.checks[head] = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"))
         var failed = TrainGitHub(world: world)
         var third = queue()
@@ -820,8 +866,9 @@ private struct TrainGitHub {
     var pushToTrainAfterOpen: String?
     /// Branch protection refuses the train's merge.
     var refusesMerge = false
-    /// Heads whose rerun of failed jobs passes; any other's fails again.
+    /// Heads whose rerun of failed jobs passes; any other's ends so again.
     var rerunsGreen: Set<String> = []
+    var rerunConclusion = "FAILURE"
     /// What gh answers a rerun it sent.
     var rerunAnswer = MergeQueue.MutationResult.sent
     var refusesClose = false
@@ -920,7 +967,7 @@ private struct TrainGitHub {
         case .rerun:
             guard let head = lastMerge else { return .refused(status: 404, message: "Not Found") }
             world.checks[head] = rerunsGreen.contains(head) ? MQ.checks(MQ.checkRun(id: 10))
-                : MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"), MQ.checkRun(id: 10, conclusion: "FAILURE"))
+                : MQ.checks(MQ.checkRun(id: 9, conclusion: rerunConclusion), MQ.checkRun(id: 10, conclusion: rerunConclusion))
             return rerunAnswer
         case .updateBranch:
             return .refused(status: 422, message: "not a train's call")

@@ -176,7 +176,7 @@ extension MergeQueue {
                 self.request = nil
                 let endsInItsStop: Bool
                 switch purpose {
-                case .train(.close), .train(.cleanup), .train(.redClose), .train(.redCleanup): endsInItsStop = true
+                case .train(.close), .train(.cleanup), .train(.redClose), .train(.leave): endsInItsStop = true
                 default: endsInItsStop = false
                 }
                 // Closing or deleting the train reads its own answer, which a Stop mustn't hide.
