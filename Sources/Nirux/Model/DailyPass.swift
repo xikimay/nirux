@@ -470,8 +470,24 @@ enum DailyPass {
                 || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty || !threadWaits.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }
                 || forgottenTasks(tasks, now: window.end).contains { !reported.contains($0.key) }
-                // The morning line's "waiting on you".
-                || tasks.contains { $0.waitsOnUser != nil || $0.question?.handedToUser == true }
+        }
+
+        /// The pass runs on news, or on anything waiting: its morning line
+        /// says so, and the quiet text keeps it from proposing rules.
+        var needsPass: Bool {
+            let waits = waits
+            return hasNews || !(waits.onUser + waits.onLead + waits.redCI).isEmpty
+        }
+
+        /// The open tasks waiting on the user, on the Lead, and on their red CI.
+        var waits: (onUser: [String], onLead: [String], redCI: [String]) {
+            let open = tasks.filter { !$0.mergedLately }
+            return (
+                open.filter { $0.waitsOnUser != nil || $0.question?.handedToUser == true }.map(\.title),
+                open.filter { $0.question.map { !$0.handedToUser } ?? false }.map(\.title),
+                open.filter { $0.pullRequest?.state == .open && $0.pullRequest?.ciStatus == "FAILURE" }
+                    .map { "\($0.title) (#\($0.pullRequest?.number ?? 0))" }
+            )
         }
 
         /// GitHub may answer next time: the window isn't marked read.
@@ -535,9 +551,10 @@ enum DailyPass {
         let forgotten = forgottenTasks(facts.tasks, now: window.end, timeZone: timeZone)
         guard facts.hasNews else {
             let merged = facts.repositories.contains { !$0.problems.isEmpty } ? "" : "no pull request merged, "
+            let failure = facts.waits.redCI.isEmpty ? "no CI failure, " : ""
             let tasks = forgottenSection(forgotten, reported: facts.reported, limits[0])
             let quiet = header + "\n\n" + morningSection(facts) + "\n\nNothing happened since \(since): no review recorded, "
-                + "\(merged)no CI failure, no Mission message held, no rule decided. Nothing to propose"
+                + "\(merged)\(failure)no Mission message held, no rule decided. Nothing to propose"
                 + (tasks.text == nil ? ": say so in one line." : ".")
             let sections = [gitHubSection(facts), tasks.text].compactMap { $0 }
             return Digest(text: ([quiet] + sections).joined(separator: "\n\n"), readUntil: window.end, listed: tasks.listed)
@@ -579,11 +596,7 @@ enum DailyPass {
     /// waits and on whom (the user, the Lead, or the task with its red CI).
     static func morningLine(_ facts: Facts) -> String {
         let landed = facts.repositories.flatMap(\.merged).sorted { $0.mergedAt < $1.mergedAt }.map { "#\($0.number)" }
-        let open = facts.tasks.filter { !$0.mergedLately }
-        let onUser = open.filter { $0.waitsOnUser != nil || $0.question?.handedToUser == true }.map(\.title)
-        let onLead = open.filter { $0.question.map { !$0.handedToUser } ?? false }.map(\.title)
-        let red = open.filter { $0.pullRequest?.state == .open && $0.pullRequest?.ciStatus == "FAILURE" }
-            .map { "\($0.title) (#\($0.pullRequest?.number ?? 0))" }
+        let (onUser, onLead, red) = facts.waits
         let waits = [("waiting on you", onUser), ("on the Lead", onLead), ("red CI, on the task", red)]
             .filter { !$0.1.isEmpty }.map { "\($0.0): \(listed($0.1))" }
         let unread = facts.repositories.contains { !$0.problems.isEmpty }

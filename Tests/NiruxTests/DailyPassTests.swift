@@ -330,7 +330,7 @@ final class DailyPassTests: XCTestCase {
         facts.repositories = []
         facts.findings = []
         XCTAssertTrue(DailyPass.digest(facts, timeZone: utc).text.contains("Overnight: landed nothing; waiting on you"), "quiet too")
-        XCTAssertTrue(facts.hasNews, "a task waiting on the user: the pass runs, its line says so")
+        XCTAssertTrue(facts.needsPass, "a task waiting: the pass runs, its line says so")
 
         var unread = facts
         unread.repositories = [DailyPass.RepositoryReport(name: "acme/one", problems: ["merged pull requests: timed out"], readsAgain: true)]
@@ -395,6 +395,24 @@ final class DailyPassTests: XCTestCase {
         let said = DailyPass.digest(unread, timeZone: utc).text
         XCTAssertTrue(said.contains("Nothing happened since 01-14 08:00: no review recorded, no CI failure,"), said)
         XCTAssertTrue(said.contains("## What GitHub didn’t say\n- acme/one: merged pull requests: timed out\nThe next pass reads this window again."), said)
+        XCTAssertFalse(quiet.needsPass)
+
+        // Waits only, each kind alone: the pass runs, quiet, proposing no rule.
+        var red = PRInfo(number: 812, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil,
+                         mergeable: nil, url: "u", additions: nil, deletions: nil, changedFiles: nil)
+        red.headRefOid = "a"
+        for task in [DailyPass.TaskActivity(id: "1", title: "Login", waitsOnUser: "a login"),
+                     DailyPass.TaskActivity(id: "2", title: "Canary", question: .init(id: "q")),
+                     DailyPass.TaskActivity(id: "4", title: "Awake", pullRequest: red)] {
+            var waiting = quiet
+            waiting.tasks = [task]
+            XCTAssertTrue(waiting.needsPass, task.title)
+            XCTAssertFalse(waiting.hasNews, task.title)
+            let text = DailyPass.digest(waiting, timeZone: utc).text
+            XCTAssertTrue(text.contains("Nothing happened since 01-14 08:00"), task.title)
+            XCTAssertFalse(text.contains("propose_rule"), task.title)
+            XCTAssertEqual(text.contains("no CI failure"), task.title != "Awake", "a red CI isn't \"no CI failure\"")
+        }
         quiet.proposals.append(proposal("Added today.", addedAt: now - hour))
         XCTAssertTrue(quiet.hasNews, "a rule decided is news")
 
