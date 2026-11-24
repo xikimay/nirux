@@ -89,6 +89,9 @@ final class NiruxShellView: NSView {
     let projectStore = ProjectStore()
     /// Each space's agent sessions (see AgentSessionLedger).
     var sessionLedger = AgentSessionLedger()
+    /// What the agents spend (`startUsageMonitor`), and its window.
+    var usageMonitor: UsageMonitor?
+    var usageWindow: UsageWindowController?
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
     var workspaces: [WorkspaceState] {
@@ -128,6 +131,8 @@ final class NiruxShellView: NSView {
 
     /// Owned by NiruxApp; nil in tests, which never touch power settings.
     weak var keepAwake: KeepAwakeController?
+    /// The user quit Nirux: the last save says so (`PersistedState.quitByUser`).
+    var quitsByUser = false
 
     /// First-launch checklist state; nil for a user set up before it existed
     /// (see OnboardingChecklist.launchState).

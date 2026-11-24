@@ -71,6 +71,12 @@ public struct CodexRateLimits: Equatable, Sendable {
         public var minutes: Int?
         /// Epoch seconds.
         public var resetsAt: TimeInterval?
+
+        public init(usedPercent: Double, minutes: Int?, resetsAt: TimeInterval?) {
+            self.usedPercent = usedPercent
+            self.minutes = minutes
+            self.resetsAt = resetsAt
+        }
     }
 
     /// As Codex names them: `minutes` says which window each is (a plan
@@ -78,6 +84,12 @@ public struct CodexRateLimits: Equatable, Sendable {
     public var primary: Window?
     public var secondary: Window?
     public var reportedAt: TimeInterval
+
+    public init(primary: Window? = nil, secondary: Window? = nil, reportedAt: TimeInterval) {
+        self.primary = primary
+        self.secondary = secondary
+        self.reportedAt = reportedAt
+    }
 
     init?(_ limits: [String: Any], reportedAt: TimeInterval) {
         func window(_ key: String) -> Window? {

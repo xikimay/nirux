@@ -45,6 +45,18 @@ extension MergeQueue {
         run.name == required || GitHub.qualifiedName(name: run.name, workflow: run.workflow) == required
     }
 
+    /// The label a pull request's CI reads to run in full a required check
+    /// it otherwise runs as "<name> (selected)".
+    static let fullRunLabel = "full-test"
+
+    /// A required check ran on this head only as "<name> (selected)".
+    static func ranSelectedOnly(_ checks: CommitChecks, required: [String]) -> Bool {
+        let latest = latestRuns(checks.runs)
+        return required.contains { name in
+            !latest.contains { matches($0, required: name) } && latest.contains { matches($0, required: name + " (selected)") }
+        }
+    }
+
     /// Each required name must have a check run, and every run matching it
     /// must be green: several workflows' jobs may share a name. A commit
     /// status of that name can make it red or pending, never green alone.

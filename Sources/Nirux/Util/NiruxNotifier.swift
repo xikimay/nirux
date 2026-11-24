@@ -11,6 +11,8 @@ import UserNotifications
 @MainActor
 final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NiruxNotifier()
+    /// Brings Nirux forward for a clicked notification (AppPresence).
+    var comeForward: @MainActor () -> Void = { NSApp.activate(ignoringOtherApps: true) }
 
     /// (workspaceID, columnIndex?) — set by the app delegate at launch.
     var onActivate: ((String, Int?) -> Void)?
@@ -50,7 +52,7 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     /// "yes" can start a merge or a push (those wait on the card, next to
     /// the question).
     private static let turnQuestionCategory = "turnQuestion"
-    nonisolated private static let quickReplyAction = "turnQuestionReply"
+    nonisolated static let quickReplyAction = "turnQuestionReply"
     /// A failure that looks flaky: the rerun comes first.
     private static let flakyCIFailureCategory = "ciFailureFlaky"
 
@@ -247,36 +249,53 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let info = response.notification.request.content.userInfo
-        let workspaceID = info["workspaceID"] as? String
-        let columnIndex = info["columnIndex"] as? Int
-        let filePath = info["filePath"] as? String
-        let ciFailureAction = CIFailureAction(rawValue: response.actionIdentifier)
-        let quickReply = response.actionIdentifier == Self.quickReplyAction
-            ? (response as? UNTextInputNotificationResponse)?.userText : nil
-        let quickReplyTarget = QuickReplyTarget(userInfo: info)
+        let click = Click(
+            userInfo: response.notification.request.content.userInfo, actionIdentifier: response.actionIdentifier,
+            userText: (response as? UNTextInputNotificationResponse)?.userText
+        )
         // Answer synchronously — sending the closure into the MainActor task
         // below would risk a data race.
         completionHandler()
-        Task { @MainActor in
-            // Download notifications reveal the file instead of focusing a
-            // workspace.
-            if let filePath {
-                NSWorkspace.shared.selectFile(filePath, inFileViewerRootedAtPath: "")
-                return
-            }
-            // A reply goes in without bringing Nirux forward (the handler
-            // does when it can't).
-            if let quickReply, let quickReplyTarget, let workspaceID {
-                self.onQuickReply?(quickReplyTarget, quickReply, workspaceID, columnIndex)
-                return
-            }
-            NSApp.activate(ignoringOtherApps: true)
-            if let workspaceID, let ciFailureAction {
-                self.onCIFailureAction?(workspaceID, ciFailureAction)
-            } else if let workspaceID {
-                self.onActivate?(workspaceID, columnIndex)
-            }
+        Task { @MainActor in self.open(click) }
+    }
+
+    /// A clicked notification, read from what UserNotifications hands over.
+    struct Click: Sendable {
+        let workspaceID: String?
+        let columnIndex: Int?
+        let filePath: String?
+        let ciFailureAction: CIFailureAction?
+        let quickReply: String?
+        let quickReplyTarget: QuickReplyTarget?
+
+        init(userInfo: [AnyHashable: Any], actionIdentifier: String, userText: String?) {
+            workspaceID = userInfo["workspaceID"] as? String
+            columnIndex = userInfo["columnIndex"] as? Int
+            filePath = userInfo["filePath"] as? String
+            ciFailureAction = CIFailureAction(rawValue: actionIdentifier)
+            quickReply = actionIdentifier == NiruxNotifier.quickReplyAction ? userText : nil
+            quickReplyTarget = QuickReplyTarget(userInfo: userInfo)
+        }
+    }
+
+    func open(_ click: Click) {
+        // Download notifications reveal the file instead of focusing a
+        // workspace.
+        if let filePath = click.filePath {
+            NSWorkspace.shared.selectFile(filePath, inFileViewerRootedAtPath: "")
+            return
+        }
+        // A reply goes in without bringing Nirux forward (the handler
+        // does when it can't).
+        if let quickReply = click.quickReply, let target = click.quickReplyTarget, let workspaceID = click.workspaceID {
+            onQuickReply?(target, quickReply, workspaceID, click.columnIndex)
+            return
+        }
+        comeForward()
+        if let workspaceID = click.workspaceID, let action = click.ciFailureAction {
+            onCIFailureAction?(workspaceID, action)
+        } else if let workspaceID = click.workspaceID {
+            onActivate?(workspaceID, click.columnIndex)
         }
     }
 

@@ -133,9 +133,9 @@ extension NiruxShellView {
         // Lays out the workspace on screen, which resumes the agents it
         // shows (see NiruxShellView+LazyRestore.swift).
         relayout(animated: false)
-        if (state.settings?.agentResumeOnLaunch ?? .defaultValue) == .allAtOnce {
-            resumeAllDeferredAgents()
-        }
+        resumeAfterLaunch(
+            all: (state.settings?.agentResumeOnLaunch ?? .defaultValue) == .allAtOnce, afterUncleanExit: state.quitByUser != true
+        )
         updateSidebar()
         restoreMergeWaits(now: Date().timeIntervalSince1970)
     }
@@ -338,7 +338,9 @@ extension NiruxShellView {
         // projects.json first: a crash in between leaves new spaces with an
         // old mirror, which the marker rule handles (see ProjectStore).
         projectStore.save(workspaceStore.profiles)
-        Persistence.save(persistedState(snapshot: snapshot))
+        var state = persistedState(snapshot: snapshot)
+        if quitsByUser { state.quitByUser = true }
+        Persistence.save(state)
     }
 
     /// Mission children saved before sub-tasks kept their parent, with

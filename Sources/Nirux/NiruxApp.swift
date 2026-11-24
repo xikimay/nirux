@@ -7,14 +7,18 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var mainWindow: NSWindow?
     /// Open for a canary run only (see CanaryChannel).
     var canaryRequests: LeadRequestCenter?
-    /// A canary run: the app stays hidden and never activates (CanaryPresentation).
-    var drivenByCanary = false
+    /// A canary run's copy never comes forward (CanaryPresentation).
+    var presence = AppPresence(launchEnvironment: [:], bringForward: NiruxApp.bringNiruxForward)
+    var drivenByCanary: Bool { !presence.mayComeForward }
     var canaryObservers: [NSObjectProtocol] = []
     var shell: NiruxShellView? {
         // Its Settings window holds Nirux's panes too.
         didSet { if let shell, shell !== oldValue { wireSettings(shell.settingsWindow) } }
     }
     var updaterController: SPUStandardUpdaterController?
+    /// A quit is the user's unless an update relaunches the app or the Mac
+    /// powers off (`setupUpdater`): the next launch resumes no work after it.
+    var quitIsUsers = true
     /// Settings without a shell (tests); the app's are the shell's.
     var standaloneSettings: SettingsWindow?
     weak var settingsTaskNamesCheckbox: NSButton?
@@ -164,7 +168,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // A canary run drives this copy through its channel: behind the
         // user's windows, never taking the focus.
         let launchEnvironment = ProcessInfo.processInfo.environment
-        drivenByCanary = CanaryChannel.token(in: launchEnvironment) != nil
+        presence = AppPresence(launchEnvironment: launchEnvironment, bringForward: Self.bringNiruxForward)
         if drivenByCanary {
             canaryObservers = CanaryPresentation.keepHidden(on: .default) { NSApp.hide(nil) }
             NSApp.hide(nil)
@@ -181,6 +185,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         let shellView = NiruxShellView(frame: rect)
         window.contentView = MainWindowContent(shell: shellView)
         shell = shellView
+        connect(shellView, to: NiruxNotifier.shared)
         shellView.applyInterfaceTransparency()
         shellView.installCommandBar(in: window)
         // The frame the screen leaves, now that the toolbar set the title
@@ -194,17 +199,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // Telegram Remote Access is gone: so is its bot token (Keychain).
         LegacyTelegramToken.removeAtLaunch()
 
-        // Native notifications: click focuses the originating workspace/column.
         NiruxNotifier.shared.setup()
-        NiruxNotifier.shared.onActivate = { [weak shellView] workspaceID, columnIndex in
-            shellView?.focusWorkspace(id: workspaceID, column: columnIndex)
-        }
-        NiruxNotifier.shared.onCIFailureAction = { [weak shellView] workspaceID, action in
-            shellView?.handleCIFailureAction(action, workspaceID: workspaceID)
-        }
-        NiruxNotifier.shared.onQuickReply = { [weak shellView] target, text, workspaceID, columnIndex in
-            shellView?.replyFromNotification(text, to: target, workspaceID: workspaceID, columnIndex: columnIndex)
-        }
 
         if drivenByCanary { window.orderBack(nil) } else { window.makeKeyAndOrderFront(nil) }
         mainWindow = window
@@ -216,6 +211,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         MissionStore.shared.load()
         // Restore previous session if available
         shellView.restoreState()
+        // After the restore: its first read, seconds long, credits the
+        // restored tasks.
+        shellView.startUsageMonitor { [weak self] _ in self?.showCodexLimits() }
 
         // Agent lifecycle hooks: install into ~/.claude/settings.json and
         // ~/.codex/config.toml, then start routing events to columns. Must
@@ -284,7 +282,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // check window.firstResponder === self and set focus accordingly.
         NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
 
-        if !drivenByCanary { NSApp.activate(ignoringOtherApps: true) }
+        presence.comeForward()
         startTrackingFrontmostApp()
         drainLaunchURLBacklog()
     }
@@ -346,6 +344,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // Apply hooks still inside the drain debounce (a first prompt just
         // sent) so the saved Claude restore targets are current.
         AgentHookCenter.shared.drain()
+        shell?.quitsByUser = quitIsUsers
         shell?.saveState(snapshot: ProcessSnapshot())
         // A queue's last step is written before the process ends.
         MergeQueueController.waitForFiles()

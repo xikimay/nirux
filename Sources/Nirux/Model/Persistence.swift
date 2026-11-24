@@ -260,6 +260,10 @@ struct PersistedState: Codable {
     var workspaces: [PersistedWorkspace]
     var activeWorkspaceIndex: Int
     var settings: PersistedSettings?
+    /// Written by the user's Quit (`NiruxShellView.quitsByUser`); missing
+    /// after an update's relaunch, a crash or a forced quit, when a launch
+    /// resumes the work that was going on (`RelaunchResume`).
+    var quitByUser: Bool?
     var workspaceProfiles: [WorkspaceProfile]?
     var activeProfileID: String?
     var activeWorkspaceID: String?

@@ -678,6 +678,12 @@ extension NiruxShellView {
                 continue
             }
             guard notice.isFor(agentStartedAt: process.instance.startedAt) || workspace.runsRestartedLead(process) else { continue }
+            if let session = notice.forSessionID {
+                // The conversation its hooks name, else the one its launch
+                // line resumed: a fresh claude after a failed resume drops it.
+                let current = column.persistedClaudeRestore(foregroundProcess: process)?.sessionID
+                guard current.map({ $0 == session }) ?? process.arguments.contains(session) else { continue }
+            }
             if agent == .codex {
                 pendingLeadNotices.append(notice)
                 queueForCodex(notice.text, id: notice.waitID, in: column, runningSince: now, snapshot: snapshot,
@@ -818,6 +824,9 @@ struct LeadNotice: Equatable {
     /// Only an agent started by then takes it: the one that saw what it
     /// answers. Nil: any.
     var forAgentStartedBy: TimeInterval?
+    /// Only this Claude conversation takes it (a relaunch's resumed one):
+    /// a fresh `claude` after a failed resume doesn't. Nil: any.
+    var forSessionID: String?
 
     /// Whether the agent started at `agentStartedAt` (nil: not known)
     /// takes it.
