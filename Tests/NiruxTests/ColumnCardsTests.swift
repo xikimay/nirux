@@ -1049,12 +1049,12 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertFalse(shadow.isLifting)
     }
 
-    /// A translucent card's cut-out spans either level's shadow, so that a
-    /// lift down ends in no hard edge.
-    func testACutOutSpansEitherLevel() throws {
+    /// A translucent card's cut-out spans every level's shadow, so that a
+    /// lift down, or a card held by the pointer, ends in no hard edge.
+    func testACutOutSpansEveryLevel() throws {
         let shadow = ColumnShadowView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
         shadow.isCardClear = true
-        let reach = max(Theme.Elevation.Level.column.reach, Theme.Elevation.Level.focusedColumn.reach)
+        let reach = [Theme.Elevation.Level.column, .focusedColumn, .floating].map(\.reach).max() ?? 0
         let span = shadow.bounds.insetBy(dx: -reach, dy: -reach)
         XCTAssertEqual(try XCTUnwrap(shadow.cutOutPath).boundingBox, span)
         shadow.show(.focusedColumn, animated: false)
@@ -1098,6 +1098,211 @@ final class ColumnCardsTests: XCTestCase {
             XCTAssertTrue(shell.window?.firstResponder === target.terminalView, "the keyboard")
             XCTAssertTrue(arrived.showsColumn(at: 1))
         }
+    }
+
+    // MARK: - A card dragged by its header
+
+    /// A dragged card lands in the slot whose place lies nearest it,
+    /// whatever the others' widths.
+    func testADraggedCardLandsInTheNearestSlot() {
+        let slot = { WorkspaceState.slot(nearest: $0, among: [300, 600]) }
+        let edges = [inset, inset + 300 + gap, inset + 900 + gap * 2]
+        XCTAssertEqual(slot(-50), 0)
+        XCTAssertEqual(slot((edges[0] + edges[1]) / 2 - 1), 0)
+        XCTAssertEqual(slot((edges[0] + edges[1]) / 2 + 1), 1)
+        XCTAssertEqual(slot((edges[1] + edges[2]) / 2 - 1), 1)
+        XCTAssertEqual(slot((edges[1] + edges[2]) / 2 + 1), 2)
+        XCTAssertEqual(slot(5_000), 2)
+        XCTAssertEqual(WorkspaceState.slot(nearest: 400, among: []), 0)
+    }
+
+    /// Held by its header, a card follows the pointer along its strip, over
+    /// its slot, and the others make room where it would land; out of the
+    /// viewport it goes back where it came from. The camera holds and no
+    /// edge shows a handle meanwhile. Let go, it keeps its slot and the
+    /// focus; cancelled, it goes back.
+    func testADraggedCardFollowsThePointerAndTheOthersMakeRoom() throws {
+        let workspace = workspace(columns: 3)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let cards = workspace.columns, slots = cards.map(\.view.frame.minX)
+        let order = { workspace.columns.map(ObjectIdentifier.init) }
+        let handles = try strip(of: workspace).subviews.compactMap { $0 as? ColumnResizeHandle }
+
+        workspace.beginColumnDrag(at: 0)
+        let camera = workspace.lastCameraX
+        XCTAssertFalse(workspace.dragColumn(to: slots[0] + 40, outside: false), "not half way to the next slot")
+        XCTAssertEqual(cards[0].view.frame.minX, slots[0] + 40, "under the pointer")
+        XCTAssertEqual(cards[0].shadow?.frame.minX, slots[0] + 40, "its shadow with it")
+
+        XCTAssertTrue(workspace.dragColumn(to: slots[1] - 10, outside: false))
+        XCTAssertEqual(order(), [cards[1], cards[0], cards[2]].map(ObjectIdentifier.init))
+        XCTAssertEqual(workspace.focusedIndex, 1)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false, glides: true)
+        XCTAssertEqual(cards[1].view.frame.minX, slots[0], "the other makes room")
+        XCTAssertNotNil(cards[1].view.layer?.animation(forKey: ColumnState.glideKey), "gliding there")
+        XCTAssertEqual(cards[0].view.frame.minX, slots[1] - 10, "still under the pointer")
+        XCTAssertNil(cards[0].view.layer?.animation(forKey: ColumnState.glideKey), "with no glide of its own")
+        XCTAssertEqual(workspace.lastCameraX, camera, "the camera holds")
+        XCTAssertTrue(handles.allSatisfy(\.isHidden))
+
+        XCTAssertTrue(workspace.dragColumn(to: slots[1] - 10, outside: true))
+        XCTAssertEqual(order(), cards.map(ObjectIdentifier.init), "out of the viewport: back where it came from")
+        XCTAssertTrue(workspace.dragColumn(to: 5_000, outside: false))
+        XCTAssertEqual(order(), [cards[1], cards[2], cards[0]].map(ObjectIdentifier.init))
+        XCTAssertEqual(cards[0].view.frame.maxX, try strip(of: workspace).frame.width - inset, "kept on its strip")
+
+        workspace.endColumnDrag(cancelled: false)
+        XCTAssertNil(workspace.draggedColumn)
+        XCTAssertNil(workspace.heldCamera)
+        XCTAssertEqual(workspace.focusedIndex, 2)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns.map(\.view.frame.minX), slots)
+
+        workspace.beginColumnDrag(at: 2)
+        workspace.dragColumn(to: 0, outside: false)
+        workspace.endColumnDrag(cancelled: true)
+        XCTAssertEqual(order(), [cards[1], cards[2], cards[0]].map(ObjectIdentifier.init), "cancelled: back")
+        XCTAssertEqual(workspace.focusedIndex, 2)
+    }
+
+    /// Taken by its header, a card rises over its neighbours, a little
+    /// larger, its light and shadow with it, its shadow floating. Let go, it
+    /// comes back to its size and lies with them once its glide is over;
+    /// taken again before then, it stays up. With Reduce motion it is there
+    /// at once.
+    func testADraggedCardRisesAndSettlesOnTime() throws {
+        try withShell { shell in
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let card = try XCTUnwrap(workspace.columns.first)
+            let scales = { (key: String) in
+                card.cardLayers.map { (($0.animation(forKey: ColumnState.dragKey) as? CABasicAnimation)?.value(forKey: key) as? NSValue)?.caTransform3DValue.m11 }
+            }
+
+            card.raise(animated: true)
+            XCTAssertEqual(scales("fromValue"), card.cardLayers.map { _ in 1 })
+            XCTAssertEqual(scales("toValue"), card.cardLayers.map { _ in ColumnState.dragScale })
+            XCTAssertEqual(Set(card.cardLayers.map(\.zPosition)), [1])
+            shell.applyCardEdges(workspace, animated: false)
+            XCTAssertEqual(card.shadow?.level, .floating)
+
+            card.settle(animated: true)
+            XCTAssertEqual(scales("toValue"), card.cardLayers.map { _ in 1 })
+            XCTAssertEqual(Set(card.cardLayers.map(\.zPosition)), [1], "up while it glides to its place")
+            card.raise(animated: true)
+            waitUntil("the drop's end came", timeout: 2) { card.lifts == 0 }
+            XCTAssertEqual(scales("toValue"), card.cardLayers.map { _ in ColumnState.dragScale }, "taken again, it stays up")
+            XCTAssertEqual(Set(card.cardLayers.map(\.zPosition)), [1])
+
+            card.settle(animated: false)
+            waitUntil("down", timeout: 2) { card.lifts == 0 }
+            XCTAssertEqual(scales("toValue"), card.cardLayers.map { _ in nil })
+            XCTAssertEqual(Set(card.cardLayers.map(\.zPosition)), [0])
+            shell.applyCardEdges(workspace, animated: false)
+            XCTAssertEqual(card.shadow?.level, .focusedColumn)
+            card.raise(animated: false)
+            XCTAssertEqual(scales("fromValue"), card.cardLayers.map { _ in ColumnState.dragScale }, "Reduce motion: there at once")
+            card.settle(animated: false)
+        }
+    }
+
+    /// A press on a header past the threshold drags its card: let go past
+    /// the neighbour's middle, it lies in the neighbour's slot, focused, and
+    /// glides there. The window never moves from the bar.
+    func testDraggingAHeaderMovesItsCard() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let cards = try threeCardsFromTheLeft(shell)
+            let header = try XCTUnwrap(cards[0].header)
+            XCTAssertFalse(header.mouseDownCanMoveWindow)
+            let start = header.convert(NSPoint(x: 4, y: header.bounds.midY), to: nil)
+            let step = cards[1].view.frame.minX - cards[0].view.frame.minX
+            XCTAssertTrue(shell.viewport.frame.contains(NSPoint(x: start.x + step, y: start.y)))
+
+            try press(header, at: start, events: [
+                (.leftMouseDragged, NSPoint(x: start.x + 10, y: start.y)),
+                (.leftMouseDragged, NSPoint(x: start.x + step - 10, y: start.y)),
+                (.leftMouseUp, NSPoint(x: start.x + step - 10, y: start.y))
+            ])
+            XCTAssertEqual(workspace.columns.map(ObjectIdentifier.init), [cards[1], cards[0], cards[2]].map(ObjectIdentifier.init))
+            XCTAssertEqual(workspace.focusedIndex, 1)
+            XCTAssertNil(workspace.draggedColumn)
+            XCTAssertNotNil(cards[0].view.layer?.animation(forKey: ColumnState.glideKey), "it glides to its slot")
+            XCTAssertEqual(cards[0].view.layer?.zPosition, 1)
+            waitUntil("it lies with the others", timeout: 2) { cards[0].view.layer?.zPosition == 0 }
+            XCTAssertNil(cards[0].view.layer?.animation(forKey: ColumnState.dragKey))
+        }
+    }
+
+    /// A press that doesn't pass the threshold moves nothing; Escape, or a
+    /// drop outside the viewport, puts the card back where it came from.
+    func testAHeaderDragCancelsWithEscapeOrOutside() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { true }
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let cards = try threeCardsFromTheLeft(shell)
+            let order = cards.map(ObjectIdentifier.init)
+            let header = try XCTUnwrap(cards[0].header)
+            let start = header.convert(NSPoint(x: 4, y: header.bounds.midY), to: nil)
+            let past = NSPoint(x: start.x + cards[1].view.frame.minX - cards[0].view.frame.minX, y: start.y)
+
+            try press(header, at: start, events: [
+                (.leftMouseDragged, NSPoint(x: start.x + 2, y: start.y)), (.leftMouseUp, NSPoint(x: start.x + 2, y: start.y))
+            ])
+            XCTAssertEqual(workspace.columns.map(ObjectIdentifier.init), order, "a click")
+            XCTAssertNil(cards[0].view.layer?.animation(forKey: ColumnState.dragKey), "a click lifts nothing")
+
+            try press(header, at: start, events: [(.leftMouseDragged, past), (.keyDown, past), (.leftMouseUp, past)])
+            XCTAssertEqual(workspace.columns.map(ObjectIdentifier.init), order, "Escape")
+            XCTAssertNil(workspace.draggedColumn)
+            XCTAssertFalse(cards[0].isDragged)
+
+            let above = NSPoint(x: past.x, y: shell.viewport.frame.maxY + 40)
+            try press(header, at: start, events: [(.leftMouseDragged, past), (.leftMouseDragged, above), (.leftMouseUp, above)])
+            XCTAssertEqual(workspace.columns.map(ObjectIdentifier.init), order, "dropped outside")
+            XCTAssertNil(workspace.heldCamera)
+        }
+    }
+
+    /// Three half-width cards, the first focused: the strip shows from its
+    /// left end.
+    private func threeCardsFromTheLeft(_ shell: NiruxShellView) throws -> [ColumnState] {
+        let workspace = try XCTUnwrap(shell.activeWorkspace)
+        shell.addColumn()
+        shell.addColumn()
+        for column in workspace.columns { column.widthFraction = 0.5 }
+        workspace.focusedIndex = 0
+        shell.relayout(animated: false)
+        waitUntil("in", timeout: 2) { !workspace.columns.contains(where: \.isArriving) }
+        return workspace.columns
+    }
+
+    /// Presses `header` at `start` (hit-tested, as AppKit does) after
+    /// posting `events` (an Escape for a key): the press reads them in order.
+    private func press(_ header: ColumnHeaderView, at start: NSPoint, events: [(NSEvent.EventType, NSPoint)]) throws {
+        let window = try XCTUnwrap(header.window), content = try XCTUnwrap(window.contentView)
+        NSApplication.shared.discardEvents(matching: .any, before: nil)
+        func mouse(_ type: NSEvent.EventType, _ point: NSPoint) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1
+            ))
+        }
+        for (type, point) in events {
+            let event = type == .keyDown
+                ? try XCTUnwrap(NSEvent.keyEvent(
+                    with: .keyDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+                    isARepeat: false, keyCode: 53
+                ))
+                : try mouse(type, point)
+            NSApp.postEvent(event, atStart: false)
+        }
+        let hit = try XCTUnwrap(content.hitTest(content.convert(start, from: nil)))
+        XCTAssertTrue(hit === header || hit.isDescendant(of: header), "the press lands on the header")
+        hit.mouseDown(with: try mouse(.leftMouseDown, start))
     }
 
     private func withShell(_ body: (NiruxShellView) throws -> Void) throws {
