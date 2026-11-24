@@ -641,9 +641,18 @@ extension MergeQueue {
                 let since = clocks.agentBusySince ?? now
                 clocks.agentBusySince = since
                 guard now - since < Limits.agentWait else {
+                    let reason = StopReason(kind: .agentBusy, message: "An agent of #\(entries[first.index].number) is still busy after "
+                        + "10 minutes: \(agents).")
+                    // One pull request at a time: it rides the next queue, the others merge.
+                    if cadence == .standard, locals.count == 1 {
+                        note("#\(entries[first.index].number) leaves the queue: an agent is still busy after 10 minutes (\(agents))")
+                        entries[first.index].step = .stopped(reason)
+                        clocks.agentBusySince = nil
+                        advance()
+                        return true
+                    }
                     current = first.index
-                    stop(StopReason(kind: .agentBusy, message: "An agent of #\(entries[first.index].number) is still busy after "
-                        + "10 minutes: \(agents)."))
+                    stop(reason)
                     return true
                 }
                 retry(&self)

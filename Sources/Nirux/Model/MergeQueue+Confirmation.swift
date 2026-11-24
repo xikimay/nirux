@@ -384,7 +384,8 @@ extension MergeQueue {
         }
         if !local.busyAgents.isEmpty {
             item.notes.append(local.busyAgents.joined(separator: "; ") + ": the queue waits up to "
-                + "\(Int(Limits.agentWait / 60)) minutes for it to be back at its prompt before merging.")
+                + "\(Int(Limits.agentWait / 60)) minutes for it to be back at its prompt before merging, then leaves it "
+                + "for the next queue.")
         }
         if pullRequest.mergeable == "UNKNOWN" {
             item.notes.append("GitHub is still computing whether it merges cleanly: the queue waits up to "

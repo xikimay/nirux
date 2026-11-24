@@ -238,16 +238,23 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
     }
 
-    func testABusyAgentStopsTheQueueAfterTenMinutes() {
+    /// An agent still busy after 10 minutes (at a dialog all night) holds
+    /// its pull request only: it leaves for the next queue, the next merges.
+    func testABusyAgentLeavesTheQueueAfterTenMinutesAndTheNextMerges() {
         var world = readyWorld()
-        world.local.busyAgents = ["codex waiting (permission: Bash) in “api”"]
-        var queue = started(world)
+        world.pullRequests[53] = MQ.pullRequest(53, head: b)
+        world.checks[b] = MQ.checks(MQ.checkRun(id: 2))
+        world.locals["feat/52"] = MergeQueue.LocalState(busyAgents: ["codex waiting (permission: Bash) in “api”"])
+        var queue = MQ.Harness(entries: [MQ.entry(52, head: a), MQ.entry(53, head: b)])
+        queue.start()
         let start = queue.now
-        XCTAssertNil(queue.run(world))
-        XCTAssertEqual(queue.stopReason?.kind, .agentBusy)
-        XCTAssertTrue(queue.stopReason?.message.contains("codex waiting (permission: Bash)") == true)
+        XCTAssertEqual(queue.run(world), .merge(number: 53, head: b, method: .merge))
+        guard case .stopped(let reason) = queue.engine.entries[0].step else { return XCTFail("#52 still in") }
+        XCTAssertEqual(reason.kind, .agentBusy)
+        XCTAssertTrue(reason.message.contains("codex waiting (permission: Bash)"), reason.message)
+        XCTAssertTrue(queue.noted("#52 leaves the queue"))
+        XCTAssertEqual(queue.phase, .running)
         XCTAssertGreaterThanOrEqual(queue.now - start, 600)
-        XCTAssertLessThan(queue.now - start, 640)
     }
 
     func testAnOpenDialogInAFocusedColumnCountsAsBusy() {
