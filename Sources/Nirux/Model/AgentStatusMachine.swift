@@ -586,21 +586,41 @@ struct AgentStatusMachine {
     static let promptHookDelay: TimeInterval = 5
 
     /// The transcript of the `claude` in front recorded `prompt`: matched
-    /// to its hook by `prompt_id`, or, queued mid-turn, to the oldest hook
-    /// before it. The requests whose dialogs a typed one closed, for their
-    /// receivers to be released.
+    /// to its hook by `prompt_id`. One queued while Claude worked has a hook
+    /// that carries the running turn's `prompt_id`: when it was submitted
+    /// (`TranscriptPrompt.submittedAt`) stands for that hook, only with an
+    /// Enter since the box last emptied just before it (else an older line,
+    /// as a resumed conversation's tail holds, or one typed elsewhere:
+    /// nothing tells which). The requests whose dialogs a typed
+    /// one closed, for their receivers to be released.
     mutating func noteTranscriptPrompt(_ prompt: TranscriptPrompt) -> [AgentPermissionRequest] {
-        let index = if let id = prompt.promptID {
-            unreadPrompts.firstIndex { $0.promptID == id }
-        } else {
-            unreadPrompts.firstIndex { $0.at <= prompt.at }
+        if let submittedAt = prompt.submittedAt {
+            let submitted = submittedAt + Self.transcriptTimeResolution
+            // Its Enter came just before it was submitted: an older one sent something else.
+            guard prompt.typed, let enter = submitKeys.last(where: { $0 <= submitted }),
+                  submitted - enter < Self.submitStampDelay
+            else { return [] }
+            return noteTypedPromptLine(PromptHook(at: submitted, promptID: prompt.promptID, sessionID: prompt.sessionID))
         }
-        guard let index else {
-            if let id = prompt.promptID { readPrompts = Array((readPrompts + [(id, prompt.typed)]).suffix(Self.promptMemory)) }
+        guard let id = prompt.promptID else { return [] }
+        guard let index = unreadPrompts.firstIndex(where: { $0.promptID == id }) else {
+            readPrompts = Array((readPrompts + [(id, prompt.typed)]).suffix(Self.promptMemory))
             return []
         }
         let hook = unreadPrompts.remove(at: index)
-        guard prompt.typed else { return [] }
+        return prompt.typed ? noteTypedPromptLine(hook) : []
+    }
+
+    /// Transcript times are cut to the millisecond: a line stamped in the
+    /// millisecond of the Enter that sent it can read as before that Enter.
+    static let transcriptTimeResolution: TimeInterval = 0.001
+    /// A queued prompt is stamped within milliseconds of its Enter (1 to 42
+    /// ms measured on 2.1.331): an Enter older than this sent something else.
+    static let submitStampDelay: TimeInterval = 1
+
+    /// `noteTypedPrompt` for a prompt its transcript line says was typed:
+    /// the requests whose dialogs it closed.
+    private mutating func noteTypedPromptLine(_ hook: PromptHook) -> [AgentPermissionRequest] {
         let held = heldApprovals
         noteTypedPrompt(hook, saidByTranscript: true)
         return held.filter { request in !pendingDialogs.contains { $0.approval?.requestID == request.approval?.requestID } }

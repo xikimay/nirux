@@ -445,7 +445,7 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
     /// commit GitHub made.
     static func commitArguments(repository: String, sha: String) -> [String] {
         ["api", "--hostname", GitHub.host, "repos/\(repository)/commits/\(pathComponent(sha))",
-         "--jq", "{sha, committer: .committer.login, parents: [.parents[].sha]}"]
+         "--jq", "{sha, committer: .committer.login, parents: [.parents[].sha], tree: .commit.tree.sha}"]
     }
 
     /// The runs on the base whatever their event (a manual dispatch shares
@@ -490,6 +490,9 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
             return ["api", "--hostname", GitHub.host, "--method", "PATCH", "repos/\(repository)/pulls/\(number)", "-f", "state=closed"]
         case .deleteBranch(let name):
             return ["api", "--hostname", GitHub.host, "--method", "DELETE", "repos/\(repository)/git/refs/heads/\(name)"]
+        case .addLabel(let number, let label):
+            return ["api", "--hostname", GitHub.host, "--method", "POST", "repos/\(repository)/issues/\(number)/labels",
+                    "-f", "labels[]=\(label)"]
         }
     }
 

@@ -181,11 +181,11 @@ extension MergeQueue {
         return Comparison(status: status, aheadBy: ahead, behindBy: behind, baseCommit: base)
     }
 
-    /// The commit filter's `{sha, committer, parents}`.
+    /// The commit filter's `{sha, committer, parents, tree}`.
     static func parseCommit(_ data: Data) -> CommitInfo? {
         guard let json = object(data), let sha = GitHub.objectID(json["sha"]), let parents = json["parents"] as? [Any] else { return nil }
         let ids = parents.compactMap(GitHub.objectID)
         guard ids.count == parents.count else { return nil }
-        return CommitInfo(sha: sha, committerLogin: json["committer"] as? String, parents: ids)
+        return CommitInfo(sha: sha, committerLogin: json["committer"] as? String, parents: ids, tree: GitHub.objectID(json["tree"]))
     }
 }

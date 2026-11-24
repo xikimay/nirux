@@ -367,6 +367,8 @@ struct WorkspaceInfo: Hashable {
     /// The Lead's messages it holds until other tasks' pull requests merge.
     var heldMessages: SidebarHeldMessages?
     var waitingTask: MergeWait.WaitingState?
+    /// Its context and its week's spend (`UsageMonitor`).
+    var usage: SidebarTaskUsage?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
@@ -422,6 +424,8 @@ struct ProfileInfo: Hashable {
     /// What its workspaces ask of the user: amber in the space picker
     /// while one waits on the user.
     let attention: AttentionSignal?
+    /// What its agents spent over the week (`UsageMonitor`).
+    var weekTokens: Double?
 }
 
 struct SidebarHitArea {

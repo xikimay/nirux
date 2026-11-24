@@ -11,7 +11,6 @@ extension TranscriptLineReader where Parser == ClaudeTranscriptUsageParser {
 extension TranscriptLineReader where Parser == TranscriptPromptParser {
     /// The prompts read since the last call.
     mutating func takePrompts() -> [TranscriptPrompt] {
-        defer { parser = TranscriptPromptParser() }
-        return parser.prompts
+        parser.takePrompts()
     }
 }

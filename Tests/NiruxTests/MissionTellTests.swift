@@ -721,8 +721,9 @@ final class MissionTellTests: XCTestCase {
     /// dialog. A typed one was sent by the last Enter before its hook,
     /// however late that hook (Claude held the prompt) and whatever Enter
     /// came before it was applied, and closes the dialogs listed then. A
-    /// prompt queued mid-turn records no `prompt_id`: its line goes with the
-    /// oldest hook before it.
+    /// prompt queued mid-turn records no `prompt_id`, and its hook, after
+    /// its line, carries the running turn's: the Enter before its line sent
+    /// it, whatever hook no line answers (a REPL's poll) came before.
     func testTheTranscriptSaysWhichPromptWasTyped() {
         func readMachine() -> AgentStatusMachine {
             var machine = idleMachine()
@@ -757,10 +758,43 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(refusal(early), .draft)
 
         var queued = readMachine()
+        read(nil, at: 0.8, typed: true, into: &queued)
+        XCTAssertEqual(queued.lastPromptByUserAt, t0 + 1, "an older line, as a resumed conversation's tail holds")
         press("\r", at: 50, into: &queued)
-        _ = queued.apply(prompt("queued", at: 50.1), isUserFocused: false)
-        read(nil, at: 55, typed: true, into: &queued)
-        XCTAssertEqual(queued.boxEmptiedAt, t0 + 50)
+        _ = queued.apply(prompt("turn", at: 50.1), isUserFocused: false)
+        read("turn", at: 50.05, typed: true, into: &queued)
+        _ = queued.apply(prompt("turn", at: 52), isUserFocused: false)
+        press("also this", at: 54, into: &queued)
+        press("\r", at: 55, into: &queued)
+        read(nil, at: 54.9996, typed: true, into: &queued) // stamped in the Enter's millisecond, cut
+        _ = queued.apply(prompt("turn", at: 55.04), isUserFocused: false)
+        XCTAssertEqual(queued.boxEmptiedAt, t0 + 55)
+        press("and this", at: 56, into: &queued)
+        press("\r", at: 57, into: &queued)
+        press("\r", at: 60, into: &queued) // sends nothing
+        read(nil, at: 57.001, typed: true, into: &queued)
+        XCTAssertEqual(queued.boxEmptiedAt, t0 + 57, "a second one in the same turn")
+        read(nil, at: 70, typed: true, into: &queued)
+        XCTAssertEqual(queued.boxEmptiedAt, t0 + 57, "an Enter long before a line sent something else")
+        press("\r", at: 71, into: &queued) // a newline in a draft
+        read(nil, at: 73, typed: true, into: &queued) // from Remote Control
+        XCTAssertEqual(queued.boxEmptiedAt, t0 + 57, "an Enter 2 s before a queued line sent something else")
+        _ = queued.apply(hook(.stop, at: 75), isUserFocused: false)
+        XCTAssertNil(refusal(queued))
+
+        // Queued during the turn's last answer: a user line after the turn,
+        // with a prompt_id no hook carries; its enqueue says when it was sent.
+        var lastAnswer = readMachine()
+        press("\r", at: 100, into: &lastAnswer)
+        _ = lastAnswer.apply(prompt("turn", at: 100.1), isUserFocused: false)
+        read("turn", at: 100.05, typed: true, into: &lastAnswer)
+        press("and then this", at: 104, into: &lastAnswer)
+        press("\r", at: 105, into: &lastAnswer)
+        _ = lastAnswer.apply(prompt("turn", at: 105.04), isUserFocused: false)
+        _ = lastAnswer.apply(hook(.stop, at: 107), isUserFocused: false)
+        _ = lastAnswer.noteTranscriptPrompt(TranscriptPrompt(promptID: "next", at: t0 + 107.09, typed: true, submittedAt: t0 + 105.042))
+        XCTAssertEqual(lastAnswer.boxEmptiedAt, t0 + 105)
+        XCTAssertNil(refusal(lastAnswer))
 
         var dialogs = readMachine()
         _ = dialogs.apply(subagentDialog(at: 60), isUserFocused: false)
@@ -805,6 +839,94 @@ final class MissionTellTests: XCTestCase {
         pty.sendRaw("\r")
         submit("typed")
         try record("typed", origin: "human")
+        XCTAssertFalse(pty.hasPromptDraft)
+    }
+
+    /// A prompt the user typed while Claude worked, taken in mid-turn: its
+    /// `queued_command` line (Claude Code 2.1.331) is stamped when it was
+    /// submitted, before its hook, which carries the running turn's
+    /// `prompt_id`. The box emptied at its Enter: a Mission message may go
+    /// in once the turn ends (the Lead's lost question of 2026-11-23).
+    func testAPromptQueuedMidTurnLeavesNoDraft() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-queued-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("lead.jsonl")
+        try Data().write(to: transcript)
+        let pty = PtySession()
+        func record(_ line: String) throws {
+            let handle = try FileHandle(forWritingTo: transcript)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((line + "\n").utf8))
+        }
+        func now() -> String { Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true)) }
+        func submit() {
+            pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .userPromptSubmit, sessionID: "lead", promptID: "turn", transcriptPath: transcript.path,
+                timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+        }
+        pty.sendRaw("fix it")
+        pty.sendRaw("\r")
+        submit()
+        try record(#"{"type":"user","origin":{"kind":"human"},"promptId":"turn","sessionId":"lead","timestamp":""# + now()
+            + #"","message":{"role":"user","content":"fix it"}}"#)
+        XCTAssertFalse(pty.hasPromptDraft)
+
+        pty.sendRaw("also this")
+        pty.sendRaw("\r")
+        let submitted = now()
+        try record(#"{"type":"attachment","sessionId":"lead","timestamp":""# + submitted + #"","attachment":{"type":"queued_command","#
+            + #""prompt":"also this","commandMode":"prompt","origin":{"kind":"human"},"humanTurn":true,"timestamp":""# + submitted + #""}}"#)
+        submit()
+        _ = pty.applyAgentHook(AgentHookEvent(
+            kind: .claude, name: .stop, sessionID: "lead", transcriptPath: transcript.path, timestamp: Date().timeIntervalSince1970
+        ), isUserFocused: false)
+        XCTAssertFalse(pty.hasPromptDraft)
+    }
+
+    /// A prompt typed during Claude's last answer isn't taken in mid-turn:
+    /// after the turn it is a user line ("queued") with a `prompt_id` no
+    /// hook carries, its hook having run at enqueue with the finished turn's
+    /// (Claude Code 2.1.331, probed). Its enqueue line says when it was
+    /// submitted: the box emptied at its Enter.
+    func testAPromptQueuedDuringTheLastAnswerLeavesNoDraft() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-last-answer-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("lead.jsonl")
+        try Data().write(to: transcript)
+        let pty = PtySession()
+        func record(_ line: String) throws {
+            let handle = try FileHandle(forWritingTo: transcript)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((line + "\n").utf8))
+        }
+        func now() -> String { Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true)) }
+        func hook(_ name: AgentHookEvent.Name, promptID: String? = nil) {
+            pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: name, sessionID: "lead", promptID: promptID, transcriptPath: transcript.path,
+                timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+        }
+        pty.sendRaw("fix it")
+        pty.sendRaw("\r")
+        hook(.userPromptSubmit, promptID: "turn")
+        try record(#"{"type":"user","origin":{"kind":"human"},"promptId":"turn","promptSource":"typed","sessionId":"lead","timestamp":""#
+            + now() + #"","message":{"role":"user","content":"fix it"}}"#)
+        XCTAssertFalse(pty.hasPromptDraft)
+
+        pty.sendRaw("then this")
+        pty.sendRaw("\r")
+        try record(#"{"type":"queue-operation","operation":"enqueue","timestamp":""# + now() + #"","sessionId":"lead","content":"then this"}"#)
+        hook(.userPromptSubmit, promptID: "turn")
+        hook(.stop, promptID: "turn")
+        XCTAssertTrue(pty.hasPromptDraft, "read while its line isn't written yet")
+        try record(#"{"type":"queue-operation","operation":"dequeue","timestamp":""# + now() + #"","sessionId":"lead"}"#)
+        try record(#"{"type":"user","origin":{"kind":"human"},"promptId":"next","promptSource":"queued","sessionId":"lead","timestamp":""#
+            + now() + #"","message":{"role":"user","content":"then this"}}"#)
         XCTAssertFalse(pty.hasPromptDraft)
     }
 

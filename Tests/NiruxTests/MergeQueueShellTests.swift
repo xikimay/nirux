@@ -354,11 +354,14 @@ final class MergeQueueShellTests: XCTestCase {
     private final class QuitQuestion {
         var asked: [String] = []
         var answer: (@MainActor (Bool) -> Void)?
+        /// Times Nirux came forward, as it does for each question.
+        var cameForward = 0
     }
 
     @MainActor
     private func recordQuitQuestions(_ shell: NiruxShellView) -> QuitQuestion {
         let question = QuitQuestion()
+        shell.sideEffects.comeToFront = { question.cameForward += 1 }
         shell.sideEffects.confirmQuitWithMergeQueue = { message, details, _, _, answer in
             question.asked.append(message + "\n" + details)
             question.answer = answer
@@ -385,6 +388,7 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertTrue(question.asked.isEmpty, "asked after AppKit hears .terminateLater")
         waitUntil("the question", timeout: 10) { !question.asked.isEmpty }
         XCTAssertTrue(question.asked[0].hasPrefix("A dry-run merge queue is running\nacme/widgets: "), question.asked[0])
+        XCTAssertEqual(question.cameForward, 1, "a quit from the Dock while hidden must show the question")
         XCTAssertEqual(shell.mergeQueueTerminateReply { _ in XCTFail("a second quit waits for the first") }, .terminateCancel)
 
         try XCTUnwrap(question.answer)(false)

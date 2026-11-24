@@ -601,10 +601,10 @@ final class LeadToolsFlowTests: XCTestCase {
         claude.startedAt * 1000 + 1
     }
 
-    private func resumedLead(_ harness: UIFlowHarness, standIn: AgentStandIn) throws -> ResumedLead {
+    private func resumedLead(_ harness: UIFlowHarness, standIn: AgentStandIn, arguments: [String] = []) throws -> ResumedLead {
         let lead = try makeLead(harness)
         let agentUUID = UUID().uuidString
-        lead.workspace.addColumn(command: standIn.command(), agentUUID: agentUUID, cwd: harness.repo)
+        lead.workspace.addColumn(command: standIn.command(arguments: arguments), agentUUID: agentUUID, cwd: harness.repo)
         let column = try XCTUnwrap(lead.workspace.columns.first { $0.agentUUID == agentUUID })
         let pty = try XCTUnwrap(column.pty)
         harness.waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
@@ -702,6 +702,34 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertNil(lead.typedAt(second))
             lead.turn()
             harness.waitUntil("the second question in its prompt") { standIn.input.contains("Export as CSV or TSV?") }
+        }
+    }
+
+    /// The relaunch's "Continue where you left off" goes into the resumed
+    /// conversation once its prompt is free: never over a draft, and never
+    /// into another conversation (a fresh claude after a failed resume).
+    func testTheRelaunchNoticeGoesIntoItsSessionNeverOverADraft() throws {
+        try UIFlowHarness.run { harness in
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            let lead = try resumedLead(harness, standIn: standIn, arguments: ["--resume", "lead"])
+            let text = "[Nirux Mission] " + RelaunchResume.continueText
+            for (words, session) in [("[Nirux Mission] For an earlier conversation.", "earlier"), (text, "lead")] {
+                var notice = LeadNotice(workspaceID: lead.leadID, agentUUID: lead.agentUUID, text: words, queuedAt: Date().timeIntervalSince1970)
+                notice.forSessionID = session
+                lead.shell.pendingLeadNotices.append(notice)
+            }
+            lead.pty.sendRaw("half a thought")
+            lead.turn()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            XCTAssertFalse(standIn.input.contains(text), "never over a draft")
+            XCTAssertTrue(lead.shell.pendingLeadNotices.contains { $0.text == text })
+
+            lead.pty.sendRaw("\r")
+            lead.turn()
+            harness.waitUntil("the notice in its prompt") { standIn.input.contains(text) }
+            XCTAssertFalse(standIn.input.contains("earlier conversation"))
+            XCTAssertTrue(lead.shell.pendingLeadNotices.isEmpty, "the other conversation's is dropped")
         }
     }
 
