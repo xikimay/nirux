@@ -134,13 +134,13 @@ final class StripSwipeTests: XCTestCase {
         _ = move(&strip, [-20, -20])
         _ = strip.scrolled(.init(dx: 0, phase: .ended, time: 10.02))
         XCTAssertFalse(strip.holdsCamera)
-        XCTAssertEqual(strip.scrolled(.init(dx: -30, phase: [], momentum: .began, time: 10.03)), .swallow)
-        XCTAssertEqual(strip.scrolled(.init(dx: -20, phase: [], momentum: .changed, time: 10.04)), .swallow)
-        XCTAssertEqual(strip.scrolled(.init(dx: -20, phase: [], time: 10.05)), .pass, "a mouse's wheel")
+        XCTAssertEqual(strip.scrolled(.init(dx: -30, phase: .momentum, time: 10.03)), .swallow)
+        XCTAssertEqual(strip.scrolled(.init(dx: -20, phase: .momentum, time: 10.04)), .swallow)
+        XCTAssertEqual(strip.scrolled(.init(dx: -20, phase: .none, time: 10.05)), .pass, "a mouse's wheel")
         var content = swipe((toStart: .can, toEnd: .can))
         _ = move(&content, [-20, -20])
         _ = content.scrolled(.init(dx: 0, phase: .ended, time: 10.02))
-        XCTAssertEqual(content.scrolled(.init(dx: -30, phase: [], momentum: .began, time: 10.03)), .pass)
+        XCTAssertEqual(content.scrolled(.init(dx: -30, phase: .momentum, time: 10.03)), .pass)
         // Let go before its end (the cards changed): the rest stays the strip's.
         var gone = swipe()
         _ = move(&gone, [-20])
@@ -151,7 +151,7 @@ final class StripSwipeTests: XCTestCase {
         var tap = swipe()
         _ = move(&tap, [-2])
         XCTAssertEqual(tap.scrolled(.init(dx: 0, phase: .ended, time: 10.01)), .pass)
-        XCTAssertEqual(tap.scrolled(.init(dx: -30, phase: [], momentum: .began, time: 10.02)), .pass)
+        XCTAssertEqual(tap.scrolled(.init(dx: -30, phase: .momentum, time: 10.02)), .pass)
     }
 
     func testAFitFillsTheWindowAndComesBack() {

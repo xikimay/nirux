@@ -20,9 +20,9 @@ extension NiruxShellView {
 
     /// `hit`: the view under the fingers, read when a gesture begins.
     func scrolled(_ scroll: StripSwipe.Scroll, over hit: @autoclosure () -> NSView?) -> Bool {
-        if !scroll.phase.isDisjoint(with: [.mayBegin, .began]) {
+        if scroll.phase == .mayBegin || scroll.phase == .began {
             letGoOfStrip()
-            stripSwipe = scroll.phase.contains(.began) ? swipe(at: scroll.time, over: hit()) : nil
+            stripSwipe = scroll.phase == .began ? swipe(at: scroll.time, over: hit()) : nil
         }
         guard var swipe = stripSwipe else { return false }
         guard let workspace = activeWorkspace, workspace.columns.map(\.id) == swipe.columns else {
@@ -130,6 +130,25 @@ extension NiruxShellView {
         guard swipe.holdsCamera, let workspace = swipedWorkspace else { return }
         workspace.heldCamera = nil
         relayout(animated: true)
+    }
+}
+
+extension StripSwipe.Scroll {
+    init(_ event: NSEvent) {
+        let phase: Phase = if !event.momentumPhase.isEmpty {
+            .momentum
+        } else if event.phase.contains(.mayBegin) {
+            .mayBegin
+        } else if event.phase.contains(.began) {
+            .began
+        } else if event.phase.contains(.ended) {
+            .ended
+        } else if event.phase.contains(.cancelled) {
+            .cancelled
+        } else {
+            event.phase.isEmpty ? .none : .changed
+        }
+        self.init(dx: event.scrollingDeltaX, dy: event.scrollingDeltaY, phase: phase, time: event.timestamp)
     }
 }
 

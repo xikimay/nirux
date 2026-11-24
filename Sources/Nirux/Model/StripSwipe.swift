@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 /// Two fingers scrolling over the columns, from the gesture's `.began` to the
 /// end of its momentum. The content under the fingers keeps the gesture when
@@ -6,24 +6,17 @@ import AppKit
 /// the strip follows them, past its ends with a rubber band, and settles on
 /// the card their speed carries it to.
 struct StripSwipe {
-    /// A scroll event as the swipe reads it: `scrollingDelta`, phases, time.
+    /// A scroll event as the swipe reads it: `scrollingDelta`, phase, time.
     struct Scroll {
+        /// Where in its gesture the event lies: the fingers' (`mayBegin`
+        /// to `ended` or `cancelled`), their momentum after, or none (a
+        /// mouse's wheel).
+        enum Phase { case mayBegin, began, changed, ended, cancelled, momentum, none }
+
         var dx: CGFloat
-        var dy: CGFloat
-        var phase: NSEvent.Phase
-        var momentum: NSEvent.Phase = []
+        var dy: CGFloat = 0
+        var phase: Phase
         var time: TimeInterval
-
-        init(dx: CGFloat, dy: CGFloat = 0, phase: NSEvent.Phase, momentum: NSEvent.Phase = [], time: TimeInterval) {
-            (self.dx, self.dy, self.phase, self.momentum, self.time) = (dx, dy, phase, momentum, time)
-        }
-
-        init(_ event: NSEvent) {
-            self.init(
-                dx: event.scrollingDeltaX, dy: event.scrollingDeltaY,
-                phase: event.phase, momentum: event.momentumPhase, time: event.timestamp
-            )
-        }
     }
 
     /// Whether the content under the fingers can scroll further one way. A
@@ -56,7 +49,7 @@ struct StripSwipe {
     private var owner = Owner.undecided
     private var settled = false
     private var declined = false
-    private var moved = CGVector.zero
+    private var moved = (dx: CGFloat(0), dy: CGFloat(0))
     private var latest: TimeInterval
     /// The camera before the rubber band, over the last `speedWindow`.
     private var samples: [(time: TimeInterval, camera: CGFloat)]
@@ -98,11 +91,13 @@ struct StripSwipe {
     }
 
     mutating func scrolled(_ scroll: Scroll) -> Step {
-        // A mouse's wheel has no phase: the content's.
-        guard !scroll.phase.isEmpty || !scroll.momentum.isEmpty else { return .pass }
-        guard scroll.momentum.isEmpty else { return owner == .strip ? .swallow : .pass }
+        switch scroll.phase {
+        case .none, .mayBegin: return .pass
+        case .momentum: return owner == .strip ? .swallow : .pass
+        case .began, .changed, .ended, .cancelled: break
+        }
         latest = max(latest, scroll.time)
-        let lifted = !scroll.phase.isDisjoint(with: [.ended, .cancelled])
+        let lifted = scroll.phase == .ended || scroll.phase == .cancelled
         switch owner {
         case .content:
             return .pass
@@ -118,7 +113,7 @@ struct StripSwipe {
         case .strip:
             guard !settled else { return .swallow }
             moved.dx += scroll.dx
-            return lifted ? settle(cancelled: scroll.phase.contains(.cancelled)) : follow()
+            return lifted ? settle(cancelled: scroll.phase == .cancelled) : follow()
         }
     }
 

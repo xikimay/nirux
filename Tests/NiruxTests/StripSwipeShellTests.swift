@@ -102,7 +102,7 @@ final class StripSwipeShellTests: XCTestCase {
             // From where the fingers left it, still going that way.
             XCTAssertEqual((glide.fromValue as? NSNumber)?.doubleValue, Double(camera(workspace, focus: 2) - (start + 124)))
             XCTAssertGreaterThan(glide.initialVelocity, 0)
-            XCTAssertTrue(shell.scrolled(.init(dx: -40, phase: [], momentum: .began, time: 0.2), over: hit), "its momentum")
+            XCTAssertTrue(shell.scrolled(.init(dx: -40, phase: .momentum, time: 0.2), over: hit), "its momentum")
             XCTAssertEqual(workspace.focusedIndex, 2)
         }
     }
@@ -157,7 +157,7 @@ final class StripSwipeShellTests: XCTestCase {
             workspace.addColumn()
             XCTAssertTrue(shell.scrolled(.init(dx: -20, phase: .changed, time: 0.03), over: hit), "the rest stays the strip's")
             XCTAssertNil(workspace.heldCamera)
-            XCTAssertTrue(shell.scrolled(.init(dx: -20, phase: [], momentum: .began, time: 0.04), over: hit))
+            XCTAssertTrue(shell.scrolled(.init(dx: -20, phase: .momentum, time: 0.04), over: hit))
 
             // Fingers down over another window.
             swipe(shell, over: try terminal(workspace, 1), [-20, -20], from: 0, lifts: false)
@@ -210,6 +210,15 @@ final class StripSwipeShellTests: XCTestCase {
             XCTAssertTrue(delegate.responds(to: NSSelectorFromString("_webView:didNotHandleWheelEvent:")), "\(type(of: view))")
         }
         XCTAssertTrue(BranchReviewView.instancesRespond(to: NSSelectorFromString("_webView:didNotHandleWheelEvent:")))
+    }
+
+    func testScrollEventsReadAsTheirPhase() throws {
+        let phases: [(Int64, Int64, StripSwipe.Scroll.Phase)] = [
+            (128, 0, .mayBegin), (1, 0, .began), (2, 0, .changed), (4, 0, .ended), (8, 0, .cancelled), (0, 1, .momentum), (0, 2, .momentum), (0, 0, .none)
+        ]
+        for (phase, momentum, read) in phases {
+            XCTAssertEqual(StripSwipe.Scroll(try scrollEvent(phase: phase, momentum: momentum)).phase, read, "\(phase) \(momentum)")
+        }
     }
 
     func testAScrollViewKeepsWhatItCanScroll() {
@@ -281,10 +290,12 @@ final class StripSwipeShellTests: XCTestCase {
         return nil
     }
 
-    /// A scroll event of no window, its phase as `CGScrollPhase` gives it.
-    private func scrollEvent(phase: Int64) throws -> NSEvent {
+    /// A scroll event of no window, its phases as `CGScrollPhase` and
+    /// `CGMomentumScrollPhase` give them.
+    private func scrollEvent(phase: Int64, momentum: Int64 = 0) throws -> NSEvent {
         let event = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: 0, wheel2: -10, wheel3: 0))
         event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+        event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum)
         return try XCTUnwrap(NSEvent(cgEvent: event))
     }
 }
