@@ -1120,4 +1120,31 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertEqual(stuck.stopReason?.kind, .notMergeable)
     }
 
+
+    /// An arm counts from its call: a Stop while it is out leaves it
+    /// counted, so the stop calls it off. One with no clear answer counts as
+    /// armed: its own auto-merge doesn't stop the queue.
+    func testAnArmInFlightOrUncertainCountsAsArmed() {
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+        var stopped = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        stopped.start()
+        stopped.answer(world) { $0.pendingMutation != nil }
+        stopped.send(.stop)
+        XCTAssertEqual(stopped.phase, .stopping)
+        stopped.mutated(.sent)
+        XCTAssertEqual(stopped.stopReason?.kind, .user)
+        XCTAssertEqual(stopped.engine.entries[0].autoMerge?.isArmed, true, "the stop calls it off")
+
+        var uncertain = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        uncertain.start()
+        uncertain.answer(world) { $0.pendingMutation != nil }
+        uncertain.mutated(.uncertain("timed out"))
+        XCTAssertTrue(uncertain.noted("got no clear answer: counted as armed"))
+        world.pullRequests[52] = MQ.pullRequest(52, head: a, autoMerge: true)
+        uncertain.answer(world)
+        XCTAssertEqual(uncertain.phase, .running, "its own auto-merge")
+    }
+
 }

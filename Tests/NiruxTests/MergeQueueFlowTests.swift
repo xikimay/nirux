@@ -521,4 +521,27 @@ final class MergeQueueFlowTests: XCTestCase {
         // Nothing reached GitHub for real: the fake answered, and no queue changed anything.
         XCTAssertTrue(client.mutations.isEmpty)
     }
+
+    /// A pull request that leaves a running queue (its agent stayed busy)
+    /// gets its auto-merge called off, once: GitHub would merge it outside.
+    @MainActor
+    func testAPullRequestThatLeavesTheQueueGetsItsAutoMergeCalledOff() {
+        let client = FakeQueueClient(world: MQ.World())
+        var engine = MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(52, head: MQ.sha("a")), MQ.entry(53, head: MQ.sha("b"))],
+                                       armsAutoMerge: true)
+        engine.entries[0].autoMerge = MergeQueue.Entry.AutoMerge(head: MQ.sha("a"), isArmed: true)
+        engine.entries[1].autoMerge = MergeQueue.Entry.AutoMerge(head: MQ.sha("b"), isArmed: true)
+        engine.entries[0].step = .stopped(MergeQueue.StopReason(kind: .agentBusy, message: "busy"))
+        let driver = MergeQueueDriver(
+            engine: engine, client: client,
+            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }, reviewTasks: { [] }),
+            clock: VirtualClock().queueClock
+        )
+        driver.send(.read(requestID: -1, .success([:])))
+        driver.send(.read(requestID: -1, .success([:])))
+        XCTAssertTrue(waitUntil("the call-off") { client.mutations == [.disarmAutoMerge(number: 52)] })
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertEqual(client.mutations, [.disarmAutoMerge(number: 52)], "once, and not for #53 still in")
+    }
+
 }

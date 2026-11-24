@@ -790,6 +790,8 @@ extension MergeQueue {
                 return mutate(.disarmAutoMerge(number: number), for: .disarm(head: head))
             }
             if entries[index].autoMerge?.head != head {
+                // Counted as armed from the call on: a Stop meanwhile calls it off.
+                entries[index].autoMerge = Entry.AutoMerge(head: head, isArmed: true)
                 return mutate(.armAutoMerge(number: number, head: head, method: settings.mergeMethod), for: .arm(head: head))
             }
             read([.pullRequest(number), .checks(head)], for: .checks(head: head))
@@ -1161,10 +1163,12 @@ extension MergeQueue {
         /// rate limit) or a dry run leaves the queue to merge it itself.
         private mutating func autoMergeAsked(_ result: MutationResult, head: String, index: Int, now: TimeInterval) {
             let number = entries[index].number
-            let isArmed = result == .sent
+            // No clear answer: it may be armed, and the queue's own merge works either way.
+            let isArmed = result == .sent || result.isUncertain
             entries[index].autoMerge = Entry.AutoMerge(head: head, isArmed: isArmed)
             switch result {
             case .sent: note("Armed GitHub’s auto-merge on \(Self.short(head)): #\(number) lands with this Mac asleep too")
+            case .uncertain: note("GitHub’s auto-merge on #\(number) got no clear answer: counted as armed")
             case .dryRun: note("Dry run: auto-merge not armed on #\(number)")
             default: note("GitHub’s auto-merge isn’t armed on #\(number) (\(Self.describe(result))): the queue merges it itself")
             }

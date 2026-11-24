@@ -242,8 +242,10 @@ final class MergeQueueConfirmationTests: XCTestCase {
         XCTAssertEqual(reasons[7], "It is merged.")
         XCTAssertEqual(reasons[8], "It targets dev, not main.")
         XCTAssertNil(reasons[9], "its auto-merge is called off by the queue, which arms its own")
+        XCTAssertEqual(MergeQueue.trainCandidateRefusal(for: candidates.filter { $0.number == 9 }, settings: MQ.settings()),
+                       "A train can’t take #9: GitHub’s auto-merge is on (gh pr merge 9 --disable-auto).")
         XCTAssertEqual(confirmation.items.first { $0.entry.number == 9 }?.notes,
-                       ["GitHub’s auto-merge is on: the queue calls it off and arms its own on the head it checks."])
+                       ["GitHub’s auto-merge is on: the queue calls it off and arms its own on the head it checks (a train can’t take it)."])
         XCTAssertEqual(reasons[10], "It is in GitHub’s merge queue: remove it from there first.")
         XCTAssertEqual(confirmation.excluded.first?.title, "Change 1", "listed with its title")
     }

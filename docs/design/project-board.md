@@ -326,9 +326,9 @@ anchors don't appear. Decided with the user on 2026-11-08:
   nightly between merges is the point of the routine.
 - Both need GitHub-side settings (branch protection or rulesets, auto-merge),
   which change the repository for every contributor. On 2026-09-27
-  `xikimay/nirux` has auto-merge off and **no protection on `main`**: GitHub
-  accepts any merge, even with red checks. The queue's own checks are the only
-  guard, so they fail closed.
+  `xikimay/nirux` had auto-merge off and no protection on `main`. On
+  2026-11-24 a ruleset requires status checks on `main` (no classic branch
+  protection) and auto-merge is on. The queue's own checks still fail closed.
 - **Since 2026-11-24, auto-merge is the queue's backstop** (the user turned
   `allow_auto_merge` on): before each pull request's checks wait, the queue
   arms `gh pr merge <n> --<method> --auto --match-head-commit <head>`, so it

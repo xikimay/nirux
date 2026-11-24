@@ -307,6 +307,9 @@ extension MergeQueue {
     /// read yet don't refuse it: the train reads them again.
     static func trainCandidateRefusal(for candidates: [ConfirmationReading.Candidate], settings: BoardConfig.QueueSettings) -> String? {
         for candidate in candidates {
+            if let pullRequest = candidate.pullRequest, pullRequest.hasAutoMerge {
+                return "A train can’t take #\(candidate.number): GitHub’s auto-merge is on (gh pr merge \(candidate.number) --disable-auto)."
+            }
             guard let checks = candidate.checks else { continue }
             let verdict = judge(checks, required: settings.requiredChecks)
             let red = verdict.failed.map(\.name) + verdict.failedStatuses + verdict.notGreen + verdict.otherFailures
@@ -382,7 +385,8 @@ extension MergeQueue {
                 + (candidate.compareError.map { " (\($0))" } ?? "") + ".")
         }
         if pullRequest.hasAutoMerge {
-            item.notes.append("GitHub’s auto-merge is on: the queue calls it off and arms its own on the head it checks.")
+            item.notes.append("GitHub’s auto-merge is on: the queue calls it off and arms its own on the head it checks "
+                + "(a train can’t take it).")
         }
         if pullRequest.mergeable == "UNKNOWN" {
             item.notes.append("GitHub is still computing whether it merges cleanly: the queue waits up to "
