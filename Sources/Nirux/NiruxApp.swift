@@ -213,6 +213,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         MissionStore.shared.load()
         // Restore previous session if available
         shellView.restoreState()
+        // After the restore: its first read, seconds long, credits the
+        // restored tasks.
+        shellView.startUsageMonitor { [weak self] _ in self?.showCodexLimits() }
 
         // Agent lifecycle hooks: install into ~/.claude/settings.json and
         // ~/.codex/config.toml, then start routing events to columns. Must
