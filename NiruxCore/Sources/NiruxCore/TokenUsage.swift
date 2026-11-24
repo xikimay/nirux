@@ -113,6 +113,8 @@ public struct UsageEvent: Hashable, Sendable {
 
 public enum UsageAgent: String, Hashable, Sendable, CaseIterable {
     case claude, codex, agy
+    /// Nirux's own one-shot Claude runs (see `NiruxOneShotLog`).
+    case nirux
 }
 
 /// An agent session: Claude's and Codex's session ID, agy's conversation ID.

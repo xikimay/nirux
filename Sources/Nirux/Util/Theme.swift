@@ -18,6 +18,13 @@ enum Theme {
         static let base = NSColor(hex: 0x1B1B23)
         /// Cards, column headers, the active editor tab, find bars, toolbars.
         static let surface = NSColor(hex: 0x20202A)
+        /// A chart's series, in this order: a categorical palette's dark
+        /// steps (blue, orange, aqua, yellow, magenta), checked for colour
+        /// blindness on `surface`. Beside a legend in a chart only: never a
+        /// state's colour.
+        static let chartSeries = [
+            NSColor(hex: 0x3987E5), NSColor(hex: 0xD95926), NSColor(hex: 0x199E70), NSColor(hex: 0xC98500), NSColor(hex: 0xD55181)
+        ]
         /// Above a surface: drag ghosts, menus, popovers, a toolbar's fields.
         static let raised = NSColor(hex: 0x292933)
 
@@ -139,6 +146,9 @@ enum Theme {
         /// A column's corners, circular: their clip stays within a terminal's
         /// padding (`TerminalConfigBuilder.padding`), so it cuts no cell.
         static let column: CGFloat = 10
+        /// A chart bar's top, and its legend's swatches.
+        static let chartBar: CGFloat = 4
+        static let chartSwatch: CGFloat = 2
         /// Palette, floating panels.
         static let panel: CGFloat = 12
     }

@@ -61,17 +61,24 @@ extension MergeQueue {
         let settings: BoardConfig.QueueSettings
         let cadence: Cadence
         let startedByLead: Bool
-        /// The branch a Train cadence composes its batch on: new for each Start.
-        let trainBranch: String
+        /// The branch of a Train cadence's first train: new for each Start.
+        let firstTrainBranch: String
         /// The CI triage was on at Start: a red train may be rerun once.
         let triagesFlakes: Bool
-        private var stopMessage = "Stopped by the user."
+        private(set) var stopMessage = "Stopped by the user."
         // The train's flow (MergeQueue+Train) writes the state below too.
         var entries: [Entry]
         var phase: Phase = .idle
         /// The entry being worked on.
         var current: Int?
         var train: Train?
+        /// This Start's trains before `train`: landed, or red and closed.
+        var pastTrains: [Train] = []
+        /// The batches still to ride, by entry, the train's own first: a red
+        /// train's batch rides again in two halves.
+        var groups: [[Int]]
+        /// Why a train failed, by the tree it ran on: the same files fail the same way.
+        var redTrees: [String: StopReason] = [:]
         /// The request whose answer the engine waits for. An answer to any
         /// other is ignored: it comes from before a Stop.
         private(set) var request: Request?
@@ -91,10 +98,11 @@ extension MergeQueue {
         ) {
             self.startedByLead = startedByLead
             self.cadence = cadence
-            self.trainBranch = trainBranch
+            firstTrainBranch = trainBranch
             self.triagesFlakes = triagesFlakes
             self.settings = settings
             self.entries = entries.map(Entry.init)
+            groups = [Array(entries.indices)]
         }
 
         var currentEntry: Entry? { current.map { entries[$0] } }
@@ -168,10 +176,10 @@ extension MergeQueue {
                 self.request = nil
                 let endsInItsStop: Bool
                 switch purpose {
-                case .train(.close), .train(.cleanup): endsInItsStop = true
+                case .train(.close), .train(.cleanup), .train(.redClose), .train(.leave): endsInItsStop = true
                 default: endsInItsStop = false
                 }
-                // Closing or deleting the train ends in its own stop, whose reason a Stop mustn't hide.
+                // Closing or deleting the train reads its own answer, which a Stop mustn't hide.
                 if phase == .stopping, !endsInItsStop {
                     var message = stopMessage + " The \(Self.describe(mutation)), already sent, answered: "
                         + "\(Self.describe(result))."
@@ -535,7 +543,7 @@ extension MergeQueue {
 
         /// Why a pull request can't go on, at any step: not open, a draft,
         /// another base, a fork, auto-merge, GitHub's merge queue.
-        func problem(with pullRequest: PullRequestSnapshot) -> StopReason? {
+        func problem(with pullRequest: PullRequestSnapshot, allowingAutoMerge: Bool = false) -> StopReason? {
             let number = "#\(pullRequest.number)"
             let url = pullRequest.url
             if !pullRequest.isOpen {
@@ -552,7 +560,7 @@ extension MergeQueue {
                 return StopReason(kind: .notMergeable, message: "\(number) comes from another repository (a fork): the queue "
                     + "only merges branches of \(settings.repository).", url: url)
             }
-            if pullRequest.hasAutoMerge {
+            if pullRequest.hasAutoMerge, !allowingAutoMerge {
                 return StopReason(kind: .notMergeable, message: "\(number) is set to auto-merge: GitHub could merge it at any "
                     + "moment, without waiting for the post-merge workflow. Disable auto-merge (gh pr merge "
                     + "\(pullRequest.number) --disable-auto), then start again.", url: url)

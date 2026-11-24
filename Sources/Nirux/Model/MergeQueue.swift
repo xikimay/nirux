@@ -436,6 +436,8 @@ extension MergeQueue {
         /// a GitHub account's.
         let committerLogin: String?
         let parents: [String]
+        /// Two commits with the same tree hold the same files.
+        var tree: String?
     }
 
     struct RateLimit: Equatable, Sendable {

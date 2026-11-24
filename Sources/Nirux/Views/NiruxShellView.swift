@@ -89,6 +89,9 @@ final class NiruxShellView: NSView {
     let projectStore = ProjectStore()
     /// Each space's agent sessions (see AgentSessionLedger).
     var sessionLedger = AgentSessionLedger()
+    /// What the agents spend (`startUsageMonitor`), and its window.
+    var usageMonitor: UsageMonitor?
+    var usageWindow: UsageWindowController?
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
     var workspaces: [WorkspaceState] {

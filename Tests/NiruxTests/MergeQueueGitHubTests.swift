@@ -55,7 +55,8 @@ final class MergeQueueGitHubTests: XCTestCase {
 
     static let webFlowCommit = """
     {"committer":"web-flow","parents":["584dea8a87e6ab2ce67ca55be95120bb8fc36b05",\
-    "2c8b4f5e91a2f5fd8d309ec64feebc7b72ceea03"],"sha":"5e2f337cf1adc0556b3af834c437f68c0d1aef01"}
+    "2c8b4f5e91a2f5fd8d309ec64feebc7b72ceea03"],"sha":"5e2f337cf1adc0556b3af834c437f68c0d1aef01",\
+    "tree":"655c2692d0ab79082d02685a92fcc28460bd9aa7"}
     """
 
     static let userCommit = """
@@ -159,6 +160,7 @@ final class MergeQueueGitHubTests: XCTestCase {
         let update = try XCTUnwrap(MergeQueue.parseCommit(Data(Self.webFlowCommit.utf8)))
         XCTAssertEqual(update.committerLogin, "web-flow")
         XCTAssertEqual(update.parents.count, 2)
+        XCTAssertEqual(update.tree, "655c2692d0ab79082d02685a92fcc28460bd9aa7")
         XCTAssertEqual(MergeQueue.parseCommit(Data(Self.userCommit.utf8))?.committerLogin, "octocat")
         XCTAssertEqual(MergeQueue.parseCommit(Data(#"{"sha":"x","committer":null,"parents":[]}"#.utf8)), nil)
 
