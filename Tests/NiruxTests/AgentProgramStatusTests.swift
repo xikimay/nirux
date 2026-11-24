@@ -163,20 +163,63 @@ final class AgentProgramStatusTests: XCTestCase {
         XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: true, now: t0 + 5), .idle)
     }
 
-    /// A status Nirux missed can't hold a column working: past a minute of
-    /// silence its output says more. A restarted terminal forgets it.
-    func testAMissedStatusYieldsToTheOutput() {
+    /// Waiting on its own background task, agy stops its spinner and says
+    /// nothing until the task ends: neither its silence nor a redraw reads
+    /// as a wait on the user, nor does it once ^Z and fg dropped its status.
+    /// Twenty minutes without a word, the row says so. A restarted terminal
+    /// forgets its status.
+    func testAgyWaitingOnItsBackgroundTaskNeverWaitsOnTheUser() {
         var machine = AgentStatusMachine()
-        _ = machine.tick(fgName: "agy", isUserFocused: false, now: t0)
-        _ = machine.noteProgramStatus(status(.working), isUserFocused: false, now: t0 + 1)
-        XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 30), .working)
-        XCTAssertNotEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 62), .working)
-        XCTAssertNil(machine.programStatus, "its next working is a new turn's")
-        _ = machine.noteProgramStatus(status(.error, "quota"), isUserFocused: false, now: t0 + 63)
-        let agy = ForegroundProcess(instance: ProcessInstance(pid: 42, startedAt: t0.timeIntervalSince1970), name: "agy", arguments: [])
-        XCTAssertEqual(machine.blockedWait(now: t0.timeIntervalSince1970 + 64, foreground: agy)?.reason, .apiError(kind: nil, detail: "quota"))
+        let agy = ProcessInstance(pid: 42, startedAt: t0.timeIntervalSince1970)
+        let shell = ProcessInstance(pid: 41, startedAt: t0.timeIntervalSince1970 - 100)
+        func tick(_ name: String, _ process: ProcessInstance, at offset: TimeInterval) -> AgentStatus {
+            machine.keepProgramStatus(of: process)
+            return machine.tick(fgName: name, isUserFocused: false, now: t0 + offset)
+        }
+        _ = tick("agy", agy, at: 0)
+        machine.noteUserInput(now: t0)
+        _ = machine.noteProgramStatus(status(.working), from: agy, isUserFocused: false, now: t0 + 1)
+        machine.noteRead(now: t0 + 8)
+        XCTAssertEqual(tick("agy", agy, at: 600), .working)
+        XCTAssertNil(machine.agyQuietFor(now: t0.timeIntervalSince1970 + 600))
+        machine.noteRead(now: t0 + 601)
+        XCTAssertEqual(tick("agy", agy, at: 1300), .working)
+        XCTAssertNil(machine.attentionReason)
+        XCTAssertEqual(machine.agyQuietFor(now: t0.timeIntervalSince1970 + 1300), 1299, "its status's age, not its output's")
+        _ = tick("zsh", shell, at: 1311)
+        _ = tick("agy", agy, at: 1312)
+        machine.noteRead(now: t0 + 1318)
+        XCTAssertEqual(tick("agy", agy, at: 1318.5), .working)
+        XCTAssertEqual(tick("agy", agy, at: 1330), .idle)
+        _ = machine.noteProgramStatus(status(.error, "quota"), from: agy, isUserFocused: false, now: t0 + 1331)
+        XCTAssertNil(machine.agyQuietFor(now: t0.timeIntervalSince1970 + 1331))
+        let front = ForegroundProcess(instance: agy, name: "agy", arguments: [])
+        XCTAssertEqual(machine.blockedWait(now: t0.timeIntervalSince1970 + 1332, foreground: front)?.reason, .apiError(kind: nil, detail: "quota"))
         machine.reset()
         XCTAssertNil(machine.programStatus)
+    }
+
+    /// The check is the agy in front's own: one that never reports (its
+    /// status turned off, an older build), started after one that did, still
+    /// needs the user when it falls silent, maybe at its approval prompt.
+    func testAnAgyThatNeverReportsStillNeedsTheUserWhenSilent() {
+        var machine = AgentStatusMachine()
+        let reporting = ProcessInstance(pid: 42, startedAt: t0.timeIntervalSince1970)
+        let shell = ProcessInstance(pid: 41, startedAt: t0.timeIntervalSince1970 - 100)
+        let mute = ProcessInstance(pid: 43, startedAt: t0.timeIntervalSince1970 + 20)
+        func tick(_ name: String, _ process: ProcessInstance, at offset: TimeInterval) -> AgentStatus {
+            machine.keepProgramStatus(of: process)
+            return machine.tick(fgName: name, isUserFocused: false, now: t0 + offset)
+        }
+        _ = tick("agy", reporting, at: 0)
+        machine.noteUserInput(now: t0)
+        _ = machine.noteProgramStatus(status(.working), from: reporting, isUserFocused: false, now: t0 + 1)
+        _ = machine.noteProgramStatus(status(.done, "ok"), from: reporting, isUserFocused: false, now: t0 + 2)
+        _ = tick("zsh", shell, at: 10)
+        _ = tick("agy", mute, at: 20)
+        machine.noteRead(now: t0 + 26)
+        XCTAssertEqual(tick("agy", mute, at: 26.5), .working)
+        XCTAssertEqual(tick("agy", mute, at: 40), .needsAttention)
     }
 
     func testASignInThatLastsNeedsTheUser() {

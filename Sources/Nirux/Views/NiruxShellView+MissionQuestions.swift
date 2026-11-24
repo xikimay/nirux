@@ -131,7 +131,7 @@ extension NiruxShellView {
                                 // The first turn proves its thread when Codex reports its end.
                                 if [.working, .blocked].contains(status.state) { return CodexLaunch.canProve(process) }
                                 return parent.provenCodexSessionID(of: process) != nil
-                            case .agy: return pty.hasAgyTurn(in: process.instance)
+                            case .agy: return pty.hasAgyPrompt(process)
                             default:
                                 return pty.agentTookPrompt(since: process).map {
                                     $0 || pty.sitsAtFirstPrompt(process, now: now, record: sessionRecord(of:))

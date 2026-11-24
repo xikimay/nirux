@@ -170,7 +170,8 @@ extension MergeQueue {
         /// The same reason, its message followed by `text`.
         func appending(_ text: String?) -> StopReason {
             guard let text else { return self }
-            return StopReason(kind: kind, message: message + text, url: url, checksTimedOut: checksTimedOut)
+            let sentence = message.last.map { ".!?".contains($0) } == true ? message : message + "."
+            return StopReason(kind: kind, message: sentence + text, url: url, checksTimedOut: checksTimedOut)
         }
 
         /// A token that a gh error echoes never reaches the saved queue.
@@ -224,6 +225,9 @@ extension MergeQueue {
         case branch(String)
         /// The pull requests from this head branch, newest first.
         case pullRequests(head: String)
+        /// The CI triage's verdict on a failed run of a pull request: not a
+        /// GitHub read, the driver asks the app.
+        case triage(run: Int, pullRequest: Int, checks: [String])
     }
 
     enum ReadResult: Equatable, Sendable {
@@ -241,6 +245,21 @@ extension MergeQueue {
         /// Nil: no such branch.
         case branch(String?)
         case pullRequests([PullRequestSnapshot])
+        case triage(TriageAnswer)
+    }
+
+    /// What the app's CI triage said of a failed run.
+    enum TriageAnswer: Equatable, Sendable {
+        case verdict(CITriage.Verdict)
+        /// It didn't read the run (gh failed, or no answer in time): why.
+        case unread(String)
+        /// The CI triage is off.
+        case off
+
+        /// A verdict only from a run it read: "unsure" otherwise says nothing.
+        init(_ outcome: CITriageInvestigation.Outcome) {
+            self = outcome.wasRead ? .verdict(outcome.verdict) : .unread("gh couldn’t read it")
+        }
     }
 
     /// Why a batch of reads failed.
@@ -270,6 +289,8 @@ extension MergeQueue {
         case mergeIntoBranch(branch: String, head: String, message: String)
         /// `POST pulls`.
         case openPullRequest(base: String, head: String, title: String, body: String)
+        /// `PATCH pulls/{n}` to `closed`: a train's pull request left behind by a stop.
+        case closePullRequest(number: Int)
         /// `DELETE git/refs/heads/{name}`: a train's own branch, once it landed or stopped.
         case deleteBranch(name: String)
     }
