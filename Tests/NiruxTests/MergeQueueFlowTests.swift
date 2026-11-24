@@ -132,7 +132,7 @@ final class MergeQueueFlowTests: XCTestCase {
                 """)
             case "api":
                 if joined.contains("rate_limit") { return ok(MergeQueueGitHubTests.rateLimit) }
-                if joined.contains("/rules/branches/") { return ok("[]") }
+                if joined.contains("/rules/branches/") { return ok(#"[{"type":"required_status_checks"}]"#) }
                 if joined.contains("mergeQueue(branch") { return ok(#"{"data":{"repository":{"mergeQueue":null}}}"#) }
                 if joined.contains("files(first:"), let number = value(after: "-F", prefix: "number=").flatMap(Int.init),
                    let pr = pullRequests[number] {
@@ -256,11 +256,9 @@ final class MergeQueueFlowTests: XCTestCase {
         XCTAssertEqual(world.mergedNumbers, [52, 53])
         XCTAssertTrue(world.forbiddenCalls.isEmpty, "\(world.forbiddenCalls)")
         XCTAssertTrue(world.answeredOffMain)
-        // GitHub's auto-merge armed on each head first, the backstop; the queue merges itself once checks pass.
+        // Green already: GitHub's auto-merge would merge at once, past the queue's own gates; the queue merges itself.
         XCTAssertEqual(world.allCalls.filter { $0.starts(with: ["pr", "merge"]) },
-                       [["pr", "merge", "52", "--repo", "github.com/acme/widgets", "--merge", "--auto", "--match-head-commit", a],
-                        ["pr", "merge", "52", "--repo", "github.com/acme/widgets", "--merge", "--match-head-commit", a],
-                        ["pr", "merge", "53", "--repo", "github.com/acme/widgets", "--merge", "--auto", "--match-head-commit", b],
+                       [["pr", "merge", "52", "--repo", "github.com/acme/widgets", "--merge", "--match-head-commit", a],
                         ["pr", "merge", "53", "--repo", "github.com/acme/widgets", "--merge", "--match-head-commit", b]])
         XCTAssertEqual(world.disarmedNumbers, [], "nothing to call off once merged")
         XCTAssertFalse(MergeQueueLock.isHeld(repository: MQ.widgets, folder: lockFolder))
@@ -278,7 +276,6 @@ final class MergeQueueFlowTests: XCTestCase {
         // The step's note, then the call it sent.
         let merging = try XCTUnwrap(journal.range(of: "Merging aaaaaaa"))
         XCTAssertNotNil(journal.range(of: "sent, waiting for the answer", range: merging.upperBound..<journal.endIndex))
-        XCTAssertTrue(journal.contains("Armed GitHub’s auto-merge on aaaaaaa"), journal)
         XCTAssertTrue(journal.contains("Finished: 2 merged"))
         XCTAssertEqual(MergeQueue.SavedQueue.load(from: files.state)?.status, .finished)
     }

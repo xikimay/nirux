@@ -86,6 +86,9 @@ extension MergeQueue {
         /// a run still going at Start or rerun since included, stops the
         /// queue before its next merge.
         private var baseRunsFailedAtStart: Set<String> = []
+        /// The base's rules require checks (`Read.baseRequiresChecks`): with
+        /// none, `gh pr merge --auto` would merge at once (gh 2.103).
+        private var baseRequiresChecks = false
         private var outbox = Output()
 
         init(
@@ -361,7 +364,8 @@ extension MergeQueue {
             phase = .running
             note("Started: \(entries.map { "#\($0.number)" }.joined(separator: ", ")) into \(settings.baseBranch) of "
                 + "\(settings.repository) (\(cadence.title))")
-            read([.auth, .rateLimit, .baseMergeQueue] + (settings.postMergeWorkflow != nil ? [.baseRuns] : []), for: .start)
+            read([.auth, .rateLimit, .baseMergeQueue] + (armsAutoMerge ? [.baseRequiresChecks] : [])
+                 + (settings.postMergeWorkflow != nil ? [.baseRuns] : []), for: .start)
         }
 
         /// The next waiting pull request, or the end.
@@ -474,7 +478,7 @@ extension MergeQueue {
                 if landedByAutoMerge(pullRequest, head: head, index: index, now: now) { return }
                 if let problem = problem(with: pullRequest) { return stop(problem) }
                 guard pullRequest.headOid == head else { return stop(changed(index: index, head: pullRequest.headOid)) }
-                decide(on: checks, head: head, index: index, now: now)
+                decide(on: checks, head: head, index: index, now: now, baseRuns: answers.runs(.baseRuns))
             case .rerunCheck(let head, let replaced, let message):
                 guard let checks = answers.checks(head) else { return missingAnswer() }
                 let latest = Set(MergeQueue.latestRuns(checks.runs).map(\.id))
@@ -532,6 +536,8 @@ extension MergeQueue {
                 guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
                 baseRunsFailedAtStart = Set(runs.filter { GitHub.isFailedRun($0.conclusion) }.map(\.attemptKey))
             }
+            // Unread, it isn't armed: the queue merges itself.
+            baseRequiresChecks = answers.baseRequiresChecks ?? false
             guard !mergeQueue else {
                 return stop(StopReason(kind: .setup, message: "\(settings.baseBranch) requires GitHub’s merge queue: gh pr merge "
                     + "would queue pull requests there instead of merging them, without waiting for the post-merge workflow. "
@@ -776,25 +782,39 @@ extension MergeQueue {
 
         // MARK: 3. Required checks
 
-        /// Auto-merge is asked for on the head first (an older head's called
-        /// off): with the Mac asleep or Nirux closed, GitHub lands it once
-        /// its checks pass, and the queue takes that as its own merge.
-        private mutating func waitForChecks(head: String, index: Int, now: TimeInterval) {
+        /// An older head's armed auto-merge is called off first; GitHub
+        /// refusing, it stays counted as armed (a stop calls it off) and
+        /// none is armed meanwhile.
+        private mutating func waitForChecks(head: String, index: Int, now: TimeInterval, callsOffOlder: Bool = true) {
             entries[index].step = .waitingForChecks(head)
             clocks.step = now
             clocks.unknownSince = nil
             clocks.unknownReads = 0
             let number = entries[index].number
-            guard armsAutoMerge else { return read([.pullRequest(number), .checks(head)], for: .checks(head: head)) }
-            if let asked = entries[index].autoMerge, asked.head != head, asked.isArmed {
-                return mutate(.disarmAutoMerge(number: number), for: .disarm(head: head))
+            if let asked = entries[index].autoMerge, asked.head != head {
+                if asked.isArmed, callsOffOlder { return mutate(.disarmAutoMerge(number: number), for: .disarm(head: head)) }
+                if !asked.isArmed { entries[index].autoMerge = nil }
             }
-            if entries[index].autoMerge?.head != head {
-                // Counted as armed from the call on: a Stop meanwhile calls it off.
-                entries[index].autoMerge = Entry.AutoMerge(head: head, isArmed: true)
-                return mutate(.armAutoMerge(number: number, head: head, method: settings.mergeMethod), for: .arm(head: head))
-            }
-            read([.pullRequest(number), .checks(head)], for: .checks(head: head))
+            read(checksReads(head: head, index: index), for: .checks(head: head))
+        }
+
+        /// The checks of `head`, and the base's runs while it may still be armed.
+        private func checksReads(head: String, index: Int) -> [Read] {
+            [.pullRequest(entries[index].number), .checks(head)] + (mayArm(index) && settings.postMergeWorkflow != nil ? [.baseRuns] : [])
+        }
+
+        private func mayArm(_ index: Int) -> Bool {
+            armsAutoMerge && cadence != .train && baseRequiresChecks && entries[index].autoMerge == nil
+        }
+
+        /// GitHub's auto-merge only while it can't merge at once (`gh pr
+        /// merge --auto` merges a pull request GitHub already finds
+        /// mergeable): the base requires checks and this head's are running,
+        /// and no post-merge run goes on the base (the queue's own wait).
+        private func armsNow(index: Int, verdict: ChecksVerdict, baseRuns: [GitHub.WorkflowRun]?) -> Bool {
+            guard mayArm(index), verdict.pending.contains(where: { !$0.hasSuffix("(not started)") }) else { return false }
+            guard settings.postMergeWorkflow != nil else { return true }
+            return baseRuns.map { $0.allSatisfy(\.isCompleted) } ?? false
         }
 
         /// GitHub's auto-merge, armed on `head`, merged the pull request: its
@@ -818,7 +838,9 @@ extension MergeQueue {
             return true
         }
 
-        private mutating func decide(on checks: CommitChecks, head: String, index: Int, now: TimeInterval) {
+        private mutating func decide(
+            on checks: CommitChecks, head: String, index: Int, now: TimeInterval, baseRuns: [GitHub.WorkflowRun]? = nil
+        ) {
             let verdict = MergeQueue.judge(checks, required: settings.requiredChecks, replaced: clocks.replacedChecks)
             if !verdict.failed.isEmpty || !verdict.failedStatuses.isEmpty {
                 return checksFailed(verdict, checks: checks, head: head, index: index, now: now)
@@ -828,6 +850,11 @@ extension MergeQueue {
                     + "isn’t green on \(Self.short(head)): neutral and skipped don’t count."))
             }
             guard verdict.pending.isEmpty else {
+                if armsNow(index: index, verdict: verdict, baseRuns: baseRuns) {
+                    // Counted as armed from the call on: a Stop meanwhile calls it off.
+                    entries[index].autoMerge = Entry.AutoMerge(head: head, isArmed: true)
+                    return mutate(.armAutoMerge(number: entries[index].number, head: head, method: settings.mergeMethod), for: .arm(head: head))
+                }
                 guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else {
                     let advice = verdict.pending.contains { $0.hasSuffix("(not started)") }
                         ? "A check that never starts may be misspelled: check the names in Board Settings."
@@ -836,8 +863,7 @@ extension MergeQueue {
                         + "Required checks were missing or running on \(Self.short(head)): "
                         + "\(verdict.pending.joined(separator: ", ")). \(advice)", checksTimedOut: true))
                 }
-                return read([.pullRequest(entries[index].number), .checks(head)], after: Limits.pollInterval,
-                            for: .checks(head: head))
+                return read(checksReads(head: head, index: index), after: Limits.pollInterval, for: .checks(head: head))
             }
             mergeChecks(head: head, index: index)
         }
@@ -1172,7 +1198,7 @@ extension MergeQueue {
             case .dryRun: note("Dry run: auto-merge not armed on #\(number)")
             default: note("GitHub’s auto-merge isn’t armed on #\(number) (\(Self.describe(result))): the queue merges it itself")
             }
-            waitForChecks(head: head, index: index, now: now)
+            read([.pullRequest(number), .checks(head)], after: Limits.pollInterval, for: .checks(head: head))
         }
 
         private mutating func mutated(_ result: MutationResult, purpose: Purpose, now: TimeInterval) {
@@ -1180,11 +1206,14 @@ extension MergeQueue {
                 return autoMergeAsked(result, head: head, index: index, now: now)
             }
             if let index = current, case .disarm(let head) = purpose {
-                if case .dryRun = result {} else if case .refused(_, let message) = result {
-                    note("Auto-merge of an older head of #\(entries[index].number) wasn’t called off: \(message)")
+                switch result {
+                case .refused(_, let message), .rateLimited(let message), .uncertain(let message):
+                    note("Auto-merge of an older head of #\(entries[index].number) wasn’t called off (\(message)): left for the stop")
+                    return waitForChecks(head: head, index: index, now: now, callsOffOlder: false)
+                case .sent, .dryRun:
+                    entries[index].autoMerge = nil
+                    return waitForChecks(head: head, index: index, now: now)
                 }
-                entries[index].autoMerge = nil
-                return waitForChecks(head: head, index: index, now: now)
             }
             if let index = current, case .disarmLeftOver = purpose, !result.isDryRun {
                 note("Called off the auto-merge left on #\(entries[index].number): the queue arms its own on the head it checks")
@@ -1321,6 +1350,11 @@ extension Dictionary where Key == MergeQueue.Read, Value == MergeQueue.ReadResul
 
     var rateLimit: MergeQueue.RateLimit? {
         if case .rateLimit(let value)? = self[.rateLimit] { return value }
+        return nil
+    }
+
+    var baseRequiresChecks: Bool? {
+        if case .baseRequiresChecks(let value)? = self[.baseRequiresChecks] { return value }
         return nil
     }
 

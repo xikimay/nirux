@@ -414,8 +414,8 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertEqual(replies, [true])
         guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("not stopped") }
         XCTAssertTrue(reason.message.contains("Check #52 on GitHub: it may be merged."), reason.message)
-        XCTAssertEqual(client.mutations, [.armAutoMerge(number: 52, head: MQ.sha("a"), method: .merge)],
-                       "a quit leaves GitHub's auto-merge armed: it lands while Nirux is closed")
+        XCTAssertFalse(client.mutations.contains { if case .disarmAutoMerge = $0 { true } else { false } },
+                       "a quit calls no auto-merge off: what is armed lands while Nirux is closed")
     }
 
     @MainActor

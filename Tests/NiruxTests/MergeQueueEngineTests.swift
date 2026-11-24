@@ -1076,15 +1076,17 @@ final class MergeQueueEngineTests: XCTestCase {
     func testAnAutoMergeNotArmedLeavesTheMergeToTheQueue() {
         var world = MQ.World()
         world.pullRequests[52] = MQ.pullRequest(52, head: a)
-        world.checks[a] = MQ.checks(MQ.checkRun(id: 1))
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
         var harness = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
         harness.start()
         harness.answer(world) { $0.pendingMutation != nil }
         harness.mutated(.refused(status: 405, message: "Auto merge is not allowed for this repository"))
         XCTAssertTrue(harness.noted("GitHub’s auto-merge isn’t armed on #52"))
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1))
         harness.answer(world) { $0.pendingMutation != nil }
         XCTAssertEqual(harness.pendingMutation, .merge(number: 52, head: a, method: .merge), "asked once")
 
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
         var dryRun = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
         dryRun.start()
         dryRun.answer(world) { $0.pendingMutation != nil }
@@ -1100,7 +1102,7 @@ final class MergeQueueEngineTests: XCTestCase {
     func testALeftOverAutoMergeIsCalledOffBeforeTheQueueArmsItsOwn() {
         var world = MQ.World()
         world.pullRequests[52] = MQ.pullRequest(52, head: a, autoMerge: true)
-        world.checks[a] = MQ.checks(MQ.checkRun(id: 1))
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
         var harness = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
         harness.start()
         harness.answer(world) { $0.pendingMutation != nil }
@@ -1145,6 +1147,56 @@ final class MergeQueueEngineTests: XCTestCase {
         world.pullRequests[52] = MQ.pullRequest(52, head: a, autoMerge: true)
         uncertain.answer(world)
         XCTAssertEqual(uncertain.phase, .running, "its own auto-merge")
+    }
+
+
+    /// `gh pr merge --auto` merges at once a pull request GitHub already
+    /// finds mergeable: the queue arms only on a base whose rules require
+    /// checks, while this head's run, and no post-merge run goes on the base.
+    /// Green already, on a base requiring none, or with the nightly running,
+    /// it arms nothing and merges itself after its own gates.
+    func testAutoMergeIsArmedOnlyWhileItCantMergeAtOnce() {
+        let pending = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+        func world(checks: MergeQueue.CommitChecks, requiresChecks: Bool = true, baseRuns: [GitHub.WorkflowRun] = []) -> MQ.World {
+            var world = MQ.World()
+            world.pullRequests[52] = MQ.pullRequest(52, head: a)
+            world.checks[a] = checks
+            world.baseRequiresChecks = requiresChecks
+            world.baseRuns = baseRuns
+            return world
+        }
+        func firstMutation(_ world: MQ.World) -> MergeQueue.Mutation? {
+            var harness = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+            harness.start()
+            harness.answer(world) { $0.pendingMutation != nil || $0.pendingDelay == 20 }
+            return harness.pendingMutation
+        }
+        XCTAssertEqual(firstMutation(world(checks: pending)), .armAutoMerge(number: 52, head: a, method: .merge))
+        XCTAssertEqual(firstMutation(world(checks: MQ.checks(MQ.checkRun(id: 1)))), .merge(number: 52, head: a, method: .merge),
+                       "green already: armed, it would merge at once")
+        XCTAssertNil(firstMutation(world(checks: pending, requiresChecks: false)), "no required checks: nothing waits for them")
+        XCTAssertNil(firstMutation(world(checks: pending, baseRuns: [MQ.run(9, head: c, status: "in_progress", conclusion: nil)])),
+                     "the nightly runs on the base")
+        XCTAssertEqual(firstMutation(world(checks: MQ.checks(MQ.checkRun(id: 1, status: "QUEUED", conclusion: nil)))),
+                       .armAutoMerge(number: 52, head: a, method: .merge), "queued: requested")
+        XCTAssertNil(firstMutation(world(checks: MQ.checks())), "no check run on the head yet")
+    }
+
+    /// An older head's auto-merge GitHub didn't call off stays counted as
+    /// armed (the stop calls it off), and none is armed meanwhile.
+    func testAnOlderHeadsAutoMergeLeftOnStaysCounted() {
+        var harness = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        harness.engine.entries[0].autoMerge = MergeQueue.Entry.AutoMerge(head: c, isArmed: true)
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+        harness.start()
+        harness.answer(world) { $0.pendingMutation != nil }
+        XCTAssertEqual(harness.pendingMutation, .disarmAutoMerge(number: 52))
+        harness.mutated(.refused(status: 422, message: "Can't disable auto-merge"))
+        XCTAssertEqual(harness.engine.entries[0].autoMerge, MergeQueue.Entry.AutoMerge(head: c, isArmed: true))
+        harness.answer(world)
+        XCTAssertNil(harness.pendingMutation, "no new arm over it")
     }
 
 }

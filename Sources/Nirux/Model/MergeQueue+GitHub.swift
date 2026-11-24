@@ -294,6 +294,9 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
                 parse(call(Self.mergeQueueArguments(repository: repository, branch: settings.baseBranch)),
                       MergeQueue.parseMergeQueue).map { .baseMergeQueue(hasRule || $0) }
             }
+        case .baseRequiresChecks:
+            return parse(call(Self.rulesArguments(repository: repository, branch: settings.baseBranch)),
+                         MergeQueue.parseRulesRequireChecks).map { .baseRequiresChecks($0) }
         case .pullRequest(let number):
             return parse(call(Self.pullRequestArguments(repository: repository, number: number)),
                          MergeQueue.parsePullRequest).map { .pullRequest($0) }

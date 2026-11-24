@@ -26,6 +26,12 @@ extension MergeQueue {
         return rules.contains { $0["type"] as? String == "merge_queue" }
     }
 
+    /// `rules/branches/{branch}`: whether a `required_status_checks` rule applies.
+    static func parseRulesRequireChecks(_ data: Data) -> Bool? {
+        guard let rules = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return nil }
+        return rules.contains { $0["type"] as? String == "required_status_checks" }
+    }
+
     /// GraphQL `repository.mergeQueue(branch:)`: whether it isn't null.
     /// A missing field is unreadable, not "none".
     static func parseMergeQueue(_ data: Data) -> Bool? {
