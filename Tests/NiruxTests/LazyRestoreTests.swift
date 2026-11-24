@@ -224,6 +224,37 @@ final class LazyRestoreTests: XCTestCase {
             let told = shell.pendingLeadNotices.filter { $0.text == "[Nirux Mission] " + RelaunchResume.continueText }
             XCTAssertEqual(told.map(\.agentUUID).sorted(), [try column(shell, 1, 0).agentUUID, try column(shell, 2, 0).agentUUID].compactMap { $0 }.sorted(),
                            "once each, typed when their prompt is free")
+            XCTAssertEqual(Set(told.compactMap(\.forSessionID)), [Self.sessionA, Self.sessionB], "for the conversation it resumed")
+        }
+
+        // The user quit Nirux: nothing resumes but what shows.
+        var quit = state()
+        quit.quitByUser = true
+        try withRestoredShell(quit) { shell, recorder in
+            XCTAssertTrue(try column(shell, 2, 0).isAwaitingResume)
+            XCTAssertEqual(recorder.commands, ["command codex resume '\(Self.thread)'"])
+            XCTAssertTrue(shell.pendingLeadNotices.isEmpty)
+        }
+        // All at once: every agent resumes; after an unclean exit those
+        // mid-turn are told to go on, after a Quit none is.
+        var allAtOnce = state()
+        var settings = PersistedSettings()
+        settings.agentResumeOnLaunch = .allAtOnce
+        allAtOnce.settings = settings
+        try withRestoredShell(allAtOnce) { shell, _ in
+            XCTAssertFalse(try column(shell, 2, 1).isAwaitingResume)
+            XCTAssertEqual(shell.pendingLeadNotices.filter { $0.text.hasSuffix(RelaunchResume.continueText) }.count, 2)
+        }
+        allAtOnce.quitByUser = true
+        try withRestoredShell(allAtOnce) { shell, _ in
+            XCTAssertFalse(try column(shell, 2, 1).isAwaitingResume)
+            XCTAssertTrue(shell.pendingLeadNotices.isEmpty)
+            // Only the user's Quit writes it; any other save leaves it out.
+            shell.saveState()
+            XCTAssertNil(Persistence.load()?.quitByUser)
+            shell.quitsByUser = true
+            shell.saveState()
+            XCTAssertEqual(Persistence.load()?.quitByUser, true)
         }
 
         var off = SpaceDefaults()

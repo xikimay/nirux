@@ -142,35 +142,40 @@ extension NiruxShellView {
         resumeDeferredAgents { _, _ in true }
     }
 
-    /// After a relaunch, the agents `RelaunchResume` names, in the spaces
-    /// whose switch is on: the rest wait for their column as before.
-    /// Those last seen mid-turn are told once to go on, as a Lead notice:
-    /// typed once their prompt is free, never over a draft.
+    /// At launch: every deferred agent with "All at once"; after an unclean
+    /// exit, also the agents `RelaunchResume` names in the spaces whose
+    /// switch is on, and, either way, those last seen mid-turn are told once
+    /// to go on: a Lead notice for the resumed session, typed once its
+    /// prompt is free, never over a draft.
     @discardableResult
-    func resumeWorkAfterRelaunch(store: MissionStore = .shared, now: TimeInterval = Date().timeIntervalSince1970) -> Bool {
-        let waiting = store.ensureLoaded() ? RelaunchResume.waitingAgents(store.pendingPromptDeliveries()) : []
+    func resumeAfterLaunch(
+        all: Bool, afterUncleanExit: Bool, store: MissionStore = .shared, now: TimeInterval = Date().timeIntervalSince1970
+    ) -> Bool {
+        let waiting = afterUncleanExit && store.ensureLoaded() ? RelaunchResume.waitingAgents(store.pendingPromptDeliveries()) : []
         var spaceResumes: [String: Bool] = [:]
-        var continuing: [(workspaceID: String, agentUUID: String)] = []
+        var continuing: [LeadNotice] = []
         let resumed = resumeDeferredAgents { column, workspace in
-            let resumesWork = spaceResumes[workspace.profileID] ?? {
+            let resumesWork = afterUncleanExit && (spaceResumes[workspace.profileID] ?? {
                 let value = SpaceDefaultsStore.defaults(forSpace: workspace.profileID).resumesWorkOnRelaunch
                 spaceResumes[workspace.profileID] = value
                 return value
-            }()
+            }())
             let candidate = RelaunchResume.Candidate(
                 agentUUID: column.agentUUID, lastStatus: column.deferredAgent?.lastStatus,
                 isLead: workspace.isLead && column.agentUUID != nil && column.agentUUID == workspace.leadAgentUUID
             )
-            guard resumesWork, RelaunchResume.resumes(candidate, messageWaitsFor: waiting) else { return false }
-            if RelaunchResume.continues(candidate), let agentUUID = column.agentUUID { continuing.append((workspace.id, agentUUID)) }
-            return true
+            let resumes = all || (resumesWork && RelaunchResume.resumes(candidate, messageWaitsFor: waiting))
+            if resumes, resumesWork, RelaunchResume.continues(candidate), let agentUUID = column.agentUUID {
+                var notice = LeadNotice(
+                    workspaceID: workspace.id, agentUUID: agentUUID, text: "\(MissionPromptText.prefix) \(RelaunchResume.continueText)",
+                    queuedAt: now
+                )
+                notice.forSessionID = column.deferredAgent?.launch.sessionID
+                continuing.append(notice)
+            }
+            return resumes
         }
-        pendingLeadNotices += continuing.map { workspaceID, agentUUID in
-            LeadNotice(
-                workspaceID: workspaceID, agentUUID: agentUUID, text: "\(MissionPromptText.prefix) \(RelaunchResume.continueText)",
-                queuedAt: now
-            )
-        }
+        pendingLeadNotices += continuing
         if !continuing.isEmpty { typeLeadNotices() }
         return resumed
     }

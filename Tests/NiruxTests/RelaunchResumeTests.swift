@@ -29,6 +29,7 @@ final class RelaunchResumeTests: XCTestCase {
         XCTAssertFalse(resumes(.idle))
         XCTAssertFalse(resumes(.needsAttention))
         XCTAssertFalse(resumes(nil, waiting: ["other"]))
+        XCTAssertFalse(resumes(.needsAttention, waiting: ["idle"]), "waiting on the user, a message for it waits too")
 
         // Told to go on: only one last seen mid-turn.
         XCTAssertTrue(RelaunchResume.continues(.init(agentUUID: "a", lastStatus: .working, isLead: true)))

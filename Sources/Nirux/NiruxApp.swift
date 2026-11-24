@@ -15,6 +15,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         didSet { if let shell, shell !== oldValue { wireSettings(shell.settingsWindow) } }
     }
     var updaterController: SPUStandardUpdaterController?
+    /// A quit is the user's unless an update relaunches the app or the Mac
+    /// powers off (`setupUpdater`): the next launch resumes no work after it.
+    var quitIsUsers = true
     /// Settings without a shell (tests); the app's are the shell's.
     var standaloneSettings: SettingsWindow?
     weak var settingsTaskNamesCheckbox: NSButton?
@@ -343,6 +346,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // Apply hooks still inside the drain debounce (a first prompt just
         // sent) so the saved Claude restore targets are current.
         AgentHookCenter.shared.drain()
+        shell?.quitsByUser = quitIsUsers
         shell?.saveState(snapshot: ProcessSnapshot())
         // A queue's last step is written before the process ends.
         MergeQueueController.waitForFiles()
