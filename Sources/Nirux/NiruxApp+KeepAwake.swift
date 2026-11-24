@@ -8,12 +8,15 @@ extension NiruxApp {
     func setUpKeepAwake(window: NSWindow, shell: NiruxShellView) {
         let indicator = KeepAwakeIndicator()
         window.addTitlebarAccessoryViewController(indicator)
-        let controller = KeepAwakeController(enabled: NiruxShellView.currentKeepMacAwakeEnabled())
+        let controller = KeepAwakeController(
+            enabled: NiruxShellView.currentKeepMacAwakeEnabled(),
+            waitsForChecks: NiruxShellView.currentKeepMacAwakeForChecksEnabled()
+        )
         controller.onChange = { [weak controller, weak indicator] in
             guard let controller else { return }
             indicator?.update(
                 isActive: controller.isActive, workingAgentCount: controller.workingAgentCount,
-                isMergeQueueRunning: controller.isMergeQueueRunning
+                isMergeQueueRunning: controller.isMergeQueueRunning, isAwaitingChecks: controller.isAwaitingChecks
             )
         }
         controller.onRefresh = { [weak shell] in
