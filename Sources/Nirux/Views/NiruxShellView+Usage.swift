@@ -13,6 +13,7 @@ extension NiruxShellView {
             if let self, let window = usageWindow, window.window?.isVisible == true {
                 window.update(report: report, names: usageNames())
             }
+            self?.startColdLeadsAfresh(now: report.generatedAt)
             onReport(report)
         }
         usageMonitor = monitor
@@ -71,6 +72,27 @@ extension NiruxShellView {
               let session = usageMonitor?.report?.latestSessions[workspace.id], session.key == UsageSessionKey(.claude, id)
         else { return nil }
         return ContextOffer(session, now: now)
+    }
+
+    /// A Claude Lead at rest past its cache with a heavy context starts a
+    /// new conversation where its space allows (`ContextOffer.restartsLead`):
+    /// its next message would write the whole context again. Never over a
+    /// draft, a dialog or a turn.
+    func startColdLeadsAfresh(now: TimeInterval) {
+        let snapshot = ProcessSnapshot()
+        for lead in workspaces where lead.isLead && !lead.isClosing {
+            guard let column = lead.leadTerminal, !column.isRestartingShell, let pty = column.pty,
+                  let foreground = pty.foregroundProcess(snapshot: snapshot), foreground.interactiveAgent == .claude,
+                  let id = column.claudeSessionID(of: foreground),
+                  let session = usageMonitor?.report?.latestSessions[lead.id], session.key == UsageSessionKey(.claude, id),
+                  ContextOffer.restartsLead(session, runningSince: foreground.instance.startedAt, now: now),
+                  column.liveAgent(snapshot: snapshot)?.status == .idle, !pty.hasPromptDraft,
+                  SpaceDefaultsStore.defaults(forSpace: lead.profileID).leadStartsFreshWhenCold
+            else { continue }
+            restartLead(lead, agent: .claude, focus: false)
+            let space = profiles.first { $0.id == lead.profileID }?.name ?? lead.title
+            showToast("The Lead of “\(space)” started a new conversation: idle for an hour with \(UsageText.tokens(session.contextTokens ?? 0)) of context.")
+        }
     }
 
     /// Compact types /compact as the user would. Fresh start restarts the

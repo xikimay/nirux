@@ -20,4 +20,13 @@ struct ContextOfferTests {
         #expect(ContextOffer(session(context: nil, idle: 7_200), now: now) == nil, "compacted: no response since")
         #expect(ContextOffer(session(.codex, context: 400_000, idle: 60), now: now) == nil)
     }
+
+    @Test func aLeadStartsAfreshOnceColdWithAHeavyContextOnly() {
+        let started = now - 86_400
+        #expect(ContextOffer.restartsLead(session(context: 200_000, idle: 3_600), runningSince: started, now: now))
+        #expect(!ContextOffer.restartsLead(session(context: 199_999, idle: 7_200), runningSince: started, now: now))
+        #expect(!ContextOffer.restartsLead(session(context: 400_000, idle: 3_599), runningSince: started, now: now))
+        #expect(!ContextOffer.restartsLead(session(context: 400_000, idle: 7_200), runningSince: now - 60, now: now), "just resumed")
+        #expect(!ContextOffer.restartsLead(session(.agy, context: 400_000, idle: 7_200), runningSince: started, now: now))
+    }
 }

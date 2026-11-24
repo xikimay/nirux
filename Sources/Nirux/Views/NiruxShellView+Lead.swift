@@ -158,7 +158,8 @@ extension NiruxShellView {
         }
     }
 
-    func restartLead(_ lead: WorkspaceState, agent: CodingAgent, resuming sessionID: String? = nil) {
+    /// `focus`: the Lead comes to the front, as for the user's restart.
+    func restartLead(_ lead: WorkspaceState, agent: CodingAgent, resuming sessionID: String? = nil, focus: Bool = true) {
         let file = agent == .claude ? claudeSpaceSettingsFile(for: lead) : nil
         if agent == .claude, sessionID != nil, file == nil, currentLeadOptions(in: lead).safety != nil {
             return showToast("Couldn’t prepare the space’s safety settings. The Lead is still running.", tone: .error)
@@ -170,7 +171,7 @@ extension NiruxShellView {
             settingsFiles: file.map { [lead.profileID: $0] } ?? [:]
         )
         defer {
-            focusLead(lead)
+            if focus { focusLead(lead) }
             updateSidebar()
             scheduleMetadataRefresh()
         }
@@ -249,6 +250,7 @@ extension NiruxShellView {
             agent: defaults?.defaults.preferredLeadAgent ?? .claude,
             dailyPass: defaults?.defaults.dailyPassIsOn ?? false,
             dailyPassHour: defaults?.defaults.dailyPassHour ?? DailyPass.defaultHour,
+            freshStart: defaults?.defaults.leadStartsFreshWhenCold ?? false,
             lastPass: lastDailyPassText(inSpace: space.id),
             canChangeDefaults: defaults?.isWritable ?? false
         )
@@ -258,6 +260,12 @@ extension NiruxShellView {
     /// (on is the default, so it writes nothing).
     func setLeadStartsTasks(_ on: Bool, spaceID: String) {
         changeSpaceDefaults(spaceID: spaceID) { $0.leadStartsTasks = on ? nil : false }
+        refreshSpaceSettingsLead()
+    }
+
+    /// "Fresh start after an idle hour", as "Starts tasks without asking".
+    func setLeadFreshStart(_ on: Bool, spaceID: String) {
+        changeSpaceDefaults(spaceID: spaceID) { $0.leadFreshStart = on ? nil : false }
         refreshSpaceSettingsLead()
     }
 

@@ -29,6 +29,9 @@ struct SpaceDefaults: Equatable, Sendable {
     var leadCanStartMergeQueue: Bool { leadStartsMergeQueue ?? false }
     var leadStartsMergeQueueWithoutLocalReview: Bool?
     var leadCanStartMergeQueueWithoutLocalReview: Bool { leadStartsMergeQueueWithoutLocalReview ?? false }
+    /// Space Settings › Lead, "Fresh start when idle with a heavy context".
+    /// Nil: on.
+    var leadFreshStart: Bool?
     /// Space Settings › Lead, "Daily pass" (docs/design/daily-pass.md). Nil:
     /// on, after `DailyPass.defaultHour`.
     var leadDailyPass: Bool?
@@ -50,6 +53,9 @@ struct SpaceDefaults: Equatable, Sendable {
     var leadStartsTasksWithoutAsking: Bool { leadStartsTasks ?? true }
 
     var dailyPassIsOn: Bool { leadDailyPass ?? true }
+    /// Whether a cold Lead with a heavy context starts a new conversation
+    /// (`ContextOffer.restartsLead`).
+    var leadStartsFreshWhenCold: Bool { leadFreshStart ?? true }
     var dailyPassHour: Int { leadDailyPassHour ?? DailyPass.defaultHour }
     /// Whether Nirux types the rounds its tasks' pull requests need.
     var followsUpPullRequests: Bool { prFollowUp ?? true }
@@ -88,6 +94,7 @@ struct SpaceDefaults: Equatable, Sendable {
             (\.leadStartsMergeQueue, .leadStartsMergeQueue, false),
             (\.leadStartsMergeQueueWithoutLocalReview, .leadStartsMergeQueueWithoutLocalReview, false),
             (\.leadDailyPass, .leadDailyPass, false),
+            (\.leadFreshStart, .leadFreshStart, false),
             (\.prFollowUp, .prFollowUp, false),
             (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
             (\.claudeDeniesIrreversible, .claudeDeniesIrreversible, true),
@@ -202,6 +209,7 @@ extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion, agent, leadAgent, claudeLaunchMode, codexLaunchMode, agyLaunchMode, environment
         case leadStartsTasks, leadStartsMergeQueue, leadStartsMergeQueueWithoutLocalReview, leadDailyPass, leadDailyPassHour, prFollowUp
+        case leadFreshStart
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
 
@@ -227,6 +235,7 @@ extension SpaceDefaults: Codable {
         leadDailyPass = (try? container.decodeIfPresent(Bool.self, forKey: .leadDailyPass)) ?? nil
         leadDailyPassHour = ((try? container.decodeIfPresent(Int.self, forKey: .leadDailyPassHour)) ?? nil).flatMap { (0...23).contains($0) ? $0 : nil }
         prFollowUp = (try? container.decodeIfPresent(Bool.self, forKey: .prFollowUp)) ?? nil
+        leadFreshStart = (try? container.decodeIfPresent(Bool.self, forKey: .leadFreshStart)) ?? nil
         claudeTrustsRepositories = (try? container.decodeIfPresent(Bool.self, forKey: .claudeTrustsRepositories)) ?? nil
         claudeDeniesIrreversible = (try? container.decodeIfPresent(Bool.self, forKey: .claudeDeniesIrreversible)) ?? nil
         claudeSandbox = (try? container.decodeIfPresent(Bool.self, forKey: .claudeSandbox)) ?? nil
@@ -253,6 +262,7 @@ extension SpaceDefaults: Codable {
         try container.encodeIfPresent(leadDailyPass, forKey: .leadDailyPass)
         try container.encodeIfPresent(leadDailyPassHour, forKey: .leadDailyPassHour)
         try container.encodeIfPresent(prFollowUp, forKey: .prFollowUp)
+        try container.encodeIfPresent(leadFreshStart, forKey: .leadFreshStart)
         try container.encodeIfPresent(claudeTrustsRepositories, forKey: .claudeTrustsRepositories)
         try container.encodeIfPresent(claudeDeniesIrreversible, forKey: .claudeDeniesIrreversible)
         try container.encodeIfPresent(claudeSandbox, forKey: .claudeSandbox)
