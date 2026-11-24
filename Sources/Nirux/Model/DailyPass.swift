@@ -525,8 +525,9 @@ enum DailyPass {
         guard facts.hasNews else {
             let merged = facts.repositories.contains { !$0.problems.isEmpty } ? "" : "no pull request merged, "
             let tasks = forgottenSection(forgotten, reported: facts.reported, limits[0])
-            let quiet = header + "\n\nNothing happened since \(since): no review recorded, \(merged)no CI failure, "
-                + "no Mission message held, no rule decided. Nothing to propose" + (tasks.text == nil ? ": say so in one line." : ".")
+            let quiet = header + "\n\n" + morningSection(facts) + "\n\nNothing happened since \(since): no review recorded, "
+                + "\(merged)no CI failure, no Mission message held, no rule decided. Nothing to propose"
+                + (tasks.text == nil ? ": say so in one line." : ".")
             let sections = [gitHubSection(facts), tasks.text].compactMap { $0 }
             return Digest(text: ([quiet] + sections).joined(separator: "\n\n"), readUntil: window.end, listed: tasks.listed)
         }
@@ -535,7 +536,7 @@ enum DailyPass {
         var parts: [Part] = []
         for limit in limits {
             parts = [
-                Part(text: instructions(facts)), Part(text: gitHubSection(facts)), rulesSection(facts, limit),
+                Part(text: morningSection(facts)), Part(text: instructions(facts)), Part(text: gitHubSection(facts)), rulesSection(facts, limit),
                 forgottenSection(forgotten, reported: facts.reported, limit), findingsSection(facts, limit),
                 pullRequestsSection(facts, limit), ciSection(facts, limit, timeZone: timeZone), missionsSection(facts, limit, timeZone: timeZone),
                 threadWaitsSection(facts, limit)
@@ -560,6 +561,29 @@ enum DailyPass {
         let continuation = page.next(afterShowing: shown, of: facts.threadWaits)
         if continuation != nil { text += "\n\n" + WaitPage.more }
         return Digest(text: text, readUntil: readUntil, nextWaitPage: continuation, listed: parts.flatMap(\.listed))
+    }
+
+    /// The line the user reads first on coming back: what landed, and what
+    /// waits and on whom (the user, the Lead, or the task with its red CI).
+    static func morningLine(_ facts: Facts) -> String {
+        let landed = facts.repositories.flatMap(\.merged).sorted { $0.mergedAt < $1.mergedAt }.map { "#\($0.number)" }
+        let open = facts.tasks.filter { !$0.mergedLately }
+        let onUser = open.filter { $0.waitsOnUser != nil || $0.question?.handedToUser == true }.map(\.title)
+        let onLead = open.filter { $0.question.map { !$0.handedToUser } ?? false }.map(\.title)
+        let red = open.filter { $0.pullRequest?.state == .open && $0.pullRequest?.ciStatus == "FAILURE" }
+            .map { "\($0.title) (#\($0.pullRequest?.number ?? 0))" }
+        let waits = [("waiting on you", onUser), ("on the Lead", onLead), ("red CI, on the task", red)]
+            .filter { !$0.1.isEmpty }.map { "\($0.0): \(listed($0.1))" }
+        return "Overnight: landed \(landed.isEmpty ? "nothing" : listed(landed))"
+            + (waits.isEmpty ? ", nothing waits." : "; " + waits.joined(separator: "; ") + ".")
+    }
+
+    private static func morningSection(_ facts: Facts) -> String {
+        "## Morning line\nOpen your answer to the user with this line, as it is:\n" + morningLine(facts)
+    }
+
+    private static func listed(_ items: [String], max: Int = 4) -> String {
+        items.prefix(max).joined(separator: ", ") + (items.count > max ? " and \(items.count - max) more" : "")
     }
 
     private static func joined(_ header: String, _ parts: [Part]) -> String {

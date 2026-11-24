@@ -309,6 +309,29 @@ final class DailyPassTests: XCTestCase {
         )
     }
 
+    /// The morning line: what landed, then what waits and on whom, first in
+    /// the digest, quiet or not.
+    func testTheDigestOpensWithTheMorningLine() {
+        var facts = facts()
+        XCTAssertEqual(DailyPass.morningLine(facts), "Overnight: landed #611, nothing waits.")
+        var red = PRInfo(number: 812, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil,
+                         mergeable: nil, url: "u", additions: nil, deletions: nil, changedFiles: nil)
+        red.headRefOid = "a"
+        facts.tasks = [
+            DailyPass.TaskActivity(id: "1", title: "Login", waitsOnUser: "a login"),
+            DailyPass.TaskActivity(id: "2", title: "Canary", question: .init(id: "q")),
+            DailyPass.TaskActivity(id: "3", title: "Picker", question: .init(id: "q2", handedToUser: true)),
+            DailyPass.TaskActivity(id: "4", title: "Awake", pullRequest: red),
+            DailyPass.TaskActivity(id: "5", title: "Landed", question: .init(id: "q3"), mergedLately: true)
+        ]
+        let line = "Overnight: landed #611; waiting on you: Login, Picker; on the Lead: Canary; red CI, on the task: Awake (#812)."
+        XCTAssertEqual(DailyPass.morningLine(facts), line)
+        XCTAssertTrue(DailyPass.digest(facts, timeZone: utc).text.contains("## Morning line\nOpen your answer to the user with this line, as it is:\n" + line))
+        facts.repositories = []
+        facts.findings = []
+        XCTAssertTrue(DailyPass.digest(facts, timeZone: utc).text.contains("Overnight: landed nothing; waiting on you"), "quiet too")
+    }
+
     /// What to propose (the free slots under the pending limit), the kinds
     /// the window saw with where else they showed up, each pull request's
     /// rounds (its recorded reviews count), reruns, and the rules to avoid.
