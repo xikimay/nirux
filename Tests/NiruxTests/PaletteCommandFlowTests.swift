@@ -205,9 +205,6 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
-    /// The project's sessions, the one a restored column holds first; the
-    /// switches; under the list, what Return does: going to the restored
-    /// column resumes its agent there, Return on an ended one resumes it.
     func testTokenUsageCommand() throws {
         try UIFlowHarness.run { harness in
             harness.runPaletteCommand("Token Usage")
@@ -233,6 +230,9 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
+    /// The project's sessions, the one a restored column holds first; the
+    /// switches; under the list, what Return does: going to the restored
+    /// column resumes its agent there, Return on an ended one resumes it.
     func testSessionHistoryCommand() throws {
         try UIFlowHarness.run { harness in
             let workspace = try XCTUnwrap(harness.shell.activeWorkspace)

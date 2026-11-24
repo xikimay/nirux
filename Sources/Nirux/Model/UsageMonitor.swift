@@ -33,15 +33,18 @@ final class UsageMonitor {
     func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
-        let catalog = catalog()
+        let asked = catalog()
         let reader = reader
         reader.queue.async {
-            let report = reader.read(catalog: catalog, now: Date().timeIntervalSince1970)
+            let report = reader.read(catalog: asked, now: Date().timeIntervalSince1970)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     self.isRefreshing = false
                     self.report = report
                     self.onReport?(report)
+                    // Tasks found during a long read (git contexts after the
+                    // restore): credited now, not at the next tick.
+                    if self.catalog() != asked { self.refresh() }
                 }
             }
         }

@@ -330,12 +330,12 @@ public struct UsageLedger: Sendable {
                 model: events.last?.model, contextTokens: events.last?.contextTokens
             )
         }
-        let oneShotSessions = oneShots.values.map { reader in
-            let events = reader.parser.events
-            return session(
-                UsageSessionKey(.nirux, URL(fileURLWithPath: reader.path).deletingPathExtension().lastPathComponent),
-                cwd: nil, events: events, model: events.last?.model, contextTokens: nil
-            )
+        // A run per line: a day's runs share no session, nor a cache.
+        let oneShotSessions = oneShots.values.flatMap { reader in
+            let day = URL(fileURLWithPath: reader.path).deletingPathExtension().lastPathComponent
+            return reader.parser.events.enumerated().map { index, event in
+                session(UsageSessionKey(.nirux, "\(day)#\(index)"), cwd: nil, events: [event], model: event.model, contextTokens: nil)
+            }
         }
         return (claudeSessions + codexSessions + agySessions + oneShotSessions).filter { !$0.events.isEmpty }
     }

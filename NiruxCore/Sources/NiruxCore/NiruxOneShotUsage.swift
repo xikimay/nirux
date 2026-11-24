@@ -3,7 +3,8 @@ import Foundation
 /// The token usage of Nirux's own one-shot Claude runs (`claude -p`), which
 /// leave no transcript (`--no-session-persistence`): one line per run in a
 /// file per UTC day, `one-shots-<yyyy-MM-dd>.jsonl`. Counts, the model, the
-/// client and the time; never text.
+/// client and the time; never text. A run of several requests logs its
+/// total, and its largest request's context as `contextTokens`.
 public enum NiruxOneShotLog {
     public static let filePrefix = "one-shots-"
     /// Day files untouched for longer go when a new day's file starts.
@@ -15,7 +16,9 @@ public enum NiruxOneShotLog {
 
     /// One write of a line under PIPE_BUF with O_APPEND: concurrent runs
     /// never interleave.
-    public static func append(client: String, model: String?, counts: TokenCounts, at time: TimeInterval, in folder: String) {
+    public static func append(
+        client: String, model: String?, counts: TokenCounts, contextTokens: Int? = nil, at time: TimeInterval, in folder: String
+    ) {
         var object: [String: Any] = [
             "timestamp": time, "client": client,
             "usage": [
@@ -25,6 +28,7 @@ public enum NiruxOneShotLog {
             ]
         ]
         if let model { object["model"] = model }
+        if let contextTokens { object["context_tokens"] = contextTokens }
         guard var line = try? JSONSerialization.data(withJSONObject: object, options: .sortedKeys) else { return }
         line.append(0x0A)
         try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
@@ -64,7 +68,8 @@ public struct NiruxOneShotUsageParser: TranscriptLineParser, Sendable {
         events.append(UsageEvent(
             timestamp: (object["timestamp"] as? NSNumber)?.doubleValue ?? 0,
             model: object["model"] as? String,
-            counts: counts
+            counts: counts,
+            contextTokens: (object["context_tokens"] as? NSNumber)?.intValue
         ))
     }
 }

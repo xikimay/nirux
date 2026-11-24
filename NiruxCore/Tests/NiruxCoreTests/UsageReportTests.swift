@@ -3,27 +3,30 @@ import Foundation
 import Testing
 
 struct UsageReportTests {
-    @Test func oneShotRunsAreLoggedPerDayAndReadAsNiruxSessions() throws {
+    @Test func oneShotRunsAreLoggedPerDayAndReadAsOneSessionEach() throws {
         let home = UsageFixture.temporaryFolder()
         defer { try? FileManager.default.removeItem(atPath: home) }
         let folder = home + "/usage"
-        let now = Date().timeIntervalSince1970
+        let now = Date().timeIntervalSince1970.rounded()
         let old = folder + "/" + NiruxOneShotLog.fileName(at: now - 40 * 86_400)
         try UsageFixture.write(["{}"], to: old)
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -40 * 86_400)], ofItemAtPath: old)
 
         let counts = TokenCounts(input: 3, output: 40, cacheWrite: 9_000, cacheRead: 1_000)
         NiruxOneShotLog.append(client: "NiruxTurnEnd", model: "claude-sonnet-5-5", counts: counts, at: now, in: folder)
-        NiruxOneShotLog.append(client: "NiruxTurnStatus", model: nil, counts: counts, at: now + 1, in: folder)
+        NiruxOneShotLog.append(client: "NiruxExplain", model: nil, counts: counts, contextTokens: 6_000, at: now, in: folder)
         #expect(!FileManager.default.fileExists(atPath: old))
 
         var ledger = UsageLedger(sources: UsageSources(home: home, niruxOneShots: folder))
         let caughtUp = ledger.refresh(since: now - 86_400)
         #expect(caughtUp)
         let sessions = ledger.sessions
-        #expect(sessions.map(\.key) == [UsageSessionKey(.nirux, String(NiruxOneShotLog.fileName(at: now).dropLast(".jsonl".count)))])
-        #expect(sessions.first?.events.map(\.counts) == [counts, counts])
-        #expect(sessions.first?.events.map(\.model) == ["claude-sonnet-5-5", nil])
+        let day = String(NiruxOneShotLog.fileName(at: now).dropLast(".jsonl".count))
+        #expect(sessions.map(\.key) == [UsageSessionKey(.nirux, day + "#0"), UsageSessionKey(.nirux, day + "#1")])
+        #expect(sessions.map(\.events) == [
+            [UsageEvent(timestamp: now, model: "claude-sonnet-5-5", counts: counts)],
+            [UsageEvent(timestamp: now, counts: counts, contextTokens: 6_000)]
+        ])
     }
 
     @Test func aReportSplitsSpendBySourceDayTaskAndSpace() throws {

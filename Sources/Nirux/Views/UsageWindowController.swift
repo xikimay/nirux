@@ -95,7 +95,8 @@ final class UsageWindowController: NSWindowController {
         window.title = "Token Usage"
         window.appearance = Theme.appearance
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 480, height: 480)
+        // The last column ("394 subagents") still fits.
+        window.minSize = NSSize(width: 560, height: 480)
         window.setFrameAutosaveName("NiruxTokenUsage")
         super.init(window: window)
 
@@ -161,7 +162,7 @@ final class UsageWindowController: NSWindowController {
 
     private static func text(_ sections: [UsageReportText.Section]) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.tabStops = [300, 360, 410, 480].map { NSTextTab(textAlignment: .left, location: $0) }
+        paragraph.tabStops = [260, 310, 350, 415].map { NSTextTab(textAlignment: .left, location: $0) }
         paragraph.lineBreakMode = .byTruncatingTail
         let body: [NSAttributedString.Key: Any] = [
             .font: Theme.Font.captionDigits, .foregroundColor: Theme.Color.textSecondary, .paragraphStyle: paragraph

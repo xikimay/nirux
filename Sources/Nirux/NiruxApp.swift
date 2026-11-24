@@ -184,9 +184,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // bar's height: even margins all round.
         window.setFrame(rect, display: false)
         setUpUsageLimits(window: window)
-        shellView.startUsageMonitor { [weak self] report in
-            self?.usageLimitsIndicator?.update(codex: report.codexLimits, now: Date().timeIntervalSince1970)
-        }
         setUpKeepAwake(window: window, shell: shellView)
         setupStatusBarNotices()
         // Copies of a branch an Explain run left when Nirux quit or crashed.
@@ -216,6 +213,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         MissionStore.shared.load()
         // Restore previous session if available
         shellView.restoreState()
+        // After the restore: its first read, seconds long, credits the
+        // restored tasks.
+        shellView.startUsageMonitor { [weak self] _ in self?.showCodexLimits() }
 
         // Agent lifecycle hooks: install into ~/.claude/settings.json and
         // ~/.codex/config.toml, then start routing events to columns. Must

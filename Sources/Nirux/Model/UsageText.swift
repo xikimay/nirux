@@ -71,9 +71,11 @@ struct SidebarTaskUsage: Hashable {
     /// From there on, each message re-reads a context worth compacting.
     var isContextHeavy: Bool { (contextTokens ?? 0) >= UsageSummary.heavyContextTokens }
 
-    /// "142k · 4.2M": the context, then the week's spend.
+    /// "142k · 4.2M": the context, then the week's spend; after "⚠︎ " once
+    /// the context is heavy.
     var text: String {
-        [contextTokens.map(UsageText.tokens), UsageText.tokens(weekTokens)].compactMap { $0 }.joined(separator: " · ")
+        let text = [contextTokens.map(UsageText.tokens), UsageText.tokens(weekTokens)].compactMap { $0 }.joined(separator: " · ")
+        return isContextHeavy ? text.asWarning : text
     }
 
     func toolTip(now: TimeInterval) -> String {

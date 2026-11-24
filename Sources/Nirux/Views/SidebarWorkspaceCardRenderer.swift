@@ -191,8 +191,8 @@ final class SidebarWorkspaceCardRenderer {
         return label
     }
 
-    /// "142k · 4.2M": the context of its latest session, in amber once
-    /// worth compacting, then what the task spent over the week.
+    /// "142k · 4.2M": the context of its latest session, then what the task
+    /// spent over the week; a warning once the context is worth compacting.
     private func usageLabel() -> NSTextField? {
         guard let usage = workspace.usage else { return nil }
         let label = textLabel(
