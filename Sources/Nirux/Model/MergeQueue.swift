@@ -293,6 +293,8 @@ extension MergeQueue {
         case closePullRequest(number: Int)
         /// `DELETE git/refs/heads/{name}`: a train's own branch, once it landed or stopped.
         case deleteBranch(name: String)
+        /// `POST issues/{n}/labels`.
+        case addLabel(number: Int, label: String)
     }
 
     enum MutationResult: Equatable, Sendable {

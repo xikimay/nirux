@@ -214,7 +214,8 @@ extension MergeQueue {
                         + "at most \(Limits.maxUpdates) times.",
                     "• Wait for the required checks on its head: \(settings.requiredChecks.joined(separator: ", ")) "
                         + "(up to \(settings.checksTimeoutMinutes) minutes). A failed one is rerun once; a second failure stops "
-                        + "the queue.",
+                        + "the queue. One that ran only as “<name> (selected)” gets the label \(fullRunLabel), which asks for "
+                        + "its full run.",
                     "• \(method), pinned to the head shown here, or to the queue’s own updates of it "
                         + "(gh pr merge --\(settings.mergeMethod.rawValue) --match-head-commit).",
                 ]
@@ -304,13 +305,12 @@ extension MergeQueue {
     }
 
     /// The first pull request a red check keeps out of a train. Checks not
-    /// read yet don't refuse it: the train reads them again.
+    /// read yet don't refuse it: the train reads them again. Required ones
+    /// missing or running don't either: the train runs them.
     static func trainCandidateRefusal(for candidates: [ConfirmationReading.Candidate], settings: BoardConfig.QueueSettings) -> String? {
         for candidate in candidates {
             guard let checks = candidate.checks else { continue }
-            let verdict = judge(checks, required: settings.requiredChecks)
-            let red = verdict.failed.map(\.name) + verdict.failedStatuses + verdict.notGreen + verdict.otherFailures
-            if let first = red.first {
+            if let first = judge(checks, required: []).otherFailures.first {
                 return "A train only takes pull requests whose checks are green: \(first) isn’t green on #\(candidate.number)."
             }
         }

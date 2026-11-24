@@ -286,7 +286,7 @@ final class MergeQueueGitHubTests: XCTestCase {
 
         let mutations: [MergeQueue.Mutation] = [
             .updateBranch(number: 52, expectedHead: a), .rerun(runID: 900), .merge(number: 52, head: a, method: .merge),
-            .merge(number: 52, head: a, method: .squash)
+            .merge(number: 52, head: a, method: .squash), .addLabel(number: 52, label: "full-test")
         ]
         for mutation in mutations {
             let arguments = GitHubCLIQueueClient.mutationArguments(mutation, repository: "acme/widgets")
@@ -299,6 +299,9 @@ final class MergeQueueGitHubTests: XCTestCase {
                         "-f", "expected_head_sha=\(a)"])
         XCTAssertEqual(GitHubCLIQueueClient.mutationArguments(.rerun(runID: 900), repository: "acme/widgets"),
                        ["run", "rerun", "900", "--repo", "github.com/acme/widgets", "--failed"])
+        XCTAssertEqual(GitHubCLIQueueClient.mutationArguments(.addLabel(number: 52, label: "full-test"), repository: "acme/widgets"),
+                       ["api", "--hostname", "github.com", "--method", "POST", "repos/acme/widgets/issues/52/labels",
+                        "-f", "labels[]=full-test"])
 
         // The checker itself catches what it must.
         XCTAssertNotNil(ForbiddenCalls.problem(["pr", "merge", "52", "--repo", "github.com/acme/widgets", "--merge"]))

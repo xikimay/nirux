@@ -77,9 +77,22 @@ final class MergeQueueTrainTests: XCTestCase {
 
         let reason = try XCTUnwrap(queue.stopReason)
         XCTAssertEqual(reason.kind, .checks)
-        XCTAssertTrue(reason.message.hasPrefix("Required check Tests / test failed on #14 at bbbbbbb"), reason.message)
+        XCTAssertTrue(reason.message.hasPrefix("Tests / test failed on #14 at bbbbbbb"), reason.message)
         XCTAssertEqual(queue.mutations, [])
         XCTAssertEqual(queue.engine.entries.map(\.step), [.waiting, .stopped(reason)])
+    }
+
+    /// Its required checks aren't awaited: the train runs them on its code.
+    func testATrainTakesAPullRequestWhoseRequiredChecksDidntRunOrStillRun() {
+        var world = world()
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 2, name: "test (selected)"))
+        world.checks[b] = MQ.checks(MQ.checkRun(id: 3, status: "IN_PROGRESS", conclusion: nil))
+        var github = TrainGitHub(world: world)
+        var queue = queue()
+        queue.drive(&github)
+
+        XCTAssertEqual(queue.phase, .finished)
+        XCTAssertEqual(queue.engine.entries.map(\.step), [.done, .done])
     }
 
     func testAPullRequestThatConflictsLeavesTheTrainWhichLandsTheOthers() throws {
@@ -678,9 +691,11 @@ final class MergeQueueTrainTests: XCTestCase {
         var red = MergeQueue.ConfirmationReading.Candidate(number: 14)
         red.checks = MQ.checks(MQ.checkRun(id: 2, conclusion: "FAILURE"))
         XCTAssertEqual(MergeQueue.trainCandidateRefusal(for: [red], settings: MQ.settings()),
-                       "A train only takes pull requests whose checks are green: test isn’t green on #14.")
+                       "A train only takes pull requests whose checks are green: Tests / test isn’t green on #14.")
         red.checks = MQ.checks(MQ.checkRun(id: 2, status: "IN_PROGRESS", conclusion: nil))
-        XCTAssertNil(MergeQueue.trainCandidateRefusal(for: [red], settings: MQ.settings()), "the train waits for running checks")
+        XCTAssertNil(MergeQueue.trainCandidateRefusal(for: [red], settings: MQ.settings()), "the train runs it")
+        red.checks = MQ.checks(MQ.checkRun(id: 2, name: "test (selected)"))
+        XCTAssertNil(MergeQueue.trainCandidateRefusal(for: [red], settings: MQ.settings()), "the train runs the full one")
     }
 
     func testTheTrainsCallsAndReadsSpeakGitHubsAPI() {
@@ -821,7 +836,7 @@ private struct TrainGitHub {
             world.checks[head] = rerunsGreen.contains(head) ? MQ.checks(MQ.checkRun(id: 10))
                 : MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"), MQ.checkRun(id: 10, conclusion: "FAILURE"))
             return rerunAnswer
-        case .updateBranch:
+        case .updateBranch, .addLabel:
             return .refused(status: 422, message: "not a train's call")
         }
         return .sent

@@ -218,6 +218,7 @@ extension MergeQueue {
             case checks(head: String)
             case rerun(head: String, replaced: Set<Int>)
             case rerunCheck(head: String, replaced: Set<Int>, message: String)
+            case fullRun(head: String)
             case mergeChecks(head: String)
             /// Only the base's runs, until those step 4 waits for end.
             case baseRunWait(head: String)
@@ -243,6 +244,8 @@ extension MergeQueue {
             var redSince: TimeInterval?
             /// Failed check runs a rerun replaces: pending until their new run shows.
             var replacedChecks: Set<Int> = []
+            /// The head whose full run a label asked for.
+            var fullRunAsked: String?
             var readFailingSince: TimeInterval?
             var readFailures = 0
             var secondaryLimits = 0
@@ -490,7 +493,7 @@ extension MergeQueue {
                       let comparison = answers.comparison(base: commit, head: settings.baseBranch)
                 else { return missingAnswer() }
                 postMergeFailed(run, commit: commit, baseRuns: runs, comparison: comparison, subject: "#\(number)")
-            case .start, .update, .rerun, .merge, .train:
+            case .start, .update, .rerun, .fullRun, .merge, .train:
                 missingAnswer()
             }
         }
@@ -770,6 +773,12 @@ extension MergeQueue {
                     + "isn’t green on \(Self.short(head)): neutral and skipped don’t count."))
             }
             guard verdict.pending.isEmpty else {
+                if clocks.fullRunAsked != head, MergeQueue.ranSelectedOnly(checks, required: settings.requiredChecks) {
+                    clocks.fullRunAsked = head
+                    note("Only the selected tests ran on \(Self.short(head)): labelling #\(entries[index].number) "
+                        + "\(MergeQueue.fullRunLabel) for the full run")
+                    return mutate(.addLabel(number: entries[index].number, label: MergeQueue.fullRunLabel), for: .fullRun(head: head))
+                }
                 guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else {
                     let advice = verdict.pending.contains { $0.hasSuffix("(not started)") }
                         ? "A check that never starts may be misspelled: check the names in Board Settings."
@@ -1141,6 +1150,18 @@ extension MergeQueue {
                 case .dryRun:
                     break
                 }
+            case .fullRun(let head):
+                switch result {
+                case .sent, .uncertain:
+                    // The full run takes the checks' whole time.
+                    clocks.step = now
+                    read([.pullRequest(number), .checks(head)], after: Limits.pollInterval, for: .checks(head: head))
+                case .refused(_, let message), .rateLimited(let message):
+                    stop(StopReason(kind: .checks, message: "GitHub refused the label \(MergeQueue.fullRunLabel) on #\(number), "
+                        + "which asks for the full run of its required checks: \(message)"))
+                case .dryRun:
+                    break
+                }
             case .merge(let head, let baseTip):
                 // Whatever gh said, GitHub says what happened.
                 clocks.step = now
@@ -1179,6 +1200,7 @@ extension MergeQueue {
             case .openPullRequest(let base, let head, _, _): return "pull request of \(head) into \(base)"
             case .closePullRequest(let number): return "close of #\(number)"
             case .deleteBranch(let name): return "deletion of branch \(name)"
+            case .addLabel(let number, let label): return "label \(label) on #\(number)"
             }
         }
 

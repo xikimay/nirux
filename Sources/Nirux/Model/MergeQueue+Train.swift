@@ -265,11 +265,10 @@ extension MergeQueue.Engine {
     }
 
     /// Each pull request must be open on the base, at its confirmed head,
-    /// free of conflicts, its agents idle and its checks green: a train only
-    /// takes green pull requests. Checks still running are waited for.
+    /// free of conflicts, its agents idle and none of its checks red. Its
+    /// required checks aren't awaited: the train runs them on its code.
     private mutating func trainPreflightRead(_ answers: [MergeQueue.Read: MergeQueue.ReadResult], now: TimeInterval) {
         var locals: [(index: Int, local: MergeQueue.LocalState)] = []
-        var verdicts: [MergeQueue.ChecksVerdict] = []
         for index in riders {
             let entry = entries[index]
             guard let pullRequest = answers.pullRequest(entry.number), let checks = answers.checks(entry.confirmedHead),
@@ -283,48 +282,22 @@ extension MergeQueue.Engine {
                 drop(index, conflict(pullRequest))
                 continue
             }
-            let verdict = MergeQueue.judge(checks, required: settings.requiredChecks)
+            let verdict = MergeQueue.judge(checks, required: [])
             if let refusal = trainRefusal(verdict, entry: entry, url: pullRequest.url) { return stop(refusal, on: index) }
             locals.append((index: index, local: local))
-            verdicts.append(verdict)
         }
         guard !locals.isEmpty else { return stopOnLeftOut() }
         let isHeld = holdForLocal(locals, now: now) { engine in engine.trainPreflight(after: MergeQueue.Limits.pollInterval) }
         guard !isHeld else { return }
-        var pending: [String] = []
-        for (index, verdict) in zip(locals.map(\.index), verdicts) where !verdict.pending.isEmpty {
-            entries[index].step = .waitingForChecks(entries[index].confirmedHead)
-            pending += verdict.pending.map { "\($0) of #\(entries[index].number)" }
-        }
-        guard pending.isEmpty else {
-            guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else {
-                return stop(MergeQueue.StopReason(kind: .checks, message: "After \(settings.checksTimeoutMinutes) minutes, required "
-                    + "checks are still missing or running: \(pending.joined(separator: ", ")). A train only takes pull requests "
-                    + "whose checks are green.", checksTimedOut: true))
-            }
-            return trainPreflight(after: MergeQueue.Limits.pollInterval)
-        }
         for index in riders { entries[index].step = .inTrain }
         read([.branch(settings.baseBranch)], for: .train(.base))
     }
 
     /// Why a pull request's own checks keep it out of a train.
     private func trainRefusal(_ verdict: MergeQueue.ChecksVerdict, entry: MergeQueue.Entry, url: String) -> MergeQueue.StopReason? {
-        let at = "#\(entry.number) at \(Self.short(entry.confirmedHead))"
-        let red = verdict.failed.map { GitHub.qualifiedName(name: $0.name, workflow: $0.workflow) ?? $0.name } + verdict.failedStatuses
-        if !red.isEmpty {
-            return MergeQueue.StopReason(kind: .checks, message: "Required check \(red.joined(separator: ", ")) failed on \(at): a "
-                + "train only takes pull requests whose checks are green.", url: url)
-        }
-        if !verdict.notGreen.isEmpty {
-            return MergeQueue.StopReason(kind: .checks, message: "Required check \(verdict.notGreen.joined(separator: ", ")) isn’t "
-                + "green on \(at): neutral and skipped don’t count.", url: url)
-        }
-        if !verdict.otherFailures.isEmpty {
-            return MergeQueue.StopReason(kind: .checks, message: "\(verdict.otherFailures.joined(separator: ", ")) failed on \(at): "
-                + "any red check keeps it out of a train, required or not.", url: url)
-        }
-        return nil
+        guard !verdict.otherFailures.isEmpty else { return nil }
+        return MergeQueue.StopReason(kind: .checks, message: "\(verdict.otherFailures.joined(separator: ", ")) failed on "
+            + "#\(entry.number) at \(Self.short(entry.confirmedHead)): any red check keeps it out of a train, required or not.", url: url)
     }
 
     // MARK: Compose: the base's tip, then one merge per pull request

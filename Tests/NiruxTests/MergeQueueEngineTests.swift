@@ -86,6 +86,39 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertEqual(MergeQueue.judge(cancelledRequired, required: ["test"]).failed.map(\.id), [1], "a required one still counts")
     }
 
+    /// The repository's CI runs `test` in full on a pull request labelled
+    /// full-test, and "test (selected)" otherwise.
+    func testAHeadThatRanOnlySelectedTestsIsLabelledOnceForItsFullRun() {
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 2, name: "test (selected)", runID: 899))
+        var queue = MQ.Harness(entries: [MQ.entry(52, head: a)])
+        queue.start()
+        XCTAssertEqual(queue.run(world), .addLabel(number: 52, label: "full-test"))
+        XCTAssertTrue(queue.noted("Only the selected tests ran on aaaaaaa: labelling #52 full-test for the full run"))
+        queue.mutated(.sent)
+        queue.answer(world)
+        XCTAssertNotNil(queue.pendingReads, "its full run hasn't shown yet: no second label")
+
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 2, name: "test (selected)", runID: 899, conclusion: "CANCELLED"), MQ.checkRun(id: 3))
+        XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
+        XCTAssertEqual(queue.mutations.count, 2)
+
+        var refused = MQ.Harness(entries: [MQ.entry(52, head: a)])
+        refused.start()
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 2, name: "test (selected)", runID: 899))
+        XCTAssertEqual(refused.run(world), .addLabel(number: 52, label: "full-test"))
+        refused.mutated(.refused(status: 403, message: "Resource not accessible by integration"))
+        XCTAssertEqual(refused.stopReason?.message, "GitHub refused the label full-test on #52, which asks for the full run of its "
+            + "required checks: Resource not accessible by integration")
+
+        var unstarted = MQ.Harness(entries: [MQ.entry(52, head: a)])
+        unstarted.start()
+        world.checks[a] = MergeQueue.CommitChecks()
+        XCTAssertNil(unstarted.run(world), "no label where no selected run shows")
+        XCTAssertTrue(unstarted.stopReason?.message.contains("test (not started)") == true)
+    }
+
     func testFastCadencesVerifyOnlyTheLastMergeAndStillRespectExternalRuns() {
         for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
             var world = readyWorld()

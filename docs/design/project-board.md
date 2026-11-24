@@ -374,8 +374,8 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   continue. Other base runs and observed failures retain their usual guards.
 - **Train** lands the batch with one CI run and one merge into the base: one
   writer on the base. It needs the merge method `merge`. Each PR must be open
-  at its confirmed head, free of conflicts, with idle agents and green checks;
-  checks still running are waited for. Nirux composes the train on GitHub: a
+  at its confirmed head, free of conflicts, with idle agents and no red check;
+  its required checks aren't awaited, since the train runs them. Nirux composes the train on GitHub: a
   branch `nirux-train/<UTC time>` at the base's tip (`POST git/refs`), then
   one merge commit per PR head in the confirmed order (`POST merges`, made by
   `web-flow`, each verified on top of the previous one). A PR that conflicts
@@ -454,6 +454,9 @@ For each PR in Standard, in order:
    - When all are green, go to step 4. A required check still missing after the
      timeout (default 30 minutes) stops the queue, so a misspelled name can't
      pass.
+   - A required check that ran only as `<name> (selected)` (CI that tests
+     less on pull requests): the queue adds the label `full-test` once per
+     head, which asks that CI for the full run, and the timeout starts again.
    - **Flaky tests:** a failed required check is rerun once
      (`gh run rerun <run id> --repo <owner/name> --failed`), once per PR per
      Start. Right after a
