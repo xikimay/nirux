@@ -326,6 +326,8 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
                          GitHub.parseWorkflowRuns).map { .runs($0) }
         case .local:
             return .failure(.unreadable("the local worktrees aren’t a GitHub read"))
+        case .triage:
+            return .failure(.unreadable("the CI triage isn’t a GitHub read"))
         case .branch(let name):
             return parse(call(Self.branchArguments(repository: repository, branch: name)), MergeQueue.parseBranchTip)
                 .map { .branch($0) }

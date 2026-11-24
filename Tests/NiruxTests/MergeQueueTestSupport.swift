@@ -114,6 +114,8 @@ enum MQ {
             graphQLRemaining: 5000, graphQLReset: Date(timeIntervalSince1970: 0)
         )
         var baseMergeQueue = false
+        /// The CI triage's answer on any failed run.
+        var triage = MergeQueue.TriageAnswer.off
 
         func answer(_ read: MergeQueue.Read) -> MergeQueue.ReadResult? {
             switch read {
@@ -141,6 +143,7 @@ enum MQ {
             case .pushRuns(let commit): return .runs(pushRuns[commit] ?? [])
             case .local(let branch, _): return .local(locals[branch] ?? local)
             case .branch(let name): return .branch(name == "main" ? mainTip : branches[name])
+            case .triage: return .triage(triage)
             case .pullRequests(let head):
                 return .pullRequests(pullRequests.values.filter { $0.headRefName == head }.sorted { $0.number > $1.number })
             }
