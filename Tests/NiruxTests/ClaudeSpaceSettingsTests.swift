@@ -217,14 +217,18 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
     func testTheMissionWaiterRunsAtEachSessionStartAndTurnEndOfARecentClaude() throws {
         let mailbox = URL(fileURLWithPath: "/state dir/mission-mailbox", isDirectory: true)
         let proven = MissionWaitHook.claudeVersion
-        XCTAssertNil(MissionWaitHook.claudeHooks(executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", version: nil, mailbox: mailbox))
+        XCTAssertNil(MissionWaitHook.claudeHooks(executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", enabled: true, version: nil, mailbox: mailbox))
+        XCTAssertNil(
+            MissionWaitHook.claudeHooks(executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", enabled: false, version: proven, mailbox: mailbox),
+            "the pilot off in Settings"
+        )
         XCTAssertNil(MissionWaitHook.claudeHooks(
-            executable: "/Applications/Nirux.app/Contents/MacOS/Nirux",
+            executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", enabled: true,
             version: ClaudeCodeVersion(major: proven.major, minor: proven.minor, patch: proven.patch - 1), mailbox: mailbox
         ))
-        XCTAssertNil(MissionWaitHook.claudeHooks(executable: nil, version: proven, mailbox: mailbox))
+        XCTAssertNil(MissionWaitHook.claudeHooks(executable: nil, enabled: true, version: proven, mailbox: mailbox))
         let hooks = try XCTUnwrap(MissionWaitHook.claudeHooks(
-            executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", version: proven, mailbox: mailbox
+            executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", enabled: true, version: proven, mailbox: mailbox
         ))
         XCTAssertEqual(Set(hooks.keys), ["SessionStart", "Stop"])
         let waiter = try XCTUnwrap(hooks["Stop"]?.first?.hooks.first)

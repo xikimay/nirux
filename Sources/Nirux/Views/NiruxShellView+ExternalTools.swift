@@ -181,7 +181,7 @@ extension NiruxShellView {
     /// written says so once, and its launches pass none.
     func claudeSpaceSettingsFiles(for workspaces: [WorkspaceState]) -> [String: String] {
         let userEnvironment = Self.claudeUserEnvironment()
-        let hooks = MissionWaitHook.claudeHooks()
+        let hooks = MissionWaitHook.claudeHooks(executable: Self.niruxExecutable, enabled: Self.currentClaudeMissionHook())
         var files: [String: String] = [:]
         for spaceID in Set(workspaces.filter { !$0.startedOutsideNirux }.map(\.profileID)) {
             do {

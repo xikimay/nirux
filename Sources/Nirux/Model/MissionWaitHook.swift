@@ -32,12 +32,8 @@ enum MissionWaitHook {
     /// The hooks a space's Claude settings run, for the oldest `claude` a
     /// terminal could run (`version`) and Nirux at `executable`; nil
     /// without either, or with the pilot off in Settings (`enabled`).
-    @MainActor
     static func claudeHooks(
-        executable: String? = NiruxShellView.niruxExecutable,
-        version: ClaudeCodeVersion? = ClaudeCodeVersion.detect(),
-        mailbox: URL = mailbox.root,
-        enabled: Bool = NiruxShellView.currentClaudeMissionHook()
+        executable: String?, enabled: Bool, version: ClaudeCodeVersion? = ClaudeCodeVersion.detect(), mailbox: URL = mailbox.root
     ) -> [String: [ClaudeSpaceSettings.File.HookGroup]]? {
         guard enabled, let executable, let version, version >= claudeVersion else { return nil }
         let path = AgentHookInstaller.shellQuoted(executable)
