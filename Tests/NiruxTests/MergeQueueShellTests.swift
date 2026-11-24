@@ -65,6 +65,64 @@ final class MergeQueueShellTests: XCTestCase {
         return queue
     }
 
+    // MARK: - Lead
+
+    /// A queue the Lead started tells it once when it ends without a
+    /// person's word (here its pull request closed): CI results wake no agent, so a
+    /// stop at night would wait for the morning. A stop by the Lead or the
+    /// user, or a queue the user started, tells it nothing.
+    @MainActor
+    func testTheLeadHearsOnceWhenAQueueItStartedEndsWithoutAPerson() throws {
+        let client = FakeQueueClient(world: waitingWorld())
+        let shell = makeShell(client)
+        shell.workspaceStore.replaceProfiles(
+            [WorkspaceProfile.defaultProfile, WorkspaceProfile(id: "project", name: "project", colorHex: "#E0AF68")],
+            activeProfileID: WorkspaceProfile.defaultID
+        )
+        shell.addWorkspace(title: "Lead", cwd: root.path, profileID: "project", isLead: true)
+        XCTAssertNotNil(shell.leadMissionParent(inSpace: "project"))
+        let queue = shell.mergeQueue(projectID: "project", repository: MQ.widgets)
+        queue.beginActivity = { NSObject() }
+        queue.endActivity = { _ in }
+        func notices() -> [String] { shell.pendingLeadNotices.map(\.text).filter { $0.contains("merge queue of") } }
+        @MainActor func run(byLead: Bool, until stop: (MergeQueueController) -> Void) {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(52, head: MQ.sha("a"))], cadence: .standard, startedByLead: byLead))
+            stop(queue)
+            XCTAssertTrue(waitUntil("the queue to end") { !queue.isRunning })
+        }
+
+        run(byLead: false) { $0.stop() }
+        run(byLead: true) { $0.stop() }
+        run(byLead: true) { $0.stop(byLead: true) }
+        XCTAssertEqual(notices(), [], "a person's stop, a queue the user started")
+
+        client.update { $0.pullRequests[52] = MQ.pullRequest(52, head: MQ.sha("a"), state: .closed) }
+        run(byLead: false) { _ in }
+        XCTAssertEqual(notices(), [], "the user's queue, stopped by GitHub")
+        // Auto-start off: the user starts what the Lead proposed, the Lead's.
+        shell.leadQueueProposals["project acme/widgets"] = [52]
+        run(byLead: false) { _ in }
+        XCTAssertEqual(notices().count, 1)
+        XCTAssertTrue(notices().first?.contains("The merge queue of acme/widgets stopped on #52 (") == true, "\(notices())")
+        XCTAssertTrue(notices().first?.contains("). Read merge_queue_status, fix what stopped it") == true, "\(notices())")
+        shell.mergeQueueDidChange(projectID: "project")
+        XCTAssertEqual(notices().count, 1, "once per run")
+        run(byLead: true) { _ in }
+        XCTAssertEqual(notices().count, 2, "another run, its own end")
+        XCTAssertEqual(
+            MergeQueue.leadEndNotice(repository: "acme/widgets", phase: .finished, isLeads: true, merged: [51, 52], left: [53], current: nil),
+            "The merge queue of acme/widgets finished: 2 merged. #53 left it, an agent still busy: queue it again once that agent "
+                + "is back at its prompt. Close the merged tasks with close_task."
+        )
+        let busy = MergeQueue.leadEndNotice(
+            repository: "acme/widgets", phase: .stopped(MergeQueue.StopReason(kind: .agentBusy, message: "busy")),
+            isLeads: true, merged: [51], current: 52
+        )
+        XCTAssertEqual(busy, "The merge queue of acme/widgets stopped on #52 (agentBusy). Its agent stayed busy: queue it again only "
+            + "once that agent is back at its prompt. #51 landed: close their tasks with close_task.")
+    }
+
     // MARK: - Status bar
 
     @MainActor

@@ -131,6 +131,9 @@ final class NiruxShellView: NSView {
 
     /// Owned by NiruxApp; nil in tests, which never touch power settings.
     weak var keepAwake: KeepAwakeController?
+    var checksWatch = ChecksWatch()
+    /// The power source the away reads ask (`refreshPullRequestsAway`); tests answer for it.
+    var isOnACPower: @MainActor () -> Bool = { isOnPowerAdapter() }
     /// The user quit Nirux: the last save says so (`PersistedState.quitByUser`).
     var quitsByUser = false
 
@@ -320,6 +323,8 @@ final class NiruxShellView: NSView {
     /// Each project's merge queues, one per repository (see
     /// `mergeQueue(projectID:repository:)`).
     var mergeQueues: [MergeQueueKey: MergeQueueController] = [:]
+    /// Each queue's phase at its last change (`noticeLeadOfEndedQueues`).
+    var mergeQueuePhases: [ObjectIdentifier: MergeQueue.Phase] = [:]
     /// Where live queues lock their repository. Tests use their own.
     var mergeQueueLockFolder = MergeQueueLock.defaultFolder
     /// The merge queue's confirmation sheet: one at a time.

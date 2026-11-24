@@ -1,4 +1,5 @@
 import Foundation
+import IOKit.ps
 import IOKit.pwr_mgt
 
 /// The power-management calls `KeepAwakeController` makes; tests inject a
@@ -28,15 +29,25 @@ struct IOKitSleepAssertions: SleepAssertionAPI {
     }
 }
 
+/// On the power adapter: a desktop Mac, or a laptop plugged in. Unknown
+/// counts as plugged in, as a desktop reports no source.
+func isOnPowerAdapter() -> Bool {
+    guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+          let source = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue()
+    else { return true }
+    return source as String == kIOPMACPowerKey
+}
+
 /// Keeps the Mac from idle-sleeping while at least one agent works, or a
-/// merge queue runs: one global assertion, taken when the first agent
-/// starts a turn (or a queue starts) and released a grace period after the
-/// last one stops, so back-to-back turns don't toggle it. An agent waiting
-/// on the user makes no progress and doesn't count. The system also drops
-/// the assertion if Nirux crashes.
+/// merge queue runs, or (on the power adapter, under its own setting) the
+/// checks of a pull request Nirux follows run: one global assertion, taken
+/// when the first reason starts and released a grace period after the last
+/// one stops, so back-to-back turns don't toggle it. An agent waiting on the
+/// user makes no progress and doesn't count. The system also drops the
+/// assertion if Nirux crashes.
 @MainActor
 final class KeepAwakeController {
-    static let assertionName = "Nirux: agents working or a merge queue running"
+    static let assertionName = "Nirux: agents working, a merge queue running or pull request checks running"
     static let gracePeriod: TimeInterval = 60
     /// While enabled, how often to ask for a fresh count (`onRefresh`). With
     /// Nirux in the background the heartbeat stops, and nothing else sees
@@ -52,11 +63,18 @@ final class KeepAwakeController {
 
     private let assertions: SleepAssertionAPI
     private let schedule: Schedule
+    private let isOnACPower: () -> Bool
+    /// The setting for agents and merge queues.
     private(set) var isEnabled: Bool
+    /// The setting for checks (`isAwaitingChecks`).
+    private(set) var waitsForChecks: Bool
     private(set) var workingAgentCount = 0
     /// A merge queue runs (docs/design/project-board.md, section 3.4): it polls
     /// GitHub for an hour or more with no agent at work.
     private(set) var isMergeQueueRunning = false
+    /// Checks run on a pull request whose result Nirux acts on (a follow-up
+    /// round, a merge wait, the Lead): asleep, nothing reads it.
+    private(set) var isAwaitingChecks = false
     private var assertionID: IOPMAssertionID?
     /// Bumped by every release and every called-off release: a scheduled
     /// release from before does nothing.
@@ -67,29 +85,42 @@ final class KeepAwakeController {
     private var isShutDown = false
     private var loggedCreateFailure = false
 
-    /// The indicator's state changed: `isActive`, `workingAgentCount` or
-    /// `isMergeQueueRunning`.
+    /// The indicator's state changed: `isActive` or one of its reasons.
     var onChange: (() -> Void)?
     /// Asked every `pollInterval` while enabled, and once more before the
     /// grace period ends; answers with `update(workingAgentCount:)`.
     var onRefresh: (() -> Void)?
 
-    /// The assertion is held — agents are working or a queue runs, or they
-    /// stopped less than `gracePeriod` ago.
+    /// The assertion is held — a reason holds, or the last one stopped less
+    /// than `gracePeriod` ago.
     var isActive: Bool { assertionID != nil }
 
-    /// What wants the Mac awake now.
-    private var isNeeded: Bool { workingAgentCount > 0 || isMergeQueueRunning }
+    /// What wants the Mac awake now, as the settings allow.
+    private var isNeeded: Bool {
+        (isEnabled && (workingAgentCount > 0 || isMergeQueueRunning))
+            || (waitsForChecks && isAwaitingChecks && isOnACPower())
+    }
+
+    private var isPolling: Bool { isEnabled || waitsForChecks }
+
+    /// What holds the Mac awake now, as the settings allow: the indicator's words.
+    var heldFor: (agents: Int, queue: Bool, checks: Bool) {
+        (isEnabled ? workingAgentCount : 0, isEnabled && isMergeQueueRunning, waitsForChecks && isAwaitingChecks && isOnACPower())
+    }
 
     init(
         enabled: Bool,
+        waitsForChecks: Bool = false,
         assertions: SleepAssertionAPI = IOKitSleepAssertions(),
-        schedule: @escaping Schedule = mainQueueSchedule
+        schedule: @escaping Schedule = mainQueueSchedule,
+        isOnACPower: @escaping () -> Bool = isOnPowerAdapter
     ) {
         self.isEnabled = enabled
+        self.waitsForChecks = waitsForChecks
         self.assertions = assertions
         self.schedule = schedule
-        if enabled { startPolling() }
+        self.isOnACPower = isOnACPower
+        if isPolling { startPolling() }
     }
 
     /// Whether a column's agent counts as working: see `activityTimeout`.
@@ -99,45 +130,63 @@ final class KeepAwakeController {
 
     /// Agents mid-turn right now, every workspace and space included.
     func update(workingAgentCount count: Int) {
-        guard !isShutDown else { return }
-        let previous = (isActive, workingAgentCount, isMergeQueueRunning)
-        workingAgentCount = max(0, count)
-        apply(since: previous)
+        change { $0.workingAgentCount = max(0, count) }
     }
 
     /// Whether a merge queue runs, in any project.
     func update(mergeQueueRunning running: Bool) {
-        guard !isShutDown else { return }
-        let previous = (isActive, workingAgentCount, isMergeQueueRunning)
-        isMergeQueueRunning = running
-        apply(since: previous)
+        change { $0.isMergeQueueRunning = running }
     }
 
-    private func apply(since previous: (isActive: Bool, count: Int, queue: Bool)) {
+    /// Whether checks run on a pull request Nirux acts on.
+    func update(awaitingChecks awaiting: Bool) {
+        change { $0.isAwaitingChecks = awaiting }
+    }
+
+    /// What the indicator says: the reasons the settings and the power source let hold.
+    private var reasons: [AnyHashable] {
+        let held = heldFor
+        return [isActive, held.agents, held.queue, held.checks]
+    }
+
+    private func change(_ body: (KeepAwakeController) -> Void) {
+        guard !isShutDown else { return }
+        let previous = reasons
+        body(self)
         if isNeeded {
             cancelPendingRelease()
-            if isEnabled { acquire() }
+            acquire()
         } else if isActive, !releaseIsPending {
             scheduleRelease()
         }
-        if isActive != previous.isActive || workingAgentCount != previous.count || isMergeQueueRunning != previous.queue {
-            onChange?()
-        }
+        if reasons != previous { onChange?() }
     }
 
-    /// Off releases at once; on protects agents already working.
+    /// Off releases at once, unless the other setting still wants the Mac
+    /// awake; on protects what already runs.
     func setEnabled(_ enabled: Bool) {
-        guard !isShutDown, enabled != isEnabled else { return }
-        isEnabled = enabled
-        let wasActive = isActive
-        if enabled {
-            startPolling()
-            if isNeeded { acquire() }
-        } else {
-            pollGeneration &+= 1
+        setSetting(\.isEnabled, enabled)
+    }
+
+    func setWaitsForChecks(_ waits: Bool) {
+        setSetting(\.waitsForChecks, waits)
+    }
+
+    private func setSetting(_ setting: ReferenceWritableKeyPath<KeepAwakeController, Bool>, _ value: Bool) {
+        guard !isShutDown, self[keyPath: setting] != value else { return }
+        let previous = reasons
+        let wasPolling = isPolling
+        self[keyPath: setting] = value
+        if isPolling != wasPolling {
+            if isPolling { startPolling() } else { pollGeneration &+= 1 }
+        }
+        if isNeeded {
+            cancelPendingRelease()
+            acquire()
+        } else if !value {
             release()
         }
-        if isActive != wasActive { onChange?() }
+        if reasons != previous { onChange?() }
     }
 
     /// App termination: release for good; later updates are ignored.

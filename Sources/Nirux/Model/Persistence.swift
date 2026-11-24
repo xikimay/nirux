@@ -292,6 +292,9 @@ struct PersistedSettings: Codable {
     var claudeMissionHook: Bool = true
     /// See `KeepAwakeController`. On by default: missing decodes to true.
     var keepMacAwakeWhileAgentsWork: Bool = true
+    /// `KeepAwakeController.isAwaitingChecks`, on the power adapter. Missing,
+    /// it follows `keepMacAwakeWhileAgentsWork`.
+    var keepMacAwakeWhileChecksRun: Bool = true
     /// Lights that breathe and pulse, and the other animations of the
     /// interface. Off, states show without moving. On by default: missing
     /// decodes to true.
@@ -389,6 +392,7 @@ struct PersistedSettings: Codable {
         case sidebarApprovalsEnabled
         case claudeMissionHook
         case keepMacAwakeWhileAgentsWork
+        case keepMacAwakeWhileChecksRun
         case animatesInterface
         case showClaudeUsageLimits
         case alertOnlyWhenClaudeAsks
@@ -437,6 +441,7 @@ struct PersistedSettings: Codable {
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? true
         claudeMissionHook = try container.decodeIfPresent(Bool.self, forKey: .claudeMissionHook) ?? true
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
+        keepMacAwakeWhileChecksRun = (try? container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileChecksRun)) ?? keepMacAwakeWhileAgentsWork
         animatesInterface = (try? container.decodeIfPresent(Bool.self, forKey: .animatesInterface)) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
@@ -496,6 +501,7 @@ struct PersistedSettings: Codable {
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(claudeMissionHook, forKey: .claudeMissionHook)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
+        try container.encode(keepMacAwakeWhileChecksRun, forKey: .keepMacAwakeWhileChecksRun)
         try container.encode(animatesInterface, forKey: .animatesInterface)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
