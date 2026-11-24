@@ -315,7 +315,6 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertNil(LeadTools.problem(tool: LeadTools.listSpaces, arguments: [:]))
         XCTAssertNil(LeadTools.problem(tool: LeadTools.listTasks, arguments: ["space": "General"]))
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.listTasks, arguments: ["space": "  "]))
-        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.listTasks, arguments: ["space": "General"], subtask: true))
 
         XCTAssertNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "color": "#aabbcc", "anchors": ["/tmp"]]))
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "   "]))

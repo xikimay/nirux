@@ -6,10 +6,23 @@ import Foundation
 /// goes to the running app through `LeadChannel`, which checks it against
 /// its own state: the caller must be a task, and it reaches only its own
 /// sub-tasks. A sub-task can't start sub-tasks (two levels), and a task
-/// runs at most `maxRunningSubtasks` at once. Nothing here merges, removes
-/// a worktree or a branch, or reaches another task or space.
+/// runs at most `maxRunningSubtasks` at once. Nothing here merges, or removes
+/// a worktree or a branch; only the space tools, where the task's space
+/// allows them, reach another space.
 enum TaskTools {
     static let names = [LeadTools.startTask, LeadTools.listTasks, LeadTools.tell, LeadTools.reply, LeadTools.askUser]
+
+    /// With the Lead's space tools where the space lets its tasks manage
+    /// spaces (SpaceToolCaller).
+    static func names(managingSpaces: Bool) -> [String] {
+        managingSpaces ? names + LeadTools.spaceNames : names
+    }
+
+    static func definitions(managingSpaces: Bool) -> [[String: Any]] {
+        guard managingSpaces else { return definitions }
+        let spaceTools = LeadTools.spaceNames.compactMap { name in LeadTools.definitions.first { $0["name"] as? String == name } }
+        return definitions.map { $0["name"] as? String == LeadTools.listTasks ? listTasksDefinition(readsSpaces: true) : $0 } + spaceTools
+    }
 
     /// How a tool names one of the caller's sub-tasks.
     static let subtaskDescription = "The sub-task's branch (its folder, as list_tasks shows it, or the folder's name, "
@@ -38,16 +51,7 @@ enum TaskTools {
                 ]),
                 required: ["description"]
             ),
-            LeadTools.definition(
-                LeadTools.listTasks, title: "List your sub-tasks",
-                description: """
-                    Your task's sub-tasks: each one's title, branch or folder, agent state (working, needs the user, \
-                    idle), pull request and checks, the last questions it got answered, and the question or result \
-                    it sent you. Read it again after a \
-                    /clear: Nirux keeps the state, your conversation doesn't.
-                    """,
-                properties: [:], required: [], readOnly: true
-            ),
+            listTasksDefinition(readsSpaces: false),
             LeadTools.definition(
                 LeadTools.tell, title: "Tell a sub-task",
                 description: """
@@ -82,5 +86,20 @@ enum TaskTools {
                 required: ["task", "why"]
             )
         ]
+    }
+
+    private static func listTasksDefinition(readsSpaces: Bool) -> [String: Any] {
+        let space = "Pass space to read a space's tasks instead, yours included, as its Lead sees them."
+        return LeadTools.definition(
+            LeadTools.listTasks, title: "List your sub-tasks",
+            description: """
+                Your task's sub-tasks: each one's title, branch or folder, agent state (working, needs the user, \
+                idle), pull request and checks, the last questions it got answered, and the question or result \
+                it sent you. Read it again after a \
+                /clear: Nirux keeps the state, your conversation doesn't.
+                """ + (readsSpaces ? " " + space : ""),
+            properties: readsSpaces ? ["space": ["type": "string", "description": "Optional: a space to read. \(LeadTools.spaceDescription)"]] : [:],
+            required: [], readOnly: true
+        )
     }
 }

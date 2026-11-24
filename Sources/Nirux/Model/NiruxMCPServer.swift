@@ -36,6 +36,13 @@ enum NiruxMCPServer {
         answer you'd pick, or for access exactly what is needed and where.
         """
 
+    /// Added for a task whose space lets its tasks manage spaces.
+    static let taskSpaceInstructions = """
+        This space lets its tasks manage spaces: list_spaces, create_space, edit_space, delete_space, \
+        move_task_to_space, and list_tasks with space to read a space's tasks. Use them only when the user asks. \
+        Moving yourself, or deleting your own space, moves you too.
+        """
+
     /// For an agent outside a Nirux workspace, which has no task tools.
     static let skillInstructions = """
         To start a task, or a sub-task of yours, in its own worktree, use the nirux-worktree skill.
@@ -63,7 +70,8 @@ enum NiruxMCPServer {
     /// learns how to start a task, with its tools in a Nirux workspace.
     static func instructions(for context: Context) -> String {
         if context.isLead { return leadInstructions + "\n\n" + instructions }
-        return instructions + "\n\n" + (context.isWorkspaceAgent ? taskInstructions : skillInstructions)
+        guard context.isWorkspaceAgent else { return instructions + "\n\n" + skillInstructions }
+        return instructions + "\n\n" + taskInstructions + (context.tasksManageSpaces ? "\n\n" + taskSpaceInstructions : "")
     }
 
     /// `--mcp-config=<this server>` and `--allowedTools=<its tools>` for
@@ -133,16 +141,23 @@ enum NiruxMCPServer {
             nonEmpty("NIRUX_WORKSPACE_ID") != nil && nonEmpty("NIRUX_AGENT_UUID") != nil
                 && nonEmpty(NiruxLaunchAuthorization.environmentKey) != nil
         }
+        /// A task's agent whose space lets its tasks manage spaces, as its
+        /// defaults.json says now: the app checks each call again.
+        var tasksManageSpaces: Bool {
+            guard !isLead, isWorkspaceAgent, let spaceID else { return false }
+            return SpaceDefaultsStore.defaults(forSpace: spaceID, stateDirectory: stateDirectory).tasksCanManageSpaces(inSpace: spaceID)
+        }
+
         /// The tools the app answers for this agent: the Lead's, or a task's.
         var appToolNames: [String] {
             if isLead { return LeadTools.names }
-            return isWorkspaceAgent ? TaskTools.names : []
+            return isWorkspaceAgent ? TaskTools.names(managingSpaces: tasksManageSpaces) : []
         }
 
         /// Their definitions, for `tools/list`.
         var appToolDefinitions: [[String: Any]] {
             if isLead { return LeadTools.definitions }
-            return isWorkspaceAgent ? TaskTools.definitions : []
+            return isWorkspaceAgent ? TaskTools.definitions(managingSpaces: tasksManageSpaces) : []
         }
         /// Tests shorten the Lead's calls' wait for the app.
         var leadTimeout: TimeInterval?

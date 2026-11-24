@@ -37,6 +37,10 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Space Settings › Defaults, "Follow up on pull requests"
     /// (docs/design/pr-follow-up.md). Nil: on; only false turns it off.
     var prFollowUp: Bool?
+    /// Space Settings › Defaults, "Tasks can manage spaces": its tasks'
+    /// agents get the Lead's space tools (SpaceToolCaller). Nil: on in
+    /// General, off elsewhere (`tasksCanManageSpaces`).
+    var tasksManageSpaces: Bool?
     /// Space Settings › Safety, one per `ClaudeSpaceSettings.Part`. Nil:
     /// its default.
     var claudeTrustsRepositories: Bool?
@@ -53,6 +57,19 @@ struct SpaceDefaults: Equatable, Sendable {
     var dailyPassHour: Int { leadDailyPassHour ?? DailyPass.defaultHour }
     /// Whether Nirux types the rounds its tasks' pull requests need.
     var followsUpPullRequests: Bool { prFollowUp ?? true }
+
+    func tasksCanManageSpaces(inSpace spaceID: String) -> Bool {
+        tasksManageSpaces ?? Self.tasksManageSpacesByDefault(inSpace: spaceID)
+    }
+
+    static func tasksManageSpacesByDefault(inSpace spaceID: String) -> Bool {
+        spaceID == WorkspaceProfile.defaultID
+    }
+
+    /// Nothing is written for the space's default.
+    mutating func setTasksManageSpaces(_ on: Bool, inSpace spaceID: String) {
+        tasksManageSpaces = on == Self.tasksManageSpacesByDefault(inSpace: spaceID) ? nil : on
+    }
 
     func isOn(_ part: ClaudeSpaceSettings.Part) -> Bool { self[keyPath: part.key] ?? part.isOnByDefault }
 
@@ -89,6 +106,7 @@ struct SpaceDefaults: Equatable, Sendable {
             (\.leadStartsMergeQueueWithoutLocalReview, .leadStartsMergeQueueWithoutLocalReview, false),
             (\.leadDailyPass, .leadDailyPass, false),
             (\.prFollowUp, .prFollowUp, false),
+            (\.tasksManageSpaces, .tasksManageSpaces, false),
             (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
             (\.claudeDeniesIrreversible, .claudeDeniesIrreversible, true),
             (\.claudeSandbox, .claudeSandbox, true)
@@ -192,7 +210,7 @@ struct SpaceDefaults: Equatable, Sendable {
 /// `{"schemaVersion": 1, "agent": "codex", "claudeLaunchMode": "plan",
 /// "codexLaunchMode": "readOnly", "environment": [{"name": …, "value": …}],
 /// "leadStartsTasks": false, "leadDailyPass": false, "leadDailyPassHour": 7,
-/// "prFollowUp": false, "claudeTrustsRepositories": false,
+/// "prFollowUp": false, "tasksManageSpaces": true, "claudeTrustsRepositories": false,
 /// "claudeDeniesIrreversible": false, "claudeSandbox": true,
 /// "claudeAllow": ["Bash(swift build:*)"], "claudeEnvironment": […]}`,
 /// every key optional, nothing written for what isn't set. Unknown keys and
@@ -202,6 +220,7 @@ extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion, agent, leadAgent, claudeLaunchMode, codexLaunchMode, agyLaunchMode, environment
         case leadStartsTasks, leadStartsMergeQueue, leadStartsMergeQueueWithoutLocalReview, leadDailyPass, leadDailyPassHour, prFollowUp
+        case tasksManageSpaces
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
 
@@ -227,6 +246,7 @@ extension SpaceDefaults: Codable {
         leadDailyPass = (try? container.decodeIfPresent(Bool.self, forKey: .leadDailyPass)) ?? nil
         leadDailyPassHour = ((try? container.decodeIfPresent(Int.self, forKey: .leadDailyPassHour)) ?? nil).flatMap { (0...23).contains($0) ? $0 : nil }
         prFollowUp = (try? container.decodeIfPresent(Bool.self, forKey: .prFollowUp)) ?? nil
+        tasksManageSpaces = (try? container.decodeIfPresent(Bool.self, forKey: .tasksManageSpaces)) ?? nil
         claudeTrustsRepositories = (try? container.decodeIfPresent(Bool.self, forKey: .claudeTrustsRepositories)) ?? nil
         claudeDeniesIrreversible = (try? container.decodeIfPresent(Bool.self, forKey: .claudeDeniesIrreversible)) ?? nil
         claudeSandbox = (try? container.decodeIfPresent(Bool.self, forKey: .claudeSandbox)) ?? nil
@@ -253,6 +273,7 @@ extension SpaceDefaults: Codable {
         try container.encodeIfPresent(leadDailyPass, forKey: .leadDailyPass)
         try container.encodeIfPresent(leadDailyPassHour, forKey: .leadDailyPassHour)
         try container.encodeIfPresent(prFollowUp, forKey: .prFollowUp)
+        try container.encodeIfPresent(tasksManageSpaces, forKey: .tasksManageSpaces)
         try container.encodeIfPresent(claudeTrustsRepositories, forKey: .claudeTrustsRepositories)
         try container.encodeIfPresent(claudeDeniesIrreversible, forKey: .claudeDeniesIrreversible)
         try container.encodeIfPresent(claudeSandbox, forKey: .claudeSandbox)

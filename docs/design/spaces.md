@@ -443,6 +443,20 @@ New flow, built on the guarded typing `tell` already uses
   nobody claims within 15 s is taken back: nothing happens. A claimed one the
   app hasn't finished within its wait may still happen, and the Lead is told
   not to call again. Calls are answered off the server's read loop.
+- **Tasks can manage spaces** (Space Settings › Defaults, on by default in
+  General, off in other spaces, `tasksManageSpaces` in its defaults.json):
+  the agents of the space's tasks get the same space tools, and `list_tasks`
+  with `space` reads any space as its Lead does (their own one included).
+  The server lists them from the setting when the agent starts; the app
+  checks it again at each call, for the space the task is in then. One
+  policy, two callers (SpaceToolCaller): a task meets the Lead's refusals,
+  with what differs about its own space and workspace. It may move itself,
+  and delete its own space with `move_tasks_to`, moving out with the other
+  tasks: the answer says where it is now, and whether tasks there can
+  manage spaces. A space with a Lead stays that Lead's to organize, its
+  own space included. It may not move without its task (a sub-task), nor
+  remove or move its own repository out of its space. `delete_space` asks
+  the user with "The task “<title>” asks to delete the space".
 - **Task work stays in its space.** Only the explicit space management tools
   (`list_spaces`, `create_space`, `edit_space`, `delete_space`,
   `move_task_to_space`, and `list_tasks` with `space`) inspect or organize
