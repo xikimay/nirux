@@ -768,8 +768,15 @@ final class MissionTellTests: XCTestCase {
         press("\r", at: 55, into: &queued)
         read(nil, at: 54.9996, typed: true, into: &queued) // stamped in the Enter's millisecond, cut
         _ = queued.apply(prompt("turn", at: 55.04), isUserFocused: false)
-        _ = queued.apply(hook(.stop, at: 58), isUserFocused: false)
         XCTAssertEqual(queued.boxEmptiedAt, t0 + 55)
+        press("and this", at: 56, into: &queued)
+        press("\r", at: 57, into: &queued)
+        press("\r", at: 60, into: &queued) // sends nothing
+        read(nil, at: 57.001, typed: true, into: &queued)
+        XCTAssertEqual(queued.boxEmptiedAt, t0 + 57, "a second one in the same turn")
+        read(nil, at: 70, typed: true, into: &queued)
+        XCTAssertEqual(queued.boxEmptiedAt, t0 + 57, "an Enter long before a line sent something else")
+        _ = queued.apply(hook(.stop, at: 75), isUserFocused: false)
         XCTAssertNil(refusal(queued))
 
         var dialogs = readMachine()
