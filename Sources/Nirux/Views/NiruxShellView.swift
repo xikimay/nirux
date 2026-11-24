@@ -131,6 +131,9 @@ final class NiruxShellView: NSView {
 
     /// Owned by NiruxApp; nil in tests, which never touch power settings.
     weak var keepAwake: KeepAwakeController?
+    var checksWatch = ChecksWatch()
+    /// The power source the away reads ask (`refreshPullRequestsAway`); tests answer for it.
+    var isOnACPower: @MainActor () -> Bool = { isOnPowerAdapter() }
     /// The user quit Nirux: the last save says so (`PersistedState.quitByUser`).
     var quitsByUser = false
 
