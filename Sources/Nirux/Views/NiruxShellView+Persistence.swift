@@ -133,6 +133,8 @@ extension NiruxShellView {
         relayout(animated: false)
         if (state.settings?.agentResumeOnLaunch ?? .defaultValue) == .allAtOnce {
             resumeAllDeferredAgents()
+        } else {
+            resumeWorkAfterRelaunch()
         }
         updateSidebar()
         restoreMergeWaits(now: Date().timeIntervalSince1970)
