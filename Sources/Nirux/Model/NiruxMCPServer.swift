@@ -141,17 +141,25 @@ enum NiruxMCPServer {
             nonEmpty("NIRUX_WORKSPACE_ID") != nil && nonEmpty("NIRUX_AGENT_UUID") != nil
                 && nonEmpty(NiruxLaunchAuthorization.environmentKey) != nil
         }
-        /// A task's agent whose space lets its tasks manage spaces, as its
-        /// defaults.json says now: the app checks each call again.
+        /// The space its workspace is in, as Nirux last saved it: a shell
+        /// keeps its launch's `NIRUX_PROFILE_ID` after its workspace moves.
+        var workspaceSpaceID: String? {
+            nonEmpty("NIRUX_WORKSPACE_ID").flatMap { Persistence.savedSpaceID(ofWorkspace: $0, stateDirectory: stateDirectory) } ?? spaceID
+        }
+
+        /// A task's agent whose space lets its tasks manage spaces, for the
+        /// tools it lists and learns about.
         var tasksManageSpaces: Bool {
-            guard !isLead, isWorkspaceAgent, let spaceID else { return false }
-            return SpaceDefaultsStore.defaults(forSpace: spaceID, stateDirectory: stateDirectory).tasksCanManageSpaces(inSpace: spaceID)
+            guard !isLead, isWorkspaceAgent, let space = workspaceSpaceID else { return false }
+            return SpaceDefaultsStore.defaults(forSpace: space, stateDirectory: stateDirectory).tasksCanManageSpaces(inSpace: space)
         }
 
         /// The tools the app answers for this agent: the Lead's, or a task's.
+        /// The app refuses a task's space tools unless the space the task
+        /// is in when it calls lets its tasks manage spaces.
         var appToolNames: [String] {
             if isLead { return LeadTools.names }
-            return isWorkspaceAgent ? TaskTools.names(managingSpaces: tasksManageSpaces) : []
+            return isWorkspaceAgent ? TaskTools.callableNames : []
         }
 
         /// Their definitions, for `tools/list`.

@@ -6,7 +6,8 @@ import Foundation
 /// through the same checks (NiruxShellView+LeadSpaces); what differs is
 /// what they may do to their own space and workspace. A task may move
 /// itself, or delete its space with the tasks moving out, and hears it
-/// moved; it may not leave its own task or repository behind.
+/// moved; it may not leave its own task or repository behind, nor move
+/// where its repository isn't.
 struct SpaceToolCaller: Equatable, Sendable {
     let workspaceID: String
     /// The space it is in now.
@@ -38,11 +39,20 @@ struct SpaceToolCaller: Equatable, Sendable {
         return "“\(MissionPromptText.quoted(space.name))” is your own space: you can't delete it."
     }
 
-    /// Why `moving` (workspace ids) may not move together; nil when they
-    /// may. A sub-task moved without its task would be listed under none.
-    func moveRefusal(moving: [String]) -> String? {
-        guard let parentTaskID, moving.contains(workspaceID), !moving.contains(parentTaskID) else { return nil }
-        return "You are a sub-task: moved without your task, you would be listed under none. Move your task, which takes you along."
+    /// Why `moving` (workspace ids) may not move together to
+    /// `destination`; nil when they may. A sub-task moved without its task
+    /// would be listed under none, a task moved out of its repository's
+    /// space would work in none of its new space's.
+    func moveRefusal(moving: [String], to destination: WorkspaceProfile) -> String? {
+        guard moving.contains(workspaceID) else { return nil }
+        if let parentTaskID, !moving.contains(parentTaskID) {
+            return "You are a sub-task: moved without your task, you would be listed under none. Move your task, which takes you along."
+        }
+        if let anchorKey, !destination.anchors.contains(where: { $0.key == anchorKey }) {
+            return "You work in a repository of your space that “\(MissionPromptText.quoted(destination.name))” doesn't have: "
+                + "moved there, you would work outside its repositories. Ask the user."
+        }
+        return nil
     }
 
     /// Why `anchors` may not leave `spaceID`, removed or moved to another

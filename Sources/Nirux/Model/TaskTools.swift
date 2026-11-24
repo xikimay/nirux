@@ -12,11 +12,10 @@ import Foundation
 enum TaskTools {
     static let names = [LeadTools.startTask, LeadTools.listTasks, LeadTools.tell, LeadTools.reply, LeadTools.askUser]
 
-    /// With the Lead's space tools where the space lets its tasks manage
-    /// spaces (SpaceToolCaller).
-    static func names(managingSpaces: Bool) -> [String] {
-        managingSpaces ? names + LeadTools.spaceNames : names
-    }
+    /// With the Lead's space tools, listed where the task's space lets its
+    /// tasks manage spaces (SpaceToolCaller), and checked by the app at each
+    /// call.
+    static let callableNames = names + LeadTools.spaceNames
 
     static func definitions(managingSpaces: Bool) -> [[String: Any]] {
         guard managingSpaces else { return definitions }

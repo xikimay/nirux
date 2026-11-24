@@ -122,6 +122,10 @@ final class TaskSpaceToolsFlowTests: XCTestCase {
             let refused = try XCTUnwrap(try call(LeadTools.listSpaces, on: server, in: harness))
             XCTAssertTrue(refused.isError, refused.text)
             XCTAssertTrue(refused.text.contains("“Ops” doesn't let its tasks manage spaces"), refused.text)
+            // Restarted in the same shell, which still says General, it lists Ops' tools.
+            let restarted = try agentServer(of: task, launchedIn: WorkspaceProfile.defaultID)
+            XCTAssertEqual(try toolNames(restarted, in: harness), searchTools + TaskTools.names)
+            XCTAssertFalse(try instructions(restarted, in: harness).contains(NiruxMCPServer.taskSpaceInstructions))
         }
     }
 
@@ -138,17 +142,18 @@ final class TaskSpaceToolsFlowTests: XCTestCase {
 
             XCTAssertEqual(try toolNames(server, in: harness), searchTools + TaskTools.names)
             XCTAssertFalse(try instructions(server, in: harness).contains(NiruxMCPServer.taskSpaceInstructions))
-            XCTAssertNil(try call(LeadTools.createSpace, ["name": "Ops"], on: server, in: harness), "not one of its tools")
-            let listed = try XCTUnwrap(try call(LeadTools.listTasks, ["space": "General"], on: server, in: harness))
-            XCTAssertTrue(listed.isError, listed.text)
-            XCTAssertTrue(listed.text.contains("“General” doesn't let its tasks manage spaces"), listed.text)
+            for (tool, arguments) in [(LeadTools.createSpace, ["name": "Ops"]), (LeadTools.listTasks, ["space": "General"])] {
+                let refused = try XCTUnwrap(try call(tool, arguments, on: server, in: harness))
+                XCTAssertTrue(refused.isError, refused.text)
+                XCTAssertTrue(refused.text.contains("“General” doesn't let its tasks manage spaces"), refused.text)
+            }
             XCTAssertEqual(shell.profiles.map(\.name), ["General"])
         }
     }
 
     /// Another space's tasks get the tools once its setting is on. A task
-    /// deleting its own space moves out with the others; it never leaves
-    /// its task or its repository behind.
+    /// never leaves its task or its repository behind, nor moves where its
+    /// repository isn't.
     func testATaskInAnotherSpaceManagesSpacesOnceTheSettingIsOn() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -164,7 +169,9 @@ final class TaskSpaceToolsFlowTests: XCTestCase {
             let server = try agentServer(of: task, launchedIn: ops.id)
 
             XCTAssertEqual(try toolNames(server, in: harness), searchTools + TaskTools.names, "off outside General")
-            XCTAssertNil(try call(LeadTools.listSpaces, on: server, in: harness))
+            let off = try XCTUnwrap(try call(LeadTools.listSpaces, on: server, in: harness))
+            XCTAssertTrue(off.isError, off.text)
+            XCTAssertTrue(off.text.contains("“Ops” doesn't let its tasks manage spaces"), off.text)
 
             shell.changeSpaceDefaults(spaceID: ops.id) { $0.setTasksManageSpaces(true, inSpace: ops.id) }
             XCTAssertEqual(try toolNames(server, in: harness), searchTools + TaskTools.names + LeadTools.spaceNames)
@@ -183,7 +190,7 @@ final class TaskSpaceToolsFlowTests: XCTestCase {
                 XCTAssertTrue(lost.isError, lost.text)
                 XCTAssertTrue(lost.text.contains("You work in “repo”"), lost.text)
             }
-            XCTAssertEqual(ops.anchors.map(\.name), ["repo"])
+            XCTAssertEqual(shell.profiles.first { $0.id == ops.id }?.anchors.map(\.name), ["repo"])
             XCTAssertNil(shell.profiles.first { $0.name == "Elsewhere" })
 
             // A space with a Lead stays that Lead's to organize, for its own tasks too.
@@ -201,16 +208,50 @@ final class TaskSpaceToolsFlowTests: XCTestCase {
             XCTAssertTrue(organized.text.contains("has a Lead of its own"), organized.text)
             XCTAssertEqual(ledTask.profileID, led.id)
 
-            harness.alertResponses = [.alertSecondButtonReturn]
-            let deleted = try XCTUnwrap(try call(
+            // General has no repository: moved there, Fix would work outside its space's.
+            let stranding = try XCTUnwrap(try call(
                 LeadTools.deleteSpace, ["space": "Ops", "move_tasks_to": "General"], on: server, in: harness
             ))
+            XCTAssertTrue(stranding.isError, stranding.text)
+            XCTAssertTrue(stranding.text.contains("You work in a repository of your space that “General” doesn't have"), stranding.text)
+            XCTAssertEqual(harness.alerts, [], "refused before asking the user")
+            XCTAssertEqual([task.profileID, child.profileID], [ops.id, ops.id])
+        }
+    }
+
+    /// A task without a repository there deletes its own space: it moves
+    /// out with the others, and keeps the tools its new space gives, in this
+    /// agent and once it restarts.
+    func testATaskThatDeletesItsSpaceManagesSpacesFromItsNewOne() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let center = startRequestCenter(shell)
+            defer { center.stop() }
+            let scratch = shell.workspaceStore.createProfile(named: "Scratch", select: false)
+            shell.changeSpaceDefaults(spaceID: scratch.id) { $0.setTasksManageSpaces(true, inSpace: scratch.id) }
+            shell.addWorkspace(title: "Notes", cwd: harness.worktree, profileID: scratch.id)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Notes" })
+            shell.addWorkspace(title: "Draft", cwd: harness.worktree, profileID: scratch.id, parentWorkspaceID: task.id)
+            let child = try XCTUnwrap(shell.workspaces.first { $0.title == "Draft" })
+            try lookAtGeneral(shell)
+            let server = try agentServer(of: task, launchedIn: scratch.id)
+
+            harness.alertResponses = [.alertSecondButtonReturn]
+            let deleted = try XCTUnwrap(try call(
+                LeadTools.deleteSpace, ["space": "Scratch", "move_tasks_to": "General"], on: server, in: harness
+            ))
             XCTAssertFalse(deleted.isError, deleted.text)
-            XCTAssertEqual(harness.alerts, ["The task “Fix” asks to delete the space \"Ops\""])
-            XCTAssertNil(shell.profiles.first { $0.id == ops.id })
+            XCTAssertEqual(harness.alerts, ["The task “Notes” asks to delete the space \"Scratch\""])
+            XCTAssertNil(shell.profiles.first { $0.id == scratch.id })
             XCTAssertTrue(deleted.text.hasSuffix("You moved too: you are in “General” (space:default) now."), deleted.text)
             XCTAssertEqual([task.profileID, child.profileID], [WorkspaceProfile.defaultID, WorkspaceProfile.defaultID])
             XCTAssertEqual(child.parentWorkspaceID, task.id)
+
+            // Its shell still names the deleted space.
+            let spaces = try XCTUnwrap(try call(LeadTools.listSpaces, on: server, in: harness))
+            XCTAssertFalse(spaces.isError, spaces.text)
+            let restarted = try agentServer(of: task, launchedIn: scratch.id)
+            XCTAssertEqual(try toolNames(restarted, in: harness), searchTools + TaskTools.names + LeadTools.spaceNames)
         }
     }
 }

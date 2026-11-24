@@ -369,7 +369,7 @@ extension NiruxShellView {
 
     /// Why `caller` may not move `tasks`, together, to `space`; nil when it may.
     private func spaceMoveRefusal(of tasks: [WorkspaceState], to space: WorkspaceProfile, caller: SpaceToolCaller) -> String? {
-        if let refusal = caller.moveRefusal(moving: tasks.map(\.id)) { return refusal }
+        if let refusal = caller.moveRefusal(moving: tasks.map(\.id), to: space) { return refusal }
         _ = MissionStore.shared.ensureLoaded()
         let staying = Set(workspaces.map(\.id)).subtracting(tasks.map(\.id))
         for task in tasks {
