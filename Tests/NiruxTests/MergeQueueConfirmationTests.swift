@@ -231,7 +231,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
         ]
         let confirmation = MergeQueue.confirmation(reading(candidates))
 
-        XCTAssertEqual(confirmation.entries.map(\.number), [11])
+        XCTAssertEqual(confirmation.entries.map(\.number), [9, 11])
         let reasons = Dictionary(uniqueKeysWithValues: confirmation.excluded.map { ($0.number, $0.reason) })
         XCTAssertEqual(reasons[1], "It is a draft.")
         XCTAssertEqual(reasons[2], "It comes from a fork: the queue only merges branches of acme/widgets.")
@@ -241,7 +241,9 @@ final class MergeQueueConfirmationTests: XCTestCase {
         XCTAssertEqual(reasons[6], "Commits not on GitHub in /.../x/app.feat-6: push them first.")
         XCTAssertEqual(reasons[7], "It is merged.")
         XCTAssertEqual(reasons[8], "It targets dev, not main.")
-        XCTAssertEqual(reasons[9], "It is set to auto-merge: disable that first (gh pr merge 9 --disable-auto).")
+        XCTAssertNil(reasons[9], "its auto-merge is called off by the queue, which arms its own")
+        XCTAssertEqual(confirmation.items.first { $0.entry.number == 9 }?.notes,
+                       ["GitHub’s auto-merge is on: the queue calls it off and arms its own on the head it checks."])
         XCTAssertEqual(reasons[10], "It is in GitHub’s merge queue: remove it from there first.")
         XCTAssertEqual(confirmation.excluded.first?.title, "Change 1", "listed with its title")
     }

@@ -66,14 +66,38 @@ final class MergeQueueDriver {
 
     func start() { send(.start) }
 
-    func stop(byLead: Bool = false) { send(byLead ? .stopByLead : .stop) }
+    /// A quit leaves GitHub's auto-merge armed: what lands while Nirux is
+    /// closed is the backstop. Any other stop calls it off.
+    private var keepsAutoMerge = false
+
+    func stop(byLead: Bool = false, keepingAutoMerge: Bool = false) {
+        keepsAutoMerge = keepingAutoMerge
+        send(byLead ? .stopByLead : .stop)
+    }
 
     func send(_ event: MergeQueue.Event) {
+        let wasStopped = if case .stopped = engine.phase { true } else { false }
         let output = engine.handle(event, now: clock.now())
         // The request goes out before anyone hears of the step: a Stop from
         // a listener finds a mutation already sent, never one about to be.
         if let request = output.request { run(request) }
+        if case .stopped = engine.phase, !wasStopped, !keepsAutoMerge { disarmAutoMerge() }
         onUpdate?(engine, output.notes)
+    }
+
+    /// The pull requests the queue armed that didn't land: GitHub would
+    /// merge them later, outside a stopped queue.
+    private func disarmAutoMerge() {
+        let client = self.client
+        let settings = engine.settings
+        for entry in engine.entries where entry.autoMerge?.isArmed == true && entry.mergeCommit == nil {
+            let mutation = MergeQueue.Mutation.disarmAutoMerge(number: entry.number)
+            let command = client.commandLine(mutation, settings: settings)
+            onMutation?(mutation, command, nil)
+            Self.runOffMain({ client.mutate(mutation, settings: settings) }, then: { [weak self] result in
+                self?.onMutation?(mutation, command, result)
+            })
+        }
     }
 
     private func run(_ request: MergeQueue.Request) {

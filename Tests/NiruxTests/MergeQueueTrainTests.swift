@@ -810,6 +810,8 @@ private struct TrainGitHub {
                 world.pullRequests[part] = MQ.pullRequest(part, head: pullRequest.headOid, state: .merged, mergeCommit: commit,
                                                           parents: [base, pullRequest.headOid])
             }
+        case .armAutoMerge, .disarmAutoMerge:
+            break
         case .closePullRequest(let number):
             if refusesClose { return .refused(status: 403, message: "Resource not accessible") }
             guard let open = world.pullRequests[number] else { return .refused(status: 404, message: "Not Found") }

@@ -414,6 +414,8 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertEqual(replies, [true])
         guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("not stopped") }
         XCTAssertTrue(reason.message.contains("Check #52 on GitHub: it may be merged."), reason.message)
+        XCTAssertEqual(client.mutations, [.armAutoMerge(number: 52, head: MQ.sha("a"), method: .merge)],
+                       "a quit leaves GitHub's auto-merge armed: it lands while Nirux is closed")
     }
 
     @MainActor
@@ -520,6 +522,8 @@ final class HeldMutationClient: MergeQueueGitHub, @unchecked Sendable {
 
     var isDryRun: Bool { false }
     var isHoldingMutation: Bool { lock.withLock { holding } }
+    /// The mutations answered at once (`mutate`).
+    var mutations: [MergeQueue.Mutation] { reads.mutations }
 
     func release() { gate.signal() }
 
@@ -527,7 +531,9 @@ final class HeldMutationClient: MergeQueueGitHub, @unchecked Sendable {
         reads.read(read, settings: settings)
     }
 
+    /// Holds a merge only: GitHub's auto-merge, armed or called off, answers at once.
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
+        guard case .merge = mutation else { return reads.mutate(mutation, settings: settings) }
         lock.withLock { holding = true }
         gate.wait()
         lock.withLock { holding = false }

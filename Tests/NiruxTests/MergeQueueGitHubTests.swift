@@ -454,9 +454,15 @@ final class MergeQueueGitHubTests: XCTestCase {
 /// SHA it was decided on.
 enum ForbiddenCalls {
     static func problem(_ arguments: [String]) -> String? {
-        for flag in ["--admin", "--auto", "--delete-branch", "-d", "--rebase", "-r", "--disable-auto"]
-        where arguments.contains(flag) {
+        for flag in ["--admin", "--delete-branch", "-d", "--rebase", "-r"] where arguments.contains(flag) {
             return "forbidden flag \(flag)"
+        }
+        // Auto-merge is armed by a merge that names its SHA, called off alone.
+        if !arguments.starts(with: ["pr", "merge"]), let flag = arguments.first(where: { $0 == "--auto" || $0 == "--disable-auto" }) {
+            return "forbidden flag \(flag)"
+        }
+        if arguments.starts(with: ["pr", "merge"]), arguments.contains("--disable-auto") {
+            return arguments.contains { ["--merge", "--squash", "--auto"].contains($0) } ? "--disable-auto with a merge" : nil
         }
         if arguments.starts(with: ["pr", "merge"]) {
             guard let index = arguments.firstIndex(of: "--match-head-commit"),

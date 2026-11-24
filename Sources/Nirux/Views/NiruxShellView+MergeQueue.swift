@@ -526,12 +526,13 @@ extension NiruxShellView {
             // No new queue starts from here on.
             self.mergeQueueConfirmation?.dismiss()
             // A queue that stops at once answers through `settleMergeQueueQuit`.
-            for controller in self.runningMergeQueues { controller.stop() }
+            // GitHub's auto-merge stays armed: it lands while Nirux is closed.
+            for controller in self.runningMergeQueues { controller.stop(keepingAutoMerge: true) }
             guard !self.runningMergeQueues.isEmpty else { return self.answerMergeQueueQuit(quit, true) }
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.mergeQueueQuitTimeout) { [weak self] in
                 guard let self, self.mergeQueueQuit === quit, !quit.isAnswered else { return }
                 NiruxDebugLog.log("MergeQueue: quitting while a call already sent hasn’t answered")
-                self.runningMergeQueues.forEach { $0.stop() }
+                self.runningMergeQueues.forEach { $0.stop(keepingAutoMerge: true) }
                 self.answerMergeQueueQuit(quit, true)
             }
         }

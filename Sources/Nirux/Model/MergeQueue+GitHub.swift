@@ -457,8 +457,8 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         return arguments + ["--json", GitHub.WorkflowRun.fields]
     }
 
-    /// Never `--admin`, `--auto`, `--delete-branch` or `--rebase`; a merge
-    /// and a branch update always carry the SHA they were decided on.
+    /// Never `--admin`, `--delete-branch` or `--rebase`; a merge, auto or
+    /// not, and a branch update always carry the SHA they were decided on.
     static func mutationArguments(_ mutation: MergeQueue.Mutation, repository: String) -> [String] {
         switch mutation {
         case .updateBranch(let number, let head):
@@ -469,6 +469,11 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         case .merge(let number, let head, let method):
             return ["pr", "merge", "\(number)", "--repo", "\(GitHub.host)/\(repository)", "--\(method.rawValue)",
                     "--match-head-commit", head]
+        case .armAutoMerge(let number, let head, let method):
+            return ["pr", "merge", "\(number)", "--repo", "\(GitHub.host)/\(repository)", "--\(method.rawValue)", "--auto",
+                    "--match-head-commit", head]
+        case .disarmAutoMerge(let number):
+            return ["pr", "merge", "\(number)", "--repo", "\(GitHub.host)/\(repository)", "--disable-auto"]
         case .createBranch(let name, let commit):
             return ["api", "--hostname", GitHub.host, "--method", "POST", "repos/\(repository)/git/refs",
                     "-f", "ref=refs/heads/\(name)", "-f", "sha=\(commit)"]

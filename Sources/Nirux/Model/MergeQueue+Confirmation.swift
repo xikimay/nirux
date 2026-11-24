@@ -381,6 +381,9 @@ extension MergeQueue {
             item.notes.append("Nirux couldn’t tell whether it is behind \(settings.baseBranch)"
                 + (candidate.compareError.map { " (\($0))" } ?? "") + ".")
         }
+        if pullRequest.hasAutoMerge {
+            item.notes.append("GitHub’s auto-merge is on: the queue calls it off and arms its own on the head it checks.")
+        }
         if pullRequest.mergeable == "UNKNOWN" {
             item.notes.append("GitHub is still computing whether it merges cleanly: the queue waits up to "
                 + "\(Int(Limits.mergeableUnknown / 60)) minutes for it.")
@@ -441,9 +444,6 @@ extension MergeQueue {
         }
         if pullRequest.headRepository != settings.gitHubRepository {
             return "It comes from a fork: the queue only merges branches of \(settings.repository)."
-        }
-        if pullRequest.hasAutoMerge {
-            return "It is set to auto-merge: disable that first (gh pr merge \(pullRequest.number) --disable-auto)."
         }
         if pullRequest.isInMergeQueue { return "It is in GitHub’s merge queue: remove it from there first." }
         return nil

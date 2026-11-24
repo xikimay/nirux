@@ -166,8 +166,11 @@ enum MQ {
         /// Every mutation the engine asked for, in order.
         var mutations: [MergeQueue.Mutation] = []
 
-        init(settings: BoardConfig.QueueSettings = MQ.settings(), entries: [MergeQueue.ConfirmedEntry], cadence: MergeQueue.Cadence = .standard) {
-            engine = MergeQueue.Engine(settings: settings, entries: entries, cadence: cadence)
+        init(
+            settings: BoardConfig.QueueSettings = MQ.settings(), entries: [MergeQueue.ConfirmedEntry], cadence: MergeQueue.Cadence = .standard,
+            armsAutoMerge: Bool = false
+        ) {
+            engine = MergeQueue.Engine(settings: settings, entries: entries, cadence: cadence, armsAutoMerge: armsAutoMerge)
         }
 
         var phase: MergeQueue.Phase { engine.phase }
@@ -238,11 +241,17 @@ enum MQ {
 
         /// Answers reads from `world` until the engine asks for a mutation
         /// (returned), stops or finishes.
+        /// GitHub's auto-merge, armed or called off, is answered `sent` on the way.
         @discardableResult
         mutating func run(_ world: World, limit: Int = 1_000) -> MergeQueue.Mutation? {
             for _ in 0..<limit {
                 guard let request = engine.request else { return nil }
-                if case .mutate(let mutation) = request.action { return mutation }
+                if case .mutate(let mutation) = request.action {
+                    switch mutation {
+                    case .armAutoMerge, .disarmAutoMerge: mutated(.sent); continue
+                    default: return mutation
+                    }
+                }
                 answer(world)
             }
             XCTFail("the engine kept reading")
@@ -287,7 +296,18 @@ final class FakeQueueClient: MergeQueueGitHub, @unchecked Sendable {
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
         lock.withLock {
             recordedMutations.append(mutation)
-            return isDryRun ? .dryRun(command: commandLine(mutation, settings: settings), reason: "a test") : .sent
+            if isDryRun { return .dryRun(command: commandLine(mutation, settings: settings), reason: "a test") }
+            switch mutation {
+            case .armAutoMerge(let number, let head, _):
+                guard let open = world.pullRequests[number], open.isOpen, open.headOid == head else { break }
+                world.pullRequests[number] = MQ.pullRequest(number, head: head, branch: open.headRefName, autoMerge: true)
+            case .disarmAutoMerge(let number):
+                guard let open = world.pullRequests[number], open.isOpen else { break }
+                world.pullRequests[number] = MQ.pullRequest(number, head: open.headOid, branch: open.headRefName)
+            default:
+                break
+            }
+            return .sent
         }
     }
 

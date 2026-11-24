@@ -76,6 +76,14 @@ extension MergeQueue {
         var hasRerun = false
         /// Its merge commit, once merged.
         var mergeCommit: String?
+        /// GitHub's auto-merge, asked for on a head: the backstop.
+        var autoMerge: AutoMerge?
+
+        struct AutoMerge: Equatable, Codable, Sendable {
+            let head: String
+            /// GitHub took it (else refused, or a dry run).
+            let isArmed: Bool
+        }
 
         init(_ confirmed: ConfirmedEntry) {
             number = confirmed.number
@@ -283,6 +291,11 @@ extension MergeQueue {
         case rerun(runID: Int)
         /// `gh pr merge <n> --<method> --match-head-commit <sha>`.
         case merge(number: Int, head: String, method: BoardConfig.MergeMethod)
+        /// The same with `--auto`: GitHub merges it once its checks pass,
+        /// with the Mac asleep or Nirux closed too.
+        case armAutoMerge(number: Int, head: String, method: BoardConfig.MergeMethod)
+        /// `gh pr merge <n> --disable-auto`.
+        case disarmAutoMerge(number: Int)
         /// `POST git/refs`: a new branch at a commit; GitHub refuses an existing one.
         case createBranch(name: String, commit: String)
         /// `POST merges`: GitHub merges a commit into a branch, refusing a conflict (409).
@@ -310,6 +323,11 @@ extension MergeQueue {
 
         var isUncertain: Bool {
             if case .uncertain = self { return true }
+            return false
+        }
+
+        var isDryRun: Bool {
+            if case .dryRun = self { return true }
             return false
         }
     }
