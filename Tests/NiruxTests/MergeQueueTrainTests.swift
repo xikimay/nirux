@@ -418,7 +418,7 @@ final class MergeQueueTrainTests: XCTestCase {
             + "train. #16 left the train too. Train #900 landed #12.")
     }
 
-    func testARedBatchRidesAgainInTwoHalvesAndTheSameFilesDontRunAgain() throws {
+    func testARedBatchRidesAgainInTwoHalvesAndAPullRequestAloneGetsARunOfItsOwn() throws {
         var github = TrainGitHub(world: world())
         github.failing = [c]
         var queue = queue([12, 14, 16])
@@ -426,8 +426,8 @@ final class MergeQueueTrainTests: XCTestCase {
 
         let reason = try XCTUnwrap(queue.stopReason)
         XCTAssertEqual(reason.kind, .checks)
-        XCTAssertEqual(reason.message, "Required check Tests / test failed on train #900 at 0000003. #16 on main at 0000006 gives "
-            + "the same files, so it wasn’t run again. It left the train. Train #901 landed #12, #14.")
+        XCTAssertEqual(reason.message, "Required check Tests / test failed on train #902 at 0000007. It left the train. "
+            + "Train #901 landed #12, #14.")
         XCTAssertEqual(queue.mutations.map(MergeQueue.Engine.describe), [
             "creation of branch \(branch) at 0000000",
             "merge of aaaaaaa into \(branch)",
@@ -444,9 +444,11 @@ final class MergeQueueTrainTests: XCTestCase {
             "deletion of branch \(branch)-2",
             "creation of branch \(branch)-3 at 0000006",
             "merge of ccccccc into \(branch)-3",
+            "pull request of \(branch)-3 into main",
+            "close of #902",
             "deletion of branch \(branch)-3",
         ])
-        XCTAssertEqual(github.trainNumber, 901, "two runs for three pull requests")
+        XCTAssertEqual(github.trainNumber, 902, "#16 had #900’s files, but leaves only on a run of its own")
         XCTAssertTrue(queue.noted("Splitting the batch: #12, #14 first, then #16"))
         XCTAssertEqual(queue.engine.entries.map(\.step), [.done, .done, .stopped(reason)])
         XCTAssertEqual(github.world.branches, [:])
@@ -507,10 +509,27 @@ final class MergeQueueTrainTests: XCTestCase {
             XCTAssertEqual(reason.message, "#16 conflicts with main. It left the train. #18, #14 left the train too. Train #901 landed #12.")
             XCTAssertTrue(queue.noted("Splitting the batch: #16, #18 first, then #12, #14"), "the conflicts ride again")
             XCTAssertTrue(queue.noted("Splitting the batch: #12 first, then #14"), "#12, #14 gave #900’s files: split without a run")
-            XCTAssertEqual(github.trainNumber, 901, "two runs for four pull requests")
+            XCTAssertEqual(github.trainNumber, 902, "three runs for four pull requests")
             XCTAssertEqual(github.world.pullRequests[12]?.state, .merged)
             XCTAssertEqual(github.world.branches, [:])
         }
+    }
+
+    func testARedCommitStatusSplitsTooAndAllFailingAloneNamesTheBase() throws {
+        var world = world()
+        world.checks[TrainGitHub.commit(2)] = MergeQueue.CommitChecks(runs: [], statuses: [.init(context: "test", state: "FAILURE")])
+        var status = TrainGitHub(world: world)
+        var first = queue()
+        first.drive(&status)
+        XCTAssertEqual(first.phase, .finished, String(describing: first.stopReason))
+        XCTAssertTrue(first.noted("Splitting the batch: #12 first, then #14"))
+
+        var red = TrainGitHub(world: self.world())
+        red.failing = [a, b]
+        var second = queue()
+        second.drive(&red)
+        XCTAssertEqual(second.stopReason?.message, "Required check Tests / test failed on train #901 at 0000003. It left the train. "
+            + "#14 left the train too. Each failed alone on main: main itself may fail the checks.")
     }
 
     func testAStopOrARefusedCloseWhileARedTrainSplitsStopsTheQueue() throws {
@@ -555,16 +574,15 @@ final class MergeQueueTrainTests: XCTestCase {
         var stillRed = TrainGitHub(world: world)
         var second = queue(triagesFlakes: true)
         second.drive(&stillRed)
-        XCTAssertTrue(second.stopReason?.message.hasPrefix("Required check Tests / test failed on train #900 at 0000002 again after "
-            + "its rerun.") == true, second.stopReason?.message ?? "")
+        XCTAssertTrue(second.noted("Closing train #900: Required check Tests / test failed on train #900 at 0000002 again after "
+            + "its rerun."))
         XCTAssertEqual(second.mutations.filter { if case .rerun = $0 { true } else { false } }.count, 1)
 
         world.triage = .verdict(.real)
         var real = TrainGitHub(world: world)
         var third = queue(triagesFlakes: true)
         third.drive(&real)
-        XCTAssertEqual(third.stopReason?.kind, .checks)
-        XCTAssertTrue(third.stopReason?.message.contains("The CI triage found a real failure.") == true)
+        XCTAssertTrue(third.noted("failed on train #900 at 0000002. The CI triage found a real failure."))
         XCTAssertFalse(third.mutations.contains { if case .rerun = $0 { true } else { false } })
 
         // Triage off: no wait for the run's other jobs, no rerun.
@@ -575,8 +593,6 @@ final class MergeQueueTrainTests: XCTestCase {
         let start = fourth.now
         fourth.run(&off) { $0.pendingMutation == .closePullRequest(number: 900) }
         XCTAssertLessThan(fourth.now - start, MergeQueue.Limits.pollInterval * 3, "it gave up at the first red look")
-        fourth.drive(&off)
-        XCTAssertEqual(fourth.stopReason?.kind, .checks)
     }
 
     @MainActor
@@ -617,16 +633,15 @@ final class MergeQueueTrainTests: XCTestCase {
             return queue
         }
         let unsure = stopped(.verdict(.unsure))
-        XCTAssertTrue(unsure.stopReason?.message.contains("The CI triage read the run and couldn’t tell it from a flake.") == true)
+        XCTAssertTrue(unsure.noted("The CI triage read the run and couldn’t tell it from a flake."))
 
         let unread = stopped(.unread("gh couldn’t read it"))
         XCTAssertTrue(unread.noted("The CI triage didn’t read run 900 (gh couldn’t read it): asking once more"))
-        XCTAssertTrue(unread.stopReason?.message.contains("The CI triage didn’t read run 900 (gh couldn’t read it), so it wasn’t "
-            + "rerun.") == true, unread.stopReason?.message ?? "")
+        XCTAssertTrue(unread.noted("The CI triage didn’t read run 900 (gh couldn’t read it), so it wasn’t rerun."))
         XCTAssertFalse(unread.mutations.contains { if case .rerun = $0 { true } else { false } })
 
         let off = stopped(.off)
-        XCTAssertTrue(off.stopReason?.message.contains("The CI triage is off, so it wasn’t rerun.") == true)
+        XCTAssertTrue(off.noted("The CI triage is off, so it wasn’t rerun."))
 
         // A failure whose run's other jobs keep going: 10 minutes at most, not the checks' 30.
         let running = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"), MQ.checkRun(id: 11, name: "lint", status: "IN_PROGRESS", conclusion: nil))
@@ -637,8 +652,7 @@ final class MergeQueueTrainTests: XCTestCase {
         var queue = self.queue(triagesFlakes: true)
         let start = queue.now
         queue.drive(&github)
-        XCTAssertTrue(queue.stopReason?.message.contains("Its run’s other jobs still ran 10 minutes later, so it wasn’t rerun.") == true,
-                      queue.stopReason?.message ?? "")
+        XCTAssertTrue(queue.noted("Its run’s other jobs still ran 10 minutes later, so it wasn’t rerun."))
         XCTAssertLessThan(queue.now - start, 20 * 60)
     }
 
@@ -667,9 +681,9 @@ final class MergeQueueTrainTests: XCTestCase {
     }
 
     func testTheTrainsOwnChecksMustBeGreen() throws {
-        let head = TrainGitHub.commit(2)
+        let head = TrainGitHub.commit(1)
         let cases: [(MergeQueue.CommitChecks, String)] = [
-            (MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE")), "Required check Tests / test failed on train #900 at 0000002."),
+            (MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE")), "Required check Tests / test failed on train #900 at 0000001."),
             (MQ.checks(MQ.checkRun(id: 9, conclusion: "SKIPPED")), "Required check test (skipped) isn’t green on train #900"),
             (MQ.checks(MQ.checkRun(id: 9, status: "IN_PROGRESS", conclusion: nil)), "The checks of train #900 timed out after 30 minutes"),
             (MergeQueue.CommitChecks(), "The checks of train #900 timed out after 30 minutes: test (not started)"),
@@ -678,7 +692,7 @@ final class MergeQueueTrainTests: XCTestCase {
             var world = world()
             world.checks[head] = checks
             var github = TrainGitHub(world: world)
-            var queue = queue()
+            var queue = queue([12])
             queue.drive(&github)
             XCTAssertEqual(queue.stopReason?.kind, .checks, message)
             XCTAssertTrue(queue.stopReason?.message.hasPrefix(message) == true, queue.stopReason?.message ?? message)
@@ -755,8 +769,8 @@ final class MergeQueueTrainTests: XCTestCase {
         var again = TrainGitHub(world: world)
         var second = queue()
         second.drive(&again)
-        XCTAssertTrue(second.stopReason?.message.hasPrefix("Required check Tests / test failed on train #900 at 0000002 again after "
-            + "its rerun.") == true, second.stopReason?.message ?? "")
+        XCTAssertTrue(second.noted("Closing train #900: Required check Tests / test failed on train #900 at 0000002 again after "
+            + "its rerun."))
         XCTAssertEqual(second.mutations.filter { if case .rerun = $0 { true } else { false } }.count, 1)
 
         // Cancelled again: no runner, so no split either.
@@ -772,7 +786,7 @@ final class MergeQueueTrainTests: XCTestCase {
         var failed = TrainGitHub(world: world)
         var third = queue()
         third.drive(&failed)
-        XCTAssertEqual(third.stopReason?.kind, .checks)
+        XCTAssertTrue(third.noted("Closing train #900: Required check Tests / test failed"))
         XCTAssertFalse(third.mutations.contains { if case .rerun = $0 { true } else { false } }, "a failure isn't rerun here")
     }
 
