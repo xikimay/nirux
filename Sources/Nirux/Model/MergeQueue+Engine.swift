@@ -83,6 +83,10 @@ extension MergeQueue {
         /// a run still going at Start or rerun since included, stops the
         /// queue before its next merge.
         private var baseRunsFailedAtStart: Set<String> = []
+        /// A batch's merge whose post-merge run a later merge was to check;
+        /// none came (the rest left, busy), so the queue checks it before
+        /// finishing (`advance`).
+        private var uncheckedMerge: (index: Int, commit: String)?
         private var outbox = Output()
 
         init(
@@ -352,8 +356,12 @@ extension MergeQueue {
         }
 
         /// The next waiting pull request, or the end.
-        private mutating func advance() {
+        private mutating func advance(now: TimeInterval) {
             guard let next = entries.firstIndex(where: { $0.step == .waiting }) else {
+                if let merge = uncheckedMerge {
+                    current = merge.index
+                    return waitForPostMerge(merge.commit, index: merge.index, now: now)
+                }
                 current = nil
                 phase = .finished
                 note("Finished: \(entries.filter { $0.step == .done }.count) merged")
@@ -484,7 +492,7 @@ extension MergeQueue {
             case .postMerge(let commit):
                 guard let runs = answers.runs(.pushRuns(commit: commit)) else { return missingAnswer() }
                 postMergeRead(runs, commit: commit, subject: "#\(number)", now: now, poll: .postMerge(commit: commit),
-                              outcome: { .postMergeOutcome(commit: commit, run: $0) }) { engine in engine.finishEntry(index) }
+                              outcome: { .postMergeOutcome(commit: commit, run: $0) }) { engine in engine.finishEntry(index, now: now) }
             case .postMergeOutcome(let commit, let run):
                 guard let runs = answers.runs(.baseRuns),
                       let comparison = answers.comparison(base: commit, head: settings.baseBranch)
@@ -523,7 +531,7 @@ extension MergeQueue {
                     + "would queue pull requests there instead of merging them, without waiting for the post-merge workflow. "
                     + "Nirux’s queue doesn’t run on such a base."))
             }
-            cadence == .train ? trainStart(now: now) : advance()
+            cadence == .train ? trainStart(now: now) : advance(now: now)
         }
 
         // MARK: 1. Preflight
@@ -621,6 +629,12 @@ extension MergeQueue {
             holdForLocal([(index: index, local: local)], now: now, retry: retry)
         }
 
+        /// Each pull request with its own agents.
+        private func busyReason(_ busy: (index: Int, local: LocalState)) -> StopReason {
+            StopReason(kind: .agentBusy, message: "An agent of #\(entries[busy.index].number) is still busy after "
+                + "10 minutes: \(busy.local.busyAgents.joined(separator: ", ")).")
+        }
+
         /// The same for a train's entries at once: a busy agent in any of
         /// them holds them all, on one clock; a problem stops on its entry.
         mutating func holdForLocal(
@@ -641,25 +655,23 @@ extension MergeQueue {
                 let since = clocks.agentBusySince ?? now
                 clocks.agentBusySince = since
                 guard now - since < Limits.agentWait else {
-                    let reason = StopReason(kind: .agentBusy, message: "An agent of #\(entries[first.index].number) is still busy after "
-                        + "10 minutes: \(agents).")
                     clocks.agentBusySince = nil
                     if cadence == .train {
                         // Composed, the train holds their commits: it can't go on without them.
                         guard train?.parts.isEmpty ?? true else {
                             current = first.index
-                            stop(reason)
+                            stop(busyReason(first))
                             return true
                         }
                         // Busy riders leave the train, which goes on without them.
-                        for (index, _) in busy { drop(index, reason) }
+                        for rider in busy { drop(rider.index, busyReason(rider)) }
                         retry(&self)
                         return true
                     }
                     // It rides the next queue; the others merge.
                     note("#\(entries[first.index].number) leaves the queue: an agent is still busy after 10 minutes (\(agents))")
-                    entries[first.index].step = .stopped(reason)
-                    advance()
+                    entries[first.index].step = .stopped(busyReason(first))
+                    advance(now: now)
                     return true
                 }
                 retry(&self)
@@ -1036,17 +1048,24 @@ extension MergeQueue {
         // MARK: 5. Post-merge workflow
 
         private mutating func merged(_ mergeCommit: String, index: Int, now: TimeInterval) {
-            guard settings.postMergeWorkflow != nil, cadence == .standard || index == entries.count - 1 else {
-                return finishEntry(index)
+            guard settings.postMergeWorkflow != nil else { return finishEntry(index, now: now) }
+            guard cadence == .standard || index == entries.count - 1 else {
+                uncheckedMerge = (index, mergeCommit)
+                return finishEntry(index, now: now)
             }
+            waitForPostMerge(mergeCommit, index: index, now: now)
+        }
+
+        private mutating func waitForPostMerge(_ mergeCommit: String, index: Int, now: TimeInterval) {
+            uncheckedMerge = nil
             entries[index].step = .waitingForPostMerge(mergeCommit)
             clocks.step = now
             read([.pushRuns(commit: mergeCommit)], after: Limits.firstRunPoll, for: .postMerge(commit: mergeCommit))
         }
 
-        private mutating func finishEntry(_ index: Int) {
+        private mutating func finishEntry(_ index: Int, now: TimeInterval) {
             entries[index].step = .done
-            advance()
+            advance(now: now)
         }
 
         /// The post-merge run of `commit`, merged for `subject` ("#52"):

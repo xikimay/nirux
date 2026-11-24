@@ -372,6 +372,8 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   before each merge, then verifies the final push run if configured.
 - Both fast cadences let pending push runs from earlier merges in this batch
   continue. Other base runs and observed failures retain their usual guards.
+  When the last pull requests leave (an agent still busy), the push run of
+  the last merge made is the one verified before the queue finishes.
 - **Train** lands the batch with one CI run and one merge into the base: one
   writer on the base. It needs the merge method `merge`. Each PR must be open
   at its confirmed head, free of conflicts, with idle agents and green checks;

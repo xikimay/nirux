@@ -169,6 +169,21 @@ final class MergeQueueTrainTests: XCTestCase {
         XCTAssertFalse(queue.mutations.isEmpty, "the others went on")
     }
 
+    /// Busy riders leave the train each with its own agents named.
+    func testEachBusyRiderLeavesTheTrainWithItsOwnAgents() {
+        var world = world()
+        world.locals["feat/12"] = MergeQueue.LocalState(busyAgents: ["claude working in “web”"])
+        world.locals["feat/14"] = MergeQueue.LocalState(busyAgents: ["codex working in “api”"])
+        var github = TrainGitHub(world: world)
+        var queue = queue()
+        queue.drive(&github)
+        let left = queue.notes.map(\.message).filter { $0.contains(" left the train: ") }
+        XCTAssertEqual(left, [
+            "#12 left the train: An agent of #12 is still busy after 10 minutes: claude working in “web”.",
+            "#14 left the train: An agent of #14 is still busy after 10 minutes: codex working in “api”."
+        ])
+    }
+
     func testAPushAfterTheLastCheckStopsOnThatPullRequestOnceTheTrainLands() throws {
         var github = TrainGitHub(world: world())
         github.pushesAfterLanding = [14: c]

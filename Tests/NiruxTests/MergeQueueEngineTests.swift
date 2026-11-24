@@ -115,6 +115,29 @@ final class MergeQueueEngineTests: XCTestCase {
         }
     }
 
+    /// The last pull request of a fast cadence leaving busy: the post-merge
+    /// run of those merged before it is still checked before the queue ends.
+    func testAFastCadenceWhoseLastPullRequestLeavesBusyStillChecksThePostMergeRun() {
+        for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
+            var world = readyWorld()
+            world.pullRequests[53] = MQ.pullRequest(53, head: b)
+            world.checks[b] = MQ.checks(MQ.checkRun(id: 2))
+            world.locals["feat/53"] = MergeQueue.LocalState(busyAgents: ["claude working in “api”"])
+            if cadence == .expressDisjoint { world.behind = [a: 1, b: 2] }
+            var queue = fastQueue(cadence)
+            XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
+            world.merge(52, as: c)
+            queue.mutated(.sent)
+            queue.answer(world, until: { $0.pendingReads == [.pushRuns(commit: c)] })
+            XCTAssertTrue(queue.noted("#53 leaves the queue"), "\(cadence)")
+            XCTAssertEqual(queue.phase, .running, "\(cadence)")
+            world.pushRuns[c] = [MQ.run(22, head: c)]
+            queue.answer(world)
+            XCTAssertEqual(queue.phase, .finished, "\(cadence)")
+            XCTAssertTrue(queue.noted("Finished: 1 merged"), "\(cadence)")
+        }
+    }
+
     func testBatchStillUpdatesBehindBranchesBeforeMerging() {
         var world = readyWorld()
         world.behind[a] = 2
