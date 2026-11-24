@@ -124,6 +124,10 @@ extension NiruxApp {
         return isMainWindowInFront && shell?.findTargetColumn != nil
     }
 
+    @objc func showTokenUsage(_ sender: Any?) {
+        shell?.showUsageWindow()
+    }
+
     @objc func toggleEditorDiff(_ sender: Any?) {
         shell?.toggleEditorDiff()
     }
@@ -284,6 +288,7 @@ extension NiruxApp {
             action: #selector(toggleInactiveWorkspaces(_:)),
             keyEquivalent: ""
         )
+        viewMenu.addItem(withTitle: "Token Usage", action: #selector(showTokenUsage(_:)), shortcut: .usage)
         viewMenu.addItem(NSMenuItem.separator())
         viewMenu.addItem(
             withTitle: "Toggle Editor Diff",

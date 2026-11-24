@@ -178,8 +178,9 @@ public struct ClaudeTranscriptUsageParser: TranscriptLineParser, Sendable {
 extension TokenCounts {
     static let claudeKeys = ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
 
-    /// Nil unless the object carries at least one known count.
-    init?(claudeUsage usage: [String: Any]) {
+    /// A Claude API `usage` object's counts. Nil unless it carries at
+    /// least one known count.
+    public init?(claudeUsage usage: [String: Any]) {
         let fields = Self.claudeKeys.map { Self.count(usage[$0]) }
         guard fields.contains(where: { $0 != nil }) else { return nil }
         let cacheWrite = fields[2] ?? 0

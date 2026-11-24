@@ -539,6 +539,28 @@ final class CITriageInvestigationTests: XCTestCase {
         )
     }
 
+    /// The runs leave no transcript: each one's counts go to the usage log.
+    func testEachRunsTokenCountsGoToTheUsageLog() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("usage-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: folder) }
+        let account = ClaudeOneShotRunner.Account(checkSetup: { [cli] in .ready(cli) })
+        try await knowsSetup(account)
+        let time: TimeInterval = 1_795_262_400
+        let runner = ClaudeOneShotRunner(client: CITriageModel.client, account: account, runProcess: { _, _, _ in
+            Self.events([
+                #"{"type":"system","subtype":"init","apiKeySource":"none","model":"claude-sonnet-5-5"}"#,
+                #"{"type":"result","is_error":false,"result":"ok","usage":{"input_tokens":3,"cache_creation_input_tokens":2000,"output_tokens":40}}"#
+            ])
+        }, usageFolder: folder, now: { time })
+        let answer = await runner.answer(to: Data(), read: { $0 })
+        XCTAssertEqual(answer, "ok")
+        var log = TranscriptLineReader<NiruxOneShotUsageParser>(path: folder + "/" + NiruxOneShotLog.fileName(at: time))
+        _ = log.readAppended()
+        XCTAssertEqual(log.parser.events, [
+            UsageEvent(timestamp: time, model: "claude-sonnet-5-5", counts: TokenCounts(input: 3, output: 40, cacheWrite: 2_000))
+        ])
+    }
+
     func testAnAnswerTheClientCantReadCountsAsAFailedRun() async throws {
         let account = ClaudeOneShotRunner.Account(checkSetup: { [cli] in .ready(cli) })
         try await knowsSetup(account)
