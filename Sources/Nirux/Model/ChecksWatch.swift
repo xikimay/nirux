@@ -17,9 +17,9 @@ struct ChecksWatch: Equatable, Sendable {
     }
 
     struct Push: Equatable, Sendable {
-        /// The pull request's head when the push came (nil: none read): a
-        /// read still showing it is from before the push, green or not.
-        let headBefore: String?
+        /// The branch's remote-tracking tip after it (nil: unread): only a
+        /// read showing it says anything of its checks.
+        let head: String?
     }
 
     /// A read older than this tells nothing: an archived workspace's, or
@@ -45,7 +45,7 @@ struct ChecksWatch: Equatable, Sendable {
         for read in reads {
             // Until a read of the pushed head says its checks settled (a fetch moves the branch too).
             if let push = read.push {
-                let showsPush = read.pullRequest.map { push.headBefore == nil || $0.headRefOid != push.headBefore } ?? false
+                let showsPush = push.head != nil && read.pullRequest?.headRefOid == push.head
                 if !showsPush || read.pullRequest?.ciStatus.map({ Self.limit($0) != nil }) ?? true { awaits = true }
             }
             guard let pullRequest = read.pullRequest, pullRequest.state == .open, let readAt = read.readAt,

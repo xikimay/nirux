@@ -45,7 +45,7 @@ final class GitRefreshCoordinator {
         var lastGitDirectory: String?
         var lastPullRequestRefresh: TimeInterval?
         var pushFollowUpUntil: TimeInterval?
-        var headBeforePush: String?
+        var pushedHead: String?
         var pullRequestNotBefore: TimeInterval?
         var lastReadFailed = false
         var changedSinceDiffStats = false
@@ -141,7 +141,7 @@ final class GitRefreshCoordinator {
     /// A push less than `PullRequestRefreshPolicy.pushFollowUp` ago.
     func recentPush(_ workspace: WorkspaceState) -> ChecksWatch.Push? {
         guard let entry = entries[ObjectIdentifier(workspace)], (entry.pushFollowUpUntil ?? -.infinity) > clock() else { return nil }
-        return ChecksWatch.Push(headBefore: entry.headBeforePush)
+        return ChecksWatch.Push(head: entry.pushedHead)
     }
 
     func notePullRequestRefresh(_ workspace: WorkspaceState) {
@@ -192,7 +192,8 @@ final class GitRefreshCoordinator {
             entry.lastPullRequestRefresh = nil
             entry.pullRequestNotBefore = now + PullRequestRefreshPolicy.pushSettleDelay
             entry.pushFollowUpUntil = now + PullRequestRefreshPolicy.pushFollowUp
-            entry.headBeforePush = workspace.prInfo?.headRefOid
+            let layout = entry.watcher?.layout ?? GitRepositoryLayout.resolve(worktreeRoot: entry.watchedRoot ?? workspace.cwd)
+            entry.pushedHead = workspace.gitContext?.branchName.flatMap(layout.remoteTrackingTip(of:))
             return
         }
         entry.changedSinceDiffStats = true
