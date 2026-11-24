@@ -244,6 +244,8 @@ extension MergeQueue {
                 "• Open a pull request of the train into \(base) and wait for its required checks: \(checks).",
                 "• Merge it with a merge commit, pinned to its head (gh pr merge --merge --match-head-commit), if \(base) hasn’t "
                     + "moved and each pull request is still at its head. Each pull request then reads merged; the queue checks it.",
+                "• A red train closes, and its pull requests ride again in two halves, one train at a time. A pull request alone "
+                    + "on a red train leaves it; the others still ride.",
                 settings.postMergeWorkflow.map { "• Then wait up to \(settings.postMergeTimeoutMinutes) minutes for \($0), once." }
                     ?? "• No post-merge workflow: done once they read merged."
             ]

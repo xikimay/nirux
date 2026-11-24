@@ -390,11 +390,18 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   came in GitHub's wait) runs again, once, after its run's other jobs end.
   Other failures of one workflow run go to the CI triage (ci-failure-triage.md,
   rules only, no model) when it was on at Start: likely flaky, the run's failed
-  jobs run again, once; anything else stops the train, saying what the triage
-  did (a verdict, a run it couldn't read twice, the triage turned off). The
-  triage gets 3 minutes; the run's other jobs, 10 minutes. Each look at the train's
-  checks reads the PRs again: a
-  push to one stops the train at once. A stop the train finds itself (red
+  jobs run again, once; anything else makes the train red, saying what the
+  triage did (a verdict, a run it couldn't read twice, the triage turned off).
+  The triage gets 3 minutes; the run's other jobs, 10 minutes. A red train of
+  several PRs closes, its branch goes, and its batch rides again in two
+  halves, one at a time, the first half first (`nirux-train/<UTC time>-2`,
+  `-3`…), each on the base's tip as it is then. A PR alone on a red train
+  leaves it, and the halves after it still ride; the queue stops on it at the
+  end, a conflict first. The Start's first train, of one PR, stops the queue.
+  A train whose head has the tree of a train that failed holds the same files:
+  it doesn't run again and counts as red, so a first half that lands sends its
+  second half to a split (or out, alone) without a run. Each look at the
+  train's checks reads the PRs again: a push to one stops the train at once. A stop the train finds itself (red
   checks, the base moved, a push) closes the train's PR first; a user Stop or
   GitHub not answering leaves it open, and the stop names it (by its branch
   while GitHub hasn't shown its number). A Stop while the train is still being

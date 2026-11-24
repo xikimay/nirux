@@ -14,13 +14,15 @@ final class MergeQueueTrainTests: XCTestCase {
         var world = MQ.World()
         world.pullRequests[12] = MQ.pullRequest(12, head: a)
         world.pullRequests[14] = MQ.pullRequest(14, head: b)
+        world.pullRequests[16] = MQ.pullRequest(16, head: c)
         world.defaultChecks = MQ.checks(MQ.checkRun(id: 1))
         return world
     }
 
-    private func queue(triagesFlakes: Bool = false) -> MQ.Harness {
+    private func queue(_ numbers: [Int] = [12, 14], triagesFlakes: Bool = false) -> MQ.Harness {
+        let heads = [12: a, 14: b, 16: c]
         var queue = MQ.Harness(entries: [], cadence: .train)
-        queue.engine = MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(12, head: a), MQ.entry(14, head: b)],
+        queue.engine = MergeQueue.Engine(settings: MQ.settings(), entries: numbers.map { MQ.entry($0, head: heads[$0] ?? a) },
                                          cadence: .train, triagesFlakes: triagesFlakes)
         queue.start()
         return queue
@@ -119,19 +121,19 @@ final class MergeQueueTrainTests: XCTestCase {
 
     func testAStopTheTrainFindsClosesItsPullRequestAndAStopOfTheUserDoesNot() throws {
         var world = world()
-        world.checks[TrainGitHub.commit(2)] = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"))
+        world.checks[TrainGitHub.commit(1)] = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"))
         var red = TrainGitHub(world: world)
-        var first = queue()
+        var first = queue([12])
         first.drive(&red)
         let reason = try XCTUnwrap(first.stopReason)
         XCTAssertEqual(reason.kind, .checks)
-        XCTAssertTrue(reason.message.hasSuffix("failed on train #900 at 0000002. Nirux closed train #900. Nirux deleted the train’s branch \(branch)."), reason.message)
+        XCTAssertTrue(reason.message.hasSuffix("failed on train #900 at 0000001. Nirux closed train #900. Nirux deleted the train’s branch \(branch)."), reason.message)
         XCTAssertEqual(first.mutations.suffix(2), [.closePullRequest(number: 900), .deleteBranch(name: branch)])
         XCTAssertEqual(red.world.pullRequests[900]?.state, .closed)
 
         var refusing = TrainGitHub(world: world)
         refusing.refusesClose = true
-        var second = queue()
+        var second = queue([12])
         second.drive(&refusing)
         XCTAssertTrue(second.stopReason?.message.hasSuffix("Nirux couldn’t close train #900: HTTP 403: Resource not accessible. "
             + "Train #900 stays open on GitHub: close it rather than merge it.") == true, second.stopReason?.message ?? "")
@@ -353,9 +355,9 @@ final class MergeQueueTrainTests: XCTestCase {
 
     func testAStopWhileClosingTheTrainKeepsItsReasonAndATrainMergedOutsideIsLeftAlone() throws {
         var world = world()
-        world.checks[TrainGitHub.commit(2)] = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"))
+        world.checks[TrainGitHub.commit(1)] = MQ.checks(MQ.checkRun(id: 9, conclusion: "FAILURE"))
         var red = TrainGitHub(world: world)
-        var queue = queue()
+        var queue = queue([12])
         while queue.pendingMutation != .closePullRequest(number: 900) {
             if let mutation = queue.pendingMutation { queue.mutated(red.apply(mutation)) } else { queue.answer(red.world) }
         }
@@ -396,6 +398,90 @@ final class MergeQueueTrainTests: XCTestCase {
             + "train. #16 left the train too. Train #900 landed #12.")
     }
 
+    func testARedBatchRidesAgainInTwoHalvesAndTheSameFilesDontRunAgain() throws {
+        var github = TrainGitHub(world: world())
+        github.failing = [c]
+        var queue = queue([12, 14, 16])
+        queue.drive(&github)
+
+        let reason = try XCTUnwrap(queue.stopReason)
+        XCTAssertEqual(reason.kind, .checks)
+        XCTAssertEqual(reason.message, "Required check Tests / test failed on train #900 at 0000003. #16 on main at 0000006 gives "
+            + "the same files, so it wasn’t run again. It left the train. Train #901 landed #12, #14.")
+        XCTAssertEqual(queue.mutations.map(MergeQueue.Engine.describe), [
+            "creation of branch \(branch) at 0000000",
+            "merge of aaaaaaa into \(branch)",
+            "merge of bbbbbbb into \(branch)",
+            "merge of ccccccc into \(branch)",
+            "pull request of \(branch) into main",
+            "close of #900",
+            "deletion of branch \(branch)",
+            "creation of branch \(branch)-2 at 0000000",
+            "merge of aaaaaaa into \(branch)-2",
+            "merge of bbbbbbb into \(branch)-2",
+            "pull request of \(branch)-2 into main",
+            "merge of #901 at 0000005",
+            "deletion of branch \(branch)-2",
+            "creation of branch \(branch)-3 at 0000006",
+            "merge of ccccccc into \(branch)-3",
+            "deletion of branch \(branch)-3",
+        ])
+        XCTAssertEqual(github.trainNumber, 901, "two runs for three pull requests")
+        XCTAssertTrue(queue.noted("Splitting the batch: #12, #14 first, then #16"))
+        XCTAssertEqual(queue.engine.entries.map(\.step), [.done, .done, .stopped(reason)])
+        XCTAssertEqual(github.world.branches, [:])
+    }
+
+    func testAPullRequestAloneOnARedTrainLeavesItAndTheNextBatchStillRides() throws {
+        var github = TrainGitHub(world: world())
+        github.failing = [a]
+        var queue = queue()
+        queue.drive(&github)
+
+        let reason = try XCTUnwrap(queue.stopReason)
+        XCTAssertEqual(reason.message, "Required check Tests / test failed on train #901 at 0000003. It left the train. "
+            + "Train #902 landed #14.")
+        XCTAssertEqual(queue.engine.entries.map(\.step), [.stopped(reason), .done])
+        XCTAssertEqual([900, 901, 902].map { github.world.pullRequests[$0]?.state }, [.closed, .closed, .merged])
+        XCTAssertEqual(github.world.pullRequests[12]?.state, .open)
+        XCTAssertEqual(github.world.branches, [:])
+
+        // A conflict is still what the queue stops on, for Ask Agent to Resolve.
+        var conflicting = TrainGitHub(world: world())
+        conflicting.failing = [a]
+        conflicting.conflicts = [c]
+        var second = self.queue([12, 14, 16])
+        second.drive(&conflicting)
+        XCTAssertEqual(second.stopReason?.message, "#16 conflicts with main or with #12, #14, merged before it in the train. It left the "
+            + "train. #12 left the train too. Train #902 landed #14.")
+        let saved = MergeQueue.SavedQueue(engine: second.engine, dryRun: false, savedAt: Date())
+        XCTAssertEqual(MergeQueue.Conflict(saved: saved, repository: MQ.widgets, dryRun: false)?.number, 16)
+    }
+
+    func testAStopOrARefusedCloseWhileARedTrainSplitsStopsTheQueue() throws {
+        var github = TrainGitHub(world: world())
+        github.failing = [b]
+        var queue = queue()
+        queue.run(&github) { $0.pendingMutation == .closePullRequest(number: 900) }
+        queue.send(.stop)
+        queue.mutated(github.apply(.closePullRequest(number: 900)))
+        XCTAssertEqual(queue.pendingMutation, .deleteBranch(name: branch), "its branch goes once it is closed")
+        queue.mutated(github.apply(.deleteBranch(name: branch)))
+        let reason = try XCTUnwrap(queue.stopReason)
+        XCTAssertEqual(reason.message, "Stopped by the user.")
+        XCTAssertEqual(queue.engine.entries.map(\.step), [.stopped(reason), .stopped(reason)])
+        XCTAssertEqual(github.trainNumber, 900, "no train after it")
+
+        var refusing = TrainGitHub(world: world())
+        refusing.failing = [b]
+        refusing.refusesClose = true
+        var second = self.queue()
+        second.drive(&refusing)
+        XCTAssertEqual(second.stopReason?.message, "Required check Tests / test failed on train #900 at 0000002. Nirux couldn’t close "
+            + "train #900: HTTP 403: Resource not accessible. Train #900 stays open on GitHub: close it rather than merge it.")
+        XCTAssertEqual(refusing.trainNumber, 900)
+    }
+
     func testARedTrainTheTriageCallsFlakyIsRerunOnceAndOnlyThen() throws {
         let head = TrainGitHub.commit(2)
         var world = world()
@@ -432,9 +518,10 @@ final class MergeQueueTrainTests: XCTestCase {
         var off = TrainGitHub(world: world)
         var fourth = queue()
         let start = fourth.now
+        fourth.run(&off) { $0.pendingMutation == .closePullRequest(number: 900) }
+        XCTAssertLessThan(fourth.now - start, MergeQueue.Limits.pollInterval * 3, "it gave up at the first red look")
         fourth.drive(&off)
         XCTAssertEqual(fourth.stopReason?.kind, .checks)
-        XCTAssertLessThan(fourth.now - start, MergeQueue.Limits.pollInterval * 3, "it stopped at the first red look")
     }
 
     @MainActor
@@ -540,7 +627,7 @@ final class MergeQueueTrainTests: XCTestCase {
             queue.drive(&github)
             XCTAssertEqual(queue.stopReason?.kind, .checks, message)
             XCTAssertTrue(queue.stopReason?.message.hasPrefix(message) == true, queue.stopReason?.message ?? message)
-            XCTAssertFalse(queue.mutations.contains { if case .merge = $0 { true } else { false } }, message)
+            XCTAssertFalse(queue.mutations.contains { if case .merge(900, _, _) = $0 { true } else { false } }, message)
         }
 
         // Green when waited for, running again at the merge's look: it waits again.
@@ -715,12 +802,18 @@ final class MergeQueueTrainTests: XCTestCase {
 }
 
 /// GitHub's side of a train's calls: branches, merges made by `web-flow`,
-/// the train's pull request (#900), and pull requests marked merged once
-/// their heads land.
+/// the trains' pull requests (#900, #901…), and pull requests marked merged
+/// once their heads land.
 private struct TrainGitHub {
     var world: MQ.World
     /// Heads whose merge into the train conflicts (409).
     var conflicts: Set<String> = []
+    /// Heads that turn red any train holding them.
+    var failing: Set<String> = []
+    /// The last train's pull request.
+    private(set) var trainNumber = 899
+    /// The heads merged into each commit GitHub made: its files.
+    private var contents: [String: Set<String>] = [:]
     var marksMerged = true
     /// Agents' pushes once the train's pull request is open.
     var pushesAfterOpen: [Int: String] = [:]
@@ -767,13 +860,13 @@ private struct TrainGitHub {
         var shown = world
         if hidesTrainOnce, reads.contains(where: { if case .pullRequests = $0 { true } else { false } }) {
             hidesTrainOnce = false
-            shown.pullRequests[900] = nil
+            shown.pullRequests[trainNumber] = nil
         }
         if let stale = staleTip, stale.reads > 0, reads.contains(.branch("nirux-train/queue")) {
             shown.branches["nirux-train/queue"] = stale.tip
             staleTip = (stale.tip, stale.reads - 1)
         }
-        if let head = world.pullRequests[900]?.headOid, reads.contains(.checks(head)), !trainChecks.isEmpty {
+        if let head = world.pullRequests[trainNumber]?.headOid, reads.contains(.checks(head)), !trainChecks.isEmpty {
             shown.checks[head] = trainChecks.removeFirst()
         }
         return shown
@@ -788,24 +881,32 @@ private struct TrainGitHub {
             guard let tip = world.branches[branch] else { return .refused(status: 404, message: "Base does not exist") }
             if conflicts.contains(head) { return .refused(status: 409, message: "Merge conflict") }
             let commit = newCommit()
-            world.commits[commit] = MergeQueue.CommitInfo(sha: commit, committerLogin: committer, parents: [tip, head])
+            contents[commit] = contents[tip, default: []].union([head])
+            world.commits[commit] = MergeQueue.CommitInfo(sha: commit, committerLogin: committer, parents: [tip, head],
+                                                          tree: contents[commit]?.sorted().joined(separator: "+"))
             if lagReads > 0 { staleTip = (tip, lagReads) }
             world.branches[branch] = commit
             partCommits[head] = commit
             lastMerge = commit
         case .openPullRequest(_, let head, _, _):
             guard let tip = world.branches[head] else { return .refused(status: 422, message: "No commits between main and \(head)") }
-            world.pullRequests[900] = MQ.pullRequest(900, head: pushToTrainAfterOpen ?? tip, branch: head)
+            trainNumber += 1
+            world.pullRequests[trainNumber] = MQ.pullRequest(trainNumber, head: pushToTrainAfterOpen ?? tip, branch: head)
+            if !failing.isDisjoint(with: contents[tip, default: []]) {
+                world.checks[tip] = MQ.checks(MQ.checkRun(id: 9, runID: trainNumber, conclusion: "FAILURE"))
+            }
             for (number, pushed) in pushesAfterOpen { world.pullRequests[number] = MQ.pullRequest(number, head: pushed) }
         case .merge(let number, _, _):
             if refusesMerge { return .refused(status: 405, message: "At least 1 approving review is required") }
             let base = world.mainTip
             let merged = newCommit()
+            let landed = world.pullRequests[number].flatMap { contents[$0.headOid] } ?? []
+            contents[merged] = landed
             world.merge(number, as: merged)
             world.pushRuns[merged] = [MQ.run(77, head: merged)]
             for (number, pushed) in pushesAfterLanding { world.pullRequests[number] = MQ.pullRequest(number, head: pushed) }
             guard marksMerged else { break }
-            for (part, pullRequest) in world.pullRequests where pullRequest.isOpen {
+            for (part, pullRequest) in world.pullRequests where pullRequest.isOpen && landed.contains(pullRequest.headOid) {
                 guard let commit = partCommits[pullRequest.headOid] else { continue }
                 world.pullRequests[part] = MQ.pullRequest(part, head: pullRequest.headOid, state: .merged, mergeCommit: commit,
                                                           parents: [base, pullRequest.headOid])
