@@ -15,9 +15,9 @@ extension ColumnState {
     var cardLayers: [CALayer] { [view, light, shadow].compactMap { $0?.layer } }
 
     /// How high the card lies, from its state: over its neighbours while it
-    /// arrives or a move lifts it, unless it is going.
+    /// arrives, a move lifts it or the pointer holds it, unless it is going.
     func updateDepth() {
-        let depth: CGFloat = (isArriving || lifts > 0) && !isClosing ? 1 : 0
+        let depth: CGFloat = (isArriving || lifts > 0 || isDragged) && !isClosing ? 1 : 0
         cardLayers.forEach { $0.zPosition = depth }
     }
 
@@ -132,6 +132,61 @@ extension ColumnState {
             guard let self else { return }
             self.lifts -= 1
             self.updateDepth()
+        }
+    }
+
+    static let dragKey = "cardDrag"
+    /// How much larger a card the pointer holds shows.
+    static let dragScale: CGFloat = 1.02
+    static let dragScaleDuration: CFTimeInterval = 0.18
+
+    /// Taken by its header, the card rises over its neighbours to
+    /// `dragScale` of its size about its middle, its light and shadow with
+    /// it, until let go (`settle`). `animated`: from the scale it shows;
+    /// else there at once.
+    func raise(animated: Bool) {
+        isDragged = true
+        drags += 1
+        updateDepth()
+        scaleDrag(to: Self.dragScale, animated: animated)
+    }
+
+    /// Let go, the card comes back to its size over its neighbours while it
+    /// glides to its place (`glideDuration`), then lies with them, on time;
+    /// its scale stays another's that took it meanwhile.
+    func settle(animated: Bool) {
+        guard isDragged else { return }
+        isDragged = false
+        drags += 1
+        let drag = drags
+        lifts += 1
+        updateDepth()
+        scaleDrag(to: 1, animated: animated)
+        Self.afterCommit(animated ? Self.glideDuration : 0) { [weak self] in
+            guard let self else { return }
+            self.lifts -= 1
+            self.updateDepth()
+            guard self.drags == drag else { return }
+            self.cardLayers.forEach { $0.removeAnimation(forKey: Self.dragKey) }
+        }
+    }
+
+    /// The card's drag scale passes to `scale` about its middle from the one
+    /// it shows (at once when not `animated`), held there.
+    private func scaleDrag(to scale: CGFloat, animated: Bool) {
+        let size = view.frame.size
+        let held = view.layer?.animation(forKey: Self.dragKey) != nil
+        let shown = held ? (view.layer?.presentation()?.value(forKeyPath: "transform.scale.x") as? NSNumber).map { CGFloat($0.doubleValue) } ?? 1 : 1
+        for layer in cardLayers {
+            let scaling = CABasicAnimation(keyPath: "transform")
+            scaling.fromValue = CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: animated ? shown : scale))
+            scaling.toValue = CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: scale))
+            scaling.isAdditive = true
+            scaling.duration = Self.dragScaleDuration
+            scaling.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+            scaling.fillMode = .forwards
+            scaling.isRemovedOnCompletion = false
+            layer.add(scaling, forKey: Self.dragKey)
         }
     }
 
