@@ -35,6 +35,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     let agyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let followUpSwitch = NSSwitch()
     let relaunchSwitch = NSSwitch()
+    let modelsSwitch = NSSwitch()
     let tableView = NSTableView()
     let addButton = NSButton(title: "Add Variable", target: nil, action: nil)
     let removeButton = NSButton(title: "Remove", target: nil, action: nil)
@@ -63,12 +64,13 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fillPopups()
         tableView.reloadData()
         let writable = loaded.isWritable
-        for control in [agentPopup, claudePopup, codexPopup, agyPopup, followUpSwitch, relaunchSwitch, addButton, tableView]
+        for control in [agentPopup, claudePopup, codexPopup, agyPopup, followUpSwitch, relaunchSwitch, modelsSwitch, addButton, tableView]
             as [NSControl] {
             control.isEnabled = writable
         }
         followUpSwitch.state = loaded.defaults.followsUpPullRequests ? .on : .off
         relaunchSwitch.state = loaded.defaults.resumesWorkOnRelaunch ? .on : .off
+        modelsSwitch.state = loaded.defaults.splitsClaudeModels ? .on : .off
         updateRemoveButton()
         let banner = message ?? loaded.problem
         bannerLabel.stringValue = banner?.asWarning ?? ""
@@ -155,6 +157,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         var defaults = loaded.defaults
         // On is the default: nothing is written for it.
         defaults.resumeWorkOnRelaunch = sender.state == .on ? nil : false
+        guard defaults != loaded.defaults else { return }
+        write(defaults)
+    }
+
+    @objc func modelsChanged(_ sender: NSSwitch) {
+        var defaults = loaded.defaults
+        // On is the default: nothing is written for it.
+        defaults.claudeModelSplit = sender.state == .on ? nil : false
         guard defaults != loaded.defaults else { return }
         write(defaults)
     }
@@ -422,13 +432,34 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         relaunch.orientation = .horizontal
         relaunch.alignment = .top
         relaunch.spacing = 12
-        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, relaunch, environment])
+        modelsSwitch.target = self
+        modelsSwitch.action = #selector(modelsChanged(_:))
+        modelsSwitch.setAccessibilityLabel("Lead on Fable, subagents on Opus")
+        let modelsTitle = NSTextField(labelWithString: "Lead on Fable, subagents on Opus")
+        modelsTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        modelsTitle.setAccessibilityElement(false)
+        let modelsHint = Self.hint(
+            "Claude sessions started from now on: the Lead's own thread runs on Fable, and every subagent on Opus, "
+                + "whatever its call asks. Off, Claude Code picks as usual."
+        )
+        modelsHint.preferredMaxLayoutWidth = Self.contentWidth - 60
+        modelsSwitch.setAccessibilityHelp(modelsHint.stringValue)
+        let modelsTexts = NSStackView(views: [modelsTitle, modelsHint])
+        modelsTexts.orientation = .vertical
+        modelsTexts.alignment = .leading
+        modelsTexts.spacing = 3
+        let models = NSStackView(views: [modelsSwitch, modelsTexts])
+        models.orientation = .horizontal
+        models.alignment = .top
+        models.spacing = 12
+        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, relaunch, models, environment])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14
         stack.setCustomSpacing(22, after: formHint)
         stack.setCustomSpacing(14, after: followUp)
-        stack.setCustomSpacing(22, after: relaunch)
+        stack.setCustomSpacing(14, after: relaunch)
+        stack.setCustomSpacing(22, after: models)
         stack.edgeInsets = Self.insets
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
@@ -446,7 +477,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
             envHint.widthAnchor.constraint(equalToConstant: Self.contentWidth),
             formHint.widthAnchor.constraint(equalToConstant: Self.contentWidth),
             followUpHint.widthAnchor.constraint(equalToConstant: Self.contentWidth - 60),
-            relaunchHint.widthAnchor.constraint(equalToConstant: Self.contentWidth - 60)
+            relaunchHint.widthAnchor.constraint(equalToConstant: Self.contentWidth - 60),
+            modelsHint.widthAnchor.constraint(equalToConstant: Self.contentWidth - 60)
         ])
     }
 

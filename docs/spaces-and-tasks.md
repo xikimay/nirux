@@ -17,7 +17,7 @@ A space's settings are in the Settings window (`Cmd+,`), under Nirux's own: the 
 | Pane | What it sets |
 | --- | --- |
 | General | name, color, repositories and folders, the default one, each repository's setup script |
-| Defaults | the agent new tasks preselect, the Claude Code and Codex modes, the pull request follow-up (on by default), environment variables for new shells |
+| Defaults | the agent new tasks preselect, the Claude Code and Codex modes, the pull request follow-up (on by default), the Claude models (on by default), environment variables for new shells |
 | Safety | what the space's Claude Code sessions are refused or trusted with ([below](#safety)) |
 | Lead | the space's [Lead](#the-lead) |
 | Brief | rules given to every Claude Code and Codex session the space starts |
@@ -28,6 +28,8 @@ A space's settings are in the Settings window (`Cmd+,`), under Nirux's own: the 
 The agent picked in the New sheet overrides the space's default agent. The space's Claude Code and Codex modes override those of Settings, unless they are left on Same as Settings.
 
 Environment values are literal (`$PATH` isn't expanded) and names starting with `NIRUX_` are reserved. They are kept in a file only you can read.
+
+**Lead on Fable, subagents on Opus** (Defaults, on by default) sets the models of the Claude Code sessions the space starts from then on: the Lead's own conversation runs on Fable (`ANTHROPIC_MODEL`), and every subagent on Opus, whatever its call or its agent file asks (`CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`). A model you pick for a task, or one of these variables set in the space's environment, comes first. Off, Claude Code picks as usual. Subagents have a soft cap of 5 per session: from the fifth, the row's token count turns to a warning, and its tooltip says to hand separate work to a task.
 
 A repository's setup script runs once in each new worktree made for a task, before the agent starts, with `/bin/sh -e` and no input. A worktree made by **Existing Branch…** runs none. If the script fails, Nirux notifies you and the agent still starts.
 

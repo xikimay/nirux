@@ -192,6 +192,8 @@ extension MenuBarFlowTests {
             let environment = lead.terminalEnvironment(agentUUID: UUID().uuidString)
             XCTAssertEqual(environment["NIRUX_LEAD"], "1")
             XCTAssertEqual(environment["NIRUX_MISSION_HANDOFFS"], "1", "its tasks report to it with handoffs off")
+            XCTAssertEqual(environment["ANTHROPIC_MODEL"], "fable", "the space's Claude models: the Lead on Fable")
+            XCTAssertEqual(environment["CLAUDE_CODE_SUBAGENT_MODEL"], "opus")
             // The Board, without settings yet, doesn't open them over Claude.
             RunLoop.main.run(until: Date().addingTimeInterval(1))
             XCTAssertNil(shell.spaceSettings)
@@ -202,6 +204,8 @@ extension MenuBarFlowTests {
             XCTAssertEqual(plainEnvironment["NIRUX_LEAD"], "", "blank, not inherited")
             XCTAssertEqual(plainEnvironment["CLAUDE_CODE_ENTRYPOINT"], "", "an SDK run's would make its agents headless")
             XCTAssertNil(plainEnvironment["NIRUX_MISSION_HANDOFFS"])
+            XCTAssertNil(plainEnvironment["ANTHROPIC_MODEL"], "a task keeps its own model")
+            XCTAssertEqual(plainEnvironment["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"], "1", "its subagents on Opus all the same")
             XCTAssertTrue(bar.isEnabled(["Space", "Start a Lead"]))
             bar.run(["Space", "Lead"])
             XCTAssertTrue(shell.activeWorkspace === lead)

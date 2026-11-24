@@ -40,6 +40,9 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Space Settings › Defaults, "Resume work after a relaunch"
     /// (`RelaunchResume`). Nil: on; only false turns it off.
     var resumeWorkOnRelaunch: Bool?
+    /// Space Settings › Defaults, "Lead on Fable, subagents on Opus". Nil:
+    /// on.
+    var claudeModelSplit: Bool?
     /// Space Settings › Safety, one per `ClaudeSpaceSettings.Part`. Nil:
     /// its default.
     var claudeTrustsRepositories: Bool?
@@ -57,6 +60,23 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Whether Nirux types the rounds its tasks' pull requests need.
     var followsUpPullRequests: Bool { prFollowUp ?? true }
     var resumesWorkOnRelaunch: Bool { resumeWorkOnRelaunch ?? true }
+    var splitsClaudeModels: Bool { claudeModelSplit ?? true }
+
+    /// What the switch sets in a new terminal (Claude Code reads it as it
+    /// starts): every subagent on Opus, whatever its call or agent file asks,
+    /// and the Lead's own thread on Fable.
+    func claudeModelEnvironment(isLead: Bool) -> [String: String] {
+        guard splitsClaudeModels else { return [:] }
+        var environment = ["CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"]
+        if isLead { environment["ANTHROPIC_MODEL"] = "fable" }
+        return environment
+    }
+
+    /// The space's variables, then the model switch's: a variable the user
+    /// set for the space wins.
+    func shellEnvironment(isLead: Bool) -> [String: String] {
+        effectiveEnvironment.merging(claudeModelEnvironment(isLead: isLead)) { space, _ in space }
+    }
 
     func isOn(_ part: ClaudeSpaceSettings.Part) -> Bool { self[keyPath: part.key] ?? part.isOnByDefault }
 
@@ -94,6 +114,7 @@ struct SpaceDefaults: Equatable, Sendable {
             (\.leadDailyPass, .leadDailyPass, false),
             (\.prFollowUp, .prFollowUp, false),
             (\.resumeWorkOnRelaunch, .resumeWorkOnRelaunch, false),
+            (\.claudeModelSplit, .claudeModelSplit, false),
             (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
             (\.claudeDeniesIrreversible, .claudeDeniesIrreversible, true),
             (\.claudeSandbox, .claudeSandbox, true)
@@ -207,6 +228,7 @@ extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion, agent, leadAgent, claudeLaunchMode, codexLaunchMode, agyLaunchMode, environment
         case leadStartsTasks, leadStartsMergeQueue, leadStartsMergeQueueWithoutLocalReview, leadDailyPass, leadDailyPassHour, prFollowUp, resumeWorkOnRelaunch
+        case claudeModelSplit
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
 
@@ -233,6 +255,7 @@ extension SpaceDefaults: Codable {
         leadDailyPassHour = ((try? container.decodeIfPresent(Int.self, forKey: .leadDailyPassHour)) ?? nil).flatMap { (0...23).contains($0) ? $0 : nil }
         prFollowUp = (try? container.decodeIfPresent(Bool.self, forKey: .prFollowUp)) ?? nil
         resumeWorkOnRelaunch = (try? container.decodeIfPresent(Bool.self, forKey: .resumeWorkOnRelaunch)) ?? nil
+        claudeModelSplit = (try? container.decodeIfPresent(Bool.self, forKey: .claudeModelSplit)) ?? nil
         claudeTrustsRepositories = (try? container.decodeIfPresent(Bool.self, forKey: .claudeTrustsRepositories)) ?? nil
         claudeDeniesIrreversible = (try? container.decodeIfPresent(Bool.self, forKey: .claudeDeniesIrreversible)) ?? nil
         claudeSandbox = (try? container.decodeIfPresent(Bool.self, forKey: .claudeSandbox)) ?? nil
@@ -260,6 +283,7 @@ extension SpaceDefaults: Codable {
         try container.encodeIfPresent(leadDailyPassHour, forKey: .leadDailyPassHour)
         try container.encodeIfPresent(prFollowUp, forKey: .prFollowUp)
         try container.encodeIfPresent(resumeWorkOnRelaunch, forKey: .resumeWorkOnRelaunch)
+        try container.encodeIfPresent(claudeModelSplit, forKey: .claudeModelSplit)
         try container.encodeIfPresent(claudeTrustsRepositories, forKey: .claudeTrustsRepositories)
         try container.encodeIfPresent(claudeDeniesIrreversible, forKey: .claudeDeniesIrreversible)
         try container.encodeIfPresent(claudeSandbox, forKey: .claudeSandbox)

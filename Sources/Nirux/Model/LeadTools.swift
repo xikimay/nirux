@@ -154,7 +154,8 @@ enum LeadTools {
                     with no git, branch or pull request: repo "\(noRepository)", or any task in a space without a \
                     repository. Never "\(noRepository)" for work that reads or changes a repository of this space: \
                     start it in that repository. When the user turned "Starts tasks without asking" off, it opens \
-                    the New sheet filled in for the user to start instead.
+                    the New sheet filled in for the user to start instead. Separate work goes to a task, not to \
+                    your subagents: past 5 in a session, Nirux flags your row.
                     """,
                 properties: startTaskProperties([
                     "description": ["type": "string", "description": "What the task must do, as you would tell the agent."],

@@ -43,6 +43,26 @@ final class UsageDisplayTests: XCTestCase {
         XCTAssertTrue(lines.contains("Past 280k of context: 98%"))
     }
 
+    /// From the soft cap, the row warns and its tooltip says why; under it,
+    /// it says nothing of subagents.
+    func testARowWarnsOnceItsSessionReachesTheSubagentsSoftCap() throws {
+        func usage(subagents: Int) throws -> SidebarTaskUsage {
+            let session = UsageSession(
+                key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "task"), contextTokens: 90_000,
+                subagents: subagents, events: [event(60, input: 90_000, context: 90_000)]
+            )
+            return try XCTUnwrap(SidebarTaskUsage(UsageReport(sessions: [session], now: now), taskID: "task"))
+        }
+        let under = try usage(subagents: SidebarTaskUsage.subagentSoftCap - 1)
+        XCTAssertFalse(under.isWarning)
+        XCTAssertFalse(under.toolTip(now: now).contains("subagents in its latest session"))
+        let capped = try usage(subagents: SidebarTaskUsage.subagentSoftCap)
+        XCTAssertTrue(capped.isWarning)
+        XCTAssertFalse(capped.isContextHeavy)
+        XCTAssertTrue(capped.toolTip(now: now).components(separatedBy: "\n")
+            .contains("5 subagents in its latest session: past 5, separate work costs less as a task"))
+    }
+
     func testTheUsageWindowRanksTasksAndCountsWhatTheyLeaveOut() {
         let sessions = [
             UsageSession(key: UsageSessionKey(.claude, "a"), attribution: UsageAttribution(spaceID: "space", taskID: "lead"),

@@ -242,6 +242,27 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.dailyPassIsOn)
     }
 
+    /// On unless the file says: every subagent on Opus, the Lead's thread
+    /// on Fable. A variable the user set for the space wins; a file Nirux
+    /// can't read leaves Claude Code's own choice.
+    func testTheClaudeModelSwitch() throws {
+        let on = SpaceDefaults()
+        XCTAssertTrue(on.splitsClaudeModels)
+        XCTAssertEqual(on.claudeModelEnvironment(isLead: false), ["CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"])
+        XCTAssertEqual(on.claudeModelEnvironment(isLead: true)["ANTHROPIC_MODEL"], "fable")
+        var mine = on
+        mine.environment = [SpaceDefaults.EnvironmentVariable(name: "CLAUDE_CODE_SUBAGENT_MODEL", value: "sonnet")]
+        XCTAssertEqual(mine.shellEnvironment(isLead: false)["CLAUDE_CODE_SUBAGENT_MODEL"], "sonnet")
+        XCTAssertEqual(mine.shellEnvironment(isLead: false)["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"], "1")
+
+        let off = SpaceDefaultsStore.decode(Data(#"{"claudeModelSplit": false}"#.utf8))
+        XCTAssertEqual(off.status, .loaded)
+        XCTAssertEqual(off.defaults.claudeModelEnvironment(isLead: true), [:])
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["claudeModelSplit"] as? Bool, false)
+        XCTAssertEqual(SpaceDefaultsStore.unreadDefaults.claudeModelEnvironment(isLead: true), [:])
+    }
+
     /// A deleted space's defaults, setup scripts, proposed rules and logs go;
     /// its brief stays, and its Claude settings stay empty for the launch
     /// lines that name them.
