@@ -323,7 +323,7 @@ final class MergeQueueController {
         runsElsewhere = false
         let driver = MergeQueueDriver(
             engine: MergeQueue.Engine(settings: settings, entries: entries, cadence: cadence, startedByLead: startedByLead,
-                                      trainBranch: MergeQueue.trainBranch(at: clock.date())),
+                                      trainBranch: MergeQueue.trainBranch(at: clock.date()), triagesFlakes: local.isTriageOn()),
             client: client, local: local, clock: clock
         )
         driver.onUpdate = { [weak self] engine, notes in self?.update(engine, notes: notes) }

@@ -19,6 +19,13 @@ struct MergeQueueLocalAccess {
     var busyAgents: @MainActor (_ worktrees: [String], _ allWorktrees: [String]) -> [String]
     /// The tasks open in the space, for the review passes they ran.
     var reviewTasks: @MainActor () -> [MergeQueue.ReviewTask]
+    /// The CI triage's verdict on a failed run (docs/design/ci-failure-triage.md):
+    /// unsure where the app gives none.
+    var triage: @MainActor (_ run: CIFailure.Run, _ pullRequest: Int, _ checks: Set<String>) async -> MergeQueue.TriageAnswer = { _, _, _ in
+        .off
+    }
+    /// Whether the CI triage is on: off, a red train stops at once.
+    var isTriageOn: @MainActor () -> Bool = { false }
 }
 
 /// The queue's clocks: `systemUptime` for every wait and timeout (it stops
@@ -94,11 +101,27 @@ final class MergeQueueDriver {
         let settings = engine.settings
         let folders = reads.contains(where: Self.isLocal) ? local.folders() : []
         let inspect = local.inspect
+        let triages = reads.filter(Self.isTriage)
         Self.runOffMain({
-            Self.fetch(reads, client: client, settings: settings, folders: folders, inspect: inspect)
+            Self.fetch(reads.filter { !Self.isTriage($0) }, client: client, settings: settings, folders: folders, inspect: inspect)
         }, then: { [weak self] fetched in
-            self?.finishReads(fetched, id: id)
+            guard let self, !triages.isEmpty, fetched.error == nil else { self?.finishReads(fetched, id: id); return }
+            let triage = self.local.triage
+            let repository = "\(settings.gitHubRepository.host)/\(settings.repository)"
+            Task { @MainActor [weak self] in
+                var fetched = fetched
+                for read in triages {
+                    guard case .triage(let run, let pullRequest, let checks) = read else { continue }
+                    fetched.answers[read] = .triage(await triage(CIFailure.Run(repository: repository, id: run), pullRequest, Set(checks)))
+                }
+                self?.finishReads(fetched, id: id)
+            }
         })
+    }
+
+    private nonisolated static func isTriage(_ read: MergeQueue.Read) -> Bool {
+        if case .triage = read { return true }
+        return false
     }
 
     private struct Fetched: Sendable {
