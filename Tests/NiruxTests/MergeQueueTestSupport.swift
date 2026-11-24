@@ -114,8 +114,8 @@ enum MQ {
             graphQLRemaining: 5000, graphQLReset: Date(timeIntervalSince1970: 0)
         )
         var baseMergeQueue = false
-        /// The base's rules require checks: GitHub's auto-merge waits for them.
-        var baseRequiresChecks = true
+        /// The checks the base's rules require: GitHub's auto-merge waits for those.
+        var baseRequiredChecks = ["test"]
         /// The CI triage's answer on any failed run.
         var triage = MergeQueue.TriageAnswer.off
 
@@ -124,7 +124,7 @@ enum MQ {
             case .auth: return .signedIn
             case .rateLimit: return .rateLimit(rateLimit)
             case .baseMergeQueue: return .baseMergeQueue(baseMergeQueue)
-            case .baseRequiresChecks: return .baseRequiresChecks(baseRequiresChecks)
+            case .baseRequiredChecks: return .baseRequiredChecks(baseRequiredChecks)
             case .pullRequest(let number): return pullRequests[number].map { .pullRequest($0) }
             case .pullRequestDetails(let number):
                 return .pullRequestDetails(details[number] ?? MergeQueue.PullRequestDetails(

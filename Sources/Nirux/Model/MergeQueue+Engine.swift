@@ -93,9 +93,9 @@ extension MergeQueue {
         /// a run still going at Start or rerun since included, stops the
         /// queue before its next merge.
         private var baseRunsFailedAtStart: Set<String> = []
-        /// The base's rules require checks (`Read.baseRequiresChecks`): with
-        /// none, `gh pr merge --auto` would merge at once (gh 2.103).
-        private var baseRequiresChecks = false
+        /// The checks the base's rules require (`Read.baseRequiredChecks`):
+        /// GitHub's auto-merge waits for these, not for the board's list.
+        private var baseRequiredChecks: [String] = []
         private var outbox = Output()
 
         init(
@@ -377,7 +377,7 @@ extension MergeQueue {
             phase = .running
             note("Started: \(entries.map { "#\($0.number)" }.joined(separator: ", ")) into \(settings.baseBranch) of "
                 + "\(settings.repository) (\(cadence.title))")
-            read([.auth, .rateLimit, .baseMergeQueue] + (armsAutoMerge ? [.baseRequiresChecks] : [])
+            read([.auth, .rateLimit, .baseMergeQueue] + (armsAutoMerge ? [.baseRequiredChecks] : [])
                  + (settings.postMergeWorkflow != nil ? [.baseRuns] : []), for: .start)
         }
 
@@ -550,7 +550,7 @@ extension MergeQueue {
                 baseRunsFailedAtStart = Set(runs.filter { GitHub.isFailedRun($0.conclusion) }.map(\.attemptKey))
             }
             // Unread, it isn't armed: the queue merges itself.
-            baseRequiresChecks = answers.baseRequiresChecks ?? false
+            baseRequiredChecks = answers.baseRequiredChecks ?? []
             guard !mergeQueue else {
                 return stop(StopReason(kind: .setup, message: "\(settings.baseBranch) requires GitHub’s merge queue: gh pr merge "
                     + "would queue pull requests there instead of merging them, without waiting for the post-merge workflow. "
@@ -817,16 +817,19 @@ extension MergeQueue {
         }
 
         private func mayArm(_ index: Int) -> Bool {
-            armsAutoMerge && cadence != .train && baseRequiresChecks && entries[index].autoMerge == nil
+            armsAutoMerge && cadence != .train && !baseRequiredChecks.isEmpty && entries[index].autoMerge == nil
         }
 
-        /// GitHub's auto-merge only while it can't merge at once (`gh pr
-        /// merge --auto` merges a pull request GitHub already finds
-        /// mergeable): the base requires checks and every one of this head's
-        /// has started (a "(selected)" run alone waits for the full run's
-        /// label), and no post-merge run goes on the base (the queue's own wait).
-        private func armsNow(index: Int, verdict: ChecksVerdict, baseRuns: [GitHub.WorkflowRun]?) -> Bool {
-            guard mayArm(index), !verdict.pending.isEmpty, !verdict.pending.contains(where: { $0.hasSuffix("(not started)") })
+        /// GitHub's auto-merge only while GitHub can't merge yet (it refuses to
+        /// arm one it can merge now, `enablePullRequestAutoMerge`): a check
+        /// the base's rules name runs on this head and all of them started (a
+        /// "(selected)" run alone waits for the full run's label; a rerun asked
+        /// for hasn't started), and no post-merge run goes on the base (the
+        /// queue's own wait).
+        private func armsNow(index: Int, checks: CommitChecks, baseRuns: [GitHub.WorkflowRun]?) -> Bool {
+            let pending = MergeQueue.judge(checks, required: baseRequiredChecks, replaced: clocks.replacedChecks).pending
+            guard mayArm(index), !pending.isEmpty,
+                  !pending.contains(where: { $0.hasSuffix("(not started)") || $0.hasSuffix("(rerun not started)") })
             else { return false }
             guard settings.postMergeWorkflow != nil else { return true }
             return baseRuns.map { $0.allSatisfy(\.isCompleted) } ?? false
@@ -875,7 +878,7 @@ extension MergeQueue {
                         return mutate(.addLabel(number: entries[index].number, label: MergeQueue.fullRunLabel), for: .fullRun(head: head))
                     }
                 }
-                if armsNow(index: index, verdict: verdict, baseRuns: baseRuns) {
+                if armsNow(index: index, checks: checks, baseRuns: baseRuns) {
                     // Counted as armed from the call on: a Stop meanwhile calls it off.
                     entries[index].autoMerge = Entry.AutoMerge(head: head, isArmed: true)
                     return mutate(.armAutoMerge(number: entries[index].number, head: head, method: settings.mergeMethod), for: .arm(head: head))
@@ -1398,8 +1401,8 @@ extension Dictionary where Key == MergeQueue.Read, Value == MergeQueue.ReadResul
         return nil
     }
 
-    var baseRequiresChecks: Bool? {
-        if case .baseRequiresChecks(let value)? = self[.baseRequiresChecks] { return value }
+    var baseRequiredChecks: [String]? {
+        if case .baseRequiredChecks(let names)? = self[.baseRequiredChecks] { return names }
         return nil
     }
 

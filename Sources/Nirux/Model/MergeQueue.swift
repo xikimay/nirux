@@ -213,9 +213,9 @@ extension MergeQueue {
         case rateLimit
         /// Whether the base branch requires GitHub's merge queue.
         case baseMergeQueue
-        /// Whether the base branch's rules require status checks: only then is
-        /// GitHub's auto-merge a backstop, not a merge at once.
-        case baseRequiresChecks
+        /// The checks the base branch's rules require, by name: GitHub's
+        /// auto-merge waits for those, not for the board's list.
+        case baseRequiredChecks
         case pullRequest(Int)
         /// Its title and the files it changes: the confirmation sheet's
         /// only; the engine never asks.
@@ -245,7 +245,7 @@ extension MergeQueue {
         case signedIn
         case rateLimit(RateLimit)
         case baseMergeQueue(Bool)
-        case baseRequiresChecks(Bool)
+        case baseRequiredChecks([String])
         case pullRequest(PullRequestSnapshot)
         case pullRequestDetails(PullRequestDetails)
         case checks(CommitChecks)

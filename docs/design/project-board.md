@@ -330,13 +330,15 @@ anchors don't appear. Decided with the user on 2026-11-08:
   2026-11-24 a ruleset requires status checks on `main` (no classic branch
   protection) and auto-merge is on. The queue's own checks still fail closed.
 - **Since 2026-11-24, auto-merge is the queue's backstop** (the user turned
-  `allow_auto_merge` on): before each pull request's checks wait, the queue
-  arms `gh pr merge <n> --<method> --auto --match-head-commit <head>`, so it
-  lands with the Mac asleep or Nirux closed. `gh pr merge --auto` merges at
-  once a pull request GitHub already finds mergeable (gh 2.103), so the queue
-  arms only while it can't: the base's rules require checks (rules API), this
-  head's checks run, and no post-merge run goes on the base. Green already, it
-  merges itself after its own gates. GitHub's merge at the armed head is the
+  `allow_auto_merge` on): while a pull request's checks run, the queue arms
+  GitHub's auto-merge at its head (GraphQL `enablePullRequestAutoMerge` with
+  `expectedHeadOid`), so it lands with the Mac asleep or Nirux closed. Never
+  `gh pr merge --auto`: it merges at once a pull request GitHub already finds
+  mergeable (gh 2.103), where the mutation refuses it. The queue arms only
+  while the checks the base's rules name (rules API, not the board's list)
+  have all started, one of them still runs (a rerun asked for counts as not
+  started), and no post-merge run goes on the base. Green already or refused,
+  it merges itself after its own gates. GitHub's merge at the armed head is the
   queue's landing; the post-merge step follows as after its own merge. The
   guards GitHub doesn't keep once armed (an agent back at work, a red check
   that isn't required, a nightly started meanwhile) are traded for that. A head the

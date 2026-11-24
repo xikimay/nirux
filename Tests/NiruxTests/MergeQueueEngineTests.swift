@@ -1231,7 +1231,7 @@ final class MergeQueueEngineTests: XCTestCase {
             var world = MQ.World()
             world.pullRequests[52] = MQ.pullRequest(52, head: a)
             world.checks[a] = checks
-            world.baseRequiresChecks = requiresChecks
+            world.baseRequiredChecks = requiresChecks ? ["test"] : []
             world.baseRuns = baseRuns
             return world
         }
@@ -1286,6 +1286,36 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertEqual(harness.engine.entries[0].autoMerge, MergeQueue.Entry.AutoMerge(head: c, isArmed: true))
         harness.answer(world)
         XCTAssertNil(harness.pendingMutation, "no new arm over it")
+    }
+
+
+    /// GitHub's auto-merge waits for the checks the base's rules name, not
+    /// the board's: a board check outside them running is no reason to arm
+    /// (GitHub could merge now), and a rerun asked for hasn't started.
+    func testAutoMergeFollowsTheChecksTheBaseRulesName() {
+        let settings = MQ.settings(requiredChecks: ["test", "lint"], postMergeWorkflow: nil)
+        let lintFailed = MQ.checkRun(id: 4, name: "lint", runID: 901, conclusion: "FAILURE")
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.baseRequiredChecks = ["test"]
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1), MQ.checkRun(id: 4, name: "lint", runID: 901, status: "IN_PROGRESS", conclusion: nil))
+        var wider = MQ.Harness(settings: settings, entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        wider.start()
+        wider.answer(world) { $0.pendingMutation != nil || $0.pendingDelay == 20 }
+        XCTAssertNil(wider.pendingMutation, "the rules' check is green: GitHub could merge now")
+
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil), lintFailed)
+        var rerun = MQ.Harness(settings: settings, entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        rerun.start()
+        rerun.answer(world) { $0.pendingMutation != nil }
+        XCTAssertEqual(rerun.pendingMutation, .rerun(runID: 901))
+        rerun.mutated(.sent)
+        rerun.answer(world)
+        XCTAssertNil(rerun.pendingMutation, "lint's rerun hasn't started")
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil), lintFailed,
+                                    MQ.checkRun(id: 5, name: "lint", runID: 901, status: "IN_PROGRESS", conclusion: nil))
+        rerun.answer(world) { $0.pendingMutation != nil }
+        XCTAssertEqual(rerun.pendingMutation, .armAutoMerge(number: 52, head: a, method: .merge))
     }
 
 }

@@ -101,11 +101,6 @@ final class MergeQueueFlowTests: XCTestCase {
                 pullRequests[number]?.autoMerge = false
                 disarmed.append(number)
                 return ok("")
-            case "pr" where arguments.count > 2 && arguments[1] == "merge" && arguments.contains("--auto"):
-                // Armed only: the checks of this world never pass while it waits.
-                guard let number = Int(arguments[2]) else { return ok("") }
-                pullRequests[number]?.autoMerge = true
-                return ok("")
             case "pr" where arguments.count > 2 && arguments[1] == "merge":
                 guard let number = Int(arguments[2]), var pullRequest = pullRequests[number],
                       let index = arguments.firstIndex(of: "--match-head-commit"), arguments[index + 1] == pullRequest.head
@@ -132,7 +127,18 @@ final class MergeQueueFlowTests: XCTestCase {
                 """)
             case "api":
                 if joined.contains("rate_limit") { return ok(MergeQueueGitHubTests.rateLimit) }
-                if joined.contains("/rules/branches/") { return ok(#"[{"type":"required_status_checks"}]"#) }
+                if joined.contains("/rules/branches/") {
+                    return ok(#"[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]"#)
+                }
+                if joined.contains("{ id }"), let number = value(after: "-F", prefix: "number=").flatMap(Int.init) {
+                    return ok(#"{"data":{"repository":{"pullRequest":{"id":"PR_\#(number)"}}}}"#)
+                }
+                if joined.contains("enablePullRequestAutoMerge"),
+                   let number = value(after: "-f", prefix: "pullRequestId=PR_").flatMap(Int.init) {
+                    // Armed only: the checks of this world never pass while it waits.
+                    pullRequests[number]?.autoMerge = true
+                    return ok(#"{"data":{"enablePullRequestAutoMerge":{"pullRequest":{"number":\#(number)}}}}"#)
+                }
                 if joined.contains("mergeQueue(branch") { return ok(#"{"data":{"repository":{"mergeQueue":null}}}"#) }
                 if joined.contains("files(first:"), let number = value(after: "-F", prefix: "number=").flatMap(Int.init),
                    let pr = pullRequests[number] {
