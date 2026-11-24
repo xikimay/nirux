@@ -59,7 +59,9 @@ jobs:
 
   test:
     if: github.event.action != 'labeled' || github.event.label.name == 'full-test'
-    name: ${{ (startsWith(github.head_ref, 'nirux-train/') || contains(github.event.pull_request.labels.*.name, 'full-test')) && 'test' || 'test (selected)' }}
+    # Never "test" in a run another label skips: a skipped check would pass
+    # the ruleset.
+    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'full-test') && (startsWith(github.head_ref, 'nirux-train/') || contains(github.event.pull_request.labels.*.name, 'full-test')) && 'test' || 'test (selected)' }}
     runs-on: macos-15
     # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift
     # 6.1): libghostty-spm 2.2 needs Swift tools 6.2.
