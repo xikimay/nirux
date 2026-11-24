@@ -65,7 +65,7 @@ extension NiruxShellView {
             claudeMode: defaults.claudeLaunchMode ?? Self.currentClaudeLaunchMode(),
             codexMode: defaults.codexLaunchMode ?? Self.currentCodexLaunchMode(),
             safety: ClaudeSpaceSettings.file(defaults, repositories: ClaudeSpaceSettings.repositories(anchors),
-                                             userEnvironment: Self.claudeUserEnvironment())
+                                             userEnvironment: Self.claudeUserEnvironment(), hooks: MissionWaitHook.claudeHooks())
         )
         lead.leadOptionsCache = (options, now)
         return options

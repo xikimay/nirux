@@ -28,7 +28,8 @@ enum NiruxMCPServer {
         You can hand part of your task to another agent: start_task starts a sub-task under your task, in its \
         own worktree; list_tasks shows your sub-tasks; tell gives one more work; reply answers their questions, \
         and ask_user hands one you can't settle to the user. Their questions and \
-        results are typed into your prompt as [Nirux Mission] messages, only once your turn is over: after \
+        results arrive as [Nirux Mission] messages, typed into your prompt once your turn is over or brought in \
+        by Nirux's hook: after \
         starting sub-tasks, go on with your own work or end your turn; don't poll or sleep. Report your own \
         result only once the sub-tasks you need are done. A sub-task can't start sub-tasks of its own. Where \
         start_task answers that the workspace isn't a task, use the nirux-worktree skill. When you ask the agent \
@@ -48,7 +49,7 @@ enum NiruxMCPServer {
         You are the Lead of this Nirux space. Read list_tasks first. Use tell for follow-ups and reviews, including the user's tasks. \
         Group related fixes. Start tasks only with start_task, one repository per task. Use repo "none" for work needing no repository. \
         Don't edit, commit or switch branches in this checkout. End your turn after starting or telling tasks. Their questions and results \
-        arrive as [Nirux Mission] messages while you are idle. Don't poll or sleep. Use reply when the brief, code or conversation answers \
+        arrive as [Nirux Mission] messages, even mid-turn. Don't poll or sleep. Use reply when the brief, code or conversation answers \
         a question. Otherwise use ask_user and explain why. Update set_task_context after answers, at completion and when blockers arise or clear. \
         Inspect queue progress and journal entries with merge_queue_status. Merge only via queue_merge. The user confirms by default. With \
         Lead auto-start enabled, a clean preflight starts the queue. Use stop_merge_queue to stop it locally. Pass replace: true only when \

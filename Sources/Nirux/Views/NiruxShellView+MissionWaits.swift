@@ -137,6 +137,9 @@ struct MissionWaitState {
     /// Columns whose Codex is being handed a message: one at a time, so
     /// that its queue keeps their order.
     var codexQueuing: Set<UUID> = []
+    /// Mission messages a hook of their agent has, or is about to
+    /// (`NiruxShellView.leaveToHook`), and since when: no prompt holds them.
+    var handedToHooks: [String: TimeInterval] = [:]
 
     /// Nirux typed into `column`'s prompt: it says nothing of it until the
     /// next check.
@@ -188,7 +191,8 @@ extension NiruxShellView {
         var givenUp: [(delivery: MissionStore.AcceptedEvent, text: String)] = []
         // Read once, and only for a notice that names what holds a message.
         lazy var handoffsEnabled = missionWaits.handoffsEnabled?.enabled ?? Self.currentMissionHandoffsEnabled()
-        for delivery in store.untypedInstructions() where !missionWaits.typing.contains(delivery.event.id) {
+        for delivery in store.untypedInstructions()
+        where !missionWaits.typing.contains(delivery.event.id) && missionWaits.handedToHooks[delivery.event.id] == nil {
             let (mission, event) = (delivery.mission, delivery.event)
             guard !resumingTasks.contains(mission.childWorkspaceID) else { continue }
             let child = missionEnd(mission, parent: false)
@@ -267,7 +271,9 @@ extension NiruxShellView {
             guard let column else { return }
             waiting[column.id, default: (column, [])].messages.append(message)
         }
-        let deliveries = store.pendingPromptDeliveries(now: now)
+        let undelivered = store.pendingPromptDeliveries(now: now)
+        withdrawStaleLetters(pending: Set(undelivered.map(\.event.id)))
+        let deliveries = undelivered.filter { missionWaits.handedToHooks[$0.event.id] == nil }
         let deliveryIDs = Set(deliveries.map(\.event.id))
         if !deliveries.isEmpty {
             let handoffsEnabled = missionWaits.handoffsEnabled.flatMap { $0.for == deliveryIDs ? $0.enabled : nil }

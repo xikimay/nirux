@@ -75,6 +75,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             exit(ClaudeStatusLineCLI.run())
         case .mode(.toolsServer):
             exit(NiruxMCPServer.run())
+        case .mode(.missionWait(let mailbox)):
+            exit(MissionWaitHook.run(mailbox: mailbox))
         case .mode(.setupFailure(let workspaceID)):
             exit(SetupFailureSignal.run(workspaceID: workspaceID))
         case .mode(.hook(let kind, let payload)):
@@ -255,6 +257,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             shellView?.handleMissionEvent(mission, event: event) ?? false
         }
         missionEvents.start()
+        shellView.settleMissionMailbox()
 
         // The Lead's tools (see LeadChannel).
         let leadRequests = LeadRequestCenter.shared

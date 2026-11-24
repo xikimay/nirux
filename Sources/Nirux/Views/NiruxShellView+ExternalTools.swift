@@ -181,12 +181,13 @@ extension NiruxShellView {
     /// written says so once, and its launches pass none.
     func claudeSpaceSettingsFiles(for workspaces: [WorkspaceState]) -> [String: String] {
         let userEnvironment = Self.claudeUserEnvironment()
+        let hooks = MissionWaitHook.claudeHooks()
         var files: [String: String] = [:]
         for spaceID in Set(workspaces.filter { !$0.startedOutsideNirux }.map(\.profileID)) {
             do {
                 files[spaceID] = try ClaudeSpaceSettings.prepare(
                     spaceID: spaceID, defaults: SpaceDefaultsStore.defaults(forSpace: spaceID),
-                    anchors: profiles.first { $0.id == spaceID }?.anchors ?? [], userEnvironment: userEnvironment
+                    anchors: profiles.first { $0.id == spaceID }?.anchors ?? [], userEnvironment: userEnvironment, hooks: hooks
                 )
             } catch {
                 NiruxDebugLog.log("ClaudeSpaceSettings: could not write the file of space \(spaceID): \(error)")

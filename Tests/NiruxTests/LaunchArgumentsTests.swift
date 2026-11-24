@@ -16,6 +16,7 @@ final class LaunchArgumentsTests: XCTestCase {
         XCTAssertEqual(decision("--hook", "claude", "--statusline"), .mode(.statusLine))
         XCTAssertEqual(decision("--hook", "claude", "--mcp"), .mode(.toolsServer))
         XCTAssertEqual(decision("--hook", "claude", "--agy"), .mode(.hook(.agy, payload: nil)))
+        XCTAssertEqual(decision("--hook", "mission-wait", "/state/mission-mailbox"), .mode(.missionWait(mailbox: "/state/mission-mailbox")))
         XCTAssertEqual(decision("--hook", "codex", SetupFailureSignal.flag, workspaceID), .mode(.setupFailure(workspaceID: workspaceID)))
         XCTAssertEqual(decision("--hook", "claude"), .mode(.hook(.claude, payload: nil)))
         XCTAssertEqual(decision("--hook", "codex", "{}"), .mode(.hook(.codex, payload: "{}")))
@@ -75,5 +76,7 @@ final class LaunchArgumentsTests: XCTestCase {
         XCTAssertEqual(decision("--hook"), .ignoredHook(readsInput: true))
         XCTAssertEqual(decision("--hook", "gemini", "{}"), .ignoredHook(readsInput: true))
         XCTAssertEqual(decision("--hook", "gemini", "--mcp"), .ignoredHook(readsInput: false))
+        // The Mission waiter as an older build reads it: a kind it doesn't know.
+        XCTAssertEqual(decision("--hook", "mission-wait"), .ignoredHook(readsInput: true))
     }
 }
