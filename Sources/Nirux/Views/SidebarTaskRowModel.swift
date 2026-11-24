@@ -171,7 +171,8 @@ extension WorkspaceInfo {
             // The one that may be going in circles: its hint, its turn's
             // time, and a click on the row brings it up.
             let circling = circlingColumn
-            let activity = circling?.circling?.statusText ?? followUp?.roundText
+            let quiet = working.lazy.compactMap(\.quietFor).first.map { "Working · no word for \($0)" }
+            let activity = circling?.circling?.statusText ?? quiet ?? followUp?.roundText
             let problem = prInfo?.problem
             let words = problem.map { "Working · " + $0 } ?? activity ?? "Working"
             let detail = circling?.circling?.detail ?? (problem == nil ? nil : followUp?.roundText)

@@ -273,6 +273,17 @@ struct AgentStatusMachine {
     private(set) var codexWorked: (at: TimeInterval, process: ProcessInstance?)?
     /// Antigravity's current or last turn (`promptRefusal`).
     private(set) var agyTurn: AgyTurn?
+    /// The process in front at the last read of the process table
+    /// (`keepProgramStatus`).
+    private var frontProcess: ProcessInstance?
+    /// A dialog Antigravity said waits (`blocked`, its sign-in aside), in a
+    /// turn or before its first: keys answer it until one that answers
+    /// (Enter, a number, Esc, Ctrl-C), the heartbeat dropping a `blocked`
+    /// status at the first.
+    private(set) var agyAnswering = false
+    /// The launch line Nirux typed into an empty shell
+    /// (`PtySession.sendShellLaunchCommand`): the shell's, not a draft.
+    private(set) var shellLaunchLineAt: TimeInterval?
 
     /// A turn of the `agy` `process`, from its first `working` (another
     /// after a dialog, or redrawn, is the same turn's) to `done`, `idle` or
@@ -286,10 +297,6 @@ struct AgentStatusMachine {
         /// How it ended, nil while it runs: `done`, or `idle` when stopped
         /// with Esc, or `error`. A later state (`idle` at a key) keeps it.
         var ended: AgentProgramStatus.State?
-        /// A dialog of it waits: keys answer it until one that answers
-        /// (Enter, a number, Esc, Ctrl-C), the heartbeat dropping a
-        /// `blocked` status at the first.
-        var answering = false
     }
 
     /// What Antigravity reported, when, from which process, and whether its
@@ -1461,8 +1468,8 @@ struct AgentStatusMachine {
         lastInputAt = time
         // So does Antigravity's, which it reports itself (OSC 7501 blocked),
         // while that agy is in front, until a key answers it.
-        let answersAgy = lastForegroundName == CodingAgent.agy.rawValue && agyTurn?.answering == true
-        if answersAgy, keys.map(Self.answersApproval) ?? true { agyTurn?.answering = false }
+        let answersAgy = lastForegroundName == CodingAgent.agy.rawValue && agyAnswering
+        if answersAgy, keys.map(Self.answersApproval) ?? true { agyAnswering = false }
         if inFront == nil, !answersAgy, keys.map(Self.sendsPrompt) ?? true {
             submitKeys = Array((submitKeys + [time]).suffix(Self.promptMemory))
             if byNirux { niruxSubmitKeys = Array((niruxSubmitKeys + [time]).suffix(Self.promptMemory)) }
@@ -1553,9 +1560,11 @@ struct AgentStatusMachine {
             if recentlyActive { startFallbackTurn(now: now) }
         case .working:
             if !recentlyActive {
-                state = isUserFocused ? .idle : .needsAttention
                 // Silence can be a finished turn or the agent's own
-                // approval prompt: no reason to claim.
+                // approval prompt: no reason to claim. An agy heard in this
+                // terminal says itself when it waits (its status went with
+                // a ^Z or a failed read).
+                state = isUserFocused || frontAgyReportsItsWaits ? .idle : .needsAttention
                 lastAttentionReason = nil
                 turnStartedAt = nil
             }
@@ -1635,9 +1644,10 @@ struct AgentStatusMachine {
             agyTurn = AgyTurn(startedAt: enter ?? time, process: process, saidAt: time)
         } else if turn != nil, turn?.ended == nil {
             agyTurn?.saidAt = time
-            agyTurn?.answering = status.state == .blocked
             if [.done, .idle, .error].contains(status.state) { agyTurn?.ended = status.state }
         }
+        // Before its first turn too: its folder trust screen.
+        agyAnswering = status.state == .blocked && status.kind != "auth" && turn?.ended == nil
         _ = reportedState(isUserFocused: isUserFocused, now: now.timeIntervalSince1970)
         guard !isUserFocused, state == .needsAttention, status.state != .working, status.state != .idle,
               status.kind != "auth" else { return nil }
@@ -1676,7 +1686,25 @@ struct AgentStatusMachine {
     /// once): a Ctrl-G editor or a ^Z shell in front doesn't end it, and
     /// its process is checked where it is read (`ReportedStatus.isFrom`).
     mutating func keepProgramStatus(of process: ProcessInstance?) {
+        frontProcess = process
         if let reported = programStatus, reported.process != process { programStatus = nil }
+    }
+
+    /// The agy in front ran a turn it reported (OSC 7501): it says itself
+    /// when it waits, even once a ^Z or a failed read dropped its status.
+    private var frontAgyReportsItsWaits: Bool {
+        guard let turn = agyTurn, lastForegroundName == CodingAgent.agy.rawValue else { return false }
+        return turn.process == frontProcess
+    }
+
+    /// How long the agy at work has said nothing, once past
+    /// `AgentProgramStatus.quietNotice`. Its status's time, not its output:
+    /// it redraws while it waits on a background task.
+    func agyQuietFor(now: TimeInterval) -> TimeInterval? {
+        guard state == .working, let reported = programStatus, reported.status.state == .working,
+              now - reported.at >= AgentProgramStatus.quietNotice
+        else { return nil }
+        return now - reported.at
     }
 
     /// A sign-in wait that outlasted every launch's moment of it, said once
@@ -1702,15 +1730,14 @@ struct AgentStatusMachine {
     }
 
     /// The state Antigravity reported since it came to the front: it says
-    /// when it waits on the user, which its output can't.
+    /// when it waits on the user, which its output can't. A `working` holds
+    /// through silence: agy 1.5.15 waiting on its own background task (a
+    /// build, `gh pr checks --watch`) stops its spinner and says nothing
+    /// until the task ends and its turn goes on.
     private mutating func reportedState(isUserFocused: Bool, now: TimeInterval) -> AgentStatus? {
         guard let reported = programStatus else { return nil }
         let (status, at) = (reported.status, reported.at)
         switch status.state {
-        case .working where now - max(at, lastReadAt) > AgentProgramStatus.workingSilence:
-            // Its next `working` is a new turn's.
-            programStatus = nil
-            return nil
         case .working:
             if turnStartedAt == nil { turnStartedAt = at }
             state = .working
@@ -1822,6 +1849,10 @@ struct AgentStatusMachine {
         turnFailure?.resumeSentAt = now
     }
 
+    mutating func noteShellLaunchLine(afterDraft: Bool) {
+        shellLaunchLineAt = afterDraft ? nil : lastDraftInputAt
+    }
+
     mutating func noteResumeTyped() {
         turnFailure?.resumeKeystrokeAt = lastDraftInputAt
     }
@@ -1833,6 +1864,9 @@ struct AgentStatusMachine {
         codexStatus = nil
         codexWorked = nil
         agyTurn = nil
+        frontProcess = nil
+        agyAnswering = false
+        shellLaunchLineAt = nil
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false

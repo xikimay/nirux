@@ -192,6 +192,7 @@ extension NiruxShellView {
             deferredAgent: Self.sidebarDeferredAgent(of: col),
             missionQuestion: missionQuestion,
             circling: circlingHintEnabled ? col.pty?.agentCirclingHint : nil,
+            quietFor: col.pty?.agentQuietFor?.shortDuration,
             turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
             questionAskedAt: asked?.since,
             dialog: showsDialog ? dialog?.dialog : nil,
