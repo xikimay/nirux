@@ -42,6 +42,8 @@ final class WorkspaceState {
     /// Where the camera stays while the pointer works on a card; nil: where
     /// the strip wants it.
     var heldCamera: CameraHold?
+    /// The card the pointer holds by its header, if any (`beginColumnDrag`).
+    private(set) var draggedColumn: ColumnDrag?
     /// Where it works; a waiting task's moves once, to its worktree
     /// (`beginTask`).
     private(set) var cwd: String
@@ -1264,10 +1266,14 @@ extension WorkspaceState {
 
     enum MoveDir { case left, right }
     func moveColumn(_ dir: MoveDir) {
-        let from = focusedIndex
-        let to = dir == .left ? from - 1 : from + 1
-        guard columns.indices.contains(to) else { return }
-        columns.swapAt(from, to)
+        moveColumn(at: focusedIndex, to: focusedIndex + (dir == .left ? -1 : 1))
+    }
+
+    /// Moves the column at `from` to `to`, the others keeping their order;
+    /// it takes the focus.
+    func moveColumn(at from: Int, to: Int) {
+        guard columns.indices.contains(from), columns.indices.contains(to) else { return }
+        columns.insert(columns.remove(at: from), at: to)
         focusedIndex = to
     }
 
@@ -1278,7 +1284,7 @@ extension WorkspaceState {
     static let columnGap = Theme.Space.sm
     static let columnInset = Theme.Space.sm
     private static let resizeHandleWidth: CGFloat = 9
-    private static let slideKey = "colSlide"
+    static let slideKey = "colSlide"
     /// The strip's slide to a card.
     static let slideDuration: CFTimeInterval = 0.3
 
@@ -1342,12 +1348,14 @@ extension WorkspaceState {
             if col.view.frame.size != NSSize(width: widths[index], height: innerHeight) {
                 col.view.layer?.removeAnimation(forKey: ColumnState.passKey)
             }
-            col.view.frame = NSRect(x: xOffset, y: inset, width: widths[index], height: innerHeight)
+            // The card the pointer holds lies under it, over its slot.
+            let x = draggedColumn.flatMap { $0.column == col.id ? $0.x : nil } ?? xOffset
+            col.view.frame = NSRect(x: x, y: inset, width: widths[index], height: innerHeight)
             col.light?.frame = col.view.frame
             shadow(for: col).frame = col.view.frame
             col.layoutWithHeader(width: widths[index], height: innerHeight, resizeTerminal: !skipTerminalResize)
-            if let was = shown[safe: index], was.width == widths[index], !col.isArriving, abs(was.x - xOffset) > 0.5 {
-                col.glide(by: was.x - xOffset)
+            if let was = shown[safe: index], was.width == widths[index], !col.isArriving, abs(was.x - x) > 0.5 {
+                col.glide(by: was.x - x)
             }
             // Its content clipped to its corners; its border (the focus) is
             // the shell's.
@@ -1357,7 +1365,7 @@ extension WorkspaceState {
             // Resize handle straddling the air at this column's right edge.
             if resizeHandles.indices.contains(index) {
                 let handle = resizeHandles[index]
-                handle.isHidden = fitAll || (index != focusedIndex && index != focusedIndex - 1)
+                handle.isHidden = fitAll || draggedColumn != nil || (index != focusedIndex && index != focusedIndex - 1)
                 handle.frame = NSRect(
                     x: xOffset + widths[index] + gap / 2 - Self.resizeHandleWidth / 2,
                     y: 0,
@@ -1447,5 +1455,124 @@ extension WorkspaceState {
         return NiruxShellView.showsColumn(
             left: frame.minX, width: frame.width, cameraX: lastCameraX, viewportWidth: containerView.frame.width
         )
+    }
+}
+
+// MARK: - A card dragged by its header
+
+/// A card the pointer holds by its header (window layout study W7): it lies
+/// under the pointer, over the others, which make room where it would land.
+struct ColumnDrag {
+    let column: UUID
+    /// Where it was taken from: Escape, or a drop outside the viewport, puts
+    /// it back there.
+    let origin: Int
+    /// Its left edge in the strip.
+    var x: CGFloat
+    /// The pointer has come off the viewport's edges since the card was
+    /// taken: holding it near one pans (`dragPan`).
+    var mayPan = false
+}
+
+extension WorkspaceState {
+    /// Where a point of the window lies in the strip.
+    func stripPoint(fromWindow point: NSPoint) -> NSPoint {
+        stripView.convert(point, from: nil)
+    }
+
+    /// The pointer takes the card at `index` where it shows: a slide of the
+    /// strip, or a glide of the card, on its way stops there. It has the
+    /// focus, and the camera holds until it is let go.
+    func beginColumnDrag(at index: Int) {
+        guard let column = columns[safe: index] else { return }
+        focusedIndex = index
+        holdCamera(for: index)
+        heldCamera?.isDrag = true
+        let x = column.shownPlace.x
+        column.cardLayers.forEach { $0.removeAnimation(forKey: ColumnState.glideKey) }
+        draggedColumn = ColumnDrag(column: column.id, origin: index, x: x)
+        place(column, at: x)
+    }
+
+    /// The pointer holding the card brought its left edge to `x`: the card
+    /// follows along the strip, its light and shadow with it, and takes the
+    /// slot nearest it, or the one it came from while the pointer is
+    /// `outside` the viewport. True when it changed slots: a layout makes
+    /// room.
+    @discardableResult
+    func dragColumn(to x: CGFloat, outside: Bool) -> Bool {
+        guard var drag = draggedColumn, let from = columns.firstIndex(where: { $0.id == drag.column }) else { return false }
+        let column = columns[from]
+        drag.x = max(Self.columnInset, min(x, stripView.frame.width - Self.columnInset - column.view.frame.width))
+        draggedColumn = drag
+        place(column, at: drag.x)
+        let to = outside
+            ? min(drag.origin, columns.count - 1)
+            : Self.slot(nearest: drag.x, among: columns.filter { $0 !== column }.map(\.view.frame.width))
+        guard to != from else { return false }
+        moveColumn(at: from, to: to)
+        return true
+    }
+
+    /// Let go, the card keeps the slot it took, or goes back to the one it
+    /// came from when `cancelled`, and has the focus, whatever column
+    /// opened or closed meanwhile; the camera goes where the strip wants it.
+    func endColumnDrag(cancelled: Bool) {
+        guard let drag = draggedColumn else { return }
+        draggedColumn = nil
+        heldCamera = nil
+        guard let from = columns.firstIndex(where: { $0.id == drag.column }) else { return }
+        moveColumn(at: from, to: cancelled ? min(drag.origin, columns.count - 1) : from)
+    }
+
+    /// The pan the pointer asks for where it lies (`edgePan`), at one of the
+    /// drag's events or `isTick` one of its ticks: the camera pans at its
+    /// ticks only, at a pace of its own, and only once the pointer has come
+    /// off the edges since the card was taken, so that a card taken at an
+    /// edge stays.
+    func dragPan(_ pan: CGFloat, isTick: Bool) {
+        guard var drag = draggedColumn else { return }
+        if pan == 0 {
+            drag.mayPan = true
+            draggedColumn = drag
+        } else if isTick, drag.mayPan {
+            panDragCamera(by: pan)
+        }
+    }
+
+    /// The camera a drag holds pans `dx` points, within a strip wider than
+    /// the viewport (from where it was, if outside it): the cards out of
+    /// view come to the pointer.
+    func panDragCamera(by dx: CGFloat) {
+        let viewport = containerView.bounds.width
+        guard draggedColumn != nil, var held = heldCamera, dx != 0, stripView.frame.width > viewport else { return }
+        held.x = min(max(held.x + dx, min(0, held.x)), max(stripView.frame.width - viewport, held.x))
+        heldCamera = held
+        lastCameraX = held.x
+        stripView.frame.origin.x = -held.x
+    }
+
+    /// How far a drag's camera pans at each of its ticks, for a pointer at
+    /// `x` in a viewport `width` wide: only within `panEdge` of either
+    /// edge, faster nearer it.
+    static func edgePan(at x: CGFloat, width: CGFloat) -> CGFloat {
+        if x < panEdge { return -panStep * (panEdge - max(x, 0)) / panEdge }
+        if x > width - panEdge { return panStep * (min(x, width) - (width - panEdge)) / panEdge }
+        return 0
+    }
+
+    static let panEdge: CGFloat = 48
+    static let panStep: CGFloat = 24
+
+    /// The card, its light and its shadow with their left edge at `x`.
+    private func place(_ column: ColumnState, at x: CGFloat) {
+        for view in [column.view, column.light, column.shadow].compactMap({ $0 }) { view.frame.origin.x = x }
+    }
+
+    /// Among cards `widths` wide, the slot whose left edge lies nearest `x`
+    /// for a card put among them.
+    static func slot(nearest x: CGFloat, among widths: [CGFloat]) -> Int {
+        let edges = widths.reduce(into: [columnInset]) { edges, width in edges.append(edges[edges.count - 1] + width + columnGap) }
+        return edges.indices.min { abs(edges[$0] - x) < abs(edges[$1] - x) } ?? 0
     }
 }
