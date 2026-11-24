@@ -158,9 +158,6 @@ extension MergeQueue {
         let message: String
         private let checksTimedOut: Bool?
 
-        /// The message of a stop the Lead asked for (`stop_merge_queue`).
-        static let byLead = "Stopped by Lead."
-
         var isChecksTimeout: Bool {
             // Queues saved before the timeout flag carry only the diagnostic.
             guard kind == .checks else { return false }

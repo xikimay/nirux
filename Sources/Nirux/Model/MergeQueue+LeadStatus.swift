@@ -38,16 +38,18 @@ extension MergeQueue {
         return lines.joined(separator: "\n")
     }
 
-    /// What the Lead hears when a queue it started ends: a stop it didn't
-    /// ask for, or its list done. Nil for anything else.
-    static func leadEndNotice(repository: String, phase: Phase, startedByLead: Bool, status: String) -> String? {
+    /// What the Lead hears when a queue it started ends: a stop nobody
+    /// asked for (a person's, the Lead's or the user's, is theirs to tell),
+    /// or its list done. Nil for anything else. Its own words only: a
+    /// stop's message can carry GitHub's.
+    static func leadEndNotice(repository: String, phase: Phase, startedByLead: Bool, merged: Int) -> String? {
         guard startedByLead else { return nil }
-        let ended = "The merge queue of \(repository) ended. " + (status.hasSuffix(".") ? status : status + ".")
         switch phase {
-        case .stopped(let reason) where reason.message != StopReason.byLead:
-            return ended + " Fix what stopped it, then queue_merge again (merge_queue_status has the journal)."
+        case .stopped(let reason) where reason.kind != .user:
+            return "The merge queue of \(repository) stopped (\(reason.kind.rawValue)). Read merge_queue_status, fix what "
+                + "stopped it, then queue_merge again."
         case .finished:
-            return ended + " Close the merged tasks with close_task."
+            return "The merge queue of \(repository) finished: \(merged) merged. Close the merged tasks with close_task."
         default:
             return nil
         }

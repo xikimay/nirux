@@ -149,7 +149,7 @@ extension MergeQueue {
             case .stop:
                 userStop(message: "Stopped by the user.")
             case .stopByLead:
-                userStop(message: StopReason.byLead)
+                userStop(message: "Stopped by Lead.")
             case .read(let id, let result):
                 guard let request, id == request.id, case .read(let reads, _) = request.action, let purpose else { break }
                 self.request = nil

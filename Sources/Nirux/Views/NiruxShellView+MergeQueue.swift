@@ -137,15 +137,15 @@ extension NiruxShellView {
         noticeLeadOfEndedQueues(projectID: projectID)
     }
 
-    /// A queue the space's Lead started ended without its word: it hears it
-    /// once, as it happens, though no user wakes it.
+    /// A queue the space's Lead started ended without a person's word: it
+    /// hears it once, as it happens, though no user wakes it.
     private func noticeLeadOfEndedQueues(projectID: String) {
         for controller in mergeQueues(of: projectID) {
             guard let engine = controller.engine else { continue }
             let was = mergeQueuePhases.updateValue(engine.phase, forKey: ObjectIdentifier(controller))
             guard was?.isActive == true, let text = MergeQueue.leadEndNotice(
                 repository: controller.queueRepository.ownerAndName, phase: engine.phase,
-                startedByLead: engine.startedByLead, status: engine.statusText
+                startedByLead: engine.startedByLead, merged: engine.entries.filter { $0.step == .done }.count
             ), let lead = leadMissionParent(inSpace: projectID) else { continue }
             tellProposer(lead, text)
         }
