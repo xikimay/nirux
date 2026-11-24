@@ -16,14 +16,15 @@ extension NiruxShellView {
         let mailbox = MissionWaitHook.mailbox
         let id = delivery.event.id
         let runsClaude = foreground?.agent == .claude
+        let startedAt = foreground?.instance.startedAt
         let recipient = runsClaude ? conversation(of: column, foreground: foreground) : nil
         let sentTo = delivery.event.kind == .instruction ? delivery.event.childSessionID : nil
         var place = places[id]
         while true {
-            // Only on proof: a claude in front that confirmed another conversation, or none.
+            // Only on proof: none in front, one on another conversation, or one started since the claim.
             let ended = place.map { place in
-                guard case .claimed(let conversation) = place, !snapshot.isEmpty else { return false }
-                return !runsClaude || recipient.map { $0 != conversation } ?? false
+                guard case .claimed(let conversation, let claimedAt) = place, !snapshot.isEmpty else { return false }
+                return !runsClaude || recipient.map { $0 != conversation } ?? false || startedAt.map { $0 > claimedAt } ?? false
             } ?? false
             switch MissionDeliveryPolicy.hookStep(place: place, recipient: recipient, ended: ended, sentTo: sentTo, isArmed: mailbox.isArmed) {
             case .leave:
@@ -54,8 +55,9 @@ extension NiruxShellView {
     }
 
     /// Records each message a hook took once a turn of its session ended
-    /// after it (a main-thread Stop), and frees one whose session ended
-    /// first to go again, through the next waiter or typing.
+    /// after it (a main-thread Stop of the `claude` that ran then), and
+    /// frees one whose session ended first to go again, through the next
+    /// waiter or typing.
     func settleHookClaims(after events: [AgentHookEvent]) {
         let ends = events.filter {
             $0.kind == .claude && $0.agentID == nil && $0.sessionID != nil && ($0.name == .stop || $0.name == .sessionEnd)
@@ -63,7 +65,10 @@ extension NiruxShellView {
         guard !ends.isEmpty else { return }
         let mailbox = MissionWaitHook.mailbox
         for claim in mailbox.claims() {
-            guard let end = ends.first(where: { $0.sessionID == claim.conversation && $0.timestamp >= claim.claimedAt }) else { continue }
+            guard let end = ends.first(where: {
+                $0.sessionID == claim.conversation && $0.timestamp >= claim.claimedAt
+                    && $0.emitterProcess.map { $0.startedAt <= claim.claimedAt } ?? true
+            }) else { continue }
             if end.name == .stop { recordHookDelivery(of: claim) }
             try? mailbox.forget(claim)
             missionWaits.handedToHooks[claim.letter.id] = nil

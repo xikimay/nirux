@@ -99,6 +99,14 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
             XCTAssertFalse(parent.typed, "the hook has it")
             XCTAssertNil(parent.deliveredAt, "not before its turn ends")
 
+            // A claude started since then never got it: its turn proves nothing.
+            let resumed = ProcessInstance(pid: 1, startedAt: Date().timeIntervalSince1970 + 60)
+            parent.shell.settleHookClaims(after: [AgentHookEvent(
+                kind: .claude, name: .stop, agentUUID: parent.column.agentUUID, sessionID: parent.session, emitterProcess: resumed,
+                timestamp: Date().timeIntervalSince1970 + 61
+            )])
+            XCTAssertNil(parent.deliveredAt)
+
             parent.shell.settleHookClaims(after: [try parent.hook(.stop)])
             XCTAssertNotNil(parent.deliveredAt)
             XCTAssertTrue(mailbox.claims().isEmpty)

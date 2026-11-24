@@ -46,7 +46,7 @@ public enum MissionDeliveryPolicy {
 /// Where a Mission message's letter is.
 public enum MissionLetterPlace: Equatable, Sendable {
     case waiting(conversation: String)
-    case claimed(conversation: String)
+    case claimed(conversation: String, at: TimeInterval)
 }
 
 /// See `MissionDeliveryPolicy.hookStep`.
@@ -181,7 +181,7 @@ public struct MissionMailbox: Sendable {
                 places[String(name.dropLast(5))] = .waiting(conversation: conversation)
             }
         }
-        for claim in claims() { places[claim.letter.id] = .claimed(conversation: claim.conversation) }
+        for claim in claims() { places[claim.letter.id] = .claimed(conversation: claim.conversation, at: claim.claimedAt) }
         return places
     }
 

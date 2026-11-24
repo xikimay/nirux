@@ -108,9 +108,9 @@ struct MissionDeliveryTests {
         (.waiting(conversation: "s"), "s", false, nil, ["s"], .leave),
         (.waiting(conversation: "s"), "s", false, nil, [], .retract("s")),
         (.waiting(conversation: "old"), "s", false, nil, ["old", "s"], .retract("old")),
-        (.claimed(conversation: "s"), "s", false, nil, [], .leave),
-        (.claimed(conversation: "old"), nil, false, nil, [], .leave),
-        (.claimed(conversation: "old"), "s", true, nil, ["s"], .release),
+        (.claimed(conversation: "s", at: 1), "s", false, nil, [], .leave),
+        (.claimed(conversation: "old", at: 1), nil, false, nil, [], .leave),
+        (.claimed(conversation: "old", at: 1), "s", true, nil, ["s"], .release),
     ] as [(MissionLetterPlace?, String?, Bool, String?, Set<String>, MissionHookStep)])
     func aHookTakesAMessageOnlyWhileItsWaiterWaitsOnTheRecipientsConversation(
         place: MissionLetterPlace?, recipient: String?, ended: Bool, sentTo: String?, armed: Set<String>, expected: MissionHookStep
@@ -123,7 +123,7 @@ struct MissionDeliveryTests {
         try mailbox.post(Letter(id: "a", text: "", postedAt: 1), to: "one")
         try mailbox.post(Letter(id: "b", text: "", postedAt: 2), to: "two")
         _ = mailbox.claim("two", at: 3)
-        #expect(mailbox.places() == ["a": .waiting(conversation: "one"), "b": .claimed(conversation: "two")])
+        #expect(mailbox.places() == ["a": .waiting(conversation: "one"), "b": .claimed(conversation: "two", at: 3)])
     }
 
     @Test func oneWaiterAtATimeArmsAConversation() throws {
