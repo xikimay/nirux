@@ -144,11 +144,14 @@ extension NiruxShellView {
 
     /// After a relaunch, the agents `RelaunchResume` names, in the spaces
     /// whose switch is on: the rest wait for their column as before.
+    /// Those last seen mid-turn are told once to go on, as a Lead notice:
+    /// typed once their prompt is free, never over a draft.
     @discardableResult
-    func resumeWorkAfterRelaunch(store: MissionStore = .shared) -> Bool {
+    func resumeWorkAfterRelaunch(store: MissionStore = .shared, now: TimeInterval = Date().timeIntervalSince1970) -> Bool {
         let waiting = store.ensureLoaded() ? RelaunchResume.waitingAgents(store.pendingPromptDeliveries()) : []
         var spaceResumes: [String: Bool] = [:]
-        return resumeDeferredAgents { column, workspace in
+        var continuing: [(workspaceID: String, agentUUID: String)] = []
+        let resumed = resumeDeferredAgents { column, workspace in
             let resumesWork = spaceResumes[workspace.profileID] ?? {
                 let value = SpaceDefaultsStore.defaults(forSpace: workspace.profileID).resumesWorkOnRelaunch
                 spaceResumes[workspace.profileID] = value
@@ -158,8 +161,18 @@ extension NiruxShellView {
                 agentUUID: column.agentUUID, lastStatus: column.deferredAgent?.lastStatus,
                 isLead: workspace.isLead && column.agentUUID != nil && column.agentUUID == workspace.leadAgentUUID
             )
-            return resumesWork && RelaunchResume.resumes(candidate, messageWaitsFor: waiting)
+            guard resumesWork, RelaunchResume.resumes(candidate, messageWaitsFor: waiting) else { return false }
+            if RelaunchResume.continues(candidate), let agentUUID = column.agentUUID { continuing.append((workspace.id, agentUUID)) }
+            return true
         }
+        pendingLeadNotices += continuing.map { workspaceID, agentUUID in
+            LeadNotice(
+                workspaceID: workspaceID, agentUUID: agentUUID, text: "\(MissionPromptText.prefix) \(RelaunchResume.continueText)",
+                queuedAt: now
+            )
+        }
+        if !continuing.isEmpty { typeLeadNotices() }
+        return resumed
     }
 
     /// The deferred agents `include` takes, but a Codex whose launch mode

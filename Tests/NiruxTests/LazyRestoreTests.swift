@@ -195,10 +195,11 @@ final class LazyRestoreTests: XCTestCase {
 
     /// After a relaunch (an update at night), the Lead and an agent last
     /// seen working start on their own, wherever they are; an idle one waits
-    /// for its column. The space's switch off, they all wait, as before.
+    /// for its column. Those mid-turn are told once to go on, the Lead too.
+    /// The space's switch off, they all wait, as before.
     func testARelaunchResumesTheWorkThatWasGoingOn() throws {
         func state() -> PersistedState {
-            let lead = Self.claude(Self.sessionA, cwd: root, width: 1)
+            let lead = Self.claude(Self.sessionA, status: .working, cwd: root, width: 1)
             var leadSpace = workspace("lead", [lead])
             leadSpace.isLead = true
             leadSpace.leadAgentUUID = lead.agentUUID
@@ -220,6 +221,9 @@ final class LazyRestoreTests: XCTestCase {
             let lead = "command claude --resume '\(Self.sessionA)' --permission-mode auto "
                 + "'--settings=\(ClaudeSpaceSettings.fileURL(spaceID: "side")?.path ?? "")'"
             XCTAssertEqual(Set(recorder.commands), [lead, Self.resume(Self.sessionB), "command codex resume '\(Self.thread)'"])
+            let told = shell.pendingLeadNotices.filter { $0.text == "[Nirux Mission] " + RelaunchResume.continueText }
+            XCTAssertEqual(told.map(\.agentUUID).sorted(), [try column(shell, 1, 0).agentUUID, try column(shell, 2, 0).agentUUID].compactMap { $0 }.sorted(),
+                           "once each, typed when their prompt is free")
         }
 
         var off = SpaceDefaults()
@@ -232,6 +236,7 @@ final class LazyRestoreTests: XCTestCase {
             XCTAssertTrue(try column(shell, 1, 0).isAwaitingResume)
             XCTAssertTrue(try column(shell, 2, 0).isAwaitingResume)
             XCTAssertEqual(recorder.commands, ["command codex resume '\(Self.thread)'"], "only the column on screen")
+            XCTAssertTrue(shell.pendingLeadNotices.isEmpty)
         }
     }
 

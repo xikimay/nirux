@@ -16,6 +16,15 @@ enum RelaunchResume {
         candidate.isLead || candidate.lastStatus == .working || candidate.agentUUID.map(waiting.contains) == true
     }
 
+    /// One last seen mid-turn, the Lead too, is told once to go on; one that
+    /// ended its turn, waited on a question or a permission waits for whoever
+    /// it waited on.
+    static func continues(_ candidate: Candidate) -> Bool {
+        candidate.lastStatus == .working
+    }
+
+    static let continueText = "Nirux restarted while you were working. Continue where you left off."
+
     /// The agents the Mission messages still to type are for: a child for
     /// a `tell` or an answer, the parent for the rest.
     static func waitingAgents(_ pending: [MissionStore.AcceptedEvent]) -> Set<String> {
