@@ -94,9 +94,7 @@ extension NiruxShellView {
         let missions = MissionStore.shared.missions
         let isSubtask = task.parentWorkspaceID != nil
             || missions.contains { $0.childWorkspaceID == task.id && $0.status == .active && $0.reportsToTask == true }
-        let subtasks = Set(workspaces.filter { $0.parentWorkspaceID == task.id && !$0.isClosing }.map(\.id))
-            .union(missions.filter { $0.parentWorkspaceID == task.id && $0.status == .active && $0.oneWay != true }.map(\.childWorkspaceID))
-        if let refusal = LeadPromotion.refusal(worker?.state, isSubtask: isSubtask, openSubtasks: subtasks.count) { return refusal }
+        if let refusal = LeadPromotion.refusal(worker?.state, isSubtask: isSubtask) { return refusal }
         guard let worker, let sessionID = worker.state.sessionID else { return nil }
         if let record = sessionLedger.session(agent: .claude, sessionID: sessionID), !AgentSessionResume.hasTranscript(for: record) {
             return SessionHistory.message(.transcriptGone, agent: .claude)
@@ -151,12 +149,12 @@ extension NiruxShellView {
             _ = MissionStore.shared.endChildMissions(workspaceID: task.id, agentUUID: uuid, at: now)
             task.noteConversationMovedToLead(at: now)
             self.saveState()
-            self.handOver(sessionID, from: task, to: lead, spaceID: spaceID)
+            self.handOver(sessionID, from: task, workerUUID: uuid, to: lead, spaceID: spaceID)
             return true
         }
     }
 
-    private func handOver(_ sessionID: String, from task: WorkspaceState, to lead: WorkspaceState?, spaceID: String) {
+    private func handOver(_ sessionID: String, from task: WorkspaceState, workerUUID: String, to lead: WorkspaceState?, spaceID: String) {
         let lost = "“\(task.title)”’s conversation stopped, but the Lead didn’t take it. Resume it from Session History."
         let current = leadWorkspace(inSpace: spaceID)
         guard current === lead else { return showToast(lost, tone: .error) }
@@ -164,10 +162,27 @@ extension NiruxShellView {
         let prompt = Self.leadPromotionPrompt(
             folder: folder, task: task.title, worktree: task.cwd, branch: task.gitBranch, pullRequest: task.prInfo?.number
         )
-        guard let current else { return startPromotedLead(spaceID: spaceID, sessionID: sessionID, prompt: prompt) }
+        guard let current else {
+            startPromotedLead(spaceID: spaceID, sessionID: sessionID, prompt: prompt)
+            if let started = leadWorkspace(inSpace: spaceID) { moveSubtasks(of: task, workerUUID: workerUUID, to: started) }
+            return
+        }
+        moveSubtasks(of: task, workerUUID: workerUUID, to: current)
         restartLead(current, agent: .claude, resuming: sessionID, resumePrompt: prompt) { [weak self] launched in
             if !launched { self?.showToast(lost, tone: .error) }
         }
+    }
+
+    /// The task's sub-tasks become the Lead's: their Missions report to its
+    /// agent, and they list among its tasks.
+    private func moveSubtasks(of task: WorkspaceState, workerUUID: String, to lead: WorkspaceState) {
+        guard let leadAgentUUID = lead.leadAgentUUID else { return }
+        _ = MissionStore.shared.reparentMissions(
+            fromWorkspace: task.id, agentUUID: workerUUID, toLead: lead.id, leadAgentUUID: leadAgentUUID, at: Date().timeIntervalSince1970
+        )
+        for subtask in workspaces where subtask.parentWorkspaceID == task.id { subtask.parentWorkspaceID = nil }
+        saveState()
+        updateSidebar()
     }
 
     /// A space with no Lead gets one, holding the promoted conversation.
