@@ -9,7 +9,9 @@ extension NiruxShellView {
             sources: UsageSources(niruxOneShots: ClaudeOneShotRunner.usageFolder),
             catalog: { [weak self] in self?.usageCatalog() ?? UsageCatalog() }
         )
+        refreshTaskBudgets()
         monitor.onReport = { [weak self] report in
+            self?.refreshTaskBudgets()
             if let self, let window = usageWindow, window.window?.isVisible == true {
                 window.update(report: report, names: usageNames())
             }
@@ -18,6 +20,20 @@ extension NiruxShellView {
         }
         usageMonitor = monitor
         monitor.start()
+    }
+
+    /// Each space's task budget, read as each usage report lands: the
+    /// sidebar asks several times a second, and the setting is on disk.
+    func refreshTaskBudgets() {
+        taskBudgets = Dictionary(uniqueKeysWithValues: workspaceStore.profiles.compactMap { profile in
+            SpaceDefaultsStore.defaults(forSpace: profile.id).weeklyTaskBudget.map { (profile.id, $0) }
+        })
+        updateSidebar()
+    }
+
+    /// Past its space's budget over 7 days (`SidebarTaskUsage.isOverBudget`).
+    func isOverBudget(_ workspace: WorkspaceState) -> Bool {
+        usageMonitor?.report.flatMap { SidebarTaskUsage($0, taskID: workspace.id, budget: taskBudgets[workspace.profileID]) }?.isOverBudget ?? false
     }
 
     func showUsageWindow() {

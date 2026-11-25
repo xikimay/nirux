@@ -235,7 +235,7 @@ extension NiruxShellView {
                       dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil,
                       followUp: followUpRow(of: workspace),
                       heldMessages: SidebarHeldMessages(workspace.mergeWaits), waitingTask: workspace.waitingStart?.waitingState)
-        info.usage = usageMonitor?.report.flatMap { SidebarTaskUsage($0, taskID: workspace.id) }
+        info.usage = usageMonitor?.report.flatMap { SidebarTaskUsage($0, taskID: workspace.id, budget: taskBudgets[workspace.profileID]) }
         return info
     }
 

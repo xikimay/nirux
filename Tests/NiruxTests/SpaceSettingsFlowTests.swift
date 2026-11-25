@@ -347,6 +347,12 @@ final class SpaceSettingsFlowTests: XCTestCase {
                 XCTAssertEqual(store.load().defaults.tasksManageSpaces, on ? true : nil, "off writes nothing")
                 XCTAssertEqual(shell.tasksManageSpaces(inSpace: space.id), on)
             }
+            XCTAssertEqual(pane.budgetPopup.titleOfSelectedItem, "25M (default)")
+            for (value, written) in [(50_000_000, 50_000_000), (0, 0), (SpaceDefaults.defaultTaskBudget, nil)] as [(Int, Int?)] {
+                pane.budgetPopup.selectItem(at: pane.budgetPopup.indexOfItem(withRepresentedObject: value))
+                pane.budgetPopup.sendAction(pane.budgetPopup.action, to: pane.budgetPopup.target)
+                XCTAssertEqual(store.load().defaults.taskBudget, written, "the default writes nothing")
+            }
             XCTAssertEqual(pane.modelsSwitch.state, .on, "on by default")
             for on in [false, true] {
                 pane.modelsSwitch.state = on ? .on : .off

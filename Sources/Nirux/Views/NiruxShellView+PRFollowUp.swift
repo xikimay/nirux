@@ -182,9 +182,10 @@ extension NiruxShellView {
         Set(workspaces.compactMap { $0.isClosing || $0.prInfo?.state != .open ? nil : $0.prInfo?.url })
     }
 
-    /// A task of a space that follows its pull requests.
+    /// A task of a space that follows its pull requests, within its budget.
     private func isFollowedTask(_ workspace: WorkspaceState) -> Bool {
         Self.isTask(workspace) && !workspace.isInactive && !workspace.isClosing && followsUpPullRequests(inSpace: workspace.profileID)
+            && !isOverBudget(workspace)
     }
 
     /// The column whose Claude the decision reads: the one the open round

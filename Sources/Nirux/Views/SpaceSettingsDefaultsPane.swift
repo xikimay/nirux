@@ -31,6 +31,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     let view = NSView()
     let agentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let claudePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    let budgetPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let codexPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let agyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let followUpSwitch = NSSwitch()
@@ -67,7 +68,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fillPopups()
         tableView.reloadData()
         let writable = loaded.isWritable
-        for control in [agentPopup, claudePopup, codexPopup, agyPopup, followUpSwitch, relaunchSwitch, manageSpacesSwitch, modelsSwitch, addButton, tableView]
+        for control in [agentPopup, claudePopup, codexPopup, agyPopup, budgetPopup, followUpSwitch, relaunchSwitch, manageSpacesSwitch, modelsSwitch, addButton, tableView]
             as [NSControl] {
             control.isEnabled = writable
         }
@@ -99,6 +100,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fill(codexPopup, settings: Self.shortName(actions.settingsCodexMode().displayName),
              modes: CodexLaunchMode.allCases.map { ($0.rawValue, $0.displayName) },
              selected: defaults.codexLaunchMode?.rawValue)
+        budgetPopup.removeAllItems()
+        let budget = defaults.taskBudget ?? SpaceDefaults.defaultTaskBudget
+        for value in Set(SpaceDefaults.taskBudgetChoices + [budget]).sorted() {
+            let title = value == 0 ? "Off" : UsageText.tokens(value) + (value == SpaceDefaults.defaultTaskBudget ? " (default)" : "")
+            budgetPopup.addItem(withTitle: title)
+            budgetPopup.lastItem?.representedObject = value
+        }
+        budgetPopup.selectItem(at: budgetPopup.indexOfItem(withRepresentedObject: budget))
         fill(agyPopup, settings: Self.shortName(actions.settingsAgyMode().displayName),
              modes: AgyLaunchMode.allCases.map { ($0.rawValue, $0.displayName) },
              selected: defaults.agyLaunchMode?.rawValue)
@@ -145,6 +154,15 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         guard let raw = sender.selectedItem?.representedObject as? String else { return }
         var defaults = loaded.defaults
         defaults.codexLaunchMode = CodexLaunchMode(rawValue: raw)
+        guard defaults != loaded.defaults else { return }
+        write(defaults)
+    }
+
+    @objc func budgetChanged(_ sender: NSPopUpButton) {
+        guard let value = sender.selectedItem?.representedObject as? Int else { return }
+        var defaults = loaded.defaults
+        // The default is written as nothing.
+        defaults.taskBudget = value == SpaceDefaults.defaultTaskBudget ? nil : value
         guard defaults != loaded.defaults else { return }
         write(defaults)
     }
@@ -328,7 +346,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
             (agentPopup, #selector(agentChanged(_:)), "Agent for new tasks"),
             (claudePopup, #selector(claudeModeChanged(_:)), "Claude Code permission mode"),
             (codexPopup, #selector(codexModeChanged(_:)), "Codex mode"),
-            (agyPopup, #selector(agyModeChanged(_:)), "Antigravity mode")
+            (agyPopup, #selector(agyModeChanged(_:)), "Antigravity mode"),
+            (budgetPopup, #selector(budgetChanged(_:)), "Task budget over 7 days")
         ] {
             popup.target = self
             popup.action = action
@@ -338,7 +357,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
             [Self.formLabel("Agent for new tasks"), agentPopup],
             [Self.formLabel("Claude Code permissions"), claudePopup],
             [Self.formLabel("Codex mode"), codexPopup],
-            [Self.formLabel("Antigravity mode"), agyPopup]
+            [Self.formLabel("Antigravity mode"), agyPopup],
+            [Self.formLabel("Task budget (7 days)"), budgetPopup]
         ])
         form.rowSpacing = 10
         form.columnSpacing = 10
@@ -347,7 +367,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
 
         let formHint = Self.hint(
             "New Task… preselects this agent; a plain new workspace stays a shell. A launch uses these modes unless "
-                + "you choose one for it, and Settings’ modes when they say Same as Settings."
+                + "you choose one for it, and Settings’ modes when they say Same as Settings. A task past its budget warns on "
+                + "its row, and its pull request’s follow-ups wait."
         )
 
         let followUp = switchRow(

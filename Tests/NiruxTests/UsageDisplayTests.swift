@@ -251,6 +251,25 @@ final class UsageDisplayTests: XCTestCase {
         XCTAssertEqual(shown(under), under.text)
     }
 
+    /// Past its space's budget, the row warns and says its follow-ups wait;
+    /// under it, or with no budget, it says nothing of one.
+    func testARowWarnsPastItsBudget() throws {
+        let session = UsageSession(
+            key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "task"), contextTokens: 90_000,
+            events: [event(60, input: 26_000_000, context: 90_000)]
+        )
+        let report = UsageReport(sessions: [session], now: now)
+        let over = try XCTUnwrap(SidebarTaskUsage(report, taskID: "task", budget: 25_000_000))
+        XCTAssertTrue(over.isOverBudget)
+        XCTAssertTrue(over.isWarning)
+        XCTAssertTrue(over.toolTip(now: now).components(separatedBy: "\n")
+            .contains("Past its budget of 25M: its pull request's follow-ups wait (Space Settings › Defaults)"))
+        let under = try XCTUnwrap(SidebarTaskUsage(report, taskID: "task", budget: 50_000_000))
+        XCTAssertFalse(under.isOverBudget)
+        XCTAssertFalse(under.isWarning)
+        XCTAssertFalse(try XCTUnwrap(SidebarTaskUsage(report, taskID: "task")).isOverBudget, "no budget")
+    }
+
     func testTheUsageWindowRanksTasksAndCountsWhatTheyLeaveOut() {
         let sessions = [
             UsageSession(key: UsageSessionKey(.claude, "a"), attribution: UsageAttribution(spaceID: "space", taskID: "lead"),
