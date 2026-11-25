@@ -896,6 +896,49 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
     }
 
+    /// An agent that takes all of a long tell and leaves before its Enter:
+    /// the tell is given up as cut off, never typed. Until Nirux reads its
+    /// exit, the dead agent (a zombie) isn't in front either.
+    func testALongTellWhoseAgentLeavesBeforeItsEnterIsGivenUp() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let message = (1...70).map { "Line \($0): read the file and add up the totals." }.joined(separator: "\n")
+            let task = try reportingTask("Reader", lead: lead, harness: harness, holdable: true)
+            defer { task.agent.remove() }
+            let agentUUID = try XCTUnwrap(task.column.agentUUID)
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            task.agent.hold()
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            harness.waitUntil("it goes in") { task.agent.input.contains("\u{1B}[200~") }
+            // It takes the rest and leaves at its end while the main thread
+            // is busy: Nirux reads the paste's end and the exit only after.
+            final class Seen: @unchecked Sendable { var deadAgentRunning: Bool? }
+            let seen = Seen()
+            let (received, claude) = (task.agent.received, task.claude)
+            let left = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                let deadline = Date().addingTimeInterval(15)
+                while Date() < deadline, !((try? String(contentsOf: received, encoding: .utf8))?.contains("\u{1B}[201~") ?? false) {
+                    usleep(2_000)
+                }
+                kill(claude.pid, SIGKILL)
+                usleep(200_000)
+                seen.deadAgentRunning = ProcessSnapshot().contains(claude)
+                left.signal()
+            }
+            task.agent.release()
+            XCTAssertEqual(left.wait(timeout: .now() + 20), .success)
+            XCTAssertEqual(seen.deadAgentRunning, false, "not reaped yet, it isn't running")
+            harness.waitUntil("its typing over", timeout: 60) { harness.shell.missionWaits.typing.isEmpty }
+            let state = MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == agentUUID }
+                .map { $0.childConsumedAt != nil ? "typed" : $0.expiredAt != nil ? "given up" : "waiting" }
+            XCTAssertEqual(state, ["given up"])
+            XCTAssertTrue(harness.shell.pendingLeadNotices.contains { $0.text.contains("“Reader” was cut off: only its start") },
+                          harness.shell.pendingLeadNotices.map(\.text).joined())
+        }
+    }
+
     /// A tell to a task whose Claude Code waits to resume is for the
     /// conversation it will resume.
     func testATellToATaskWaitingToResumeIsForItsConversation() throws {

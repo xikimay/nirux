@@ -12,15 +12,15 @@ struct AgentStandIn {
 
     /// The shell command that becomes it. `holdable`: it takes 128 bytes at
     /// a time; after `hold()`, one more read, then none until `release()`
-    /// (20 s at most: an app that waited on it fails rather than hangs), as
-    /// an agent busy drawing. `launchPrompt` (no single quote in it): its last argument,
+    /// (20 s at most from that read: an app that waited on it fails rather
+    /// than hangs), as an agent busy drawing. `launchPrompt` (no single quote in it): its last argument,
     /// as an agent launched with a prompt has.
     /// `arguments` (no single quote in them) come before it.
     func command(named name: String = "claude", holdable: Bool = false, arguments: [String] = [], launchPrompt: String? = nil) -> String {
         guard holdable || launchPrompt != nil || !arguments.isEmpty else {
             return "stty -icanon min 1 time 0; exec -a \(name) /bin/cat > '\(received.path)'"
         }
-        let wait = holdable ? #" select(undef, undef, undef, 0.02) while -e "\#(held.path)" && time - (stat _)[9] < 20;"# : ""
+        let wait = holdable ? #" my $s = time; select(undef, undef, undef, 0.02) while -e "\#(held.path)" && time - $s < 20;"# : ""
         let reader = #"open(my $o, ">", $ARGV[0]); $o->autoflush(1); "#
             + #"while (sysread(STDIN, my $b, 128)) { print $o $b;"# + wait + " }"
         let prompt = (arguments + (launchPrompt.map { [$0] } ?? [])).map { " '\($0)'" }.joined()

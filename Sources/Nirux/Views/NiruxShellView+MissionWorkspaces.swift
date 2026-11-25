@@ -582,6 +582,8 @@ extension NiruxShellView {
         }
         if snapshot.isEmpty, tries > 1 { return again(after: 0.5, tries: tries - 1, rereads: rereads) }
         guard !snapshot.isEmpty else { return done(.inPrompt(why: "Nirux couldn't read the running processes")) }
+        // Its agent left after the paste: what it took never reached a prompt.
+        if let process, !snapshot.contains(process) { return done(.cut) }
         // The paste's own keys are the last: anything since is someone's.
         guard pty.mayPressEnter(after: typedAt, for: process, snapshot: snapshot)
         else { return done(.inPrompt(why: "someone typed meanwhile or a dialog opened")) }
