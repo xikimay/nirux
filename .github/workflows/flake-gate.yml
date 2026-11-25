@@ -58,6 +58,9 @@ jobs:
             echo "$s" | xcrun swift-demangle
             objdump -d --disassemble-symbols="$s" "$B" | grep -E "\sbl\s" | sed -E 's/.*<(.*)>.*/\1/' | xcrun swift-demangle --simplified | head -12
           done
+          A=$(nm "$B" | awk '$3 ~ /TaskSpaceToolsFlow.*6answer.*FZ$/ {print $3}' | head -1)
+          echo "== answer $A"
+          objdump -d --disassemble-symbols="$A" "$B" | grep -E "\sbl\s" | sed -E 's/.*<(.*)>.*/\1/' | xcrun swift-demangle --simplified | head -20
 
       - name: Repeat the classes
         env:
