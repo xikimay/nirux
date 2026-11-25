@@ -117,6 +117,35 @@ extension UsageText {
         }
     }
 
+    /// "Claude · 5-hour window", "Codex · week".
+    static func longName(of limit: QuotaLimit) -> String {
+        let minutes = Int(limit.length / 60)
+        let window = minutes == 10_080 ? "week"
+            : minutes % 1_440 == 0 ? "\(minutes / 1_440)-day window" : "\(max(1, Int((Double(minutes) / 60).rounded())))-hour window"
+        return "\(limit.agent == .claude ? "Claude" : "Codex") · \(window)"
+    }
+
+    /// A limit's line in the popover: its pace, then its reset.
+    static func detail(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> QuotaTitle {
+        let resetsAt = limit.latest.resetsAt
+        let reset = ClaudeUsageLimits.resetText(resetsAt, now: now, calendar: calendar)
+        switch limit.forecast {
+        case .reached:
+            return QuotaTitle(text: "Full: it \(reset)".asWarning, tone: .runsOut)
+        case .runsOut(let at):
+            let clock = ClaudeUsageLimits.clockText(at, now: now, calendar: calendar)
+            let resetClock = ClaudeUsageLimits.clockText(resetsAt, now: now, calendar: calendar)
+            let before = ClaudeUsageLimits.remainingText(resetsAt - at)
+            return QuotaTitle(text: "Full by \(clock), \(before) before it resets at \(resetClock)".asWarning, tone: .runsOut)
+        case .atReset(let percent):
+            return QuotaTitle(text: "≈ \(percent)% when it \(reset)", tone: .normal)
+        case .quiet:
+            return QuotaTitle(text: "No agent in Nirux spent it lately; it \(reset)", tone: .normal)
+        case .unknown:
+            return QuotaTitle(text: reset.prefix(1).uppercased() + reset.dropFirst(), tone: .normal)
+        }
+    }
+
     /// The pace in a tooltip's words: "full by 20:05, before its reset at 20:21".
     static func pace(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> String {
         let reset = ClaudeUsageLimits.clockText(limit.latest.resetsAt, now: now, calendar: calendar)
