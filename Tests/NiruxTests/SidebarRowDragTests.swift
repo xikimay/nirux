@@ -129,12 +129,12 @@ final class SidebarRowDragTests: XCTestCase {
 
         let start = try frame(ofRow: 1, in: sidebar).center
         post(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - 10), in: sidebar, window: window)
-        postTicks(SidebarView.lostPressTicks)
+        postTicks(HeldPress.lostPressTicks)
         let later = laterMouseUp(at: start, in: sidebar, window: window)
         sidebar.mouseDown(with: try mouse(.leftMouseDown, at: start, in: sidebar, window: window))
 
         XCTAssertFalse(later.wasNeeded, "the drag held the sidebar until another mouse-up")
-        XCTAssertEqual(press.looks, SidebarView.lostPressTicks, "lost once the wait is over, not before")
+        XCTAssertEqual(press.looks, HeldPress.lostPressTicks, "lost once the wait is over, not before")
         XCTAssertNil(sidebar.workspaceDrag)
         XCTAssertNil(sidebar.dragGhostView, "its ghost goes with it")
         XCTAssertTrue(waited.update, "the update was put aside")
@@ -161,7 +161,7 @@ final class SidebarRowDragTests: XCTestCase {
         post(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - 10), in: sidebar, window: window)
         post(.leftMouseDragged, at: underAll, in: sidebar, window: window)
         // The whole wait in ticks, then a last drag back up a row and the mouse-up.
-        postTicks(SidebarView.lostPressTicks)
+        postTicks(HeldPress.lostPressTicks)
         post(.leftMouseDragged, at: underTheSecond, in: sidebar, window: window)
         post(.leftMouseUp, at: underTheSecond, in: sidebar, window: window)
         let later = laterMouseUp(at: underAll, in: sidebar, window: window)
@@ -182,7 +182,7 @@ final class SidebarRowDragTests: XCTestCase {
 
         let start = try frame(ofRow: 0, in: sidebar).center
         let underAll = NSPoint(x: start.x, y: try frame(ofRow: 2, in: sidebar).minY + 2)
-        let almost = SidebarView.lostPressTicks - 1
+        let almost = HeldPress.lostPressTicks - 1
         // Almost the wait, a move, almost the wait again: at its last tick, the drop.
         button(of: sidebar, found: [2 * almost: { [weak self, weak sidebar, weak window] in
             guard let self, let sidebar, let window else { return }

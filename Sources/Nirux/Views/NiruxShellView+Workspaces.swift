@@ -716,7 +716,7 @@ extension NiruxShellView {
             let color = isFocus ? accent : Theme.Color.line.cgColor
             if layer.borderWidth != width { layer.borderWidth = width }
             if layer.borderColor != color { layer.borderColor = color }
-            col.shadow?.show(isFocus ? .focusedColumn : .column, animated: animated)
+            col.shadow?.show(col.isDragged ? .floating : isFocus ? .focusedColumn : .column, animated: animated)
         }
     }
 }
