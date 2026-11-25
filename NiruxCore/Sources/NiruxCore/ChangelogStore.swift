@@ -13,6 +13,10 @@ public final class ChangelogStore {
     public private(set) var changelog: Changelog?
     /// Why the last fetch failed; nil once one succeeds.
     public private(set) var failure: String?
+    /// A fetch succeeded since launch: `changelog` is the published one,
+    /// not the copy an earlier launch kept.
+    public private(set) var hasFetched = false
+    public var isRefreshing: Bool { fetch != nil }
     private let cache: URL
     private let load: Loader
     private let onChange: @MainActor () -> Void
@@ -45,6 +49,7 @@ public final class ChangelogStore {
                 let data = try await load(url)
                 changelog = try JSONDecoder().decode(Changelog.self, from: data)
                 failure = nil
+                hasFetched = true
                 try? data.write(to: cache, options: .atomic)
             } catch {
                 failure = error.localizedDescription

@@ -269,6 +269,8 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertTrue(controller.search.sendAction(controller.search.action, to: controller.search.target))
             XCTAssertTrue(text().contains("#913"))
             XCTAssertFalse(text().contains("Columns: pin a column"))
+            let store = try XCTUnwrap(shell.changelogStore)
+            harness.waitUntil("the fetch to end") { !store.isRefreshing }
         }
     }
 
@@ -278,10 +280,11 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
     func testWhatsNewCardAfterAnUpdate() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
-            let defaults = try XCTUnwrap(UserDefaults(suiteName: "NiruxWhatsNewCard-\(UUID().uuidString)"))
-            shell.sideEffects.changelogDefaults = defaults
+            let seenFile = FileManager.default.temporaryDirectory.appendingPathComponent("whats-new-seen-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: seenFile) }
+            shell.sideEffects.whatsNewSeenFile = seenFile
             shell.sideEffects.installedBuild = { 202611251854 }
-            defaults.set(202611242135, forKey: NiruxShellView.lastSeenBuildKey)
+            try "202611242135".write(to: seenFile, atomically: true, encoding: .utf8)
             let published = Changelog(entries: [
                 Changelog.Entry(pullRequest: 913, title: "⌘P: open a pull request by its number", why: nil, kind: .new, build: 202611251854),
                 Changelog.Entry(pullRequest: 917, title: "Tests: a calmer clock", why: nil, kind: .internal, build: 202611251854),
@@ -305,14 +308,16 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertTrue(card.text.contains("2 nightlies, 2 changes"))
             XCTAssertTrue(card.text.contains("1 under the hood"))
             XCTAssertFalse(card.text.contains("Columns: drag a column by its header"), "the build already seen")
-            XCTAssertEqual(defaults.integer(forKey: NiruxShellView.lastSeenBuildKey), 202611242135, "seen only once dismissed")
+            XCTAssertEqual(shell.lastSeenBuild, 202611242135, "seen only once put away")
 
             XCTAssertTrue(card.seeAllButton.accessibilityPerformPress())
             XCTAssertNil(shell.whatsNewCard)
             let window = try XCTUnwrap(shell.whatsNewWindow)
             defer { window.close() }
             XCTAssertTrue(window.window?.isVisible == true)
-            XCTAssertEqual(defaults.integer(forKey: NiruxShellView.lastSeenBuildKey), 202611251854)
+            XCTAssertEqual(shell.lastSeenBuild, 202611251854)
+            let store = try XCTUnwrap(shell.changelogStore)
+            harness.waitUntil("the window's fetch") { !store.isRefreshing }
             shell.startWhatsNewAfterUpdate()
             XCTAssertNil(shell.whatsNewCard, "a later launch of the same build")
         }

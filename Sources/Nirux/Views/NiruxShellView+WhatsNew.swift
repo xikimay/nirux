@@ -3,10 +3,13 @@ import AppKit
 // MARK: - What's New (docs/design/changelog.md)
 
 extension NiruxShellView {
-    /// The cached changelog at once, the published one when it arrives.
+    /// The cached changelog at once, the published one when it arrives. It
+    /// shows what the card would, so the card goes and the build counts as
+    /// seen.
     func showWhatsNewWindow() {
         let controller = whatsNewWindow ?? WhatsNewWindowController { [weak self] in self?.changelogStore?.pullRequestURL($0) }
         whatsNewWindow = controller
+        if whatsNewCard == nil { markWhatsNewSeen() } else { dismissWhatsNewCard() }
         changelogDidChange()
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
@@ -24,29 +27,31 @@ extension NiruxShellView {
 
     // MARK: - The card after an update
 
-    /// The build whose changes were last shown, or dismissed.
-    static let lastSeenBuildKey = "NiruxChangelogLastSeenBuild"
+    /// The nightly whose changes were last shown, put away, or read in the
+    /// window; nil before the first, or when the file holds no nightly.
+    var lastSeenBuild: Int? {
+        (try? String(contentsOf: sideEffects.whatsNewSeenFile, encoding: .utf8))
+            .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .flatMap { Changelog.date(ofBuild: $0) == nil ? nil : $0 }
+    }
 
-    /// At launch: a first launch only notes its build; a newer build than
+    /// At launch: a first launch only notes its build; a nightly newer than
     /// the last one seen fetches the changelog, and the card follows.
     func startWhatsNewAfterUpdate() {
         let installed = sideEffects.installedBuild()
-        guard installed > 0, let store = changelogStore else { return }
-        let seen = sideEffects.changelogDefaults.integer(forKey: Self.lastSeenBuildKey)
-        guard seen > 0 else { return markWhatsNewSeen() }
+        guard Changelog.date(ofBuild: installed) != nil, let store = changelogStore else { return }
+        guard let seen = lastSeenBuild else { return markWhatsNewSeen() }
         guard seen < installed else { return }
-        showWhatsNewCardIfDue()
         store.refresh()
     }
 
-    /// Once the changelog holds the builds since the last one seen: the card,
-    /// or, when they hold nothing to show, that build marked as seen.
+    /// Once the changelog published since launch is read: the card for the
+    /// builds since the last one seen, or, when they hold nothing to show,
+    /// the build marked as seen.
     func showWhatsNewCardIfDue() {
         let installed = sideEffects.installedBuild()
-        let seen = sideEffects.changelogDefaults.integer(forKey: Self.lastSeenBuildKey)
-        guard whatsNewCard == nil, installed > 0, seen > 0, seen < installed,
-              let shipped = changelogStore?.changelog?.entries(after: seen, through: installed),
-              shipped.contains(where: { $0.build == installed })
+        guard whatsNewCard == nil, let seen = lastSeenBuild, seen < installed, let store = changelogStore, store.hasFetched,
+              let shipped = store.changelog?.entries(after: seen, through: installed), !shipped.isEmpty
         else { return }
         guard shipped.contains(where: { $0.kind != .internal }) else { return markWhatsNewSeen() }
         let card = WhatsNewCardView(shipped: shipped, seen: seen)
@@ -70,10 +75,13 @@ extension NiruxShellView {
     }
 
     private func markWhatsNewSeen() {
-        sideEffects.changelogDefaults.set(sideEffects.installedBuild(), forKey: Self.lastSeenBuildKey)
+        let installed = sideEffects.installedBuild()
+        guard Changelog.date(ofBuild: installed) != nil else { return }
+        try? String(installed).write(to: sideEffects.whatsNewSeenFile, atomically: true, encoding: .utf8)
     }
 
-    /// Over the bottom right of the viewport, above the column dots.
+    /// Over the bottom right of the viewport, above the column dots; hidden
+    /// while the viewport is too short to leave the work around it.
     func layOutWhatsNewCard(_ frames: ChromeFrames? = nil) {
         guard let card = whatsNewCard else { return }
         let viewport = frames?.viewport ?? viewportRestFrame
@@ -81,6 +89,7 @@ extension NiruxShellView {
         card.setFrameOrigin(NSPoint(
             x: (viewport.maxX - card.frame.width - Theme.Space.lg).rounded(), y: (bottom + Theme.Space.sm).rounded()
         ))
+        card.isHidden = card.frame.height * 2 > viewport.height
     }
 
     /// Sets where it ends at once, then fades and rises on its layer, unless

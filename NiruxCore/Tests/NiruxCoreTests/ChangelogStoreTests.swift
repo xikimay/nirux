@@ -28,10 +28,11 @@ struct ChangelogStoreTests {
         let store = try #require(made)
         #expect(store.changelog == nil)
         await store.refresh().value
-        #expect(store.changelog == published)
+        #expect(store.changelog == published && store.hasFetched && !store.isRefreshing)
         #expect(changes == 1)
         let relaunched = ChangelogStore(feed: Self.feed, cache: cache, onChange: {})
         #expect(relaunched?.changelog == published)
+        #expect(relaunched?.hasFetched == false, "a copy from an earlier launch")
     }
 
     @Test func aFailedFetchKeepsWhatWasRead() async throws {
@@ -41,6 +42,6 @@ struct ChangelogStoreTests {
         let store = try #require(made)
         await store.refresh().value
         #expect(store.changelog == published)
-        #expect(store.failure != nil)
+        #expect(store.failure != nil && !store.hasFetched)
     }
 }

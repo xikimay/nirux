@@ -2,7 +2,8 @@ import AppKit
 
 /// After an update, what the builds since the one you ran brought: a card
 /// over the bottom right of the work, which stays until dismissed and never
-/// takes the keyboard (docs/design/changelog.md).
+/// takes the keyboard (docs/design/changelog.md); opening What's New puts
+/// it away too.
 final class WhatsNewCardView: NSView {
     static let width: CGFloat = 340
     /// Lines a kind lists before "+N more".
@@ -26,11 +27,6 @@ final class WhatsNewCardView: NSView {
         background.cornerRadius = Theme.Radius.panel
         background.borderWidth = 1
         background.borderColor = Theme.Color.lineStrong.cgColor
-        let shadow = Theme.Elevation.Level.floating
-        background.shadowColor = NSColor.black.cgColor
-        background.shadowOpacity = shadow.opacity
-        background.shadowRadius = shadow.radius
-        background.shadowOffset = CGSize(width: 0, height: -shadow.drop)
         layer?.addSublayer(background)
 
         let visible = shipped.filter { $0.kind != .internal }
@@ -100,7 +96,7 @@ final class WhatsNewCardView: NSView {
     override func layout() {
         super.layout()
         background.frame = bounds
-        background.shadowPath = CGPath(roundedRect: bounds, cornerWidth: Theme.Radius.panel, cornerHeight: Theme.Radius.panel, transform: nil)
+        Theme.Elevation.apply(.floating, to: background, roundedRect: background.bounds, radius: Theme.Radius.panel, cutOut: nil)
     }
 
     @objc private func dismiss() { onDismiss?() }
