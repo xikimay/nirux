@@ -396,11 +396,15 @@ final class SidebarGlassRowsTests: XCTestCase {
             id: "widgets", units: [.task(line("checkout", .checks), subtasks: [line("tests", .reviews)]), .task(line("notes", .code, rail: false), subtasks: [])],
             withoutTask: [.task(line("bot", .merge, task: false), subtasks: [])], merged: []
         )
+        var section = BoardStagesView.Section(id: "widgets", title: "widgets", detail: nil, status: nil, lines: lines)
+        section.offersTrains = true
         let content = BoardStagesView.Content(
             header: BoardStagesView.Header(name: "Acme", color: Theme.Color.accent, summary: "", lead: nil), order: .sidebar,
-            sections: [BoardStagesView.Section(id: "widgets", title: "widgets", detail: nil, status: nil, lines: lines)], now: 0
+            sections: [section], now: 0
         )
         XCTAssertEqual(NiruxShellView.taskStations(of: content, fresh: ["widgets"]).mapValues(\.station), ["checkout": .checks, "tests": .reviews])
+        XCTAssertEqual(NiruxShellView.taskStations(of: content, fresh: ["widgets"]).mapValues(\.offersTrains), ["checkout": true, "tests": true],
+                       "its section's queue offers trains")
         XCTAssertEqual(NiruxShellView.taskStations(of: content, fresh: []), [:], "its reading aged: none")
         // A reading stands for two read intervals.
         XCTAssertTrue(ProjectBoardController.stands(age: 120, interval: 60))

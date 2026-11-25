@@ -41,6 +41,9 @@ final class BoardStagesView: NSView {
         var lines: BoardStages.Section
         /// Its merge queue, as its header says it; nil without one.
         var queue: SectionQueue?
+        /// Its queue offers trains, which merge the base into what they
+        /// land: a pull request behind the base is ready all the same.
+        var offersTrains = false
         /// Its header's menu.
         var menu: [SectionMenuItem] = []
         var kind = Kind.repository

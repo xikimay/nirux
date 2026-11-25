@@ -269,6 +269,8 @@ extension ProjectBoardController {
             lines: BoardStages.section(facts, order: inputs.order, now: now.timeIntervalSince1970)
         )
         if readOnly { shown.lines.merged.removeAll { $0.lineID == nil } }
+        shown.offersTrains = !readOnly && loaded(for: section)?.queueSettings
+            .map { MergeQueue.Confirmation.unavailability(of: .train, settings: $0) == nil } == true
         for line in (shown.lines.units + shown.lines.withoutTask).flatMap(\.lines) {
             if let offer = line.offer { targets.offers[section.id, default: [:]][offer.number] = offer }
             // The menu's item: the phrase's link is only there while it acts.
