@@ -54,6 +54,12 @@ struct SidebarTaskUsage: Hashable {
     var subagentTokens: Double
     var heavyContextTokens: Double
     var coldRewrites: Int
+    /// Its latest session's.
+    var subagents: Int
+
+    /// From this many subagents in a session, the row warns: separate work
+    /// goes to a task, which starts with a context of its own.
+    static let subagentSoftCap = 5
 
     /// Nil for a task no agent spent on this week.
     init?(_ report: UsageReport, taskID: String) {
@@ -66,10 +72,16 @@ struct SidebarTaskUsage: Hashable {
         subagentTokens = week?.subagentWeightedTokens ?? 0
         heavyContextTokens = week?.heavyContextWeightedTokens ?? 0
         coldRewrites = week?.coldRewrites ?? 0
+        subagents = latest?.subagents ?? 0
     }
 
     /// From there on, each message re-reads a context worth compacting.
     var isContextHeavy: Bool { (contextTokens ?? 0) >= UsageSummary.heavyContextTokens }
+
+    var isFanningOut: Bool { subagents >= Self.subagentSoftCap }
+
+    /// What the row says as a warning.
+    var isWarning: Bool { isContextHeavy || isFanningOut }
 
     /// "142k · 4.2M": the context, then the week's spend.
     var text: String {
@@ -87,6 +99,9 @@ struct SidebarTaskUsage: Hashable {
                 let idle = ClaudeUsageLimits.remainingText(now - lastResponseAt)
                 lines.append("Idle for \(idle): its cache expired, the next message writes it again")
             }
+        }
+        if isFanningOut {
+            lines.append("\(subagents) subagents in its latest session: from the \(Self.subagentSoftCap)th, separate work costs less as a task")
         }
         lines.append("Last 7 days: \(UsageText.tokens(weekTokens)) tokens, \(UsageText.unitNote)")
         if subagentTokens > 0 { lines.append("Subagents: \(UsageText.share(subagentTokens, of: weekTokens))") }

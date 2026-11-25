@@ -36,6 +36,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     let followUpSwitch = NSSwitch()
     let relaunchSwitch = NSSwitch()
     let manageSpacesSwitch = NSSwitch()
+    let modelsSwitch = NSSwitch()
     let tableView = NSTableView()
     let addButton = NSButton(title: "Add Variable", target: nil, action: nil)
     let removeButton = NSButton(title: "Remove", target: nil, action: nil)
@@ -66,13 +67,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fillPopups()
         tableView.reloadData()
         let writable = loaded.isWritable
-        for control in [agentPopup, claudePopup, codexPopup, agyPopup, followUpSwitch, relaunchSwitch, manageSpacesSwitch, addButton, tableView]
+        for control in [agentPopup, claudePopup, codexPopup, agyPopup, followUpSwitch, relaunchSwitch, manageSpacesSwitch, modelsSwitch, addButton, tableView]
             as [NSControl] {
             control.isEnabled = writable
         }
         followUpSwitch.state = loaded.defaults.followsUpPullRequests ? .on : .off
         relaunchSwitch.state = loaded.defaults.resumesWorkOnRelaunch ? .on : .off
         manageSpacesSwitch.state = loaded.defaults.tasksCanManageSpaces(inSpace: spaceID) ? .on : .off
+        modelsSwitch.state = loaded.defaults.splitsClaudeModels ? .on : .off
         updateRemoveButton()
         let banner = message ?? loaded.problem
         bannerLabel.stringValue = banner?.asWarning ?? ""
@@ -167,6 +169,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         var defaults = loaded.defaults
         // On is the default: nothing is written for it.
         defaults.prFollowUp = sender.state == .on ? nil : false
+        guard defaults != loaded.defaults else { return }
+        write(defaults)
+    }
+
+    @objc func modelsChanged(_ sender: NSSwitch) {
+        var defaults = loaded.defaults
+        // On is the default: nothing is written for it.
+        defaults.claudeModelSplit = sender.state == .on ? nil : false
         guard defaults != loaded.defaults else { return }
         write(defaults)
     }
@@ -357,6 +367,11 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
                 + "a Lead does; deleting a space still asks you first. On by default in General. An agent started while "
                 + "it was off gets the tools when it starts again."
         )
+        let models = switchRow(
+            modelsSwitch, action: #selector(modelsChanged(_:)), title: "Lead on Fable, subagents on Opus",
+            hint: "Every subagent of the Claude sessions this space starts runs on Opus, whatever its call asks. A new Lead "
+                + "conversation runs on Fable; a resumed one keeps the model it ran. Off, Claude Code picks as usual."
+        )
 
         let header = NSTextField(labelWithString: "Environment")
         header.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
@@ -409,12 +424,12 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         environment.alignment = .leading
         environment.spacing = 8
 
-        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, relaunch, manageSpaces, environment])
+        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, relaunch, manageSpaces, models, environment])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14
         stack.setCustomSpacing(22, after: formHint)
-        stack.setCustomSpacing(22, after: manageSpaces)
+        stack.setCustomSpacing(22, after: models)
         stack.edgeInsets = Self.insets
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
