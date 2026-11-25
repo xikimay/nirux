@@ -252,9 +252,9 @@ extension NiruxShellView {
         // Clamp into the drag bounds: a hand-edited or corrupt widthPreset
         // must not restore an invisible sliver or an over-wide column.
         let fraction = CGFloat(persistedColumn.widthPreset)
-        workspace.columns.last?.widthFraction = min(
-            WorkspaceState.maxWidthFraction,
-            max(WorkspaceState.minWidthFraction, fraction)
+        workspace.columns.last?.restoreWidth(
+            min(WorkspaceState.maxWidthFraction, max(WorkspaceState.minWidthFraction, fraction)),
+            unfit: persistedColumn.unfitPreset.map { CGFloat($0) }
         )
     }
 
@@ -397,7 +397,7 @@ extension NiruxShellView {
                 PersistedWorkspace(
                     id: workspace.id, title: workspace.title,
                     cwd: Self.persistedWorkspaceCwd(for: workspace),
-                    columns: workspace.columns.filter { $0.waitingTask == nil }.map { persistedColumn($0, in: workspace, snapshot: snapshot) },
+                    columns: persistedColumns(of: workspace, snapshot: snapshot),
                     focusedColumnIndex: workspace.focusedIndex,
                     profileID: workspace.profileID,
                     isInactive: workspace.isInactive,
@@ -436,6 +436,14 @@ extension NiruxShellView {
             // Only when projects.json holds these spaces; see ProjectStore.
             projectsFileVersion: projectStore.isFileCurrent ? ProjectStore.schemaVersion : nil
         )
+    }
+
+    private func persistedColumns(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> [PersistedColumn] {
+        workspace.columns.filter { $0.waitingTask == nil }.map { column in
+            var persisted = persistedColumn(column, in: workspace, snapshot: snapshot)
+            persisted.unfitPreset = column.unfitFraction.map(Double.init)
+            return persisted
+        }
     }
 
     private func persistedColumn(
