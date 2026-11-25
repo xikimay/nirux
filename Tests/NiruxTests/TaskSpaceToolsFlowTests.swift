@@ -50,7 +50,9 @@ final class TaskSpaceToolsFlowTests: XCTestCase {
     ) throws -> [String: Any] {
         let line = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 1, "method": method, "params": params])
         let reply = Reply()
-        Thread { reply.data = NiruxMCPServer.reply(to: line, context: server) ?? Data() }.start()
+        // Typed first, so that it stays nonisolated (ThreadClosureGuardTests).
+        let answer: @Sendable () -> Void = { reply.data = NiruxMCPServer.reply(to: line, context: server) ?? Data() }
+        Thread(block: answer).start()
         harness.waitUntil("the server's answer to \(method)", timeout: 60) { reply.data != nil }
         return try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(reply.data)) as? [String: Any])
     }

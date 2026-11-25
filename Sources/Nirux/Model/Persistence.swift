@@ -771,6 +771,9 @@ struct PersistedWorkspace: Codable {
 
 struct PersistedColumn: Codable {
     var widthPreset: Double // raw CGFloat value
+    /// The width a column fitted to the window comes back to
+    /// (`ColumnState.toggleFit`).
+    var unfitPreset: Double?
     var cwd: String
     var columnType: ColumnKind?
     var webViewURL: String? // current URL for webView columns
@@ -854,7 +857,7 @@ struct PersistedColumn: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case widthPreset, cwd, columnType, webViewURL, isIsolatedBrowser
+        case widthPreset, unfitPreset, cwd, columnType, webViewURL, isIsolatedBrowser
         case editorOpenFiles, editorActiveFile
         case editorOpenFile // legacy single-file editor state
         case claudeLaunchMode
@@ -878,6 +881,7 @@ struct PersistedColumn: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         widthPreset = try container.decode(Double.self, forKey: .widthPreset)
+        unfitPreset = try? container.decodeIfPresent(Double.self, forKey: .unfitPreset)
         cwd = try container.decode(String.self, forKey: .cwd)
         columnType = try? container.decodeIfPresent(ColumnKind.self, forKey: .columnType)
         webViewURL = try container.decodeIfPresent(String.self, forKey: .webViewURL)
@@ -923,6 +927,7 @@ struct PersistedColumn: Codable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(widthPreset, forKey: .widthPreset)
+        try container.encodeIfPresent(unfitPreset, forKey: .unfitPreset)
         try container.encode(cwd, forKey: .cwd)
         try container.encodeIfPresent(columnType, forKey: .columnType)
         try container.encodeIfPresent(webViewURL, forKey: .webViewURL)
