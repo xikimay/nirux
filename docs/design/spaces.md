@@ -257,7 +257,8 @@ New flow, built on the guarded typing `tell` already uses
   (the space brief, the same for both) until it compacts, so its first prompt says where
   it works now; its MCP tools and instructions come from the new launch. The task's own
   Missions end without typing anything more, and it keeps its worktree, branch, pull
-  request and row. Only at rest, never with open sub-tasks; Codex and Antigravity tasks
+  request and row; its sub-tasks' Missions report to the Lead's agent, and they list among
+  the Lead's tasks. Only at rest, never a sub-task; Codex and Antigravity tasks
   aren't promoted (an Antigravity conversation keeps running in its first folder).
   Antigravity reports turn state through OSC 7501. Its CLI rejects `mcpServers` in
   `--settings` and exposes server configuration through the persistent `agy mcp` commands.
