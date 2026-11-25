@@ -1152,6 +1152,8 @@ final class LeadToolsFlowTests: XCTestCase {
             let leadRow = try XCTUnwrap(shell.sidebar.lastInfos.first(where: \.isLead))
             XCTAssertNil(leadRow.usage?.budget, "a Lead spends past a task's budget by design")
             XCTAssertEqual(leadRow.usage?.isWarning, false)
+            XCTAssertEqual(leadRow.usage?.spaceWeekShare, 1, "its space spent the whole week")
+            XCTAssertNil(taskRow.usage?.spaceWeekShare)
 
             var pullRequest = PRInfo(
                 number: 9, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil, mergeable: nil,

@@ -34,12 +34,16 @@ extension NiruxShellView {
     /// Its row's usage; a task's has its space's budget, unless the user let
     /// it pass for now (`budgetPassedAt`); a Lead's or a plain workspace's none.
     func taskUsage(of workspace: WorkspaceState) -> SidebarTaskUsage? {
-        usageMonitor?.report.flatMap {
-            SidebarTaskUsage(
-                $0, taskID: workspace.id,
+        usageMonitor?.report.flatMap { report in
+            var usage = SidebarTaskUsage(
+                report, taskID: workspace.id,
                 budget: Self.isTask(workspace) && !workspace.passesBudget(at: Date().timeIntervalSince1970)
                     ? taskBudgets[workspace.profileID] : nil
             )
+            if workspace.isLead, report.week.total.weightedTokens > 0 {
+                usage?.spaceWeekShare = (report.week.spaces[workspace.profileID]?.weightedTokens ?? 0) / report.week.total.weightedTokens
+            }
+            return usage
         }
     }
 

@@ -167,8 +167,10 @@ extension NiruxShellView {
             self.sessionLedger.closeSessions(ofWorker: uuid, at: now)
             _ = MissionStore.shared.endChildMissions(workspaceID: task.id, agentUUID: uuid, at: now)
             task.noteConversationMovedToLead(at: now)
-            self.saveState()
             self.handOver(sessionID, from: task, workerUUID: uuid, to: lead, spaceID: spaceID)
+            // After the hand-over: the Lead's column saves the conversation it
+            // resumes, even while its previous session ends.
+            self.saveState()
             return true
         }
     }
@@ -193,15 +195,31 @@ extension NiruxShellView {
     }
 
     /// The task's sub-tasks become the Lead's: their Missions report to its
-    /// agent, and they list among its tasks.
-    private func moveSubtasks(of task: WorkspaceState, workerUUID: String, to lead: WorkspaceState) {
-        guard let leadAgentUUID = lead.leadAgentUUID else { return }
+    /// agent, and they list among its tasks. Whether it had any.
+    @discardableResult
+    private func moveSubtasks(of task: WorkspaceState, workerUUID: String, to lead: WorkspaceState) -> Bool {
+        guard let leadAgentUUID = lead.leadAgentUUID else { return false }
+        let had = workspaces.contains { $0.parentWorkspaceID == task.id } || MissionStore.shared.missions.contains {
+            $0.parentWorkspaceID == task.id && $0.parentAgentUUID == workerUUID && $0.oneWay != true
+        }
         _ = MissionStore.shared.reparentMissions(
             fromWorkspace: task.id, agentUUID: workerUUID, toLead: lead.id, leadAgentUUID: leadAgentUUID, at: Date().timeIntervalSince1970
         )
         for subtask in workspaces where subtask.parentWorkspaceID == task.id { subtask.parentWorkspaceID = nil }
         saveState()
         updateSidebar()
+        return had
+    }
+
+    static let subtasksMovedLine = "Your sub-tasks now report to the space’s Lead, which took over coordinating them. Keep to your own work here."
+
+    /// A worker that stays in its task hears, in one line, that it no longer
+    /// follows its sub-tasks.
+    private func tellSubtasksMoved(_ task: WorkspaceState, to lead: WorkspaceState) {
+        guard let agentUUID = lead.leadAgentUUID else { return }
+        tellTask(Self.subtasksMovedLine, to: task, lead: NewTask.MissionParent(workspaceID: lead.id, agentUUID: agentUUID)) { [weak self] message, failed in
+            if failed { self?.showToast(message, tone: .error) }
+        }
     }
 
     /// Codex can't be told the Lead's role on a resumed thread, and an
@@ -226,11 +244,14 @@ extension NiruxShellView {
                     spaceID: spaceID, launch: { Self.launch(of: agent, resume: nil, model: model, in: $0) },
                     prompt: ([Self.leadRestartPrompt(for: agent)] + handover).joined(separator: "\n")
                 )
-                if let started = self.leadWorkspace(inSpace: spaceID) { self.moveSubtasks(of: task, workerUUID: uuid, to: started) }
+                if let started = self.leadWorkspace(inSpace: spaceID), self.moveSubtasks(of: task, workerUUID: uuid, to: started) {
+                    self.tellSubtasksMoved(task, to: started)
+                }
                 return
             }
-            self.moveSubtasks(of: task, workerUUID: uuid, to: lead)
+            let moved = self.moveSubtasks(of: task, workerUUID: uuid, to: lead)
             self.restartLead(lead, agent: agent, handover: handover)
+            if moved { self.tellSubtasksMoved(task, to: lead) }
         }
     }
 
@@ -244,6 +265,7 @@ extension NiruxShellView {
             handoverPrompt: prompt, settingsFiles: file.map { [lead.profileID: $0] } ?? [:]
         )
         prepareSessionResume(launch, in: column)
+        column.handedClaudeSessionID = launch.agent == .claude ? launch.sessionID : nil
         sideEffects.launchAgent(column, command)
     }
 }

@@ -349,7 +349,8 @@ struct WorkspaceInfo: Hashable {
         guard let boardProgress, let prInfo else { return boardProgress }
         guard boardProgress.number == prInfo.number, prInfo.state != .closed else { return nil }
         if (boardProgress.mergeStep == .merged) != (prInfo.state == .merged) { return nil }
-        if boardProgress.mergeStep == .ready, prInfo.blocksMerge(hasFeedback: prFeedback != nil) { return nil }
+        if boardProgress.mergeStep == .ready,
+           prInfo.blocksMerge(hasFeedback: prFeedback != nil, offersTrains: boardProgress.offersTrains) { return nil }
         return boardProgress
     }
     var station: BoardStages.Station? { currentBoardProgress?.station }

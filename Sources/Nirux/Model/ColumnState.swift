@@ -123,6 +123,10 @@ final class ColumnState {
 
     /// Session History treats this column as the holder while the old Lead is stopping.
     var relaunchingLeadSessionID: String?
+    /// A Claude conversation this column was handed to resume (a Lead
+    /// relaunched or promoted): saves name it until its `claude` holds it,
+    /// so a quit meanwhile resumes it rather than the session it replaces.
+    var handedClaudeSessionID: String?
     var leadSafetyAtLaunch: ClaudeSpaceSettings.File?
     /// Spec needed to respawn the shell after it exits.
     private var terminalSpec: (cwd: String, shellArgs: [String], environment: [String: String])?

@@ -106,6 +106,7 @@ final class BoardStagesContentFlowTests: BoardRepositoryTestCase {
             XCTAssertEqual(widgets.status?.symbol, Theme.Symbol.checksPassed, "the run read: green")
             XCTAssertEqual(widgets.queue?.start?.title.hasPrefix("Start"), true, "Start…, or Start Dry Run… in a build that can't change GitHub")
             XCTAssertEqual(widgets.menu, [.boardSettings, .openMainCheckout(path: repo)])
+            XCTAssertTrue(widgets.offersTrains, "its queue merges with a merge commit: it offers trains")
             // Its tasks in the sidebar's order, the pull request without a task folded, its other worktrees with the Lead's first.
             XCTAssertEqual(widgets.lines.units.flatMap(\.lines).map(\.id), [ids("widgets"), ids("login"), ids("old")])
             XCTAssertEqual(widgets.lines.units.flatMap(\.lines).map(\.pullRequest), ["no PR yet", "#12", "no PR yet"])
@@ -126,6 +127,7 @@ final class BoardStagesContentFlowTests: BoardRepositoryTestCase {
             XCTAssertEqual(gadgetsSection.detail, "acme/gadgets")
             XCTAssertEqual(gadgetsSection.lines.units.flatMap(\.lines).map(\.id), [ids("gadget")])
             XCTAssertNil(gadgetsSection.queue)
+            XCTAssertFalse(gadgetsSection.offersTrains)
             XCTAssertFalse(gadgetsSection.menu.contains(.boardSettings))
             XCTAssertEqual(gadgetsSection.status?.text, "Read-only")
             XCTAssertEqual(gadgetsSection.status?.toolTip, "Read-only, from origin: not one of this space’s repositories, so no merge queue here.")
