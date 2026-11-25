@@ -22,8 +22,8 @@ enum LeadPromotion {
     }
 
     /// Nil when `worker` can be promoted. `isSubtask`: its parent would lose
-    /// it. `openSubtasks`: the task's own open sub-tasks, whose parent it is.
-    static func refusal(_ worker: Worker?, isSubtask: Bool = false, openSubtasks: Int) -> String? {
+    /// it.
+    static func refusal(_ worker: Worker?, isSubtask: Bool = false) -> String? {
         if isSubtask { return "A sub-task can’t become the Lead: its task waits for it. Promote its task instead." }
         guard let worker else { return "Nirux couldn’t find this task’s agent terminal." }
         if worker.isStarting { return "The task’s terminal is starting. Try again once it opens." }
@@ -34,7 +34,6 @@ enum LeadPromotion {
         if !worker.isAtRest { return "The task’s agent is working. Promote it once its turn ends." }
         if worker.hasDialog { return "A dialog waits in the task’s terminal. Answer it first." }
         if worker.hasDraft { return "The task’s prompt holds a draft. Send or clear it first." }
-        if openSubtasks > 0 { return "Close the task’s sub-tasks first: they can’t follow it to the Lead yet." }
         return nil
     }
 }
