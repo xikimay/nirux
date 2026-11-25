@@ -48,6 +48,17 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
+      - name: Probe closure
+        run: |
+          swift --version
+          B=$(find .build -type f -name NiruxPackageTests -path "*MacOS*" | head -1)
+          echo "binary $B"
+          for s in $(nm "$B" | awk '$3 ~ /TaskSpaceToolsFlow.*fU_$/ {print $3}'); do
+            echo "== $s"
+            echo "$s" | xcrun swift-demangle
+            objdump -d --disassemble-symbols="$s" "$B" | grep -E "\sbl\s" | sed -E 's/.*<(.*)>.*/\1/' | xcrun swift-demangle --simplified | head -12
+          done
+
       - name: Repeat the classes
         env:
           CLASSES: ${{ inputs.classes }}
