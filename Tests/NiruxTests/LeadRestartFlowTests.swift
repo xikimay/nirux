@@ -271,6 +271,8 @@ final class LeadRestartFlowTests: XCTestCase {
             harness.waitUntil("what fits") { pastes() == 2 }
             XCTAssertEqual(count(parts[0]), 1)
             XCTAssertEqual(count(parts[19]), 0, "past the paste's limit: the next pass")
+            // An agent starts its turn after the paste's Enter: the rest is held till then.
+            harness.waitUntil("its Enter") { shell.missionWaits.typing.isEmpty }
             report(.working)
             report(.done)
             shell.typeMissionMessages()
