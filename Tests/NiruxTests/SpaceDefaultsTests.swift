@@ -314,7 +314,11 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(set.defaults.weeklyTaskBudget, 50_000_000)
         let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(set.defaults)) as? [String: Any]
         XCTAssertEqual(written?["taskBudget"] as? Int, 50_000_000)
-        XCTAssertEqual(SpaceDefaultsStore.decode(Data(#"{"taskBudget": -5}"#.utf8)).defaults.weeklyTaskBudget, SpaceDefaults.defaultTaskBudget)
+        for unreadable in [#"{"taskBudget": -5}"#, #"{"taskBudget": "50M"}"#] {
+            let odd = SpaceDefaultsStore.decode(Data(unreadable.utf8))
+            XCTAssertEqual(odd.status, .readOnly(.unknownSettings(["taskBudget"])), "kept, never rewritten: \(unreadable)")
+            XCTAssertEqual(odd.defaults.weeklyTaskBudget, SpaceDefaults.defaultTaskBudget)
+        }
         XCTAssertEqual(SpaceDefaultsStore.unreadDefaults.weeklyTaskBudget, SpaceDefaults.defaultTaskBudget, "a pause is the safe side")
     }
 

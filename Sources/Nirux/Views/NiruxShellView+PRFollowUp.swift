@@ -121,7 +121,8 @@ extension NiruxShellView {
         var probe = decided.entry
         var ready = facts
         ready.hasTrackedChanges = false
-        guard target.column != nil, case .wait = decided.action, case .type = PRFollowUp.next(&probe, ready),
+        // Past its budget, no round is typed; its stops and row stay.
+        guard target.column != nil, case .wait = decided.action, case .type = PRFollowUp.next(&probe, ready), !isOverBudget(workspace),
               !isFollowUpRoundRunning(besides: pullRequest.url, now: now),
               let root = workspace.gitContext?.identity.repositoryRoot,
               center.checking.insert(workspace.id).inserted
@@ -158,7 +159,7 @@ extension NiruxShellView {
             of: workspace, pullRequest: pullRequest, target: target, facts: facts, snapshot: snapshot,
             note: untracked ? "untracked files don't block" : nil
         )
-        guard case .type(let round, let prompt) = decided.action else { return }
+        guard case .type(let round, let prompt) = decided.action, !isOverBudget(workspace) else { return }
         guard let pty = column.pty, let paste = TypedPromptSanitizer.bracketedPaste(for: prompt) else {
             prFollowUpCenter.noteTyped(.left, round: round, url: pullRequest.url, now: now)
             return scheduleMetadataRefresh()
@@ -182,10 +183,9 @@ extension NiruxShellView {
         Set(workspaces.compactMap { $0.isClosing || $0.prInfo?.state != .open ? nil : $0.prInfo?.url })
     }
 
-    /// A task of a space that follows its pull requests, within its budget.
+    /// A task of a space that follows its pull requests.
     private func isFollowedTask(_ workspace: WorkspaceState) -> Bool {
         Self.isTask(workspace) && !workspace.isInactive && !workspace.isClosing && followsUpPullRequests(inSpace: workspace.profileID)
-            && !isOverBudget(workspace)
     }
 
     /// The column whose Claude the decision reads: the one the open round

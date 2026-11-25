@@ -1126,6 +1126,46 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// Past its budget, a task's row warns and its follow-up stop still
+    /// shows: only typing a round waits. The Lead's row has no budget.
+    func testATaskPastItsBudgetKeepsItsFollowUpStopAndTheLeadHasNone() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let started = try call(LeadTools.startTask, ["description": "Check export"], lead: lead, in: harness)
+            XCTAssertFalse(started.isError, started.text)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Check export" })
+            let now = Date().timeIntervalSince1970
+            func session(_ id: String, of workspace: WorkspaceState) -> UsageSession {
+                UsageSession(
+                    key: UsageSessionKey(.claude, id), attribution: UsageAttribution(spaceID: lead.space, taskID: workspace.id),
+                    events: [UsageEvent(timestamp: now - 60, model: "claude-opus-5-5", counts: TokenCounts(input: 30_000_000))]
+                )
+            }
+            let monitor = UsageMonitor(sources: UsageSources(home: harness.home), catalog: { UsageCatalog() })
+            monitor.report = UsageReport(sessions: [session("t", of: task), session("l", of: lead.workspace)], now: now)
+            shell.usageMonitor = monitor
+            shell.taskBudgets = [lead.space: SpaceDefaults.defaultTaskBudget]
+            shell.updateSidebar()
+            let taskRow = try XCTUnwrap(shell.sidebar.lastInfos.first { $0.id == task.id })
+            XCTAssertEqual(taskRow.usage?.isOverBudget, true)
+            let leadRow = try XCTUnwrap(shell.sidebar.lastInfos.first(where: \.isLead))
+            XCTAssertNil(leadRow.usage?.budget, "a Lead spends past a task's budget by design")
+            XCTAssertEqual(leadRow.usage?.isWarning, false)
+
+            var pullRequest = PRInfo(
+                number: 9, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil, mergeable: nil,
+                url: "https://github.com/acme/repo/pull/9", additions: nil, deletions: nil, changedFiles: nil
+            )
+            pullRequest.headRefOid = "abc"
+            task.prInfo = pullRequest
+            shell.prFollowUpCenter.file.update {
+                $0.pullRequests[pullRequest.url] = PRFollowUp.Entry(stop: PRFollowUp.Stop(kind: .ci, cause: .rounds, head: "abc", at: now))
+            }
+            XCTAssertNotNil(shell.followUpRow(of: task), "its stop still shows past its budget")
+        }
+    }
+
     func testDailyPassRequiresAPullRequestReadForTheCurrentCheckout() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
