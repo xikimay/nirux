@@ -28,7 +28,9 @@ struct UsageWeek: Equatable {
             let named = top.map { rise * (spend[$0] ?? 0) / total }
             return named + [rise - named.reduce(0, +)]
         }
-        let risen = zip(rise, dayTasks).filter { $0.0 > 0 }
+        // Days it rose with Claude spending in Nirux: a rise from claude.ai
+        // alone has no tokens to divide.
+        let risen = zip(rise, dayTasks).filter { $0.0 > 0 && $0.1.values.reduce(0, +) > 0 }
         let tokens = risen.reduce(0.0) { $0 + $1.1.values.reduce(0, +) }
         pointsPerToken = tokens > 0 ? risen.reduce(0.0) { $0 + $1.0 } / tokens : nil
     }

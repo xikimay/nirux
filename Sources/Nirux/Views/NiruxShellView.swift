@@ -96,6 +96,9 @@ final class NiruxShellView: NSView {
     var usageWindow: UsageWindowController?
     /// "Compact at turn end" waiting for its claude to rest: column ID → task ID.
     var compactsAtTurnEnd: [UUID: String] = [:]
+    /// The title bar's limits, held forecasts included, and Claude's weekly
+    /// readings over the week, while the option is on: the Usage window's.
+    var usageWindowQuota: (() -> (limits: [QuotaLimit], weekReadings: [QuotaReading]))?
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
     var workspaces: [WorkspaceState] {

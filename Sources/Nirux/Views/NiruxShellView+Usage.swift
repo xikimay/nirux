@@ -173,22 +173,9 @@ extension NiruxShellView {
         }
     }
 
-    /// The plan limits as the title bar reads them, and Claude's weekly
-    /// readings over the week, for the Usage window.
-    func usageWindowLimits() -> (limits: [QuotaLimit], weekReadings: [QuotaReading]) {
-        let now = Date().timeIntervalSince1970
-        let readings = QuotaReadingLog.read(in: ClaudeUsageLimitsFile.readingsFolder(), since: now - Double(QuotaReadingLog.keptDays) * 86_400)
-        let report = usageMonitor?.report
-        let limits = QuotaLimit.current(
-            claude: ClaudeUsageLimitsFile.load()?.current(at: now), claudeReadings: readings,
-            codex: report?.codexLimits, codexReadings: report?.codexReadings ?? [:], previous: [], now: now
-        )
-        return (limits, readings["seven_day"] ?? [])
-    }
-
     func updateUsageWindow() {
-        let (limits, weekReadings) = usageWindowLimits()
-        usageWindow?.update(report: usageMonitor?.report, names: usageNames(), limits: limits, weekReadings: weekReadings)
+        let quota: (limits: [QuotaLimit], weekReadings: [QuotaReading]) = usageWindowQuota?() ?? ([], [])
+        usageWindow?.update(report: usageMonitor?.report, names: usageNames(), limits: quota.limits, weekReadings: quota.weekReadings)
     }
 
     func showUsageWindow() {

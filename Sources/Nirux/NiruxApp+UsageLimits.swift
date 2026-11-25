@@ -29,6 +29,12 @@ extension NiruxApp {
         }
         usageLimitsIndicator = indicator
         usageLimitsMonitor = monitor
+        shell?.usageWindowQuota = { [weak indicator, weak monitor] in
+            guard monitor?.isEnabled == true else { return ([], []) }
+            let now = Date().timeIntervalSince1970
+            let week = QuotaReadingLog.read(in: ClaudeUsageLimitsFile.readingsFolder(), since: now - Double(QuotaReadingLog.keptDays) * 86_400)
+            return (indicator?.limits ?? [], week["seven_day"] ?? [])
+        }
         monitor.setEnabled(Self.currentShowClaudeUsageLimits())
     }
 

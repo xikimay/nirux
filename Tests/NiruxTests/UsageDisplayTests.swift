@@ -373,7 +373,7 @@ final class UsageDisplayTests: XCTestCase {
         // The tasks go to the table, in points of the weekly limit when calibrated.
         let calibrated = UsageWeek(rise: [0, 0, 0, 0, 0, 0, 9], dayTasks: [[:], [:], [:], [:], [:], [:], ["lead": 600, "closed": 300]])
         let table = UsageReportText.tableRows(week, names: names, week: calibrated, dayTasks: [[:], [:], [:], [:], [:], [:], ["lead": 600, "closed": 300]])
-        XCTAssertEqual(table.map(\.title), ["Lead", "Closed task"])
+        XCTAssertEqual(table.map(\.title), ["Lead", "Closed task", "Outside tasks"])
         XCTAssertEqual(table.first?.points ?? 0, 6, accuracy: 0.001)
         XCTAssertEqual(table.first?.tokens, 600)
     }
@@ -393,6 +393,8 @@ final class UsageDisplayTests: XCTestCase {
         XCTAssertEqual(week.tasks, ["a", "b", ""])
         XCTAssertEqual(week.days, [[0, 0, 0], [6, 4, 0], [2, 0, 4]])
         XCTAssertEqual(week.pointsPerToken ?? 0, 16.0 / 1_300, accuracy: 1e-9)
+        let elsewhere = try XCTUnwrap(UsageWeek(rise: [10, 5], dayTasks: [[:], ["a": 1_000]]))
+        XCTAssertEqual(elsewhere.pointsPerToken ?? 0, 5.0 / 1_000, accuracy: 1e-9, "a rise with no spend in Nirux divides nothing")
         XCTAssertNil(UsageWeek(rise: [0, 0, 0], dayTasks: [[:], [:], [:]]), "no readings, no points")
     }
 

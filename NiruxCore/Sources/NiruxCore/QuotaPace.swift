@@ -43,10 +43,11 @@ public enum QuotaCalibration {
     public static func dailyRise(_ readings: [QuotaReading], dayStarts: [TimeInterval]) -> [Double] {
         var rise = Array(repeating: 0.0, count: dayStarts.count)
         let sorted = readings.sorted { $0.time < $1.time }
-        for (previous, reading) in zip(sorted, sorted.dropFirst())
-        where abs(reading.resetsAt - previous.resetsAt) <= QuotaPace.sameWindow && reading.usedPercent > previous.usedPercent {
-            guard let day = dayStarts.lastIndex(where: { $0 <= reading.time }) else { continue }
-            rise[day] += reading.usedPercent - previous.usedPercent
+        for (previous, reading) in zip(sorted, sorted.dropFirst()) {
+            // A new window climbed from 0 to its first reading.
+            let from = abs(reading.resetsAt - previous.resetsAt) <= QuotaPace.sameWindow ? previous.usedPercent : 0
+            guard reading.usedPercent > from, let day = dayStarts.lastIndex(where: { $0 <= reading.time }) else { continue }
+            rise[day] += reading.usedPercent - from
         }
         return rise
     }

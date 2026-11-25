@@ -23,7 +23,8 @@ enum UsageReportText {
     /// The tasks, busiest first, for the table; points of Claude's weekly
     /// limit from `week` over 7 days.
     static func tableRows(_ period: UsageReport.Period, names: UsageNames, week: UsageWeek?, dayTasks: [[String: Double]]) -> [UsageTasksTable.Row] {
-        period.tasks.sorted { $0.value.weightedTokens > $1.value.weightedTokens }.prefix(taskRows).map { id, summary in
+        let ranked = period.tasks.sorted { $0.value.weightedTokens > $1.value.weightedTokens }
+        var rows = ranked.prefix(taskRows).map { id, summary in
             let claude = dayTasks.reduce(0.0) { $0 + ($1[id] ?? 0) }
             return UsageTasksTable.Row(
                 title: names.tasks[id]?.title ?? "Closed task",
@@ -31,6 +32,14 @@ enum UsageReportText {
                 tokens: summary.weightedTokens, peakContext: summary.peakContextTokens, subagents: summary.subagents.count
             )
         }
+        // What the rows leave out still shows.
+        let rest = period.total.weightedTokens - rows.reduce(0) { $0 + $1.tokens }
+        if rest >= 1 {
+            rows.append(UsageTasksTable.Row(
+                title: ranked.count > taskRows ? "Other tasks and sessions" : "Outside tasks", points: nil, tokens: rest, peakContext: 0, subagents: 0
+            ))
+        }
+        return rows
     }
 
     static func name(of source: UsageReport.Source) -> String {
@@ -57,7 +66,7 @@ enum UsageReportText {
             row("Context past \(UsageText.tokens(UsageSummary.heavyContextTokens))", period.total.heavyContextWeightedTokens,
                 [saves(period.total.heavyContextExcessWeightedTokens, "Compacting there")]),
             row("Subagents (\(period.total.subagents.count))", period.total.subagentWeightedTokens,
-                [period.total.subagents.count > SidebarTaskUsage.subagentSoftCap ? "Past \(SidebarTaskUsage.subagentSoftCap) a session: start tasks" : ""]),
+                [period.total.subagents.isEmpty ? "" : "Past \(SidebarTaskUsage.subagentSoftCap) in a session, tasks cost less"]),
             row("Cold cache rewrites (\(period.total.coldRewrites))", period.total.coldRewriteWeightedTokens,
                 [saves(period.total.coldRewriteWeightedTokens, "A fresh start after an idle hour")]),
             row("Leads", leads)
@@ -188,7 +197,7 @@ final class UsageWindowController: NSWindowController {
         limitsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let width = (window?.contentLayoutRect.width ?? 640) - 40
         for limit in limits.sorted(by: { ($0.agent == .claude ? 0 : 1, $0.length) < ($1.agent == .claude ? 0 : 1, $1.length) }) {
-            limitsStack.addArrangedSubview(QuotaPopoverViewController.limitRow(limit, now: report.generatedAt, calendar: .current, width: width))
+            limitsStack.addArrangedSubview(QuotaPopoverViewController.limitRow(limit, now: Date().timeIntervalSince1970, calendar: .current, width: width))
         }
         limitsStack.isHidden = limits.isEmpty
         textView.textStorage?.setAttributedString(Self.text(UsageReportText.sections(shown, names: names)))

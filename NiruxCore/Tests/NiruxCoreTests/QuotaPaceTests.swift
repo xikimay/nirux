@@ -144,12 +144,12 @@ struct QuotaPaceTests {
         let readings = [
             QuotaReading(time: now - 2 * 86_400 + 60, usedPercent: 10, resetsAt: now - 86_400 + 600),
             QuotaReading(time: now - 2 * 86_400 + 3_600, usedPercent: 25, resetsAt: now - 86_400 + 600),
-            // The week reset: the new window starts at 2 %, no fall.
+            // The week reset: the new window climbed to 2 %, no fall.
             QuotaReading(time: now - 86_400 + 1_200, usedPercent: 2, resetsAt: now + 6 * 86_400),
             QuotaReading(time: now - 86_400 + 7_200, usedPercent: 9, resetsAt: now + 6 * 86_400),
             QuotaReading(time: now + 60, usedPercent: 12, resetsAt: now + 6 * 86_400)
         ]
-        #expect(QuotaCalibration.dailyRise(readings, dayStarts: days) == [15, 7, 3])
+        #expect(QuotaCalibration.dailyRise(readings, dayStarts: days) == [15, 9, 3])
     }
 
     @Test func theContextPastItsThresholdCountsWhatCompactingWouldSave() {
