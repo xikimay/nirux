@@ -483,8 +483,8 @@ extension NiruxShellView {
             }
             col.restoredColumn = nil
         }
-        let kind: ColumnKind
-        let webURL: String?
+        var kind: ColumnKind
+        var webURL: String?
         var editorOpenFiles: [String]?
         var editorActiveFile: String?
         var claudeMode: ClaudeLaunchMode?
@@ -517,6 +517,15 @@ extension NiruxShellView {
             }
         } else {
             kind = .terminal; webURL = nil
+        }
+        if let handed = col.handedClaudeSessionID {
+            if claudeRestore?.sessionID == handed {
+                col.handedClaudeSessionID = nil
+            } else {
+                kind = .claudeCode
+                webURL = nil
+                claudeRestore = .resume(handed)
+            }
         }
         // What the column says next launch, until its agent resumes.
         let isAgent = [.claudeCode, .codex, .agy].contains(kind)

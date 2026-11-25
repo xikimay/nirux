@@ -1033,6 +1033,12 @@ final class LeadRestartFlowTests: XCTestCase {
                 harness?.restartedAgent = promotedCommand
             }
 
+            var savedAsTheLeadRestarts: PersistedState?
+            let restartLeadTerminal = shell.sideEffects.restartTerminal
+            shell.sideEffects.restartTerminal = { [weak shell] target, command, starts in
+                savedAsTheLeadRestarts = shell?.persistedState()
+                restartLeadTerminal(target, command, starts)
+            }
             harness.alertResponses = [.alertSecondButtonReturn]
             let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === task })
             harness.perform([NiruxShellView.promoteToLeadTitle], in: shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil))
@@ -1049,6 +1055,10 @@ final class LeadRestartFlowTests: XCTestCase {
             }
             XCTAssertNotEqual(ProcessInstance.running(pid: original.pid), original)
             XCTAssertNotEqual(ProcessInstance.running(pid: process.pid), process)
+            // Saved while the previous Lead still ran: a quit then resumes the
+            // promoted conversation in the Lead's column.
+            let savedLead = try XCTUnwrap(savedAsTheLeadRestarts?.workspaces.first { $0.id == lead.workspace.id })
+            XCTAssertTrue(savedLead.columns.contains { $0.agentUUID == lead.agentUUID && $0.claudeSessionID == sessionID })
             XCTAssertIdentical(leadColumn, lead.workspace.leadTerminal)
             XCTAssertEqual(leadColumn.agentUUID, lead.agentUUID)
             XCTAssertEqual(leadColumn.launchDirectory, lead.workspace.cwd)
@@ -1146,7 +1156,8 @@ final class LeadRestartFlowTests: XCTestCase {
     }
 
     /// Codex can't take the Lead's role on a resumed thread: the Lead starts
-    /// afresh with Codex, handed the task, which keeps its worker.
+    /// afresh with Codex, handed the task, which keeps its worker; its
+    /// sub-tasks go to the Lead, and the worker hears so.
     func testPromotingACodexTaskStartsTheLeadAfreshWithItsHandover() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -1166,6 +1177,16 @@ final class LeadRestartFlowTests: XCTestCase {
             // Codex says it waits at its prompt with OSC 7501.
             pty.onProgramStatus?(AgentProgramStatus(state: .idle, kind: nil, message: nil, agent: .codex))
             harness.waitUntil("Codex at rest") { pty.programStatus(of: pty.foregroundProcess(snapshot: ProcessSnapshot()))?.state == .idle }
+            let (subtaskID, subtaskUUID) = (UUID().uuidString, UUID().uuidString)
+            let subMission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: task.id, parentAgentUUID: agentUUID,
+                childWorkspaceID: subtaskID, childAgentUUID: subtaskUUID, childAgentKind: "claude",
+                branch: "feat/codex-part", reportsToTask: true
+            ), enabled: true))
+            shell.addWorkspace(
+                title: "Its part", cwd: harness.worktree, profileID: lead.space, workspaceID: subtaskID,
+                initialAgentUUID: subtaskUUID, missionID: subMission.id, parentWorkspaceID: task.id, reportsToTask: true
+            )
             harness.alertResponses = [.alertSecondButtonReturn]
             shell.requestLeadPromotion(of: task)
             XCTAssertEqual(harness.alerts.last, "Make “Codex part” the Lead of “Tools”?", shell.toast?.message ?? "")
@@ -1177,6 +1198,14 @@ final class LeadRestartFlowTests: XCTestCase {
             XCTAssertFalse(command.contains("codex resume"), command)
             XCTAssertEqual(harness.terminalRestarts.count, 1, "the task keeps its worker")
             XCTAssertIdentical(column, task.columns.first { $0.agentUUID == agentUUID })
+            // Its sub-task went to the Lead, and the worker hears it in one line.
+            XCTAssertEqual(MissionStore.shared.missions.first { $0.id == subMission.id }?.parentWorkspaceID, lead.workspace.id)
+            harness.waitUntil("the worker told its sub-tasks moved") {
+                MissionStore.shared.missions.contains { mission in
+                    mission.childWorkspaceID == task.id
+                        && mission.events.contains { $0.kind == .instruction && $0.message.contains(NiruxShellView.subtasksMovedLine) }
+                }
+            }
             XCTAssertEqual(ProcessInstance.running(pid: process.pid), process)
             harness.waitUntil("the old Lead to end") { ProcessInstance.running(pid: original.pid) != original }
         }
