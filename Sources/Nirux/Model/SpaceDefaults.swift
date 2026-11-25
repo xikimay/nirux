@@ -35,6 +35,9 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Space Settings › Lead, "Daily pass" (docs/design/daily-pass.md). Nil:
     /// on, after `DailyPass.defaultHour`.
     var leadDailyPass: Bool?
+    /// Space Settings › Lead, "Group task results" (`MissionResultBatch`).
+    /// Nil: on.
+    var leadGroupsResults: Bool?
     /// 0 to 23, local time.
     var leadDailyPassHour: Int?
     /// Space Settings › Defaults, "Follow up on pull requests"
@@ -63,6 +66,7 @@ struct SpaceDefaults: Equatable, Sendable {
     var leadStartsTasksWithoutAsking: Bool { leadStartsTasks ?? true }
 
     var dailyPassIsOn: Bool { leadDailyPass ?? true }
+    var groupsResults: Bool { leadGroupsResults ?? true }
     /// Whether a cold Lead with a heavy context starts a new conversation
     /// (`ContextOffer.restartsLead`).
     var leadStartsFreshWhenCold: Bool { leadFreshStart ?? true }
@@ -140,6 +144,7 @@ struct SpaceDefaults: Equatable, Sendable {
             (\.leadStartsMergeQueue, .leadStartsMergeQueue, false),
             (\.leadStartsMergeQueueWithoutLocalReview, .leadStartsMergeQueueWithoutLocalReview, false),
             (\.leadDailyPass, .leadDailyPass, false),
+            (\.leadGroupsResults, .leadGroupsResults, false),
             (\.leadFreshStart, .leadFreshStart, false),
             (\.prFollowUp, .prFollowUp, false),
             (\.resumeWorkOnRelaunch, .resumeWorkOnRelaunch, false),
@@ -258,6 +263,7 @@ extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion, agent, leadAgent, claudeLaunchMode, codexLaunchMode, agyLaunchMode, environment
         case leadStartsTasks, leadStartsMergeQueue, leadStartsMergeQueueWithoutLocalReview, leadDailyPass, leadDailyPassHour, prFollowUp, resumeWorkOnRelaunch
+        case leadGroupsResults
         case leadFreshStart, tasksManageSpaces
         case claudeModelSplit
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
@@ -283,6 +289,7 @@ extension SpaceDefaults: Codable {
         leadStartsMergeQueue = try? container.decodeIfPresent(Bool.self, forKey: .leadStartsMergeQueue)
         leadStartsMergeQueueWithoutLocalReview = try? container.decodeIfPresent(Bool.self, forKey: .leadStartsMergeQueueWithoutLocalReview)
         leadDailyPass = (try? container.decodeIfPresent(Bool.self, forKey: .leadDailyPass)) ?? nil
+        leadGroupsResults = (try? container.decodeIfPresent(Bool.self, forKey: .leadGroupsResults)) ?? nil
         leadDailyPassHour = ((try? container.decodeIfPresent(Int.self, forKey: .leadDailyPassHour)) ?? nil).flatMap { (0...23).contains($0) ? $0 : nil }
         prFollowUp = (try? container.decodeIfPresent(Bool.self, forKey: .prFollowUp)) ?? nil
         leadFreshStart = (try? container.decodeIfPresent(Bool.self, forKey: .leadFreshStart)) ?? nil
@@ -313,6 +320,7 @@ extension SpaceDefaults: Codable {
             try container.encode(true, forKey: .leadStartsMergeQueueWithoutLocalReview)
         }
         try container.encodeIfPresent(leadDailyPass, forKey: .leadDailyPass)
+        try container.encodeIfPresent(leadGroupsResults, forKey: .leadGroupsResults)
         try container.encodeIfPresent(leadDailyPassHour, forKey: .leadDailyPassHour)
         try container.encodeIfPresent(prFollowUp, forKey: .prFollowUp)
         try container.encodeIfPresent(leadFreshStart, forKey: .leadFreshStart)

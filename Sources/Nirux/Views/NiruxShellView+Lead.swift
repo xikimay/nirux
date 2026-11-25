@@ -279,6 +279,7 @@ extension NiruxShellView {
             agent: defaults?.defaults.preferredLeadAgent ?? .claude,
             dailyPass: defaults?.defaults.dailyPassIsOn ?? false,
             dailyPassHour: defaults?.defaults.dailyPassHour ?? DailyPass.defaultHour,
+            groupsResults: defaults?.defaults.groupsResults ?? false,
             freshStart: defaults?.defaults.leadStartsFreshWhenCold ?? false,
             lastPass: lastDailyPassText(inSpace: space.id),
             canChangeDefaults: defaults?.isWritable ?? false
@@ -290,6 +291,14 @@ extension NiruxShellView {
     func setLeadStartsTasks(_ on: Bool, spaceID: String) {
         changeSpaceDefaults(spaceID: spaceID) { $0.leadStartsTasks = on ? nil : false }
         refreshSpaceSettingsLead()
+    }
+
+    /// "Group task results", as "Starts tasks without asking".
+    func setLeadGroupsResults(_ on: Bool, spaceID: String) {
+        changeSpaceDefaults(spaceID: spaceID) { $0.leadGroupsResults = on ? nil : false }
+        refreshSpaceSettingsLead()
+        // Off, what waited goes now.
+        if !on { typeMissionMessages() }
     }
 
     /// "Fresh start after an idle hour", as "Starts tasks without asking".

@@ -547,6 +547,10 @@ final class PtySession: @unchecked Sendable {
         }
     }
 
+    /// A long paste is still being written: anything typed now would land
+    /// inside it.
+    var isPasting: Bool { state.pasting.withLock { $0 > 0 } }
+
     /// What one write to the terminal surely takes: about what its input
     /// queue holds. A longer text goes through `pasteInBackground`.
     nonisolated static let inputQueueBytes = 1_024
