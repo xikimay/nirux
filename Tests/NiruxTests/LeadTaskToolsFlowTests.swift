@@ -876,7 +876,14 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 task.hook(.stop)
                 task.agent.hold()
                 XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader \(cut)", "message": message], lead: lead).isError)
-                harness.waitUntil("it goes in") { task.agent.input.contains("\u{1B}[200~") }
+                if !harness.waitUntil("it goes in", { task.agent.input.contains("\u{1B}[200~") }) {
+                    // What held it, for a run where it never went in.
+                    let snapshot = ProcessSnapshot(), now = Date().timeIntervalSince1970
+                    let pty = try XCTUnwrap(task.column.pty)
+                    XCTFail("held: \(pty.missionPromptRefusal(runningSince: now, snapshot: snapshot).map(\.rawValue) ?? "free") "
+                        + "fg=\(pty.foregroundProcess(snapshot: snapshot)?.name ?? "-") typing=\(harness.shell.missionWaits.typing.count) "
+                        + "state=\(state(agentUUID))" + pty.missionPromptFacts(now: now, snapshot: snapshot))
+                }
                 XCTAssertEqual(state(agentUUID), ["waiting"])
                 if cut == "leaves" {
                     kill(task.claude.pid, SIGKILL)
@@ -889,7 +896,8 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 harness.waitUntil("its typing over (\(cut))", timeout: 60) { harness.shell.missionWaits.typing.isEmpty }
                 harness.shell.sweepWaitingInstructions(now: Date().timeIntervalSince1970, snapshot: ProcessSnapshot())
                 XCTAssertEqual(state(agentUUID), ["given up"], cut)
-                XCTAssertFalse(task.agent.input.hasSuffix("\n"), "no Enter (\(cut))")
+                // Its lines end in "\n"; Enter is "\r".
+                XCTAssertFalse(task.agent.input.contains("\r"), "no Enter (\(cut))")
                 let told = cut == "leaves" ? "“Reader leaves” was cut off: only its start" : "was never typed: its task closed first."
                 XCTAssertTrue(harness.shell.pendingLeadNotices.contains { $0.text.contains(told) }, harness.shell.pendingLeadNotices.map(\.text).joined())
             }
