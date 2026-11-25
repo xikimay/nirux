@@ -303,6 +303,11 @@ final class ClaudeUsageLimitsTests: XCTestCase {
             QuotaReading(time: $0.time - 60, usedPercent: $0.usedPercent, resetsAt: $0.resetsAt)
         }], now: now)
         XCTAssertEqual(indicator.limits.first { $0.length == 5 * hour }?.latest.usedPercent, 63)
+        let full = ClaudeUsageLimits(fiveHour: window(100, resetsAt: now + hour, reportedAt: now), sevenDay: window(20, resetsAt: now + 90 * hour))
+        indicator.update(limits: full, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour).map {
+            QuotaReading(time: $0.time - 60, usedPercent: $0.usedPercent, resetsAt: $0.resetsAt)
+        }], now: now)
+        XCTAssertEqual(indicator.limits.first { $0.length == 5 * hour }?.forecast, .reached, "shown full is full")
 
         indicator.update(limits: claude, readings: ["five_hour": climb([52.5, 55, 57.5, 60], resetsAt: now + hour)], now: now)
         XCTAssertEqual(indicator.label.stringValue, "5h 60% · ≈ 90%")
