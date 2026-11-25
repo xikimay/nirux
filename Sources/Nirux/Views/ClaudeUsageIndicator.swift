@@ -96,17 +96,19 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
         view.isHidden = false
     }
 
-    /// Each window with its reset, then each one's pace.
+    /// Each window shown, with its use and reset, then each one's pace, then
+    /// when the latest reading came.
     private func tooltip(now: TimeInterval) -> String {
-        let codexLines = codex.map { UsageText.codexWindows($0, now: now) }?.map { window in
-            "\(window.name) window: \(window.percent)% used"
-                + (window.resetsAt.map { ", " + ClaudeUsageLimits.resetText($0, now: now, calendar: calendar) } ?? "")
-        } ?? []
+        let windows = limits.map { limit in
+            "\(limit.agent == .claude ? "Claude " : "")\(UsageText.name(of: limit)): \(Int(limit.latest.usedPercent.rounded()))% used, "
+                + ClaudeUsageLimits.resetText(limit.latest.resetsAt, now: now, calendar: calendar)
+        }
+        let read = limits.map(\.latest.time).max().map { "Last reading at \(ClaudeUsageLimits.clockText($0, now: now, calendar: calendar)). " } ?? ""
         return [
-            claude?.tooltip(now: now, calendar: calendar),
-            codexLines.isEmpty ? nil : (["Codex plan usage limits"] + codexLines).joined(separator: "\n"),
-            (["At this pace"] + paceLines(now: now)).joined(separator: "\n")
-        ].compactMap { $0 }.joined(separator: "\n\n")
+            (["Plan usage limits"] + windows).joined(separator: "\n"),
+            (["At this pace"] + paceLines(now: now)).joined(separator: "\n"),
+            read + "Use elsewhere (claude.ai, another Mac) counts from the next reading."
+        ].joined(separator: "\n\n")
     }
 
     private func paceLines(now: TimeInterval) -> [String] {
