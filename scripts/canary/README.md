@@ -128,6 +128,8 @@ scripts/canary.sh Nirux.app --explore --replay-trace /tmp/nirux-explore/explore-
 
 The copy runs hidden through the canary channel (no focus taken, nothing in front, no Accessibility permission) in the two-space world of `multi-agent-routing`. Every terminal runs a fake claude, never a shell, and the copy and all its children run under `explore.sb`: file reads and writes denied but for macOS's own folders and the run's throwaway folder, no network but localhost (`test_explore_sandbox.py`). The MCP server refuses what opens a terminal (⌘T, Columns › New Terminal), a malformed call, and anything past the run's budget. Each episode is a fresh `claude -p` toward one goal, with the explorer's MCP server (`explorer_mcp.py`) as its only tools: `--strict-mcp-config`, `--tools ""`, hooks off, the runner's environment without API keys. The tools act as a person does (`look`, `press`, `menu`, `key`, `type`, `terminal`, `render`, `note`).
 
+The copy's GitHub is `fake_gh.py`: in a canary run only, Nirux runs it as gh (`GitHub.CLI.candidates`), never the user's. It answers pull requests, checks and sign-in from `<run>/github/world.json` (a pull request per fixture branch, each with an upstream on `acme/widgets`), records every call in `calls.jsonl`, and refuses GraphQL and the rest. The explorer's `github` tool changes that world as someone outside Nirux would: merge, close, reopen, checks passing, failing or running.
+
 After each action the server runs the oracles and says what failed: the app exited, didn't answer, an amber badge without a rendered reason (or the Space button's "waits for you in"), `state.json` unreadable, a fatal line in the app's stderr, typed text that showed in a terminal other than the focused one. The runner adds a quit nobody asked for, children that outlive the quit, and `.ips` crash reports. `budget.json` caps the run's calls and renders; the runner stops the last episode at the deadline.
 
 The run folder keeps `report.json` (episodes, tokens, cost, findings), `trace.jsonl` (every call, with its answer and failed checks), `findings.jsonl`, and `digest.md` (the agent's notes: to verify by a person, never in the ledger). Each distinct finding goes to the incident ledger as `intermittent`; `--replay-trace` runs a trace again without a model, and a finding it brings back is a `regression`.
@@ -139,6 +141,8 @@ scripts/canary.sh /tmp/nirux-explore/explore-XXXXXXXX/Nirux.app.zip --explore \
 # A kept trace is a regression check that needs no model
 scripts/canary.sh Nirux.app --explore --replay-trace scripts/canary/traces/hidden-copy-quits-when-a-popover-closes.jsonl
 ```
+
+`--replay-traces DIR` replays every kept trace of a folder, each in a fresh copy; a trace that finds its bug again is a `regression`, one that doesn't is a pass under `trace:<name>`. `.github/workflows/canary-traces.yml` runs `scripts/canary/traces` this way every night at 03:00 UTC on main (and on demand, or on a pull request that changes the traces or the workflow), without a model.
 
 `--diff-base REF` puts first the goals that the files changed since REF touch. `traces/` keeps reduced traces: `hidden-copy-quits-when-a-popover-closes` (4 of the first run's 21 calls, 178 replays) quit the hidden copy before it stopped counting a closing popover as its last window.
 

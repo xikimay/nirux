@@ -44,6 +44,7 @@ from scenarios import fixture_multi_agent  # noqa: E402
 from triage import normalize_error_text  # noqa: E402
 
 SCENARIO = "explore"
+INFRA = "infra_unavailable"
 EXIT_FINDINGS = 1
 # After a replay's last call, what it set off has this long to happen.
 SETTLE_SECONDS = 3
@@ -103,7 +104,9 @@ The copy runs on synthetic data: two spaces (Canary Alpha, Canary Beta), one tas
 Beta Child, a Mission of Alpha Parent), each with a fake agent named claude in its terminal. A fake agent reads \
 lines: "ask: <anything>" ends its turn on its one question, "Which one do you want: A or B?"; \
 "permission: <tool>" asks for a permission to use that tool; "exit" quits; anything else is a prompt it answers \
-with one turn. Their texts are synthetic: judge what Nirux shows of them, not their wording. The command bar's \
+with one turn. Their texts are synthetic: judge what Nirux shows of them, not their wording. The repository is acme/widgets on a \
+fake GitHub: pull request #1 is Alpha's branch, #2 Beta's. The github tool changes them as someone outside Nirux \
+would (merge, close, reopen, checks green, red or running); Nirux sees it at its next refresh. The command bar's \
 badge counts the agents waiting other than the one on screen (what ⌘J visits).
 
 Work toward the goal you are given, and take unexpected but legitimate paths a hurried person might: fast \
@@ -181,12 +184,32 @@ def digest(notes):
     return "\n".join(lines) + "\n"
 
 
+def github_world(repo, branches, git=subprocess.check_output):
+    """The copy's GitHub (fake_gh.py): a pull request for each branch, its checks green."""
+    tip = lambda ref: git(["/usr/bin/git", "-C", str(repo), "rev-parse", ref], text=True).strip()
+    return {"repository": "acme/widgets", "mainTip": tip("main"), "pullRequests": [
+        {"number": number, "title": f"Work on {branch}", "headRefName": branch, "headRefOid": tip(branch), "baseRefName": "main",
+         "state": "OPEN", "checks": "success", "createdAt": "2026-01-01T00:00:00Z"}
+        for number, branch in enumerate(branches, start=1)]}
+
+
 def build_world(app, work, seed):
     for name in ("state", "tmp", "home"):
         (work / name).mkdir(mode=0o700)
     world = fixture_multi_agent(work, app.env, seed)
     app.tree = world["treeAlpha"]
     agents = [app.fake_agent(name) for name in ("claude", "codex", "agy")]
+    gh = agents[0].parent / "gh"
+    shutil.copyfile(HERE / "fake_gh.py", gh)
+    gh.chmod(0o755)
+    # A GitHub remote and each branch's upstream on it: what PR detection needs before it asks gh.
+    git = ["/usr/bin/git", "-C", str(work / "repo")]
+    subprocess.run([*git, "remote", "add", "origin", "https://github.com/acme/widgets.git"], check=True, env=app.env, timeout=30)
+    for branch in ("canary-alpha", "canary-beta"):
+        subprocess.run([*git, "config", f"branch.{branch}.remote", "origin"], check=True, env=app.env, timeout=30)
+        subprocess.run([*git, "config", f"branch.{branch}.merge", f"refs/heads/{branch}"], check=True, env=app.env, timeout=30)
+    (work / "github").mkdir()
+    write_json(work / "github/world.json", github_world(work / "repo", ["canary-alpha", "canary-beta"]))
     app.env["PATH"] = f"{agents[0].parent}:{app.env['PATH']}"
     with (work / "home/.zshrc").open("a", encoding="utf-8") as rc:
         rc.write(AUTOSTART)
@@ -252,7 +275,7 @@ def finish(report, evidence, findings, episodes):
 def explore(args, evidence, work, trace=None):
     """One run: Claude's episodes, or `trace` replayed without a model."""
     claude = shutil.which("claude")
-    if not claude:
+    if not claude and trace is None:
         raise InfrastructureError("claude is not on PATH")
     seed = str(uuid.uuid4())
     metadata = {"version": 2, "scenario": SCENARIO, "seed": seed, "injectFailure": None,
@@ -353,6 +376,40 @@ def reduce(args, root):
     return result
 
 
+def replay_kept(args, root, ledger, commit, run=None):
+    """Each kept trace replayed in a fresh copy: a finding is a known bug back (regression)."""
+    def fresh(trace, evidence):
+        with tempfile.TemporaryDirectory(dir="/private/tmp", prefix="nirux-canary-") as folder:
+            return explore(args, evidence, Path(folder), trace=trace)
+
+    run = run or fresh
+    results = []
+    for path in sorted(args.replay_traces.glob("*.jsonl")):
+        evidence = Path(tempfile.mkdtemp(dir=root, prefix=f"trace-{path.stem}-"))
+        try:
+            data = run(read_jsonl(path), evidence)
+        except InfrastructureError as error:
+            data = {"verdict": INFRA, "error": str(error), "findings": []}
+        write_json(evidence / "report.json", data)
+        name = f"trace:{path.stem}"
+        if data["verdict"] == INFRA:
+            pass
+        elif data["findings"]:
+            for finding in data["findings"]:
+                ledger.record_incident(finding["fingerprint"], {"scenario": name, "rule": finding["rule"], "detail": finding["detail"]},
+                                       "regression", run_id=evidence.name, commit=commit, bundle_sha256=data.get("bundleSHA256"),
+                                       crashed=finding["rule"] == "app-alive", investigation_dir=evidence)
+        else:
+            ledger.record_pass(name, run_id=evidence.name, commit=commit, bundle_sha256=data.get("bundleSHA256"))
+        results.append({"trace": path.stem, "verdict": data["verdict"], "findings": len(data["findings"]),
+                        "report": str(evidence / "report.json")})
+    write_json(root / "traces.json", results)
+    print(json.dumps({"traces": results}))
+    if any(result["findings"] for result in results):
+        return EXIT_FINDINGS
+    return EXIT_INFRA if any(result["verdict"] == INFRA for result in results) else 0
+
+
 def record(ledger, data, evidence, commit, reproduced=()):
     """A finding a replay brought back is a regression; one exploration's, intermittent."""
     run_id = evidence.name
@@ -382,6 +439,7 @@ def parser():
     root.add_argument("--evidence-dir", type=Path)
     root.add_argument("--history-dir", type=Path)
     root.add_argument("--replay-trace", type=Path, help="replay a run's trace.jsonl without a model")
+    root.add_argument("--replay-traces", type=Path, help="replay every kept trace (*.jsonl) of a folder, each in a fresh copy")
     root.add_argument("--reduce", type=Path, help="shrink a run's trace.jsonl to the calls that bring back its finding")
     root.add_argument("--rule", help="with --reduce: the finding's rule (default: the run's first finding)")
     root.add_argument("--diff-base", help="put first the goals that the files changed since this ref touch")
@@ -392,6 +450,8 @@ def main(argv=None):
     args = parser().parse_args(argv)
     root = args.evidence_dir or Path(tempfile.mkdtemp(prefix="nirux-evidence-"))
     root.mkdir(parents=True, exist_ok=True)
+    if args.replay_traces:
+        return replay_kept(args, root.resolve(), IncidentLedger(args.history_dir or default_history_dir()), detect_commit())
     if args.reduce:
         result = reduce(args, root.resolve())
         print(json.dumps({key: result[key] for key in ("rule", "from", "reduced", "replays")}))
