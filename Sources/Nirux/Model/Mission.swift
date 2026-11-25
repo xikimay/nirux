@@ -733,9 +733,12 @@ final class MissionStore {
                 && !mission.events.contains { $0.kind == .response && $0.inReplyTo == event.id }
         case .completed:
             // Not once the child got more work from the parent: it moved on.
+            // A Lead's result waits for its group (`MissionResultBatch`): work
+            // sent meanwhile was sent without it.
+            let held = mission.reportsToLead == true ? MissionResultBatch.window : 0
             return event.parentConsumedAt == nil
                 && !mission.events.contains {
-                    $0.kind == .instruction && $0.timestamp > event.timestamp && $0.childConsumedAt != nil
+                    $0.kind == .instruction && $0.timestamp > event.timestamp + held && $0.childConsumedAt != nil
                 }
         default:
             return false

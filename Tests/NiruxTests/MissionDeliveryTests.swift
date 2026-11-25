@@ -7,6 +7,73 @@ import XCTest
 /// and popover that let the user answer.
 @MainActor
 final class MissionDeliveryTests: XCTestCase {
+    /// A Lead's results wait until the oldest is 3 minutes old, then go
+    /// together; another Lead's group keeps its own window; questions, and
+    /// results to a parent that doesn't group them, never wait.
+    /// A paste holds what fits under the sanitizer's cut, the first always.
+    func testAGroupGoesInPastesThatFit() {
+        let limit = 20
+        XCTAssertEqual(MissionResultBatch.fittingCount(["aaaaaaaa", "bbbbbbbb", "cccccccc"], limit: limit), 2, "8 + 2 + 8 = 18")
+        XCTAssertEqual(MissionResultBatch.fittingCount(["aaaaaaaa", "bbbbbbbbbb"], limit: limit), 2, "exactly 20")
+        XCTAssertEqual(MissionResultBatch.fittingCount([String(repeating: "a", count: 30), "b"], limit: limit), 1, "one too long still goes")
+        XCTAssertEqual(MissionResultBatch.fittingCount(["a"], limit: limit), 1)
+    }
+
+    /// Work a Lead sends a task while the task's result waits for its group
+    /// doesn't drop that result; later work still does, as before.
+    @MainActor func testAHeldResultOutlivesWorkSentDuringItsWindow() {
+        let result = MissionEvent(
+            id: "r", missionID: "m", childWorkspaceID: "task", childAgentUUID: "agent", kind: .completed,
+            message: "Done", inReplyTo: nil, timestamp: 1_000
+        )
+        func mission(tellAt time: TimeInterval, toLead: Bool = true) -> Mission {
+            var tell = MissionEvent(
+                id: "t", missionID: "m", childWorkspaceID: "task", childAgentUUID: "agent", kind: .instruction,
+                message: "Also fix the docs", inReplyTo: nil, timestamp: time
+            )
+            tell.childConsumedAt = time + 1
+            return Mission(
+                id: "m", parentWorkspaceID: "lead", parentAgentUUID: "lead-agent", childWorkspaceID: "task", childAgentUUID: "agent",
+                childAgentKind: "claude", branch: "feat/x", status: .active, createdAt: 0, updatedAt: time, events: [result, tell],
+                reportsToLead: toLead
+            )
+        }
+        XCTAssertTrue(MissionStore.awaitsParentReceipt(result, in: mission(tellAt: 1_100)), "sent while it waited")
+        XCTAssertFalse(MissionStore.awaitsParentReceipt(result, in: mission(tellAt: 1_000 + MissionResultBatch.window + 1)))
+        XCTAssertFalse(MissionStore.awaitsParentReceipt(result, in: mission(tellAt: 1_100, toLead: false)), "no group, as before")
+    }
+
+    @MainActor func testALeadsResultsWaitForTheirWindowThenGoTogether() {
+        let now: TimeInterval = 10_000
+        func delivery(_ id: String, _ kind: MissionEvent.Kind, at time: TimeInterval, parent: String = "lead") -> MissionStore.AcceptedEvent {
+            let event = MissionEvent(
+                id: id, missionID: "m-" + id, childWorkspaceID: "task-" + id, childAgentUUID: "agent-" + id, kind: kind,
+                message: id, inReplyTo: nil, timestamp: time
+            )
+            let mission = Mission(
+                id: "m-" + id, parentWorkspaceID: parent, parentAgentUUID: parent + "-agent", childWorkspaceID: "task-" + id,
+                childAgentUUID: "agent-" + id, childAgentKind: "claude", branch: "feat/" + id, status: .active, createdAt: time - 600,
+                updatedAt: time, events: [event], reportsToLead: true
+            )
+            return MissionStore.AcceptedEvent(mission: mission, event: event)
+        }
+        let first = delivery("a", .completed, at: now - 100)
+        let second = delivery("b", .completed, at: now - 10)
+        let question = delivery("q", .question, at: now - 5)
+        let elsewhere = delivery("c", .completed, at: now - 200, parent: "other-lead")
+        let plain = delivery("p", .completed, at: now - 1, parent: "task-parent")
+        let batch = MissionResultBatch([first, second, question, elsewhere, plain]) { $0.parentWorkspaceID != "task-parent" }
+        XCTAssertEqual(batch.held(now: now), ["a", "b"], "their oldest is 100 s old")
+        XCTAssertEqual(batch.nextRelease(now: now), now - 100 + MissionResultBatch.window)
+        XCTAssertEqual(batch.together(with: elsewhere).map(\.event.id), ["c"], "due: its own group only")
+        XCTAssertEqual(batch.together(with: question).map(\.event.id), ["q"])
+        XCTAssertEqual(batch.together(with: plain).map(\.event.id), ["p"])
+        let later = now + 80
+        XCTAssertEqual(batch.held(now: later), [])
+        XCTAssertEqual(batch.together(with: first).map(\.event.id), ["a", "b"], "one prompt, one wake")
+        XCTAssertNil(batch.nextRelease(now: later))
+    }
+
     private let missionID = "11111111-1111-4111-8111-111111111111"
     private let parentWorkspaceID = "22222222-2222-4222-8222-222222222222"
     private let parentAgentUUID = "33333333-3333-4333-8333-333333333333"
