@@ -1237,10 +1237,9 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(harness.terminalRestarts.count, 1)
             XCTAssertNil(task.budgetPassedAt)
 
-            let asked = harness.alerts.count
-            harness.alertResponses = [.alertSecondButtonReturn]
+            harness.alertResponses = [.alertFirstButtonReturn]
             shell.takeBudgetChoice(.close, workspaceID: task.id)
-            XCTAssertEqual(harness.alerts.count, asked + 1)
+            XCTAssertEqual(harness.alerts.last, "Close workspace “Check export”?")
             XCTAssertFalse(task.isClosing, "Cancel")
         }
     }
