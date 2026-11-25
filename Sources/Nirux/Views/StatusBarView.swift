@@ -51,7 +51,8 @@ final class StatusBarView: NSView {
     private(set) var queueDismissButton: NSButton?
     private(set) var queueNotice: QueueNotice?
     private var trackingArea: NSTrackingArea?
-    private var updateVersion: String?
+    /// The update notice's words; nil once ✕ put it away.
+    private(set) var updateVersion: String?
     private(set) var crashNotice: CrashNotice?
     private var copiedFlashGeneration = 0
     /// Whether the last render showed a notice.

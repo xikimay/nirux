@@ -69,12 +69,22 @@ extension NiruxApp {
     /// Install and Relaunch goes through Sparkle's alert.
     func showUpdateAvailable(build: Int, installNow: (() -> Void)?) {
         shell?.showAvailableUpdate(AvailableUpdate(build: build, isReady: installNow != nil) { [weak self] in
-            if let installNow { installNow() } else { self?.updaterController?.checkForUpdates(nil) }
+            guard let self else { return }
+            if let installNow {
+                // A relaunch cancelled earlier (unsaved edits, a queue) left
+                // the quit marked as the user's.
+                quitIsUsers = false
+                installNow()
+            } else if updaterController?.updater.sessionInProgress == true {
+                shell?.showToast("The update is still downloading.")
+            } else {
+                updaterController?.checkForUpdates(nil)
+            }
         })
     }
 
     @objc func installUpdate(_ sender: Any?) {
-        updaterController?.checkForUpdates(sender)
+        manualCheckForUpdates(sender)
     }
 
     func validateMenuItemForUpdate(_ menuItem: NSMenuItem) -> Bool {
@@ -96,6 +106,9 @@ extension NiruxApp {
     }
 
     @objc func manualCheckForUpdates(_ sender: Any?) {
+        // Sparkle, which handed over the downloaded update, checks nothing
+        // more until it installs.
+        if let shell, shell.availableUpdate?.isReady == true { return shell.showUpdatePopover() }
         isManualUpdateCheck = true
         updaterController?.checkForUpdates(sender)
     }

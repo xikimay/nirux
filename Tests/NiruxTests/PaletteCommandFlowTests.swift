@@ -383,6 +383,13 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertTrue(view.primaryButton.accessibilityPerformPress())
             XCTAssertEqual(installs, 1)
             harness.waitUntil("the popover to close") { !popover.isShown }
+            XCTAssertEqual(shell.lastSeenBuild, 202611251854, "listed here: no card after the relaunch")
+
+            shell.showUpdatePopover()
+            let again = try XCTUnwrap(shell.updatePopover)
+            harness.waitUntil("the popover from Check for Updates…") { again.isShown }
+            again.close()
+            harness.waitUntil("the popover to close again") { !again.isShown }
         }
     }
 
