@@ -112,6 +112,9 @@ public enum QuotaPace {
     public static let rounding: TimeInterval = 5 * 60
     /// A new "runs out" time within this of the previous one keeps it.
     public static let steadiness: TimeInterval = 10 * 60
+    /// Past this without a reading, the silence counts as a reading at `now`
+    /// holding the latest percentage: the pace drops when spending stops.
+    public static let silence: TimeInterval = 5 * 60
     /// Readings of one window share its reset, give or take this.
     public static let sameWindow: TimeInterval = 5 * 60
 
@@ -138,11 +141,12 @@ public enum QuotaPace {
             .sorted { $0.time < $1.time }
         guard let first = recent.first else { return .quiet }
         guard recent.count >= minimumReadings, latest.time - first.time >= minimumSpan else { return .unknown }
-        let rate = max(0, slope(recent))
-        let atReset = latest.usedPercent + rate * (latest.resetsAt - latest.time)
+        let held = now - latest.time >= silence ? QuotaReading(time: now, usedPercent: latest.usedPercent, resetsAt: latest.resetsAt) : latest
+        let rate = max(0, slope(held == latest ? recent : recent + [held]))
+        let atReset = held.usedPercent + rate * (held.resetsAt - held.time)
         // 100 % shows only as running out.
         guard rate > 0, atReset >= 100 else { return .atReset(percent: min(99, Int(atReset.rounded()))) }
-        let full = latest.time + (100 - latest.usedPercent) / rate
+        let full = held.time + (100 - held.usedPercent) / rate
         // Never a time already gone while the limit isn't full yet, nor one past its reset.
         let rounded = max((full / rounding).rounded(.down) * rounding, now)
         if case .runsOut(let shown) = previous, abs(shown - rounded) <= steadiness, shown > now, shown < latest.resetsAt {
