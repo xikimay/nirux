@@ -275,6 +275,8 @@ final class SpaceDefaultsTests: XCTestCase {
         let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
         XCTAssertEqual(written?["leadFreshStart"] as? Bool, false)
         XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.leadStartsFreshWhenCold)
+    }
+
     /// On unless the file says: every subagent on Opus, through the
     /// terminal; Fable for a new Claude Lead conversation, on its launch line
     /// only. A variable the user set for the space wins; a file Nirux can't
