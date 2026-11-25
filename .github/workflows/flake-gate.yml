@@ -55,3 +55,31 @@ jobs:
         run: |
           read -ra classes <<< "${CLASSES//$'\n'/ }"
           scripts/run-tests.sh --repeat "$RUNS" "${classes[@]}"
+
+      # Probe only (DO NOT MERGE): what a crashed xctest left.
+      - name: Crash diagnostics
+        if: always()
+        run: |
+          sleep 45
+          ls -la ~/Library/Logs/DiagnosticReports 2>/dev/null | tail -20
+          for f in ~/Library/Logs/DiagnosticReports/xctest*; do
+            [ -f "$f" ] || continue
+            echo "=== $f"
+            /usr/bin/python3 -B - "$f" <<'PY'
+          import json, sys
+          text = open(sys.argv[1]).read()
+          _, _, body = text.partition("\n")
+          r = json.loads(body)
+          print("exception", r.get("exception"))
+          print("asi", r.get("asi"))
+          imgs = r.get("usedImages", [])
+          for t in r.get("threads", []):
+              if t.get("triggered"):
+                  print("thread", t.get("queue"), t.get("name"))
+                  for fr in t.get("frames", [])[:45]:
+                      i = fr.get("imageIndex", 0)
+                      name = imgs[i].get("name", "?") if i < len(imgs) else "?"
+                      print(" ", name, fr.get("symbol", ""), fr.get("imageOffset"))
+          PY
+          done
+          log show --last 40m --style compact --predicate 'eventMessage CONTAINS "BUG IN CLIENT" OR eventMessage CONTAINS "Fatal error" OR eventMessage CONTAINS "Incorrect actor" OR eventMessage CONTAINS "isolation"' 2>/dev/null | tail -40
