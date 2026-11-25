@@ -564,7 +564,6 @@
         wordWrap: wordWrap ? "on" : "off",
         minimap: { enabled: minimapEnabled },
         renderLineHighlight: "none",
-        scrollbar: { alwaysConsumeMouseWheel: false },
         renderSideBySide: true,
         useInlineViewWhenSpaceIsLimited: false,
         enableSplitViewResizing: true,
@@ -1014,9 +1013,6 @@
       fontSize: 13,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      // A wheel the editor can't scroll goes on, to WebKit and then to the
-      // strip's swipe (StripSwipe).
-      scrollbar: { alwaysConsumeMouseWheel: false },
       renderLineHighlight: "all",
       smoothScrolling: true,
       stickyScroll: { enabled: true },

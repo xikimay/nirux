@@ -123,7 +123,6 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         webView.uiDelegate = self
         webView.underPageBackgroundColor = Theme.Color.surface
         webView.allowsBackForwardNavigationGestures = true
-        webView.bouncesOnlyVertically()
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -308,12 +307,6 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     }
 
     // MARK: - WKUIDelegate (popups, alerts, new windows)
-
-    /// A scroll the page didn't handle goes on to the strip (`StripSwipe`).
-    @objc(_webView:didNotHandleWheelEvent:)
-    func webView(_ webView: WKWebView, didNotHandleWheelEvent event: NSEvent) {
-        webView.passOnUnhandled(event)
-    }
 
     /// Handle target=_blank links and OAuth popups (Google Sign-In etc.)
     @MainActor func webView(
