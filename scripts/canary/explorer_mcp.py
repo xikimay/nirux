@@ -21,6 +21,7 @@ import sys
 import time
 
 from channel import Channel, ChannelError, NotTaken, StillWorking
+import fake_gh
 from scenarios import check_amber_has_reason, check_state_json_valid
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -261,15 +262,15 @@ class Explorer:
 
     def change_github(self, arguments):
         """The run's GitHub (fake_gh.py's world) changed as from outside Nirux."""
-        world_file = self.state.parent / "github" / "world.json"
-        world = json.loads(world_file.read_text())
-        pull = next((p for p in world["pullRequests"] if p["number"] == arguments["pull"]), None)
-        if pull is None:
-            raise ValueError(f"no pull request #{arguments['pull']}")
-        pull.update(GITHUB_EVENTS[arguments["event"]](time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
-        world_file.with_suffix(".tmp").write_text(json.dumps(world, indent=1))
-        world_file.with_suffix(".tmp").replace(world_file)
-        return f"Pull request #{pull['number']}: {arguments['event']}."
+        def change(world):
+            pull = next((p for p in world["pullRequests"] if p["number"] == arguments["pull"]), None)
+            if pull is None:
+                raise ValueError(f"no pull request #{arguments['pull']}")
+            pull.update(GITHUB_EVENTS[arguments["event"]](time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+            return f"Pull request #{pull['number']}: {arguments['event']}.", True
+
+        # Under fake_gh's lock: a retarget by the app at the same moment loses nothing.
+        return fake_gh.update(self.state.parent / "github" / "world.json", change)[0]
 
     def act(self, name, arguments):
         if name == "github":

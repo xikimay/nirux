@@ -53,9 +53,44 @@ class FakeGhTests(unittest.TestCase):
         # Its world file is all it reads; explore.sb confines it besides (no network, no home folder).
         source = (HERE / "fake_gh.py").read_text()
         imported = {line.split()[1].split(".")[0] for line in source.splitlines() if line.startswith(("import ", "from "))}
-        self.assertEqual(imported - {"json", "pathlib", "sys", "time"}, set())
+        self.assertEqual(imported - {"fcntl", "json", "os", "pathlib", "sys", "tempfile", "time"}, set())
         for forbidden in ("/opt/homebrew", "/usr/local/bin", ".config/gh", "GH_TOKEN", "GITHUB_TOKEN", "hosts.yml"):
             self.assertNotIn(forbidden, source)
+
+    def test_a_close_is_not_a_retarget_and_disabling_auto_merge_merges_nothing(self):
+        def run(*args):
+            return subprocess.run([str(self.gh), *args], capture_output=True, text=True, timeout=10)
+        self.assertEqual(run("api", "--method", "PATCH", "repos/acme/widgets/pulls/1", "-f", "state=closed").returncode, 0)
+        self.assertEqual(run("pr", "merge", "2", "--disable-auto").returncode, 0)
+        pulls = {p["number"]: p for p in json.loads(self.world.read_text())["pullRequests"]}
+        self.assertEqual((pulls[1]["state"], pulls[1].get("baseRefName", "main")), ("CLOSED", "main"))
+        self.assertEqual(pulls[2]["state"], "OPEN")
+
+    def test_what_it_cant_serve_answers_as_gh_would_and_every_call_is_logged(self):
+        for args, message in [(["pr", "view", "9", "--json", "number"], "Could not resolve to a PullRequest with the number of 9"),
+                              (["pr", "view", "--json", "number"], "argument required"),
+                              (["api", "--method", "PATCH", "repos/acme/widgets/pulls/1"], "isn't faked")]:
+            result = subprocess.run([str(self.gh), *args], capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 1, args)
+            self.assertIn(message, result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+        calls = [json.loads(line) for line in self.world.with_name("calls.jsonl").read_text().splitlines()]
+        self.assertEqual([c["status"] for c in calls], [1, 1, 1])
+
+    def test_writers_under_the_lock_lose_no_change(self):
+        import sys
+        import threading
+        sys.path.insert(0, str(HERE))
+        import fake_gh
+
+        def add(index):
+            fake_gh.update(self.world, lambda world: (world.setdefault("seen", []).append(index), True))
+        threads = [threading.Thread(target=add, args=(index,)) for index in range(30)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sorted(json.loads(self.world.read_text())["seen"]), list(range(30)))
 
     def test_a_merge_and_a_retarget_change_the_world_and_the_rest_is_refused(self):
         merged = subprocess.run([str(self.gh), "pr", "merge", "2", "--squash", "--match-head-commit", "b"], capture_output=True, text=True)
