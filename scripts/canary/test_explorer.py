@@ -175,6 +175,8 @@ class ExplorerTests(unittest.TestCase):
             ("key", {"characters": "c", "modifiers": ["command"]}, "clipboard"),
             ("menu", {"path": ["Edit", "Paste"]}, "clipboard"),
             ("menu", {"path": ["Edit", "Cut"]}, "clipboard"),
+            ("press", {"label": "New Terminal"}, "opens no terminal"),
+            ("press", {"label": "Open Browser"}, "opens no browser"),
         ]:
             content, is_error = explorer.call(name, arguments)
             self.assertTrue(is_error, arguments)
@@ -182,6 +184,7 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(explorer.channel.calls, [])
         self.assertFalse(explorer_mcp.refused("menu", {"path": ["Columns", "Open Browser"]}, allows_browser=True))
         self.assertFalse(explorer_mcp.refused("key", {"characters": "p", "modifiers": ["command", "shift"]}))
+        self.assertFalse(explorer_mcp.refused("press", {"label": "New…"}))
 
     def test_a_dead_app_reads_dead_although_nobody_reaped_it(self):
         child = subprocess.Popen(["/usr/bin/true"])

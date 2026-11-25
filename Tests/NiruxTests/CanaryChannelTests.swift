@@ -420,6 +420,47 @@ final class CanaryChannelTests: XCTestCase {
         XCTAssertEqual(column.policy(for: URL(string: "https://example.com/f.zip"), download: true), .cancel, "nor a download")
     }
 
+    /// A canary copy's pages load nothing from beyond localhost (fetch, XHR,
+    /// images, scripts, WebSockets): its image through localhost loads, the
+    /// same one through another host name doesn't. A normal launch loads both.
+    @MainActor
+    func testACanaryCopysPagesLoadOnlyLocalSubresources() throws {
+        let site = stateDirectory.appendingPathComponent("site", isDirectory: true)
+        try FileManager.default.createDirectory(at: site, withIntermediateDirectories: true)
+        try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="))
+            .write(to: site.appendingPathComponent("pixel.png"))
+        let server = Process()
+        server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        server.arguments = ["-c", "import functools, http.server, sys; s = http.server.ThreadingHTTPServer(('127.0.0.1', 0), "
+            + "functools.partial(http.server.SimpleHTTPRequestHandler, directory=sys.argv[1])); "
+            + "print(s.server_address[1], flush=True); s.serve_forever()", site.path]
+        let output = Pipe()
+        server.standardOutput = output
+        server.standardError = FileHandle.nullDevice
+        try server.run()
+        defer {
+            server.terminate()
+            server.waitUntilExit()
+        }
+        let port = String(decoding: output.fileHandleForReading.availableData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        try """
+        <script>var seen = {}; function done(name, loaded) { seen[name] = loaded; document.title = JSON.stringify(seen); }</script>
+        <img src="http://localhost:\(port)/pixel.png" onload="done('local', 1)" onerror="done('local', 0)">
+        <img src="http://localhost.:\(port)/pixel.png" onload="done('other', 1)" onerror="done('other', 0)">
+        """.write(to: site.appendingPathComponent("page.html"), atomically: true, encoding: .utf8)
+
+        for (root, otherLoads) in [(nil, 1), (stateDirectory, 0)] as [(URL?, Int)] {
+            let column = WebViewColumn(url: "http://localhost:\(port)/page.html", dataStore: .nonPersistent(), isolatedWorkspaceID: nil,
+                                       localOnlyRoot: root)
+            waitUntil("both images settled, \(root == nil ? "normal" : "canary")", timeout: 30) {
+                (column.webView.title ?? "").contains("local") && (column.webView.title ?? "").contains("other")
+            }
+            let seen = try XCTUnwrap(JSONSerialization.jsonObject(with: Data((column.webView.title ?? "{}").utf8)) as? [String: Int])
+            XCTAssertEqual(seen["local"], 1, "\(root == nil ? "normal" : "canary")")
+            XCTAssertEqual(seen["other"], otherLoads, root == nil ? "localhost. is reachable" : "a canary copy blocks it")
+        }
+    }
+
     /// Text is typed with each character's US key code and Shift, as KeyMapper expects.
     @MainActor
     func testTextTypesEachCharactersKey() {
