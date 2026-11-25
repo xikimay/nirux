@@ -321,8 +321,11 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         }
     }
 
+    /// AppKit also asks when a panel closes while Nirux is hidden, as it
+    /// then counts no window on screen: only a shown Nirux can have had its
+    /// window closed.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        !sender.isHidden
     }
 
     /// Unsaved changes and a running merge queue ask first, an update's
