@@ -1,13 +1,15 @@
 import Foundation
 
 /// Folds a Codex rollout (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`)
-/// into its responses and latest rate limits. Never keeps text.
+/// into its responses and its rate limit readings. Never keeps text.
 public struct CodexRolloutUsageParser: TranscriptLineParser, Sendable {
     public private(set) var sessionID: String?
     public private(set) var cwd: String?
     public private(set) var model: String?
     public private(set) var contextWindow: Int?
-    public private(set) var rateLimits: CodexRateLimits?
+    /// Oldest first.
+    public private(set) var rateLimitReadings: [CodexRateLimits] = []
+    public var rateLimits: CodexRateLimits? { rateLimitReadings.last }
     public private(set) var events: [UsageEvent] = []
     /// Codex repeats a `token_count` without a new response: same total.
     private var lastTotal: TokenCounts?
@@ -35,8 +37,8 @@ public struct CodexRolloutUsageParser: TranscriptLineParser, Sendable {
     }
 
     private mutating func consumeTokenCount(_ payload: [String: Any], timestamp: TimeInterval) {
-        if let limits = payload["rate_limits"] as? [String: Any] {
-            rateLimits = CodexRateLimits(limits, reportedAt: timestamp) ?? rateLimits
+        if let limits = payload["rate_limits"] as? [String: Any], let reading = CodexRateLimits(limits, reportedAt: timestamp) {
+            rateLimitReadings.append(reading)
         }
         guard let info = payload["info"] as? [String: Any] else { return }
         contextWindow = TokenCounts.count(info["model_context_window"]) ?? contextWindow
@@ -105,6 +107,18 @@ public struct CodexRateLimits: Equatable, Sendable {
         secondary = window("secondary")
         guard primary != nil || secondary != nil else { return nil }
         self.reportedAt = reportedAt
+    }
+
+    /// Each window's readings, by its length in minutes, oldest first.
+    public static func quotaReadings(_ reports: [CodexRateLimits]) -> [Int: [QuotaReading]] {
+        var readings: [Int: [QuotaReading]] = [:]
+        for report in reports {
+            for window in [report.primary, report.secondary].compactMap({ $0 }) {
+                guard let minutes = window.minutes, let resetsAt = window.resetsAt else { continue }
+                readings[minutes, default: []].append(QuotaReading(time: report.reportedAt, usedPercent: window.usedPercent, resetsAt: resetsAt))
+            }
+        }
+        return readings.mapValues { $0.sorted { $0.time < $1.time } }
     }
 }
 

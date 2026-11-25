@@ -34,6 +34,8 @@ enum ClaudeUsageLimitsFile {
         var limits = ClaudeUsageLimits()
         /// What each `claude` process last reported (see `reporter`).
         var reporters: [String: ReporterMark] = [:]
+        /// When each window last went to the readings log, by its name there.
+        var logged: [String: TimeInterval] = [:]
 
         init() {}
 
@@ -42,6 +44,7 @@ enum ClaudeUsageLimitsFile {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             limits = try container.decode(ClaudeUsageLimits.self, forKey: .limits)
             reporters = (try? container.decodeIfPresent([String: ReporterMark].self, forKey: .reporters)) ?? [:]
+            logged = (try? container.decodeIfPresent([String: TimeInterval].self, forKey: .logged)) ?? [:]
         }
     }
 
@@ -84,6 +87,15 @@ enum ClaudeUsageLimitsFile {
     static var url: URL {
         Persistence.stateDirectory.appendingPathComponent("claude-usage-limits.json")
     }
+
+    /// The readings log (`QuotaReadingLog`) beside the file, for the pace.
+    static func readingsFolder(beside url: URL = url) -> String {
+        url.deletingLastPathComponent().appendingPathComponent("usage").path
+    }
+
+    /// News that repeats the last logged reading goes to the log again only
+    /// this long after it: the pace needs to see a limit hold still.
+    static let readingHeartbeat: TimeInterval = 5 * 60
 
     static func load(from url: URL = url) -> ClaudeUsageLimits? {
         loadContents(from: url)?.limits
@@ -139,6 +151,14 @@ enum ClaudeUsageLimitsFile {
             contents.reporters[reporter] = mark
         }
         contents.limits = (contents.limits.current(at: now) ?? ClaudeUsageLimits()).updated(with: news)
+        var readings: [String: QuotaReading] = [:]
+        for (name, window, before) in [("five_hour", news.fiveHour, existing.limits.fiveHour), ("seven_day", news.sevenDay, existing.limits.sevenDay)] {
+            guard let window else { continue }
+            let changed = before?.usedPercentage != window.usedPercentage || before?.resetsAt != window.resetsAt
+            guard changed || now - (contents.logged[name] ?? 0) >= readingHeartbeat else { continue }
+            readings[name] = QuotaReading(time: now, usedPercent: window.usedPercentage, resetsAt: window.resetsAt)
+            contents.logged[name] = now
+        }
         contents.reporters = contents.reporters
             .filter { $0.value.changedAt > now - reporterMemory }
             .sorted { $0.value.changedAt > $1.value.changedAt }
@@ -147,13 +167,15 @@ enum ClaudeUsageLimitsFile {
         guard contents != existing else { return true }
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        guard let data = try? encoder.encode(contents) else { return false }
-        return (try? data.write(to: url, options: .atomic)) != nil
+        guard let data = try? encoder.encode(contents), (try? data.write(to: url, options: .atomic)) != nil else { return false }
+        QuotaReadingLog.append(readings, in: readingsFolder(beside: url))
+        return true
     }
 
-    /// Turning the option off forgets what was reported.
+    /// Turning the option off forgets what was reported, readings included.
     static func remove(at url: URL = url) {
         try? FileManager.default.removeItem(at: url)
+        QuotaReadingLog.removeAll(in: readingsFolder(beside: url))
     }
 
     static let lockWait: TimeInterval = 0.5
