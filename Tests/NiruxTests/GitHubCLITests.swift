@@ -28,6 +28,15 @@ final class GitHubCLITests: XCTestCase {
         XCTAssertNil(GitHub.CLI.installedPath(among: [plain]))
     }
 
+    /// A canary run's copy runs its run's own fake gh, never the user's; a
+    /// normal launch, Homebrew's.
+    func testACanaryRunUsesOnlyItsOwnFakeGh() {
+        let state = folder.appendingPathComponent("state")
+        let canary = ["NIRUX_STATE_DIR": state.path, CanaryChannel.tokenKey: String(repeating: "0123456789abcdef", count: 4)]
+        XCTAssertEqual(GitHub.CLI.candidates(environment: [:], stateDirectory: state), ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"])
+        XCTAssertEqual(GitHub.CLI.candidates(environment: canary, stateDirectory: state), [folder.appendingPathComponent("agents/gh").path])
+    }
+
     /// No colour or TTY forced, whatever the caller adds, from the call's
     /// folder: what Branch Review's runner, `GitHub.CLI.installed`, runs.
     func testGhRunsWithTheNeutralEnvironmentFromTheCallsFolder() throws {

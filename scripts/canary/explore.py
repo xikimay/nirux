@@ -103,7 +103,9 @@ The copy runs on synthetic data: two spaces (Canary Alpha, Canary Beta), one tas
 Beta Child, a Mission of Alpha Parent), each with a fake agent named claude in its terminal. A fake agent reads \
 lines: "ask: <anything>" ends its turn on its one question, "Which one do you want: A or B?"; \
 "permission: <tool>" asks for a permission to use that tool; "exit" quits; anything else is a prompt it answers \
-with one turn. Their texts are synthetic: judge what Nirux shows of them, not their wording. The command bar's \
+with one turn. Their texts are synthetic: judge what Nirux shows of them, not their wording. The repository is acme/widgets on a \
+fake GitHub: pull request #1 is Alpha's branch, #2 Beta's. The github tool changes them as someone outside Nirux \
+would (merge, close, reopen, checks green, red or running); Nirux sees it at its next refresh. The command bar's \
 badge counts the agents waiting other than the one on screen (what ⌘J visits).
 
 Work toward the goal you are given, and take unexpected but legitimate paths a hurried person might: fast \
@@ -181,12 +183,32 @@ def digest(notes):
     return "\n".join(lines) + "\n"
 
 
+def github_world(repo, branches, git=subprocess.check_output):
+    """The copy's GitHub (fake_gh.py): a pull request for each branch, its checks green."""
+    tip = lambda ref: git(["/usr/bin/git", "-C", str(repo), "rev-parse", ref], text=True).strip()
+    return {"repository": "acme/widgets", "mainTip": tip("main"), "pullRequests": [
+        {"number": number, "title": f"Work on {branch}", "headRefName": branch, "headRefOid": tip(branch), "baseRefName": "main",
+         "state": "OPEN", "checks": "success", "createdAt": "2026-01-01T00:00:00Z"}
+        for number, branch in enumerate(branches, start=1)]}
+
+
 def build_world(app, work, seed):
     for name in ("state", "tmp", "home"):
         (work / name).mkdir(mode=0o700)
     world = fixture_multi_agent(work, app.env, seed)
     app.tree = world["treeAlpha"]
     agents = [app.fake_agent(name) for name in ("claude", "codex", "agy")]
+    gh = agents[0].parent / "gh"
+    shutil.copyfile(HERE / "fake_gh.py", gh)
+    gh.chmod(0o755)
+    # A GitHub remote and each branch's upstream on it: what PR detection needs before it asks gh.
+    git = ["/usr/bin/git", "-C", str(work / "repo")]
+    subprocess.run([*git, "remote", "add", "origin", "https://github.com/acme/widgets.git"], check=True, env=app.env, timeout=30)
+    for branch in ("canary-alpha", "canary-beta"):
+        subprocess.run([*git, "config", f"branch.{branch}.remote", "origin"], check=True, env=app.env, timeout=30)
+        subprocess.run([*git, "config", f"branch.{branch}.merge", f"refs/heads/{branch}"], check=True, env=app.env, timeout=30)
+    (work / "github").mkdir()
+    write_json(work / "github/world.json", github_world(work / "repo", ["canary-alpha", "canary-beta"]))
     app.env["PATH"] = f"{agents[0].parent}:{app.env['PATH']}"
     with (work / "home/.zshrc").open("a", encoding="utf-8") as rc:
         rc.write(AUTOSTART)
