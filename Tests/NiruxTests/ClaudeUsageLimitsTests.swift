@@ -394,7 +394,8 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(QueuedCompact.of(LeadHoldings(isBusy: true)), .wait)
         XCTAssertEqual(QueuedCompact.of(LeadHoldings(hasDialog: true)), .wait)
         XCTAssertEqual(QueuedCompact.of(LeadHoldings(hasQuestion: true)), .wait)
-        XCTAssertEqual(QueuedCompact.of(LeadHoldings(isBusy: true, hasDraft: true)), .yield, "the user's words win")
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(isBusy: true, hasDraft: true)), .wait, "typed ahead: it may be sent before the turn ends")
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(hasDraft: true)), .yield, "at rest, the user's words win")
         XCTAssertEqual(QueuedCompact.of(LeadHoldings()), .send)
     }
 
