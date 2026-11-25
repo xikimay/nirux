@@ -39,7 +39,7 @@ def actions(root):
     """What GitHub Actions gives a step."""
     (root / "summary.md").touch()
     (root / "output").touch()
-    return {"PATH": "/usr/bin:/bin", "GITHUB_RUN_ID": "42", "GITHUB_REPOSITORY": "xikimay/nirux",
+    return {"PATH": "/usr/bin:/bin", "GITHUB_RUN_ID": "42", "GITHUB_SHA": "main-tip", "GITHUB_REPOSITORY": "xikimay/nirux",
             "GITHUB_SERVER_URL": "https://github.com", "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
             "GITHUB_OUTPUT": str(root / "output")}
 
@@ -105,6 +105,7 @@ class NightTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(envs["explore"][night.TOKEN], TOKEN)
         self.assertNotIn(night.TOKEN, envs["traces"])
+        self.assertFalse([env for env in envs.values() if "GITHUB_SHA" in env], "the ledger records the nightly's commit")
         self.assertTrue(uploaded)
         self.assertFalse([text for text in uploaded + [summary, printed.getvalue()] if TOKEN in text])
         self.assertIn("- Step upload: files holding the Claude token removed from the evidence", summary)

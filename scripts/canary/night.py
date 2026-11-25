@@ -158,6 +158,8 @@ def run(root, environ=os.environ, fetch=fetch_nightly, step=run_step):
     evidence.mkdir(parents=True, exist_ok=True)
     app, about = fetch(root / "nightly")
     token = environ.get(TOKEN, "")
+    # GITHUB_SHA is main's tip: without it, the ledger records the checkout's commit, the nightly's.
+    base = {key: value for key, value in environ.items() if key != "GITHUB_SHA"}
     steps, statuses = [], []
 
     def explore(name, arguments, env):
@@ -167,13 +169,13 @@ def run(root, environ=os.environ, fetch=fetch_nightly, step=run_step):
         steps.append((name, STEP_ENDS.get(statuses[-1], f"failed (exit {statuses[-1]})")))
 
     if app and token:
-        explore("explore", ["--calls", "50", "--max-usd", "3"], dict(environ))
+        explore("explore", ["--calls", "50", "--max-usd", "3"], base)
     elif app:
         print(f"::notice title=Canary night::Exploration {NO_TOKEN}")
         steps.append(("explore", NO_TOKEN))
     if app:
         explore("kept traces", ["--replay-traces", str(HERE / "traces")],
-                {key: value for key, value in environ.items() if key != TOKEN})
+                {key: value for key, value in base.items() if key != TOKEN})
     if token and drop_files_holding(root, token):
         steps.append(("upload", "files holding the Claude token removed from the evidence"))
     incidents, _ = ledger(history)
