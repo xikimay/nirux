@@ -142,6 +142,16 @@ scripts/canary.sh Nirux.app --explore --replay-trace scripts/canary/traces/hidde
 
 `--diff-base REF` puts first the goals that the files changed since REF touch. `traces/` keeps reduced traces: `hidden-copy-quits-when-a-popover-closes` (4 of the first run's 21 calls, 178 replays) quit the hidden copy before it stopped counting a closing popover as its last window.
 
+## Night run (off until installed)
+
+```sh
+/usr/bin/python3 scripts/canary/night.py install --app /path/to/Nirux.app [--hour 3]   # turns it on
+/usr/bin/python3 scripts/canary/night.py uninstall                                     # turns it off
+/usr/bin/python3 scripts/canary/night.py digest                                        # what came since the last digest
+```
+
+A LaunchAgent (`com.xikimay.nirux.canary-night`, never at load) starts `night.py run` at the hour. It goes on only on AC power, with this user's session in front and the keyboard and mouse idle for 30 minutes; it runs one explore run (its budget: 50 calls, `--max-usd`) then replays each kept trace, and stops the moment someone touches the keyboard or mouse. Each night's runs and `digest.md` (new incidents with their replay command, clean runs) go to the history folder's `night/<date>/`. Nothing installs it but a person.
+
 ## Workflow
 
 **Packaged app canary** (`.github/workflows/canary.yml`) is a manual Actions workflow supporting `triage` and `qualify` modes and single-scenario, `all`, or diff-targeted `selected` execution. It stays outside PR triggers to respect the 5-job macOS CI concurrency cap. The runner unit tests run on every PR in `.github/workflows/tests.yml` (job `core`).
