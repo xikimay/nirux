@@ -49,12 +49,20 @@ extension MergeQueue {
     /// it otherwise runs as "<name> (selected)".
     static let fullRunLabel = "full-test"
 
+    /// The names a head's checks are read by: a required one that ran
+    /// there only as "<name> (selected)", by that run.
+    static func selectedStandIns(_ required: [String], ran: (String) -> Bool) -> [String] {
+        required.map { name in !ran(name) && ran(name + " (selected)") ? name + " (selected)" : name }
+    }
+
+    static func selectedStandIns(_ required: [String], in checks: CommitChecks) -> [String] {
+        let latest = latestRuns(checks.runs)
+        return selectedStandIns(required) { name in latest.contains { matches($0, required: name) } }
+    }
+
     /// A required check ran on this head only as "<name> (selected)".
     static func ranSelectedOnly(_ checks: CommitChecks, required: [String]) -> Bool {
-        let latest = latestRuns(checks.runs)
-        return required.contains { name in
-            !latest.contains { matches($0, required: name) } && latest.contains { matches($0, required: name + " (selected)") }
-        }
+        selectedStandIns(required, in: checks) != required
     }
 
     /// Each required name must have a check run, and every run matching it

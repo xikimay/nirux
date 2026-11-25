@@ -1005,7 +1005,7 @@ extension MergeQueue {
                 return behind(by: comparison.behindBy, head: head, index: index, now: now)
             }
             let verdict = MergeQueue.judge(checks, required: settings.requiredChecks, replaced: clocks.replacedChecks)
-            if cadence == .expressDisjoint, let reason = verdict.expressRefusal(number: number) {
+            if cadence == .expressDisjoint, let reason = verdict.refusal(number: number) {
                 return stop(StopReason(kind: .checks, message: reason, url: pullRequest.url))
             }
             guard verdict.allRequiredGreen else {
