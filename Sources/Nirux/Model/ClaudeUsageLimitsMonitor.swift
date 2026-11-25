@@ -12,6 +12,9 @@ final class ClaudeUsageLimitsMonitor {
     /// they were judged at.
     var onUpdate: ((ClaudeUsageLimits?, TimeInterval) -> Void)?
     private(set) var isEnabled = false
+    /// The readings log over the pace's widest span (`QuotaPace`), read
+    /// with the file: each news replaces it.
+    private(set) var readings: [String: [QuotaReading]] = [:]
 
     private let url: URL
     /// Whether Claude Code's status line is Nirux's. Once the user sets one
@@ -61,11 +64,13 @@ final class ClaudeUsageLimitsMonitor {
         let version = attributes.map {
             FileVersion(modified: $0[.modificationDate] as? Date, inode: ($0[.systemFileNumber] as? NSNumber)?.intValue)
         }
+        let time = now.timeIntervalSince1970
         if version != loadedVersion {
             loaded = version == nil ? nil : ClaudeUsageLimitsFile.load(from: url)
+            readings = version == nil ? [:]
+                : QuotaReadingLog.read(in: ClaudeUsageLimitsFile.readingsFolder(beside: url), since: time - QuotaPace.weekSpan)
             loadedVersion = version
         }
-        let time = now.timeIntervalSince1970
         onUpdate?(isReporting() ? loaded?.current(at: time) : nil, time)
     }
 }
