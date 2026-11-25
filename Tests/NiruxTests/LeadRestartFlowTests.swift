@@ -213,6 +213,83 @@ final class LeadRestartFlowTests: XCTestCase {
         }
     }
 
+    /// "Group task results" on: a Lead's result waits for its group's
+    /// window, with a pass due when it ends; a due group goes in one paste,
+    /// and one past a paste's limit goes in pastes that fit, each result once.
+    func testALeadsGroupedResultsGoTogetherInPastesThatFit() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            shell.setLeadGroupsResults(true, spaceID: lead.space)
+            let column = try XCTUnwrap(lead.workspace.leadTerminal)
+            column.onAgentAttention = { _ in }
+            let pty = try XCTUnwrap(column.pty)
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            _ = try run(standIn.command(named: "agy", launchPrompt: "Check the space."), named: "agy", in: column, harness: harness)
+            @MainActor func report(_ state: AgentProgramStatus.State) {
+                pty.onProgramStatus?(AgentProgramStatus(state: state, kind: nil, message: nil, agent: .agy))
+            }
+            report(.working)
+            report(.done)
+            @MainActor func result(_ message: String, at time: TimeInterval) throws {
+                let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                    id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                    childWorkspaceID: UUID().uuidString, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+                    branch: "feat/x", reportsToLead: true
+                ), enabled: true))
+                XCTAssertNotNil(MissionStore.shared.accept(MissionEvent(
+                    id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID,
+                    childAgentUUID: mission.childAgentUUID, kind: .completed, message: message, timestamp: time
+                ), enabled: false))
+            }
+            // A redraw's Ctrl+L can reach the stand-in (its process is perl) in the middle of a paste.
+            func input() -> String { standIn.input.replacingOccurrences(of: "\u{0C}", with: "") }
+            func pastes() -> Int { input().components(separatedBy: "\u{1b}[200~").count - 1 }
+            func count(_ text: String) -> Int { input().components(separatedBy: text).count - 1 }
+            let now = Date().timeIntervalSince1970
+            try result("Docs written.", at: now)
+            shell.typeMissionMessages()
+            XCTAssertNotNil(shell.missionWaits.resultReleaseAt, "a pass when its window ends")
+            RunLoop.main.run(until: Date().addingTimeInterval(1))
+            XCTAssertEqual(pastes(), 0, "within its window")
+
+            try result("Export finished.", at: now - MissionResultBatch.window - 1)
+            shell.typeMissionMessages()
+            harness.waitUntil("the Lead's results") { input().contains("Docs written.") }
+            XCTAssertEqual(count("Export finished."), 1)
+            XCTAssertEqual(pastes(), 1, "one paste, one wake")
+
+            // 20 × 490 characters: past one paste's 8,000, whatever frames them.
+            let parts = (1...20).map { String(format: "Part %02d ", $0) }
+            for (index, part) in parts.enumerated() {
+                try result(part + String(repeating: "x", count: 482), at: now - MissionResultBatch.window - 100 + TimeInterval(index))
+            }
+            report(.working)
+            report(.done)
+            shell.typeMissionMessages()
+            harness.waitUntil("what fits") { pastes() == 2 }
+            XCTAssertEqual(count(parts[0]), 1)
+            XCTAssertEqual(count(parts[19]), 0, "past the paste's limit: the next pass")
+            // An agent starts its turn after the paste's Enter: the rest is held till then.
+            harness.waitUntil("its Enter") { shell.missionWaits.typing.isEmpty }
+            report(.working)
+            report(.done)
+            shell.typeMissionMessages()
+            @MainActor func state(_ part: String) -> String {
+                let event = MissionStore.shared.missions.flatMap(\.events).first { $0.message.hasPrefix(part) }
+                return "\(part)typed=\(event?.parentTypedAt != nil) typing=\(event.map { shell.missionWaits.typing.contains($0.id) } ?? false)"
+            }
+            harness.waitUntil("the rest", timeout: 20) { count(parts[19]) == 1 }
+            XCTAssertEqual(pastes(), 3)
+            XCTAssertEqual(
+                parts.map(count), Array(repeating: 1, count: parts.count),
+                "each result once; Ctrl+L seen: \(standIn.input.contains("\u{0C}")); pastes \(pastes()); "
+                    + parts.filter { count($0) != 1 }.map(state).joined(separator: ", ") + "; tail: " + String(input().suffix(160)).debugDescription
+            )
+        }
+    }
+
     func testCodexRecoveryChecksToolsAndResumesTheProvenThreadWithCurrentOptions() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

@@ -45,7 +45,13 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         self.init(url: url, dataStore: Self.sharedDataStore, isolatedWorkspaceID: nil)
     }
 
-    init(url: String, dataStore: WKWebsiteDataStore, isolatedWorkspaceID: String?) {
+    /// `localOnlyRoot`: a canary run's folder (CanaryChannel.localOnlyRoot), whose copy opens and
+    /// loads only localhost and that folder's files.
+    init(
+        url: String, dataStore: WKWebsiteDataStore, isolatedWorkspaceID: String?,
+        localOnlyRoot: URL? = CanaryChannel.localOnlyRoot(environment: ProcessInfo.processInfo.environment,
+                                                          stateDirectory: Persistence.stateDirectory)
+    ) {
         precondition(isolatedWorkspaceID == nil || !dataStore.isPersistent)
         diagnostics = isolatedWorkspaceID.map(IsolatedBrowserDiagnostics.init(workspaceID:))
         let config = WKWebViewConfiguration()
@@ -67,7 +73,21 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         setupHeader()
         setupProgressBar()
         setupWebView()
-        navigate(to: url)
+        guard let localOnlyRoot else {
+            navigate(to: url)
+            return
+        }
+        allowsPage = { CanaryChannel.allowsPage($0, root: localOnlyRoot) }
+        // Nothing loads before every non-local request is blocked; nothing at all if that fails.
+        let store = WKContentRuleListStore(url: localOnlyRoot.appendingPathComponent("webkit-rules", isDirectory: true))
+        store?.compileContentRuleList(forIdentifier: "canary-local-only",
+                                      encodedContentRuleList: CanaryChannel.localOnlyRules(root: localOnlyRoot)) { [weak self] list, _ in
+            MainActor.assumeIsolated {
+                guard let self, let list else { return }
+                self.webView.configuration.userContentController.add(list)
+                self.navigate(to: url)
+            }
+        }
     }
 
     @available(*, unavailable)
@@ -290,11 +310,15 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
-        if navigationAction.shouldPerformDownload {
-            decisionHandler(.download)
-        } else {
-            decisionHandler(.allow)
-        }
+        decisionHandler(policy(for: navigationAction.request.url, download: navigationAction.shouldPerformDownload))
+    }
+
+    /// What a canary run's copy may open (CanaryChannel.pagePolicy), every page otherwise.
+    var allowsPage = CanaryChannel.pagePolicy(environment: ProcessInfo.processInfo.environment, stateDirectory: Persistence.stateDirectory)
+
+    func policy(for url: URL?, download: Bool) -> WKNavigationActionPolicy {
+        guard url.map(allowsPage) ?? true else { return .cancel }
+        return download ? .download : .allow
     }
 
     @MainActor

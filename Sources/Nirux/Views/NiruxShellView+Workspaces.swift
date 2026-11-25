@@ -248,13 +248,13 @@ extension NiruxShellView {
         + "Status 5 means the question was retired. Continue with the new prompt without retrying that ask. "
         + "Report the final result with \"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
 
-    /// A Claude Code child: Nirux types the answer into its prompt
-    /// (`MissionPromptText`).
+    /// A Claude Code child: Nirux types the answer into its prompt, or its
+    /// hook brings it in (`MissionWaitHook`).
     nonisolated static let typedAnswerMission = "This is a Nirux mission workspace. To ask the parent agent, run "
         + "\(MissionEventCLI.askCommand) "
         + "(at most \(MissionEventCLI.maxMessageLength) characters, the recommendation "
-        + "\(MissionEventCLI.maxRecommendationLength)), then end your turn: Nirux types "
-        + "the answer into your prompt as a message starting with \(MissionPromptText.prefix). "
+        + "\(MissionEventCLI.maxRecommendationLength)), then end your turn: Nirux types the answer into your prompt, "
+        + "or brings it in through its hook, as a message starting with \(MissionPromptText.prefix). "
         + "\(MissionEventCLI.askGuide) If it exits with status 3, run the exact same command again: it does not ask twice. "
         + missionAskEndGuide
 
@@ -716,7 +716,7 @@ extension NiruxShellView {
             let color = isFocus ? accent : Theme.Color.line.cgColor
             if layer.borderWidth != width { layer.borderWidth = width }
             if layer.borderColor != color { layer.borderColor = color }
-            col.shadow?.show(isFocus ? .focusedColumn : .column, animated: animated)
+            col.shadow?.show(col.isDragged ? .floating : isFocus ? .focusedColumn : .column, animated: animated)
         }
     }
 }

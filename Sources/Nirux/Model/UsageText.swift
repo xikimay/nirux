@@ -45,6 +45,37 @@ enum UsageText {
     }
 }
 
+extension ContextOffer {
+    /// "Each message rereads 312k".
+    var text: String {
+        switch reason {
+        case .heavy: "Each message rereads \(UsageText.tokens(contextTokens))"
+        case .cold: "Cache expired: \(UsageText.tokens(contextTokens)) to write again"
+        }
+    }
+
+    static let toolTip = """
+        Compact: Claude sums up this conversation and goes on from the summary.
+        Fresh start: a new conversation, handed the task's request, progress and next step.
+        """
+}
+
+extension ContextOffer.Choice {
+    var title: String {
+        switch self {
+        case .compact: "Compact"
+        case .freshStart: "Fresh start"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .compact: "Compact: type /compact in claude's prompt"
+        case .freshStart: "Fresh start: a new Claude conversation with a handover"
+        }
+    }
+}
+
 /// A task row's usage: its latest session's context, and what it spent
 /// over the week (`UsageReport`).
 struct SidebarTaskUsage: Hashable {
@@ -54,9 +85,17 @@ struct SidebarTaskUsage: Hashable {
     var subagentTokens: Double
     var heavyContextTokens: Double
     var coldRewrites: Int
+    /// Its latest session's.
+    var subagents: Int
+    /// Its space's 7-day budget (`SpaceDefaults.weeklyTaskBudget`).
+    var budget: Int?
+
+    /// From this many subagents in a session, the row warns: separate work
+    /// goes to a task, which starts with a context of its own.
+    static let subagentSoftCap = 5
 
     /// Nil for a task no agent spent on this week.
-    init?(_ report: UsageReport, taskID: String) {
+    init?(_ report: UsageReport, taskID: String, budget: Int? = nil) {
         let week = report.week.tasks[taskID]
         let latest = report.latestSessions[taskID]
         guard week != nil || latest != nil else { return nil }
@@ -66,10 +105,20 @@ struct SidebarTaskUsage: Hashable {
         subagentTokens = week?.subagentWeightedTokens ?? 0
         heavyContextTokens = week?.heavyContextWeightedTokens ?? 0
         coldRewrites = week?.coldRewrites ?? 0
+        subagents = latest?.subagents ?? 0
+        self.budget = budget
     }
 
     /// From there on, each message re-reads a context worth compacting.
     var isContextHeavy: Bool { (contextTokens ?? 0) >= UsageSummary.heavyContextTokens }
+
+    var isFanningOut: Bool { subagents >= Self.subagentSoftCap }
+
+    /// Past its budget: its pull request's follow-ups wait.
+    var isOverBudget: Bool { budget.map { weekTokens >= Double($0) } ?? false }
+
+    /// What the row says as a warning.
+    var isWarning: Bool { isContextHeavy || isFanningOut || isOverBudget }
 
     /// "142k · 4.2M": the context, then the week's spend.
     var text: String {
@@ -88,7 +137,13 @@ struct SidebarTaskUsage: Hashable {
                 lines.append("Idle for \(idle): its cache expired, the next message writes it again")
             }
         }
+        if isFanningOut {
+            lines.append("\(subagents) subagents in its latest session: from the \(Self.subagentSoftCap)th, separate work costs less as a task")
+        }
         lines.append("Last 7 days: \(UsageText.tokens(weekTokens)) tokens, \(UsageText.unitNote)")
+        if isOverBudget, let budget {
+            lines.append("Past its budget of \(UsageText.tokens(budget)): its pull request's follow-ups wait (Space Settings › Defaults)")
+        }
         if subagentTokens > 0 { lines.append("Subagents: \(UsageText.share(subagentTokens, of: weekTokens))") }
         if heavyContextTokens > 0 {
             lines.append("Past \(UsageText.tokens(UsageSummary.heavyContextTokens)) of context: \(UsageText.share(heavyContextTokens, of: weekTokens))")

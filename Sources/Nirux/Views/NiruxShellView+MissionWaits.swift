@@ -104,6 +104,8 @@ struct MissionWaitState {
     /// times a second, and the setting it reads is on disk.
     var shown: [UUID: SidebarWaitingMessages] = [:]
     var checkedAt: TimeInterval?
+    /// When the pass that types a Lead's grouped results is due.
+    var resultReleaseAt: TimeInterval?
     /// "<message id> <reason>" of each line written to the log, while the
     /// message waits: one line per message and reason.
     var logged: Set<String> = []
@@ -137,6 +139,12 @@ struct MissionWaitState {
     /// Columns whose Codex is being handed a message: one at a time, so
     /// that its queue keeps their order.
     var codexQueuing: Set<UUID> = []
+    /// Mission messages a hook of their agent has, or is about to
+    /// (`NiruxShellView.leaveToHook`), and since when: no prompt holds them.
+    var handedToHooks: [String: TimeInterval] = [:]
+    /// Claims whose transcript is being read (`checkClaim`), and whether
+    /// their session ended.
+    var checkingClaims: [String: Bool] = [:]
 
     /// Nirux typed into `column`'s prompt: it says nothing of it until the
     /// next check.
@@ -202,6 +210,8 @@ extension NiruxShellView {
                 givenUp.append((delivery, "\(yours) was never typed: its agent's terminal closed first."))
                 continue
             }
+            // Its hook has it, or will at the next step.
+            guard missionWaits.handedToHooks[event.id] == nil else { continue }
             let since = runningSince(of: event, in: column, snapshot: snapshot, now: now)
             let agent = mission.deliveryAgent
             let refusal = agent == .codex ? column.codexMissionRefusal(runningSince: since, snapshot: snapshot)
@@ -267,7 +277,11 @@ extension NiruxShellView {
             guard let column else { return }
             waiting[column.id, default: (column, [])].messages.append(message)
         }
-        let deliveries = store.pendingPromptDeliveries(now: now)
+        let undelivered = store.pendingPromptDeliveries(now: now)
+        withdrawStaleLetters(pending: Set(undelivered.map(\.event.id)))
+        // A Lead's grouped results wait on purpose (`MissionResultBatch`).
+        let held = resultBatch(undelivered).held(now: now)
+        let deliveries = undelivered.filter { missionWaits.handedToHooks[$0.event.id] == nil && !held.contains($0.event.id) }
         let deliveryIDs = Set(deliveries.map(\.event.id))
         if !deliveries.isEmpty {
             let handoffsEnabled = missionWaits.handoffsEnabled.flatMap { $0.for == deliveryIDs ? $0.enabled : nil }

@@ -59,6 +59,14 @@ struct ColumnInfo: Hashable {
     /// The Lead's Claude column (`WorkspaceState.leadTerminal`), which
     /// closes only with the Lead.
     var isLeadTerminal = false
+    /// Its Claude session at rest costs to go on with: Compact / Fresh start.
+    var contextOffer: ContextOffer?
+
+    /// At its prompt, asking nothing: no turn, dialog, permission prompt,
+    /// question or failed turn.
+    var isAtRest: Bool {
+        agentStatus == .idle && permissionApproval == nil && openDialog == nil && turnQuestion == nil && stuck == nil
+    }
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
@@ -103,6 +111,7 @@ struct ColumnInfo: Hashable {
             && lhs.quietFor == rhs.quietFor
             && lhs.waitingMessages == rhs.waitingMessages
             && lhs.isLeadTerminal == rhs.isLeadTerminal
+            && lhs.contextOffer == rhs.contextOffer
     }
 
     func hash(into hasher: inout Hasher) {
@@ -134,6 +143,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(quietFor)
         hasher.combine(waitingMessages)
         hasher.combine(isLeadTerminal)
+        hasher.combine(contextOffer)
     }
 }
 
@@ -464,6 +474,10 @@ enum SidebarHitRegion {
     case agentResume(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval)
     /// Interrupt under a column whose turn went silent.
     case agentInterrupt(workspaceIndex: Int, columnIndex: Int, since: TimeInterval)
+    /// Compact or Fresh start under a Claude column whose context costs.
+    case contextOffer(workspaceIndex: Int, columnIndex: Int, offer: ContextOffer, choice: ContextOffer.Choice)
+    /// Continue, Fresh start or Close… under a task past its budget.
+    case budgetChoice(workspaceIndex: Int, offer: SidebarBudgetOffer, choice: BudgetChoice)
     /// Type it now on the row of Mission messages waiting for a `claude`
     /// with no prompt yet, since the oldest was sent.
     case missionTypeNow(workspaceIndex: Int, columnIndex: Int, since: TimeInterval)
@@ -555,6 +569,18 @@ enum SidebarHoverTarget: Hashable {
         "interrupt|\(workspaceIndex)|\(columnIndex)|\(since)"
     }
 
+    /// Key of a Compact / Fresh start button's view, as Interrupt's: a
+    /// later response at the same place arms again.
+    static func contextOfferButtonKey(workspaceIndex: Int, columnIndex: Int, offer: ContextOffer, choice: ContextOffer.Choice) -> String {
+        "context-offer|\(workspaceIndex)|\(columnIndex)|\(offer.lastResponseAt)|\(choice.rawValue)"
+    }
+
+    /// Key of a budget choice's button: its task and budget, wherever its
+    /// row moves; another task's at that place arms again.
+    static func budgetChoiceButtonKey(offer: SidebarBudgetOffer, choice: BudgetChoice) -> String {
+        "budget|\(offer.workspaceID)|\(offer.budget)|\(choice.rawValue)"
+    }
+
     /// Key of a Type it now button's view, as Interrupt's: other messages at
     /// the same place arm again.
     static func typeNowButtonKey(workspaceIndex: Int, columnIndex: Int, since: TimeInterval) -> String {
@@ -623,4 +649,13 @@ struct SidebarNavigation: Hashable {
     var boardTip: String {
         boardAvailable ? "Board (\(NiruxShortcuts.board.chord.display))" : "Open a task to show its space’s Board"
     }
+}
+
+/// A task past its space's budget, as its card offers it
+/// (`SidebarCardAction.budget`).
+struct SidebarBudgetOffer: Hashable {
+    let workspaceID: String
+    let budget: Int
+    /// Fresh start only at rest: it ends the worker's shell.
+    let choices: [BudgetChoice]
 }

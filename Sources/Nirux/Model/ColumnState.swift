@@ -160,8 +160,14 @@ final class ColumnState {
     var isArriving = false
     /// Passes in or out its card took, the last one owning it (`pass`).
     var passes = 0
-    /// Moves on their way that lift its card over a neighbour (`lift`).
+    /// Moves on their way that lift its card over a neighbour (`lift`),
+    /// a drop's glide included (`settle`).
     var lifts = 0
+    /// The pointer holds its card by its header (`raise`).
+    var isDragged = false
+    /// Times its card was taken or let go, the last one owning its scale
+    /// (`raise`, `settle`).
+    var drags = 0
     /// Moves on their way that pass over its card, and the shade they dim
     /// it with (`lift`).
     var dims = 0
@@ -727,6 +733,11 @@ final class ColumnState {
     /// Mission message goes to.
     func provenCodexSessionID(of process: ForegroundProcess) -> String? {
         codexSessionTracker.provenSessionID(for: process)
+    }
+
+    /// The session `foreground`, this column's `claude`, reported in its hooks.
+    func claudeSessionID(of foreground: ForegroundProcess) -> String? {
+        claudeSessionTracker.boundSessionID(for: foreground.instance)
     }
 
     func prepareClaudeResume(sessionID: String) {

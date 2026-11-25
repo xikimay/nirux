@@ -158,6 +158,29 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(unreadable.status, .readOnly(.unknownSettings(["prFollowUp"])))
     }
 
+    /// "Tasks can manage spaces": on in General, off elsewhere, the default
+    /// written as nothing; a value this build can't read is off.
+    func testTasksManageSpacesInGeneralUnlessTurnedOff() throws {
+        let general = WorkspaceProfile.defaultID
+        XCTAssertTrue(SpaceDefaults().tasksCanManageSpaces(inSpace: general))
+        XCTAssertFalse(SpaceDefaults().tasksCanManageSpaces(inSpace: "ops"))
+        var defaults = SpaceDefaults()
+        defaults.setTasksManageSpaces(true, inSpace: general)
+        XCTAssertNil(defaults.tasksManageSpaces)
+        defaults.setTasksManageSpaces(true, inSpace: "ops")
+        XCTAssertEqual(defaults.tasksManageSpaces, true)
+        defaults.setTasksManageSpaces(false, inSpace: general)
+        XCTAssertFalse(defaults.tasksCanManageSpaces(inSpace: general))
+
+        let store = try store()
+        _ = try store.save(defaults, replacing: store.load()).get()
+        XCTAssertEqual(store.load().defaults.tasksManageSpaces, false)
+        try Data(#"{"tasksManageSpaces": "yes"}"#.utf8).write(to: store.fileURL)
+        let unreadable = store.load()
+        XCTAssertFalse(unreadable.defaults.tasksCanManageSpaces(inSpace: general))
+        XCTAssertEqual(unreadable.status, .readOnly(.unknownSettings(["tasksManageSpaces"])))
+    }
+
     /// Another Nirux saved since the window read the file: left alone.
     func testAFileChangedSinceLoadedIsNotOverwritten() throws {
         let store = try store()
@@ -240,6 +263,75 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(odd.defaults.dailyPassHour, DailyPass.defaultHour)
         XCTAssertFalse(odd.defaults.dailyPassIsOn, "an hour it can't read: off")
         XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.dailyPassIsOn)
+    }
+
+    /// A Lead's results are grouped unless the file says; a file Nirux can't
+    /// read sends each at once.
+    func testTheGroupResultsSetting() throws {
+        XCTAssertTrue(SpaceDefaults().groupsResults)
+        let off = SpaceDefaultsStore.decode(Data(#"{"leadGroupsResults": false}"#.utf8))
+        XCTAssertEqual(off.status, .loaded)
+        XCTAssertFalse(off.defaults.groupsResults)
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["leadGroupsResults"] as? Bool, false)
+        XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.groupsResults)
+    }
+
+    /// A cold Lead's fresh start is on unless the file says; a file Nirux
+    /// can't read turns it off.
+    func testTheFreshStartSetting() throws {
+        XCTAssertTrue(SpaceDefaults().leadStartsFreshWhenCold)
+        let off = SpaceDefaultsStore.decode(Data(#"{"leadFreshStart": false}"#.utf8))
+        XCTAssertEqual(off.status, .loaded)
+        XCTAssertFalse(off.defaults.leadStartsFreshWhenCold)
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["leadFreshStart"] as? Bool, false)
+        XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.leadStartsFreshWhenCold)
+    }
+
+    /// On unless the file says: every subagent on Opus, through the
+    /// terminal; Fable for a new Claude Lead conversation, on its launch line
+    /// only. A variable the user set for the space wins; a file Nirux can't
+    /// read leaves Claude Code's own choice.
+    func testTheClaudeModelSwitch() throws {
+        let on = SpaceDefaults()
+        XCTAssertTrue(on.splitsClaudeModels)
+        XCTAssertEqual(on.claudeModelEnvironment, ["CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"])
+        XCTAssertNil(on.shellEnvironment["ANTHROPIC_MODEL"], "never the Lead's whole terminal")
+        XCTAssertEqual(on.leadModel(for: .claude), "fable")
+        XCTAssertNil(on.leadModel(for: .codex))
+        XCTAssertNil(on.leadModel(for: .agy))
+        var mine = on
+        mine.environment = [SpaceDefaults.EnvironmentVariable(name: "CLAUDE_CODE_SUBAGENT_MODEL", value: "sonnet")]
+        XCTAssertEqual(mine.shellEnvironment["CLAUDE_CODE_SUBAGENT_MODEL"], "sonnet")
+        XCTAssertEqual(mine.shellEnvironment["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"], "1")
+
+        let off = SpaceDefaultsStore.decode(Data(#"{"claudeModelSplit": false}"#.utf8))
+        XCTAssertEqual(off.status, .loaded)
+        XCTAssertEqual(off.defaults.claudeModelEnvironment, [:])
+        XCTAssertNil(off.defaults.leadModel(for: .claude))
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["claudeModelSplit"] as? Bool, false)
+        XCTAssertEqual(SpaceDefaultsStore.unreadDefaults.claudeModelEnvironment, [:])
+        XCTAssertNil(SpaceDefaultsStore.unreadDefaults.leadModel(for: .claude))
+    }
+
+    /// 25M over 7 days unless the file says; 0 turns it off, and a value it
+    /// can't take reads as the default.
+    func testTheTaskBudgetSetting() throws {
+        XCTAssertEqual(SpaceDefaults().weeklyTaskBudget, SpaceDefaults.defaultTaskBudget)
+        XCTAssertNil(SpaceDefaultsStore.decode(Data(#"{"taskBudget": 0}"#.utf8)).defaults.weeklyTaskBudget, "off")
+        let set = SpaceDefaultsStore.decode(Data(#"{"taskBudget": 50000000}"#.utf8))
+        XCTAssertEqual(set.status, .loaded)
+        XCTAssertEqual(set.defaults.weeklyTaskBudget, 50_000_000)
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(set.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["taskBudget"] as? Int, 50_000_000)
+        for unreadable in [#"{"taskBudget": -5}"#, #"{"taskBudget": "50M"}"#] {
+            let odd = SpaceDefaultsStore.decode(Data(unreadable.utf8))
+            XCTAssertEqual(odd.status, .readOnly(.unknownSettings(["taskBudget"])), "kept, never rewritten: \(unreadable)")
+            XCTAssertEqual(odd.defaults.weeklyTaskBudget, SpaceDefaults.defaultTaskBudget)
+        }
+        XCTAssertEqual(SpaceDefaultsStore.unreadDefaults.weeklyTaskBudget, SpaceDefaults.defaultTaskBudget, "a pause is the safe side")
     }
 
     /// A deleted space's defaults, setup scripts, proposed rules and logs go;

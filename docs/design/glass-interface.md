@@ -510,6 +510,23 @@ the text stays flat and sharp.
   the viewport, the card lands there with a tick of the trackpad. Only
   the columns whose width changes take a new fraction, and a focus moved
   during a drag ends it.
+- **Dragging a card** (same study, W7): a press on a column's header, off
+  its controls, drags the card once it moves 4 pt (`HeldPress`, as a
+  task's row does), and the header no longer moves the window (the title
+  bar's strip does). Taken where it shows (a slide or a glide on its way
+  stops there), the card rises to 102 % over its neighbours, its shadow at
+  the floating level, and follows the pointer along the strip, which holds
+  still; within 48 pt of the viewport's left or right edge the strip pans
+  at the drag's ticks (not its events, whose rate is the mouse's), up to
+  24 pt each, faster nearer the edge, once the pointer has come there from
+  further in (a card taken at an edge stays), so the cards out of view come
+  to it. It takes the slot whose place lies nearest
+  it, so the others
+  glide aside as it passes; let go, it glides into that slot, moved by
+  `WorkspaceState.moveColumn(at:to:)` as ⇧⌘← and ⇧⌘→ move it, and the
+  camera brings it to the middle. Escape, the pointer out of the viewport
+  (the others make room back at once) or a lost press puts it back. With
+  Reduce motion it is up and down at once.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within

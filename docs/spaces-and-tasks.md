@@ -17,7 +17,7 @@ A space's settings are in the Settings window (`Cmd+,`), under Nirux's own: the 
 | Pane | What it sets |
 | --- | --- |
 | General | name, color, repositories and folders, the default one, each repository's setup script |
-| Defaults | the agent new tasks preselect, the Claude Code and Codex modes, the pull request follow-up (on by default), environment variables for new shells |
+| Defaults | the agent new tasks preselect, the Claude Code and Codex modes, the pull request follow-up (on by default), the Claude models (on by default), environment variables for new shells |
 | Safety | what the space's Claude Code sessions are refused or trusted with ([below](#safety)) |
 | Lead | the space's [Lead](#the-lead) |
 | Brief | rules given to every Claude Code and Codex session the space starts |
@@ -28,6 +28,8 @@ A space's settings are in the Settings window (`Cmd+,`), under Nirux's own: the 
 The agent picked in the New sheet overrides the space's default agent. The space's Claude Code and Codex modes override those of Settings, unless they are left on Same as Settings.
 
 Environment values are literal (`$PATH` isn't expanded) and names starting with `NIRUX_` are reserved. They are kept in a file only you can read.
+
+**Lead on Fable, subagents on Opus** (Defaults, on by default) sets the models of the Claude Code sessions the space starts from then on: every subagent runs on Opus, whatever its call or its agent file asks (`CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` in the terminal), and a new Lead conversation on Fable (`--model fable` on its launch line); a resumed conversation keeps the model it ran, so its cache stays. A model you pick for a task, or one of these variables set in the space's environment, comes first. Off, Claude Code picks as usual. **Task budget (7 days)** (Defaults, 25M by default, about what 9 tasks in 10 spent in a week) is a soft budget in the same weighted tokens as the Usage window: past it, a task's row turns its token count to a warning and says so, and Nirux stops typing its pull request's follow-ups until the week's spend falls back under it. Its card offers **Continue** (the budget no longer holds that task for 7 days), **Fresh start** (a new conversation with a handover, same agent and model, offered only while the task's agents rest; it lifts the budget too) or **Close…**. Nothing stops a turn. Off turns it off. Subagents have a soft cap of 5 per session: from the fifth, the row's token count turns to a warning, and its tooltip says to hand separate work to a task.
 
 A repository's setup script runs once in each new worktree made for a task, before the agent starts, with `/bin/sh -e` and no input. A worktree made by **Existing Branch…** runs none. If the script fails, Nirux notifies you and the agent still starts.
 
@@ -153,3 +155,11 @@ Once a day, after 06:00, Nirux asks the Lead to look back at the space's day. Th
 It then proposes the rules that would have spared that friction, through **Rule proposed · Review** on its row. Nothing reaches the brief without you.
 
 Nirux asks only when something happened, and only once the Lead has been idle for 30 minutes and you have been away from Nirux for 10. For a day after, the Lead's row shows what the pass read ("Daily pass · 6 PRs, 1 flaky test, 2 rules proposed"), and its reply in its terminal says why. Turn it off or change its hour with **Daily pass** in Space Settings › Lead. You can also ask the Lead for a pass at any time.
+
+**Group task results** (Space Settings › Lead, on by default) saves the Lead a wake per finished task: the results its tasks report within 3 minutes of the first one reach it together, in one message (or together through its Claude hook). Questions never wait.
+
+### A heavy or cold context
+
+Every message a Claude session sends reads its whole context again. Once a Claude column is at rest (its prompt waiting, no dialog, no question to you) with 280k of context or more, its card says so and offers **Compact** (Nirux types `/compact`, never after a draft) or **Fresh start** (a new conversation on the same model, handed the task's request, progress and next step; for the Lead, Restart Lead, which asks first). The same offer comes from 150k once the session has been idle for an hour: its cache expired, so its next message writes the whole context again. Nirux never chooses for you there.
+
+The Lead is the exception, behind **Fresh start after an idle hour** in Space Settings › Lead, on by default: a Claude Lead idle for an hour with 200k of context or more starts a new conversation by itself, unless it holds something that conversation would lose: a draft, a dialog, a question to you, a task's question it hasn't answered, or a merge queue it started. The new conversation is handed the last entry of the previous one and where to read the rest in Session History; its tasks, questions and brief stay.

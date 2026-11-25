@@ -27,6 +27,172 @@ final class UsageDisplayTests: XCTestCase {
         XCTAssertEqual(UsageText.codexWindows(limits, now: now + 61).map(\.name), ["7d"])
     }
 
+    /// Under the column, never imposed: why, then Compact and Fresh start,
+    /// which arm like Allow / Deny and click only for that offer.
+    @MainActor func testAHeavyClaudeColumnOffersACompactionOrAFreshStart() throws {
+        let offer = ContextOffer(reason: .heavy, contextTokens: 312_000, lastResponseAt: 100)
+        var column = ColumnInfo(
+            index: 0, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
+            webTitle: nil, terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil
+        )
+        column.contextOffer = offer
+        func card(_ column: ColumnInfo) -> WorkspaceInfo {
+            WorkspaceInfo(
+                id: "ws", index: 0, title: "check-video", profileID: WorkspaceProfile.defaultID, isInactive: false,
+                columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
+                columns: [column], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+                phase: .active, lastSummary: nil, lastActivityAt: nil
+            )
+        }
+        let info = card(column)
+        XCTAssertEqual(info.cardActions, [.contextOffer(columnIndex: 0, offer)])
+        XCTAssertEqual(offer.text, "Each message rereads 312k")
+        XCTAssertEqual(
+            ContextOffer(reason: .cold, contextTokens: 160_000, lastResponseAt: 100).text, "Cache expired: 160k to write again"
+        )
+
+        let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 800).render()
+        let keys = [ContextOffer.Choice.compact, .freshStart].map {
+            SidebarHoverTarget.contextOfferButtonKey(workspaceIndex: 0, columnIndex: 0, offer: offer, choice: $0)
+        }
+        XCTAssertEqual(Set(result.approvalButtons.keys), Set(keys))
+        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260), accuracy: 0.5)
+
+        let compact = SidebarHitRegion.contextOffer(workspaceIndex: 0, columnIndex: 0, offer: offer, choice: .compact)
+        func click(_ released: SidebarHitRegion?, count: Int = 1) -> SidebarContextOfferClick? {
+            SidebarView.contextOfferClick(pressed: compact, released: released, clickCount: count, armedAtPress: true, armedAtRelease: true)
+        }
+        XCTAssertEqual(click(compact), SidebarContextOfferClick(workspaceIndex: 0, columnIndex: 0, choice: .compact))
+        XCTAssertNil(click(.contextOffer(workspaceIndex: 0, columnIndex: 0, offer: offer, choice: .freshStart)), "released on the other")
+        var later = offer
+        later.lastResponseAt = 200
+        XCTAssertNil(click(.contextOffer(workspaceIndex: 0, columnIndex: 0, offer: later, choice: .compact)), "another response came")
+        XCTAssertNil(click(compact, count: 2))
+
+        // Where Nirux can't hand the work over: Compact alone.
+        column.contextOffer = ContextOffer(reason: .heavy, contextTokens: 312_000, lastResponseAt: 100, choices: [.compact])
+        XCTAssertEqual(
+            Array(SidebarWorkspaceCardRenderer(workspace: card(column), sidebarWidth: 260, yOffset: 800).render().approvalButtons.keys),
+            [SidebarHoverTarget.contextOfferButtonKey(workspaceIndex: 0, columnIndex: 0, offer: column.contextOffer!, choice: .compact)]
+        )
+    }
+
+    @MainActor func testAColumnIsAtRestOnlyAtItsPromptAskingNothing() throws {
+        let idle = column(.idle)
+        XCTAssertTrue(idle.isAtRest)
+        let working = column(.working)
+        var asked = idle
+        asked.openDialog = .askedInReply("Queue #824 now or wait?")
+        var turn = idle
+        turn.turnQuestion = SidebarTurnQuestion(text: "Queue #824 now or wait?", turnEndedAt: 1, isYesNo: false, columnID: UUID())
+        var failed = idle
+        failed.stuck = .silent(duration: "4h45m", since: 100, interruptible: true)
+        var request = AgentPermissionRequest(toolName: "Bash", summary: "x", key: "k", agentID: nil, sessionID: "lead", requestedAt: 0)
+        request.approval = PermissionApprovalTicket(requestID: "r", deadline: 100, text: "rm -rf build")
+        var approval = idle
+        approval.permissionApproval = try XCTUnwrap(SidebarPermissionApproval(request, now: 1))
+        for (column, why) in [(working, "working"), (asked, "its reply asks"), (turn, "its turn asked"), (failed, "a failed turn"),
+                              (approval, "a permission prompt")] {
+            XCTAssertFalse(column.isAtRest, why)
+        }
+    }
+
+    func testAClickOnTheOfferNeverTypesOverADraftAndKeepsTheWorkersModel() {
+        XCTAssertEqual(ContextOfferAction.of(.compact, hasDraft: false, isLead: false, workerModel: nil), .typeCompact)
+        XCTAssertEqual(ContextOfferAction.of(.compact, hasDraft: true, isLead: false, workerModel: nil), .refuse(ContextOfferAction.draftRefusal))
+        XCTAssertEqual(ContextOfferAction.of(.freshStart, hasDraft: true, isLead: true, workerModel: nil), .confirmLeadRestart, "Restart Lead asks")
+        XCTAssertEqual(ContextOfferAction.of(.freshStart, hasDraft: false, isLead: false, workerModel: "sonnet"), .resumeTask(model: "sonnet"))
+        XCTAssertEqual(AgentModels.launchModel(arguments: ["--model", "sonnet", "Continue the task"]), "sonnet")
+    }
+
+    @MainActor func testATaskTakesItsOwnCLIAgainOnlyForAFreshStart() {
+        XCTAssertEqual(
+            NiruxShellView.taskSwitchRefusal(current: .claude, choice: .claude, awaitingResume: false, freshStart: false),
+            "This task already runs claude. Choose another CLI."
+        )
+        XCTAssertNil(NiruxShellView.taskSwitchRefusal(current: .claude, choice: .claude, awaitingResume: false, freshStart: true))
+        XCTAssertNil(NiruxShellView.taskSwitchRefusal(current: .claude, choice: .claude, awaitingResume: true, freshStart: false))
+        XCTAssertNil(NiruxShellView.taskSwitchRefusal(current: .codex, choice: .claude, awaitingResume: false, freshStart: false))
+    }
+
+    /// Cold, heavy, its own session, allowed by its space, holding nothing:
+    /// each missing one keeps the Lead's conversation.
+    func testAColdLeadStartsAfreshOnlyWhenItHoldsNothing() throws {
+        let session = UsageSession(
+            key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "lead"), contextTokens: 300_000,
+            events: [event(7_200, input: 300_000, context: 300_000)]
+        )
+        let latest = try XCTUnwrap(UsageReport(sessions: [session], now: now).latestSessions["lead"])
+        func starts(
+            _ sessionID: String? = "s", runningSince: TimeInterval = 0, context: Int = 300_000, spaceAllows: Bool = true,
+            holdings: LeadHoldings = LeadHoldings()
+        ) -> Bool {
+            var latest = latest
+            latest.contextTokens = context
+            return ColdLead.startsFresh(
+                latest: latest, sessionID: sessionID, runningSince: runningSince, now: now, spaceAllows: spaceAllows, holdings: holdings
+            )
+        }
+        XCTAssertTrue(starts())
+        XCTAssertFalse(starts("other"), "another conversation runs in its terminal")
+        XCTAssertFalse(starts(nil), "its hooks haven't named it")
+        XCTAssertFalse(starts(runningSince: now - 60), "just resumed")
+        XCTAssertFalse(starts(context: 150_000))
+        XCTAssertFalse(starts(spaceAllows: false))
+        let held: [(WritableKeyPath<LeadHoldings, Bool>, String)] = [
+            (\.isBusy, "working"), (\.hasDialog, "a dialog"), (\.hasQuestion, "a question to the user"), (\.hasDraft, "a draft"),
+            (\.owesMissionReply, "a task's question"), (\.runsItsQueue, "the queue it started")
+        ]
+        for (key, why) in held {
+            var holdings = LeadHoldings()
+            holdings[keyPath: key] = true
+            XCTAssertFalse(starts(holdings: holdings), why)
+        }
+    }
+
+    func testALeadOwesAReplyToItsTasksQuestionUntilItAnswers() {
+        let question = MissionEvent(
+            id: "q", missionID: "m", childWorkspaceID: "task", childAgentUUID: "agent", kind: .question,
+            message: "Queue it now?", inReplyTo: nil, timestamp: now - 7_200
+        )
+        func mission(_ events: [MissionEvent], status: Mission.Status = .active) -> Mission {
+            Mission(
+                id: "m", parentWorkspaceID: "lead", parentAgentUUID: "lead-agent", childWorkspaceID: "task", childAgentUUID: "agent",
+                childAgentKind: "claude", branch: "feat/x", status: status, createdAt: now - 9_000, updatedAt: now, events: events,
+                reportsToLead: true
+            )
+        }
+        XCTAssertTrue(mission([question]).awaitsReply(from: "lead"))
+        XCTAssertFalse(mission([question]).awaitsReply(from: "other"))
+        let answer = MissionEvent(
+            id: "a", missionID: "m", childWorkspaceID: "task", childAgentUUID: "agent", kind: .response,
+            message: "Yes", inReplyTo: "q", timestamp: now - 60
+        )
+        XCTAssertFalse(mission([question, answer]).awaitsReply(from: "lead"))
+        var handed = question
+        handed.handedToUserBecause = "a decision"
+        XCTAssertFalse(mission([handed]).awaitsReply(from: "lead"), "the user answers it")
+        XCTAssertFalse(mission([question], status: .completed).awaitsReply(from: "lead"))
+    }
+
+    /// The fresh Lead learns where its previous conversation is; its first
+    /// prompt still reads as a restart.
+    func testAFreshLeadIsHandedItsPreviousConversation() {
+        XCTAssertEqual(NiruxShellView.leadHandoverLines(previous: nil, context: ["Last conversation entry: Queue #824 when green."]),
+                       ["Last conversation entry: Queue #824 when green."])
+        let record = AgentSessionRecord(
+            schemaVersion: 1, agent: .claude, sessionID: "s1", startedAt: 0, lastStartAt: 0, lastActivityAt: 0, status: .idle, hasConversation: true
+        )
+        XCTAssertEqual(NiruxShellView.leadHandoverLines(previous: record, context: []).first?.hasPrefix(
+            "Previous conversation in Session History: claude s1."
+        ), true)
+        let prompt = ([NiruxShellView.leadRestartPrompt(for: .claude)] + ["Last conversation entry: Queue #824 when green."])
+            .joined(separator: "\n")
+        XCTAssertTrue(NiruxShellView.isLeadRestart(prompt: prompt, agent: .claude))
+        XCTAssertTrue(NiruxShellView.isLeadRestart(prompt: NiruxShellView.leadRelaunchPrompt(for: .claude), agent: .claude))
+        XCTAssertFalse(NiruxShellView.isLeadRestart(prompt: "Fix the build", agent: .claude))
+    }
+
     func testATaskRowReadsItsLatestSessionsContextAndItsWeek() throws {
         let session = UsageSession(
             key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "task"), contextTokens: 300_000,
@@ -41,6 +207,151 @@ final class UsageDisplayTests: XCTestCase {
         XCTAssertTrue(lines.contains("Idle for 2h: its cache expired, the next message writes it again"))
         XCTAssertTrue(lines.contains("Subagents: 2%"))
         XCTAssertTrue(lines.contains("Past 280k of context: 98%"))
+    }
+
+    /// From the soft cap, the row warns and its tooltip says why; under it,
+    /// it says nothing of subagents.
+    @MainActor func testARowWarnsOnceItsSessionReachesTheSubagentsSoftCap() throws {
+        func usage(subagents: Int) throws -> SidebarTaskUsage {
+            let session = UsageSession(
+                key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "task"), contextTokens: 90_000,
+                subagents: subagents, events: [event(60, input: 90_000, context: 90_000)]
+            )
+            return try XCTUnwrap(SidebarTaskUsage(UsageReport(sessions: [session], now: now), taskID: "task"))
+        }
+        let under = try usage(subagents: SidebarTaskUsage.subagentSoftCap - 1)
+        XCTAssertFalse(under.isWarning)
+        XCTAssertFalse(under.toolTip(now: now).contains("subagents in its latest session"))
+        let capped = try usage(subagents: SidebarTaskUsage.subagentSoftCap)
+        XCTAssertTrue(capped.isWarning)
+        XCTAssertFalse(capped.isContextHeavy)
+        XCTAssertTrue(capped.toolTip(now: now).components(separatedBy: "\n")
+            .contains("5 subagents in its latest session: from the 5th, separate work costs less as a task"))
+
+        // The row's count says it as a warning.
+        func shown(_ usage: SidebarTaskUsage) -> String? {
+            var info = WorkspaceInfo(
+                id: "task", index: 0, title: "check-video", profileID: WorkspaceProfile.defaultID, isInactive: false,
+                columnCount: 0, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
+                columns: [], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+                phase: .active, lastSummary: nil, lastActivityAt: nil
+            )
+            info.usage = usage
+            let labels = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 800).render().views
+                .compactMap { $0 as? NSTextField }
+            return labels.first { $0.stringValue.hasSuffix(usage.text) }?.stringValue
+        }
+        XCTAssertEqual(shown(capped), capped.text.asWarning)
+        XCTAssertEqual(shown(under), under.text)
+    }
+
+    /// Past its space's budget, the row warns and says its follow-ups wait;
+    /// under it, or with no budget, it says nothing of one.
+    func testARowWarnsPastItsBudget() throws {
+        let session = UsageSession(
+            key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "task"), contextTokens: 90_000,
+            events: [event(60, input: 26_000_000, context: 90_000)]
+        )
+        let report = UsageReport(sessions: [session], now: now)
+        let over = try XCTUnwrap(SidebarTaskUsage(report, taskID: "task", budget: 25_000_000))
+        XCTAssertTrue(over.isOverBudget)
+        XCTAssertTrue(over.isWarning)
+        XCTAssertTrue(over.toolTip(now: now).components(separatedBy: "\n")
+            .contains("Past its budget of 25M: its pull request's follow-ups wait (Space Settings › Defaults)"))
+        let under = try XCTUnwrap(SidebarTaskUsage(report, taskID: "task", budget: 50_000_000))
+        XCTAssertFalse(under.isOverBudget)
+        XCTAssertFalse(under.isWarning)
+        XCTAssertFalse(try XCTUnwrap(SidebarTaskUsage(report, taskID: "task")).isOverBudget, "no budget")
+    }
+
+    /// Past its budget, a task's card offers Continue, Fresh start (only
+    /// while its columns rest) and Close…; they arm like Allow / Deny and
+    /// click only for that task, budget and choice.
+    @MainActor func testATaskPastItsBudgetOffersAChoice() throws {
+        let offer = SidebarBudgetOffer(workspaceID: "ws", budget: 25_000_000, choices: BudgetChoice.allCases)
+        let info = overBudgetTask([column(.idle)])
+        XCTAssertEqual(info.cardActions, [.budget(offer)])
+        let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 800).render()
+        XCTAssertEqual(Set(result.approvalButtons.keys), Set(BudgetChoice.allCases.map {
+            SidebarHoverTarget.budgetChoiceButtonKey(offer: offer, choice: $0)
+        }))
+        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260), accuracy: 0.5)
+        XCTAssertEqual(overBudgetTask([column(.working)]).cardActions, [
+            .budget(SidebarBudgetOffer(workspaceID: "ws", budget: 25_000_000, choices: [.keepGoing, .close]))
+        ], "no Fresh start mid-turn")
+
+        let keepGoing = SidebarHitRegion.budgetChoice(workspaceIndex: 0, offer: offer, choice: .keepGoing)
+        func click(_ released: SidebarHitRegion?) -> SidebarBudgetClick? {
+            SidebarView.budgetChoiceClick(pressed: keepGoing, released: released, clickCount: 1, armedAtPress: true, armedAtRelease: true)
+        }
+        XCTAssertEqual(click(keepGoing), SidebarBudgetClick(workspaceID: "ws", choice: .keepGoing))
+        XCTAssertNil(click(.budgetChoice(workspaceIndex: 0, offer: offer, choice: .close)), "released on another")
+        let other = SidebarBudgetOffer(workspaceID: "other", budget: 25_000_000, choices: BudgetChoice.allCases)
+        XCTAssertNil(click(.budgetChoice(workspaceIndex: 0, offer: other, choice: .keepGoing)), "another task's, at the same place")
+        XCTAssertNotEqual(
+            SidebarHoverTarget.budgetChoiceButtonKey(offer: offer, choice: .keepGoing),
+            SidebarHoverTarget.budgetChoiceButtonKey(offer: other, choice: .keepGoing),
+            "another task's row moved there: not armed"
+        )
+        var unbudgeted = info
+        unbudgeted.usage = SidebarTaskUsage(UsageReport(sessions: [overBudgetSession], now: now), taskID: "ws")
+        XCTAssertEqual(unbudgeted.cardActions, [], "no budget, no choice")
+    }
+
+    /// VoiceOver's press on a budget choice, once armed, hands the shell its
+    /// task's id and the choice.
+    @MainActor func testABudgetChoicePressReachesItsTask() throws {
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 800))
+        let window = NSWindow(contentRect: sidebar.frame, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = sidebar
+        sidebar.isExpanded = true
+        sidebar.update(profiles: [], workspaces: [overBudgetTask([column(.idle)], isActive: true)])
+        var chosen: [String] = []
+        sidebar.onBudgetChoice = { chosen.append("\($0) \($1.rawValue)") }
+        let button = try XCTUnwrap(NiruxApp.pressTarget(label: BudgetChoice.keepGoing.accessibilityLabel, in: [window]))
+        XCTAssertFalse(button.accessibilityPerformPress(), "not armed yet")
+        let offer = SidebarBudgetOffer(workspaceID: "ws", budget: 25_000_000, choices: BudgetChoice.allCases)
+        waitUntil("armed") { sidebar.isApprovalButtonArmed(SidebarHoverTarget.budgetChoiceButtonKey(offer: offer, choice: .keepGoing)) }
+        XCTAssertTrue(button.accessibilityPerformPress())
+        XCTAssertEqual(chosen, ["ws keepGoing"])
+    }
+
+    /// Continue on the card outlives a relaunch; a task that never chose it
+    /// writes nothing.
+    func testContinuePastTheBudgetIsSaved() throws {
+        let passing = PersistedWorkspace(id: "a", title: "a", cwd: "/tmp", columns: [], focusedColumnIndex: 0, budgetPassedAt: 1_000)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(passing)) as? [String: Any])
+        XCTAssertEqual(json["budgetPassedAt"] as? Double, 1_000)
+        XCTAssertEqual(try JSONDecoder().decode(PersistedWorkspace.self, from: JSONEncoder().encode(passing)).budgetPassedAt, 1_000)
+        let none = PersistedWorkspace(id: "b", title: "b", cwd: "/tmp", columns: [], focusedColumnIndex: 0)
+        let empty = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(none)) as? [String: Any])
+        XCTAssertNil(empty["budgetPassedAt"])
+    }
+
+    private var overBudgetSession: UsageSession {
+        UsageSession(
+            key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "ws"), contextTokens: 90_000,
+            events: [event(60, input: 26_000_000, context: 90_000)]
+        )
+    }
+
+    @MainActor private func overBudgetTask(_ columns: [ColumnInfo], isActive: Bool = false) -> WorkspaceInfo {
+        var info = WorkspaceInfo(
+            id: "ws", index: 0, title: "check-video", profileID: WorkspaceProfile.defaultID, isInactive: false,
+            columnCount: columns.count, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: isActive,
+            columns: columns, prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+            phase: .active, lastSummary: nil, lastActivityAt: nil
+        )
+        info.usage = SidebarTaskUsage(UsageReport(sessions: [overBudgetSession], now: now), taskID: "ws", budget: 25_000_000)
+        return info
+    }
+
+    private func column(_ status: AgentStatus) -> ColumnInfo {
+        ColumnInfo(
+            index: 0, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
+            webTitle: nil, terminalTitle: nil, agentStatus: status, isEditor: false, editorFileName: nil
+        )
     }
 
     func testTheUsageWindowRanksTasksAndCountsWhatTheyLeaveOut() {

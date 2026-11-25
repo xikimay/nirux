@@ -22,6 +22,50 @@ public enum MissionDeliveryPolicy {
         if let best = carriers.subtracting([.typed]).min() { return best }
         return carriers.contains(.typed) && !typingRefused ? .typed : nil
     }
+
+    /// The next step for a message to an agent whose hook may wait on its
+    /// conversation, from where its letter is (`MissionMailbox.places`).
+    /// `recipient`: the conversation the agent runs now, if known;
+    /// `ended`: the conversation of its claim runs nowhere any more;
+    /// `sentTo`: the one a `tell` was sent to, posted nowhere else.
+    public static func hookStep(
+        place: MissionLetterPlace?, recipient: String?, ended: Bool, sentTo: String? = nil, isArmed: (String) -> Bool
+    ) -> MissionHookStep {
+        switch place {
+        case .claimed?:
+            return ended ? .release : .leave
+        case .owed?:
+            return .type
+        case .waiting(let conversation)?:
+            return conversation == recipient && isArmed(conversation) ? .leave : .retract(conversation)
+        case nil:
+            guard let recipient, sentTo == nil || sentTo == recipient, isArmed(recipient) else { return .type }
+            return .post(recipient)
+        }
+    }
+}
+
+/// Where a Mission message's letter is.
+public enum MissionLetterPlace: Equatable, Sendable {
+    case waiting(conversation: String)
+    case claimed(conversation: String, at: TimeInterval)
+    /// Nirux took it back: typing carries it (`MissionMailbox.markTyped`).
+    case owed(conversation: String)
+}
+
+/// See `MissionDeliveryPolicy.hookStep`.
+public enum MissionHookStep: Equatable, Sendable {
+    /// Its hook has it, or is about to.
+    case leave
+    /// Its claim's session ended before the turn that took it: drop the
+    /// claim, then take the next step.
+    case release
+    /// Its waiter left that conversation: take it back, then take the next step.
+    case retract(String)
+    /// A waiter waits on that conversation.
+    case post(String)
+    /// No hook takes it: typing does.
+    case type
 }
 
 /// Mission messages for a conversation's hook (a Claude session, a Codex
@@ -40,11 +84,15 @@ public struct MissionMailbox: Sendable {
         public var id: String
         public var text: String
         public var postedAt: TimeInterval
+        /// The size of its conversation's transcript when it was posted: a
+        /// reader looks for it only past there.
+        public var transcriptOffset: UInt64?
 
-        public init(id: String, text: String, postedAt: TimeInterval) {
+        public init(id: String, text: String, postedAt: TimeInterval, transcriptOffset: UInt64? = nil) {
             self.id = id
             self.text = text
             self.postedAt = postedAt
+            self.transcriptOffset = transcriptOffset
         }
     }
 
@@ -193,6 +241,127 @@ public struct MissionMailbox: Sendable {
         try Self.remove(try folder(.ids, of: claim.conversation).appendingPathComponent(claim.letter.id))
     }
 
+    /// Where each letter waits, was claimed or is owed, by its id.
+    public func places() -> [String: MissionLetterPlace] {
+        var places: [String: MissionLetterPlace] = [:]
+        for conversation in conversations() {
+            for (state, place) in [(State.waiting, MissionLetterPlace.waiting(conversation: conversation)), (.owed, .owed(conversation: conversation))] {
+                for name in (try? folder(state, of: conversation)).map(Self.names) ?? [] { places[String(name.dropLast(5))] = place }
+            }
+        }
+        for claim in claims() { places[claim.letter.id] = .claimed(conversation: claim.conversation, at: claim.claimedAt) }
+        return places
+    }
+
+    /// A hook waiting on a conversation's letters: one at a time per
+    /// conversation, holding its lock while it lives (`isArmed`).
+    public final class Waiter: Sendable {
+        let descriptor: Int32
+
+        init(descriptor: Int32) {
+            self.descriptor = descriptor
+        }
+
+        deinit {
+            close(descriptor)
+        }
+    }
+
+    /// `conversation`'s waiter, or nil while another one waits there.
+    /// `isArmed` takes the lock for an instant: a few tries ride it out.
+    public func arm(_ conversation: String) throws -> Waiter? {
+        let lock = try lockFile(of: conversation)
+        for attempt in 1...5 {
+            try FileManager.default.createDirectory(at: try folder(.waiting, of: conversation), withIntermediateDirectories: true)
+            let descriptor = open(lock.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+            guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            // Still the file at its path: `prune` may have removed the one it opened.
+            if flock(descriptor, LOCK_EX | LOCK_NB) == 0, Self.isFile(descriptor, at: lock.path) { return Waiter(descriptor: descriptor) }
+            close(descriptor)
+            if attempt < 5 { usleep(20_000) }
+        }
+        return nil
+    }
+
+    /// Marks `conversation` as the one `process` runs now: a waiter on its
+    /// earlier one leaves (`letters`), as after `/clear`.
+    public func noteRunning(_ conversation: String, in process: pid_t) throws {
+        try Self.requireName(conversation)
+        try FileManager.default.createDirectory(at: processes, withIntermediateDirectories: true)
+        try Data(conversation.utf8).write(to: processes.appendingPathComponent(String(process)), options: .atomic)
+    }
+
+    /// The conversation `process` runs, as its last waiter noted it.
+    public func running(in process: pid_t) -> String? {
+        (try? Data(contentsOf: processes.appendingPathComponent(String(process)))).flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    /// The processes alive, stopped ones too, whose last waiter noted they run
+    /// `conversation`.
+    public func processes(running conversation: String) -> [pid_t] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: processes.path)) ?? []).compactMap { name in
+            guard let process = pid_t(name), running(in: process) == conversation, kill(process, 0) == 0 || errno == EPERM else { return nil }
+            return process
+        }
+    }
+
+    /// Notes where `conversation`'s agent keeps its transcript, for Nirux to
+    /// see whether a claimed letter reached the model (`transcript(of:)`).
+    public func noteTranscript(_ path: String, of conversation: String) throws {
+        try Self.requireName(conversation)
+        let note = root.appendingPathComponent(conversation, isDirectory: true).appendingPathComponent("transcript")
+        try FileManager.default.createDirectory(at: note.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(path.utf8).write(to: note, options: .atomic)
+    }
+
+    public func transcript(of conversation: String) -> String? {
+        guard Self.isName(conversation) else { return nil }
+        let note = root.appendingPathComponent(conversation, isDirectory: true).appendingPathComponent("transcript")
+        return (try? Data(contentsOf: note)).flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    /// Whether a waiter waits on `conversation` now.
+    public func isArmed(_ conversation: String) -> Bool {
+        guard let lock = try? lockFile(of: conversation) else { return false }
+        let descriptor = open(lock.path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+        return flock(descriptor, LOCK_SH | LOCK_NB) != 0 && errno == EWOULDBLOCK
+    }
+
+    /// Claims `conversation`'s letters once there are any, waiting while
+    /// `parent` runs it (`noteRunning`), until `deadline`; empty when it
+    /// stopped first.
+    public func letters(for conversation: String, whileRunning parent: pid_t, until deadline: Date) -> [Letter] {
+        guard let waiting = try? folder(.waiting, of: conversation),
+              (try? FileManager.default.createDirectory(at: waiting, withIntermediateDirectories: true)) != nil,
+              (try? FileManager.default.createDirectory(at: processes, withIntermediateDirectories: true)) != nil
+        else { return [] }
+        let queue = kqueue()
+        guard queue >= 0 else { return [] }
+        defer { close(queue) }
+        let watched = [waiting, processes].map { open($0.path, O_EVTONLY | O_CLOEXEC) }
+        defer { watched.filter { $0 >= 0 }.forEach { close($0) } }
+        guard watched.allSatisfy({ $0 >= 0 }) else { return [] }
+        var changes = watched.map {
+            kevent(ident: UInt($0), filter: Int16(EVFILT_VNODE), flags: UInt16(EV_ADD | EV_CLEAR), fflags: UInt32(NOTE_WRITE), data: 0, udata: nil)
+        } + [kevent(ident: UInt(parent), filter: Int16(EVFILT_PROC), flags: UInt16(EV_ADD | EV_ONESHOT), fflags: UInt32(NOTE_EXIT), data: 0, udata: nil)]
+        // ESRCH: the parent is gone already.
+        guard kevent(queue, &changes, Int32(changes.count), nil, 0, nil) == 0 else { return [] }
+        while running(in: parent).map({ $0 == conversation }) ?? true {
+            let letters = claim(conversation, at: Date().timeIntervalSince1970)
+            let left = deadline.timeIntervalSinceNow
+            guard letters.isEmpty, left > 0 else { return letters }
+            let wait = min(left, 60)
+            var timeout = timespec(tv_sec: Int(wait), tv_nsec: Int((wait - wait.rounded(.down)) * 1e9))
+            var event = kevent()
+            let count = kevent(queue, nil, 0, &event, 1, &timeout)
+            if count < 0, errno != EINTR { return [] }
+            if count > 0, event.filter == Int16(EVFILT_PROC) { return [] }
+        }
+        return []
+    }
+
     /// Drops what is `lifetime` old: letters waiting or owed, by when they
     /// were posted, and claims, by when they were taken. Then what a crash
     /// left `leftoverAge` ago (a draft, a marker with no letter), and the
@@ -222,7 +391,12 @@ public struct MissionMailbox: Sendable {
             }
             // rmdir(2) leaves a folder something just went into.
             for state in [State.waiting, .claimed, .owed, .ids] { rmdir((try? folder(state, of: conversation))?.path ?? "") }
+            dropNotes(of: conversation)
             rmdir(root.appendingPathComponent(conversation, isDirectory: true).path)
+        }
+        for name in (try? manager.contentsOfDirectory(atPath: processes.path)) ?? [] {
+            guard let process = pid_t(name), kill(process, 0) != 0, errno == ESRCH else { continue }
+            try? manager.removeItem(at: processes.appendingPathComponent(name))
         }
         for name in (try? manager.contentsOfDirectory(atPath: drafts.path)) ?? []
         where Self.age(of: drafts.appendingPathComponent(name), now: now) >= Self.leftoverAge {
@@ -240,6 +414,28 @@ public struct MissionMailbox: Sendable {
     }
 
     private var drafts: URL { root.appendingPathComponent(".drafts", isDirectory: true) }
+    private var processes: URL { root.appendingPathComponent(".processes", isDirectory: true) }
+
+    /// The transcript note and the waiter's lock of a conversation that has
+    /// nothing else left, while no waiter holds it: `arm` checks it holds
+    /// the file at its path, so one arming meanwhile starts over.
+    private func dropNotes(of conversation: String) {
+        let folder = root.appendingPathComponent(conversation, isDirectory: true)
+        guard let lock = try? lockFile(of: conversation),
+              Set((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).isSubset(of: ["waiter.lock", "transcript"])
+        else { return }
+        let descriptor = open(lock.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { return }
+        defer { close(descriptor) }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { return }
+        unlink(folder.appendingPathComponent("transcript").path)
+        unlink(lock.path)
+    }
+
+    private func lockFile(of conversation: String) throws -> URL {
+        try Self.requireName(conversation)
+        return root.appendingPathComponent(conversation, isDirectory: true).appendingPathComponent("waiter.lock")
+    }
 
     private func folder(_ state: State, of conversation: String) throws -> URL {
         try Self.requireName(conversation)
@@ -297,6 +493,11 @@ public struct MissionMailbox: Sendable {
         }
         close(descriptor)
         return true
+    }
+
+    private static func isFile(_ descriptor: Int32, at path: String) -> Bool {
+        var opened = stat(), named = stat()
+        return fstat(descriptor, &opened) == 0 && stat(path, &named) == 0 && opened.st_ino == named.st_ino && opened.st_dev == named.st_dev
     }
 
     /// rename(2) that leaves an existing `destination` alone: 0, or the errno.

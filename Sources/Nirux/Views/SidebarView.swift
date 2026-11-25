@@ -19,6 +19,7 @@ final class SidebarSectionToggleView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { acceptsFirstClick }
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { role }
+    override func isAccessibilityEnabled() -> Bool { onPress != nil }
     override func accessibilityPerformPress() -> Bool {
         guard let onPress else { return false }
         onPress()
@@ -43,6 +44,8 @@ final class SidebarView: NSView {
     /// Interrupt clicked under a silent turn: workspace, column, and the
     /// silence it aims at.
     var onAgentInterrupt: ((Int, Int, TimeInterval) -> Void)?
+    var onContextOffer: ((Int, Int, ContextOffer.Choice) -> Void)?
+    var onBudgetChoice: ((String, BudgetChoice) -> Void)?
     /// Type it now clicked on a row of waiting Mission messages:
     /// (workspaceIndex, columnIndex, since).
     var onMissionTypeNow: ((Int, Int, TimeInterval) -> Void)?
@@ -252,7 +255,7 @@ final class SidebarView: NSView {
     /// shows and the button is down. Tests say: events posted to the app
     /// move no button, and a drag made of them is lost once it holds
     /// still for a quarter of a second.
-    var rowPressHolds: @MainActor (NSWindow) -> Bool = { $0.isVisible && NSEvent.pressedMouseButtons & 1 != 0 }
+    var rowPressHolds: @MainActor (NSWindow) -> Bool = HeldPress.leftButtonHolds
 
     /// Active workspace the sidebar last auto-scrolled to. Used by
     /// `rebuildContent` so we only follow the active workspace when it
@@ -721,7 +724,8 @@ final class SidebarView: NSView {
         case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _),
              .agentInterrupt(let workspaceIndex, _, _), .missionTypeNow(let workspaceIndex, _, _),
              .deferredAgentResume(let workspaceIndex, _, _), .turnAnswer(let workspaceIndex, _, _, _),
-             .missionAnswer(let workspaceIndex, _, _, _):
+             .missionAnswer(let workspaceIndex, _, _, _), .contextOffer(let workspaceIndex, _, _, _),
+             .budgetChoice(let workspaceIndex, _, _):
             clearHover()
             if let key = Self.armedButtonKey(for: area.region) {
                 setHoverTarget(.approvalButton(workspaceIndex: workspaceIndex, key: key))
@@ -799,7 +803,7 @@ final class SidebarView: NSView {
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
         case .permissionDecision, .agentResume, .agentInterrupt, .missionTypeNow, .deferredAgentResume, .turnAnswer, .missionAnswer,
-             .actionBlock, .inert:
+             .contextOffer, .budgetChoice, .actionBlock, .inert:
             break // buttons go through trackApprovalClick; the block is inert
         }
     }
@@ -1003,10 +1007,11 @@ final class SidebarView: NSView {
                  .missionTypeNow(let workspaceIndex, let columnIndex, _),
                  .deferredAgentResume(let workspaceIndex, let columnIndex, _),
                  .turnAnswer(let workspaceIndex, let columnIndex, _, _),
-                 .missionAnswer(let workspaceIndex, let columnIndex, _, _):
+                 .missionAnswer(let workspaceIndex, let columnIndex, _, _),
+                 .contextOffer(let workspaceIndex, let columnIndex, _, _):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
-                 .actionBlock(let workspaceIndex):
+                 .actionBlock(let workspaceIndex), .budgetChoice(let workspaceIndex, _, _):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
             case .spacePicker, .newTask, .archivedToggle, .board, .history, .inert, .link, .catchUp:
                 continue

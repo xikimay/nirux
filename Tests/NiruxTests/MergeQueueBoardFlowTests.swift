@@ -522,10 +522,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             try click(try XCTUnwrap(sheet.startButton))
 
             let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
-            waitUntil("the queue waits for the checks") {
-                if case .waitingForChecks? = queue.engine?.currentEntry?.step { return true }
-                return false
-            }
+            waitUntil("the queue waits for the checks between two looks") { queue.waitsBetweenLooks }
             waitUntil("the line says so") { (BoardStagesClicks.shownLine("login", in: board)?.line.phrase.text) == "Auto · Waiting for checks" }
             BoardStagesClicks.layOut(header)
             XCTAssertTrue(header.startButton.isHidden)

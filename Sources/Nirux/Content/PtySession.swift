@@ -547,6 +547,10 @@ final class PtySession: @unchecked Sendable {
         }
     }
 
+    /// A long paste is still being written: anything typed now would land
+    /// inside it.
+    var isPasting: Bool { state.pasting.withLock { $0 > 0 } }
+
     /// What one write to the terminal surely takes: about what its input
     /// queue holds. A longer text goes through `pasteInBackground`.
     nonisolated static let inputQueueBytes = 1_024
@@ -1068,6 +1072,14 @@ final class PtySession: @unchecked Sendable {
     /// Resize the PTY (notify the shell of new terminal dimensions)
     func resize(cols: Int, rows: Int) {
         state.resize(cols: cols, rows: rows)
+    }
+
+    /// Whether keys reach the program in front as they are typed (vim, htop):
+    /// in line mode, a key waits for Return, then for whoever reads next.
+    var readsKeysAsTyped: Bool {
+        var attributes = termios()
+        guard state.ptyFd >= 0, tcgetattr(state.ptyFd, &attributes) == 0 else { return false }
+        return attributes.c_lflag & tcflag_t(ICANON) == 0
     }
 
     /// Force a SIGWINCH to the foreground process group so TUI apps redraw.

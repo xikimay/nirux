@@ -182,6 +182,8 @@ final class MergeQueueGitHubTests: XCTestCase {
         XCTAssertEqual(limit.graphQLRemaining, 4997)
         XCTAssertEqual(limit.graphQLReset, Date(timeIntervalSince1970: 1790619350))
 
+        XCTAssertEqual(MergeQueue.parseRulesRequiredChecks(Data("[]".utf8)), [])
+        XCTAssertEqual(MergeQueue.parseRulesRequiredChecks(Data(#"[{"type":"deletion"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"},{"context":"lint","integration_id":15368}]}}]"#.utf8)), ["test", "lint"])
         XCTAssertEqual(MergeQueue.parseRulesRequireMergeQueue(Data("[]".utf8)), false)
         XCTAssertEqual(MergeQueue.parseRulesRequireMergeQueue(Data(#"[{"type":"deletion"},{"type":"merge_queue"}]"#.utf8)), true)
         XCTAssertEqual(MergeQueue.parseMergeQueue(Data(#"{"data":{"repository":{"mergeQueue":null}}}"#.utf8)), false)
@@ -375,6 +377,30 @@ final class MergeQueueGitHubTests: XCTestCase {
         XCTAssertTrue(gh.forbidden.isEmpty)
     }
 
+    /// GitHub's auto-merge is armed with GraphQL at the pull request's id,
+    /// never `gh pr merge --auto`: `enablePullRequestAutoMerge` refuses
+    /// one GitHub can merge now instead of merging it.
+    func testAutoMergeIsArmedThroughGraphQLWhichRefusesAMergeablePullRequest() {
+        let arm = MergeQueue.Mutation.armAutoMerge(number: 52, head: MQ.sha("a"), method: .merge)
+        let gh = ScriptedGH()
+        gh.answer(prefix: ["api", "graphql"], containing: "{ id }", stdout: #"{"data":{"repository":{"pullRequest":{"id":"PR_52"}}}}"#)
+        gh.answer(prefix: ["api", "graphql"], containing: "enablePullRequestAutoMerge", status: 1,
+                  stdout: #"{"errors":[{"type":"UNPROCESSABLE","message":"Pull request Pull request is in clean status"}]}"#,
+                  stderr: "gh: Pull request Pull request is in clean status\n")
+        let client = GitHubCLIQueueClient(gh: gh.run)
+        let refused = client.mutate(arm, settings: settings)
+        guard case .refused = refused else { return XCTFail("\(refused)") }
+        let call = gh.calls.last ?? []
+        XCTAssertEqual(call, GitHubCLIQueueClient.armAutoMergeArguments(pullRequestID: "PR_52", head: MQ.sha("a"), method: .merge))
+        XCTAssertTrue(call.contains("expectedHeadOid=\(MQ.sha("a"))") && call.contains("mergeMethod=MERGE"), "\(call)")
+        XCTAssertFalse(gh.calls.contains { $0.starts(with: ["pr", "merge"]) })
+
+        gh.answer(prefix: ["api", "graphql"], containing: "enablePullRequestAutoMerge",
+                  stdout: #"{"data":{"enablePullRequestAutoMerge":{"pullRequest":{"number":52}}}}"#)
+        XCTAssertEqual(client.mutate(arm, settings: settings), .sent)
+        XCTAssertTrue(gh.forbidden.isEmpty, "\(gh.forbidden)")
+    }
+
     // MARK: Dry run
 
     func testDevBuildsGetTheDryRunClient() {
@@ -459,9 +485,15 @@ final class MergeQueueGitHubTests: XCTestCase {
 /// SHA it was decided on.
 enum ForbiddenCalls {
     static func problem(_ arguments: [String]) -> String? {
-        for flag in ["--admin", "--auto", "--delete-branch", "-d", "--rebase", "-r", "--disable-auto"]
-        where arguments.contains(flag) {
+        for flag in ["--admin", "--delete-branch", "-d", "--rebase", "-r"] where arguments.contains(flag) {
             return "forbidden flag \(flag)"
+        }
+        // Auto-merge is armed by a merge that names its SHA, called off alone.
+        if !arguments.starts(with: ["pr", "merge"]), let flag = arguments.first(where: { $0 == "--auto" || $0 == "--disable-auto" }) {
+            return "forbidden flag \(flag)"
+        }
+        if arguments.starts(with: ["pr", "merge"]), arguments.contains("--disable-auto") {
+            return arguments.contains { ["--merge", "--squash", "--auto"].contains($0) } ? "--disable-auto with a merge" : nil
         }
         if arguments.starts(with: ["pr", "merge"]) {
             guard let index = arguments.firstIndex(of: "--match-head-commit"),

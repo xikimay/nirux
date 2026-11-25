@@ -8,7 +8,8 @@ final class UsageMonitor {
     /// A refresh with nothing new takes tens of milliseconds.
     static let refreshInterval: TimeInterval = 20
 
-    private(set) var report: UsageReport?
+    /// The latest read's; a flow sets its own.
+    var report: UsageReport?
     var onReport: ((UsageReport) -> Void)?
     private let reader: Reader
     private let catalog: () -> UsageCatalog

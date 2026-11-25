@@ -21,6 +21,10 @@ struct ShellSideEffects {
     }
     var generateTaskNames: TaskNameSuggestion.Generator = TaskNameSuggestion.generate
 
+    /// Runs just before Nirux reads whether a long Mission paste's agent is
+    /// still in front for its Enter: tests end that agent there.
+    var willPressEnter: @MainActor (_ pty: PtySession) -> Void = { _ in }
+
     /// Types an agent's launch command into a new terminal column.
     var launchAgent: @MainActor (_ column: ColumnState, _ command: String) -> Void = { column, command in
         // After the column's shell has started (0.5 s, see ColumnState).
@@ -95,6 +99,11 @@ struct ShellSideEffects {
     /// tracking took from the app.
     var secondsSinceMouseUp: @MainActor () -> TimeInterval = {
         CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .leftMouseUp)
+    }
+
+    /// A drag's own ticks (`HeldPress`) on or off: tests post theirs.
+    var runsDragTicks: @MainActor (_ on: Bool) -> Void = { on in
+        if on { NSEvent.startPeriodicEvents(afterDelay: 0.15, withPeriod: HeldPress.tickPeriod) } else { NSEvent.stopPeriodicEvents() }
     }
 
     /// macOS's "Reduce motion" (System Settings › Accessibility › Display).

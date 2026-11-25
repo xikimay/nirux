@@ -143,7 +143,10 @@ final class CanaryChannelTests: XCTestCase {
         let bar = NSMenu()
         let space = NSMenu(title: "Space")
         space.autoenablesItems = false
-        bar.addItem(withTitle: "Space", action: nil, keyEquivalent: "").submenu = space
+        // As the app builds its menu bar: the item untitled, its menu titled.
+        let spaceItem = NSMenuItem()
+        spaceItem.submenu = space
+        bar.addItem(spaceItem)
         for (title, enabled) in [("Previous Space", true), ("Next Space", false)] {
             let item = space.addItem(withTitle: title, action: #selector(Target.pick(_:)), keyEquivalent: "")
             item.target = target
@@ -179,6 +182,16 @@ final class CanaryChannelTests: XCTestCase {
 
         NiruxApp.press(try XCTUnwrap(NiruxApp.pressTarget(label: "Board", in: [window])))
         XCTAssertNil(NiruxApp.pressTarget(label: "Merge", in: [window]), "disabled")
+        // A custom view's AXEnabled reads false, yet a person clicks it.
+        let custom = PressableView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        window.contentView?.addSubview(custom)
+        let snapshotted = NiruxApp.accessibilitySnapshot(of: window)["elements"] as? [[String: Any]] ?? []
+        XCTAssertEqual(snapshotted.first { $0["label"] as? String == "Custom" }?["pressable"] as? Bool, true)
+        XCTAssertEqual(buttons.map { $0["pressable"] as? Bool }, [true, false])
+        window.contentView?.addSubview(NowhereView(frame: NSRect(x: 0, y: 0, width: 10, height: 10)))
+        XCTAssertNil(NiruxApp.pressTarget(label: "Nowhere", in: [window]), "a view without a press of its own")
+        NiruxApp.press(try XCTUnwrap(NiruxApp.pressTarget(label: "Custom", in: [window])))
+        XCTAssertEqual(custom.presses, 1)
         XCTAssertNil(NiruxApp.pressTarget(label: "Missing", in: [window]))
         XCTAssertEqual(target.picked, ["Board"])
     }
@@ -193,9 +206,16 @@ final class CanaryChannelTests: XCTestCase {
         let app = NiruxApp()
         app.mainWindow = window
         var answers: [(String, Bool)] = []
-        app.performCanaryRequest(request(token: token, tool: "press", arguments: ["label": "Board"])) { answers.append(($0, $1)) }
-        XCTAssertEqual(answers.map { $0.0 }, ["Pressed Board."])
-        XCTAssertEqual(answers.map { $0.1 }, [false])
+        let inert = PressableView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        inert.label = "Inert"
+        inert.action = false
+        window.contentView?.addSubview(inert)
+        for label in ["Board", "Inert"] {
+            app.performCanaryRequest(request(token: token, tool: "press", arguments: ["label": label])) { answers.append(($0, $1)) }
+        }
+        XCTAssertEqual(answers.map { $0.0 }, ["Pressed Board.", "Inert has nothing to do on a press."])
+        XCTAssertEqual(answers.map { $0.1 }, [false, true])
+        XCTAssertEqual(inert.presses, 1)
         XCTAssertEqual(target.picked, ["Board"])
     }
 
@@ -344,6 +364,103 @@ final class CanaryChannelTests: XCTestCase {
         }
     }
 
+    /// Every open terminal's text, the focused one marked, as the app's
+    /// global search reads it.
+    @MainActor
+    func testTerminalTextAnswersEachTerminal() throws {
+        try UIFlowHarness.run { harness in
+            let app = NiruxApp()
+            app.shell = harness.shell
+            app.mainWindow = harness.window
+            let terminal = try XCTUnwrap(harness.shell.activeWorkspace?.columns.first?.pty)
+            harness.waitUntil("the terminal's shell") { terminal.shellPID != nil }
+            terminal.sendRaw("echo canary-$((6 * 7))\n")
+            var answers: [(text: String, isError: Bool)] = []
+            var asked = 0
+            harness.waitUntil("the command's output in the answer") {
+                guard answers.count == asked else { return false }
+                if answers.last?.text.contains("canary-42") == true { return true }
+                asked += 1
+                app.performCanaryRequest(request(token: token, tool: "terminal")) { answers.append(($0, $1)) }
+                return false
+            }
+            let answer = try XCTUnwrap(answers.last)
+            XCTAssertFalse(answer.isError)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(answer.text.utf8)) as? [String: Any])
+            let focused = try XCTUnwrap(json["terminals"] as? [[String: Any]]).filter { $0["focused"] as? Bool == true }
+            XCTAssertEqual(focused.count, 1)
+            XCTAssertEqual(focused.first?["workspace"] as? String, harness.shell.activeWorkspace?.title)
+            XCTAssertEqual(focused.first?["active"] as? Bool, true)
+            XCTAssertTrue((focused.first?["text"] as? String)?.contains("canary-42") == true)
+        }
+    }
+
+    /// A canary copy's browser opens localhost and the run's files only:
+    /// WebKit's network process is outside the copy's sandbox.
+    @MainActor
+    func testACanaryCopysBrowserOpensOnlyLocalPages() throws {
+        let column = WebViewColumn(url: "about:blank", dataStore: .nonPersistent(), isolatedWorkspaceID: nil)
+        XCTAssertEqual(column.policy(for: URL(string: "https://example.com"), download: false), .allow, "a normal launch")
+        let state = stateDirectory.appendingPathComponent("state")
+        column.allowsPage = CanaryChannel.pagePolicy(
+            environment: ["NIRUX_STATE_DIR": state.path, CanaryChannel.tokenKey: token], stateDirectory: state
+        )
+        // Through the navigation delegate, as WebKit asks for a typed URL, a link or a redirect.
+        func decision(_ page: String) -> WKNavigationActionPolicy? {
+            var decided: WKNavigationActionPolicy?
+            column.webView(WKWebView(), decidePolicyFor: PageRequest(page)) { decided = $0 }
+            return decided
+        }
+        for page in ["https://example.com", "http://example.com/a", "file:///etc/hosts", "http://localhost.example.com/"] {
+            XCTAssertEqual(decision(page), .cancel, page)
+        }
+        for page in ["http://localhost:8080/", "http://127.0.0.1/a", "about:blank", stateDirectory.appendingPathComponent("page.html").absoluteString] {
+            XCTAssertEqual(decision(page), .allow, page)
+        }
+        XCTAssertEqual(column.policy(for: URL(string: "https://example.com/f.zip"), download: true), .cancel, "nor a download")
+    }
+
+    /// A canary copy's pages load nothing from beyond localhost (fetch, XHR,
+    /// images, scripts, WebSockets): its image through localhost loads, the
+    /// same one through another host name doesn't. A normal launch loads both.
+    @MainActor
+    func testACanaryCopysPagesLoadOnlyLocalSubresources() throws {
+        let site = stateDirectory.appendingPathComponent("site", isDirectory: true)
+        try FileManager.default.createDirectory(at: site, withIntermediateDirectories: true)
+        try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="))
+            .write(to: site.appendingPathComponent("pixel.png"))
+        let server = Process()
+        server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        server.arguments = ["-c", "import functools, http.server, sys; s = http.server.ThreadingHTTPServer(('127.0.0.1', 0), "
+            + "functools.partial(http.server.SimpleHTTPRequestHandler, directory=sys.argv[1])); "
+            + "print(s.server_address[1], flush=True); s.serve_forever()", site.path]
+        let output = Pipe()
+        server.standardOutput = output
+        server.standardError = FileHandle.nullDevice
+        try server.run()
+        defer {
+            server.terminate()
+            server.waitUntilExit()
+        }
+        let port = String(decoding: output.fileHandleForReading.availableData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        try """
+        <script>var seen = {}; function done(name, loaded) { seen[name] = loaded; document.title = JSON.stringify(seen); }</script>
+        <img src="http://localhost:\(port)/pixel.png" onload="done('local', 1)" onerror="done('local', 0)">
+        <img src="http://localhost.:\(port)/pixel.png" onload="done('other', 1)" onerror="done('other', 0)">
+        """.write(to: site.appendingPathComponent("page.html"), atomically: true, encoding: .utf8)
+
+        for (root, otherLoads) in [(nil, 1), (stateDirectory, 0)] as [(URL?, Int)] {
+            let column = WebViewColumn(url: "http://localhost:\(port)/page.html", dataStore: .nonPersistent(), isolatedWorkspaceID: nil,
+                                       localOnlyRoot: root)
+            waitUntil("both images settled, \(root == nil ? "normal" : "canary")", timeout: 30) {
+                (column.webView.title ?? "").contains("local") && (column.webView.title ?? "").contains("other")
+            }
+            let seen = try XCTUnwrap(JSONSerialization.jsonObject(with: Data((column.webView.title ?? "{}").utf8)) as? [String: Int])
+            XCTAssertEqual(seen["local"], 1, "\(root == nil ? "normal" : "canary")")
+            XCTAssertEqual(seen["other"], otherLoads, root == nil ? "localhost. is reachable" : "a canary copy blocks it")
+        }
+    }
+
     /// Text is typed with each character's US key code and Shift, as KeyMapper expects.
     @MainActor
     func testTextTypesEachCharactersKey() {
@@ -359,6 +476,30 @@ private final class Target: NSObject {
 
     @objc func pick(_ sender: Any) {
         picked.append((sender as? NSMenuItem)?.title ?? (sender as? NSButton)?.title ?? "")
+    }
+}
+
+private final class PageRequest: WKNavigationAction {
+    let page: URLRequest
+    init(_ url: String) {
+        page = URLRequest(url: URL(string: url)!)
+        super.init()
+    }
+    override var request: URLRequest { page }
+    override var shouldPerformDownload: Bool { false }
+}
+
+private final class PressableView: NSView {
+    var presses = 0
+    var label = "Custom"
+    /// Whether a press does something, as SidebarSectionToggleView's with an onPress.
+    var action = true
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityLabel() -> String? { label }
+    override func accessibilityPerformPress() -> Bool {
+        presses += 1
+        return action
     }
 }
 

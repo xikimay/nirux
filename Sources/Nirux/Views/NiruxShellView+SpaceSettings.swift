@@ -116,6 +116,7 @@ extension NiruxShellView {
             if case .success = saved {
                 self?.leadWorkspace(inSpace: spaceID)?.leadOptionsCache = nil
                 self?.spaceDefaultsSaved(defaults, replacing: loaded.defaults, spaceID: spaceID)
+                if defaults.taskBudget != loaded.defaults.taskBudget { self?.refreshTaskBudgets() }
             }
             return saved
         }
@@ -124,7 +125,7 @@ extension NiruxShellView {
         defaultsActions.settingsCodexMode = { Self.currentCodexLaunchMode() }
         defaultsActions.settingsAgyMode = { Self.currentAgyLaunchMode() }
         // Read when its pane first shows (`onTabShown`), not for each ⌘,.
-        let defaults = SpaceSettingsDefaultsPane(loaded: unread, actions: defaultsActions)
+        let defaults = SpaceSettingsDefaultsPane(spaceID: spaceID, loaded: unread, actions: defaultsActions)
         let safety = SpaceSettingsSafetyPane(model: spaceSettingsSafetyModel(for: space))
         safety.actions.set = { [weak self] part, on in self?.setClaudeSafety(part, on: on, spaceID: spaceID) }
         safety.actions.setPeriod = { [weak self] days in self?.refreshSpaceSettingsSafety(periodDays: days) }
@@ -150,6 +151,8 @@ extension NiruxShellView {
             self?.refreshSpaceSettingsLead()
         }
         lead.actions.setDailyPass = { [weak self] on in self?.setDailyPass(on, spaceID: spaceID) }
+        lead.actions.setGroupsResults = { [weak self] on in self?.setLeadGroupsResults(on, spaceID: spaceID) }
+        lead.actions.setFreshStart = { [weak self] on in self?.setLeadFreshStart(on, spaceID: spaceID) }
         lead.actions.setDailyPassHour = { [weak self] hour in self?.setDailyPassHour(hour, spaceID: spaceID) }
         let settings = SpaceSettingsSection(
             spaceID: spaceID, general: general, defaults: defaults, safety: safety, lead: lead,

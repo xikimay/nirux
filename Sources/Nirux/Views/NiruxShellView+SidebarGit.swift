@@ -57,6 +57,9 @@ extension NiruxShellView {
                     waitingMessages: missionWaits.shown[col.id]
                 )
                 info.isLeadTerminal = col === leadTerminal
+                info.contextOffer = contextOffer(
+                    for: col, in: workspace, foreground: foregroundProcess, atRest: info.isAtRest, snapshot: snapshot, now: now
+                )
                 return info
             }
             var info = sidebarWorkspaceInfo(
@@ -232,7 +235,7 @@ extension NiruxShellView {
                       dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil,
                       followUp: followUpRow(of: workspace),
                       heldMessages: SidebarHeldMessages(workspace.mergeWaits), waitingTask: workspace.waitingStart?.waitingState)
-        info.usage = usageMonitor?.report.flatMap { SidebarTaskUsage($0, taskID: workspace.id) }
+        info.usage = taskUsage(of: workspace)
         return info
     }
 
@@ -495,6 +498,7 @@ extension NiruxShellView {
             appliedEvent.resolution.workspace.noteReviewPasses(of: event, in: appliedEvent.resolution.column.id, now: now)
             recordReviewPasses(of: event, in: appliedEvent.resolution.workspace, now: now)
         }
+        settleHookClaims(after: events.map(\.event))
         updateSidebar(snapshot: snapshot)
         if changed { saveState(snapshot: snapshot) }
         // After this drain: a turn that ended may have freed a Mission
@@ -781,7 +785,9 @@ extension NiruxShellView {
     }
 
     /// Heavy redraw: refresh every terminal surface, and Ctrl+L to the
-    /// programs that need it to repaint their buffer.
+    /// programs that need it to repaint their buffer, if they read it now:
+    /// in line mode, it would wait for the next reader, the agent a launch
+    /// step (a setup script) runs before.
     func redrawAllTerminals() {
         let snap = ProcessSnapshot()
         for workspace in workspaces {
@@ -789,8 +795,9 @@ extension NiruxShellView {
                 col.terminalView?.fitToSize()
                 col.pty?.forceRedraw()
                 col.terminalView?.needsDisplay = true
-                if let name = col.pty?.foregroundProcessName(snapshot: snap), Self.repaintsWithCtrlL(name) {
-                    col.pty?.sendRaw(Data([0x0C]))
+                if let pty = col.pty, pty.readsKeysAsTyped,
+                   let name = pty.foregroundProcessName(snapshot: snap), Self.repaintsWithCtrlL(name) {
+                    pty.sendRaw(Data([0x0C]))
                 }
             }
         }

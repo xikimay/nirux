@@ -53,6 +53,19 @@ struct SidebarInterruptClick: Equatable {
     let since: TimeInterval
 }
 
+/// A budget choice clicked under a task.
+struct SidebarBudgetClick: Equatable {
+    let workspaceID: String
+    let choice: BudgetChoice
+}
+
+/// Compact or Fresh start clicked under a Claude column.
+struct SidebarContextOfferClick: Equatable {
+    let workspaceIndex: Int
+    let columnIndex: Int
+    let choice: ContextOffer.Choice
+}
+
 /// Type it now clicked on a row of waiting Mission messages.
 struct SidebarTypeNowClick: Equatable {
     let workspaceIndex: Int
@@ -109,6 +122,10 @@ extension SidebarView {
             return SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
         case let .agentInterrupt(workspaceIndex, columnIndex, since):
             return SidebarHoverTarget.interruptButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
+        case let .contextOffer(workspaceIndex, columnIndex, offer, choice):
+            return SidebarHoverTarget.contextOfferButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, offer: offer, choice: choice)
+        case let .budgetChoice(_, offer, choice):
+            return SidebarHoverTarget.budgetChoiceButtonKey(offer: offer, choice: choice)
         case let .missionTypeNow(workspaceIndex, columnIndex, since):
             return SidebarHoverTarget.typeNowButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
         case let .deferredAgentResume(_, _, columnID):
@@ -187,6 +204,34 @@ extension SidebarView {
               case let .agentInterrupt(workspaceIndex, columnIndex, releasedSilence)? = released,
               releasedSilence == pressedSilence else { return nil }
         return SidebarInterruptClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: releasedSilence)
+    }
+
+    /// The Compact or Fresh start a click makes, if any: the same rules, for
+    /// the same offer and choice.
+    static func contextOfferClick(
+        pressed: SidebarHitRegion,
+        released: SidebarHitRegion?,
+        clickCount: Int,
+        armedAtPress: Bool,
+        armedAtRelease: Bool
+    ) -> SidebarContextOfferClick? {
+        guard clickCount == 1, armedAtPress, armedAtRelease,
+              case let .contextOffer(_, _, pressedOffer, pressedChoice) = pressed,
+              case let .contextOffer(workspaceIndex, columnIndex, releasedOffer, releasedChoice)? = released,
+              releasedOffer == pressedOffer, releasedChoice == pressedChoice else { return nil }
+        return SidebarContextOfferClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, choice: releasedChoice)
+    }
+
+    /// The budget choice a click makes, if any: the same rules, for the same
+    /// task, budget and choice.
+    static func budgetChoiceClick(
+        pressed: SidebarHitRegion, released: SidebarHitRegion?, clickCount: Int, armedAtPress: Bool, armedAtRelease: Bool
+    ) -> SidebarBudgetClick? {
+        guard clickCount == 1, armedAtPress, armedAtRelease,
+              case let .budgetChoice(_, pressedOffer, pressedChoice) = pressed,
+              case let .budgetChoice(_, releasedOffer, releasedChoice)? = released,
+              releasedOffer == pressedOffer, releasedChoice == pressedChoice else { return nil }
+        return SidebarBudgetClick(workspaceID: releasedOffer.workspaceID, choice: releasedChoice)
     }
 
     /// The Type it now a click makes, if any: the same rules, for the same
@@ -272,9 +317,8 @@ extension SidebarView {
     }
 
     /// A press on Allow / Deny / Resume / Interrupt / Type it now acts only on
-    /// its release (see `approvalClickDecision`, `resumeClick`,
-    /// `interruptClick`, `typeNowClick`, `deferredResumeClick`), never on the
-    /// press. The loop also keeps the press from moving the window.
+    /// its release (`act(pressed:released:…)`), never on the press. The
+    /// loop also keeps the press from moving the window.
     func trackApprovalClick(_ region: SidebarHitRegion, event: NSEvent) {
         guard let key = Self.armedButtonKey(for: region) else { return }
         let armedAtPress = isApprovalButtonArmed(key)
@@ -291,52 +335,92 @@ extension SidebarView {
             }
             guard next.type == .leftMouseUp else { continue }
             let point = contentDocumentView.convert(next.locationInWindow, from: nil)
-            let released = hitArea(at: point)?.region
-            let armedAtRelease = isApprovalButtonArmed(key)
-            if let decision = Self.approvalClickDecision(
-                pressed: region, released: released, clickCount: event.clickCount,
-                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
-            ) {
-                lastButtonActionAt = next.timestamp
-                onPermissionDecision?(decision.workspaceIndex, decision.columnIndex, decision.requestID, decision.behavior)
-            } else if let resume = Self.resumeClick(
-                pressed: region, released: released, clickCount: event.clickCount,
-                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
-            ) {
-                lastButtonActionAt = next.timestamp
-                onAgentResume?(resume.workspaceIndex, resume.columnIndex, resume.failedAt)
-            } else if let interrupt = Self.interruptClick(
-                pressed: region, released: released, clickCount: event.clickCount,
-                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
-            ) {
-                lastButtonActionAt = next.timestamp
-                onAgentInterrupt?(interrupt.workspaceIndex, interrupt.columnIndex, interrupt.since)
-            } else if let typeNow = Self.typeNowClick(
-                pressed: region, released: released, clickCount: event.clickCount,
-                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
-            ) {
-                lastButtonActionAt = next.timestamp
-                onMissionTypeNow?(typeNow.workspaceIndex, typeNow.columnIndex, typeNow.since)
-            } else if let resume = Self.deferredResumeClick(
-                pressed: region, released: released, clickCount: event.clickCount,
-                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
-            ) {
-                lastButtonActionAt = next.timestamp
-                onDeferredAgentResume?(resume.workspaceIndex, resume.columnIndex, resume.columnID)
-            } else if let answer = Self.turnAnswerClick(
-                pressed: region, released: released, clickCount: event.clickCount,
-                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
-            ) {
-                lastButtonActionAt = next.timestamp
-                onTurnAnswer?(answer.question, answer.answer, approvalButtonViews[key])
-            } else if let answer = Self.missionAnswerClick(
-                pressed: region, released: released, clickCount: event.clickCount,
-                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
-            ) {
-                lastButtonActionAt = next.timestamp
-                onMissionAnswer?(answer, approvalButtonViews[key])
-            }
+            act(
+                pressed: region, released: hitArea(at: point)?.region, clickCount: event.clickCount,
+                armedAtPress: armedAtPress, armedAtRelease: isApprovalButtonArmed(key), at: next.timestamp
+            )
             return
         }
+    }
+
+    /// VoiceOver's press on a button: a single click, released where the
+    /// button is now, armed as a click must be. Whether it acted.
+    func pressApprovalButton(_ region: SidebarHitRegion) -> Bool {
+        guard let key = Self.armedButtonKey(for: region) else { return false }
+        let armed = isApprovalButtonArmed(key)
+        return act(
+            pressed: region, released: hitAreas.first { Self.armedButtonKey(for: $0.region) == key }?.region, clickCount: 1,
+            armedAtPress: armed, armedAtRelease: armed, at: ProcessInfo.processInfo.systemUptime
+        )
+    }
+
+    /// What a press on a button released on `released` does, by its rules
+    /// (`approvalClickDecision`, `resumeClick`, `interruptClick`,
+    /// `typeNowClick`, `deferredResumeClick`, `turnAnswerClick`,
+    /// `missionAnswerClick`). Whether it acted.
+    @discardableResult
+    private func act(
+        pressed: SidebarHitRegion, released: SidebarHitRegion?, clickCount: Int,
+        armedAtPress: Bool, armedAtRelease: Bool, at time: TimeInterval
+    ) -> Bool {
+        let button = Self.armedButtonKey(for: pressed).flatMap { approvalButtonViews[$0] }
+        if let decision = Self.approvalClickDecision(
+            pressed: pressed, released: released, clickCount: clickCount,
+            armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+        ) {
+            lastButtonActionAt = time
+            onPermissionDecision?(decision.workspaceIndex, decision.columnIndex, decision.requestID, decision.behavior)
+        } else if let resume = Self.resumeClick(
+            pressed: pressed, released: released, clickCount: clickCount,
+            armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+        ) {
+            lastButtonActionAt = time
+            onAgentResume?(resume.workspaceIndex, resume.columnIndex, resume.failedAt)
+        } else if let interrupt = Self.interruptClick(
+            pressed: pressed, released: released, clickCount: clickCount,
+            armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+        ) {
+            lastButtonActionAt = time
+            onAgentInterrupt?(interrupt.workspaceIndex, interrupt.columnIndex, interrupt.since)
+        } else if let offer = Self.contextOfferClick(
+            pressed: pressed, released: released, clickCount: clickCount,
+            armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+        ) {
+            lastButtonActionAt = time
+            onContextOffer?(offer.workspaceIndex, offer.columnIndex, offer.choice)
+        } else if let budget = Self.budgetChoiceClick(
+            pressed: pressed, released: released, clickCount: clickCount,
+            armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+        ) {
+            lastButtonActionAt = time
+            onBudgetChoice?(budget.workspaceID, budget.choice)
+        } else if let typeNow = Self.typeNowClick(
+            pressed: pressed, released: released, clickCount: clickCount,
+            armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+        ) {
+            lastButtonActionAt = time
+            onMissionTypeNow?(typeNow.workspaceIndex, typeNow.columnIndex, typeNow.since)
+        } else if let resume = Self.deferredResumeClick(
+            pressed: pressed, released: released, clickCount: clickCount,
+            armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+        ) {
+            lastButtonActionAt = time
+            onDeferredAgentResume?(resume.workspaceIndex, resume.columnIndex, resume.columnID)
+        } else if let answer = Self.turnAnswerClick(
+            pressed: pressed, released: released, clickCount: clickCount,
+            armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+        ) {
+            lastButtonActionAt = time
+            onTurnAnswer?(answer.question, answer.answer, button)
+        } else if let answer = Self.missionAnswerClick(
+            pressed: pressed, released: released, clickCount: clickCount,
+            armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+        ) {
+            lastButtonActionAt = time
+            onMissionAnswer?(answer, button)
+        } else {
+            return false
+        }
+        return true
     }
 }

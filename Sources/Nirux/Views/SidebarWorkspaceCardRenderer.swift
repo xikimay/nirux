@@ -192,12 +192,13 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     /// "142k · 4.2M": the context of its latest session, then what the task
-    /// spent over the week; a warning once the context is worth compacting.
+    /// spent over the week; a warning once the context is worth compacting
+    /// or the session reached the subagents' soft cap.
     private func usageLabel() -> NSTextField? {
         guard let usage = workspace.usage else { return nil }
         let label = textLabel(
-            usage.isContextHeavy ? usage.text.asWarning : usage.text, font: Theme.Font.captionDigits,
-            color: usage.isContextHeavy ? .niruxWarning : Theme.Color.textTertiary
+            usage.isWarning ? usage.text.asWarning : usage.text, font: Theme.Font.captionDigits,
+            color: usage.isWarning ? .niruxWarning : Theme.Color.textTertiary
         )
         label.alignment = .right
         let toolTip = usage.toolTip(now: Date().timeIntervalSince1970)
@@ -687,6 +688,7 @@ final class SidebarWorkspaceCardRenderer {
         button.cornerRadius = Theme.Radius.chip
         button.hoverFillColor = Theme.Color.accent.withAlphaComponent(0.14)
         button.toolTip = deferred.tooltip
+        button.setAccessibilityElement(true)
         button.setAccessibilityRole(.button)
         button.setAccessibilityLabel("Resume \(deferred.agent.rawValue) here")
         views.last?.setAccessibilityElement(false)
@@ -750,6 +752,12 @@ final class SidebarWorkspaceCardRenderer {
         case let .interrupt(columnIndex, since):
             add(SidebarInterruptBlockRenderer(
                 since: since, workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
+            ).render())
+        case let .budget(offer):
+            add(SidebarBudgetBlockRenderer(offer: offer, workspaceIndex: workspace.index, x: x, width: width, top: top).render())
+        case let .contextOffer(columnIndex, offer):
+            add(SidebarContextOfferBlockRenderer(
+                offer: offer, workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
             ).render())
         case let .turnQuestion(columnIndex, question):
             add(SidebarTurnQuestionBlockRenderer(
@@ -1178,6 +1186,7 @@ enum SidebarActionButton {
         // A capsule, as `NiruxButton`.
         button.cornerRadius = SidebarExpandedMetrics.buttonHeight / 2
         button.toolTip = label
+        button.setAccessibilityElement(true)
         button.setAccessibilityRole(.button)
         button.setAccessibilityLabel(label)
         return button

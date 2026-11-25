@@ -66,6 +66,25 @@ enum Persistence {
         stateURL.deletingLastPathComponent()
     }
 
+    /// The space `workspaceID` was in at the last save, read from the
+    /// state.json in `stateDirectory` without the rest; nil when it can't
+    /// tell. For a process beside the app (the MCP server), whose launch
+    /// environment names the space the workspace was in then.
+    static func savedSpaceID(ofWorkspace workspaceID: String, stateDirectory: URL) -> String? {
+        struct Saved: Decodable {
+            struct Workspace: Decodable {
+                let id: String?
+                let profileID: String?
+            }
+            let workspaces: [Workspace]
+        }
+        guard let data = try? Data(contentsOf: stateDirectory.appendingPathComponent("state.json")),
+              let saved = try? JSONDecoder().decode(Saved.self, from: data),
+              let workspace = saved.workspaces.first(where: { $0.id == workspaceID })
+        else { return nil }
+        return workspace.profileID ?? WorkspaceProfile.defaultID
+    }
+
     private static func backupURL(_ index: Int, in dir: URL) -> URL {
         dir.appendingPathComponent("state.backup.\(index).json")
     }
@@ -285,6 +304,11 @@ struct PersistedSettings: Codable {
     /// Answer Claude permission dialogs from the sidebar (see
     /// `PermissionApproval`). On for a new install, as Mission handoffs.
     var sidebarApprovalsEnabled: Bool = true
+    /// Mission messages reach Claude Code through Nirux's waiter hook
+    /// instead of being typed into its terminal
+    /// (docs/design/mission-delivery.md, section 4). On by default: missing
+    /// decodes to true.
+    var claudeMissionHook: Bool = true
     /// See `KeepAwakeController`. On by default: missing decodes to true.
     var keepMacAwakeWhileAgentsWork: Bool = true
     /// `KeepAwakeController.isAwaitingChecks`, on the power adapter. Missing,
@@ -362,6 +386,7 @@ struct PersistedSettings: Codable {
         sidebarExpanded: Bool? = nil,
         missionHandoffsEnabled: Bool = true,
         sidebarApprovalsEnabled: Bool = true,
+        claudeMissionHook: Bool = true,
         onboardingChecklist: OnboardingChecklistState? = nil
     ) {
         self.claudeLaunchMode = claudeLaunchMode
@@ -371,6 +396,7 @@ struct PersistedSettings: Codable {
         self.sidebarExpanded = sidebarExpanded
         self.missionHandoffsEnabled = missionHandoffsEnabled
         self.sidebarApprovalsEnabled = sidebarApprovalsEnabled
+        self.claudeMissionHook = claudeMissionHook
         self.onboardingChecklist = onboardingChecklist
     }
 
@@ -383,6 +409,7 @@ struct PersistedSettings: Codable {
         case sidebarWidth
         case missionHandoffsEnabled
         case sidebarApprovalsEnabled
+        case claudeMissionHook
         case keepMacAwakeWhileAgentsWork
         case keepMacAwakeWhileChecksRun
         case animatesInterface
@@ -431,6 +458,7 @@ struct PersistedSettings: Codable {
         sidebarWidth = try? container.decode(Double.self, forKey: .sidebarWidth)
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? true
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? true
+        claudeMissionHook = try container.decodeIfPresent(Bool.self, forKey: .claudeMissionHook) ?? true
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
         keepMacAwakeWhileChecksRun = (try? container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileChecksRun)) ?? keepMacAwakeWhileAgentsWork
         animatesInterface = (try? container.decodeIfPresent(Bool.self, forKey: .animatesInterface)) ?? true
@@ -490,6 +518,7 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(sidebarWidth, forKey: .sidebarWidth)
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
+        try container.encode(claudeMissionHook, forKey: .claudeMissionHook)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
         try container.encode(keepMacAwakeWhileChecksRun, forKey: .keepMacAwakeWhileChecksRun)
         try container.encode(animatesInterface, forKey: .animatesInterface)
@@ -557,6 +586,8 @@ struct PersistedWorkspace: Codable {
     /// build before S13 drops them, and the fields become the user's.
     var nextStepIsFromLead: Bool
     var blockerIsFromLead: Bool
+    /// See `WorkspaceState.budgetPassedAt`.
+    var budgetPassedAt: TimeInterval?
     /// `ReviewPass` raw values: a pass this build doesn't know is dropped
     /// on load, never a reason to fail the workspace.
     var reviewRuns: [String: ReviewRun]?
@@ -602,6 +633,7 @@ struct PersistedWorkspace: Codable {
         nextStep: String? = nil,
         blocker: String? = nil,
         nextStepIsFromLead: Bool = false,
+        budgetPassedAt: TimeInterval? = nil,
         blockerIsFromLead: Bool = false,
         reviewRuns: [String: ReviewRun]? = nil,
         startedOutsideNirux: Bool = false,
@@ -633,6 +665,7 @@ struct PersistedWorkspace: Codable {
         self.nextStep = nextStep
         self.blocker = blocker
         self.nextStepIsFromLead = nextStepIsFromLead
+        self.budgetPassedAt = budgetPassedAt
         self.blockerIsFromLead = blockerIsFromLead
         self.reviewRuns = reviewRuns
         self.startedOutsideNirux = startedOutsideNirux
@@ -649,6 +682,7 @@ struct PersistedWorkspace: Codable {
         case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID, parentWorkspaceID, parentIsSettled
         case purpose, phase, lastSummary, lastSummaryIsManual, lastSummaryIsStatus, lastActivityAt
         case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
+        case budgetPassedAt
         case leadAgentUUID
         case reportsToLead, reportsToTask
         case taskFolder, mergeWaits
@@ -679,6 +713,7 @@ struct PersistedWorkspace: Codable {
         nextStep = try container.decodeIfPresent(String.self, forKey: .nextStep)
         blocker = try container.decodeIfPresent(String.self, forKey: .blocker)
         nextStepIsFromLead = (try? container.decodeIfPresent(Bool.self, forKey: .nextStepIsFromLead)) ?? false
+        budgetPassedAt = (try? container.decodeIfPresent(TimeInterval.self, forKey: .budgetPassedAt)) ?? nil
         blockerIsFromLead = (try? container.decodeIfPresent(Bool.self, forKey: .blockerIsFromLead)) ?? false
         // Only badges: a shape this build can't read never fails the state.
         reviewRuns = (try? container.decodeIfPresent([String: ReviewRun].self, forKey: .reviewRuns)) ?? nil
@@ -720,6 +755,7 @@ struct PersistedWorkspace: Codable {
         try container.encodeIfPresent(nextStep, forKey: .nextStep)
         try container.encodeIfPresent(blocker, forKey: .blocker)
         if nextStepIsFromLead { try container.encode(true, forKey: .nextStepIsFromLead) }
+        try container.encodeIfPresent(budgetPassedAt, forKey: .budgetPassedAt)
         if blockerIsFromLead { try container.encode(true, forKey: .blockerIsFromLead) }
         try container.encodeIfPresent(reviewRuns, forKey: .reviewRuns)
         if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }

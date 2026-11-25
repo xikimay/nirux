@@ -95,6 +95,8 @@ final class NiruxShellView: NSView {
     var sessionLedger = AgentSessionLedger()
     /// What the agents spend (`startUsageMonitor`), and its window.
     var usageMonitor: UsageMonitor?
+    /// Each space's task budget (`refreshTaskBudgets`), by space ID; none: off.
+    var taskBudgets: [String: Int] = [:]
     var usageWindow: UsageWindowController?
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
@@ -463,6 +465,12 @@ final class NiruxShellView: NSView {
         sidebar.onAgentInterrupt = { [weak self] wsIndex, colIndex, since in
             self?.noteCatchUpTaskAnswered(workspaceIndex: wsIndex)
             self?.interruptSilentAgent(workspaceIndex: wsIndex, columnIndex: colIndex, since: since)
+        }
+        sidebar.onBudgetChoice = { [weak self] workspaceID, choice in
+            self?.takeBudgetChoice(choice, workspaceID: workspaceID)
+        }
+        sidebar.onContextOffer = { [weak self] wsIndex, colIndex, choice in
+            self?.takeContextOffer(choice, workspaceIndex: wsIndex, columnIndex: colIndex)
         }
         sidebar.onMissionTypeNow = { [weak self] wsIndex, colIndex, since in
             self?.typeWaitingMessagesNow(workspaceIndex: wsIndex, columnIndex: colIndex, since: since)

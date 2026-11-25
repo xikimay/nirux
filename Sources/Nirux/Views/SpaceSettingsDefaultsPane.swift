@@ -2,11 +2,11 @@ import AppKit
 
 /// Space Settings › Defaults (docs/design/projects.md, section 5): the agent its
 /// tasks preselect, the agent launch modes, the pull request
-/// follow-up (docs/design/pr-follow-up.md), and environment variables for
-/// new shells. Each change is written at once
-/// (SpaceDefaultsStore); a variable list with a problem isn't, until it's
-/// fixed. A launch takes an explicit choice first, then these, then
-/// Settings.
+/// follow-up (docs/design/pr-follow-up.md), whether its tasks manage spaces
+/// (SpaceToolCaller), and environment variables for new shells. Each
+/// change is written at once (SpaceDefaultsStore); a variable list with a
+/// problem isn't, until it's fixed. A launch takes an explicit choice
+/// first, then these, then Settings.
 @MainActor
 final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     struct Actions {
@@ -31,10 +31,13 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     let view = NSView()
     let agentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let claudePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    let budgetPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let codexPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let agyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let followUpSwitch = NSSwitch()
     let relaunchSwitch = NSSwitch()
+    let manageSpacesSwitch = NSSwitch()
+    let modelsSwitch = NSSwitch()
     let tableView = NSTableView()
     let addButton = NSButton(title: "Add Variable", target: nil, action: nil)
     let removeButton = NSButton(title: "Remove", target: nil, action: nil)
@@ -42,12 +45,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     let warningsLabel = NSTextField(wrappingLabelWithString: "")
     let bannerLabel = NSTextField(wrappingLabelWithString: "")
 
+    let spaceID: String
     private(set) var loaded: SpaceDefaultsStore.Loaded
     /// The variables as listed, typed ones included.
     private(set) var rows: [SpaceDefaults.EnvironmentVariable]
     var actions: Actions
 
-    init(loaded: SpaceDefaultsStore.Loaded, actions: Actions) {
+    init(spaceID: String, loaded: SpaceDefaultsStore.Loaded, actions: Actions) {
+        self.spaceID = spaceID
         self.loaded = loaded
         self.rows = loaded.defaults.environment
         self.actions = actions
@@ -63,12 +68,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fillPopups()
         tableView.reloadData()
         let writable = loaded.isWritable
-        for control in [agentPopup, claudePopup, codexPopup, agyPopup, followUpSwitch, relaunchSwitch, addButton, tableView]
+        for control in [agentPopup, claudePopup, codexPopup, agyPopup, budgetPopup, followUpSwitch, relaunchSwitch, manageSpacesSwitch, modelsSwitch, addButton, tableView]
             as [NSControl] {
             control.isEnabled = writable
         }
         followUpSwitch.state = loaded.defaults.followsUpPullRequests ? .on : .off
         relaunchSwitch.state = loaded.defaults.resumesWorkOnRelaunch ? .on : .off
+        manageSpacesSwitch.state = loaded.defaults.tasksCanManageSpaces(inSpace: spaceID) ? .on : .off
+        modelsSwitch.state = loaded.defaults.splitsClaudeModels ? .on : .off
         updateRemoveButton()
         let banner = message ?? loaded.problem
         bannerLabel.stringValue = banner?.asWarning ?? ""
@@ -93,6 +100,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fill(codexPopup, settings: Self.shortName(actions.settingsCodexMode().displayName),
              modes: CodexLaunchMode.allCases.map { ($0.rawValue, $0.displayName) },
              selected: defaults.codexLaunchMode?.rawValue)
+        budgetPopup.removeAllItems()
+        let budget = defaults.taskBudget ?? SpaceDefaults.defaultTaskBudget
+        for value in Set(SpaceDefaults.taskBudgetChoices + [budget]).sorted() {
+            let title = value == 0 ? "Off" : UsageText.tokens(value) + (value == SpaceDefaults.defaultTaskBudget ? " (default)" : "")
+            budgetPopup.addItem(withTitle: title)
+            budgetPopup.lastItem?.representedObject = value
+        }
+        budgetPopup.selectItem(at: budgetPopup.indexOfItem(withRepresentedObject: budget))
         fill(agyPopup, settings: Self.shortName(actions.settingsAgyMode().displayName),
              modes: AgyLaunchMode.allCases.map { ($0.rawValue, $0.displayName) },
              selected: defaults.agyLaunchMode?.rawValue)
@@ -143,6 +158,15 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         write(defaults)
     }
 
+    @objc func budgetChanged(_ sender: NSPopUpButton) {
+        guard let value = sender.selectedItem?.representedObject as? Int else { return }
+        var defaults = loaded.defaults
+        // The default is written as nothing.
+        defaults.taskBudget = value == SpaceDefaults.defaultTaskBudget ? nil : value
+        guard defaults != loaded.defaults else { return }
+        write(defaults)
+    }
+
     @objc func agyModeChanged(_ sender: NSPopUpButton) {
         guard let raw = sender.selectedItem?.representedObject as? String else { return }
         var defaults = loaded.defaults
@@ -163,6 +187,21 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         var defaults = loaded.defaults
         // On is the default: nothing is written for it.
         defaults.prFollowUp = sender.state == .on ? nil : false
+        guard defaults != loaded.defaults else { return }
+        write(defaults)
+    }
+
+    @objc func modelsChanged(_ sender: NSSwitch) {
+        var defaults = loaded.defaults
+        // On is the default: nothing is written for it.
+        defaults.claudeModelSplit = sender.state == .on ? nil : false
+        guard defaults != loaded.defaults else { return }
+        write(defaults)
+    }
+
+    @objc func manageSpacesChanged(_ sender: NSSwitch) {
+        var defaults = loaded.defaults
+        defaults.setTasksManageSpaces(sender.state == .on, inSpace: spaceID)
         guard defaults != loaded.defaults else { return }
         write(defaults)
     }
@@ -307,7 +346,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
             (agentPopup, #selector(agentChanged(_:)), "Agent for new tasks"),
             (claudePopup, #selector(claudeModeChanged(_:)), "Claude Code permission mode"),
             (codexPopup, #selector(codexModeChanged(_:)), "Codex mode"),
-            (agyPopup, #selector(agyModeChanged(_:)), "Antigravity mode")
+            (agyPopup, #selector(agyModeChanged(_:)), "Antigravity mode"),
+            (budgetPopup, #selector(budgetChanged(_:)), "Task budget over 7 days")
         ] {
             popup.target = self
             popup.action = action
@@ -317,7 +357,8 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
             [Self.formLabel("Agent for new tasks"), agentPopup],
             [Self.formLabel("Claude Code permissions"), claudePopup],
             [Self.formLabel("Codex mode"), codexPopup],
-            [Self.formLabel("Antigravity mode"), agyPopup]
+            [Self.formLabel("Antigravity mode"), agyPopup],
+            [Self.formLabel("Task budget (7 days)"), budgetPopup]
         ])
         form.rowSpacing = 10
         form.columnSpacing = 10
@@ -326,30 +367,32 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
 
         let formHint = Self.hint(
             "New Task… preselects this agent; a plain new workspace stays a shell. A launch uses these modes unless "
-                + "you choose one for it, and Settings’ modes when they say Same as Settings."
+                + "you choose one for it, and Settings’ modes when they say Same as Settings. A task past its budget warns on "
+                + "its row, and its pull request’s follow-ups wait."
         )
 
-        followUpSwitch.target = self
-        followUpSwitch.action = #selector(followUpChanged(_:))
-        followUpSwitch.setAccessibilityLabel("Follow up on pull requests")
-        let followUpTitle = NSTextField(labelWithString: "Follow up on pull requests")
-        followUpTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
-        followUpTitle.setAccessibilityElement(false)
-        let followUpHint = Self.hint(
-            "When a task’s Claude sits idle, Nirux asks it to fix what keeps its pull request from merging: a conflict "
+        let followUp = switchRow(
+            followUpSwitch, action: #selector(followUpChanged(_:)), title: "Follow up on pull requests",
+            hint: "When a task’s Claude sits idle, Nirux asks it to fix what keeps its pull request from merging: a conflict "
                 + "with the base, a failed check that isn’t a likely flake, new review feedback. Three rounds per pull "
                 + "request, then it’s yours. On by default; it spends your Claude usage on its own."
         )
-        followUpHint.preferredMaxLayoutWidth = Self.contentWidth - 60
-        followUpSwitch.setAccessibilityHelp(followUpHint.stringValue)
-        let followUpTexts = NSStackView(views: [followUpTitle, followUpHint])
-        followUpTexts.orientation = .vertical
-        followUpTexts.alignment = .leading
-        followUpTexts.spacing = 3
-        let followUp = NSStackView(views: [followUpSwitch, followUpTexts])
-        followUp.orientation = .horizontal
-        followUp.alignment = .top
-        followUp.spacing = 12
+        let relaunch = switchRow(
+            relaunchSwitch, action: #selector(relaunchChanged(_:)), title: "Resume work after a relaunch",
+            hint: "When Nirux comes back (an update, a crash), the Lead, the tasks that were working and those a "
+                + "Mission message waits for start again on their own. Off, each waits for Resume."
+        )
+        let manageSpaces = switchRow(
+            manageSpacesSwitch, action: #selector(manageSpacesChanged(_:)), title: "Tasks can manage spaces",
+            hint: "When you ask, a task’s agent lists, creates, edits and deletes spaces and moves tasks between them, as "
+                + "a Lead does; deleting a space still asks you first. On by default in General. An agent started while "
+                + "it was off gets the tools when it starts again."
+        )
+        let models = switchRow(
+            modelsSwitch, action: #selector(modelsChanged(_:)), title: "Lead on Fable, subagents on Opus",
+            hint: "Every subagent of the Claude sessions this space starts runs on Opus, whatever its call asks. A new Lead "
+                + "conversation runs on Fable; a resumed one keeps the model it ran. Off, Claude Code picks as usual."
+        )
 
         let header = NSTextField(labelWithString: "Environment")
         header.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
@@ -402,33 +445,12 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         environment.alignment = .leading
         environment.spacing = 8
 
-        relaunchSwitch.target = self
-        relaunchSwitch.action = #selector(relaunchChanged(_:))
-        relaunchSwitch.setAccessibilityLabel("Resume work after a relaunch")
-        let relaunchTitle = NSTextField(labelWithString: "Resume work after a relaunch")
-        relaunchTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
-        relaunchTitle.setAccessibilityElement(false)
-        let relaunchHint = Self.hint(
-            "When Nirux comes back (an update, a crash), the Lead, the tasks that were working and those a "
-                + "Mission message waits for start again on their own. Off, each waits for Resume."
-        )
-        relaunchHint.preferredMaxLayoutWidth = Self.contentWidth - 60
-        relaunchSwitch.setAccessibilityHelp(relaunchHint.stringValue)
-        let relaunchTexts = NSStackView(views: [relaunchTitle, relaunchHint])
-        relaunchTexts.orientation = .vertical
-        relaunchTexts.alignment = .leading
-        relaunchTexts.spacing = 3
-        let relaunch = NSStackView(views: [relaunchSwitch, relaunchTexts])
-        relaunch.orientation = .horizontal
-        relaunch.alignment = .top
-        relaunch.spacing = 12
-        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, relaunch, environment])
+        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, relaunch, manageSpaces, models, environment])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14
         stack.setCustomSpacing(22, after: formHint)
-        stack.setCustomSpacing(14, after: followUp)
-        stack.setCustomSpacing(22, after: relaunch)
+        stack.setCustomSpacing(22, after: models)
         stack.edgeInsets = Self.insets
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
@@ -444,10 +466,31 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
             problemsLabel.widthAnchor.constraint(equalToConstant: Self.contentWidth),
             warningsLabel.widthAnchor.constraint(equalToConstant: Self.contentWidth),
             envHint.widthAnchor.constraint(equalToConstant: Self.contentWidth),
-            formHint.widthAnchor.constraint(equalToConstant: Self.contentWidth),
-            followUpHint.widthAnchor.constraint(equalToConstant: Self.contentWidth - 60),
-            relaunchHint.widthAnchor.constraint(equalToConstant: Self.contentWidth - 60)
+            formHint.widthAnchor.constraint(equalToConstant: Self.contentWidth)
         ])
+    }
+
+    /// A switch, its title and its hint, which is also its help.
+    private func switchRow(_ toggle: NSSwitch, action: Selector, title: String, hint: String) -> NSStackView {
+        toggle.target = self
+        toggle.action = action
+        toggle.setAccessibilityLabel(title)
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        titleLabel.setAccessibilityElement(false)
+        let hintLabel = Self.hint(hint)
+        hintLabel.preferredMaxLayoutWidth = Self.contentWidth - 60
+        hintLabel.widthAnchor.constraint(equalToConstant: Self.contentWidth - 60).isActive = true
+        toggle.setAccessibilityHelp(hint)
+        let texts = NSStackView(views: [titleLabel, hintLabel])
+        texts.orientation = .vertical
+        texts.alignment = .leading
+        texts.spacing = 3
+        let row = NSStackView(views: [toggle, texts])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = 12
+        return row
     }
 
     private static func formLabel(_ title: String) -> NSTextField {

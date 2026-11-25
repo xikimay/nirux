@@ -29,9 +29,15 @@ struct SpaceDefaults: Equatable, Sendable {
     var leadCanStartMergeQueue: Bool { leadStartsMergeQueue ?? false }
     var leadStartsMergeQueueWithoutLocalReview: Bool?
     var leadCanStartMergeQueueWithoutLocalReview: Bool { leadStartsMergeQueueWithoutLocalReview ?? false }
+    /// Space Settings › Lead, "Fresh start when idle with a heavy context".
+    /// Nil: on.
+    var leadFreshStart: Bool?
     /// Space Settings › Lead, "Daily pass" (docs/design/daily-pass.md). Nil:
     /// on, after `DailyPass.defaultHour`.
     var leadDailyPass: Bool?
+    /// Space Settings › Lead, "Group task results" (`MissionResultBatch`).
+    /// Nil: on.
+    var leadGroupsResults: Bool?
     /// 0 to 23, local time.
     var leadDailyPassHour: Int?
     /// Space Settings › Defaults, "Follow up on pull requests"
@@ -40,6 +46,17 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Space Settings › Defaults, "Resume work after a relaunch"
     /// (`RelaunchResume`). Nil: on; only false turns it off.
     var resumeWorkOnRelaunch: Bool?
+    /// Space Settings › Defaults, "Lead on Fable, subagents on Opus". Nil:
+    /// on.
+    var claudeModelSplit: Bool?
+    /// Space Settings › Defaults, "Task budget": weighted tokens
+    /// (`TokenCounts.weighted`) a task may spend over 7 days before its row
+    /// warns and its pull request's follow-ups wait. Nil: the default; 0: off.
+    var taskBudget: Int?
+    /// Space Settings › Defaults, "Tasks can manage spaces": its tasks'
+    /// agents get the Lead's space tools (SpaceToolCaller). Nil: on in
+    /// General, off elsewhere (`tasksCanManageSpaces`).
+    var tasksManageSpaces: Bool?
     /// Space Settings › Safety, one per `ClaudeSpaceSettings.Part`. Nil:
     /// its default.
     var claudeTrustsRepositories: Bool?
@@ -53,10 +70,60 @@ struct SpaceDefaults: Equatable, Sendable {
     var leadStartsTasksWithoutAsking: Bool { leadStartsTasks ?? true }
 
     var dailyPassIsOn: Bool { leadDailyPass ?? true }
+    var groupsResults: Bool { leadGroupsResults ?? true }
+    /// Whether a cold Lead with a heavy context starts a new conversation
+    /// (`ContextOffer.restartsLead`).
+    var leadStartsFreshWhenCold: Bool { leadFreshStart ?? true }
     var dailyPassHour: Int { leadDailyPassHour ?? DailyPass.defaultHour }
     /// Whether Nirux types the rounds its tasks' pull requests need.
     var followsUpPullRequests: Bool { prFollowUp ?? true }
     var resumesWorkOnRelaunch: Bool { resumeWorkOnRelaunch ?? true }
+    var splitsClaudeModels: Bool { claudeModelSplit ?? true }
+
+    /// About the 90th percentile of what a Nirux task spent in 7 days
+    /// (the 2026-11-23 scan).
+    static let defaultTaskBudget = 25_000_000
+    static let taskBudgetChoices = [0, 10_000_000, defaultTaskBudget, 50_000_000, 100_000_000]
+
+    /// Nil: no budget.
+    var weeklyTaskBudget: Int? {
+        let budget = taskBudget ?? Self.defaultTaskBudget
+        return budget > 0 ? budget : nil
+    }
+
+    /// What the switch sets in a new terminal (Claude Code reads it as it
+    /// starts): every subagent on Opus, whatever its call or agent file
+    /// asks. A subagent starts its own context: a resumed session switches
+    /// at no cache cost.
+    var claudeModelEnvironment: [String: String] {
+        splitsClaudeModels ? ["CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"] : [:]
+    }
+
+    /// The model of a new Lead conversation, on its launch line only: a
+    /// resumed one keeps the model it ran (Claude Code restores it), and the
+    /// rest of the Lead's terminal never inherits it.
+    func leadModel(for agent: CodingAgent) -> String? {
+        agent == .claude && splitsClaudeModels ? "fable" : nil
+    }
+
+    /// The space's variables, then the model switch's: a variable the user
+    /// set for the space wins.
+    var shellEnvironment: [String: String] {
+        effectiveEnvironment.merging(claudeModelEnvironment) { space, _ in space }
+    }
+
+    func tasksCanManageSpaces(inSpace spaceID: String) -> Bool {
+        tasksManageSpaces ?? Self.tasksManageSpacesByDefault(inSpace: spaceID)
+    }
+
+    static func tasksManageSpacesByDefault(inSpace spaceID: String) -> Bool {
+        spaceID == WorkspaceProfile.defaultID
+    }
+
+    /// Nothing is written for the space's default.
+    mutating func setTasksManageSpaces(_ on: Bool, inSpace spaceID: String) {
+        tasksManageSpaces = on == Self.tasksManageSpacesByDefault(inSpace: spaceID) ? nil : on
+    }
 
     func isOn(_ part: ClaudeSpaceSettings.Part) -> Bool { self[keyPath: part.key] ?? part.isOnByDefault }
 
@@ -92,8 +159,12 @@ struct SpaceDefaults: Equatable, Sendable {
             (\.leadStartsMergeQueue, .leadStartsMergeQueue, false),
             (\.leadStartsMergeQueueWithoutLocalReview, .leadStartsMergeQueueWithoutLocalReview, false),
             (\.leadDailyPass, .leadDailyPass, false),
+            (\.leadGroupsResults, .leadGroupsResults, false),
+            (\.leadFreshStart, .leadFreshStart, false),
             (\.prFollowUp, .prFollowUp, false),
             (\.resumeWorkOnRelaunch, .resumeWorkOnRelaunch, false),
+            (\.claudeModelSplit, .claudeModelSplit, false),
+            (\.tasksManageSpaces, .tasksManageSpaces, false),
             (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
             (\.claudeDeniesIrreversible, .claudeDeniesIrreversible, true),
             (\.claudeSandbox, .claudeSandbox, true)
@@ -197,7 +268,7 @@ struct SpaceDefaults: Equatable, Sendable {
 /// `{"schemaVersion": 1, "agent": "codex", "claudeLaunchMode": "plan",
 /// "codexLaunchMode": "readOnly", "environment": [{"name": …, "value": …}],
 /// "leadStartsTasks": false, "leadDailyPass": false, "leadDailyPassHour": 7,
-/// "prFollowUp": false, "claudeTrustsRepositories": false,
+/// "prFollowUp": false, "tasksManageSpaces": true, "claudeTrustsRepositories": false,
 /// "claudeDeniesIrreversible": false, "claudeSandbox": true,
 /// "claudeAllow": ["Bash(swift build:*)"], "claudeEnvironment": […]}`,
 /// every key optional, nothing written for what isn't set. Unknown keys and
@@ -207,6 +278,9 @@ extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion, agent, leadAgent, claudeLaunchMode, codexLaunchMode, agyLaunchMode, environment
         case leadStartsTasks, leadStartsMergeQueue, leadStartsMergeQueueWithoutLocalReview, leadDailyPass, leadDailyPassHour, prFollowUp, resumeWorkOnRelaunch
+        case leadGroupsResults
+        case leadFreshStart, tasksManageSpaces
+        case claudeModelSplit, taskBudget
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
 
@@ -230,9 +304,14 @@ extension SpaceDefaults: Codable {
         leadStartsMergeQueue = try? container.decodeIfPresent(Bool.self, forKey: .leadStartsMergeQueue)
         leadStartsMergeQueueWithoutLocalReview = try? container.decodeIfPresent(Bool.self, forKey: .leadStartsMergeQueueWithoutLocalReview)
         leadDailyPass = (try? container.decodeIfPresent(Bool.self, forKey: .leadDailyPass)) ?? nil
+        leadGroupsResults = (try? container.decodeIfPresent(Bool.self, forKey: .leadGroupsResults)) ?? nil
         leadDailyPassHour = ((try? container.decodeIfPresent(Int.self, forKey: .leadDailyPassHour)) ?? nil).flatMap { (0...23).contains($0) ? $0 : nil }
         prFollowUp = (try? container.decodeIfPresent(Bool.self, forKey: .prFollowUp)) ?? nil
+        leadFreshStart = (try? container.decodeIfPresent(Bool.self, forKey: .leadFreshStart)) ?? nil
         resumeWorkOnRelaunch = (try? container.decodeIfPresent(Bool.self, forKey: .resumeWorkOnRelaunch)) ?? nil
+        claudeModelSplit = (try? container.decodeIfPresent(Bool.self, forKey: .claudeModelSplit)) ?? nil
+        taskBudget = ((try? container.decodeIfPresent(Int.self, forKey: .taskBudget)) ?? nil).flatMap { $0 >= 0 ? $0 : nil }
+        tasksManageSpaces = (try? container.decodeIfPresent(Bool.self, forKey: .tasksManageSpaces)) ?? nil
         claudeTrustsRepositories = (try? container.decodeIfPresent(Bool.self, forKey: .claudeTrustsRepositories)) ?? nil
         claudeDeniesIrreversible = (try? container.decodeIfPresent(Bool.self, forKey: .claudeDeniesIrreversible)) ?? nil
         claudeSandbox = (try? container.decodeIfPresent(Bool.self, forKey: .claudeSandbox)) ?? nil
@@ -257,9 +336,14 @@ extension SpaceDefaults: Codable {
             try container.encode(true, forKey: .leadStartsMergeQueueWithoutLocalReview)
         }
         try container.encodeIfPresent(leadDailyPass, forKey: .leadDailyPass)
+        try container.encodeIfPresent(leadGroupsResults, forKey: .leadGroupsResults)
         try container.encodeIfPresent(leadDailyPassHour, forKey: .leadDailyPassHour)
         try container.encodeIfPresent(prFollowUp, forKey: .prFollowUp)
+        try container.encodeIfPresent(leadFreshStart, forKey: .leadFreshStart)
         try container.encodeIfPresent(resumeWorkOnRelaunch, forKey: .resumeWorkOnRelaunch)
+        try container.encodeIfPresent(claudeModelSplit, forKey: .claudeModelSplit)
+        try container.encodeIfPresent(taskBudget, forKey: .taskBudget)
+        try container.encodeIfPresent(tasksManageSpaces, forKey: .tasksManageSpaces)
         try container.encodeIfPresent(claudeTrustsRepositories, forKey: .claudeTrustsRepositories)
         try container.encodeIfPresent(claudeDeniesIrreversible, forKey: .claudeDeniesIrreversible)
         try container.encodeIfPresent(claudeSandbox, forKey: .claudeSandbox)

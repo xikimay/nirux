@@ -45,7 +45,9 @@ final class ProcessSnapshot {
             var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
             return sysctl(&mib, 4, buffer, &size, nil, 0) == 0 ? 0 : errno
         }
-        for i in procs.indices {
+        // A zombie isn't running: until its parent reads its exit, it would
+        // stay in front of its terminal.
+        for i in procs.indices where Int32(procs[i].kp_proc.p_stat) != SZOMB {
             let pid = procs[i].kp_proc.p_pid
             let ppid = procs[i].kp_eproc.e_ppid
             let processGroupID = procs[i].kp_eproc.e_pgid
