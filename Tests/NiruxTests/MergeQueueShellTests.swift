@@ -588,6 +588,7 @@ final class MergeQueueShellTests: XCTestCase {
         shell.sideEffects.requestQuit = { quits += 1 }
         XCTAssertTrue(shell.mainWindowShouldClose(), "nothing runs: the window closes, and Nirux quits")
         let queue = start(shell)
+        waitUntil("the queue waits for the checks, its auto-merge armed") { queue.waitsBetweenLooks }
 
         XCTAssertFalse(shell.mainWindowShouldClose(), "the window stays while a queue runs")
         XCTAssertEqual(quits, 1, "and Nirux quits, which asks")
