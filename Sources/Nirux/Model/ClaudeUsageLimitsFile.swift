@@ -179,7 +179,8 @@ enum ClaudeUsageLimitsFile {
     }
 
     /// Turning the option off forgets what was reported, readings included.
-    /// Under the lock: a status line run in flight must not log after it.
+    /// Under the lock when it comes within `lockWait`: a status line run in
+    /// flight must not log after it.
     static func remove(at url: URL = url) {
         let lock = open(url.path + ".lock", O_RDWR | O_CREAT, 0o600)
         defer { if lock >= 0 { close(lock) } }
