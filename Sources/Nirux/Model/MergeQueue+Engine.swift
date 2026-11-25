@@ -65,6 +65,9 @@ extension MergeQueue {
         let firstTrainBranch: String
         /// The CI triage was on at Start: a red train may be rerun once.
         let triagesFlakes: Bool
+        /// Arms GitHub's auto-merge while a pull request's checks run
+        /// (`armsNow`): the backstop of a Mac asleep or Nirux closed.
+        let armsAutoMerge: Bool
         private(set) var stopMessage = "Stopped by the user."
         // The train's flow (MergeQueue+Train) writes the state below too.
         var entries: [Entry]
@@ -94,13 +97,17 @@ extension MergeQueue {
         /// none came (the rest left, busy), so the queue checks it before
         /// finishing (`advance`).
         private var uncheckedMerge: (index: Int, commit: String)?
+        /// The checks the base's rules require (`Read.baseRequiredChecks`):
+        /// GitHub's auto-merge waits for these, not for the board's list.
+        private var baseRequiredChecks: [String] = []
         private var outbox = Output()
 
         init(
             settings: BoardConfig.QueueSettings, entries: [ConfirmedEntry], cadence: Cadence = .standard, startedByLead: Bool = false,
-            trainBranch: String = "nirux-train/queue", triagesFlakes: Bool = false
+            trainBranch: String = "nirux-train/queue", triagesFlakes: Bool = false, armsAutoMerge: Bool = false
         ) {
             self.startedByLead = startedByLead
+            self.armsAutoMerge = armsAutoMerge
             self.cadence = cadence
             firstTrainBranch = trainBranch
             self.triagesFlakes = triagesFlakes
@@ -228,6 +235,13 @@ extension MergeQueue {
             case update422(from: String, message: String)
             case updateFailed(from: String, message: String)
             case checks(head: String)
+            /// Auto-merge asked for on `head`, then the checks read.
+            case arm(head: String)
+            /// Auto-merge of an older head called off, before `head`'s.
+            case disarm(head: String)
+            /// Auto-merge the queue didn't arm (left by a quit, or a person)
+            /// called off at preflight.
+            case disarmLeftOver
             case rerun(head: String, replaced: Set<Int>)
             case rerunCheck(head: String, replaced: Set<Int>, message: String)
             case fullRun(head: String)
@@ -262,6 +276,8 @@ extension MergeQueue {
             var fullRunAskedAgain = false
             var readFailingSince: TimeInterval?
             var readFailures = 0
+            /// A left-over auto-merge was called off once (`preflight`).
+            var leftOverAutoMergeCalledOff = false
             var secondaryLimits = 0
 
             /// A pause for a rate limit doesn't count toward any timeout.
@@ -365,7 +381,8 @@ extension MergeQueue {
             phase = .running
             note("Started: \(entries.map { "#\($0.number)" }.joined(separator: ", ")) into \(settings.baseBranch) of "
                 + "\(settings.repository) (\(cadence.title))")
-            read([.auth, .rateLimit, .baseMergeQueue] + (settings.postMergeWorkflow != nil ? [.baseRuns] : []), for: .start)
+            read([.auth, .rateLimit, .baseMergeQueue] + (armsAutoMerge ? [.baseRequiredChecks] : [])
+                 + (settings.postMergeWorkflow != nil ? [.baseRuns] : []), for: .start)
         }
 
         /// The next waiting pull request, or the end.
@@ -479,9 +496,10 @@ extension MergeQueue {
                 guard let pullRequest = answers.pullRequest(number), let checks = answers.checks(head) else {
                     return missingAnswer()
                 }
+                if landedByAutoMerge(pullRequest, head: head, index: index, now: now) { return }
                 if let problem = problem(with: pullRequest) { return stop(problem) }
                 guard pullRequest.headOid == head else { return stop(changed(index: index, head: pullRequest.headOid)) }
-                decide(on: checks, head: head, index: index, now: now)
+                decide(on: checks, head: head, index: index, now: now, baseRuns: answers.runs(.baseRuns))
             case .rerunCheck(let head, let replaced, let message):
                 guard let checks = answers.checks(head) else { return missingAnswer() }
                 let latest = Set(MergeQueue.latestRuns(checks.runs).map(\.id))
@@ -511,7 +529,7 @@ extension MergeQueue {
                       let comparison = answers.comparison(base: commit, head: settings.baseBranch)
                 else { return missingAnswer() }
                 postMergeFailed(run, commit: commit, baseRuns: runs, comparison: comparison, subject: "#\(number)")
-            case .start, .update, .rerun, .fullRun, .merge, .train:
+            case .start, .update, .rerun, .fullRun, .merge, .arm, .disarm, .disarmLeftOver, .train:
                 missingAnswer()
             }
         }
@@ -539,6 +557,8 @@ extension MergeQueue {
                 guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
                 baseRunsFailedAtStart = Set(runs.filter { GitHub.isFailedRun($0.conclusion) }.map(\.attemptKey))
             }
+            // Unread, it isn't armed: the queue merges itself.
+            baseRequiredChecks = answers.baseRequiredChecks ?? []
             guard !mergeQueue else {
                 return stop(StopReason(kind: .setup, message: "\(settings.baseBranch) requires GitHub’s merge queue: gh pr merge "
                     + "would queue pull requests there instead of merging them, without waiting for the post-merge workflow. "
@@ -568,7 +588,7 @@ extension MergeQueue {
                 return StopReason(kind: .notMergeable, message: "\(number) comes from another repository (a fork): the queue "
                     + "only merges branches of \(settings.repository).", url: url)
             }
-            if pullRequest.hasAutoMerge, !allowingAutoMerge {
+            if pullRequest.hasAutoMerge, !allowingAutoMerge, !armedAutoMerge(pullRequest.number) {
                 return StopReason(kind: .notMergeable, message: "\(number) is set to auto-merge: GitHub could merge it at any "
                     + "moment, without waiting for the post-merge workflow. Disable auto-merge (gh pr merge "
                     + "\(pullRequest.number) --disable-auto), then start again.", url: url)
@@ -578,6 +598,11 @@ extension MergeQueue {
                     + "without waiting for the post-merge workflow. Remove it from there, then start again.", url: url)
             }
             return nil
+        }
+
+        /// The queue armed GitHub's auto-merge on this pull request itself.
+        func armedAutoMerge(_ number: Int) -> Bool {
+            entries.contains { $0.number == number && $0.autoMerge?.isArmed == true }
         }
 
         /// "#52 changed since you confirmed it", with the two heads compared.
@@ -609,6 +634,11 @@ extension MergeQueue {
         }
 
         private mutating func preflight(_ pullRequest: PullRequestSnapshot, index: Int) {
+            if armsAutoMerge, pullRequest.isOpen, pullRequest.hasAutoMerge, !armedAutoMerge(pullRequest.number),
+               !clocks.leftOverAutoMergeCalledOff {
+                clocks.leftOverAutoMergeCalledOff = true
+                return mutate(.disarmAutoMerge(number: pullRequest.number), for: .disarmLeftOver)
+            }
             if let problem = problem(with: pullRequest) { return stop(problem) }
             guard entries[index].heads.contains(pullRequest.headOid) else {
                 return stop(changed(index: index, head: pullRequest.headOid))
@@ -793,15 +823,70 @@ extension MergeQueue {
 
         // MARK: 3. Required checks
 
-        private mutating func waitForChecks(head: String, index: Int, now: TimeInterval) {
+        /// An older head's armed auto-merge is called off first; GitHub
+        /// refusing, it stays counted as armed (a stop calls it off) and
+        /// none is armed meanwhile.
+        private mutating func waitForChecks(head: String, index: Int, now: TimeInterval, callsOffOlder: Bool = true) {
             entries[index].step = .waitingForChecks(head)
             clocks.step = now
             clocks.unknownSince = nil
             clocks.unknownReads = 0
-            read([.pullRequest(entries[index].number), .checks(head)], for: .checks(head: head))
+            let number = entries[index].number
+            if let asked = entries[index].autoMerge, asked.head != head {
+                if asked.isArmed, callsOffOlder { return mutate(.disarmAutoMerge(number: number), for: .disarm(head: head)) }
+                if !asked.isArmed { entries[index].autoMerge = nil }
+            }
+            read(checksReads(head: head, index: index), for: .checks(head: head))
         }
 
-        private mutating func decide(on checks: CommitChecks, head: String, index: Int, now: TimeInterval) {
+        /// The checks of `head`, and the base's runs while it may still be armed.
+        private func checksReads(head: String, index: Int) -> [Read] {
+            [.pullRequest(entries[index].number), .checks(head)] + (mayArm(index) && settings.postMergeWorkflow != nil ? [.baseRuns] : [])
+        }
+
+        private func mayArm(_ index: Int) -> Bool {
+            armsAutoMerge && cadence != .train && !baseRequiredChecks.isEmpty && entries[index].autoMerge == nil
+        }
+
+        /// GitHub's auto-merge only while GitHub can't merge yet (it refuses to
+        /// arm one it can merge now, `enablePullRequestAutoMerge`): a check
+        /// the base's rules name runs on this head and all of them started (a
+        /// "(selected)" run alone waits for the full run's label; a rerun asked
+        /// for hasn't started), and no post-merge run goes on the base (the
+        /// queue's own wait).
+        private func armsNow(index: Int, checks: CommitChecks, baseRuns: [GitHub.WorkflowRun]?) -> Bool {
+            let pending = MergeQueue.judge(checks, required: baseRequiredChecks, replaced: clocks.replacedChecks).pending
+            guard mayArm(index), !pending.isEmpty,
+                  !pending.contains(where: { $0.hasSuffix("(not started)") || $0.hasSuffix("(rerun not started)") })
+            else { return false }
+            guard settings.postMergeWorkflow != nil else { return true }
+            return baseRuns.map { $0.allSatisfy(\.isCompleted) } ?? false
+        }
+
+        /// GitHub's auto-merge, armed on `head`, merged the pull request: its
+        /// landing, then the post-merge step as after the queue's own merge.
+        private mutating func landedByAutoMerge(
+            _ pullRequest: PullRequestSnapshot, head: String, index: Int, now: TimeInterval
+        ) -> Bool {
+            guard pullRequest.state == .merged, entries[index].autoMerge?.isArmed == true else { return false }
+            guard pullRequest.headOid == head else {
+                stop(StopReason(kind: .merge, message: "#\(pullRequest.number) was merged at \(Self.short(pullRequest.headOid)), "
+                    + "not at \(Self.short(head)): outside the queue.", url: pullRequest.url))
+                return true
+            }
+            guard let commit = pullRequest.mergeCommit else {
+                read([.pullRequest(pullRequest.number), .checks(head)], after: Limits.pollInterval, for: .checks(head: head))
+                return true
+            }
+            entries[index].mergeCommit = commit
+            note("GitHub’s auto-merge merged \(Self.short(head)) as \(Self.short(commit))")
+            merged(commit, index: index, now: now)
+            return true
+        }
+
+        private mutating func decide(
+            on checks: CommitChecks, head: String, index: Int, now: TimeInterval, baseRuns: [GitHub.WorkflowRun]? = nil
+        ) {
             let verdict = MergeQueue.judge(checks, required: settings.requiredChecks, replaced: clocks.replacedChecks)
             if !verdict.failed.isEmpty || !verdict.failedStatuses.isEmpty {
                 return checksFailed(verdict, checks: checks, head: head, index: index, now: now)
@@ -821,6 +906,11 @@ extension MergeQueue {
                         return mutate(.addLabel(number: entries[index].number, label: MergeQueue.fullRunLabel), for: .fullRun(head: head))
                     }
                 }
+                if armsNow(index: index, checks: checks, baseRuns: baseRuns) {
+                    // Counted as armed from the call on: a Stop meanwhile calls it off.
+                    entries[index].autoMerge = Entry.AutoMerge(head: head, isArmed: true)
+                    return mutate(.armAutoMerge(number: entries[index].number, head: head, method: settings.mergeMethod), for: .arm(head: head))
+                }
                 guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else {
                     let advice = verdict.pending.contains { $0.hasSuffix("(not started)") }
                         ? "A check that never starts may be misspelled: check the names in Board Settings."
@@ -829,8 +919,7 @@ extension MergeQueue {
                         + "Required checks were missing or running on \(Self.short(head)): "
                         + "\(verdict.pending.joined(separator: ", ")). \(advice)", checksTimedOut: true))
                 }
-                return read([.pullRequest(entries[index].number), .checks(head)], after: Limits.pollInterval,
-                            for: .checks(head: head))
+                return read(checksReads(head: head, index: index), after: Limits.pollInterval, for: .checks(head: head))
             }
             mergeChecks(head: head, index: index)
         }
@@ -906,6 +995,7 @@ extension MergeQueue {
                   let comparison = answers.comparison(base: settings.baseBranch, head: head),
                   let local = answers.local(branch: entries[index].branch, head: head)
             else { return missingAnswer() }
+            if landedByAutoMerge(pullRequest, head: head, index: index, now: now) { return }
             if let problem = problem(with: pullRequest) { return stop(problem) }
             guard pullRequest.headOid == head else { return stop(changed(index: index, head: pullRequest.headOid)) }
             if let problem = mergeabilityProblem(pullRequest) { return stop(problem) }
@@ -1043,7 +1133,7 @@ extension MergeQueue {
                 note("Merged as \(Self.short(mergeCommit))")
                 return landed(&self, mergeCommit)
             }
-            if pullRequest.isOpen, pullRequest.hasAutoMerge {
+            if pullRequest.isOpen, pullRequest.hasAutoMerge, !armedAutoMerge(number) {
                 return stop(StopReason(kind: .merge, message: "GitHub enabled auto-merge on #\(number) instead of merging it. "
                     + "Disable it: gh pr merge \(number) --repo github.com/\(settings.repository) --disable-auto",
                     url: pullRequest.url))
@@ -1160,7 +1250,40 @@ extension MergeQueue {
 
         // MARK: Mutation answers
 
+        /// A backstop: GitHub's refusal (auto-merge off on the repository, a
+        /// rate limit) or a dry run leaves the queue to merge it itself.
+        private mutating func autoMergeAsked(_ result: MutationResult, head: String, index: Int, now: TimeInterval) {
+            let number = entries[index].number
+            // No clear answer: it may be armed, and the queue's own merge works either way.
+            let isArmed = result == .sent || result.isUncertain
+            entries[index].autoMerge = Entry.AutoMerge(head: head, isArmed: isArmed)
+            switch result {
+            case .sent: note("Armed GitHub’s auto-merge on \(Self.short(head)): #\(number) lands with this Mac asleep too")
+            case .uncertain: note("GitHub’s auto-merge on #\(number) got no clear answer: counted as armed")
+            case .dryRun: note("Dry run: auto-merge not armed on #\(number)")
+            default: note("GitHub’s auto-merge isn’t armed on #\(number) (\(Self.describe(result))): the queue merges it itself")
+            }
+            read([.pullRequest(number), .checks(head)], after: Limits.pollInterval, for: .checks(head: head))
+        }
+
         private mutating func mutated(_ result: MutationResult, purpose: Purpose, now: TimeInterval) {
+            if let index = current, case .arm(let head) = purpose {
+                return autoMergeAsked(result, head: head, index: index, now: now)
+            }
+            if let index = current, case .disarm(let head) = purpose {
+                switch result {
+                case .refused(_, let message), .rateLimited(let message), .uncertain(let message):
+                    note("Auto-merge of an older head of #\(entries[index].number) wasn’t called off (\(message)): left for the stop")
+                    return waitForChecks(head: head, index: index, now: now, callsOffOlder: false)
+                case .sent, .dryRun:
+                    entries[index].autoMerge = nil
+                    return waitForChecks(head: head, index: index, now: now)
+                }
+            }
+            if let index = current, case .disarmLeftOver = purpose, !result.isDryRun {
+                note("Called off the auto-merge left on #\(entries[index].number): the queue arms its own on the head it checks")
+                return read([.pullRequest(entries[index].number)], for: .preflight)
+            }
             if case .dryRun(let command, let reason) = result {
                 return stop(StopReason(kind: .dryRun, message: "Dry run: this build doesn’t change GitHub, because "
                     + "\(reason). It stopped before running: \(command)"))
@@ -1251,6 +1374,8 @@ extension MergeQueue {
             case .updateBranch(let number, let head): return "update-branch #\(number) from \(short(head))"
             case .rerun(let runID): return "rerun of run \(runID)"
             case .merge(let number, let head, let method): return "\(method.rawValue) of #\(number) at \(short(head))"
+            case .armAutoMerge(let number, let head, _): return "auto-merge of #\(number) at \(short(head))"
+            case .disarmAutoMerge(let number): return "auto-merge call-off of #\(number)"
             case .createBranch(let name, let commit): return "creation of branch \(name) at \(short(commit))"
             case .mergeIntoBranch(let branch, let head, _): return "merge of \(short(head)) into \(branch)"
             case .openPullRequest(let base, let head, _, _): return "pull request of \(head) into \(base)"
@@ -1308,6 +1433,11 @@ extension Dictionary where Key == MergeQueue.Read, Value == MergeQueue.ReadResul
 
     var rateLimit: MergeQueue.RateLimit? {
         if case .rateLimit(let value)? = self[.rateLimit] { return value }
+        return nil
+    }
+
+    var baseRequiredChecks: [String]? {
+        if case .baseRequiredChecks(let names)? = self[.baseRequiredChecks] { return names }
         return nil
     }
 

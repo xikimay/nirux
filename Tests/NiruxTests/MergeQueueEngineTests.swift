@@ -1135,4 +1135,224 @@ final class MergeQueueEngineTests: XCTestCase {
         queue.fail(.refused("Could not resolve to a PullRequest with the number of 52."))
         XCTAssertEqual(queue.stopReason?.kind, .github)
     }
+
+    // MARK: - GitHub's auto-merge, the backstop
+
+    /// Each pull request gets GitHub's auto-merge on its head before its
+    /// checks wait: with the Mac asleep or Nirux closed, it still lands.
+    /// GitHub's merge at that head is the queue's landing, its post-merge
+    /// step follows, and the queue's own merge is never sent. Its own
+    /// auto-merge doesn't stop it; a merge at another head does.
+    func testAutoMergeArmedOnTheHeadLandsThePullRequest() {
+        let pending = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = pending
+        var harness = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        harness.start()
+        harness.answer(world) { $0.pendingMutation != nil }
+        XCTAssertEqual(harness.pendingMutation, .armAutoMerge(number: 52, head: a, method: .merge))
+        harness.mutated(.sent)
+        XCTAssertTrue(harness.noted("Armed GitHub’s auto-merge on aaaaaaa"))
+        world.pullRequests[52] = MQ.pullRequest(52, head: a, autoMerge: true)
+        harness.answer(world)
+        XCTAssertEqual(harness.phase, .running, "its own auto-merge")
+        XCTAssertEqual(harness.pendingReads, [.pullRequest(52), .checks(a)])
+
+        world.merge(52, as: MQ.sha("m"))
+        world.pushRuns[MQ.sha("m")] = [MQ.run(77, head: MQ.sha("m"))]
+        harness.answer(world) { $0.phase == .finished }
+        XCTAssertTrue(harness.noted("GitHub’s auto-merge merged aaaaaaa as mmmmmmm"))
+        XCTAssertEqual(harness.engine.entries[0].mergeCommit, MQ.sha("m"))
+        XCTAssertEqual(harness.mutations, [.armAutoMerge(number: 52, head: a, method: .merge)], "no merge of its own")
+
+        var elsewhere = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        var moved = world
+        moved.pullRequests[52] = MQ.pullRequest(52, head: a)
+        elsewhere.start()
+        elsewhere.answer(moved) { $0.pendingMutation != nil }
+        elsewhere.mutated(.sent)
+        moved.pullRequests[52] = MQ.pullRequest(52, head: b, state: .merged, mergeCommit: MQ.sha("n"), parents: [MQ.sha("0"), b])
+        elsewhere.answer(moved)
+        XCTAssertEqual(elsewhere.stopReason?.kind, .merge)
+        XCTAssertTrue(elsewhere.stopReason?.message.contains("not at aaaaaaa") == true, elsewhere.stopReason?.message ?? "")
+    }
+
+    /// GitHub refusing auto-merge (off on the repository) or a dry run
+    /// leaves the queue to merge the pull request itself, once.
+    func testAnAutoMergeNotArmedLeavesTheMergeToTheQueue() {
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+        var harness = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        harness.start()
+        harness.answer(world) { $0.pendingMutation != nil }
+        harness.mutated(.refused(status: 405, message: "Auto merge is not allowed for this repository"))
+        XCTAssertTrue(harness.noted("GitHub’s auto-merge isn’t armed on #52"))
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1))
+        harness.answer(world) { $0.pendingMutation != nil }
+        XCTAssertEqual(harness.pendingMutation, .merge(number: 52, head: a, method: .merge), "asked once")
+
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+        var dryRun = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        dryRun.start()
+        dryRun.answer(world) { $0.pendingMutation != nil }
+        dryRun.mutated(.dryRun(command: "gh pr merge 52 --auto", reason: "a test"))
+        XCTAssertTrue(dryRun.noted("Dry run: auto-merge not armed on #52"))
+        XCTAssertEqual(dryRun.phase, .running)
+    }
+
+
+    /// An auto-merge the queue didn't arm (a quit left it, or a person) is
+    /// called off at preflight, once, and the queue arms its own on the head
+    /// it checks. Still on after that, it stops the queue as before.
+    func testALeftOverAutoMergeIsCalledOffBeforeTheQueueArmsItsOwn() {
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a, autoMerge: true)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+        var harness = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        harness.start()
+        harness.answer(world) { $0.pendingMutation != nil }
+        XCTAssertEqual(harness.pendingMutation, .disarmAutoMerge(number: 52))
+        harness.mutated(.sent)
+        XCTAssertTrue(harness.noted("Called off the auto-merge left on #52"))
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        harness.answer(world) { $0.pendingMutation != nil }
+        XCTAssertEqual(harness.pendingMutation, .armAutoMerge(number: 52, head: a, method: .merge))
+
+        var stuck = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        world.pullRequests[52] = MQ.pullRequest(52, head: a, autoMerge: true)
+        stuck.start()
+        stuck.answer(world) { $0.pendingMutation != nil }
+        stuck.mutated(.refused(status: 403, message: "Resource not accessible"))
+        stuck.answer(world)
+        XCTAssertEqual(stuck.stopReason?.kind, .notMergeable)
+    }
+
+
+    /// An arm counts from its call: a Stop while it is out leaves it
+    /// counted, so the stop calls it off. One with no clear answer counts as
+    /// armed: its own auto-merge doesn't stop the queue.
+    func testAnArmInFlightOrUncertainCountsAsArmed() {
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+        var stopped = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        stopped.start()
+        stopped.answer(world) { $0.pendingMutation != nil }
+        stopped.send(.stop)
+        XCTAssertEqual(stopped.phase, .stopping)
+        stopped.mutated(.sent)
+        XCTAssertEqual(stopped.stopReason?.kind, .user)
+        XCTAssertEqual(stopped.engine.entries[0].autoMerge?.isArmed, true, "the stop calls it off")
+
+        var uncertain = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        uncertain.start()
+        uncertain.answer(world) { $0.pendingMutation != nil }
+        uncertain.mutated(.uncertain("timed out"))
+        XCTAssertTrue(uncertain.noted("got no clear answer: counted as armed"))
+        world.pullRequests[52] = MQ.pullRequest(52, head: a, autoMerge: true)
+        uncertain.answer(world)
+        XCTAssertEqual(uncertain.phase, .running, "its own auto-merge")
+    }
+
+
+    /// `gh pr merge --auto` merges at once a pull request GitHub already
+    /// finds mergeable: the queue arms only on a base whose rules require
+    /// checks, while this head's run, and no post-merge run goes on the base.
+    /// Green already, on a base requiring none, or with the nightly running,
+    /// it arms nothing and merges itself after its own gates.
+    func testAutoMergeIsArmedOnlyWhileItCantMergeAtOnce() {
+        let pending = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+        func world(checks: MergeQueue.CommitChecks, requiresChecks: Bool = true, baseRuns: [GitHub.WorkflowRun] = []) -> MQ.World {
+            var world = MQ.World()
+            world.pullRequests[52] = MQ.pullRequest(52, head: a)
+            world.checks[a] = checks
+            world.baseRequiredChecks = requiresChecks ? ["test"] : []
+            world.baseRuns = baseRuns
+            return world
+        }
+        func firstMutation(_ world: MQ.World) -> MergeQueue.Mutation? {
+            var harness = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+            harness.start()
+            harness.answer(world) { $0.pendingMutation != nil || $0.pendingDelay == 20 }
+            return harness.pendingMutation
+        }
+        XCTAssertEqual(firstMutation(world(checks: pending)), .armAutoMerge(number: 52, head: a, method: .merge))
+        XCTAssertEqual(firstMutation(world(checks: MQ.checks(MQ.checkRun(id: 1)))), .merge(number: 52, head: a, method: .merge),
+                       "green already: armed, it would merge at once")
+        XCTAssertNil(firstMutation(world(checks: pending, requiresChecks: false)), "no required checks: nothing waits for them")
+        XCTAssertNil(firstMutation(world(checks: pending, baseRuns: [MQ.run(9, head: c, status: "in_progress", conclusion: nil)])),
+                     "the nightly runs on the base")
+        XCTAssertEqual(firstMutation(world(checks: MQ.checks(MQ.checkRun(id: 1, status: "QUEUED", conclusion: nil)))),
+                       .armAutoMerge(number: 52, head: a, method: .merge), "queued: requested")
+        XCTAssertNil(firstMutation(world(checks: MQ.checks())), "no check run on the head yet")
+
+        // `test` ran only as "(selected)", `lint` runs: the full run's label
+        // first, and the arm only once that run started.
+        let selected = MQ.checkRun(id: 2, name: "test (selected)", runID: 899)
+        let lint = MQ.checkRun(id: 4, name: "lint", runID: 901, status: "IN_PROGRESS", conclusion: nil)
+        var labelled = MQ.Harness(settings: MQ.settings(requiredChecks: ["test", "lint"]), entries: [MQ.entry(52, head: a)],
+                                  armsAutoMerge: true)
+        var selectedOnly = world(checks: MQ.checks(selected, lint))
+        labelled.start()
+        labelled.answer(selectedOnly) { $0.pendingMutation != nil }
+        XCTAssertEqual(labelled.pendingMutation, .addLabel(number: 52, label: "full-test"))
+        labelled.mutated(.sent)
+        labelled.answer(selectedOnly)
+        labelled.answer(selectedOnly)
+        XCTAssertNil(labelled.pendingMutation, "its full run hasn't started")
+        XCTAssertNotNil(labelled.pendingReads)
+        selectedOnly.checks[a] = MQ.checks(selected, lint, MQ.checkRun(id: 3, status: "IN_PROGRESS", conclusion: nil))
+        labelled.answer(selectedOnly) { $0.pendingMutation != nil }
+        XCTAssertEqual(labelled.pendingMutation, .armAutoMerge(number: 52, head: a, method: .merge))
+    }
+
+    /// An older head's auto-merge GitHub didn't call off stays counted as
+    /// armed (the stop calls it off), and none is armed meanwhile.
+    func testAnOlderHeadsAutoMergeLeftOnStaysCounted() {
+        var harness = MQ.Harness(entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        harness.engine.entries[0].autoMerge = MergeQueue.Entry.AutoMerge(head: c, isArmed: true)
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+        harness.start()
+        harness.answer(world) { $0.pendingMutation != nil }
+        XCTAssertEqual(harness.pendingMutation, .disarmAutoMerge(number: 52))
+        harness.mutated(.refused(status: 422, message: "Can't disable auto-merge"))
+        XCTAssertEqual(harness.engine.entries[0].autoMerge, MergeQueue.Entry.AutoMerge(head: c, isArmed: true))
+        harness.answer(world)
+        XCTAssertNil(harness.pendingMutation, "no new arm over it")
+    }
+
+
+    /// GitHub's auto-merge waits for the checks the base's rules name, not
+    /// the board's: a board check outside them running is no reason to arm
+    /// (GitHub could merge now), and a rerun asked for hasn't started.
+    func testAutoMergeFollowsTheChecksTheBaseRulesName() {
+        let settings = MQ.settings(requiredChecks: ["test", "lint"], postMergeWorkflow: nil)
+        let lintFailed = MQ.checkRun(id: 4, name: "lint", runID: 901, conclusion: "FAILURE")
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.baseRequiredChecks = ["test"]
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1), MQ.checkRun(id: 4, name: "lint", runID: 901, status: "IN_PROGRESS", conclusion: nil))
+        var wider = MQ.Harness(settings: settings, entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        wider.start()
+        wider.answer(world) { $0.pendingMutation != nil || $0.pendingDelay == 20 }
+        XCTAssertNil(wider.pendingMutation, "the rules' check is green: GitHub could merge now")
+
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil), lintFailed)
+        var rerun = MQ.Harness(settings: settings, entries: [MQ.entry(52, head: a)], armsAutoMerge: true)
+        rerun.start()
+        rerun.answer(world) { $0.pendingMutation != nil }
+        XCTAssertEqual(rerun.pendingMutation, .rerun(runID: 901))
+        rerun.mutated(.sent)
+        rerun.answer(world)
+        XCTAssertNil(rerun.pendingMutation, "lint's rerun hasn't started")
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil), lintFailed,
+                                    MQ.checkRun(id: 5, name: "lint", runID: 901, status: "IN_PROGRESS", conclusion: nil))
+        rerun.answer(world) { $0.pendingMutation != nil }
+        XCTAssertEqual(rerun.pendingMutation, .armAutoMerge(number: 52, head: a, method: .merge))
+    }
+
 }

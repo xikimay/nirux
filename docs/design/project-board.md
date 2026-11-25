@@ -326,9 +326,26 @@ anchors don't appear. Decided with the user on 2026-11-08:
   nightly between merges is the point of the routine.
 - Both need GitHub-side settings (branch protection or rulesets, auto-merge),
   which change the repository for every contributor. On 2026-09-27
-  `xikimay/nirux` has auto-merge off and **no protection on `main`**: GitHub
-  accepts any merge, even with red checks. The queue's own checks are the only
-  guard, so they fail closed.
+  `xikimay/nirux` had auto-merge off and no protection on `main`. On
+  2026-11-24 a ruleset requires status checks on `main` (no classic branch
+  protection) and auto-merge is on. The queue's own checks still fail closed.
+- **Since 2026-11-24, auto-merge is the queue's backstop** (the user turned
+  `allow_auto_merge` on): while a pull request's checks run, the queue arms
+  GitHub's auto-merge at its head (GraphQL `enablePullRequestAutoMerge` with
+  `expectedHeadOid`), so it lands with the Mac asleep or Nirux closed. Never
+  `gh pr merge --auto`: it merges at once a pull request GitHub already finds
+  mergeable (gh 2.103), where the mutation refuses it. The queue arms only
+  while the checks the base's rules name (rules API, not the board's list)
+  have all started, one of them still runs (a rerun asked for counts as not
+  started), and no post-merge run goes on the base. Green already or refused,
+  it merges itself after its own gates. GitHub's merge at the armed head is the
+  queue's landing; the post-merge step follows as after its own merge. The
+  guards GitHub doesn't keep once armed (an agent back at work, a red check
+  that isn't required, a nightly started meanwhile) are traded for that. A head the
+  queue moves (branch update) gets its auto-merge called off and armed again; a
+  refusal or a dry run leaves the merge to the queue. Any stop but a quit calls
+  it off; a quit leaves it armed. An auto-merge the queue didn't arm is called
+  off once at preflight, then the queue arms its own. Trains come next.
 
 ### 3.2 Steps
 
@@ -512,8 +529,9 @@ For each PR in Standard, in order:
 
    Then run `gh pr merge <n> --repo <owner/name> --<method>
    --match-head-commit <sha>` from a folder outside every worktree, so `gh`
-   never touches a local checkout. Never `--admin`, `--auto` or
-   `--delete-branch`: deleting branches is Clean Up's job, on its own click.
+   never touches a local checkout. Never `--admin` or `--delete-branch`:
+   deleting branches is Clean Up's job, on its own click. `--auto` only as the
+   backstop of section 3.1, with the same `--match-head-commit`.
 
    Then re-read the PR. It must be MERGED. On a base that requires GitHub's
    merge queue, `gh pr merge` enables auto-merge or enqueues the PR instead,
@@ -899,7 +917,7 @@ pull request.
   finishes, since a merge can't be undone, and the journal says what ran.
 - **Never:**
   - force-push, or update a branch by rebase;
-  - `--admin`, `--auto` or `--delete-branch`;
+  - `--admin` or `--delete-branch`, or `--auto` without `--match-head-commit`;
   - merge with a required check red or missing, or any check red;
   - merge a draft, a PR from a fork, or a head the user didn't confirm.
 - **Every merge and branch update is pinned to the SHA it was decided on**
@@ -1142,8 +1160,9 @@ What the board adds:
     queue, a lock held by another process;
   - Stop in every state, a rate-limit pause, a restart.
 - **A fake `GitHubClient`** returns scripted answers and records calls. A
-  test fails if any recorded call is forbidden: `--admin`, `--auto`,
-  `--delete-branch`, `--rebase`, or a merge or branch update without its SHA.
+  test fails if any recorded call is forbidden: `--admin`, `--delete-branch`,
+  `--rebase`, `--auto` or `--disable-auto` outside `gh pr merge`, or a merge
+  (auto or not) or branch update without its SHA.
   Another checks that dev builds get the dry-run client.
 - **Parsers** are tested on fixtures of real `gh` output, anonymized: `pr list`,
   check runs, `run list`, `compare`, `update-branch` errors.

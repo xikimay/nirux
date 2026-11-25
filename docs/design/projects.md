@@ -562,6 +562,7 @@ What shipped differs from the proposal below in these ways:
 | Codex mode | A Codex column launches | `CodexLaunchMode.cliArgs` |
 | Environment variables | A shell starts in the project | `makeTerminalEnvironment` |
 | Follow up on pull requests (`prFollowUp`: on unless false) | A task's pull request needs a round and its Claude sits idle | `PRFollowUp` ([pr-follow-up.md](pr-follow-up.md)) |
+| Tasks can manage spaces (`tasksManageSpaces`: on in General, off elsewhere) | A task's agent starts its Nirux MCP server, and at each space tool call | `SpaceToolCaller` ([spaces.md](spaces.md)) |
 | Post-worktree setup script | After a worktree workspace is created, before the agent starts | Typed before the agent command (see below) |
 | Pinned URLs | On demand | Project view and command palette; open as web columns |
 

@@ -474,13 +474,13 @@ final class LeadSpaceToolsTests: XCTestCase {
             XCTAssertTrue(moveClosing.text.contains("closing"), moveClosing.text)
             XCTAssertEqual(closing.profileID, lead.space)
 
-            // A task's agent can't look into another space.
+            // A task's agent can't look into another space unless its own lets it.
             let taskAgentUUID = try XCTUnwrap(inA.columns.first?.agentUUID)
             let subtaskList = try harness.callLeadTool(
                 LeadTools.listTasks, ["space": "SpaceA"], from: inA, agentUUID: taskAgentUUID
             )
             XCTAssertTrue(subtaskList.isError, subtaskList.text)
-            XCTAssertTrue(subtaskList.text.contains("Only the space's Lead"), subtaskList.text)
+            XCTAssertTrue(subtaskList.text.contains("doesn't let its tasks manage spaces"), subtaskList.text)
         }
     }
 }

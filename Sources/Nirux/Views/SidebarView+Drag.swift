@@ -37,28 +37,11 @@ enum SidebarDragMath {
 
 extension SidebarView {
 
-    private static let dragThreshold: CGFloat = 4
-    private static let escapeKeyCode: UInt16 = 53
-    /// nextEvent timeout: lets the loop notice a window that closed or a
-    /// button that was released without a delivered mouseUp, instead of
-    /// blocking the main thread forever.
-    private static let eventTimeout: TimeInterval = 0.25
-    /// A drag's own ticks, and how many of them in a row find the press
-    /// gone before it is lost: as long as the timeout.
-    private static let tickPeriod: TimeInterval = 0.05
-    static let lostPressTicks = 5
-
-    private static let gestureEventMask: NSEvent.EventTypeMask = [
-        .leftMouseDragged, .leftMouseUp, .keyDown, .keyUp, .periodic,
-        .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp, .scrollWheel
-    ]
-
-    /// Called from mouseDown on a `.workspace` hit region. Runs a local
-    /// event-tracking loop until mouseUp: a gesture that never leaves its
-    /// original slot delivers the normal click, anything else becomes a
-    /// reorder drag. Consuming the events here (instead of relying on
-    /// mouseDragged/mouseUp delivery) also keeps the window-move machinery
-    /// from seeing them — the sidebar's subviews report
+    /// Called from mouseDown on a `.workspace` hit region. Follows the
+    /// press until its mouse-up (`HeldPress`): a gesture that never leaves
+    /// its original slot delivers the normal click, anything else becomes a
+    /// reorder drag. Taking the events off the queue also keeps the
+    /// window-move machinery from seeing them: the sidebar's subviews report
     /// `mouseDownCanMoveWindow == true`.
     func trackWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) {
         guard let window else {
@@ -71,105 +54,17 @@ extension SidebarView {
             return
         }
         workspaceDrag = drag
-        var lastDragEvent: NSEvent?
-        // The ticks in a row that found the press gone, its mouse-up not
-        // here.
-        var ticksGone = 0
-
-        tracking: while true {
-            guard let event = window.nextEvent(
-                matching: Self.gestureEventMask,
-                until: Date(timeIntervalSinceNow: Self.eventTimeout),
-                inMode: .eventTracking,
-                dequeue: true
-            ) else {
-                // Timeout tick: bail if the gesture can no longer finish.
-                if rowPressIsLost(in: window, atTimeout: true, ticksGone: &ticksGone) { break }
-                continue
-            }
-            switch event.type {
-            case .leftMouseDragged:
-                // Drags still come: the press holds as far as the events
-                // say (events posted to the app move no button).
-                ticksGone = 0
-                lastDragEvent = event
+        HeldPress(window: window, holds: rowPressHolds).follow(
+            isDragging: { drag.isDragging },
+            moved: { event, _ in
                 dragMoved(event, drag: &drag)
                 workspaceDrag = drag
-            case .periodic:
-                // A drag's own ticks keep the timeout above from ever
-                // coming.
-                if rowPressIsLost(in: window, atTimeout: false, ticksGone: &ticksGone) { break tracking }
-                // Keeps autoscroll running while the cursor holds still
-                // past the sidebar edge.
-                if drag.isDragging, let lastDragEvent {
-                    dragMoved(lastDragEvent, drag: &drag)
-                    workspaceDrag = drag
-                }
-            case .leftMouseUp:
-                // A later press's: this one's went elsewhere.
-                if answersALaterPress(event, in: window) { break tracking }
+            },
+            ended: { end in
                 finishWorkspaceDrag()
-                deliverDrop(drag)
-                return
-            case .keyDown where drag.isDragging:
-                if event.keyCode == Self.escapeKeyCode {
-                    finishWorkspaceDrag()
-                    consumeGestureUntilMouseUp(window)
-                    return
-                }
-                // Other keys are swallowed while the drag is modal.
-            case .keyUp where drag.isDragging:
-                break // swallowed symmetrically with the keyDowns above
-            case .keyDown, .keyUp:
-                // Not in drag mode (or a keyUp): a press on a card must
-                // not eat typing — hand the event to normal dispatch.
-                NSApp.sendEvent(event)
-            default:
-                break // swallow stray mouse/scroll during the gesture
+                if end == .released { deliverDrop(drag) }
             }
-        }
-        finishWorkspaceDrag()
-    }
-
-    /// At a tick of a row gesture, whether its press is lost: its
-    /// mouse-up went elsewhere (a modal, another app), and the gesture
-    /// would hold the sidebar's updates, and a drag the keyboard, until
-    /// the next click.
-    /// - A press made since proves this one ended.
-    /// - At a timeout nothing came for as long as a mouse-up is waited
-    ///   for: the button up, or the window gone, is enough.
-    /// - A drag's own ticks keep that timeout from ever coming: the press
-    ///   is lost once `lostPressTicks` of them in a row found it gone,
-    ///   unless its mouse-up waits in the queue (the app was busy): it is
-    ///   never taken ahead of the drags and keys queued before it.
-    /// No clock in this: the tests' stand still.
-    private func rowPressIsLost(in window: NSWindow, atTimeout: Bool, ticksGone: inout Int) -> Bool {
-        if let press = queued(.leftMouseDown, in: window) {
-            // Unless this one's mouse-up is queued before it.
-            guard let mouseUp = queued(.leftMouseUp, in: window), mouseUp.timestamp <= press.timestamp else { return true }
-            return false
-        }
-        guard !rowPressHolds(window) else {
-            ticksGone = 0
-            return false
-        }
-        if atTimeout { return true }
-        ticksGone += 1
-        return ticksGone >= Self.lostPressTicks && queued(.leftMouseUp, in: window) == nil
-    }
-
-    /// The first event of that kind waiting in the queue, left there.
-    private func queued(_ kind: NSEvent.EventTypeMask, in window: NSWindow) -> NSEvent? {
-        window.nextEvent(matching: kind, until: .distantPast, inMode: .eventTracking, dequeue: false)
-    }
-
-    /// A mouse-up the gesture just took that answers a press made after
-    /// its own (the loop never takes a press): its own mouse-up was lost.
-    /// The mouse-up goes back behind that press, which gets it.
-    private func answersALaterPress(_ mouseUp: NSEvent, in window: NSWindow) -> Bool {
-        guard let press = queued(.leftMouseDown, in: window), press.timestamp < mouseUp.timestamp else { return false }
-        NSApp.postEvent(mouseUp, atStart: false)
-        return true
+        )
     }
 
     private func makeWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) -> SidebarWorkspaceDrag? {
@@ -212,10 +107,10 @@ extension SidebarView {
     private func dragMoved(_ event: NSEvent, drag: inout SidebarWorkspaceDrag) {
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
         if !drag.isDragging {
-            guard hypot(point.x - drag.startPoint.x, point.y - drag.startPoint.y) > Self.dragThreshold else { return }
+            guard hypot(point.x - drag.startPoint.x, point.y - drag.startPoint.y) > HeldPress.dragThreshold else { return }
             drag.isDragging = true
             beginDragVisuals(for: drag)
-            NSEvent.startPeriodicEvents(afterDelay: 0.15, withPeriod: Self.tickPeriod)
+            NSEvent.startPeriodicEvents(afterDelay: 0.15, withPeriod: HeldPress.tickPeriod)
         }
         contentDocumentView.autoscroll(with: event)
         // Where the pointer is once the list has scrolled, kept to the part
@@ -254,7 +149,7 @@ extension SidebarView {
     private func deliverFallbackClick(workspaceIndex: Int, window: NSWindow) {
         let clickedID = lastInfos.first { $0.index == workspaceIndex }?.id
         // A press that lost its mouse-up clicks nothing.
-        guard consumeGestureUntilMouseUp(window) else { return }
+        guard HeldPress(window: window, holds: rowPressHolds).swallowRest() else { return }
         if let clickedID {
             if let current = lastInfos.first(where: { $0.id == clickedID })?.index {
                 clickRow(current)
@@ -273,33 +168,6 @@ extension SidebarView {
             onColumnClicked?(workspaceIndex, column)
         } else {
             onWorkspaceClicked?(workspaceIndex)
-        }
-    }
-
-    /// Swallows the rest of a press. True when its mouse-up came, false
-    /// when it was lost.
-    @discardableResult
-    private func consumeGestureUntilMouseUp(_ window: NSWindow) -> Bool {
-        var ticksGone = 0
-        while true {
-            guard let event = window.nextEvent(
-                matching: Self.gestureEventMask,
-                until: Date(timeIntervalSinceNow: Self.eventTimeout),
-                inMode: .eventTracking,
-                dequeue: true
-            ) else {
-                if rowPressIsLost(in: window, atTimeout: true, ticksGone: &ticksGone) { return false }
-                continue
-            }
-            switch event.type {
-            case .leftMouseUp:
-                return !answersALaterPress(event, in: window)
-            case .keyDown, .keyUp:
-                // No drag is modal here — don't eat typing.
-                NSApp.sendEvent(event)
-            default:
-                break
-            }
         }
     }
 

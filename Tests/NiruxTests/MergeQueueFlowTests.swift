@@ -37,6 +37,7 @@ final class MergeQueueFlowTests: XCTestCase {
             var state = "OPEN"
             var mergeCommit: String?
             var parents: [String] = []
+            var autoMerge = false
         }
 
         private let lock = NSLock()
@@ -48,6 +49,7 @@ final class MergeQueueFlowTests: XCTestCase {
         private(set) var calls: [[String]] = []
         private(set) var merged: [Int] = []
         private(set) var forbidden: [String] = []
+        private(set) var disarmed: [Int] = []
         private(set) var threads: Set<String> = []
 
         init(pullRequests: [Int: String], testConclusion: String? = "SUCCESS") {
@@ -58,6 +60,7 @@ final class MergeQueueFlowTests: XCTestCase {
         var callCount: Int { lock.withLock { calls.count } }
         var mergedNumbers: [Int] { lock.withLock { merged } }
         var forbiddenCalls: [String] { lock.withLock { forbidden } }
+        var disarmedNumbers: [Int] { lock.withLock { disarmed } }
         var allCalls: [[String]] { lock.withLock { calls } }
         var answeredOffMain: Bool { lock.withLock { !threads.contains("main") && !threads.isEmpty } }
 
@@ -93,6 +96,11 @@ final class MergeQueueFlowTests: XCTestCase {
             switch arguments.first {
             case "auth":
                 return ok("")
+            case "pr" where arguments.count > 2 && arguments[1] == "merge" && arguments.contains("--disable-auto"):
+                guard let number = Int(arguments[2]) else { return ok("") }
+                pullRequests[number]?.autoMerge = false
+                disarmed.append(number)
+                return ok("")
             case "pr" where arguments.count > 2 && arguments[1] == "merge":
                 guard let number = Int(arguments[2]), var pullRequest = pullRequests[number],
                       let index = arguments.firstIndex(of: "--match-head-commit"), arguments[index + 1] == pullRequest.head
@@ -119,7 +127,18 @@ final class MergeQueueFlowTests: XCTestCase {
                 """)
             case "api":
                 if joined.contains("rate_limit") { return ok(MergeQueueGitHubTests.rateLimit) }
-                if joined.contains("/rules/branches/") { return ok("[]") }
+                if joined.contains("/rules/branches/") {
+                    return ok(#"[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]"#)
+                }
+                if joined.contains("{ id }"), let number = value(after: "-F", prefix: "number=").flatMap(Int.init) {
+                    return ok(#"{"data":{"repository":{"pullRequest":{"id":"PR_\#(number)"}}}}"#)
+                }
+                if joined.contains("enablePullRequestAutoMerge"),
+                   let number = value(after: "-f", prefix: "pullRequestId=PR_").flatMap(Int.init) {
+                    // Armed only: the checks of this world never pass while it waits.
+                    pullRequests[number]?.autoMerge = true
+                    return ok(#"{"data":{"enablePullRequestAutoMerge":{"pullRequest":{"number":\#(number)}}}}"#)
+                }
                 if joined.contains("mergeQueue(branch") { return ok(#"{"data":{"repository":{"mergeQueue":null}}}"#) }
                 if joined.contains("files(first:"), let number = value(after: "-F", prefix: "number=").flatMap(Int.init),
                    let pr = pullRequests[number] {
@@ -155,7 +174,8 @@ final class MergeQueueFlowTests: XCTestCase {
             {"data":{"repository":{"pullRequest":{"number":\(number),"state":"\(pullRequest.state)","isDraft":false,\
             "url":"https://github.com/acme/widgets/pull/\(number)","headRefName":"feat/\(number)",\
             "headRefOid":"\(pullRequest.head)","baseRefName":"main","headRepository":{"name":"widgets","owner":{"login":"acme"}},\
-            "mergeable":"MERGEABLE","isInMergeQueue":false,"autoMergeRequest":null,"mergeCommit":\(mergeCommit)}}}}
+            "mergeable":"MERGEABLE","isInMergeQueue":false,\
+            "autoMergeRequest":\(pullRequest.autoMerge ? #"{"enabledAt":"2026-11-24T00:00:00Z"}"# : "null"),"mergeCommit":\(mergeCommit)}}}}
             """
         }
 
@@ -242,9 +262,11 @@ final class MergeQueueFlowTests: XCTestCase {
         XCTAssertEqual(world.mergedNumbers, [52, 53])
         XCTAssertTrue(world.forbiddenCalls.isEmpty, "\(world.forbiddenCalls)")
         XCTAssertTrue(world.answeredOffMain)
+        // Green already: GitHub's auto-merge would merge at once, past the queue's own gates; the queue merges itself.
         XCTAssertEqual(world.allCalls.filter { $0.starts(with: ["pr", "merge"]) },
                        [["pr", "merge", "52", "--repo", "github.com/acme/widgets", "--merge", "--match-head-commit", a],
                         ["pr", "merge", "53", "--repo", "github.com/acme/widgets", "--merge", "--match-head-commit", b]])
+        XCTAssertEqual(world.disarmedNumbers, [], "nothing to call off once merged")
         XCTAssertFalse(MergeQueueLock.isHeld(repository: MQ.widgets, folder: lockFolder))
         XCTAssertEqual(began, 1)
         XCTAssertEqual(ended, 1)
@@ -259,8 +281,7 @@ final class MergeQueueFlowTests: XCTestCase {
         XCTAssertTrue(journal.contains(#""result":"done""#))
         // The step's note, then the call it sent.
         let merging = try XCTUnwrap(journal.range(of: "Merging aaaaaaa"))
-        let sent = try XCTUnwrap(journal.range(of: "sent, waiting for the answer"))
-        XCTAssertLessThan(merging.lowerBound, sent.lowerBound)
+        XCTAssertNotNil(journal.range(of: "sent, waiting for the answer", range: merging.upperBound..<journal.endIndex))
         XCTAssertTrue(journal.contains("Finished: 2 merged"))
         XCTAssertEqual(MergeQueue.SavedQueue.load(from: files.state)?.status, .finished)
     }
@@ -293,6 +314,7 @@ final class MergeQueueFlowTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         XCTAssertEqual(world.callCount, calls)
         XCTAssertTrue(world.mergedNumbers.isEmpty)
+        XCTAssertTrue(waitUntil("the auto-merge called off") { world.disarmedNumbers == [52] }, "a stop leaves nothing for GitHub to merge")
     }
 
     /// A listener that stops the queue as it hears of a merge comes after
@@ -502,4 +524,27 @@ final class MergeQueueFlowTests: XCTestCase {
         // Nothing reached GitHub for real: the fake answered, and no queue changed anything.
         XCTAssertTrue(client.mutations.isEmpty)
     }
+
+    /// A pull request that leaves a running queue (its agent stayed busy)
+    /// gets its auto-merge called off, once: GitHub would merge it outside.
+    @MainActor
+    func testAPullRequestThatLeavesTheQueueGetsItsAutoMergeCalledOff() {
+        let client = FakeQueueClient(world: MQ.World())
+        var engine = MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(52, head: MQ.sha("a")), MQ.entry(53, head: MQ.sha("b"))],
+                                       armsAutoMerge: true)
+        engine.entries[0].autoMerge = MergeQueue.Entry.AutoMerge(head: MQ.sha("a"), isArmed: true)
+        engine.entries[1].autoMerge = MergeQueue.Entry.AutoMerge(head: MQ.sha("b"), isArmed: true)
+        engine.entries[0].step = .stopped(MergeQueue.StopReason(kind: .agentBusy, message: "busy"))
+        let driver = MergeQueueDriver(
+            engine: engine, client: client,
+            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }, reviewTasks: { [] }),
+            clock: VirtualClock().queueClock
+        )
+        driver.send(.read(requestID: -1, .success([:])))
+        driver.send(.read(requestID: -1, .success([:])))
+        XCTAssertTrue(waitUntil("the call-off") { client.mutations == [.disarmAutoMerge(number: 52)] })
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertEqual(client.mutations, [.disarmAutoMerge(number: 52)], "once, and not for #53 still in")
+    }
+
 }
