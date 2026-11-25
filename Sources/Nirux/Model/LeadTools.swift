@@ -245,7 +245,9 @@ enum LeadTools {
                 queueMerge, title: "Queue pull requests",
                 description: """
                     Queue these pull requests of one repository in the given order. By default the user confirms in a sheet. \
-                    If this space allows the Lead to start the queue, it starts directly when every safety check passes.
+                    If this space allows the Lead to start the queue, it starts directly when every safety check passes. \
+                    For What's New, first label one `new` when it brings a feature users will notice, `internal` when they \
+                    won't see it at all; the branch sorts the rest (fix/ is Fixed, else Better).
                     """,
                 properties: [
                     "cadence": ["type": "string", "enum": MergeQueue.Cadence.allCases.map(\.toolArgument), "default": "standard"],
