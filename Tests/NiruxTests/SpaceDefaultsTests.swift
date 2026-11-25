@@ -158,6 +158,29 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(unreadable.status, .readOnly(.unknownSettings(["prFollowUp"])))
     }
 
+    /// "Tasks can manage spaces": on in General, off elsewhere, the default
+    /// written as nothing; a value this build can't read is off.
+    func testTasksManageSpacesInGeneralUnlessTurnedOff() throws {
+        let general = WorkspaceProfile.defaultID
+        XCTAssertTrue(SpaceDefaults().tasksCanManageSpaces(inSpace: general))
+        XCTAssertFalse(SpaceDefaults().tasksCanManageSpaces(inSpace: "ops"))
+        var defaults = SpaceDefaults()
+        defaults.setTasksManageSpaces(true, inSpace: general)
+        XCTAssertNil(defaults.tasksManageSpaces)
+        defaults.setTasksManageSpaces(true, inSpace: "ops")
+        XCTAssertEqual(defaults.tasksManageSpaces, true)
+        defaults.setTasksManageSpaces(false, inSpace: general)
+        XCTAssertFalse(defaults.tasksCanManageSpaces(inSpace: general))
+
+        let store = try store()
+        _ = try store.save(defaults, replacing: store.load()).get()
+        XCTAssertEqual(store.load().defaults.tasksManageSpaces, false)
+        try Data(#"{"tasksManageSpaces": "yes"}"#.utf8).write(to: store.fileURL)
+        let unreadable = store.load()
+        XCTAssertFalse(unreadable.defaults.tasksCanManageSpaces(inSpace: general))
+        XCTAssertEqual(unreadable.status, .readOnly(.unknownSettings(["tasksManageSpaces"])))
+    }
+
     /// Another Nirux saved since the window read the file: left alone.
     func testAFileChangedSinceLoadedIsNotOverwritten() throws {
         let store = try store()
@@ -242,25 +265,31 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.dailyPassIsOn)
     }
 
-    /// On unless the file says: every subagent on Opus, the Lead's thread
-    /// on Fable. A variable the user set for the space wins; a file Nirux
-    /// can't read leaves Claude Code's own choice.
+    /// On unless the file says: every subagent on Opus, through the
+    /// terminal; Fable for a new Claude Lead conversation, on its launch line
+    /// only. A variable the user set for the space wins; a file Nirux can't
+    /// read leaves Claude Code's own choice.
     func testTheClaudeModelSwitch() throws {
         let on = SpaceDefaults()
         XCTAssertTrue(on.splitsClaudeModels)
-        XCTAssertEqual(on.claudeModelEnvironment(isLead: false), ["CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"])
-        XCTAssertEqual(on.claudeModelEnvironment(isLead: true)["ANTHROPIC_MODEL"], "fable")
+        XCTAssertEqual(on.claudeModelEnvironment, ["CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"])
+        XCTAssertNil(on.shellEnvironment["ANTHROPIC_MODEL"], "never the Lead's whole terminal")
+        XCTAssertEqual(on.leadModel(for: .claude), "fable")
+        XCTAssertNil(on.leadModel(for: .codex))
+        XCTAssertNil(on.leadModel(for: .agy))
         var mine = on
         mine.environment = [SpaceDefaults.EnvironmentVariable(name: "CLAUDE_CODE_SUBAGENT_MODEL", value: "sonnet")]
-        XCTAssertEqual(mine.shellEnvironment(isLead: false)["CLAUDE_CODE_SUBAGENT_MODEL"], "sonnet")
-        XCTAssertEqual(mine.shellEnvironment(isLead: false)["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"], "1")
+        XCTAssertEqual(mine.shellEnvironment["CLAUDE_CODE_SUBAGENT_MODEL"], "sonnet")
+        XCTAssertEqual(mine.shellEnvironment["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"], "1")
 
         let off = SpaceDefaultsStore.decode(Data(#"{"claudeModelSplit": false}"#.utf8))
         XCTAssertEqual(off.status, .loaded)
-        XCTAssertEqual(off.defaults.claudeModelEnvironment(isLead: true), [:])
+        XCTAssertEqual(off.defaults.claudeModelEnvironment, [:])
+        XCTAssertNil(off.defaults.leadModel(for: .claude))
         let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
         XCTAssertEqual(written?["claudeModelSplit"] as? Bool, false)
-        XCTAssertEqual(SpaceDefaultsStore.unreadDefaults.claudeModelEnvironment(isLead: true), [:])
+        XCTAssertEqual(SpaceDefaultsStore.unreadDefaults.claudeModelEnvironment, [:])
+        XCTAssertNil(SpaceDefaultsStore.unreadDefaults.leadModel(for: .claude))
     }
 
     /// A deleted space's defaults, setup scripts, proposed rules and logs go;

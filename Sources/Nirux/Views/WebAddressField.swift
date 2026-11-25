@@ -141,9 +141,10 @@ final class AddressBox: NSView {
         needsLayout = true
     }
 
-    /// Starts editing; a click on the margin while editing keeps it going.
+    /// Starts editing; a press on the margin while editing keeps it going,
+    /// and drags no column (its header's).
     override func mouseDown(with event: NSEvent) {
-        guard let field, field.currentEditor() == nil else { return super.mouseDown(with: event) }
+        guard let field, field.currentEditor() == nil else { return }
         window?.makeFirstResponder(field)
     }
 }

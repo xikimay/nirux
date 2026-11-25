@@ -1,28 +1,58 @@
 import AppKit
 
-// MARK: - The Lead's space tools (see LeadTools)
+// MARK: - The space tools (LeadTools.spaceNames), a Lead's or a task's
 
 extension WorkspaceProfile {
     var leadSpaceReference: String { LeadTools.spaceIDPrefix + id }
 }
 
 extension NiruxShellView {
-    // MARK: list_tasks (with optional space)
-
-    func leadListTasks(_ arguments: [String: Any], in callerSpace: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {
-        guard let requested = LeadTools.string(arguments, "space") else {
-            return answer(leadTaskList(in: callerSpace, lead: leadID), false)
+    /// A space tool call (`LeadTools.isSpaceCall`) from `caller`, in
+    /// `space`, its own: the same checks for a Lead and a task, the
+    /// caller's own space and workspace aside (SpaceToolCaller).
+    func handleSpaceTool(
+        _ tool: String, _ arguments: [String: Any], caller: SpaceToolCaller, in space: WorkspaceProfile, answer: @escaping LeadAnswer
+    ) {
+        switch tool {
+        case LeadTools.listTasks: leadListTasks(LeadTools.string(arguments, "space") ?? "", caller: caller, answer: answer)
+        case LeadTools.listSpaces: answer(leadSpaceList(currentSpace: space), false)
+        case LeadTools.createSpace: leadCreateSpace(arguments, caller: caller, answer: answer)
+        case LeadTools.editSpace: leadEditSpace(arguments, caller: caller, answer: answer)
+        case LeadTools.deleteSpace: leadDeleteSpace(arguments, caller: caller, answer: answer)
+        case LeadTools.moveTaskToSpace: leadMoveTaskToSpace(arguments, caller: caller, in: space, answer: answer)
+        default: answer("Unknown tool: \(tool)", true)
         }
+    }
+
+    /// What the space tools' checks need of `workspace`, the caller.
+    func spaceToolCaller(_ workspace: WorkspaceState) -> SpaceToolCaller {
+        if workspace.isLead { return .lead(workspaceID: workspace.id, spaceID: workspace.profileID) }
+        let parent = workspaces.first {
+            $0.id == workspace.parentWorkspaceID && $0.profileID == workspace.profileID && !$0.isLead && !$0.isClosing
+        }
+        return SpaceToolCaller(
+            workspaceID: workspace.id, spaceID: workspace.profileID, isLead: false,
+            anchorKey: subtaskRepositoryKey(of: workspace), parentTaskID: parent?.id
+        )
+    }
+
+    /// Space Settings › Defaults, "Tasks can manage spaces".
+    func tasksManageSpaces(inSpace spaceID: String) -> Bool {
+        SpaceDefaultsStore.defaults(forSpace: spaceID).tasksCanManageSpaces(inSpace: spaceID)
+    }
+
+    // MARK: list_tasks with space
+
+    private func leadListTasks(_ requested: String, caller: SpaceToolCaller, answer: @escaping LeadAnswer) {
         switch resolveSpace(requested) {
-        case .success(let target) where target.id == callerSpace.id:
-            answer(leadTaskList(in: target, lead: leadID), false)
+        case .success(let target) where caller.leads(target.id):
+            answer(leadTaskList(in: target, lead: caller.workspaceID), false)
         case .success(let target):
             // As its own Lead reads it: whose each task is, and what it asks.
             let owner = leadWorkspace(inSpace: target.id)
             let name = MissionPromptText.quoted(target.name)
             let view = owner == nil ? "“\(name)” has no Lead." : "As the Lead of “\(name)” sees it (“you” below is that Lead)."
-            answer(view + " Your tell, reply and close_task reach your own space only.\n"
-                + leadTaskList(in: target, lead: owner?.id ?? ""), false)
+            answer(view + " " + caller.reach + "\n" + leadTaskList(in: target, lead: owner?.id ?? ""), false)
         case .failure(let refusal):
             answer(refusal.message, true)
         }
@@ -65,31 +95,35 @@ extension NiruxShellView {
 
     // MARK: create_space
 
-    func leadCreateSpace(_ arguments: [String: Any], answer: @escaping LeadAnswer) {
+    private func leadCreateSpace(_ arguments: [String: Any], caller: SpaceToolCaller, answer: @escaping LeadAnswer) {
         // LeadTools.problem checked the arguments.
         let name = LeadTools.string(arguments, "name") ?? ""
         if let duplicate = duplicateSpace(named: name, excluding: nil) { return answer(Self.duplicateSpaceMessage(duplicate), true) }
         let colorHex = LeadTools.string(arguments, "color").flatMap(LeadTools.normalizedColorHex) ?? workspaceStore.unusedColorHex()
         let paths = LeadTools.stringArray(arguments, "anchors") ?? []
         let movesAnchors = LeadTools.optionalFlag(arguments, "move_anchors") == true
-        guard !paths.isEmpty else { return finishCreateSpace(name: name, colorHex: colorHex, anchors: [], movesAnchors: false, answer: answer) }
+        guard !paths.isEmpty else {
+            return finishCreateSpace(name: name, colorHex: colorHex, anchors: [], movesAnchors: false, caller: caller, answer: answer)
+        }
         guard projectStore.availability == .writable else { return answer(Self.anchorsLockedMessage, true) }
         resolveAnchors(paths) { result in
             switch result {
             case .failure(let refusal): answer(refusal.message, true)
             case .success(let anchors):
-                self.finishCreateSpace(name: name, colorHex: colorHex, anchors: anchors, movesAnchors: movesAnchors, answer: answer)
+                self.finishCreateSpace(name: name, colorHex: colorHex, anchors: anchors, movesAnchors: movesAnchors, caller: caller, answer: answer)
             }
         }
     }
 
     private func finishCreateSpace(
-        name: String, colorHex: String, anchors: [SpaceAnchor], movesAnchors: Bool, answer: @escaping LeadAnswer
+        name: String, colorHex: String, anchors: [SpaceAnchor], movesAnchors: Bool, caller: SpaceToolCaller, answer: @escaping LeadAnswer
     ) {
         if let duplicate = duplicateSpace(named: name, excluding: nil) { return answer(Self.duplicateSpaceMessage(duplicate), true) }
         if !anchors.isEmpty {
             guard projectStore.availability == .writable else { return answer(Self.anchorsLockedMessage, true) }
-            if let conflict = anchorOwnershipConflict(for: anchors, joining: nil, movesAnchors: movesAnchors) { return answer(conflict, true) }
+            if let conflict = anchorOwnershipConflict(for: anchors, joining: nil, movesAnchors: movesAnchors, caller: caller) {
+                return answer(conflict, true)
+            }
         }
         let created = workspaceStore.createProfile(named: name, colorHex: colorHex, anchors: anchors, select: false)
         refreshAfterLeadSpaceChange(anchors: !anchors.isEmpty)
@@ -104,9 +138,10 @@ extension NiruxShellView {
         let colorHex: String?
         let removing: [String]
         let movesAnchors: Bool
+        let caller: SpaceToolCaller
     }
 
-    func leadEditSpace(_ arguments: [String: Any], answer: @escaping LeadAnswer) {
+    private func leadEditSpace(_ arguments: [String: Any], caller: SpaceToolCaller, answer: @escaping LeadAnswer) {
         let target: WorkspaceProfile
         switch resolveSpace(LeadTools.string(arguments, "space") ?? "") {
         case .success(let resolved): target = resolved
@@ -116,7 +151,8 @@ extension NiruxShellView {
             name: LeadTools.string(arguments, "name"),
             colorHex: LeadTools.string(arguments, "color").flatMap(LeadTools.normalizedColorHex),
             removing: LeadTools.stringArray(arguments, "remove_anchors") ?? [],
-            movesAnchors: LeadTools.optionalFlag(arguments, "move_anchors") == true
+            movesAnchors: LeadTools.optionalFlag(arguments, "move_anchors") == true,
+            caller: caller
         )
         let paths = LeadTools.stringArray(arguments, "add_anchors") ?? []
         if let refusal = editSpaceRefusal(target, edit, addsAnchors: !paths.isEmpty) { return answer(refusal, true) }
@@ -159,7 +195,10 @@ extension NiruxShellView {
         case .success(let found): removed = found
         case .failure(let refusal): return answer(refusal.message, true)
         }
-        if let conflict = anchorOwnershipConflict(for: added, joining: spaceID, movesAnchors: edit.movesAnchors) { return answer(conflict, true) }
+        if let refusal = edit.caller.anchorLossRefusal(removed, from: spaceID) { return answer(refusal, true) }
+        if let conflict = anchorOwnershipConflict(for: added, joining: spaceID, movesAnchors: edit.movesAnchors, caller: edit.caller) {
+            return answer(conflict, true)
+        }
 
         var changes: [String] = []
         if let name = edit.name, name != target.name, workspaceStore.renameProfile(id: spaceID, to: name) {
@@ -190,7 +229,7 @@ extension NiruxShellView {
 
     // MARK: delete_space
 
-    func leadDeleteSpace(_ arguments: [String: Any], callerSpace: WorkspaceProfile, answer: @escaping LeadAnswer) {
+    private func leadDeleteSpace(_ arguments: [String: Any], caller: SpaceToolCaller, answer: @escaping LeadAnswer) {
         let target: WorkspaceProfile
         switch resolveSpace(LeadTools.string(arguments, "space") ?? "") {
         case .success(let resolved): target = resolved
@@ -203,29 +242,32 @@ extension NiruxShellView {
             case .failure(let refusal): return answer(refusal.message, true)
             }
         }
-        if let refusal = deleteRefusal(target, movingTo: destination, callerSpace: callerSpace) { return answer(refusal, true) }
-        let (spaceID, destinationID, callerID) = (target.id, destination?.id, callerSpace.id)
+        if let refusal = deleteRefusal(target, movingTo: destination, caller: caller) { return answer(refusal, true) }
+        let (spaceID, destinationID, callerID) = (target.id, destination?.id, caller.workspaceID)
         // Its defaults and setup scripts go: the user decides, as from the sidebar.
         runFromRunLoop { [weak self] in
             guard let self else { return answer("Nirux closed meanwhile: nothing changed.", true) }
             let current = { (id: String?) in id.flatMap { id in self.profiles.first { $0.id == id } } }
-            guard let target = current(spaceID), let caller = current(callerID) else {
-                return answer("That space was deleted meanwhile.", true)
+            guard let target = current(spaceID) else { return answer("That space was deleted meanwhile.", true) }
+            guard let asker = self.workspaces.first(where: { $0.id == callerID && !$0.isClosing }) else {
+                return answer("Your workspace closed meanwhile: nothing changed.", true)
             }
             let tasks = self.workspaceStore.visibleWorkspaceIndices(in: spaceID)
             let destination = current(destinationID)
-            guard self.confirmSpaceDeletion(target, movingTo: destination?.name ?? "", count: tasks.count, byLead: true) else {
+            let askedBy = asker.isLead ? "The Lead" : "The task “\(asker.title)”"
+            guard self.confirmSpaceDeletion(target, movingTo: destination?.name ?? "", count: tasks.count, askedBy: askedBy) else {
                 return answer("The user kept “\(MissionPromptText.quoted(target.name))”: nothing changed.", true)
             }
-            // Checked again: the space may have changed while the user read.
-            if let refusal = self.deleteRefusal(target, movingTo: destination, callerSpace: caller) { return answer(refusal, true) }
-            answer(self.deleteSpace(target, movingTasksTo: destination), false)
+            // Checked again: the spaces, or where the caller is, may have changed while the user read.
+            let caller = self.spaceToolCaller(asker)
+            if let refusal = self.deleteRefusal(target, movingTo: destination, caller: caller) { return answer(refusal, true) }
+            answer(self.deleteSpace(target, movingTasksTo: destination, caller: caller), false)
         }
     }
 
-    /// Why the Lead may not delete `target`, its tasks moving to `destination`; nil when it may.
-    private func deleteRefusal(_ target: WorkspaceProfile, movingTo destination: WorkspaceProfile?, callerSpace: WorkspaceProfile) -> String? {
-        if let refusal = deleteSpaceRefusal(target, callerSpace: callerSpace) { return refusal }
+    /// Why `caller` may not delete `target`, its tasks moving to `destination`; nil when it may.
+    private func deleteRefusal(_ target: WorkspaceProfile, movingTo destination: WorkspaceProfile?, caller: SpaceToolCaller) -> String? {
+        if let refusal = deleteSpaceRefusal(target, caller: caller) { return refusal }
         // Sub-tasks after their task, as the sidebar lists them.
         let tasks = workspaceStore.visibleWorkspaceIndices(in: target.id).map { workspaces[$0] }
         guard !tasks.isEmpty else { return nil }
@@ -234,28 +276,31 @@ extension NiruxShellView {
             return "“\(MissionPromptText.quoted(target.name))” still has \(count): pass move_tasks_to to move them first."
         }
         guard destination.id != target.id else { return "move_tasks_to must name another space." }
-        return spaceMoveRefusal(of: tasks, to: destination)
+        return spaceMoveRefusal(of: tasks, to: destination, caller: caller)
     }
 
     /// What it did, for the answer; checked by `deleteRefusal`.
-    private func deleteSpace(_ target: WorkspaceProfile, movingTasksTo destination: WorkspaceProfile?) -> String {
+    private func deleteSpace(_ target: WorkspaceProfile, movingTasksTo destination: WorkspaceProfile?, caller: SpaceToolCaller) -> String {
         let name = "“\(MissionPromptText.quoted(target.name))” (\(target.leadSpaceReference))"
         let tasks = workspaceStore.visibleWorkspaceIndices(in: target.id).map { workspaces[$0] }
         var moved = ""
+        var note: String?
         if let destination, !tasks.isEmpty {
             for task in tasks { moveWorkspaceToSpace(workspaceID: task.id, profileID: destination.id, refocusing: false) }
             let count = tasks.count == 1 ? "1 task" : "\(tasks.count) tasks"
             moved = "Moved \(count) to “\(MissionPromptText.quoted(destination.name))” (\(destination.leadSpaceReference)), then "
+            note = caller.movedNote(moved: tasks.map(\.id), to: destination, tasksManageSpacesThere: tasksManageSpaces(inSpace: destination.id))
         }
         // Refused only for a queue started meanwhile, which deleteRefusal saw.
         deleteSpace(profileID: target.id, refocusing: false)
-        return moved + (moved.isEmpty ? "Deleted \(name)." : "deleted \(name).")
+        let done = moved + (moved.isEmpty ? "Deleted \(name)." : "deleted \(name).")
+        return [done, note].compactMap { $0 }.joined(separator: " ")
     }
 
-    private func deleteSpaceRefusal(_ target: WorkspaceProfile, callerSpace: WorkspaceProfile) -> String? {
+    private func deleteSpaceRefusal(_ target: WorkspaceProfile, caller: SpaceToolCaller) -> String? {
         let name = "“\(MissionPromptText.quoted(target.name))”"
         if target.id == WorkspaceProfile.defaultID { return "The default space \(name) can't be deleted." }
-        if target.id == callerSpace.id { return "\(name) is your own space: you can't delete it." }
+        if let refusal = caller.deletionRefusal(of: target) { return refusal }
         // Deleting it would move their selection and keyboard.
         if target.id == activeProfileID { return "The user has \(name) on screen: leave it to them, or ask them to delete it." }
         // What they typed there would go.
@@ -273,14 +318,16 @@ extension NiruxShellView {
 
     // MARK: move_task_to_space
 
-    func leadMoveTaskToSpace(_ arguments: [String: Any], callerSpace: WorkspaceProfile, answer: @escaping LeadAnswer) {
+    private func leadMoveTaskToSpace(
+        _ arguments: [String: Any], caller: SpaceToolCaller, in callerSpace: WorkspaceProfile, answer: @escaping LeadAnswer
+    ) {
         let source: WorkspaceProfile
         switch LeadTools.string(arguments, "from_space").map(resolveSpace) ?? .success(callerSpace) {
         case .success(let resolved): source = resolved
         case .failure(let refusal): return answer(refusal.message, true)
         }
         // Its Lead tells and closes its tasks, and only there.
-        if source.id != callerSpace.id, leadWorkspace(inSpace: source.id) != nil {
+        if !caller.leads(source.id), leadWorkspace(inSpace: source.id) != nil {
             return answer("“\(MissionPromptText.quoted(source.name))” has a Lead of its own, which organizes its tasks: ask the user.", true)
         }
         let destination: WorkspaceProfile
@@ -297,10 +344,12 @@ extension NiruxShellView {
         let to = "“\(MissionPromptText.quoted(destination.name))” (\(destination.leadSpaceReference))"
         guard task.profileID != destination.id else { return answer("\(title) is already in \(to).", false) }
         let tree = withSubtasks(task)
-        if let refusal = spaceMoveRefusal(of: tree, to: destination) { return answer(refusal, true) }
+        if let refusal = spaceMoveRefusal(of: tree, to: destination, caller: caller) { return answer(refusal, true) }
         for moving in tree { moveWorkspaceToSpace(workspaceID: moving.id, profileID: destination.id, refocusing: false) }
         let subtasks = tree.count == 1 ? "" : tree.count == 2 ? " and its sub-task" : " and its \(tree.count - 1) sub-tasks"
-        answer("Moved \(title)\(subtasks) from “\(MissionPromptText.quoted(source.name))” to \(to).", false)
+        let moved = "Moved \(title)\(subtasks) from “\(MissionPromptText.quoted(source.name))” to \(to)."
+        let note = caller.movedNote(moved: tree.map(\.id), to: destination, tasksManageSpacesThere: tasksManageSpaces(inSpace: destination.id))
+        answer([moved, note].compactMap { $0 }.joined(separator: " "), false)
     }
 
     /// The task, then the sub-tasks under it, which move with it.
@@ -318,8 +367,9 @@ extension NiruxShellView {
         return tree
     }
 
-    /// Why the Lead may not move `tasks`, together, to `space`; nil when it may.
-    private func spaceMoveRefusal(of tasks: [WorkspaceState], to space: WorkspaceProfile) -> String? {
+    /// Why `caller` may not move `tasks`, together, to `space`; nil when it may.
+    private func spaceMoveRefusal(of tasks: [WorkspaceState], to space: WorkspaceProfile, caller: SpaceToolCaller) -> String? {
+        if let refusal = caller.moveRefusal(moving: tasks.map(\.id), to: space) { return refusal }
         _ = MissionStore.shared.ensureLoaded()
         let staying = Set(workspaces.map(\.id)).subtracting(tasks.map(\.id))
         for task in tasks {
@@ -460,10 +510,12 @@ extension NiruxShellView {
     }
 
     /// Why `anchors` can't join the space `spaceID` (nil: a new one), or
-    /// nil. A repository or folder belongs to one space: the Lead moves one
+    /// nil. A repository or folder belongs to one space: the caller moves one
     /// only when asked to, never from a space whose Lead or merge queue works
-    /// from it.
-    private func anchorOwnershipConflict(for anchors: [SpaceAnchor], joining spaceID: String?, movesAnchors: Bool) -> String? {
+    /// from it, nor a task's own out of its space.
+    private func anchorOwnershipConflict(
+        for anchors: [SpaceAnchor], joining spaceID: String?, movesAnchors: Bool, caller: SpaceToolCaller
+    ) -> String? {
         for anchor in anchors {
             guard let key = anchor.key, let owner = workspaceStore.profile(anchoring: key), owner.id != spaceID else { continue }
             let belongs = "“\(MissionPromptText.quoted(anchor.name))” belongs to “\(MissionPromptText.quoted(owner.name))” "
@@ -471,6 +523,7 @@ extension NiruxShellView {
             if leadWorkspace(inSpace: owner.id) != nil || hasRunningMergeQueue(inSpace: owner.id) {
                 return belongs + ", whose Lead or merge queue works from it: only the user can move it, in Space Settings."
             }
+            if let refusal = caller.anchorLossRefusal([anchor], from: owner.id) { return refusal }
             if !movesAnchors { return belongs + ": pass move_anchors: true to move it, if the user asked to." }
         }
         return nil

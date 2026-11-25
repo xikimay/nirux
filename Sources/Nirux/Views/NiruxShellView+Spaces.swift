@@ -33,13 +33,14 @@ extension NiruxShellView {
         deleteSpace(profileID: profileID)
     }
 
-    /// The question before a space goes, asked by the user or by a Lead.
-    func confirmSpaceDeletion(_ space: WorkspaceProfile, movingTo destination: String, count: Int, byLead: Bool = false) -> Bool {
+    /// The question before a space goes, asked by the user, or by an agent
+    /// (`askedBy`: "The Lead").
+    func confirmSpaceDeletion(_ space: WorkspaceProfile, movingTo destination: String, count: Int, askedBy: String? = nil) -> Bool {
         let moved = count == 0
             ? "It has no workspaces."
             : "Its \(count == 1 ? "workspace moves" : "\(count) workspaces move") to \"\(destination)\"."
         return confirmDestructiveClose(
-            message: byLead ? "The Lead asks to delete the space \"\(space.name)\"" : "Delete the space \"\(space.name)\"?",
+            message: askedBy.map { "\($0) asks to delete the space \"\(space.name)\"" } ?? "Delete the space \"\(space.name)\"?",
             details: [
                 moved,
                 "Its defaults and setup scripts are deleted; its brief stays on disk. Folders and repositories aren't touched."

@@ -6,19 +6,23 @@ import AppKit
 /// column but a Lead's (NiruxShellView+LeadTools hands the request over).
 /// It acts on the sub-tasks that agent started only: it starts them under
 /// its task, lists them, answers their questions. Two levels: a sub-task
-/// has none of its own. Never in a workspace opened from outside Nirux.
+/// has none of its own. The space tools act as the Lead's, where the
+/// task's space lets its tasks manage spaces. Never in a workspace opened
+/// from outside Nirux.
 extension NiruxShellView {
     func handleTaskRequest(_ request: LeadChannel.Request, from caller: WorkspaceState, answer: @escaping LeadAnswer) {
-        guard TaskTools.names.contains(request.tool) else {
+        let arguments = request.argumentObject
+        let managesSpaces = LeadTools.isSpaceCall(request.tool, arguments)
+        guard TaskTools.names.contains(request.tool) || managesSpaces else {
             return answer("Only a space's Lead can use \(request.tool).", true)
         }
         // Its agents act for whoever sent the link, not for the user: no
         // pre-allowed agents, no space environment or setup script.
         guard !caller.startedOutsideNirux else {
-            return answer("This workspace was opened by a link from outside Nirux: its agents can't start or follow "
-                + "sub-tasks. The user starts tasks with ⌘N.", true)
+            return answer("This workspace was opened by a link from outside Nirux: its agents can't "
+                + (managesSpaces ? "manage spaces." : "start or follow sub-tasks. The user starts tasks with ⌘N."), true)
         }
-        let arguments = request.argumentObject
+        if managesSpaces { return taskSpaceTool(request.tool, arguments, from: caller, answer: answer) }
         if let problem = LeadTools.problem(tool: request.tool, arguments: arguments, subtask: true) { return answer(problem, true) }
         let subtasks = subtasks(of: caller)
         let place = subtaskPlace(of: caller)
@@ -94,6 +98,19 @@ extension NiruxShellView {
                 + "so it has no sub-tasks: to start a task from here, use the nirux-worktree skill."
         }
         return nil
+    }
+
+    /// As the Lead's, while the task's space lets its tasks manage spaces:
+    /// the agent may have listed the tools before the user turned it off,
+    /// or before the task moved.
+    private func taskSpaceTool(_ tool: String, _ arguments: [String: Any], from caller: WorkspaceState, answer: @escaping LeadAnswer) {
+        guard let space = profiles.first(where: { $0.id == caller.profileID }) else { return answer("This task's space is gone.", true) }
+        guard tasksManageSpaces(inSpace: space.id) else {
+            return answer("“\(MissionPromptText.quoted(space.name))” doesn't let its tasks manage spaces: the user can turn on "
+                + "“Tasks can manage spaces” in its Space Settings › Defaults.", true)
+        }
+        if let problem = LeadTools.problem(tool: tool, arguments: arguments) { return answer(problem, true) }
+        handleSpaceTool(tool, arguments, caller: spaceToolCaller(caller), in: space, answer: answer)
     }
 
     // MARK: start_task

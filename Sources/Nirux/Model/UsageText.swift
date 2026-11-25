@@ -101,7 +101,7 @@ struct SidebarTaskUsage: Hashable {
             }
         }
         if isFanningOut {
-            lines.append("\(subagents) subagents in its latest session: past \(Self.subagentSoftCap), separate work costs less as a task")
+            lines.append("\(subagents) subagents in its latest session: from the \(Self.subagentSoftCap)th, separate work costs less as a task")
         }
         lines.append("Last 7 days: \(UsageText.tokens(weekTokens)) tokens, \(UsageText.unitNote)")
         if subagentTokens > 0 { lines.append("Subagents: \(UsageText.share(subagentTokens, of: weekTokens))") }
