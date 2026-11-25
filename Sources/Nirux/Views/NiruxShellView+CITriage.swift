@@ -65,10 +65,9 @@ extension NiruxShellView {
     /// them (in the background: the sidebar is refreshed when it comes).
     /// Every red check, news or not: a pull request already red at launch
     /// reads "likely flaky" too.
-    func triageRedChecks(in workspace: WorkspaceState) {
+    func triageRedChecks(in workspace: WorkspaceState, now: TimeInterval = Date().timeIntervalSince1970) {
         let center = ciTriageCenter
         guard center.isEnabled, let pullRequest = workspace.prInfo else { return }
-        let now = Date().timeIntervalSince1970
         let results = CIFailure.ownRunResults(pullRequest)
         let remembered = center.store
         if results.contains(where: { remembered.record(of: $0.run) != nil }) {

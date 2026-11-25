@@ -42,7 +42,7 @@ struct UsageReportTests {
         let sessions = [
             UsageSession(key: UsageSessionKey(.claude, "old"), attribution: task, contextTokens: 50_000, events: [event(30, input: 100)]),
             UsageSession(
-                key: UsageSessionKey(.claude, "new"), attribution: task, contextTokens: 300_000,
+                key: UsageSessionKey(.claude, "new"), attribution: task, contextTokens: 300_000, subagents: 1,
                 events: [event(2, input: 1_000, context: 300_000), event(1, input: 10, subagent: "a")]
             ),
             UsageSession(
@@ -66,6 +66,7 @@ struct UsageReportTests {
         #expect(report.latestSessions["task"]?.key == UsageSessionKey(.claude, "new"))
         #expect(report.latestSessions["task"]?.contextTokens == 300_000)
         #expect(report.latestSessions["task"]?.lastResponseAt == now - 7_200)
+        #expect(report.latestSessions["task"]?.subagents == 1)
         #expect(report.codexLimits?.reportedAt == now - 60)
     }
 }
