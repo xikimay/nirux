@@ -1,10 +1,27 @@
 name: Package
 
-# The nightly packages every push to main. A pull request that changes how
-# the app is built, bundled or launched can package its branch here first,
-# ad-hoc signed, by hand: `gh workflow run package.yml --ref <branch>`. It
-# checks the packaged terminal runtime and runs the launch check.
+# The nightly packages and publishes only from main. A train (nirux-train/*)
+# that changes how the app is built, bundled or launched packages it here
+# first, the way the nightly does (ad-hoc signed), checks the packaged
+# terminal runtime, and runs the launch check. Other pull requests only by
+# hand: `gh workflow run package.yml --ref <branch>`.
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - NiruxCore/Package.swift
+      - Package.swift
+      - Package.resolved
+      - scripts/bundle.sh
+      - Resources/Info.plist
+      - Sources/Nirux/NiruxApp.swift
+      - Sources/Nirux/Util/TerminalConfigBuilder.swift
+      - Sources/Nirux/Util/LaunchArguments.swift
+      - Sources/Nirux/Util/RealStateGuard.swift
+      - Sources/Nirux/Util/StateFolderLock.swift
+      - scripts/launch-check.sh
+      - .github/workflows/nightly.yml
+      - .github/workflows/package.yml
   workflow_dispatch:
 
 concurrency:
@@ -16,6 +33,7 @@ permissions:
 
 jobs:
   package:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'nirux-train/')
     runs-on: macos-15
     timeout-minutes: 30
     env:

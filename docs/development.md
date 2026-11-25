@@ -21,7 +21,7 @@ An agent waiting on the PR’s Tests workflow can run `scripts/watch-ci-failure.
 
 A pull request runs `test (selected)`, whether draft or ready: it lands in a merge train, whose pull request (`nirux-train/*`) runs the full suite under the `test` check that main requires. When a train starts, the Tests runs still queued or running on its pull requests’ heads are cancelled. The queue’s Standard cadence, which merges a pull request on its own, adds the `full-test` label when it finds only `test (selected)`: from then on, each push runs the full suite under `test`. Add the label by hand for the full suite on any pull request. The daily Coverage map workflow records which XCTest classes executed each Swift source file on main. The selector examines all changes since the indexed commit, including changes that landed on main after the map was recorded. It also includes classes declared by changed test files. Shared test helpers, removed test files, uncovered sources, build inputs, and missing or empty selections trigger the full suite.
 
-Pull requests don’t package the app: the nightly does on each push to main. To package a branch first, ad-hoc signed, run `gh workflow run package.yml --ref <branch>`.
+Among pull requests, only a train packages the app, when it changes how the app is built, bundled or launched: ad-hoc signed, with the terminal runtime and launch checks the nightly runs on main. To package another branch, run `gh workflow run package.yml --ref <branch>`.
 
 The longest classes start first, in the order `scripts/test-class-times.txt` gives. When classes have grown or new long ones came in, `scripts/test-class-times.sh` rewrites it from main's last green nightly runs.
 
