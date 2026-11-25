@@ -209,6 +209,7 @@ extension NiruxShellView {
             lead.addColumn(agentUUID: lead.leadAgentUUID ?? reportedTo ?? UUID().uuidString)
             guard let column = lead.columns[safe: lead.focusedIndex] else { return launched(false) }
             lead.leadAgentUUID = column.agentUUID
+            column.handedClaudeSessionID = agent == .claude ? sessionID : nil
             relayout(animated: false)
             column.recordLeadSafety(file: file)
             sideEffects.launchAgent(column, command)
@@ -223,8 +224,10 @@ extension NiruxShellView {
                   canRelaunchLeadSession(sessionID, agent: agent, in: column) else { return launched(false) }
             column.relaunchingLeadSessionID = sessionID
         }
+        column.handedClaudeSessionID = agent == .claude ? sessionID : nil
         refreshLaunch(of: column, in: lead)
-        let started = { (started: Bool) -> Bool in
+        let started = { [weak column] (started: Bool) -> Bool in
+            if !started { column?.handedClaudeSessionID = nil }
             launched(started)
             return started
         }
