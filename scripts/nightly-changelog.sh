@@ -15,11 +15,13 @@ out="$3"
 mkdir -p "$out"
 rm -f "$out/changelog.json"
 
-# Dated releases are never replaced, so their copy can't be caught half
-# uploaded like the rolling release's.
+# The newest dated release's copy first: they are never replaced, so it
+# can't be caught half uploaded like the rolling release's. The rolling one
+# last: only a nightly that also published its dated copy updates it, and it
+# outlives the dated releases the prune deletes.
 tags=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 40 --json tagName --jq '.[].tagName | select(startswith("nightly-"))')
-for tag in $tags; do
-    assets=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+for tag in $tags nightly; do
+    assets=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | select(.state == "uploaded") | .name')
     if grep -qx changelog.json <<< "$assets"; then
         gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern changelog.json --dir "$out"
         reached=$(jq -r '.commit // empty' "$out/changelog.json" 2>/dev/null || true)

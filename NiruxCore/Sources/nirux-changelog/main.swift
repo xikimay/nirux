@@ -21,10 +21,13 @@ guard let added = Changelog.entries(fromPullRequests: try Data(contentsOf: URL(f
     FileHandle.standardError.write(Data("\(pullRequests) isn't a list of pull requests from gh pr list.\n".utf8))
     exit(1)
 }
+// An unreadable history stops here: the next nightly continues from the
+// last one published, rather than from an empty one.
 let saved = FileManager.default.contents(atPath: changelogPath)
 let read = saved.flatMap { try? JSONDecoder().decode(Changelog.self, from: $0) }
 if saved != nil, read == nil {
-    FileHandle.standardError.write(Data("\(changelogPath) can't be read: starting a new changelog.\n".utf8))
+    FileHandle.standardError.write(Data("\(changelogPath) can't be read.\n".utf8))
+    exit(1)
 }
 let previous = read ?? Changelog()
 let oldest = Changelog.build(at: built.addingTimeInterval(-Double(Changelog.keptDays) * 86_400))

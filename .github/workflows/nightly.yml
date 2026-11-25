@@ -268,7 +268,7 @@ jobs:
           CHANGELOG_OUTCOME: ${{ steps.changelog.outcome }}
         run: |
           # Capture the previous nightly's commit BEFORE the rolling tag moves —
-          # the changelog diffs against it.
+          # the commit list diffs against it.
           PREV_SHA=$(git rev-parse -q --verify 'nightly^{commit}' || echo "")
           if [ -n "$PREV_SHA" ]; then
             RANGE="$PREV_SHA..HEAD"
@@ -328,9 +328,11 @@ jobs:
             --prerelease \
             Nirux.app.zip \
             appcast.xml
-          if [ -n "${CHANGELOG_FILE:-}" ]; then
-            gh release upload "$RELEASE_TAG" "$CHANGELOG_FILE" \
-              || echo "::error title=Changelog::Could not attach changelog.json to $RELEASE_TAG."
+          # Without its dated copy, the rolling release keeps the previous
+          # changelog too: the next nightly continues from that one.
+          if [ -n "${CHANGELOG_FILE:-}" ] && ! gh release upload "$RELEASE_TAG" "$CHANGELOG_FILE"; then
+            echo "::error title=Changelog::Could not attach changelog.json to $RELEASE_TAG."
+            echo "CHANGELOG_FILE=" >> "$GITHUB_ENV"
           fi
 
       - name: Update rolling nightly release
