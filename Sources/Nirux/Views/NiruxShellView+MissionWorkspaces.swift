@@ -300,6 +300,8 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
         var typedAny = false
+        lazy var places = MissionWaitHook.mailbox.places()
+        lazy var hooksOn = Self.currentClaudeMissionHook()
         for delivery in MissionStore.shared.pendingPromptDeliveries(now: now)
         where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
             let mission = delivery.mission
@@ -316,6 +318,17 @@ extension NiruxShellView {
                 continue
             }
             guard !missionWaits.typing.contains(delivery.event.id) else { continue }
+            if agent == .claude, leaveToHook(
+                delivery, in: recipient, foreground: pty.foregroundProcess(snapshot: snapshot), places: places, now: now, enabled: hooksOn,
+                text: {
+                    MissionStore.shared.pendingPromptDelivery(delivery).flatMap {
+                        MissionPromptText.hookText(for: $0, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title)
+                    }
+                }
+            ) {
+                if recipient.id == seenAtPrompt, onSight == nil { onSight = .typed }
+                continue
+            }
             let refusal = pty.missionPromptRefusal(
                 runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now), snapshot: snapshot,
                 seenByUser: recipient.id == seenAtPrompt, agent: agent
@@ -482,7 +495,7 @@ extension NiruxShellView {
     /// prompt (a tell is given up then, an answer or a question counts as
     /// typed). One whose agent left before any of it did waits for the next
     /// free prompt.
-    private func finishTyping(_ delivery: MissionStore.AcceptedEvent, _ typed: TypedMessage, at timestamp: TimeInterval) {
+    func finishTyping(_ delivery: MissionStore.AcceptedEvent, _ typed: TypedMessage, at timestamp: TimeInterval) {
         let store = MissionStore.shared
         let id = delivery.event.id
         switch typed {
@@ -496,6 +509,7 @@ extension NiruxShellView {
             guard recorded else {
                 return MissionWaitLog.logger.error("A typed Mission message wasn't recorded: id=\(id.prefix(8), privacy: .public)")
             }
+            letterTyped(id)
         }
         missionWaits.typing.remove(id)
     }

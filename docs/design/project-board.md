@@ -389,6 +389,8 @@ The sheet opens in **Standard** every time. Three opt-in cadences apply to this 
   before each merge, then verifies the final push run if configured.
 - Both fast cadences let pending push runs from earlier merges in this batch
   continue. Other base runs and observed failures retain their usual guards.
+  When the last pull requests leave (an agent still busy), the push run of
+  the last merge made is the one verified before the queue finishes.
 - **Train** lands the batch with one CI run and one merge into the base: one
   writer on the base. It needs the merge method `merge`. Each PR must be open
   at its confirmed head, free of conflicts, with idle agents and no red check;
@@ -457,7 +459,9 @@ For each PR in Standard, in order:
    - no agent working or waiting on a dialog (section 2), in any workspace of
      the row, or in any other workspace with a shell inside the worktree (as
      cleanup's foreign agents). If one is, the queue waits up to 10 minutes
-     for it to go idle, then stops;
+     for it to go idle, then that pull request leaves the queue for the next
+     one and the others go on (a train goes on without it; once composed, a
+     train stops instead: its branch holds the rider's commits);
    - if the branch has a local worktree: no unpushed commits, and no changes to
      tracked files. Untracked files, such as the handover, don't count. Unpushed
      means REST `compare/{PR head}...{local HEAD}` answers `ahead_by > 0`, or
@@ -814,8 +818,9 @@ pull request.
   It is the list of its queue's repository: once board.json names another,
   the board shows that one's, and no longer marks rows with the last queue's
   steps. A row
-  the queue would stop on at once (a draft, another base, a conflict, a busy
-  agent) says why instead; the sheet checks the rest. The list doesn't change
+  the queue would stop on at once (a draft, another base, a conflict) says
+  why instead; a busy agent doesn't, the queue waits for it. The sheet checks
+  the rest. The list doesn't change
   while a queue runs, here or in another Nirux, nor while the sheet is open or
   Nirux is quitting. A Start makes it the confirmed list: what the sheet left
   out leaves it, and each pull request leaves it once merged. A pull request
@@ -841,7 +846,10 @@ pull request.
   stop it first. The board keeps its queue line, and Stop, while a queue runs,
   even when board.json can't be read.
 - **Warnings and refusals.** Besides section 4's: a post-merge run going on the
-  base (the first merge waits for it), a red check that isn't required (the
+  base is said, not warned of (the first merge waits for it, and the Lead's
+  `queue_merge` starts all the same), nor is an agent at work in a pull
+  request's worktree (it joins; the queue waits for it before merging, up to
+  10 minutes), a red check that isn't required (the
   queue never merges with one), a required check that ended skipped or neutral,
   more than 100 changed files. "The last post-merge run" is the last completed
   one. Nothing that can join refuses Start too.

@@ -19,6 +19,7 @@ final class SidebarSectionToggleView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { acceptsFirstClick }
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { role }
+    override func isAccessibilityEnabled() -> Bool { onPress != nil }
     override func accessibilityPerformPress() -> Bool {
         guard let onPress else { return false }
         onPress()

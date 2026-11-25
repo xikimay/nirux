@@ -350,6 +350,8 @@ final class BoardStagesMergedEntryView: BoardStagesKeyView, NSViewToolTipOwner {
         }
     }
 
+    override func isAccessibilityEnabled() -> Bool { true }
+
     /// As a click: only on an entry that shows.
     override func accessibilityPerformPress() -> Bool {
         guard pullRequest.lineID != nil, isShown else { return false }
