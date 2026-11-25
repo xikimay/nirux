@@ -99,7 +99,7 @@ extension MergeQueue {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-        return "nirux-train/" + formatter.string(from: date)
+        return MergeTrain.branchPrefix + formatter.string(from: date)
     }
 }
 
