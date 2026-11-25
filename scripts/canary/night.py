@@ -4,10 +4,15 @@ in front and idle for 30 minutes, and stops the moment the keyboard or mouse is 
 morning digest lists what the ledger got since the last one, each incident with its replay command,
 and how each step ended.
 
-  night.py install --app PATH [--hour 3]   copies the runner, writes and loads the LaunchAgent
-  night.py uninstall                       unloads and removes both
-  night.py run --app PATH                  what the LaunchAgent starts
-  night.py digest                          prints the digest of what came since the last one
+  night.py install --app latest|PATH [--hour 3]   copies the runner, writes and loads the LaunchAgent
+  night.py uninstall                              unloads and removes them
+  night.py run --app latest|PATH                  what the LaunchAgent starts
+  night.py digest                                 prints the digest of what came since the last one
+
+With --app latest, each run first downloads the nightly release's Nirux.app.zip, the one Sparkle
+installs: the night's only network use, outside the sandboxed run. It tests it once its signature
+verifies and its build is no older than the last good copy's, which it replaces; otherwise it tests
+that copy, and the digest says why.
 
 A sleeping Mac skips the night: launchd runs the job at wake, the check then sees the user back
 and does nothing. Running at the hour needs a wake schedule, system-wide (sudo pmset repeat
@@ -44,6 +49,7 @@ PLIST = Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
 # A copy of the runner where no task worktree goes away under it.
 SUPPORT = Path.home() / "Library/Application Support/Nirux Canary"
 SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+NIGHTLY_ZIP = "https://github.com/xikimay/nirux/releases/download/nightly/Nirux.app.zip"
 
 
 def on_ac_power(pmset):
@@ -82,7 +88,7 @@ def current_idle():
 
 
 def watched(command, idle=current_idle, sleep=time.sleep, interval=5, **popen):
-    """Runs \`command\` (explore.py); once someone touches the keyboard or mouse, or the watch itself
+    """Runs `command` (explore.py); once someone touches the keyboard or mouse, or the watch itself
     fails, sends it SIGTERM, which ends its copy and claude (explore.stop_on_sigterm), then kills
     what is left. (exit status, whether it was stopped)."""
     process = subprocess.Popen(command, start_new_session=True, **popen)
@@ -104,19 +110,74 @@ def watched(command, idle=current_idle, sleep=time.sleep, interval=5, **popen):
     return process.returncode, stopped
 
 
+class Unusable(Exception):
+    """Why the newest nightly can't be tested."""
+
+
+def tool(why, command, timeout):
+    """Runs a system tool; when it fails, raises Unusable("why: its last line")."""
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, timeout=timeout)
+    except subprocess.CalledProcessError as error:
+        said = (error.stderr or error.stdout or "").strip().splitlines()
+        raise Unusable(f"{why}: {said[-1] if said else f'exit {error.returncode}'}") from None
+    except (subprocess.TimeoutExpired, OSError) as error:
+        raise Unusable(f"{why}: {error}") from None
+
+
+def curl(url, target):
+    tool("download failed", ["/usr/bin/curl", "--fail", "--silent", "--show-error", "--location", "--proto", "=https",
+                             "--proto-redir", "=https", "--max-time", "900", "--output", str(target), url], 960)
+
+
+def build_number(app):
+    """CFBundleVersion: a nightly's yyyymmddHHMM."""
+    try:
+        with open(app / "Contents/Info.plist", "rb") as info:
+            return int(plistlib.load(info)["CFBundleVersion"])
+    except (OSError, KeyError, TypeError, ValueError):
+        raise Unusable("no build number") from None
+
+
+def newest_nightly(folder=SUPPORT / "nightly", download=curl):
+    """The nightly release's app once its signature verifies and its build is no older than the last
+    good copy's, which it replaces; else that copy. (app or None, the digest's line)."""
+    good, incoming = folder / "Nirux.app", folder / "incoming"
+    shutil.rmtree(incoming, ignore_errors=True)
+    incoming.mkdir(parents=True)
+    try:
+        download(NIGHTLY_ZIP, incoming / "Nirux.app.zip")
+        tool("doesn't unpack", ["/usr/bin/ditto", "-x", "-k", str(incoming / "Nirux.app.zip"), str(incoming)], 300)
+        app = incoming / "Nirux.app"
+        tool("signature doesn't verify", ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)], 120)
+        build = build_number(app)
+        if good.exists() and build < build_number(good):
+            raise Unusable(f"build {build} is older than the last good one")
+        shutil.rmtree(good, ignore_errors=True)
+        app.rename(good)
+        return good, f"nightly build {build}"
+    except Unusable as refused:
+        if not good.exists():
+            return None, f"none, nothing ran (newest nightly: {refused})"
+        return good, f"last good build {build_number(good)} (newest nightly: {refused})"
+    finally:
+        shutil.rmtree(incoming, ignore_errors=True)
+
+
 def launch_agent(app, hour, runner, claude, python=sys.executable):
-    """Started at \`hour\` every night, never at load; claude's folder on its PATH; its output in the history."""
-    logs = default_history_dir() / "night"
+    """Started at `hour` every night, never at load; claude's folder on its PATH; its output in the history."""
+    history = default_history_dir()
     return {
         "Label": LABEL,
         "ProgramArguments": [python, "-B", str(runner / "night.py"), "run", "--app", str(app)],
-        "EnvironmentVariables": {"PATH": f"{Path(claude).parent}:{SYSTEM_PATH}"},
+        # launchd's TMPDIR need not be the shell's: pinned, `night.py digest` reads what the run wrote.
+        "EnvironmentVariables": {"PATH": f"{Path(claude).parent}:{SYSTEM_PATH}", "NIRUX_CANARY_HISTORY_DIR": str(history)},
         "StartCalendarInterval": {"Hour": hour, "Minute": 0},
         "RunAtLoad": False,
         "ProcessType": "Background",
         "LowPriorityIO": True,
-        "StandardOutPath": str(logs / "night.log"),
-        "StandardErrorPath": str(logs / "night.log"),
+        "StandardOutPath": str(history / "night/night.log"),
+        "StandardErrorPath": str(history / "night/night.log"),
     }
 
 
@@ -142,7 +203,7 @@ def install(app, hour, *, plist=PLIST, support=SUPPORT, run=subprocess.run, whic
 def uninstall(*, plist=PLIST, support=SUPPORT, run=subprocess.run):
     run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"], check=False, capture_output=True)
     plist.unlink(missing_ok=True)
-    shutil.rmtree(support / "runner", ignore_errors=True)
+    shutil.rmtree(support, ignore_errors=True)
     return "night run off"
 
 
@@ -160,29 +221,33 @@ def replay_command(folder):
 STEP_ENDS = {0: "clean", 1: "findings", 2: "infra unavailable"}
 
 
-def digest(history, since, steps=()):
-    """The ledger's events after \`since\`, as markdown: how each step ended, the incidents with their
-    replay commands, the clean runs."""
+def digest(history, since, steps=(), app=None):
+    """The ledger's events after `since`, as markdown: the app tested, how each step ended, the
+    incidents with their replay commands, the clean runs."""
     events_path = history / "events.jsonl"
     events = [json.loads(line) for line in events_path.read_text().splitlines()] if events_path.exists() else []
     recent = [event for event in events if event.get("timestamp", "") > since]
     incidents = [event for event in recent if event["type"] == "incident"]
     passes = [event for event in recent if event["type"] == "pass"]
     lines = [f"# Canary night digest, {datetime.date.today().isoformat()}", ""]
+    if app:
+        lines.append(f"- App: {app}")
     for step in steps:
         end = "stopped: someone was back" if step["stopped"] else STEP_ENDS.get(step["exit"], f"failed (exit {step['exit']})")
         lines.append(f"- Step {step['name']}: {end}")
-    lines += ["" if steps else None, f"{len(incidents)} incident(s), {len(passes)} clean run(s) since {since or 'the start'}.", ""]
+    if len(lines) > 2:
+        lines.append("")
+    lines += [f"{len(incidents)} incident(s), {len(passes)} clean run(s) since {since or 'the start'}.", ""]
     for event in incidents:
         components, folder = event.get("components") or {}, event.get("investigationDir")
         lines.append(f"- **{event['scenario']}** · {components.get('rule', '?')} ({event['classification']}): "
                      f"{components.get('detail', '')}")
         if folder:
             lines.append(f"  Replay: {replay_command(folder)}")
-    return "\n".join(line for line in lines if line is not None) + "\n"
+    return "\n".join(lines) + "\n"
 
 
-def run(args, history=None, probe=probe, watch=watched, user=getpass.getuser):
+def run(args, history=None, probe=probe, watch=watched, user=getpass.getuser, nightly=newest_nightly):
     history = history or default_history_dir()
     (history / "night").mkdir(parents=True, exist_ok=True)
     with open(history / "night" / "run.lock", "a") as lock:
@@ -202,35 +267,42 @@ def run(args, history=None, probe=probe, watch=watched, user=getpass.getuser):
         night.mkdir(parents=True, exist_ok=True)
         stamp = history / "night" / "last-digest"
         since = stamp.read_text().strip() if stamp.exists() else ""
-        explore = [sys.executable, "-B", str(HERE / "explore.py"), str(args.app), "--evidence-dir", str(night),
+        app, about = nightly() if args.app == "latest" else (args.app, str(args.app))
+        explore = [sys.executable, "-B", str(HERE / "explore.py"), str(app), "--evidence-dir", str(night),
                    "--history-dir", str(history)]
-        steps = [("explore", explore)] + [(f"trace {trace.stem}", explore + ["--replay-trace", str(trace)])
-                                          for trace in sorted((HERE / "traces").glob("*.jsonl"))]
+        steps = ([("explore", explore)] + [(f"trace {trace.stem}", explore + ["--replay-trace", str(trace)])
+                                           for trace in sorted((HERE / "traces").glob("*.jsonl"))]) if app else []
         ended = []
         for name, command in steps:
             status, stopped = watch(command)
             ended.append({"name": name, "exit": status, "stopped": stopped})
             if stopped:
                 break
-        (night / "digest.md").write_text(digest(history, since, ended))
+        (night / "digest.md").write_text(digest(history, since, ended, about))
         stamp.write_text(utc_now_iso())
         awake.terminate()
+        awake.wait()
         print(f"digest: {night / 'digest.md'}")
         return 0
+
+
+def app_argument(value):
+    """`latest`, the nightly release's newest build, or a Nirux.app."""
+    return value if value == "latest" else Path(value).resolve()
 
 
 def main(argv=None):
     root = argparse.ArgumentParser(prog="night.py")
     commands = root.add_subparsers(dest="command", required=True)
     installing = commands.add_parser("install")
-    installing.add_argument("--app", type=Path, required=True)
+    installing.add_argument("--app", type=app_argument, required=True)
     installing.add_argument("--hour", type=int, default=3, choices=range(24), metavar="0-23")
     commands.add_parser("uninstall")
-    commands.add_parser("run").add_argument("--app", type=Path, required=True)
+    commands.add_parser("run").add_argument("--app", type=app_argument, required=True)
     commands.add_parser("digest")
     args = root.parse_args(argv)
     if args.command == "install":
-        print(install(args.app.resolve(), args.hour))
+        print(install(args.app, args.hour))
     elif args.command == "uninstall":
         print(uninstall())
     elif args.command == "run":

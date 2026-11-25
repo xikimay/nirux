@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,26 @@ BATTERY = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t80%; di
 
 def ioreg(seconds):
     return f'    | |   "HIDIdleTime" = {int(seconds * 1e9)}\n'
+
+
+def signed_app(folder, build):
+    """An ad-hoc signed Nirux.app whose CFBundleVersion is `build`."""
+    app = folder / "Nirux.app"
+    (app / "Contents/MacOS").mkdir(parents=True)
+    shutil.copy("/usr/bin/true", app / "Contents/MacOS/Nirux")
+    (app / "Contents/Info.plist").write_bytes(plistlib.dumps(
+        {"CFBundleExecutable": "Nirux", "CFBundleIdentifier": "com.example.night-fixture", "CFBundleVersion": str(build)}))
+    subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(app)], check=True, capture_output=True)
+    return app
+
+
+def released(app):
+    """A download that gets `app` zipped, as the nightly release ships it."""
+    return lambda url, target: subprocess.run(["/usr/bin/ditto", "-c", "-k", "--keepParent", str(app), str(target)], check=True)
+
+
+def unreachable(url, target):
+    night.tool("download failed", ["/bin/sh", "-c", "echo 'curl: (6) Could not resolve host: github.com' >&2; exit 6"], 5)
 
 
 def gone(pid):
@@ -70,19 +91,19 @@ class NightTests(unittest.TestCase):
             root, calls = Path(folder), []
             run = lambda command, **kwargs: calls.append((command[1], kwargs.get("check")))
             plist, support = root / "LaunchAgents/agent.plist", root / "Support"
-            for _ in range(2):
-                text = night.install(Path("/tmp/Nirux.app"), 4, plist=plist, support=support, run=run,
-                                     which=lambda _: "/opt/tools/bin/claude")
+            for app in (Path("/tmp/Nirux.app"), night.app_argument("latest")):
+                text = night.install(app, 4, plist=plist, support=support, run=run, which=lambda _: "/opt/tools/bin/claude")
             agent = plistlib.loads(plist.read_bytes())
             self.assertEqual(calls, [("bootout", False), ("bootstrap", True)] * 2)
-            self.assertEqual(agent["ProgramArguments"][2:], [str(support / "runner/night.py"), "run", "--app", "/tmp/Nirux.app"])
-            self.assertEqual(agent["EnvironmentVariables"]["PATH"], "/opt/tools/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+            self.assertEqual(agent["ProgramArguments"][2:], [str(support / "runner/night.py"), "run", "--app", "latest"])
+            self.assertEqual(agent["EnvironmentVariables"], {"PATH": "/opt/tools/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                                                             "NIRUX_CANARY_HISTORY_DIR": str(night.default_history_dir())})
             self.assertEqual((agent["StartCalendarInterval"], agent["RunAtLoad"]), ({"Hour": 4, "Minute": 0}, False))
             self.assertTrue((support / "runner/explore.py").exists() and (support / "runner/traces").is_dir())
             self.assertFalse(list((support / "runner").glob("test_*")))
             self.assertIn("sudo pmset repeat wakeorpoweron MTWRFSU 03:55:00", text)
             self.assertEqual(night.uninstall(plist=plist, support=support, run=run), "night run off")
-            self.assertFalse(plist.exists() or (support / "runner").exists())
+            self.assertFalse(plist.exists() or support.exists())
         with self.assertRaises(SystemExit):
             night.install(Path("/tmp/Nirux.app"), 4, plist=plist, support=support, run=run, which=lambda _: None)
 
@@ -98,6 +119,49 @@ class NightTests(unittest.TestCase):
                 night.fcntl.flock(held, night.fcntl.LOCK_EX)
                 night.run(mock.Mock(app=Path("/tmp/Nirux.app")), history=history, probe=lambda _: AC, watch=watch, user=lambda: "me")
         watch.assert_not_called()
+
+    def test_latest_takes_a_newer_nightly_whose_signature_verifies_else_the_last_good_copy(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            kept, older, newer = (signed_app(root / str(build), build) for build in (202611250300, 202611240300, 202611260300))
+            tampered = signed_app(root / "tampered", 202611270300)
+            (tampered / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "Nirux", "CFBundleVersion": "202611280300"}))
+            junk = lambda url, target: target.write_text("<html>rate limited</html>")
+            nightly, good = root / "nightly", root / "nightly/Nirux.app"
+            got = lambda download: night.newest_nightly(nightly, download)
+
+            self.assertEqual(got(unreachable),
+                             (None, "none, nothing ran (newest nightly: download failed: curl: (6) Could not resolve host: github.com)"))
+            self.assertEqual(got(released(kept)), (good, "nightly build 202611250300"))
+            self.assertEqual(got(released(older)),
+                             (good, "last good build 202611250300 (newest nightly: build 202611240300 is older than the last good one)"))
+            self.assertEqual(got(unreachable)[1],
+                             "last good build 202611250300 (newest nightly: download failed: curl: (6) Could not resolve host: github.com)")
+            self.assertRegex(got(junk)[1], r"^last good build 202611250300 \(newest nightly: doesn't unpack: .+\)$")
+            self.assertRegex(got(released(tampered))[1], r"^last good build 202611250300 \(newest nightly: signature doesn't verify: .+\)$")
+            self.assertEqual(night.build_number(good), 202611250300)
+            self.assertEqual(got(released(kept)), (good, "nightly build 202611250300"), "the same build again is no older")
+            self.assertEqual(got(released(newer)), (good, "nightly build 202611260300"))
+            self.assertEqual(night.build_number(good), 202611260300)
+            self.assertEqual(sorted(path.name for path in nightly.iterdir()), ["Nirux.app"], "each download's leftovers go")
+
+    def test_a_latest_run_tests_the_copy_it_got_and_none_when_there_is_none(self):
+        answers = {"pmset": AC, "ioreg": ioreg(3600), "stat": "me\n"}
+        probe = lambda command: answers[Path(command[0]).name]
+        with tempfile.TemporaryDirectory() as folder:
+            history = Path(folder)
+            for app, about in ((Path("/kept/Nirux.app"), "last good build 202611250300 (newest nightly: download failed: x)"),
+                               (None, "none, nothing ran (newest nightly: download failed: x)")):
+                watch = mock.Mock(return_value=(0, False))
+                night.run(mock.Mock(app="latest"), history=history, probe=probe, watch=watch, user=lambda: "me",
+                          nightly=lambda: (app, about))
+                digest = next((history / "night").glob("*/digest.md")).read_text()
+                self.assertIn(f"- App: {about}\n", digest)
+                if app:
+                    self.assertTrue(watch.call_args_list and all(call.args[0][3] == str(app) for call in watch.call_args_list))
+                else:
+                    watch.assert_not_called()
+                    self.assertNotIn("- Step", digest)
 
     def test_the_digest_tells_each_steps_end_and_the_replay_each_incident_allows(self):
         with tempfile.TemporaryDirectory() as folder:
