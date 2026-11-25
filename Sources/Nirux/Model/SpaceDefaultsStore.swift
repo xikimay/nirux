@@ -189,6 +189,7 @@ struct SpaceDefaultsStore: Sendable {
             unknown.insert(item.name.rawValue)
         }
         if top["leadDailyPassHour"].map({ !($0 is NSNull) }) == true, decoded.leadDailyPassHour == nil { unknown.insert("leadDailyPassHour") }
+        if top["taskBudget"].map({ !($0 is NSNull) }) == true, decoded.taskBudget == nil { unknown.insert("taskBudget") }
         for key in [SpaceDefaults.CodingKeys.claudeAllow, .claudeEnvironment] {
             if let value = top[key.rawValue], !(value is NSNull), !(value is [String]) { unknown.insert(key.rawValue) }
         }

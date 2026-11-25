@@ -316,6 +316,24 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertNil(SpaceDefaultsStore.unreadDefaults.leadModel(for: .claude))
     }
 
+    /// 25M over 7 days unless the file says; 0 turns it off, and a value it
+    /// can't take reads as the default.
+    func testTheTaskBudgetSetting() throws {
+        XCTAssertEqual(SpaceDefaults().weeklyTaskBudget, SpaceDefaults.defaultTaskBudget)
+        XCTAssertNil(SpaceDefaultsStore.decode(Data(#"{"taskBudget": 0}"#.utf8)).defaults.weeklyTaskBudget, "off")
+        let set = SpaceDefaultsStore.decode(Data(#"{"taskBudget": 50000000}"#.utf8))
+        XCTAssertEqual(set.status, .loaded)
+        XCTAssertEqual(set.defaults.weeklyTaskBudget, 50_000_000)
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(set.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["taskBudget"] as? Int, 50_000_000)
+        for unreadable in [#"{"taskBudget": -5}"#, #"{"taskBudget": "50M"}"#] {
+            let odd = SpaceDefaultsStore.decode(Data(unreadable.utf8))
+            XCTAssertEqual(odd.status, .readOnly(.unknownSettings(["taskBudget"])), "kept, never rewritten: \(unreadable)")
+            XCTAssertEqual(odd.defaults.weeklyTaskBudget, SpaceDefaults.defaultTaskBudget)
+        }
+        XCTAssertEqual(SpaceDefaultsStore.unreadDefaults.weeklyTaskBudget, SpaceDefaults.defaultTaskBudget, "a pause is the safe side")
+    }
+
     /// A deleted space's defaults, setup scripts, proposed rules and logs go;
     /// its brief stays, and its Claude settings stay empty for the launch
     /// lines that name them.
