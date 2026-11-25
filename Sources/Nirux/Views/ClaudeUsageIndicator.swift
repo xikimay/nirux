@@ -46,6 +46,8 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController, NSPopoverDe
     /// at each update while it shows; their actions go to `onBurnAction`.
     var burnRows: (([QuotaReading]) -> [QuotaBurnRow])?
     var onBurnAction: ((String, QuotaBurnRow.Action) -> Void)?
+    /// Each update's limits, with their forecasts (`QuotaAlerter`).
+    var onLimits: (([QuotaLimit], TimeInterval) -> Void)?
     /// Shows the popover under the indicator; a test sets its own.
     var presentPopover: (NSPopover, NSView) -> Void = { popover, view in
         guard view.window != nil else { return }
@@ -129,6 +131,7 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController, NSPopoverDe
         limits = QuotaLimit.current(
             claude: claude, claudeReadings: claudeReadings, codex: codex, codexReadings: codexReadings, previous: limits, now: now
         )
+        onLimits?(limits, now)
         guard let binding = QuotaLimit.binding(limits) else {
             view.isHidden = true
             view.frame.size.width = 0

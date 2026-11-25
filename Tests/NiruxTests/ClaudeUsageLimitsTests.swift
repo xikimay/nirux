@@ -383,6 +383,41 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(taken, ["task-1 Compact at turn end"])
     }
 
+    /// Once per window: "full by" 20 minutes or more ahead, then "full";
+    /// nothing while the setting is off; the top spender's compaction rides along.
+    @MainActor
+    func testTheAlerterPostsOncePerWindowWithTheTopSpender() throws {
+        var posted: [QuotaAlerter.Notice] = []
+        var enabled = false
+        let column = UUID()
+        let burner = QuotaBurnRow(
+            workspaceID: "task-1", title: "Search index rewrite", share: 0.64, points: 7, tokens: 2e6,
+            cause: "Each message rereads 612k", actions: [.compactAtTurnEnd(column: column)]
+        )
+        let alerter = QuotaAlerter(isEnabled: { enabled }, burner: { burner }, post: { posted.append($0) })
+        // A point a minute from 60 %: full by 14:40, 20 minutes before its reset at 15:00.
+        let fast = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([45, 50, 55, 60], resetsAt: now + hour), now: now))
+        alerter.check([fast], now: now, calendar: utc)
+        XCTAssertEqual(posted, [], "off")
+
+        enabled = true
+        alerter.check([fast], now: now, calendar: utc)
+        alerter.check([fast], now: now, calendar: utc)
+        XCTAssertEqual(posted, [QuotaAlerter.Notice(
+            title: "Claude’s 5-hour window will be full by 14:40",
+            body: "Then it resets at 15:00 (in 1h). “Search index rewrite” spends the most: each message rereads 612k.",
+            workspaceID: "task-1", compactColumn: column
+        )], "once per window")
+
+        // Under 20 minutes ahead: no alert; full: one more.
+        let late = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([45, 50, 55, 60], resetsAt: now + 50 * 60), now: now))
+        XCTAssertEqual(QuotaAlert.due([late], sent: []), [])
+        let full = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([90, 95, 100], resetsAt: now + hour), now: now))
+        alerter.check([full], now: now, calendar: utc)
+        XCTAssertEqual(posted.last?.title, "Claude’s 5-hour window is full")
+        XCTAssertEqual(posted.count, 2)
+    }
+
     func testAQueuedCompactWaitsForRestAndYieldsToADraft() {
         XCTAssertEqual(QueuedCompact.of(nil), .drop, "its claude left")
         XCTAssertEqual(QueuedCompact.of(LeadHoldings(isBusy: true)), .wait)

@@ -332,6 +332,9 @@ extension NiruxApp {
         notifier.onQuickReply = { [weak shellView] target, text, workspaceID, columnIndex in
             shellView?.replyFromNotification(text, to: target, workspaceID: workspaceID, columnIndex: columnIndex)
         }
+        notifier.onQuotaCompact = { [weak shellView] workspaceID, column in
+            shellView?.takeBurnAction(.compactAtTurnEnd(column: column), workspaceID: workspaceID)
+        }
     }
 
     static func bringNiruxForward() {

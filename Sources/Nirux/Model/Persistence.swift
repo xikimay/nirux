@@ -338,6 +338,9 @@ struct PersistedSettings: Codable {
     /// A pull request whose checks failed says when the failure looks
     /// flaky (see `CITriage`). On by default: missing decodes to true.
     var triageCIFailures: Bool = true
+    /// A plan limit's pace notifies before it fills (see `QuotaAlert`). On
+    /// by default: missing decodes to true.
+    var warnQuotaForecast: Bool = true
     /// Minutes a dialog may wait before its agent reads as stuck; 0 = off.
     var stuckAgentMinutes: Int?
     /// A working Claude that may be going in circles says so on its row
@@ -419,6 +422,7 @@ struct PersistedSettings: Codable {
         case generateTaskNames
         case showCatchUp
         case triageCIFailures
+        case warnQuotaForecast
         case stuckAgentMinutes
         case agentCirclingHint
         case onboardingChecklist
@@ -468,6 +472,7 @@ struct PersistedSettings: Codable {
         generateTaskNames = (try? container.decodeIfPresent(Bool.self, forKey: .generateTaskNames)) ?? true
         showCatchUp = (try? container.decodeIfPresent(Bool.self, forKey: .showCatchUp)) ?? true
         triageCIFailures = try container.decodeIfPresent(Bool.self, forKey: .triageCIFailures) ?? true
+        warnQuotaForecast = (try? container.decodeIfPresent(Bool.self, forKey: .warnQuotaForecast)) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
         agentCirclingHint = try container.decodeIfPresent(Bool.self, forKey: .agentCirclingHint) ?? true
         // A value from a newer build must not make the whole state file
@@ -528,6 +533,7 @@ struct PersistedSettings: Codable {
         try container.encode(showTurnStatus, forKey: .showTurnStatus)
         try container.encode(showCatchUp, forKey: .showCatchUp)
         try container.encode(triageCIFailures, forKey: .triageCIFailures)
+        try container.encode(warnQuotaForecast, forKey: .warnQuotaForecast)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
         try container.encode(agentCirclingHint, forKey: .agentCirclingHint)
         try container.encodeIfPresent(
