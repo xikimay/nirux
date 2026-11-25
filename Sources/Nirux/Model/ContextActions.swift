@@ -85,9 +85,9 @@ enum QueuedCompact: Equatable {
 
     static func of(_ holdings: LeadHoldings?) -> QueuedCompact {
         guard let holdings else { return .drop }
-        if holdings.hasDraft { return .yield }
         if holdings.isBusy || holdings.hasDialog || holdings.hasQuestion { return .wait }
-        return .send
+        // A draft typed ahead may be sent before the turn ends: it wins only at rest.
+        return holdings.hasDraft ? .yield : .send
     }
 }
 
