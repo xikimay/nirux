@@ -171,6 +171,9 @@ extension NiruxShellView {
                 showToast("“\(workspace?.title ?? "")” won’t compact at turn end: its prompt holds a draft.")
             case .send:
                 compactsAtTurnEnd[columnID] = nil
+                // Compacted another way meanwhile (typed by hand, or by claude
+                // itself): its context no longer weighs.
+                guard let workspace, taskUsage(of: workspace)?.isContextHeavy == true else { continue }
                 guard let uuid = column?.agentUUID, case .sent = sendTypedPrompt(agentUUID: uuid, prompt: "/compact") else {
                     showToast("Couldn’t type /compact: claude’s prompt isn’t free.", tone: .error)
                     continue
