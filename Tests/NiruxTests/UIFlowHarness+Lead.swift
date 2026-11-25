@@ -12,13 +12,18 @@ extension UIFlowHarness {
     }
 
     /// A space anchored to the harness's repository, with its Lead, and
-    /// Mission handoffs off: the Lead's tasks must work all the same.
+    /// Mission handoffs off: the Lead's tasks must work all the same. Its
+    /// tasks' results reach it at once: a flow can't wait out the group's
+    /// window (`MissionResultBatch`).
     func makeLead(environment: [SpaceDefaults.EnvironmentVariable] = []) throws -> Lead {
         shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
         XCTAssertTrue(Persistence.updateSettings(liveLayout: shell.persistedState()) { $0.missionHandoffsEnabled = false })
         let repository = SpaceAnchor(kind: .gitRepository(commonDir: repo + "/.git"), name: "repo", isDefault: true)
         let space = shell.workspaceStore.createProfile(named: "Tools", anchors: [repository], select: true).id
-        if !environment.isEmpty { shell.changeSpaceDefaults(spaceID: space) { $0.environment = environment } }
+        shell.changeSpaceDefaults(spaceID: space) {
+            $0.environment = environment
+            $0.leadGroupsResults = false
+        }
         shell.startLead(spaceID: space)
         let workspace = try XCTUnwrap(shell.leadWorkspace(inSpace: space))
         return Lead(space: space, workspace: workspace, agentUUID: try XCTUnwrap(workspace.columns.first?.agentUUID))

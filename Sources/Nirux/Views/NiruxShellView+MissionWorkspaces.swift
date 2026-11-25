@@ -302,8 +302,12 @@ extension NiruxShellView {
         var typedAny = false
         lazy var places = MissionWaitHook.mailbox.places()
         lazy var hooksOn = Self.currentClaudeMissionHook()
-        for delivery in MissionStore.shared.pendingPromptDeliveries(now: now)
-        where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
+        let deliveries = MissionStore.shared.pendingPromptDeliveries(now: now).filter { $0.mission.isCarried(handoffsEnabled: handoffsEnabled) }
+        let results = resultBatch(deliveries)
+        let held = results.held(now: now)
+        scheduleResultRelease(at: results.nextRelease(now: now), now: now)
+        var typedTogether = Set<String>()
+        for delivery in deliveries where !held.contains(delivery.event.id) && !typedTogether.contains(delivery.event.id) {
             let mission = delivery.mission
             let recipientID = Self.goesToParent(delivery.event) ? mission.parentWorkspaceID : mission.childWorkspaceID
             guard !resumingTasks.contains(recipientID) else { continue }
@@ -334,13 +338,37 @@ extension NiruxShellView {
                 seenByUser: recipient.id == seenAtPrompt, agent: agent
             )
             if recipient.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
-            guard refusal == nil,
-                  let delivery = MissionStore.shared.pendingPromptDelivery(delivery),
-                  let text = MissionPromptText.text(
-                      for: delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title
-                  ),
-                  let paste = TypedPromptSanitizer.bracketedPaste(for: text)
+            // Typed inside a paste still being written, it would garble both.
+            guard refusal == nil, !pty.isPasting, let delivery = MissionStore.shared.pendingPromptDelivery(delivery) else { continue }
+            // A Lead's grouped results, in one prompt: one wake for them all.
+            let together = results.together(with: delivery).enumerated().compactMap { index, item -> (MissionStore.AcceptedEvent, String)? in
+                let childTitle = workspaces.first { $0.id == item.mission.childWorkspaceID }?.title
+                // A joined result the hook has, or may have claimed, isn't typed again.
+                guard index == 0 || (!missionWaits.typing.contains(item.event.id) && missionWaits.handedToHooks[item.event.id] == nil
+                          && !(agent == .claude && leaveToHook(
+                              item, in: recipient, foreground: pty.foregroundProcess(snapshot: snapshot), places: places, now: now,
+                              enabled: hooksOn,
+                              text: {
+                                  MissionStore.shared.pendingPromptDelivery(item).flatMap {
+                                      MissionPromptText.hookText(for: $0, childTitle: childTitle, parentTitle: parentWorkspace?.title)
+                                  }
+                              }
+                          ))),
+                      let item = MissionStore.shared.pendingPromptDelivery(item),
+                      let text = MissionPromptText.text(for: item, childTitle: childTitle, parentTitle: parentWorkspace?.title)
+                else { return nil }
+                return (item, text)
+            }
+            // What one paste holds; the rest waits for the next pass.
+            let fitting = Array(together.prefix(MissionResultBatch.fittingCount(together.map(\.1))))
+            guard fitting.first?.0.event.id == delivery.event.id,
+                  let paste = TypedPromptSanitizer.bracketedPaste(for: fitting.map(\.1).joined(separator: MissionResultBatch.separator))
             else { continue }
+            let typedItems = fitting.map(\.0)
+            // Those left out wait for the next pass, after this prompt's turn:
+            // until the paste is written, no pass takes them.
+            let leftOut = together.dropFirst(fitting.count).map(\.0)
+            typedTogether.formUnion(together.map(\.0.event.id))
             let toChild = !Self.goesToParent(delivery.event)
             let byUser = delivery.event.answeredByUser == true
             // Its sender hears what stayed in the prompt: an agent, about its own message.
@@ -348,12 +376,15 @@ extension NiruxShellView {
                 ? delivery.event.leadSender ?? NewTask.MissionParent(workspaceID: mission.parentWorkspaceID, agentUUID: mission.parentAgentUUID)
                 : nil
             let recipientTitle = MissionPromptText.quoted((toChild ? childWorkspace : parentWorkspace)?.title ?? mission.branch)
-            missionWaits.typing.insert(delivery.event.id)
+            missionWaits.typing.formUnion(together.map(\.0.event.id))
             let front = pty.foregroundProcess(snapshot: snapshot)?.instance
             typeMissionPrompt(paste, into: pty, keepingInFront: front, typedByNirux: !byUser) { [weak self] typed in
                 guard let self else { return }
-                self.finishTyping(delivery, typed, at: now)
-                self.reportUnsent(typed, what: byUser ? "your answer" : "a Mission message", for: recipientTitle, telling: sender)
+                // Cut, only the first's start surely went in: the rest go again.
+                for (index, item) in typedItems.enumerated() { self.finishTyping(item, typed == .cut && index > 0 ? .left : typed, at: now) }
+                for item in leftOut { self.finishTyping(item, .left, at: now) }
+                let what = byUser ? "your answer" : typedItems.count > 1 ? "\(typedItems.count) task results" : "a Mission message"
+                self.reportUnsent(typed, what: what, for: recipientTitle, telling: sender)
                 // agy says when it takes a prompt (OSC 7501 working).
                 guard typed == .sent, agent == .agy, let front else { return }
                 self.checkStarted(front, in: pty, since: now) { shell in
@@ -390,6 +421,27 @@ extension NiruxShellView {
             return false
         }
         return true
+    }
+
+    /// `MissionResultBatch` of `deliveries`: results to a Lead whose space
+    /// groups them.
+    func resultBatch(_ deliveries: [MissionStore.AcceptedEvent]) -> MissionResultBatch {
+        MissionResultBatch(deliveries) { mission in
+            guard let lead = workspaces.first(where: { $0.id == mission.parentWorkspaceID }), lead.isLead else { return false }
+            return SpaceDefaultsStore.defaults(forSpace: lead.profileID).groupsResults
+        }
+    }
+
+    /// A pass when the next waiting results are due, unless one comes by
+    /// then.
+    private func scheduleResultRelease(at release: TimeInterval?, now: TimeInterval) {
+        guard let release, missionWaits.resultReleaseAt.map({ $0 <= now || $0 > release }) ?? true else { return }
+        missionWaits.resultReleaseAt = release
+        DispatchQueue.main.asyncAfter(deadline: .now() + (release - now)) { [weak self] in
+            guard let self else { return }
+            if self.missionWaits.resultReleaseAt == release { self.missionWaits.resultReleaseAt = nil }
+            self.typeMissionMessages()
+        }
     }
 
     private func typeMissionMessagesSoon() {

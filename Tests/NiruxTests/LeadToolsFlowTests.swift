@@ -1297,6 +1297,11 @@ final class LeadToolsFlowTests: XCTestCase {
             pane.dailyPassSwitch.sendAction(pane.dailyPassSwitch.action, to: pane.dailyPassSwitch.target)
             XCTAssertEqual(SpaceDefaultsStore(spaceID: lead.space)?.load().defaults.leadDailyPass, false)
             XCTAssertFalse(pane.dailyPassHourPopup.isEnabled)
+            XCTAssertEqual(pane.groupResultsSwitch.state, .off, "the harness's Lead takes its results at once")
+            pane.groupResultsSwitch.state = .on
+            pane.groupResultsSwitch.sendAction(pane.groupResultsSwitch.action, to: pane.groupResultsSwitch.target)
+            XCTAssertNil(SpaceDefaultsStore(spaceID: lead.space)?.load().defaults.leadGroupsResults, "on writes nothing")
+            XCTAssertEqual(pane.groupResultsSwitch.state, .on)
             XCTAssertFalse(try call(LeadTools.recordReview, ["task": "Fix", "findings": [finding]], lead: lead, in: harness).isError)
             check(at: tomorrow + 86_400)
             XCTAssertEqual(box.sent.count, 1, "off, though something happened")
