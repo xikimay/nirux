@@ -896,6 +896,51 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
     }
 
+    /// An agent that takes all of a long tell and ends before its Enter,
+    /// its exit not read yet (a zombie): it isn't in front, the tell is
+    /// given up, and its sender hears it may not have read it.
+    func testALongTellWhoseAgentEndsBeforeItsEnterIsGivenUp() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let message = (1...70).map { "Line \($0): read the file and add up the totals." }.joined(separator: "\n")
+            let task = try reportingTask("Reader", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            let agentUUID = try XCTUnwrap(task.column.agentUUID)
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            // Ended at Enter's check, on the main thread: its exit, read
+            // there too, comes after the check.
+            var endedAtEnter = false
+            // Called once all of the paste went in: the agent read it, then ended.
+            harness.shell.sideEffects.willPressEnter = { pty in
+                guard pty === task.column.pty, !endedAtEnter else { return }
+                endedAtEnter = true
+                let deadline = Date().addingTimeInterval(10)
+                while !task.agent.input.hasSuffix("\u{1B}[201~"), Date() < deadline { usleep(1_000) }
+                kill(task.claude.pid, SIGKILL)
+                while !Self.isZombie(task.claude.pid), Date() < deadline { usleep(1_000) }
+                XCTAssertTrue(Self.isZombie(task.claude.pid), "ended, its exit not read")
+            }
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            harness.waitUntil("its typing over", timeout: 60) { harness.shell.missionWaits.typing.isEmpty }
+            XCTAssertTrue(endedAtEnter, "its Enter was next")
+            XCTAssertTrue(task.agent.input.hasSuffix("\u{1B}[201~"), "all of it, read, no Enter")
+            let state = MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == agentUUID }
+                .map { $0.childConsumedAt != nil ? "typed" : $0.expiredAt != nil ? "given up" : "waiting" }
+            XCTAssertEqual(state, ["given up"])
+            XCTAssertTrue(harness.shell.pendingLeadNotices.contains {
+                $0.text.contains("“Reader” went into its prompt, but its agent ended before Enter: it may not have read it")
+            }, harness.shell.pendingLeadNotices.map(\.text).joined())
+        }
+    }
+
+    private static func isZombie(_ pid: pid_t) -> Bool {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        return sysctl(&mib, 4, &info, &size, nil, 0) == 0 && size > 0 && Int32(info.kp_proc.p_stat) == SZOMB
+    }
+
     /// A tell to a task whose Claude Code waits to resume is for the
     /// conversation it will resume.
     func testATellToATaskWaitingToResumeIsForItsConversation() throws {
