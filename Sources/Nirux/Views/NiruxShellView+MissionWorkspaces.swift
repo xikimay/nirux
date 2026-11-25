@@ -338,7 +338,8 @@ extension NiruxShellView {
                 seenByUser: recipient.id == seenAtPrompt, agent: agent
             )
             if recipient.id == seenAtPrompt, onSight == nil { onSight = .refused(refusal) }
-            guard refusal == nil, let delivery = MissionStore.shared.pendingPromptDelivery(delivery) else { continue }
+            // Typed inside a paste still being written, it would garble both.
+            guard refusal == nil, !pty.isPasting, let delivery = MissionStore.shared.pendingPromptDelivery(delivery) else { continue }
             // A Lead's grouped results, in one prompt: one wake for them all.
             let together = results.together(with: delivery).enumerated().compactMap { index, item -> (MissionStore.AcceptedEvent, String)? in
                 let childTitle = workspaces.first { $0.id == item.mission.childWorkspaceID }?.title
@@ -364,7 +365,9 @@ extension NiruxShellView {
                   let paste = TypedPromptSanitizer.bracketedPaste(for: fitting.map(\.1).joined(separator: MissionResultBatch.separator))
             else { continue }
             let typedItems = fitting.map(\.0)
-            // Those left out wait for the next pass, after this prompt's turn.
+            // Those left out wait for the next pass, after this prompt's turn:
+            // until the paste is written, no pass takes them.
+            let leftOut = together.dropFirst(fitting.count).map(\.0)
             typedTogether.formUnion(together.map(\.0.event.id))
             let toChild = !Self.goesToParent(delivery.event)
             let byUser = delivery.event.answeredByUser == true
@@ -373,12 +376,13 @@ extension NiruxShellView {
                 ? delivery.event.leadSender ?? NewTask.MissionParent(workspaceID: mission.parentWorkspaceID, agentUUID: mission.parentAgentUUID)
                 : nil
             let recipientTitle = MissionPromptText.quoted((toChild ? childWorkspace : parentWorkspace)?.title ?? mission.branch)
-            missionWaits.typing.formUnion(typedItems.map(\.event.id))
+            missionWaits.typing.formUnion(together.map(\.0.event.id))
             let front = pty.foregroundProcess(snapshot: snapshot)?.instance
             typeMissionPrompt(paste, into: pty, keepingInFront: front, typedByNirux: !byUser) { [weak self] typed in
                 guard let self else { return }
                 // Cut, only the first's start surely went in: the rest go again.
                 for (index, item) in typedItems.enumerated() { self.finishTyping(item, typed == .cut && index > 0 ? .left : typed, at: now) }
+                for item in leftOut { self.finishTyping(item, .left, at: now) }
                 let what = byUser ? "your answer" : typedItems.count > 1 ? "\(typedItems.count) task results" : "a Mission message"
                 self.reportUnsent(typed, what: what, for: recipientTitle, telling: sender)
                 // agy says when it takes a prompt (OSC 7501 working).
