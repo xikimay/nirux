@@ -112,6 +112,9 @@ def refused(name, arguments, allows_browser=False):
         kind = next((kind for title in arguments["path"] for pattern, kind in MENU_RES if pattern.search(title)), None)
     elif name == "type":
         kind = next((kind for pattern, kind in TYPED_RES if pattern.search(arguments["text"])), None)
+    elif name == "press":
+        # A button named like those menu items ("New Terminal", "Open Browser") does what they do.
+        kind = next((kind for pattern, kind in MENU_RES if kind != "clipboard" and pattern.search(arguments["label"])), None)
     else:
         kind = None
     return None if kind is None or (kind == "browser" and allows_browser) else kind
