@@ -87,6 +87,31 @@ struct QuotaPaceTests {
         #expect(QuotaPace.forecast(near, span: span, now: now) == .atReset(percent: 99))
     }
 
+    @Test func theBindingLimitIsTheOneThatStopsTheAgentsFirst() throws {
+        func limit(_ agent: QuotaLimit.Agent, _ length: TimeInterval, _ percents: [Double], resetsIn: TimeInterval) throws -> QuotaLimit {
+            try #require(QuotaLimit(agent: agent, length: length, readings: readings(percents, resetsAt: now + resetsIn), now: now))
+        }
+        let week = try limit(.claude, 7 * 86_400, [70, 70, 70, 70], resetsIn: 86_400)
+        let session = try limit(.claude, 5 * 3_600, [52.5, 55, 57.5, 60], resetsIn: 3_600)
+        let codex = try limit(.codex, 5 * 3_600, [30, 30, 30, 30], resetsIn: 3_600)
+        #expect(session.forecast == .atReset(percent: 90))
+        #expect(QuotaLimit.binding([codex, week, session])?.id == session.id, "90 % at its reset beats 30 %")
+        // Half a point every 5 minutes: the week is full in under 5 hours.
+        let climbingWeek = try limit(.claude, 7 * 86_400, [70, 70.5, 71, 71.5], resetsIn: 86_400)
+        #expect(climbingWeek.runsOut && !session.runsOut)
+        #expect(QuotaLimit.binding([session, climbingWeek])?.id == climbingWeek.id)
+        let fast = try limit(.claude, 5 * 3_600, [45, 50, 55, 60], resetsIn: 3_600)
+        #expect(QuotaLimit.binding([climbingWeek, fast])?.id == fast.id, "it runs out first")
+        let full = try limit(.codex, 5 * 3_600, [98, 99, 100], resetsIn: 600)
+        #expect(QuotaLimit.binding([fast, full, climbingWeek])?.id == full.id)
+        #expect(QuotaLimit(agent: .claude, length: 3_600, readings: readings([10], resetsAt: now - 1), now: now) == nil)
+        // A limit no agent spent lately still counts by its use: a pause must not hide a nearly full window.
+        let quiet = try #require(QuotaLimit(agent: .claude, length: 5 * 3_600, readings: [QuotaReading(time: now - 2_400, usedPercent: 95, resetsAt: now + 3_600)], now: now))
+        #expect(quiet.forecast == .quiet)
+        #expect(QuotaLimit.binding([week, quiet])?.id == quiet.id)
+        #expect(QuotaLimit.binding([quiet, try limit(.codex, 5 * 3_600, [70, 80, 90, 98], resetsIn: 3_600)])?.agent == .codex, "one running out still comes first")
+    }
+
     @Test func silenceAfterTheLastReadingSlowsThePace() {
         // 80 → 90 % over 15 minutes, then nothing for 16: no "full by now".
         let stopped = (0..<3).map { QuotaReading(time: now - 1_860 + Double($0) * 450, usedPercent: 80 + Double($0) * 5, resetsAt: now + 3 * 3_600) }
