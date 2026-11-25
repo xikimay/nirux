@@ -289,6 +289,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(indicator.label.stringValue, "⚠︎ 5h full by 14:40")
         XCTAssertEqual(indicator.label.textColor, Theme.Color.error)
         XCTAssertEqual(indicator.meters.limits.map(\.length), [5 * hour, 7 * 24 * hour])
+        XCTAssertEqual(indicator.meters.limits.map(QuotaMeterView.projected), [100, 20], "the hatch runs to the reset's forecast")
         XCTAssertTrue(indicator.view.toolTip?.contains("5h: full by 14:40, before its reset at 15:00") == true)
         XCTAssertTrue(indicator.view.toolTip?.contains("Claude 7d: 20% used, resets Wed 08:00 (in 3d 18h)") == true, "every window, from what's shown")
         XCTAssertTrue(indicator.label.accessibilityLabel()?.contains("7d 20% used") == true, "VoiceOver hears every window")
