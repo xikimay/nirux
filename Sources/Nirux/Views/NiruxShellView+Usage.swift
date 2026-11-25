@@ -308,6 +308,9 @@ extension NiruxShellView {
     func takeContextOffer(_ choice: ContextOffer.Choice, workspaceIndex: Int, columnIndex: Int) {
         guard let workspace = workspaces[safe: workspaceIndex], let column = workspace.columns[safe: columnIndex],
               let uuid = column.agentUUID, let pty = column.pty else { return }
+        // The user's own choice replaces a queued "Compact at turn end",
+        // whether or not it goes through.
+        compactsAtTurnEnd[column.id] = nil
         let foreground = pty.foregroundProcess(snapshot: ProcessSnapshot())
         let action = ContextOfferAction.of(
             choice, hasDraft: pty.hasPromptDraft, isLead: workspace.isLead,
@@ -317,7 +320,6 @@ extension NiruxShellView {
         case .refuse(let message):
             showToast(message, tone: .error)
         case .typeCompact:
-            compactsAtTurnEnd[column.id] = nil
             guard case .sent = sendTypedPrompt(agentUUID: uuid, prompt: "/compact") else {
                 return showToast("Couldn’t type /compact: claude’s prompt isn’t free.", tone: .error)
             }
