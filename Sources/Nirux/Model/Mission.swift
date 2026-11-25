@@ -10,8 +10,8 @@ struct Mission: Codable, Equatable {
     }
 
     let id: String
-    let parentWorkspaceID: String
-    let parentAgentUUID: String
+    var parentWorkspaceID: String
+    var parentAgentUUID: String
     let childWorkspaceID: String
     let childAgentUUID: String
     /// `CodingAgent`'s raw value, or "agent" when the child started none.
@@ -397,6 +397,26 @@ final class MissionStore {
                 }
             }
             if mission != original { mission.updatedAt = now }
+            return mission
+        }
+        return updated == missions || commit(updated)
+    }
+
+    /// A task's conversation became its space's Lead: the Missions it
+    /// parented report to the Lead's agent now, as the Lead's own tasks.
+    func reparentMissions(
+        fromWorkspace workspaceID: String, agentUUID: String, toLead leadID: String, leadAgentUUID: String, at now: TimeInterval
+    ) -> Bool {
+        guard ensureLoaded() else { return false }
+        let updated = missions.map { original -> Mission in
+            guard original.parentWorkspaceID == workspaceID, original.parentAgentUUID == agentUUID, original.oneWay != true
+            else { return original }
+            var mission = original
+            mission.parentWorkspaceID = leadID
+            mission.parentAgentUUID = leadAgentUUID
+            mission.reportsToLead = true
+            mission.reportsToTask = nil
+            mission.updatedAt = now
             return mission
         }
         return updated == missions || commit(updated)

@@ -1,98 +1,197 @@
 import AppKit
 
-/// "5h 42% · 7d 18% · Codex 7d 30%" at the trailing end of the main
-/// window's title bar: the Claude plan usage limits (see
-/// `ClaudeUsageLimits`), then Codex's as its rollouts last reported them
-/// (`UsageMonitor`), a warning from 80% of any window like a nearly full
-/// context. The tooltip gives each
-/// window's reset. While the option is off or nothing is known it takes
-/// no room: the controller's `isHidden` only works for top and bottom
-/// accessories, so the view hides and shrinks to nothing itself.
-/// First of the trailing accessories, it keeps the window's edge, at the
-/// right end of the toolbar (`CommandBarToolbar`): the cup, which comes and
-/// goes with every turn, appears to its left without moving it.
-final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
+/// The indicator's view: a click, or VoiceOver's press, opens the popover.
+private final class PressableView: NSView {
+    var onPress: (() -> Void)?
+
+    /// A click opens the popover, never drags the window, wherever it lands
+    /// (the label and the meters would let the title bar drag it).
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        frame.contains(point) && !isHidden ? self : nil
+    }
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityPerformPress() -> Bool {
+        onPress?()
+        return true
+    }
+}
+
+/// The binding plan limit at the trailing end of the main window's title
+/// bar: the one that stops the agents first (`QuotaLimit.binding`), Claude's
+/// from its status line (see `ClaudeUsageLimits`) or Codex's from its
+/// rollouts (`UsageMonitor`). Hair meters for that agent's windows, then its
+/// pace in words: "5h 68% · ≈ 87%", or in red "⚠︎ 5h full by 20:05" once it
+/// runs out before its reset. The tooltip gives every window; a click opens
+/// the popover with each one's meter, pace and reset. While the
+/// option is off or nothing is known it takes no room: the controller's
+/// `isHidden` only works for top and bottom accessories, so the view hides
+/// and shrinks to nothing itself. First of the trailing accessories, it
+/// keeps the window's edge, at the right end of the toolbar
+/// (`CommandBarToolbar`): the cup, which comes and goes with every turn,
+/// appears to its left without moving it.
+final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController, NSPopoverDelegate {
+    /// A transient popover closes on the mouse-down of the click that meant
+    /// to close it; that click's toggle, right after, must not open it again.
+    static let reopenDelay: TimeInterval = 0.3
     private static let height: CGFloat = 22
     private static let padding: CGFloat = 6
+    private static let metersWidth: CGFloat = 42
     private static let normalColor = NSColor.white.withAlphaComponent(0.45)
 
     let label = NSTextField(labelWithString: "")
+    let meters = QuotaMeterView()
+    let popoverContent = QuotaPopoverViewController()
+    /// The Usage window, from the popover.
+    var onShowUsage: (() -> Void)?
+    /// Shows the popover under the indicator; a test sets its own.
+    var presentPopover: (NSPopover, NSView) -> Void = { popover, view in
+        guard view.window != nil else { return }
+        popover.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+    }
+    private lazy var popover: NSPopover = {
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.appearance = Theme.appearance
+        popover.contentViewController = popoverContent
+        popover.delegate = self
+        return popover
+    }()
+    private var popoverClosedAt: TimeInterval = 0
+    private var renderedAt: TimeInterval = 0
+    /// Times read in the user's calendar; a test sets its own.
+    var calendar = Calendar.current
+    /// The limits shown, each with its forecast: the next update holds them.
+    private(set) var limits: [QuotaLimit] = []
     private var claude: ClaudeUsageLimits?
+    private var claudeReadings: [String: [QuotaReading]] = [:]
     private var codex: CodexRateLimits?
+    private var codexReadings: [Int: [QuotaReading]] = [:]
 
     init() {
         super.init(nibName: nil, bundle: nil)
         layoutAttribute = .trailing
+        popoverContent.onShowUsage = { [weak self] in
+            self?.popover.performClose(nil)
+            self?.onShowUsage?()
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 0, height: Self.height))
+        let container = PressableView(frame: NSRect(x: 0, y: 0, width: 0, height: Self.height))
         container.isHidden = true
+        container.onPress = { [weak self] in self?.togglePopover() }
+        container.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(togglePopover)))
         label.font = Theme.Font.captionDigits
         label.textColor = Self.normalColor
         label.lineBreakMode = .byClipping
+        container.addSubview(meters)
         container.addSubview(label)
         view = container
     }
 
-    func update(limits: ClaudeUsageLimits?, now: TimeInterval) {
+    func update(limits: ClaudeUsageLimits?, readings: [String: [QuotaReading]] = [:], now: TimeInterval) {
         claude = limits
+        claudeReadings = readings
         render(now: now)
     }
 
-    func update(codex limits: CodexRateLimits?, now: TimeInterval) {
+    func update(codex limits: CodexRateLimits?, readings: [Int: [QuotaReading]] = [:], now: TimeInterval) {
         codex = limits
+        codexReadings = readings
         render(now: now)
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        popoverClosedAt = Date().timeIntervalSince1970
+    }
+
+    /// Opens the popover, or closes it when it shows.
+    @objc func togglePopover() {
+        if popover.isShown { return popover.performClose(nil) }
+        guard isShowing, Date().timeIntervalSince1970 - popoverClosedAt >= Self.reopenDelay else { return }
+        popoverContent.update(limits: limits, now: renderedAt, calendar: calendar)
+        presentPopover(popover, view)
     }
 
     private func render(now: TimeInterval) {
+        // Loading the view later would reset the label's colour set below.
+        loadViewIfNeeded()
         defer { relayOutTitleBar() }
-        let codexWindows = codex.map { UsageText.codexWindows($0, now: now) } ?? []
-        guard claude != nil || !codexWindows.isEmpty else {
+        renderedAt = now
+        limits = QuotaLimit.current(
+            claude: claude, claudeReadings: claudeReadings, codex: codex, codexReadings: codexReadings, previous: limits, now: now
+        )
+        guard let binding = QuotaLimit.binding(limits) else {
             view.isHidden = true
             view.frame.size.width = 0
             view.toolTip = nil
             label.toolTip = nil
             label.stringValue = ""
+            meters.limits = []
+            if popover.isShown { popover.performClose(nil) }
             return
         }
-        let codexText = codexWindows.isEmpty ? nil : "Codex " + codexWindows.map { "\($0.name) \($0.percent)%" }.joined(separator: " · ")
-        let text = [claude?.titleText, codexText].compactMap { $0 }.joined(separator: " · ")
-        let isNearLimit = claude?.isNearLimit == true || codexWindows.contains { $0.percent >= ClaudeUsageLimits.nearLimitPercent }
-        label.stringValue = isNearLimit ? text.asWarning : text
-        label.textColor = isNearLimit ? .niruxWarning : Self.normalColor
-        let codexLines = codexWindows.map { window in
-            "\(window.name) window: \(window.percent)% used"
-                + (window.resetsAt.map { ", " + ClaudeUsageLimits.resetText($0, now: now, calendar: .current) } ?? "")
+        if popover.isShown { popoverContent.update(limits: limits, now: now, calendar: calendar) }
+        let title = UsageText.title(binding, now: now, calendar: calendar)
+        label.stringValue = title.text
+        label.textColor = switch title.tone {
+        case .normal: Self.normalColor
+        case .warning: .niruxWarning
+        case .runsOut: Theme.Color.error
         }
-        label.setAccessibilityLabel([
-            claude?.accessibilityText, codexLines.isEmpty ? nil : "Codex usage limits: " + codexLines.joined(separator: ", ")
-        ].compactMap { $0 }.joined(separator: ". "))
-        let tooltip = [
-            claude?.tooltip(now: now), codexLines.isEmpty ? nil : (["Codex plan usage limits"] + codexLines).joined(separator: "\n")
-        ].compactMap { $0 }.joined(separator: "\n\n")
+        meters.limits = limits.filter { $0.agent == binding.agent }.sorted { $0.length < $1.length }
+        meters.now = now
+        let tooltip = tooltip(now: now)
         view.toolTip = tooltip
         label.toolTip = tooltip
+        view.setAccessibilityLabel(([title.text.replacingOccurrences(of: "⚠︎ ", with: "")] + limits.map { limit in
+            "\(UsageText.name(of: limit)) \(Int(limit.latest.usedPercent.rounded()))% used, \(UsageText.pace(limit, now: now, calendar: calendar))"
+        }).joined(separator: ". "))
         label.sizeToFit()
         // The title bar sets the height; only the width follows the text.
-        view.frame.size.width = label.frame.width + Self.padding * 2
-        centerLabel()
+        view.frame.size.width = Self.padding + Self.metersWidth + Theme.Space.sm + label.frame.width + Self.padding
+        layOut()
         view.isHidden = false
     }
 
-    /// Showing the limits, as opposed to taking no room.
+    /// Each window shown, with its use and reset, then each one's pace, then
+    /// when the latest reading came.
+    private func tooltip(now: TimeInterval) -> String {
+        let windows = limits.map { limit in
+            "\(limit.agent == .claude ? "Claude " : "")\(UsageText.name(of: limit)): \(Int(limit.latest.usedPercent.rounded()))% used, "
+                + ClaudeUsageLimits.resetText(limit.latest.resetsAt, now: now, calendar: calendar)
+        }
+        let read = limits.map(\.latest.time).max().map { "Last reading at \(ClaudeUsageLimits.clockText($0, now: now, calendar: calendar)). " } ?? ""
+        return [
+            (["Plan usage limits"] + windows).joined(separator: "\n"),
+            (["At this pace"] + paceLines(now: now)).joined(separator: "\n"),
+            read + "Use elsewhere (claude.ai, another Mac) counts from the next reading."
+        ].joined(separator: "\n\n")
+    }
+
+    private func paceLines(now: TimeInterval) -> [String] {
+        limits.map { "\(UsageText.name(of: $0)): \(UsageText.pace($0, now: now, calendar: calendar))" }
+    }
+
+    /// Showing a limit, as opposed to taking no room.
     var isShowing: Bool { !view.isHidden && view.frame.width > 0 }
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        centerLabel()
+        layOut()
     }
 
     /// Level with the traffic lights and the keep-awake cup.
-    private func centerLabel() {
-        label.frame.origin = NSPoint(x: Self.padding, y: floor((view.bounds.height - label.frame.height) / 2))
+    private func layOut() {
+        let meterHeight = QuotaMeterView.height(rows: max(1, meters.limits.count))
+        meters.frame = NSRect(x: Self.padding, y: floor((view.bounds.height - meterHeight) / 2), width: Self.metersWidth, height: meterHeight)
+        label.frame.origin = NSPoint(x: meters.frame.maxX + Theme.Space.sm, y: floor((view.bounds.height - label.frame.height) / 2))
     }
 }

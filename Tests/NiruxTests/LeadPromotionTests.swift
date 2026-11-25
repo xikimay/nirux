@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Promote to Lead's rules: only a Claude conversation at rest moves, and
+/// Promote to Lead's rules: only a worker at rest is promoted, and
 /// the Missions it carried as a task end without typing anything more.
 @MainActor
 final class LeadPromotionTests: XCTestCase {
@@ -13,30 +13,30 @@ final class LeadPromotionTests: XCTestCase {
     private let atRest = LeadPromotion.Worker(agent: .claude, sessionID: "s", isAtRest: true)
 
     func testOnlyAClaudeConversationAtRestMoves() {
-        XCTAssertNil(LeadPromotion.refusal(atRest, openSubtasks: 0))
-        var cases: [(LeadPromotion.Worker?, Int, String)] = [
-            (nil, 0, "agent terminal"),
-            (atRest, 1, "sub-tasks")
-        ]
-        XCTAssertTrue(LeadPromotion.refusal(atRest, isSubtask: true, openSubtasks: 0)?.contains("Promote its task") == true)
+        XCTAssertNil(LeadPromotion.refusal(atRest))
+        var cases: [(LeadPromotion.Worker?, String)] = [(nil, "agent terminal")]
+        XCTAssertTrue(LeadPromotion.refusal(atRest, isSubtask: true)?.contains("Promote its task") == true)
+        // Another agent's Lead starts afresh: no conversation to carry.
+        for agent in [CodingAgent.codex, .agy] {
+            XCTAssertNil(LeadPromotion.refusal(LeadPromotion.Worker(agent: agent, isAtRest: true)), agent.rawValue)
+            XCTAssertNotNil(LeadPromotion.refusal(LeadPromotion.Worker(agent: agent)), agent.rawValue)
+        }
         func with(_ change: (inout LeadPromotion.Worker) -> Void) -> LeadPromotion.Worker {
             var worker = atRest
             change(&worker)
             return worker
         }
         cases += [
-            (with { $0.isStarting = true }, 0, "starting"),
-            (with { $0.otherProgram = "vim" }, 0, "vim runs"),
-            (with { $0.agent = nil }, 0, "No agent"),
-            (with { $0.agent = .codex }, 0, "Only a Claude task"),
-            (with { $0.agent = .agy }, 0, "Only a Claude task"),
-            (with { $0.sessionID = nil }, 0, "first turn"),
-            (with { $0.isAtRest = false }, 0, "working"),
-            (with { $0.hasDialog = true }, 0, "dialog"),
-            (with { $0.hasDraft = true }, 0, "draft")
+            (with { $0.isStarting = true }, "starting"),
+            (with { $0.otherProgram = "vim" }, "vim runs"),
+            (with { $0.agent = nil }, "No agent"),
+            (with { $0.sessionID = nil }, "first turn"),
+            (with { $0.isAtRest = false }, "working"),
+            (with { $0.hasDialog = true }, "dialog"),
+            (with { $0.hasDraft = true }, "draft")
         ]
-        for (worker, subtasks, expected) in cases {
-            let refusal = LeadPromotion.refusal(worker, openSubtasks: subtasks)
+        for (worker, expected) in cases {
+            let refusal = LeadPromotion.refusal(worker)
             XCTAssertTrue(refusal?.contains(expected) == true, "\(String(describing: worker)): \(String(describing: refusal))")
         }
     }
@@ -74,5 +74,29 @@ final class LeadPromotionTests: XCTestCase {
         XCTAssertEqual(store.missions.first { $0.id == own.id }?.status, .completed)
         XCTAssertEqual(store.pendingPromptDeliveries(now: now).map(\.mission.id), [other.id])
         XCTAssertEqual(store.missions.first { $0.id == other.id }?.status, .active)
+    }
+
+    /// The Missions a promoted task parented report to the Lead now, as
+    /// its own tasks; another parent's are left alone.
+    func testItsMissionsAsAParentMoveToTheLead() throws {
+        let store = MissionStore(fileURL: URL(fileURLWithPath: "/dev/null"), persistsToDisk: false)
+        let leadID = "77777777-7777-4777-8777-777777777777", leadAgent = "88888888-8888-4888-8888-888888888888"
+        func mission(parent: String) throws -> Mission {
+            try XCTUnwrap(store.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: parent, parentAgentUUID: parentAgentUUID,
+                childWorkspaceID: UUID().uuidString, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+                branch: "feat/part", reportsToTask: true
+            ), enabled: false, now: 10))
+        }
+        let own = try mission(parent: parentWorkspaceID)
+        let other = try mission(parent: childWorkspaceID)
+        XCTAssertTrue(store.reparentMissions(
+            fromWorkspace: parentWorkspaceID, agentUUID: parentAgentUUID, toLead: leadID, leadAgentUUID: leadAgent, at: 20
+        ))
+        let moved = try XCTUnwrap(store.missions.first { $0.id == own.id })
+        XCTAssertEqual([moved.parentWorkspaceID, moved.parentAgentUUID], [leadID, leadAgent])
+        XCTAssertEqual(moved.reportsToLead, true)
+        XCTAssertNil(moved.reportsToTask)
+        XCTAssertEqual(store.missions.first { $0.id == other.id }?.parentWorkspaceID, childWorkspaceID)
     }
 }

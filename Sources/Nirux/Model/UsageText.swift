@@ -45,6 +45,120 @@ enum UsageText {
     }
 }
 
+extension QuotaLimit {
+    /// Claude's windows from its status line and readings log, Codex's from
+    /// its rollouts; each forecast held from `previous` (`QuotaPace`).
+    static func current(
+        claude: ClaudeUsageLimits?, claudeReadings: [String: [QuotaReading]],
+        codex: CodexRateLimits?, codexReadings: [Int: [QuotaReading]],
+        previous: [QuotaLimit], now: TimeInterval
+    ) -> [QuotaLimit] {
+        // The pace reads the logged readings (responses only); the file's
+        // window joins them only when none of its own is logged yet, since it
+        // also takes a `/resume`'s old numbers. What's shown is the newest.
+        func limit(_ agent: Agent, _ length: TimeInterval, _ readings: [QuotaReading], _ latest: QuotaReading) -> QuotaLimit? {
+            let held = previous.first { $0.agent == agent && $0.length == length }?.forecast
+            let logged = readings.contains { abs($0.resetsAt - latest.resetsAt) <= QuotaPace.sameWindow }
+            guard var limit = QuotaLimit(agent: agent, length: length, readings: logged ? readings : readings + [latest], now: now, previous: held) else {
+                return nil
+            }
+            if latest.time > limit.latest.time, abs(latest.resetsAt - limit.latest.resetsAt) <= QuotaPace.sameWindow, latest.time <= now {
+                limit.latest = latest
+                if latest.usedPercent >= 100 { limit.forecast = .reached }
+            }
+            return limit
+        }
+        let claudeWindows = [("five_hour", 5 * 3_600.0, claude?.fiveHour), ("seven_day", 7 * 86_400.0, claude?.sevenDay)]
+        let claudeLimits = claudeWindows.compactMap { name, length, window in
+            window.flatMap { window in
+                limit(.claude, length, claudeReadings[name] ?? [], QuotaReading(time: window.reportedAt, usedPercent: window.usedPercentage, resetsAt: window.resetsAt))
+            }
+        }
+        let codexLimits = [codex?.primary, codex?.secondary].compactMap { window -> QuotaLimit? in
+            guard let codex, let window, let minutes = window.minutes, let resetsAt = window.resetsAt else { return nil }
+            return limit(.codex, Double(minutes) * 60, codexReadings[minutes] ?? [], QuotaReading(time: codex.reportedAt, usedPercent: window.usedPercent, resetsAt: resetsAt))
+        }
+        return claudeLimits + codexLimits
+    }
+}
+
+extension UsageText {
+    struct QuotaTitle: Equatable {
+        enum Tone { case normal, warning, runsOut }
+        var text: String
+        var tone: Tone
+    }
+
+    /// "5h", "7d", "Codex 5h".
+    static func name(of limit: QuotaLimit) -> String {
+        (limit.agent == .codex ? "Codex " : "") + (window(minutes: Int(limit.length / 60)) ?? "")
+    }
+
+    /// The title bar's words for the binding limit: "5h 68% · ≈ 87%",
+    /// "⚠︎ 5h full by 20:05", "⚠︎ 7d full until Fri 10:15". A forecast that
+    /// holds needs no warning; without one, a warning from
+    /// `nearLimitPercent`, like a nearly full context.
+    static func title(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> QuotaTitle {
+        let name = name(of: limit)
+        let used = Int(limit.latest.usedPercent.rounded())
+        switch limit.forecast {
+        case .reached:
+            return QuotaTitle(text: "\(name) full until \(ClaudeUsageLimits.clockText(limit.latest.resetsAt, now: now, calendar: calendar))".asWarning, tone: .runsOut)
+        case .runsOut(let at):
+            return QuotaTitle(text: "\(name) full by \(ClaudeUsageLimits.clockText(at, now: now, calendar: calendar))".asWarning, tone: .runsOut)
+        case .atReset(let percent) where percent > used:
+            return QuotaTitle(text: "\(name) \(used)% · ≈ \(percent)%", tone: .normal)
+        case .atReset:
+            // Holding at a full 100 % still says so.
+            return used >= 100 ? QuotaTitle(text: "\(name) \(used)%".asWarning, tone: .warning) : QuotaTitle(text: "\(name) \(used)%", tone: .normal)
+        case .quiet, .unknown:
+            let text = "\(name) \(used)%"
+            return used >= ClaudeUsageLimits.nearLimitPercent ? QuotaTitle(text: text.asWarning, tone: .warning) : QuotaTitle(text: text, tone: .normal)
+        }
+    }
+
+    /// "Claude · 5-hour window", "Codex · week".
+    static func longName(of limit: QuotaLimit) -> String {
+        let minutes = Int(limit.length / 60)
+        let window = minutes == 10_080 ? "week"
+            : minutes % 1_440 == 0 ? "\(minutes / 1_440)-day window" : "\(max(1, Int((Double(minutes) / 60).rounded())))-hour window"
+        return "\(limit.agent == .claude ? "Claude" : "Codex") · \(window)"
+    }
+
+    /// A limit's line in the popover: its pace, then its reset.
+    static func detail(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> QuotaTitle {
+        let resetsAt = limit.latest.resetsAt
+        let reset = ClaudeUsageLimits.resetText(resetsAt, now: now, calendar: calendar)
+        switch limit.forecast {
+        case .reached:
+            return QuotaTitle(text: "Full: it \(reset)".asWarning, tone: .runsOut)
+        case .runsOut(let at):
+            let clock = ClaudeUsageLimits.clockText(at, now: now, calendar: calendar)
+            let resetClock = ClaudeUsageLimits.clockText(resetsAt, now: now, calendar: calendar)
+            let before = ClaudeUsageLimits.remainingText(resetsAt - at)
+            return QuotaTitle(text: "Full by \(clock), \(before) before it resets at \(resetClock)".asWarning, tone: .runsOut)
+        case .atReset(let percent):
+            return QuotaTitle(text: "≈ \(percent)% when it \(reset)", tone: .normal)
+        case .quiet:
+            return QuotaTitle(text: "No agent in Nirux spent it lately; it \(reset)", tone: .normal)
+        case .unknown:
+            return QuotaTitle(text: reset.prefix(1).uppercased() + reset.dropFirst(), tone: .normal)
+        }
+    }
+
+    /// The pace in a tooltip's words: "full by 20:05, before its reset at 20:21".
+    static func pace(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> String {
+        let reset = ClaudeUsageLimits.clockText(limit.latest.resetsAt, now: now, calendar: calendar)
+        switch limit.forecast {
+        case .reached: return "full until its reset at \(reset)"
+        case .runsOut(let at): return "full by \(ClaudeUsageLimits.clockText(at, now: now, calendar: calendar)), before its reset at \(reset)"
+        case .atReset(let percent): return "about \(percent)% at its reset at \(reset)"
+        case .quiet: return "no agent in Nirux spent it lately"
+        case .unknown: return "too few readings yet to tell its pace"
+        }
+    }
+}
+
 extension ContextOffer {
     /// "Each message rereads 312k".
     var text: String {
