@@ -260,8 +260,8 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(config["mcpServers"]["canary"]["args"][-1].endswith("explorer_mcp.py"))
         self.assertEqual(json.loads(command[command.index("--settings") + 1]), {"disableAllHooks": True})
         environment = explore.claude_environment({"HOME": "/h", "PATH": "/bin", "ANTHROPIC_API_KEY": "k",
-                                                  "NIRUX_AGENT_UUID": "u", "NIRUX_CANARY_TOKEN": "t"})
-        self.assertEqual(environment, {"HOME": "/h", "PATH": "/bin"})
+                                                  "CLAUDE_CODE_OAUTH_TOKEN": "o", "NIRUX_AGENT_UUID": "u", "NIRUX_CANARY_TOKEN": "t"})
+        self.assertEqual(environment, {"HOME": "/h", "PATH": "/bin", "CLAUDE_CODE_OAUTH_TOKEN": "o"})
 
     def test_findings_go_to_the_ledger_once_each_and_a_clean_run_as_a_pass(self):
         findings = explore.distinct_findings([
