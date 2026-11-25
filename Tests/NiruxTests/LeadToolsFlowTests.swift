@@ -1282,8 +1282,8 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(shell.quotaBurnRows(readings: []).first?.cause, "Each message rereads 612k")
             func compacts() -> Int { worker.input.components(separatedBy: "/compact").count - 1 }
 
-            shell.takeBurnAction(.compactAtTurnEnd(column: column.id), workspaceID: task.id)
-            XCTAssertEqual(shell.compactsAtTurnEnd[column.id], task.id)
+            shell.takeNotifiedCompact(workspaceID: task.id, column: column.id)
+            XCTAssertEqual(shell.compactsAtTurnEnd[column.id], task.id, "the notification's button, while it still applies")
             shell.runCompactsAtTurnEnd(snapshot: ProcessSnapshot(entries: []))
             XCTAssertEqual(shell.compactsAtTurnEnd[column.id], task.id, "a pass without the process table decides nothing")
             shell.updateSidebar()
@@ -1297,6 +1297,8 @@ final class LeadToolsFlowTests: XCTestCase {
                 return compacts() == 1
             }
             XCTAssertTrue(shell.compactsAtTurnEnd.isEmpty)
+            shell.takeNotifiedCompact(workspaceID: task.id, column: column.id)
+            XCTAssertTrue(shell.compactsAtTurnEnd.isEmpty, "pressed late, at rest: no longer applies")
 
             // Compacted another way meanwhile: the queued one goes, never a second /compact.
             hook(.userPromptSubmit)

@@ -127,6 +127,16 @@ extension NiruxShellView {
         return Array(actions.prefix(Self.burnActions))
     }
 
+    /// A quota alert's Compact at turn end, maybe hours later: queued only
+    /// while its task still offers it.
+    func takeNotifiedCompact(workspaceID: String, column: UUID) {
+        let action = QuotaBurnRow.Action.compactAtTurnEnd(column: column)
+        guard quotaBurnRows(readings: []).first(where: { $0.workspaceID == workspaceID })?.actions.contains(action) == true else {
+            return showToast("Compact at turn end no longer applies there.")
+        }
+        takeBurnAction(action, workspaceID: workspaceID)
+    }
+
     func takeBurnAction(_ action: QuotaBurnRow.Action, workspaceID: String) {
         guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
         let workspace = workspaces[index]

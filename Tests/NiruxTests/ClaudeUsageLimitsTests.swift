@@ -412,13 +412,15 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         let fast = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([45, 50, 55, 60], resetsAt: now + hour), now: now))
         alerter.check([fast], now: now, calendar: utc)
         XCTAssertEqual(posted, [], "off")
+        XCTAssertEqual(alerter.sent.count, 1, "handled while off: the setting isn't read again this window")
 
         enabled = true
-        alerter.check([fast], now: now, calendar: utc)
-        alerter.check([fast], now: now, calendar: utc)
+        let nextWindow = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([45, 50, 55, 60], resetsAt: now + hour + 60), now: now))
+        alerter.check([nextWindow], now: now, calendar: utc)
+        alerter.check([nextWindow], now: now, calendar: utc)
         XCTAssertEqual(posted, [QuotaAlerter.Notice(
             title: "Claude’s 5-hour window will be full by 14:40",
-            body: "Then it resets at 15:00 (in 1h). “Search index rewrite” spends the most: each message rereads 612k.",
+            body: "Then it resets at 15:01 (in 1h 1m). “Search index rewrite” spends the most: each message rereads 612k.",
             workspaceID: "task-1", compactColumn: column
         )], "once per window")
 

@@ -67,7 +67,9 @@ final class QuotaAlerter {
 
     func check(_ limits: [QuotaLimit], now: TimeInterval, calendar: Calendar = .current) {
         let due = QuotaAlert.due(limits, sent: sent)
-        guard !due.isEmpty, isEnabled() else { return }
+        guard !due.isEmpty else { return }
+        // Off, they count as handled: the setting isn't read again until the next window.
+        guard isEnabled() else { return sent.formUnion(due.map(\.key)) }
         for alert in due {
             sent.insert(alert.key)
             let top = alert.limit.agent == .claude ? burner() : nil
