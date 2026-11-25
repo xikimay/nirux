@@ -178,6 +178,9 @@ final class MergeQueueConfirmationPanel: NSObject {
         for warning in confirmation.warnings {
             add(warning.asWarning, color: Self.warningColor)
         }
+        for wait in confirmation.waits {
+            add(wait, color: Self.secondaryText)
+        }
         if !confirmation.items.isEmpty {
             heading("MERGE CADENCE")
             let picker = NSPopUpButton(frame: .zero, pullsDown: false)
