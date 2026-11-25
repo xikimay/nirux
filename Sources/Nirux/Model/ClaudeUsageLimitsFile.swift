@@ -173,9 +173,10 @@ enum ClaudeUsageLimitsFile {
         guard contents != existing else { return true }
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        guard let data = try? encoder.encode(contents), (try? data.write(to: url, options: .atomic)) != nil else { return false }
+        guard let data = try? encoder.encode(contents) else { return false }
+        // The log first: the app reloads it when the file changes.
         QuotaReadingLog.append(readings, in: readingsFolder(beside: url))
-        return true
+        return (try? data.write(to: url, options: .atomic)) != nil
     }
 
     /// Turning the option off forgets what was reported, readings included.
