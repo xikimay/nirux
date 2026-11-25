@@ -98,6 +98,10 @@ final class NiruxShellView: NSView {
     /// Each space's task budget (`refreshTaskBudgets`), by space ID; none: off.
     var taskBudgets: [String: Int] = [:]
     var usageWindow: UsageWindowController?
+    var whatsNewWindow: WhatsNewWindowController?
+    /// The nightlies' changelog; nil in a build that doesn't update.
+    lazy var changelogStore: ChangelogStore? = makeChangelogStore()
+    var whatsNewCard: WhatsNewCardView?
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
     var workspaces: [WorkspaceState] {
@@ -630,6 +634,7 @@ final class NiruxShellView: NSView {
         applyChromeLayout(frames, animated: animated)
         railMayHaveChanged(animated: animated)
         layoutToast(frames)
+        layOutWhatsNewCard(frames)
         layOutWorkspaceCard(in: frames.viewport)
 
         // Each workspace fills the viewport; the strip stacks them and is
