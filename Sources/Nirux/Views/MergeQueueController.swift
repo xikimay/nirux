@@ -295,8 +295,8 @@ final class MergeQueueController {
         start(settings: settings, entries: entries, cadence: .standard)
     }
 
-    private func start(settings: BoardConfig.QueueSettings, entries: [MergeQueue.ConfirmedEntry],
-                       cadence: MergeQueue.Cadence, startedByLead: Bool = false) -> StartRefusal? {
+    func start(settings: BoardConfig.QueueSettings, entries: [MergeQueue.ConfirmedEntry],
+               cadence: MergeQueue.Cadence, startedByLead: Bool = false) -> StartRefusal? {
         guard !isRunning else { return .alreadyRunning }
         guard settings.gitHubRepository == queueRepository else { return .otherRepository }
         guard files != nil else { return .noProjectFolder }

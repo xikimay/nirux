@@ -482,6 +482,9 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
             return ["api", "--hostname", GitHub.host, "--method", "PATCH", "repos/\(repository)/pulls/\(number)", "-f", "state=closed"]
         case .deleteBranch(let name):
             return ["api", "--hostname", GitHub.host, "--method", "DELETE", "repos/\(repository)/git/refs/heads/\(name)"]
+        case .addLabel(let number, let label):
+            return ["api", "--hostname", GitHub.host, "--method", "POST", "repos/\(repository)/issues/\(number)/labels",
+                    "-f", "labels[]=\(label)"]
         }
     }
 

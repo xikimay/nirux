@@ -586,22 +586,23 @@ struct AgentStatusMachine {
     static let promptHookDelay: TimeInterval = 5
 
     /// The transcript of the `claude` in front recorded `prompt`: matched
-    /// to its hook by `prompt_id`. One queued mid-turn has no `prompt_id`,
-    /// and its hook, which comes after its line, carries the running turn's:
-    /// its line, stamped when it was submitted, stands for that hook, only
-    /// with an Enter since the box last emptied just before it (else an
-    /// older line, as a resumed conversation's tail holds, or one typed
-    /// elsewhere: nothing tells which). The requests whose dialogs a typed
+    /// to its hook by `prompt_id`. One queued while Claude worked has a hook
+    /// that carries the running turn's `prompt_id`: when it was submitted
+    /// (`TranscriptPrompt.submittedAt`) stands for that hook, only with an
+    /// Enter since the box last emptied just before it (else an older line,
+    /// as a resumed conversation's tail holds, or one typed elsewhere:
+    /// nothing tells which). The requests whose dialogs a typed
     /// one closed, for their receivers to be released.
     mutating func noteTranscriptPrompt(_ prompt: TranscriptPrompt) -> [AgentPermissionRequest] {
-        guard let id = prompt.promptID else {
-            let submitted = prompt.at + Self.transcriptTimeResolution
-            // Its Enter came just before its stamp: an older one sent something else.
+        if let submittedAt = prompt.submittedAt {
+            let submitted = submittedAt + Self.transcriptTimeResolution
+            // Its Enter came just before it was submitted: an older one sent something else.
             guard prompt.typed, let enter = submitKeys.last(where: { $0 <= submitted }),
-                  submitted - enter < Self.promptHookDelay
+                  submitted - enter < Self.submitStampDelay
             else { return [] }
-            return noteTypedPromptLine(PromptHook(at: submitted, promptID: nil, sessionID: prompt.sessionID))
+            return noteTypedPromptLine(PromptHook(at: submitted, promptID: prompt.promptID, sessionID: prompt.sessionID))
         }
+        guard let id = prompt.promptID else { return [] }
         guard let index = unreadPrompts.firstIndex(where: { $0.promptID == id }) else {
             readPrompts = Array((readPrompts + [(id, prompt.typed)]).suffix(Self.promptMemory))
             return []
@@ -613,6 +614,9 @@ struct AgentStatusMachine {
     /// Transcript times are cut to the millisecond: a line stamped in the
     /// millisecond of the Enter that sent it can read as before that Enter.
     static let transcriptTimeResolution: TimeInterval = 0.001
+    /// A queued prompt is stamped within milliseconds of its Enter (1 to 42
+    /// ms measured on 2.1.331): an Enter older than this sent something else.
+    static let submitStampDelay: TimeInterval = 1
 
     /// `noteTypedPrompt` for a prompt its transcript line says was typed:
     /// the requests whose dialogs it closed.

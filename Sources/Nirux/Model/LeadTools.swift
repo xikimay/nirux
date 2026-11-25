@@ -37,6 +37,13 @@ enum LeadTools {
         closeTask, moveTask, renameTask, setTaskParent, readThread, readTask, resumeTask, interruptTask,
         listSpaces, createSpace, editSpace, deleteSpace, moveTaskToSpace
     ]
+    /// Also a task's, where its space lets tasks manage spaces (SpaceToolCaller).
+    static let spaceNames = [listSpaces, createSpace, editSpace, deleteSpace, moveTaskToSpace]
+
+    /// A space tool's call, `list_tasks` reading a space included.
+    static func isSpaceCall(_ tool: String, _ arguments: [String: Any]) -> Bool {
+        spaceNames.contains(tool) || tool == listTasks && isGiven(arguments, "space")
+    }
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
     /// of its own (unless a repository of the space has that name).
@@ -480,8 +487,8 @@ enum LeadTools {
                 deleteSpace, title: "Delete a space",
                 description: """
                     Delete a space once the user confirms it in Nirux's alert: its tasks move to move_tasks_to first; its \
-                    defaults, setup scripts and rule proposals are deleted, its brief stays. Refused for General, your space, \
-                    the space on screen, and a space with a Lead or a running merge queue.
+                    defaults, setup scripts and rule proposals are deleted, its brief stays. Refused for General, the space \
+                    on screen, and a space with a Lead or a running merge queue.
                     """,
                 properties: [
                     "space": ["type": "string", "description": spaceDescription],
@@ -643,10 +650,7 @@ enum LeadTools {
             }
             return nil
         case listTasks:
-            if isGiven(arguments, "space") {
-                if subtask { return "Only the space's Lead can inspect another space." }
-                if string(arguments, "space") == nil { return "space must name a space (or omit it for your own space)." }
-            }
+            if isGiven(arguments, "space"), string(arguments, "space") == nil { return "space must name a space, or be left out." }
             return nil
         case tell, reply:
             let target = tool == tell ? "task" : "question"
@@ -710,7 +714,7 @@ enum LeadTools {
                 rule: LearnedRules.cleaned(rule, limit: LearnedRules.maxRuleLength),
                 evidence: LearnedRules.cleaned(evidence, limit: LearnedRules.maxEvidenceLength)
             )
-        case listSpaces, createSpace, editSpace, deleteSpace, moveTaskToSpace:
+        case _ where spaceNames.contains(tool):
             return spaceToolProblem(tool: tool, arguments: arguments)
         default:
             return "Unknown tool: \(tool)"

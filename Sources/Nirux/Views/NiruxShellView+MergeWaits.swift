@@ -166,13 +166,14 @@ extension NiruxShellView {
         }
     }
 
-    /// Away from Nirux the heartbeat stops: the pull requests a wait follows
-    /// are still read when due. Their git state is read too, which the read
-    /// after this one needs: no tick keeps it current meanwhile.
-    func refreshAwaitedPullRequests() {
+    /// Away from Nirux the heartbeat stops: pull requests are still read when
+    /// due, since a follow-up round, a merge wait or the Lead acts on them
+    /// overnight. Their git state is read too, which the read after this one
+    /// needs: no tick keeps it current meanwhile.
+    func refreshPullRequestsAway() {
         let awaited = awaitedWorkspaceIDs
-        guard !awaited.isEmpty else { return }
-        let tiers = gitRefreshTiers.filter { awaited.contains($0.workspace.id) }
+        // On battery, those a merge wait follows only.
+        let tiers = isOnACPower() ? gitRefreshTiers : gitRefreshTiers.filter { awaited.contains($0.workspace.id) }
         let due = gitRefresh.pullRequestsDue(tiers, awaited: awaited)
         for (workspace, tier) in tiers where due.contains(where: { $0 === workspace }) {
             gitRefresh.refreshNow(workspace, tier: tier)
