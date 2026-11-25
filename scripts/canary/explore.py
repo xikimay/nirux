@@ -193,6 +193,30 @@ def build_world(app, work, seed):
     return world
 
 
+class Stopped(BaseException):
+    """SIGTERM (night.py's watcher, someone is back): every finally block runs, ending the copy and claude."""
+
+
+def stop_on_sigterm():
+    def stop(signum, frame):
+        raise Stopped()
+    signal.signal(signal.SIGTERM, stop)
+
+
+def wait_or_end(process, timeout):
+    """Waits for `process` (its own session) at most `timeout` s; ends its whole group on a timeout,
+    a stop or any other way out. True when it timed out."""
+    try:
+        process.wait(timeout=timeout)
+        return False
+    except subprocess.TimeoutExpired:
+        return True
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+
+
 def run_episode(index, goal, *, claude, args, evidence, server_environment, deadline, max_usd):
     folder = evidence / f"episode-{index}"
     folder.mkdir()
@@ -200,16 +224,10 @@ def run_episode(index, goal, *, claude, args, evidence, server_environment, dead
     command = claude_command(claude, model=args.model, goal=goal, server_environment=dict(
         server_environment, CANARY_EPISODE=str(index), CANARY_EPISODE_ACTIONS=str(args.episode_calls),
     ), max_turns=args.episode_calls + 2, max_usd=max_usd)
-    timed_out = False
     with log.open("wb") as out:
         process = subprocess.Popen(command, cwd=folder, env=claude_environment(os.environ), stdin=subprocess.DEVNULL,
                                    stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
-        try:
-            process.wait(timeout=max(1.0, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            os.killpg(process.pid, signal.SIGKILL)
-            process.wait()
+        timed_out = wait_or_end(process, max(1.0, deadline - time.monotonic()))
     result = last_result(log)
     return {"episode": index, "goal": goal, "exitCode": process.returncode, "timedOut": timed_out,
             "subtype": result.get("subtype"), "turns": result.get("num_turns"), "usage": result.get("usage"),
@@ -390,6 +408,7 @@ def parser():
 
 def main(argv=None):
     args = parser().parse_args(argv)
+    stop_on_sigterm()
     root = args.evidence_dir or Path(tempfile.mkdtemp(prefix="nirux-evidence-"))
     root.mkdir(parents=True, exist_ok=True)
     if args.reduce:
