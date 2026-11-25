@@ -161,13 +161,27 @@ class ExplorerTests(unittest.TestCase):
 
     def test_nothing_that_opens_a_terminal_reaches_the_app(self):
         explorer = self.explorer(FakeChannel())
-        for name, arguments in [("key", {"characters": "t", "modifiers": ["command"]}),
-                                ("key", {"characters": "T", "modifiers": ["command"]}),
-                                ("menu", {"path": ["Columns", "New Terminal"]})]:
+        for name, arguments, why in [
+            ("key", {"characters": "t", "modifiers": ["command"]}, "opens no terminal"),
+            ("key", {"characters": "T", "modifiers": ["command", "shift"]}, "opens no terminal"),
+            ("key", {"characters": "t", "modifiers": ["command", "x"]}, "modifiers must be among command"),
+            ("menu", {"path": ["Columns", "New Terminal"]}, "opens no terminal"),
+            ("type", {"text": "New Terminal\n"}, "opens no terminal"),
+            ("key", {"characters": "b", "modifiers": ["command"]}, "opens no browser"),
+            ("menu", {"path": ["Columns", "Open Browser"]}, "opens no browser"),
+            ("menu", {"path": ["Columns", "Focus Address Bar"]}, "opens no browser"),
+            ("type", {"text": "open browser"}, "opens no browser"),
+            ("key", {"characters": "v", "modifiers": ["command"]}, "clipboard"),
+            ("key", {"characters": "c", "modifiers": ["command"]}, "clipboard"),
+            ("menu", {"path": ["Edit", "Paste"]}, "clipboard"),
+            ("menu", {"path": ["Edit", "Cut"]}, "clipboard"),
+        ]:
             content, is_error = explorer.call(name, arguments)
             self.assertTrue(is_error, arguments)
-            self.assertIn("opens no terminal", content[0]["text"])
+            self.assertIn(why, content[0]["text"], arguments)
         self.assertEqual(explorer.channel.calls, [])
+        self.assertFalse(explorer_mcp.refused("menu", {"path": ["Columns", "Open Browser"]}, allows_browser=True))
+        self.assertFalse(explorer_mcp.refused("key", {"characters": "p", "modifiers": ["command", "shift"]}))
 
     def test_a_dead_app_reads_dead_although_nobody_reaped_it(self):
         child = subprocess.Popen(["/usr/bin/true"])

@@ -289,11 +289,15 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
-        if navigationAction.shouldPerformDownload {
-            decisionHandler(.download)
-        } else {
-            decisionHandler(.allow)
-        }
+        decisionHandler(policy(for: navigationAction.request.url, download: navigationAction.shouldPerformDownload))
+    }
+
+    /// What a canary run's copy may open (CanaryChannel.pagePolicy), every page otherwise.
+    var allowsPage = CanaryChannel.pagePolicy(environment: ProcessInfo.processInfo.environment, stateDirectory: Persistence.stateDirectory)
+
+    func policy(for url: URL?, download: Bool) -> WKNavigationActionPolicy {
+        guard url.map(allowsPage) ?? true else { return .cancel }
+        return download ? .download : .allow
     }
 
     @MainActor

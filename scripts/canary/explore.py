@@ -59,7 +59,7 @@ GOALS = (
      "('permission: Bash'). Answer them from the sidebar and from the terminal; the amber state must come and go "
      "with a visible reason."),
     ("columns", r"Editor|WebView|Column|Monaco|BranchReview",
-     "Open an editor column and a browser column beside an agent, move between columns, close and reopen them, "
+     "Open an editor column beside an agent, edit a file, move between columns, close and reopen them, "
      "and check that the keyboard follows the focus."),
     ("tasks", r"Palette|Workspace|Space|Sidebar|Menu",
      "Use the command palette (shift-command-P), the Space and Workspace menus: open, rename, close and reopen "

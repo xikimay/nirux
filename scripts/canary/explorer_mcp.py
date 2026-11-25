@@ -62,9 +62,21 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
 ]
 ACTIONS = {"press", "menu", "key", "type"}
-# What opens a terminal (NiruxShortcuts.newTerminal, Columns › New Terminal): every terminal of the
-# copy runs a fake agent inside explore.sb, and the agent isn't handed one besides.
-SHELL_MENU_RE = re.compile(r"\bTerminal\b")
+# What the agent isn't handed, whatever explore.sb and the copy already refuse: a terminal (every
+# one runs a fake agent), a browser (pages are localhost only, CanaryChannel.pagePolicy), the
+# user's clipboard (the copy reaches none).
+REFUSALS = {
+    "terminal": "The canary opens no terminal: every one runs a fake agent.",
+    "browser": "The canary opens no browser unless the run allows local pages (CANARY_ALLOW_BROWSER).",
+    "clipboard": "The canary leaves the clipboard alone: it is the user's.",
+}
+COMMAND_KEYS = {"t": "terminal", "b": "browser", "c": "clipboard", "v": "clipboard", "x": "clipboard"}
+MENU_RES = (
+    (re.compile(r"\bTerminal\b"), "terminal"),
+    (re.compile(r"\bBrowser\b|Address Bar"), "browser"),
+    (re.compile(r"^(Cut|Copy|Paste)\b"), "clipboard"),
+)
+TYPED_RES = ((re.compile(r"new terminal", re.I), "terminal"), (re.compile(r"(open|new) browser", re.I), "browser"))
 SCHEMA_TYPES = {"string": str, "integer": int, "array": list}
 BUTTON_ROLES = {"AXButton", "AXMenuButton", "AXPopUpButton", "AXCheckBox", "AXRadioButton", "AXDisclosureTriangle"}
 
@@ -86,13 +98,23 @@ def invalid(name, arguments):
             return f"{key} must be {(spec or {}).get('type', 'absent')}."
         if expected is list and not all(isinstance(item, str) for item in value):
             return f"{key} must hold strings."
+        allowed = (spec.get("items") or {}).get("enum")
+        if expected is list and allowed and not set(value) <= set(allowed):
+            return f"{key} must be among {', '.join(allowed)}."
     return None
 
 
-def opens_shell(name, arguments):
-    if name == "key":
-        return arguments["characters"].lower() == "t" and set(arguments.get("modifiers") or []) == {"command"}
-    return name == "menu" and any(SHELL_MENU_RE.search(title) for title in arguments["path"])
+def refused(name, arguments, allows_browser=False):
+    """What the call would open that the agent isn't handed, or None."""
+    if name == "key" and "command" in (arguments.get("modifiers") or []):
+        kind = COMMAND_KEYS.get(arguments["characters"].lower())
+    elif name == "menu":
+        kind = next((kind for title in arguments["path"] for pattern, kind in MENU_RES if pattern.search(title)), None)
+    elif name == "type":
+        kind = next((kind for pattern, kind in TYPED_RES if pattern.search(arguments["text"])), None)
+    else:
+        kind = None
+    return None if kind is None or (kind == "browser" and allows_browser) else kind
 
 
 def elements(snapshot):
@@ -154,6 +176,7 @@ class Explorer:
         self.episode = int(environ.get("CANARY_EPISODE") or 1)
         self.episode_actions = int(environ.get("CANARY_EPISODE_ACTIONS") or 12)
         self.clock = clock
+        self.allows_browser = environ.get("CANARY_ALLOW_BROWSER") == "1"
         self.calls = 0
         self.previous_look = []
         self.stderr_offset = self.stderr.stat().st_size if self.stderr and self.stderr.exists() else 0
@@ -258,8 +281,8 @@ class Explorer:
     def call(self, name, arguments):
         """(content, isError) for one tool call."""
         refusal = invalid(name, arguments) or self.refusal(name)
-        if not refusal and opens_shell(name, arguments):
-            refusal = "The canary opens no terminal: every one runs a fake agent."
+        if not refusal and refused(name, arguments, self.allows_browser):
+            refusal = REFUSALS[refused(name, arguments, self.allows_browser)]
         if refusal:
             return [{"type": "text", "text": refusal}], True
         budget = self.spend("calls")

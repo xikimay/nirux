@@ -406,6 +406,31 @@ final class CanaryChannelTests: XCTestCase {
         }
     }
 
+    /// A canary copy's browser opens localhost and the run's files only:
+    /// WebKit's network process is outside the copy's sandbox.
+    @MainActor
+    func testACanaryCopysBrowserOpensOnlyLocalPages() throws {
+        let column = WebViewColumn(url: "about:blank", dataStore: .nonPersistent(), isolatedWorkspaceID: nil)
+        XCTAssertEqual(column.policy(for: URL(string: "https://example.com"), download: false), .allow, "a normal launch")
+        let state = stateDirectory.appendingPathComponent("state")
+        column.allowsPage = CanaryChannel.pagePolicy(
+            environment: ["NIRUX_STATE_DIR": state.path, CanaryChannel.tokenKey: token], stateDirectory: state
+        )
+        // Through the navigation delegate, as WebKit asks for a typed URL, a link or a redirect.
+        func decision(_ page: String) -> WKNavigationActionPolicy? {
+            var decided: WKNavigationActionPolicy?
+            column.webView(WKWebView(), decidePolicyFor: PageRequest(page)) { decided = $0 }
+            return decided
+        }
+        for page in ["https://example.com", "http://example.com/a", "file:///etc/hosts", "http://localhost.example.com/"] {
+            XCTAssertEqual(decision(page), .cancel, page)
+        }
+        for page in ["http://localhost:8080/", "http://127.0.0.1/a", "about:blank", stateDirectory.appendingPathComponent("page.html").absoluteString] {
+            XCTAssertEqual(decision(page), .allow, page)
+        }
+        XCTAssertEqual(column.policy(for: URL(string: "https://example.com/f.zip"), download: true), .cancel, "nor a download")
+    }
+
     /// Text is typed with each character's US key code and Shift, as KeyMapper expects.
     @MainActor
     func testTextTypesEachCharactersKey() {
@@ -422,6 +447,16 @@ private final class Target: NSObject {
     @objc func pick(_ sender: Any) {
         picked.append((sender as? NSMenuItem)?.title ?? (sender as? NSButton)?.title ?? "")
     }
+}
+
+private final class PageRequest: WKNavigationAction {
+    let page: URLRequest
+    init(_ url: String) {
+        page = URLRequest(url: URL(string: url)!)
+        super.init()
+    }
+    override var request: URLRequest { page }
+    override var shouldPerformDownload: Bool { false }
 }
 
 private final class PressableView: NSView {
