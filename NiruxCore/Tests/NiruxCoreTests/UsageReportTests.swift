@@ -47,7 +47,10 @@ struct UsageReportTests {
             ),
             UsageSession(
                 key: UsageSessionKey(.codex, "x"), attribution: UsageAttribution(spaceID: "space"),
-                rateLimits: CodexRateLimits(reportedAt: now - 60), events: [event(13, input: 200)]
+                rateLimitReadings: [
+                    CodexRateLimits(primary: .init(usedPercent: 3, minutes: 300, resetsAt: now), reportedAt: now - 8 * 86_400),
+                    CodexRateLimits(primary: .init(usedPercent: 40, minutes: 300, resetsAt: now + 600), reportedAt: now - 60)
+                ], events: [event(13, input: 200)]
             ),
             UsageSession(key: UsageSessionKey(.nirux, "one-shots"), events: [event(200, input: 7)])
         ]
@@ -68,5 +71,7 @@ struct UsageReportTests {
         #expect(report.latestSessions["task"]?.lastResponseAt == now - 7_200)
         #expect(report.latestSessions["task"]?.subagents == 1)
         #expect(report.codexLimits?.reportedAt == now - 60)
+        // Readings from before the week are left out.
+        #expect(report.codexReadings == [300: [QuotaReading(time: now - 60, usedPercent: 40, resetsAt: now + 600)]])
     }
 }
