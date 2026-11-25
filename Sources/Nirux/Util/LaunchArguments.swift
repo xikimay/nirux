@@ -20,6 +20,10 @@ enum LaunchArguments {
         /// `--hook claude --mcp`: the tools server of the agents Nirux
         /// launches (NiruxMCPServer), spelled as a hook for the same reason.
         case toolsServer
+        /// `--hook mission-wait <mailbox>`: the hook that hands a `claude` its
+        /// Mission messages (MissionWaitHook). An older build doesn't know
+        /// the kind: it reads the payload and exits.
+        case missionWait(mailbox: String)
         /// `--hook codex --setup-failed <workspace id>`: a setup script failed
         /// in a new worktree (SpaceSetupScript). An older build reads a Codex
         /// payload it can't parse and exits.
@@ -83,6 +87,7 @@ enum LaunchArguments {
         if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--mcp" { return .toolsServer }
         // Antigravity's Stop hook (AgentHookInstaller.agyHookCommand).
         if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--agy" { return .hook(.agy, payload: nil) }
+        if args.count == 4, args[1] == "--hook", args[2] == "mission-wait" { return .missionWait(mailbox: args[3]) }
         if let workspaceID = SetupFailureSignal.workspaceID(in: args) { return .setupFailure(workspaceID: workspaceID) }
         if args.count >= 3, args[1] == "--hook", let agent = CodingAgent(rawValue: args[2]), agent.sendsHooks {
             return .hook(agent, payload: args.count > 3 ? args.last : nil)

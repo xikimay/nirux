@@ -495,6 +495,7 @@ extension NiruxShellView {
             appliedEvent.resolution.workspace.noteReviewPasses(of: event, in: appliedEvent.resolution.column.id, now: now)
             recordReviewPasses(of: event, in: appliedEvent.resolution.workspace, now: now)
         }
+        settleHookClaims(after: events.map(\.event))
         updateSidebar(snapshot: snapshot)
         if changed { saveState(snapshot: snapshot) }
         // After this drain: a turn that ended may have freed a Mission

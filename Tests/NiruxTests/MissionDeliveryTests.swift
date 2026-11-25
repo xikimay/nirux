@@ -167,6 +167,29 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertEqual(MissionPromptText.text(for: again, childTitle: nil, parentTitle: nil), "[Nirux Mission] \"feat/date-filter\" completed: Docs done.")
     }
 
+    /// What a hook brings in: a `tell` names its sender, since no prompt
+    /// shows it typed, and a slash command stays for typing, which alone runs it.
+    func testAHookBringsInATellWithItsSenderAndLeavesSlashCommandsToTyping() throws {
+        let store = makeStore()
+        let tell = try XCTUnwrap(store.accept(parentEvent(.instruction, "Now the docs.", at: 20), enabled: true))
+        XCTAssertEqual(MissionPromptText.text(for: tell, childTitle: nil, parentTitle: "web-main"), "Now the docs.")
+        XCTAssertEqual(
+            MissionPromptText.hookText(for: tell, childTitle: nil, parentTitle: "web-main"),
+            "[Nirux Mission] From \"web-main\", which started this task:\nNow the docs."
+        )
+        XCTAssertEqual(
+            MissionPromptText.hookText(for: tell, childTitle: nil, parentTitle: nil),
+            "[Nirux Mission] From the agent that started this task:\nNow the docs."
+        )
+        let review = try XCTUnwrap(store.accept(parentEvent(.instruction, "/code-review high", at: 21), enabled: true))
+        XCTAssertNil(MissionPromptText.hookText(for: review, childTitle: nil, parentTitle: "web-main"))
+        let question = try XCTUnwrap(store.accept(childEvent(.question, "Keep date=?", at: 22), enabled: true))
+        XCTAssertEqual(
+            MissionPromptText.hookText(for: question, childTitle: nil, parentTitle: nil),
+            MissionPromptText.text(for: question, childTitle: nil, parentTitle: nil)
+        )
+    }
+
     /// The question `ask_user` hands over: the oldest one waiting, never
     /// one a later prompt retired.
     func testAskUserHandsOverTheQuestionThatWaits() throws {
