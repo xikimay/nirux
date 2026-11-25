@@ -325,6 +325,10 @@ final class ClaudeUsageLimitsTests: XCTestCase {
 
         XCTAssertTrue(indicator.view.accessibilityPerformPress())
         XCTAssertEqual(presented, 1)
+        // The same words keep the same views.
+        let firstRow = indicator.popoverContent.view.subviews.first?.subviews.first
+        indicator.popoverContent.update(limits: indicator.limits, now: now, calendar: utc)
+        XCTAssertTrue(indicator.popoverContent.view.subviews.first?.subviews.first === firstRow)
         let texts = indicator.popoverContent.texts
         for expected in [
             "Claude · 5-hour window", "60%", "⚠︎ Full by 14:40, 20m before it resets at 15:00",
@@ -338,6 +342,10 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         let usage = try XCTUnwrap(buttons(in: indicator.popoverContent.view).first { $0.title == "Usage…" })
         usage.performClick(nil)
         XCTAssertEqual(usageOpened, 1)
+        // The click that closed the transient popover doesn't open it again.
+        indicator.popoverDidClose(Notification(name: NSPopover.didCloseNotification))
+        XCTAssertTrue(indicator.view.accessibilityPerformPress())
+        XCTAssertEqual(presented, 1)
 
         let holding = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([52.5, 55, 57.5, 60], resetsAt: now + hour), now: now))
         XCTAssertEqual(UsageText.detail(holding, now: now, calendar: utc).text, "≈ 90% when it resets at 15:00 (in 1h)")

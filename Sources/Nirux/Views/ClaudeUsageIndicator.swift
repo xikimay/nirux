@@ -4,6 +4,9 @@ import AppKit
 private final class PressableView: NSView {
     var onPress: (() -> Void)?
 
+    /// A click opens the popover, never drags the window.
+    override var mouseDownCanMoveWindow: Bool { false }
+
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .button }
     override func accessibilityPerformPress() -> Bool {
@@ -25,7 +28,10 @@ private final class PressableView: NSView {
 /// keeps the window's edge, at the right end of the toolbar
 /// (`CommandBarToolbar`): the cup, which comes and goes with every turn,
 /// appears to its left without moving it.
-final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
+final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController, NSPopoverDelegate {
+    /// A transient popover closes on the mouse-down of the click that meant
+    /// to close it; that click's toggle, right after, must not open it again.
+    static let reopenDelay: TimeInterval = 0.3
     private static let height: CGFloat = 22
     private static let padding: CGFloat = 6
     private static let metersWidth: CGFloat = 42
@@ -46,8 +52,10 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
         popover.behavior = .transient
         popover.appearance = Theme.appearance
         popover.contentViewController = popoverContent
+        popover.delegate = self
         return popover
     }()
+    private var popoverClosedAt: TimeInterval = 0
     private var renderedAt: TimeInterval = 0
     /// Times read in the user's calendar; a test sets its own.
     var calendar = Calendar.current
@@ -95,10 +103,14 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
         render(now: now)
     }
 
+    func popoverDidClose(_ notification: Notification) {
+        popoverClosedAt = Date().timeIntervalSince1970
+    }
+
     /// Opens the popover, or closes it when it shows.
     @objc func togglePopover() {
         if popover.isShown { return popover.performClose(nil) }
-        guard isShowing else { return }
+        guard isShowing, Date().timeIntervalSince1970 - popoverClosedAt >= Self.reopenDelay else { return }
         popoverContent.update(limits: limits, now: renderedAt, calendar: calendar)
         presentPopover(popover, view)
     }

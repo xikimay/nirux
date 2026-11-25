@@ -8,6 +8,9 @@ final class QuotaPopoverViewController: NSViewController {
 
     var onShowUsage: (() -> Void)?
     private let stack = NSStackView()
+    /// What the rows last said: the same words keep the same views, so
+    /// VoiceOver's place and a click in progress survive an update.
+    private var shown: [String] = []
 
     override func loadView() {
         stack.orientation = .vertical
@@ -39,8 +42,12 @@ final class QuotaPopoverViewController: NSViewController {
 
     func update(limits: [QuotaLimit], now: TimeInterval, calendar: Calendar) {
         loadViewIfNeeded()
-        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let ordered = limits.sorted { ($0.agent == .claude ? 0 : 1, $0.length) < ($1.agent == .claude ? 0 : 1, $1.length) }
+        let words = ordered.map { "\(UsageText.longName(of: $0)) \(Int($0.latest.usedPercent.rounded())) \(UsageText.detail($0, now: now, calendar: calendar).text)" }
+            + [limits.map(\.latest.time).max().map { ClaudeUsageLimits.clockText($0, now: now, calendar: calendar) } ?? ""]
+        guard words != shown || stack.arrangedSubviews.isEmpty else { return }
+        shown = words
+        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for limit in ordered { stack.addArrangedSubview(row(limit, now: now, calendar: calendar)) }
         stack.addArrangedSubview(textRow(
             "Antigravity", value: "—",
