@@ -64,6 +64,7 @@ extension QuotaLimit {
             }
             if latest.time > limit.latest.time, abs(latest.resetsAt - limit.latest.resetsAt) <= QuotaPace.sameWindow, latest.time <= now {
                 limit.latest = latest
+                if latest.usedPercent >= 100 { limit.forecast = .reached }
             }
             return limit
         }
