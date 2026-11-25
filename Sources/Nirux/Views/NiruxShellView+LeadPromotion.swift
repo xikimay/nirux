@@ -30,7 +30,8 @@ extension NiruxShellView {
 
     /// The task row's ⋯ menu and ⌘P.
     func offersLeadPromotion(_ workspace: WorkspaceState) -> Bool {
-        !workspace.isClosing && !workspace.isInactive && Self.spaceCanHaveLead(workspace.profileID) && Self.isTask(workspace)
+        !workspace.isClosing && !workspace.isInactive && !workspace.startedOutsideNirux
+            && Self.spaceCanHaveLead(workspace.profileID) && Self.isTask(workspace)
     }
 
     /// Promote to Lead, once the user confirms.
@@ -41,7 +42,7 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         let worker = promotionWorker(of: task, snapshot: snapshot)
         let lead = leadWorkspace(inSpace: spaceID)
-        if let refusal = promotionRefusal(worker?.state, of: task, lead: lead) { return showToast(refusal) }
+        if let refusal = promotionRefusal(worker, of: task, lead: lead) { return showToast(refusal) }
         guard let (column, state) = worker, let sessionID = state.sessionID else { return }
         let space = profiles.first { $0.id == spaceID }?.name ?? spaceID
         var details = [
@@ -63,9 +64,9 @@ extension NiruxShellView {
         ) else { return }
         // Read again: the modal let the task's agent and the Lead go on.
         let latest = promotionWorker(of: task, snapshot: ProcessSnapshot())
-        guard offersLeadPromotion(task), leadWorkspace(inSpace: spaceID) === lead, latest?.column === column,
+        guard offersLeadPromotion(task), task.profileID == spaceID, leadWorkspace(inSpace: spaceID) === lead, latest?.column === column,
               latest?.state.sessionID == sessionID else { return showToast("The task or its Lead changed meanwhile. Nothing was promoted.") }
-        if let refusal = promotionRefusal(latest?.state, of: task, lead: lead) { return showToast(refusal) }
+        if let refusal = promotionRefusal(latest, of: task, lead: lead) { return showToast(refusal) }
         promote(task, column: column, sessionID: sessionID, into: lead)
     }
 
@@ -75,7 +76,10 @@ extension NiruxShellView {
         let agent = foreground?.interactiveAgent
         return (column, LeadPromotion.Worker(
             agent: agent,
-            sessionID: foreground.flatMap { agent == .claude ? column.claudeSessionID(of: $0) : nil },
+            sessionID: foreground.flatMap { process -> String? in
+                guard agent == .claude, case .resume(let id)? = column.persistedClaudeRestore(foregroundProcess: process) else { return nil }
+                return id
+            },
             isStarting: column.isRestartingShell || (!column.isAwaitingResume && pty.shellPID == nil && !pty.hasExited),
             isAtRest: column.liveAgent(snapshot: snapshot)?.status == .idle || pty.agentAttentionReason == .turnFinished,
             hasDialog: pty.pendingAgentDialog != nil || foreground.map { pty.agentVisibleDialog(foreground: $0) != nil } == true,
@@ -84,13 +88,32 @@ extension NiruxShellView {
         ))
     }
 
-    private func promotionRefusal(_ worker: LeadPromotion.Worker?, of task: WorkspaceState, lead: WorkspaceState?) -> String? {
-        let subtasks = workspaces.filter { $0.parentWorkspaceID == task.id && !$0.isClosing }.count
-        if let refusal = LeadPromotion.refusal(worker, openSubtasks: subtasks) { return refusal }
-        guard let column = lead?.leadTerminal else { return nil }
-        if column.isRestartingShell || column.relaunchingLeadSessionID != nil { return "The Lead is restarting. Try again in a moment." }
-        if !column.isAwaitingResume, let pty = column.pty, pty.shellPID == nil, !pty.hasExited {
+    /// The task's rules, then what would keep the Lead from taking the
+    /// conversation once the task's agent ended.
+    private func promotionRefusal(_ worker: (column: ColumnState, state: LeadPromotion.Worker)?, of task: WorkspaceState, lead: WorkspaceState?) -> String? {
+        let missions = MissionStore.shared.missions
+        let isSubtask = task.parentWorkspaceID != nil
+            || missions.contains { $0.childWorkspaceID == task.id && $0.status == .active && $0.reportsToTask == true }
+        let subtasks = Set(workspaces.filter { $0.parentWorkspaceID == task.id && !$0.isClosing }.map(\.id))
+            .union(missions.filter { $0.parentWorkspaceID == task.id && $0.status == .active && $0.oneWay != true }.map(\.childWorkspaceID))
+        if let refusal = LeadPromotion.refusal(worker?.state, isSubtask: isSubtask, openSubtasks: subtasks.count) { return refusal }
+        guard let worker, let sessionID = worker.state.sessionID else { return nil }
+        if let record = sessionLedger.session(agent: .claude, sessionID: sessionID), !AgentSessionResume.hasTranscript(for: record) {
+            return SessionHistory.message(.transcriptGone, agent: .claude)
+        }
+        let leadColumn = lead?.leadTerminal
+        let others = agentSessionHolders(snapshot: ProcessSnapshot()).filter { $0.columnID != worker.column.id && $0.columnID != leadColumn?.id }
+        if sessionResume.inFlight.contains(AgentSessionRecord.key(agent: CodingAgent.claude.rawValue, sessionID: sessionID))
+            || HeldAgentSession.find(sessionID, in: others) != nil {
+            return "Another column is holding or resuming this conversation."
+        }
+        guard let lead, let leadColumn else { return nil }
+        if leadColumn.isRestartingShell || leadColumn.relaunchingLeadSessionID != nil { return "The Lead is restarting. Try again in a moment." }
+        if !leadColumn.isAwaitingResume, let pty = leadColumn.pty, pty.shellPID == nil, !pty.hasExited {
             return "The Lead is starting. Try again in a moment."
+        }
+        if claudeSpaceSettingsFile(for: lead) == nil, currentLeadOptions(in: lead).safety != nil {
+            return "Couldn’t prepare the space’s safety settings for the Lead."
         }
         return nil
     }
@@ -112,7 +135,9 @@ extension NiruxShellView {
             return true
         }) { [weak self, weak task] stillRunning in
             guard let self, let task else { return false }
-            guard stillRunning.isEmpty else {
+            // What its Bash tool left in the background may run on; its agent
+            // must not, holding the conversation.
+            guard !stillRunning.contains(where: { CodingAgent(launchable: $0) != nil }) else {
                 self.showToast(
                     "The task’s agent didn’t stop within \(Int(Self.exitTimeout)) s (\(stillRunning.joined(separator: ", "))). "
                         + "Nothing was promoted.",
@@ -121,6 +146,7 @@ extension NiruxShellView {
                 return false
             }
             let now = Date().timeIntervalSince1970
+            self.sessionResume.forgetLaunch(in: column)
             self.sessionLedger.closeSessions(ofWorker: uuid, at: now)
             _ = MissionStore.shared.endChildMissions(workspaceID: task.id, agentUUID: uuid, at: now)
             task.noteConversationMovedToLead(at: now)

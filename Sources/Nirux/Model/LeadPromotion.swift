@@ -9,7 +9,7 @@ enum LeadPromotion {
     struct Worker: Equatable {
         /// The coding agent in front, if any.
         var agent: CodingAgent?
-        /// Its Claude conversation, once its hooks proved it.
+        /// Its Claude conversation, once it took a prompt.
         var sessionID: String?
         /// Its terminal is starting or restarting.
         var isStarting = false
@@ -21,9 +21,10 @@ enum LeadPromotion {
         var otherProgram: String?
     }
 
-    /// Nil when `worker` can be promoted. `openSubtasks`: the task's own
-    /// open sub-tasks, whose parent it is.
-    static func refusal(_ worker: Worker?, openSubtasks: Int) -> String? {
+    /// Nil when `worker` can be promoted. `isSubtask`: its parent would lose
+    /// it. `openSubtasks`: the task's own open sub-tasks, whose parent it is.
+    static func refusal(_ worker: Worker?, isSubtask: Bool = false, openSubtasks: Int) -> String? {
+        if isSubtask { return "A sub-task can’t become the Lead: its task waits for it. Promote its task instead." }
         guard let worker else { return "Nirux couldn’t find this task’s agent terminal." }
         if worker.isStarting { return "The task’s terminal is starting. Try again once it opens." }
         if let program = worker.otherProgram { return "\(program) runs in the task’s terminal. Finish it first." }

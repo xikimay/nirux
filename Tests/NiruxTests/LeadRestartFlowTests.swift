@@ -1022,6 +1022,9 @@ final class LeadRestartFlowTests: XCTestCase {
             )
             let branch = GitWorktree.currentBranch(at: harness.worktree)
             XCTAssertNotNil(branch)
+            // Resumed in the task a moment ago: its column held the session
+            // for the launch's grace, which ends with its agent.
+            shell.sessionResume.noteLaunch(of: sessionID, in: column, now: ProcessInfo.processInfo.systemUptime)
             let restartTask = shell.sideEffects.restartTaskTerminal
             let promotedCommand = promoted.command(arguments: flags + ["--resume", sessionID], launchPrompt: NiruxShellView.leadPromotionPrompt)
             shell.sideEffects.restartTaskTerminal = { [weak harness] target, command, canStop, starts in
@@ -1072,16 +1075,24 @@ final class LeadRestartFlowTests: XCTestCase {
     }
 
     /// Mid-turn, the task's conversation stays where it is: nothing asks,
-    /// nothing stops. The Lead's own row offers no promotion.
+    /// nothing stops. Neither the Lead, a task opened from outside Nirux nor
+    /// a sub-task is promoted.
     func testATaskIsPromotedOnlyAtRest() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try harness.makeLead()
             let worker = AgentStandIn()
             defer { worker.remove() }
-            let (task, _, process) = try makeTask(
-                "Busy", in: lead.space, sessionID: UUID().uuidString, standIn: worker, harness: harness, turnEnded: false
+            let sessionID = UUID().uuidString
+            let (task, column, process) = try makeTask(
+                "Busy", in: lead.space, sessionID: sessionID, standIn: worker, harness: harness, turnEnded: false
             )
+            // A silent stand-in reads idle after a while: its turn starts again now.
+            _ = try XCTUnwrap(column.pty).applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .userPromptSubmit, agentUUID: try XCTUnwrap(column.agentUUID), sessionID: sessionID,
+                emitterProcess: process, timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+            XCTAssertEqual(column.liveAgent(snapshot: ProcessSnapshot())?.status, .working)
             XCTAssertTrue(shell.offersLeadPromotion(task))
             XCTAssertFalse(shell.offersLeadPromotion(lead.workspace))
             shell.requestLeadPromotion(of: task)
@@ -1089,6 +1100,13 @@ final class LeadRestartFlowTests: XCTestCase {
             XCTAssertTrue(harness.alerts.isEmpty)
             XCTAssertTrue(harness.terminalRestarts.isEmpty)
             XCTAssertEqual(ProcessInstance.running(pid: process.pid), process)
+            shell.addWorkspace(title: "From a link", cwd: harness.worktree, profileID: lead.space, startedOutsideNirux: true)
+            XCTAssertFalse(shell.offersLeadPromotion(try XCTUnwrap(shell.activeWorkspace)), "opened from outside Nirux")
+            shell.addWorkspace(title: "Its part", cwd: harness.worktree, profileID: lead.space, parentWorkspaceID: task.id)
+            let subtask = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(subtask.parentWorkspaceID, task.id)
+            shell.requestLeadPromotion(of: subtask)
+            XCTAssertEqual(shell.toast?.message, "A sub-task can’t become the Lead: its task waits for it. Promote its task instead.")
         }
     }
 

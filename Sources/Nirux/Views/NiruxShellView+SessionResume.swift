@@ -44,6 +44,11 @@ final class SessionResumeState {
         launches.append(Launch(column: column, sessionID: sessionID, at: now))
     }
 
+    /// Its agent ended: the column holds no session it launched.
+    func forgetLaunch(in column: ColumnState) {
+        launches.removeAll { $0.column === column }
+    }
+
     func launchedSession(in column: ColumnState, now: TimeInterval) -> String? {
         launches.last { $0.column === column && now - $0.at <= Self.launchGrace }?.sessionID
     }

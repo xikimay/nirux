@@ -18,6 +18,7 @@ final class LeadPromotionTests: XCTestCase {
             (nil, 0, "agent terminal"),
             (atRest, 1, "sub-tasks")
         ]
+        XCTAssertTrue(LeadPromotion.refusal(atRest, isSubtask: true, openSubtasks: 0)?.contains("Promote its task") == true)
         func with(_ change: (inout LeadPromotion.Worker) -> Void) -> LeadPromotion.Worker {
             var worker = atRest
             change(&worker)
