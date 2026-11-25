@@ -420,6 +420,10 @@ final class NiruxShellView: NSView {
             guard let task = self?.workspaces[safe: index] else { return false }
             return !task.isInactive && Self.isTask(task)
         }
+        sidebar.offersLeadPromotion = { [weak self] index in
+            guard let self, let task = self.workspaces[safe: index] else { return false }
+            return self.offersLeadPromotion(task)
+        }
         sidebar.offersSubtask = { [weak self] index in
             guard let self, let workspace = self.workspaces[safe: index], !workspace.isClosing else { return false }
             return self.offersSubtask(workspace)

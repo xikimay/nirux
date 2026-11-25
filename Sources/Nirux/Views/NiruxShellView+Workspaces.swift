@@ -489,6 +489,9 @@ extension NiruxShellView {
         case .resumeWith:
             showResumeTask(workspaces[workspaceIndex])
             return
+        case .promoteToLead:
+            requestLeadPromotion(of: workspaces[workspaceIndex])
+            return
         case .startWaitingTask:
             startWaitingTask(workspaces[workspaceIndex])
             return
