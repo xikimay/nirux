@@ -304,7 +304,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         indicator.update(limits: claude, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour)], now: now)
         XCTAssertEqual(indicator.label.stringValue, "⚠︎ 5h full by 14:40")
         XCTAssertEqual(indicator.label.textColor, Theme.Color.error)
-        XCTAssertEqual(indicator.meters.limits.map(\.length), [5 * hour, 7 * 86_400])
+        XCTAssertEqual(indicator.meters.limits.map(\.length), [5 * hour, 7 * 24 * hour])
         XCTAssertTrue(indicator.view.toolTip?.contains("5h: full by 14:40, before its reset at 15:00") == true)
         XCTAssertTrue(indicator.label.accessibilityLabel()?.contains("7d 20% used") == true, "VoiceOver hears every window")
         // A `/resume` of an older session left 12 % in the file: the logged readings still tell the pace.

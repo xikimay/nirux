@@ -13,8 +13,3 @@ extension NSColor {
     static let niruxWarning = Theme.Color.textPrimary
 }
 
-extension String {
-    /// The words of a warning, as `NSColor.niruxWarning` draws them:
-    /// "⚠︎ Couldn’t read the file."
-    var asWarning: String { "⚠︎ " + self }
-}
