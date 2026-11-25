@@ -336,7 +336,9 @@ New flow, built on the guarded typing `tell` already uses
     landed; a task's instructions say to merge the base only then. The default
     protects the user's prepared list. When the
     user requests a replacement, an opted-in Lead can pass `replace: true`.
-    The same preflight checks the requested order and cadence. A proposal that
+    The same preflight checks the requested order and cadence. In a train, a
+    pull request's own head needs none of the required checks, only none red:
+    the train runs them on its code. A proposal that
     needs manual review opens the confirmation sheet. An open sheet, a running
     queue or a selection changed during preflight prevents replacement.
   - `merge_queue_status(repo?)` reports the phase, cadence, current step,
