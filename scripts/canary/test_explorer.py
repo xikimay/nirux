@@ -203,6 +203,22 @@ class ExplorerTests(unittest.TestCase):
             running.kill()
             running.wait()
 
+    def test_the_github_tool_changes_the_copys_github_as_from_outside(self):
+        world = self.root / "github/world.json"
+        world.parent.mkdir()
+        world.write_text(json.dumps({"repository": "acme/widgets", "pullRequests": [
+            {"number": 2, "headRefName": "canary-beta", "state": "OPEN", "checks": "pending"}]}))
+        explorer = self.explorer(FakeChannel(snapshot=[snapshot("A")]))
+        content, is_error = explorer.call("github", {"pull": 2, "event": "merge"})
+        self.assertFalse(is_error)
+        self.assertEqual(content[0]["text"], "Pull request #2: merge.\nChecks passed.")
+        self.assertEqual(json.loads(world.read_text())["pullRequests"][0]["state"], "MERGED")
+        explorer.call("github", {"pull": 2, "event": "checks-fail"})
+        self.assertEqual(json.loads(world.read_text())["pullRequests"][0]["checks"], "failure")
+        self.assertEqual(explorer.call("github", {"pull": 2, "event": "delete"})[0][0]["text"],
+                         "event must be one of merge, close, reopen, checks-pass, checks-fail, checks-run.")
+        self.assertIn("no pull request #9", explorer.call("github", {"pull": 9, "event": "merge"})[0][0]["text"])
+
     def test_notes_wait_for_a_person(self):
         self.explorer(FakeChannel()).call("note", {"text": "The badge says 2, one agent waits."})
         self.assertEqual([(n["text"], n["episode"]) for n in self.lines("notes.jsonl")],
@@ -226,7 +242,7 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(replies[1]["error"]["code"], -32601)
         self.assertEqual(replies[2]["result"]["protocolVersion"], "2025-11-25")
         self.assertEqual({t["name"] for t in replies[3]["result"]["tools"]},
-                         {"look", "press", "menu", "key", "type", "terminal", "render", "note"})
+                         {"look", "press", "menu", "key", "type", "terminal", "render", "github", "note"})
 
 
 class RunnerTests(unittest.TestCase):

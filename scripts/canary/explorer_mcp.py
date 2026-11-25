@@ -21,6 +21,7 @@ import sys
 import time
 
 from channel import Channel, ChannelError, NotTaken, StillWorking
+import fake_gh
 from scenarios import check_amber_has_reason, check_state_json_valid
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -58,10 +59,22 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "render", "description": "A picture of the main window. Scarce: use look() first.",
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "github", "description": "Change the copy's GitHub as someone outside Nirux would: merge, close or reopen a "
+                                      "pull request, or make its checks pass, fail or run. Nirux sees it at its next refresh.",
+     "inputSchema": {"type": "object", "properties": {
+         "pull": {"type": "integer"},
+         "event": {"type": "string", "enum": ["merge", "close", "reopen", "checks-pass", "checks-fail", "checks-run"]}},
+         "required": ["pull", "event"]}},
     {"name": "note", "description": "Something that looks wrong although no check failed: what you did and what you saw.",
      "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
 ]
-ACTIONS = {"press", "menu", "key", "type"}
+ACTIONS = {"press", "menu", "key", "type", "github"}
+GITHUB_EVENTS = {
+    "merge": lambda at: {"state": "MERGED", "mergedAt": at}, "close": lambda at: {"state": "CLOSED", "closedAt": at},
+    "reopen": lambda at: {"state": "OPEN", "closedAt": None, "mergedAt": None},
+    "checks-pass": lambda at: {"checks": "success"}, "checks-fail": lambda at: {"checks": "failure"},
+    "checks-run": lambda at: {"checks": "pending"},
+}
 # What the agent isn't handed, whatever explore.sb and the copy already refuse: a terminal (every
 # one runs a fake agent), a browser (pages are localhost only, CanaryChannel.pagePolicy), the
 # user's clipboard (the copy reaches none).
@@ -96,6 +109,8 @@ def invalid(name, arguments):
         expected = SCHEMA_TYPES.get((spec or {}).get("type"))
         if spec is None or (expected and (not isinstance(value, expected) or isinstance(value, bool))):
             return f"{key} must be {(spec or {}).get('type', 'absent')}."
+        if spec.get("enum") and value not in spec["enum"]:
+            return f"{key} must be one of {', '.join(spec['enum'])}."
         if expected is list and not all(isinstance(item, str) for item in value):
             return f"{key} must hold strings."
         allowed = (spec.get("items") or {}).get("enum")
@@ -248,7 +263,21 @@ class Explorer:
     def terminals(self):
         return json.loads(self.channel.call("terminal"))
 
+    def change_github(self, arguments):
+        """The run's GitHub (fake_gh.py's world) changed as from outside Nirux."""
+        def change(world):
+            pull = next((p for p in world["pullRequests"] if p["number"] == arguments["pull"]), None)
+            if pull is None:
+                raise ValueError(f"no pull request #{arguments['pull']}")
+            pull.update(GITHUB_EVENTS[arguments["event"]](time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+            return f"Pull request #{pull['number']}: {arguments['event']}.", True
+
+        # Under fake_gh's lock: a retarget by the app at the same moment loses nothing.
+        return fake_gh.update(self.state.parent / "github" / "world.json", change)[0]
+
     def act(self, name, arguments):
+        if name == "github":
+            return self.change_github(arguments)
         if name == "press":
             return self.channel.call("press", label=arguments["label"])
         if name == "menu":
