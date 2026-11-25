@@ -26,6 +26,19 @@ extension MergeQueue {
         return rules.contains { $0["type"] as? String == "merge_queue" }
     }
 
+    /// `rules/branches/{branch}`: the checks its `required_status_checks` rules name.
+    static func parseRulesRequiredChecks(_ data: Data) -> [String]? {
+        guard let rules = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return nil }
+        return rules.filter { $0["type"] as? String == "required_status_checks" }.flatMap { rule in
+            (GitHub.dig(rule, "parameters", "required_status_checks") as? [[String: Any]] ?? []).compactMap { $0["context"] as? String }
+        }
+    }
+
+    /// GraphQL `repository.pullRequest(number:).id`.
+    static func parsePullRequestID(_ data: Data) -> String? {
+        GitHub.dig(object(data), "data", "repository", "pullRequest", "id") as? String
+    }
+
     /// GraphQL `repository.mergeQueue(branch:)`: whether it isn't null.
     /// A missing field is unreadable, not "none".
     static func parseMergeQueue(_ data: Data) -> Bool? {
