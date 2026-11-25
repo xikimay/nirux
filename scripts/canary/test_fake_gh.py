@@ -49,6 +49,14 @@ class FakeGhTests(unittest.TestCase):
         calls = [json.loads(line) for line in self.world.with_name("calls.jsonl").read_text().splitlines()]
         self.assertEqual([(c["args"][:2], c["status"]) for c in calls][:2], [(["pr", "list"], 0), (["pr", "list"], 0)])
 
+    def test_it_can_reach_neither_the_network_nor_a_real_gh(self):
+        # Its world file is all it reads; explore.sb confines it besides (no network, no home folder).
+        source = (HERE / "fake_gh.py").read_text()
+        imported = {line.split()[1].split(".")[0] for line in source.splitlines() if line.startswith(("import ", "from "))}
+        self.assertEqual(imported - {"json", "pathlib", "sys", "time"}, set())
+        for forbidden in ("/opt/homebrew", "/usr/local/bin", ".config/gh", "GH_TOKEN", "GITHUB_TOKEN", "hosts.yml"):
+            self.assertNotIn(forbidden, source)
+
     def test_a_merge_and_a_retarget_change_the_world_and_the_rest_is_refused(self):
         merged = subprocess.run([str(self.gh), "pr", "merge", "2", "--squash", "--match-head-commit", "b"], capture_output=True, text=True)
         self.assertEqual(merged.returncode, 0)
