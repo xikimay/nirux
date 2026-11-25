@@ -227,6 +227,12 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
             version: ClaudeCodeVersion(major: proven.major, minor: proven.minor, patch: proven.patch - 1), mailbox: mailbox
         ))
         XCTAssertNil(MissionWaitHook.claudeHooks(executable: nil, enabled: true, version: proven, mailbox: mailbox))
+        func detected() -> ClaudeCodeVersion? {
+            XCTFail("no detection without Nirux's binary or with the pilot off")
+            return proven
+        }
+        XCTAssertNil(MissionWaitHook.claudeHooks(executable: nil, enabled: true, version: detected(), mailbox: mailbox))
+        XCTAssertNil(MissionWaitHook.claudeHooks(executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", enabled: false, version: detected(), mailbox: mailbox))
         let hooks = try XCTUnwrap(MissionWaitHook.claudeHooks(
             executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", enabled: true, version: proven, mailbox: mailbox
         ))

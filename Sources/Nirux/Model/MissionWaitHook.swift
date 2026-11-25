@@ -33,9 +33,11 @@ enum MissionWaitHook {
     /// terminal could run (`version`) and Nirux at `executable`; nil
     /// without either, or with the pilot off in Settings (`enabled`).
     static func claudeHooks(
-        executable: String?, enabled: Bool, version: ClaudeCodeVersion? = ClaudeCodeVersion.detect(), mailbox: URL = mailbox.root
+        executable: String?, enabled: Bool, version: @autoclosure () -> ClaudeCodeVersion? = ClaudeCodeVersion.detect(),
+        mailbox: URL = mailbox.root
     ) -> [String: [ClaudeSpaceSettings.File.HookGroup]]? {
-        guard enabled, let executable, let version, version >= claudeVersion else { return nil }
+        // Detected only then: it reads every claude install on the PATH.
+        guard enabled, let executable, let version = version(), version >= claudeVersion else { return nil }
         let path = AgentHookInstaller.shellQuoted(executable)
         let command = #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x \#(path) ]; then exec \#(path) --hook mission-wait "#
             + AgentHookInstaller.shellQuoted(mailbox.path) + "; else /bin/cat >/dev/null; fi"
