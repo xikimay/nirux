@@ -3,7 +3,11 @@ import Foundation
 /// A `cat` under an agent's name, for tests that type into a real terminal:
 /// what it is sent goes to a file the test reads, byte by byte. The
 /// terminal's line mode is off: left on, text typed without Return would
-/// never get there, nor anything of a line over 1,024 bytes.
+/// never get there, nor anything of a line over 1,024 bytes. Its `stty`
+/// runs in the shell's process group (`set +m`): in front, the shell, then
+/// the stand-in, as for an agent, which sets the mode itself; never a
+/// program that has just turned line mode off, whose Ctrl+L (the heavy
+/// redraw's) the stand-in would read.
 struct AgentStandIn {
     let received = FileManager.default.temporaryDirectory
         .appendingPathComponent("nirux-agent-stand-in-\(UUID().uuidString).txt")
@@ -18,14 +22,16 @@ struct AgentStandIn {
     /// `arguments` (no single quote in them) come before it.
     func command(named name: String = "claude", holdable: Bool = false, arguments: [String] = [], launchPrompt: String? = nil) -> String {
         guard holdable || launchPrompt != nil || !arguments.isEmpty else {
-            return "stty -icanon min 1 time 0; exec -a \(name) /bin/cat > '\(received.path)'"
+            return Self.lineModeOff + "exec -a \(name) /bin/cat > '\(received.path)'"
         }
         let wait = holdable ? #" select(undef, undef, undef, 0.02) while -e "\#(held.path)" && time - (stat _)[9] < 20;"# : ""
         let reader = #"open(my $o, ">", $ARGV[0]); $o->autoflush(1); "#
             + #"while (sysread(STDIN, my $b, 128)) { print $o $b;"# + wait + " }"
         let prompt = (arguments + (launchPrompt.map { [$0] } ?? [])).map { " '\($0)'" }.joined()
-        return "stty -icanon min 1 time 0; exec -a \(name) /usr/bin/perl -e '\(reader)' '\(received.path)'\(prompt)"
+        return Self.lineModeOff + "exec -a \(name) /usr/bin/perl -e '\(reader)' '\(received.path)'\(prompt)"
     }
+
+    private static let lineModeOff = "set +m; stty -icanon min 1 time 0; "
 
     /// What it was sent so far.
     var input: String {
