@@ -88,7 +88,9 @@ enum ClaudeUsageLimitsFile {
         Persistence.stateDirectory.appendingPathComponent("claude-usage-limits.json")
     }
 
-    /// The readings log (`QuotaReadingLog`) beside the file, for the pace.
+    /// The readings log (`QuotaReadingLog`) beside the file, for the pace:
+    /// the state's `usage` folder, which the one-shot log shares (their file
+    /// prefixes keep them apart).
     static func readingsFolder(beside url: URL = url) -> String {
         url.deletingLastPathComponent().appendingPathComponent("usage").path
     }
@@ -134,9 +136,13 @@ enum ClaudeUsageLimitsFile {
         let existing = loadContents(from: url) ?? Contents()
         var contents = existing
         var news = report.limits
+        // Only a new response logs a reading: a differing repeat (`/resume`
+        // of an older session) brings old numbers at a new time.
+        var isResponse = true
         if let reporter {
             let last = contents.reporters[reporter]
             if let last, last.sessionID != report.sessionID || (report.apiDuration ?? -1) <= (last.apiDuration ?? -1) {
+                isResponse = false
                 if ReporterMark.Reading(news.fiveHour) == last.fiveHour { news.fiveHour = nil }
                 if ReporterMark.Reading(news.sevenDay) == last.sevenDay { news.sevenDay = nil }
             }
@@ -153,7 +159,7 @@ enum ClaudeUsageLimitsFile {
         contents.limits = (contents.limits.current(at: now) ?? ClaudeUsageLimits()).updated(with: news)
         var readings: [String: QuotaReading] = [:]
         for (name, window, before) in [("five_hour", news.fiveHour, existing.limits.fiveHour), ("seven_day", news.sevenDay, existing.limits.sevenDay)] {
-            guard let window else { continue }
+            guard isResponse, let window else { continue }
             let changed = before?.usedPercentage != window.usedPercentage || before?.resetsAt != window.resetsAt
             guard changed || now - (contents.logged[name] ?? 0) >= readingHeartbeat else { continue }
             readings[name] = QuotaReading(time: now, usedPercent: window.usedPercentage, resetsAt: window.resetsAt)
@@ -173,7 +179,12 @@ enum ClaudeUsageLimitsFile {
     }
 
     /// Turning the option off forgets what was reported, readings included.
+    /// Under the lock: a status line run in flight must not log after it.
     static func remove(at url: URL = url) {
+        let lock = open(url.path + ".lock", O_RDWR | O_CREAT, 0o600)
+        defer { if lock >= 0 { close(lock) } }
+        let locked = lock >= 0 && acquire(lock)
+        defer { if locked { flock(lock, LOCK_UN) } }
         try? FileManager.default.removeItem(at: url)
         QuotaReadingLog.removeAll(in: readingsFolder(beside: url))
     }

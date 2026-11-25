@@ -26,9 +26,9 @@ struct CodexAgyUsageTests {
         #expect(parser.contextWindow == 258_000)
         #expect(parser.rateLimits?.primary?.usedPercent == 42.5)
         #expect(parser.rateLimits?.secondary == nil)
-        // Every reading, the repeated response's too: the pace needs them.
-        #expect(parser.rateLimitReadings.count == 3)
-        #expect(CodexRateLimits.quotaReadings(parser.rateLimitReadings)[300]?.map(\.usedPercent) == [42.5, 42.5, 42.5])
+        // A reading per response; the repeat in between brought old numbers at a new time.
+        #expect(parser.rateLimitReadings.map(\.reportedAt) == parser.events.map(\.timestamp))
+        #expect(CodexRateLimits.quotaReadings(parser.rateLimitReadings)[300]?.map(\.usedPercent) == [42.5, 42.5])
         #expect(parser.events.map(\.counts) == [
             TokenCounts(input: 5_000, output: 200, cacheRead: 15_000),
             TokenCounts(input: 2_000, output: 50, cacheRead: 28_000)

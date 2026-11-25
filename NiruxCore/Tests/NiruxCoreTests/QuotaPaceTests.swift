@@ -56,6 +56,27 @@ struct QuotaPaceTests {
         let shown = fresh - 600
         #expect(QuotaPace.forecast(climb, span: span, now: now, previous: .runsOut(at: shown)) == .runsOut(at: shown))
         #expect(QuotaPace.forecast(climb, span: span, now: now, previous: .runsOut(at: shown - 300)) == .runsOut(at: fresh))
+        // A held time that went by gives way.
+        let later = now + 1_200
+        let forecast = QuotaPace.forecast(climb, span: span + 1_200, now: later, previous: .runsOut(at: later - 60))
+        guard case .runsOut(let moved) = forecast else {
+            Issue.record("no forecast")
+            return
+        }
+        #expect(moved > later)
+    }
+
+    @Test func aLimitAboutToFillNeverShowsATimeGoneByNorAHundredAtItsReset() {
+        // 97 % a minute ago, a point a minute: full in 2 minutes.
+        let fast = (0..<4).map { QuotaReading(time: now - 60 - Double(3 - $0) * 300, usedPercent: 82 + Double($0) * 5, resetsAt: now + 3_600) }
+        guard case .runsOut(let at) = QuotaPace.forecast(fast, span: span, now: now) else {
+            Issue.record("no forecast")
+            return
+        }
+        #expect(at >= now)
+        // 99.7 % at the reset: not full.
+        let near = readings([99.1, 99.3, 99.5], every: 450, resetsAt: now + 600)
+        #expect(QuotaPace.forecast(near, span: span, now: now) == .atReset(percent: 99))
     }
 
     @Test func theWeekTakesItsPaceOverADay() {

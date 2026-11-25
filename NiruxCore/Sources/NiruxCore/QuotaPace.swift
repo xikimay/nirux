@@ -74,10 +74,14 @@ public enum QuotaPace {
         guard recent.count >= minimumReadings, latest.time - first.time >= minimumSpan else { return .unknown }
         let rate = max(0, slope(recent))
         let atReset = latest.usedPercent + rate * (latest.resetsAt - latest.time)
-        guard rate > 0, atReset >= 100 else { return .atReset(percent: Int(min(100, atReset).rounded())) }
+        // 100 % shows only as running out.
+        guard rate > 0, atReset >= 100 else { return .atReset(percent: min(99, Int(atReset.rounded()))) }
         let full = latest.time + (100 - latest.usedPercent) / rate
-        let rounded = (full / rounding).rounded(.down) * rounding
-        if case .runsOut(let shown) = previous, abs(shown - rounded) <= steadiness, shown < latest.resetsAt { return .runsOut(at: shown) }
+        // Never a time already gone while the limit isn't full yet.
+        let rounded = max((full / rounding).rounded(.down) * rounding, (now / rounding).rounded(.up) * rounding)
+        if case .runsOut(let shown) = previous, abs(shown - rounded) <= steadiness, shown > now, shown < latest.resetsAt {
+            return .runsOut(at: shown)
+        }
         return .runsOut(at: rounded)
     }
 

@@ -37,16 +37,24 @@ public struct CodexRolloutUsageParser: TranscriptLineParser, Sendable {
     }
 
     private mutating func consumeTokenCount(_ payload: [String: Any], timestamp: TimeInterval) {
-        if let limits = payload["rate_limits"] as? [String: Any], let reading = CodexRateLimits(limits, reportedAt: timestamp) {
+        let reading = (payload["rate_limits"] as? [String: Any]).flatMap { CodexRateLimits($0, reportedAt: timestamp) }
+        let isResponse = consumeResponse(payload["info"] as? [String: Any], timestamp: timestamp)
+        // A repeat without a response brings old numbers at a new time.
+        if let reading, isResponse || !reading.sameWindows(as: rateLimitReadings.last) {
             rateLimitReadings.append(reading)
         }
-        guard let info = payload["info"] as? [String: Any] else { return }
+    }
+
+    /// Whether `info` brought a new response.
+    private mutating func consumeResponse(_ info: [String: Any]?, timestamp: TimeInterval) -> Bool {
+        guard let info else { return false }
         contextWindow = TokenCounts.count(info["model_context_window"]) ?? contextWindow
         let total = (info["total_token_usage"] as? [String: Any]).flatMap(TokenCounts.init(codexUsage:))
         guard let last = (info["last_token_usage"] as? [String: Any]).flatMap(TokenCounts.init(codexUsage:)),
-              last.context + last.output > 0, total == nil || total != lastTotal else { return }
+              last.context + last.output > 0, total == nil || total != lastTotal else { return false }
         lastTotal = total
         events.append(UsageEvent(timestamp: timestamp, model: model, counts: last))
+        return true
     }
 }
 
@@ -107,6 +115,10 @@ public struct CodexRateLimits: Equatable, Sendable {
         secondary = window("secondary")
         guard primary != nil || secondary != nil else { return nil }
         self.reportedAt = reportedAt
+    }
+
+    func sameWindows(as other: CodexRateLimits?) -> Bool {
+        primary == other?.primary && secondary == other?.secondary
     }
 
     /// Each window's readings, by its length in minutes, oldest first.

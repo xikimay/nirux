@@ -205,6 +205,8 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         try report("a", api: 400, fiveHour: 31, sevenDay: 18, at: beat + ClaudeUsageLimitsFile.readingHeartbeat)
         XCTAssertEqual(logged(), [30, 31, 31], "its prompt cache expired: a repeat, not a reading")
         XCTAssertEqual(logged("seven_day"), [18, 18])
+        try report("a", session: "s2", api: 50_000, fiveHour: 12, sevenDay: 18, at: beat + 700)
+        XCTAssertEqual(logged(), [30, 31, 31], "/resume of an older session: its numbers are old")
 
         ClaudeUsageLimitsFile.remove(at: fileURL)
         XCTAssertEqual(QuotaReadingLog.read(in: folder, since: 0), [:])
