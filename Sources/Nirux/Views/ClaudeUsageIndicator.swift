@@ -47,6 +47,10 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController, NSPopoverDe
     let popoverContent = QuotaPopoverViewController()
     /// The Usage window, from the popover.
     var onShowUsage: (() -> Void)?
+    /// The tasks spending Claude's session, asked as the popover opens and
+    /// at each update while it shows; their actions go to `onBurnAction`.
+    var burnRows: (([QuotaReading]) -> [QuotaBurnRow])?
+    var onBurnAction: ((String, QuotaBurnRow.Action) -> Void)?
     /// Shows the popover under the indicator; a test sets its own.
     var presentPopover: (NSPopover, NSView) -> Void = { popover, view in
         guard view.window != nil else { return }
@@ -77,6 +81,10 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController, NSPopoverDe
         popoverContent.onShowUsage = { [weak self] in
             self?.popover.performClose(nil)
             self?.onShowUsage?()
+        }
+        popoverContent.onBurnAction = { [weak self] workspaceID, action in
+            self?.popover.performClose(nil)
+            self?.onBurnAction?(workspaceID, action)
         }
     }
 
@@ -116,7 +124,7 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController, NSPopoverDe
     @objc func togglePopover() {
         if popover.isShown { return popover.performClose(nil) }
         guard isShowing, Date().timeIntervalSince1970 - popoverClosedAt >= Self.reopenDelay else { return }
-        popoverContent.update(limits: limits, now: renderedAt, calendar: calendar)
+        refreshPopover(now: renderedAt)
         presentPopover(popover, view)
     }
 
@@ -138,7 +146,7 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController, NSPopoverDe
             if popover.isShown { popover.performClose(nil) }
             return
         }
-        if popover.isShown { popoverContent.update(limits: limits, now: now, calendar: calendar) }
+        if popover.isShown { refreshPopover(now: now) }
         let title = UsageText.title(binding, now: now, calendar: calendar)
         label.stringValue = title.text
         label.textColor = switch title.tone {
@@ -159,6 +167,11 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController, NSPopoverDe
         view.frame.size.width = Self.padding + Self.metersWidth + Theme.Space.sm + label.frame.width + Self.padding
         layOut()
         view.isHidden = false
+    }
+
+    private func refreshPopover(now: TimeInterval) {
+        let burn = burnRows?(claudeReadings["five_hour"] ?? []) ?? []
+        popoverContent.update(limits: limits, burn: burn, now: now, calendar: calendar)
     }
 
     /// Each window shown, with its use and reset, then each one's pace, then

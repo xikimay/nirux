@@ -1244,6 +1244,88 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// A task at work with a heavy context offers "Compact at turn end" in
+    /// the title bar popover; queued once, it types /compact when its turn
+    /// ends, not before, never twice, and not once compacted another way.
+    func testCompactAtTurnEndTypesCompactOnceItsTurnEnds() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let started = try call(LeadTools.startTask, ["description": "Index rewrite"], lead: lead, in: harness)
+            XCTAssertFalse(started.isError, started.text)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Index rewrite" })
+            let now = Date().timeIntervalSince1970
+            let monitor = UsageMonitor(sources: UsageSources(home: harness.home), catalog: { UsageCatalog() })
+            @MainActor func report(context: Int) -> UsageReport {
+                UsageReport(sessions: [UsageSession(
+                    key: UsageSessionKey(.claude, "t"), attribution: UsageAttribution(spaceID: lead.space, taskID: task.id), contextTokens: context,
+                    events: [UsageEvent(timestamp: now - 60, model: "claude-opus-5-5", counts: TokenCounts(input: 1_000, cacheRead: context - 1_000))]
+                )], now: now)
+            }
+            monitor.report = report(context: 612_000)
+            shell.usageMonitor = monitor
+            let column = try XCTUnwrap(shell.taskWorker(task, snapshot: ProcessSnapshot()))
+            let pty = try XCTUnwrap(column.pty)
+            let worker = AgentStandIn()
+            defer { worker.remove() }
+            harness.waitUntil("task shell") { pty.shellPID != nil }
+            pty.sendShellLaunchCommand("(\(worker.command()))")
+            harness.waitUntil("its Claude worker") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            var holdings: LeadHoldings? = LeadHoldings(isBusy: true)
+            shell.claudeHoldings = { _, held, _ in held === column ? holdings : nil }
+            func compacts() -> Int { worker.input.components(separatedBy: "/compact").count - 1 }
+
+            let offer = shell.quotaBurnRows(readings: []).first
+            XCTAssertEqual(offer?.actions, [.compactAtTurnEnd(column: column.id)], "mid-turn with 612k")
+            XCTAssertEqual(offer?.cause, "Each message rereads 612k")
+            shell.takeBurnAction(.compactAtTurnEnd(column: column.id), workspaceID: task.id)
+            XCTAssertEqual(shell.compactsAtTurnEnd[column.id], task.id)
+            shell.runCompactsAtTurnEnd(snapshot: ProcessSnapshot(entries: []))
+            XCTAssertEqual(shell.compactsAtTurnEnd[column.id], task.id, "a pass without the process table decides nothing")
+            shell.updateSidebar()
+            XCTAssertEqual(compacts(), 0, "it waits for the turn to end")
+            XCTAssertEqual(shell.quotaBurnRows(readings: []).first?.actions, [], "queued once")
+            XCTAssertEqual(shell.quotaBurnRows(readings: []).first?.cause, "Each message rereads 612k · compacts at turn end")
+
+            holdings = LeadHoldings()
+            harness.waitUntil("/compact typed at rest") {
+                shell.updateSidebar()
+                return compacts() == 1
+            }
+            XCTAssertTrue(shell.compactsAtTurnEnd.isEmpty)
+            shell.updateSidebar()
+            XCTAssertEqual(compacts(), 1, "once")
+
+            // A Compact taken by hand replaces its queued twin, typed or refused
+            // (the stand-in's screen now reads as a draft).
+            holdings = LeadHoldings(isBusy: true)
+            shell.takeBurnAction(.compactAtTurnEnd(column: column.id), workspaceID: task.id)
+            let index = try XCTUnwrap(task.columns.firstIndex { $0 === column })
+            let taskIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === task })
+            shell.takeContextOffer(.compact, workspaceIndex: taskIndex, columnIndex: index)
+            XCTAssertTrue(shell.compactsAtTurnEnd.isEmpty)
+
+            // A draft at rest wins, with a word.
+            holdings = LeadHoldings(isBusy: true)
+            shell.takeBurnAction(.compactAtTurnEnd(column: column.id), workspaceID: task.id)
+            holdings = LeadHoldings(hasDraft: true)
+            shell.updateSidebar()
+            XCTAssertTrue(shell.compactsAtTurnEnd.isEmpty)
+            XCTAssertEqual(shell.toast?.message, "“Index rewrite” won’t compact at turn end: its prompt holds a draft.")
+
+            // Compacted where Nirux can't see it (claude itself, or by hand):
+            // a light context sends nothing at rest.
+            holdings = LeadHoldings(isBusy: true)
+            shell.takeBurnAction(.compactAtTurnEnd(column: column.id), workspaceID: task.id)
+            monitor.report = report(context: 40_000)
+            let typed = compacts()
+            holdings = LeadHoldings()
+            shell.updateSidebar()
+            XCTAssertTrue(shell.compactsAtTurnEnd.isEmpty)
+            XCTAssertEqual(compacts(), typed)
+        }
+    }
+
     @MainActor private func budgetOffer(of task: WorkspaceState, in shell: NiruxShellView) -> SidebarBudgetOffer? {
         shell.sidebar.lastInfos.first { $0.id == task.id }?.cardActions.lazy.compactMap {
             if case .budget(let offer) = $0 { offer } else { nil }
