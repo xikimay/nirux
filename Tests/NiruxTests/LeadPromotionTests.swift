@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Promote to Lead's rules: only a Claude conversation at rest moves, and
+/// Promote to Lead's rules: only a worker at rest is promoted, and
 /// the Missions it carried as a task end without typing anything more.
 @MainActor
 final class LeadPromotionTests: XCTestCase {
@@ -16,6 +16,11 @@ final class LeadPromotionTests: XCTestCase {
         XCTAssertNil(LeadPromotion.refusal(atRest))
         var cases: [(LeadPromotion.Worker?, String)] = [(nil, "agent terminal")]
         XCTAssertTrue(LeadPromotion.refusal(atRest, isSubtask: true)?.contains("Promote its task") == true)
+        // Another agent's Lead starts afresh: no conversation to carry.
+        for agent in [CodingAgent.codex, .agy] {
+            XCTAssertNil(LeadPromotion.refusal(LeadPromotion.Worker(agent: agent, isAtRest: true)), agent.rawValue)
+            XCTAssertNotNil(LeadPromotion.refusal(LeadPromotion.Worker(agent: agent)), agent.rawValue)
+        }
         func with(_ change: (inout LeadPromotion.Worker) -> Void) -> LeadPromotion.Worker {
             var worker = atRest
             change(&worker)
@@ -25,8 +30,6 @@ final class LeadPromotionTests: XCTestCase {
             (with { $0.isStarting = true }, "starting"),
             (with { $0.otherProgram = "vim" }, "vim runs"),
             (with { $0.agent = nil }, "No agent"),
-            (with { $0.agent = .codex }, "Only a Claude task"),
-            (with { $0.agent = .agy }, "Only a Claude task"),
             (with { $0.sessionID = nil }, "first turn"),
             (with { $0.isAtRest = false }, "working"),
             (with { $0.hasDialog = true }, "dialog"),
