@@ -9,6 +9,9 @@ on:
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/canary-night.yml"
 
 permissions:
   contents: read
@@ -19,7 +22,6 @@ concurrency:
 
 jobs:
   explore:
-    if: github.ref == 'refs/heads/main'
     runs-on: macos-15
     timeout-minutes: 30
     env:
@@ -31,7 +33,6 @@ jobs:
       # The commit the nightly was built from, so the explorer and the copy agree.
       - uses: actions/checkout@v5
         with:
-          ref: nightly
           persist-credentials: false
       - name: Install Claude Code
         run: npm install --global "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
