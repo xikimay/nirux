@@ -324,10 +324,11 @@ extension WorkspaceInfo {
             if pullRequest.isDraft { return row(.idle, "#\(pullRequest.number) · draft", nil, trailing: age) }
             switch pullRequest.ciStatus {
             case "SUCCESS"?:
+                let offersTrains = currentBoardProgress?.offersTrains == true
                 let boardAllowsMerge = currentBoardProgress.map {
-                    $0.mergeStep == .ready || ($0.readyApartFromLocalReviews && pullRequest.mergeStateStatus == "CLEAN")
+                    $0.mergeStep == .ready || ($0.readyApartFromLocalReviews && pullRequest.mergeStateIsReady(offersTrains: offersTrains))
                 } ?? true
-                guard boardAllowsMerge, pullRequest.isReadyToMerge(hasFeedback: prFeedback != nil) else {
+                guard boardAllowsMerge, pullRequest.isReadyToMerge(hasFeedback: prFeedback != nil, offersTrains: offersTrains) else {
                     let reason: String
                     if let review = pullRequest.reviewRequest(hasFeedback: prFeedback != nil) { reason = review.text.lowercased() }
                     else if pullRequest.mergeStateStatus == "BLOCKED" { reason = "merge blocked by GitHub" }
@@ -361,13 +362,19 @@ extension PRInfo {
 
     var requiresReview: Bool { reviewRequest(hasFeedback: false) != nil }
 
-    func blocksMerge(hasFeedback: Bool) -> Bool {
-        isDraft || ["FAILURE", "PENDING"].contains(ciStatus) || mergeable == "CONFLICTING" || requiresReview || hasFeedback
-            || autoMerges || (mergeStateStatus.map { $0 != "CLEAN" } ?? false)
+    /// GitHub can merge it as it is, or, where the queue offers trains,
+    /// once the base is merged into it: the train does that.
+    func mergeStateIsReady(offersTrains: Bool) -> Bool {
+        mergeStateStatus == "CLEAN" || (offersTrains && mergeStateStatus == "BEHIND")
     }
 
-    func isReadyToMerge(hasFeedback: Bool) -> Bool {
-        state == .open && ciStatus == "SUCCESS" && !blocksMerge(hasFeedback: hasFeedback)
+    func blocksMerge(hasFeedback: Bool, offersTrains: Bool) -> Bool {
+        isDraft || ["FAILURE", "PENDING"].contains(ciStatus) || mergeable == "CONFLICTING" || requiresReview || hasFeedback
+            || autoMerges || (mergeStateStatus != nil && !mergeStateIsReady(offersTrains: offersTrains))
+    }
+
+    func isReadyToMerge(hasFeedback: Bool, offersTrains: Bool) -> Bool {
+        state == .open && ciStatus == "SUCCESS" && !blocksMerge(hasFeedback: hasFeedback, offersTrains: offersTrains)
     }
 }
 
@@ -376,6 +383,7 @@ struct SidebarBoardProgress: Hashable {
     var number: Int?
     var mergeStep: SidebarTaskStep?
     var readyApartFromLocalReviews = false
+    var offersTrains = false
 }
 
 enum SidebarTaskStep: String {
@@ -404,7 +412,7 @@ enum SidebarTaskStep: String {
             else { self = .checks }
         case nil:
             if let pr, pr.state == .open {
-                if pr.isReadyToMerge(hasFeedback: workspace.prFeedback != nil) { self = .ready }
+                if pr.isReadyToMerge(hasFeedback: workspace.prFeedback != nil, offersTrains: false) { self = .ready }
                 else if pr.isDraft { self = coding }
                 else if ["PENDING", "FAILURE"].contains(pr.ciStatus) { self = .checks }
                 else { self = .review }
