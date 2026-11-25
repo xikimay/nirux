@@ -17,14 +17,26 @@ final class QuotaShareBar: NSView {
     }
 }
 
-/// Plan limits as hair meters, a row each: the used part filled, red once
-/// the limit runs out before its reset (`QuotaLimit.runsOut`), and a tick
-/// where time is in its window. Rows are `limits`, top down.
+/// Plan limits as hair meters, a row each: the used part filled, the
+/// projection to its reset hatched, both red once the limit runs out before
+/// its reset (`QuotaLimit.runsOut`), and a tick where time is in its window.
+/// Rows are `limits`, top down.
 final class QuotaMeterView: NSView {
     static let barHeight: CGFloat = 4
     static let rowGap: CGFloat = 4
     private static let tickWidth: CGFloat = 1.5
     private static let tickOverhang: CGFloat = 1.5
+    private static let hatchStep: CGFloat = 3
+    private static let hatchAlpha: CGFloat = 0.55
+
+    /// Where the forecast takes it by its reset, 0…100.
+    static func projected(_ limit: QuotaLimit) -> Double {
+        switch limit.forecast {
+        case .reached, .runsOut: 100
+        case .atReset(let percent): max(limit.latest.usedPercent, Double(percent))
+        case .quiet, .unknown: limit.latest.usedPercent
+        }
+    }
 
     var limits: [QuotaLimit] = [] {
         didSet { if limits != oldValue { needsDisplay = true } }
@@ -57,8 +69,25 @@ final class QuotaMeterView: NSView {
             Theme.Color.lineStrong.setFill()
             NSBezierPath(roundedRect: bar, xRadius: radius, yRadius: radius).fill()
             let used = min(1, max(0, limit.latest.usedPercent / 100))
+            let ink = limit.runsOut ? Theme.Color.error : Theme.Color.textSecondary
+            let projected = min(1, Self.projected(limit) / 100)
+            if projected > used {
+                NSGraphicsContext.saveGraphicsState()
+                NSBezierPath(roundedRect: bar, xRadius: radius, yRadius: radius).addClip()
+                NSRect(x: bar.width * used, y: bar.minY, width: bar.width * (projected - used), height: bar.height).clip()
+                ink.withAlphaComponent(Self.hatchAlpha).setStroke()
+                let hatch = NSBezierPath()
+                var x = bar.width * used - bar.height
+                while x < bar.width * projected {
+                    hatch.move(to: NSPoint(x: x, y: bar.maxY))
+                    hatch.line(to: NSPoint(x: x + bar.height, y: bar.minY))
+                    x += Self.hatchStep
+                }
+                hatch.stroke()
+                NSGraphicsContext.restoreGraphicsState()
+            }
             if used > 0 {
-                (limit.runsOut ? Theme.Color.error : Theme.Color.textSecondary).setFill()
+                ink.setFill()
                 let fill = NSRect(x: bar.minX, y: bar.minY, width: max(Self.barHeight, bar.width * used), height: bar.height)
                 NSBezierPath(roundedRect: fill, xRadius: radius, yRadius: radius).fill()
             }
