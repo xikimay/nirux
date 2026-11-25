@@ -1521,11 +1521,12 @@ extension WorkspaceState {
     /// Let go, the card keeps the slot it took, or goes back to the one it
     /// came from when `cancelled`, and has the focus, whatever column
     /// opened or closed meanwhile; the camera goes where the strip wants it.
+    /// A card closed meanwhile recedes where it lies.
     func endColumnDrag(cancelled: Bool) {
         guard let drag = draggedColumn else { return }
         draggedColumn = nil
         heldCamera = nil
-        guard let from = columns.firstIndex(where: { $0.id == drag.column }) else { return }
+        guard let from = columns.firstIndex(where: { $0.id == drag.column }), !columns[from].isClosing else { return }
         moveColumn(at: from, to: cancelled ? min(drag.origin, columns.count - 1) : from)
     }
 
