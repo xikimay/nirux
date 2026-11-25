@@ -20,6 +20,33 @@ enum ContextOfferAction: Equatable {
     }
 }
 
+/// What a task past its budget offers on its card (`SidebarCardAction.budget`).
+enum BudgetChoice: String, Hashable, Sendable, CaseIterable {
+    /// Its budget no longer holds it for 7 days: no warning, no pause.
+    case keepGoing
+    /// Its worker, same agent and model, in a new conversation with a
+    /// handover; only while its columns rest. Lifts the budget too.
+    case freshStart
+    /// Close Workspace, which asks first.
+    case close
+
+    var title: String {
+        switch self {
+        case .keepGoing: "Continue"
+        case .freshStart: "Fresh start"
+        case .close: "Close…"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .keepGoing: "Continue past its budget: its pull request's follow-ups go on"
+        case .freshStart: "Fresh start: a new conversation with a handover"
+        case .close: "Close this task"
+        }
+    }
+}
+
 /// What a Lead holds that a fresh start would lose.
 struct LeadHoldings: Equatable {
     /// Working, or a status Nirux can't trust.

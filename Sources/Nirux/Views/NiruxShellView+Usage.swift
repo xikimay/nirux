@@ -31,12 +31,50 @@ extension NiruxShellView {
         updateSidebar()
     }
 
-    /// Its row's usage; a task's has its space's budget, a Lead's or a plain
-    /// workspace's none.
+    /// Its row's usage; a task's has its space's budget, unless the user let
+    /// it pass for now (`budgetPassedAt`); a Lead's or a plain workspace's none.
     func taskUsage(of workspace: WorkspaceState) -> SidebarTaskUsage? {
         usageMonitor?.report.flatMap {
-            SidebarTaskUsage($0, taskID: workspace.id, budget: Self.isTask(workspace) ? taskBudgets[workspace.profileID] : nil)
+            SidebarTaskUsage(
+                $0, taskID: workspace.id,
+                budget: Self.isTask(workspace) && !workspace.passesBudget(at: Date().timeIntervalSince1970)
+                    ? taskBudgets[workspace.profileID] : nil
+            )
         }
+    }
+
+    /// Continue lifts the budget for this task for 7 days. Fresh start, only
+    /// while its agents rest (it ends the worker's shell), resumes its worker
+    /// with the same agent and model in a new conversation, and lifts it too.
+    /// Close… asks as Close Workspace does.
+    func takeBudgetChoice(_ choice: BudgetChoice, workspaceID: String) {
+        guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }), Self.isTask(workspaces[index]) else { return }
+        let task = workspaces[index]
+        switch choice {
+        case .keepGoing:
+            passBudget(of: task)
+        case .freshStart:
+            guard sidebar.lastInfos.first(where: { $0.id == task.id })?.agentsRest == true else {
+                return showToast("“\(task.title)” is working or asking: Fresh start waits until it rests.")
+            }
+            let snapshot = ProcessSnapshot()
+            guard let worker = taskWorker(task, snapshot: snapshot), let agent = worker.missionAgent(snapshot: snapshot) else {
+                return showToast("Nirux couldn’t tell which agent this task runs.", tone: .error)
+            }
+            let model = worker.pty?.foregroundProcess(snapshot: snapshot).flatMap { AgentModels.launchModel(arguments: $0.arguments) }
+            resumeTask(task, with: TaskAgentChoice(agent: agent, model: model), interactive: true, freshStart: true) { [weak self, weak task] message, failed in
+                self?.showToast(message, tone: failed ? .error : .info)
+                if !failed, let task { self?.passBudget(of: task) }
+            }
+        case .close:
+            requestCloseWorkspace(at: index)
+        }
+    }
+
+    private func passBudget(of task: WorkspaceState) {
+        task.budgetPassedAt = Date().timeIntervalSince1970
+        saveState()
+        updateSidebar()
     }
 
     /// Past its space's budget over 7 days (`SidebarTaskUsage.isOverBudget`).
