@@ -102,6 +102,15 @@ final class NiruxShellView: NSView {
     /// The nightlies' changelog; nil in a build that doesn't update.
     lazy var changelogStore: ChangelogStore? = makeChangelogStore()
     var whatsNewCard: WhatsNewCardView?
+    /// "Compact at turn end" waiting for its claude to rest: column ID → task ID.
+    var compactsAtTurnEnd: [UUID: String] = [:]
+    /// What holds a column's claude (nil: none runs there), for the queued
+    /// compactions and their offer; a test sets its own.
+    lazy var claudeHoldings: (WorkspaceState, ColumnState, ProcessSnapshot) -> LeadHoldings? = { [weak self] workspace, column, snapshot in
+        guard let self, let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
+              foreground.interactiveAgent == .claude else { return nil }
+        return self.leadHoldings(workspace, column: column, pty: pty, foreground: foreground, snapshot: snapshot)
+    }
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
     var workspaces: [WorkspaceState] {
@@ -423,6 +432,10 @@ final class NiruxShellView: NSView {
         sidebar.offersTaskResume = { [weak self] index in
             guard let task = self?.workspaces[safe: index] else { return false }
             return !task.isInactive && Self.isTask(task)
+        }
+        sidebar.offersLeadPromotion = { [weak self] index in
+            guard let self, let task = self.workspaces[safe: index] else { return false }
+            return self.offersLeadPromotion(task)
         }
         sidebar.offersSubtask = { [weak self] index in
             guard let self, let workspace = self.workspaces[safe: index], !workspace.isClosing else { return false }

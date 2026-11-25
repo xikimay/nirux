@@ -331,6 +331,7 @@ extension BoardStages {
             || pullRequest.baseRefName == repository.baseBranch
         // Merged: its checks no longer hold anything, and none is named.
         let latest = isMerged ? [] : GitHub.latest(pullRequest.checks)
+        let required = MergeQueue.selectedStandIns(repository.requiredChecks) { name in latest.contains { $0.matches(name) } }
         let request: ReviewRequest?
         switch pullRequest.reviewDecision {
         case "CHANGES_REQUESTED": request = .changesRequested
@@ -344,9 +345,9 @@ extension BoardStages {
             mergeabilityUnknown: !isMerged && !pullRequest.isConflicting && pullRequest.mergeable != "MERGEABLE",
             isConflicting: pullRequest.isConflicting,
             base: pullRequest.baseRefName ?? repository.baseBranch ?? "", isOnBaseBranch: isOnBaseBranch,
-            checks: isMerged ? .passed : checks(latest: latest, required: repository.requiredChecks),
+            checks: isMerged ? .passed : checks(latest: latest, required: required),
             reviewRequest: request, stack: stack, url: pullRequest.url,
-            checkLines: isMerged ? [] : checkLines(latest: latest, required: repository.requiredChecks)
+            checkLines: isMerged ? [] : checkLines(latest: latest, required: required)
         )
     }
 

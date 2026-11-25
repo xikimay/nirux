@@ -152,7 +152,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
         unreviewed.missingReviews = ["Code review"]
         let read = reading([first, unreviewed], baseRuns: [MQ.run(1, head: c)])
         let confirmation = MergeQueue.confirmation(read)
-        XCTAssertEqual(confirmation.items[1].warnings, ["No code review yet: Nirux saw none run on its branch."])
+        XCTAssertEqual(confirmation.items[1].warnings(in: .standard), ["No code review yet: Nirux saw none run on its branch."])
         XCTAssertEqual(
             read.leadStartRefusal(confirmation: confirmation, numbers: [12, 14], cadence: .standard, allowWithoutLocalReview: false),
             "#14: No code review yet: Nirux saw none run on its branch."
@@ -201,6 +201,59 @@ final class MergeQueueConfirmationTests: XCTestCase {
         )
     }
 
+    /// A pull request's own run names its tests "test (selected)" (#818);
+    /// a train runs "test" on its code, the other cadences need it green on
+    /// the head (#817).
+    func testLeadStartTakesARiderWhoseOnlyTestsRanAsSelectedInATrainOnly() {
+        let selected = MQ.checks(MQ.checkRun(id: 1, name: "test (selected)"))
+        let read = reading([
+            candidate(12, head: a, files: ["Sources/A.swift"], checks: selected),
+            candidate(14, head: b, files: ["Sources/B.swift"], checks: selected),
+        ], baseRuns: [MQ.run(1, head: c)])
+        func refusal(_ read: MergeQueue.ConfirmationReading, _ cadence: MergeQueue.Cadence) -> String? {
+            read.leadStartRefusal(confirmation: MergeQueue.confirmation(read), numbers: [12, 14], cadence: cadence)
+        }
+        XCTAssertEqual(MergeQueue.confirmation(read).items.map(\.checks), ["test (selected) ✓", "test (selected) ✓"])
+        XCTAssertNil(refusal(read, .train))
+        for cadence in [MergeQueue.Cadence.standard, .batchPostMerge, .expressDisjoint] {
+            XCTAssertEqual(refusal(read, cadence), "Required checks for #12 aren’t all green.", cadence.title)
+        }
+
+        let blockers: [(inout MergeQueue.ConfirmationReading) -> Void] = [
+            { $0.candidates[1].checks = MQ.checks(MQ.checkRun(id: 1, name: "test (selected)", conclusion: "FAILURE")) },
+            { $0.candidates[1].checks = MQ.checks(MQ.checkRun(id: 1, name: "test (selected)"), MQ.checkRun(id: 2, name: "lint", conclusion: "FAILURE")) },
+            { $0.candidates[1].checks = nil },
+            { $0.candidates[1].pullRequest = MQ.pullRequest(14, head: self.b, mergeable: "UNKNOWN") },
+        ]
+        for (index, block) in blockers.enumerated() {
+            var blocked = read
+            block(&blocked)
+            XCTAssertNotNil(refusal(blocked, .train), "blocker \(index)")
+        }
+    }
+
+    @MainActor
+    func testATrainDoesNotHoldARiderOnARequiredCheckThatEndedNeitherGreenNorRed() {
+        let skipped = MQ.checks(MQ.checkRun(id: 1, conclusion: "SKIPPED"))
+        let read = reading([candidate(12, head: a), candidate(14, head: b, checks: skipped)], baseRuns: [MQ.run(1, head: c)])
+        let confirmation = MergeQueue.confirmation(read)
+        let warning = "test (skipped): only a new run can turn it green, so the queue will stop on it."
+        XCTAssertEqual(confirmation.items[1].warnings(in: .standard), [warning])
+        XCTAssertEqual(confirmation.items[1].warnings(in: .train), [])
+        XCTAssertEqual(read.leadStartRefusal(confirmation: confirmation, numbers: [12, 14], cadence: .standard), "#14: " + warning)
+        XCTAssertNil(read.leadStartRefusal(confirmation: confirmation, numbers: [12, 14], cadence: .train))
+
+        let sheet = MergeQueueConfirmationPanel(projectID: "space", repository: MQ.widgets, isDryRun: false, numbers: [12, 14])
+        sheet.show(attachedTo: nil, repository: "acme/widgets", baseBranch: "main")
+        defer { sheet.dismiss() }
+        sheet.update(confirmation)
+        XCTAssertTrue(sheet.lines.contains { $0.contains(warning) }, "\(sheet.lines)")
+        var train = confirmation
+        train.select(.train)
+        sheet.update(train)
+        XCTAssertFalse(sheet.lines.contains { $0.contains(warning) }, "\(sheet.lines)")
+    }
+
     // MARK: - Who joins
 
     func testEveryReadyPullRequestJoinsInTheProposedOrderWithItsHeadAndChecks() {
@@ -214,7 +267,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
         XCTAssertEqual(confirmation.items.map(\.title), ["Change 12", "Change 7"])
         XCTAssertEqual(confirmation.items.map(\.checks), ["test ✓", "test ✓"])
         XCTAssertEqual(confirmation.items.flatMap(\.notes), [])
-        XCTAssertEqual(confirmation.items.flatMap(\.warnings), [])
+        XCTAssertEqual(confirmation.items.flatMap { $0.warnings(in: .standard) }, [])
         XCTAssertEqual(confirmation.excluded, [])
         XCTAssertEqual(confirmation.refusals, [])
         XCTAssertEqual(confirmation.warnings, [])
@@ -300,10 +353,10 @@ final class MergeQueueConfirmationTests: XCTestCase {
         XCTAssertEqual(items.map(\.checks), ["test ●", "test ✓", "test ✗", "test (skipped)", "test not started"])
         XCTAssertEqual(items[0].notes, ["Behind main by 3 commits."])
         XCTAssertEqual(items[1].notes, ["GitHub is still computing whether it merges cleanly: the queue waits up to 2 minutes for it."])
-        XCTAssertEqual(items[1].warnings, ["Red, though not required: Tests / lint. The queue never merges with a check red."])
+        XCTAssertEqual(items[1].warnings(in: .standard), ["Red, though not required: Tests / lint. The queue never merges with a check red."])
         XCTAssertEqual(items[2].notes, ["A required check failed on this head: the queue reruns it once if it can, and stops if it fails again."])
-        XCTAssertEqual(items[2].warnings, ["It changes .github/workflows/: its checks ran its own version of the workflows."])
-        XCTAssertEqual(items[3].warnings, [
+        XCTAssertEqual(items[2].warnings(in: .standard), ["It changes .github/workflows/: its checks ran its own version of the workflows."])
+        XCTAssertEqual(items[3].warnings(in: .standard), [
             "test (skipped): only a new run can turn it green, so the queue will stop on it.",
             "It changes more than 100 files: Nirux didn’t check them all for .github/workflows/.",
         ])
@@ -322,13 +375,13 @@ final class MergeQueueConfirmationTests: XCTestCase {
             candidate(4, head: a),
         ])).items
         XCTAssertEqual(items.map(\.entry.number), [1, 2, 3, 4], "it joins: the sheet says it, the user decides")
-        XCTAssertEqual(items[0].warnings, ["No code review yet: Nirux saw none run on its branch."])
-        XCTAssertEqual(items[1].warnings, [
+        XCTAssertEqual(items[0].warnings(in: .standard), ["No code review yet: Nirux saw none run on its branch."])
+        XCTAssertEqual(items[1].warnings(in: .standard), [
             "No code review or premortem yet: Nirux saw none run on its branch.",
             "It changes .github/workflows/: its checks ran its own version of the workflows.",
         ])
-        XCTAssertEqual(items[2].warnings, ["No adversarial review, premortem or code style review yet: Nirux saw none run on its branch."])
-        XCTAssertEqual(items[3].warnings, [])
+        XCTAssertEqual(items[2].warnings(in: .standard), ["No adversarial review, premortem or code style review yet: Nirux saw none run on its branch."])
+        XCTAssertEqual(items[3].warnings(in: .standard), [])
     }
 
     func testAReviewCountsWhenRecordedOnThePullRequestsBranchInWhateverTask() {
@@ -380,7 +433,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
 
         XCTAssertEqual(item?.checks, "checks unknown: HTTP 502")
         XCTAssertEqual(item?.notes, ["Nirux couldn’t tell whether it is behind main (HTTP 502)."])
-        XCTAssertEqual(item?.warnings, ["Nirux couldn’t read the files it changes (not read): check .github/workflows/ yourself."])
+        XCTAssertEqual(item?.warnings(in: .standard), ["Nirux couldn’t read the files it changes (not read): check .github/workflows/ yourself."])
         XCTAssertNil(item?.title)
     }
 

@@ -112,7 +112,16 @@ extension NiruxShellView {
                 self.requestRestartLead(spaceID: self.activeProfileID)
             }
         ]
-        return restartLead + CodingAgent.launchable.map { agent in
+        let promote = activeWorkspace.flatMap { offersLeadPromotion($0) ? $0 : nil }.map { task in
+            [PaletteAction(
+                icon: .agent(.claude), title: Self.promoteToLeadTitle,
+                subtitle: "Make “\(task.title)”’s conversation the space’s Lead, in the space’s checkout", shortcut: nil
+            ) { [weak self, weak task] in
+                guard let self, let task else { return }
+                self.requestLeadPromotion(of: task)
+            }]
+        } ?? []
+        return restartLead + promote + CodingAgent.launchable.map { agent in
             PaletteAction(
                 icon: .agent(agent), title: "Open \(agent.productName)",
                 subtitle: "Launch \(agent.fullName) in a new terminal", shortcut: nil

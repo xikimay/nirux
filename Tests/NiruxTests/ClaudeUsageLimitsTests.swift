@@ -90,37 +90,39 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         """#.utf8).write(to: fileURL)
         let current = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: fileURL)?.current(at: now))
         XCTAssertEqual(current.fiveHour?.usedPercentage, ClaudeUsageLimits.maximumPercentage)
-        XCTAssertEqual(current.titleText, "5h 999%")
+        XCTAssertEqual(current.fiveHour?.displayedPercent, 999)
         XCTAssertNil(current.sevenDay, "a reset decades out never expires: dropped")
     }
 
     // MARK: - Display
 
-    func testTitleShowsTheReportedWindowsAndTurnsAtEightyPercent() {
-        let both = ClaudeUsageLimits(fiveHour: window(42.4, resetsAt: now + hour), sevenDay: window(79.4, resetsAt: now + 9 * hour))
-        XCTAssertEqual(both.titleText, "5h 42% · 7d 79%")
-        XCTAssertFalse(both.isNearLimit)
-
-        let near = ClaudeUsageLimits(sevenDay: window(79.5, resetsAt: now + 9 * hour))
-        XCTAssertEqual(near.titleText, "7d 80%")
-        XCTAssertTrue(near.isNearLimit, "the color agrees with the number shown")
+    /// Readings every 5 minutes up to now.
+    private func climb(_ percents: [Double], resetsAt: TimeInterval) -> [QuotaReading] {
+        percents.enumerated().map { QuotaReading(time: now - Double(percents.count - 1 - $0.offset) * 300, usedPercent: $0.element, resetsAt: resetsAt) }
     }
 
-    func testTooltipGivesEachResetAndWhenItWasReported() {
+    private var utc: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.locale = Locale(identifier: "en_GB")
         calendar.timeZone = TimeZone(identifier: "UTC")!
-        let limits = ClaudeUsageLimits(
-            fiveHour: window(25, resetsAt: now + 2 * hour + 600, reportedAt: now - 300),
-            sevenDay: window(18, resetsAt: now + 99 * hour, reportedAt: now - 300)
-        )
-        XCTAssertEqual(limits.tooltip(now: now, calendar: calendar).components(separatedBy: "\n"), [
-            "Claude plan usage limits",
-            "5-hour window: 25% used, resets at 16:10 (in 2h 10m)",
-            "Weekly limit: 18% used, resets Wed 17:00 (in 4d 3h)",
-            "Last reported at 13:55 by a Claude session in Nirux.",
-            "Use elsewhere (claude.ai, another Mac) counts from the next report."
-        ])
+        return calendar
+    }
+
+    func testTitleSaysTheBindingLimitsPace() throws {
+        func title(_ percents: [Double], length: TimeInterval = 5 * 3600, resetsIn: TimeInterval) throws -> UsageText.QuotaTitle {
+            let limit = try XCTUnwrap(QuotaLimit(agent: .claude, length: length, readings: climb(percents, resetsAt: now + resetsIn), now: now))
+            return UsageText.title(limit, now: now, calendar: utc)
+        }
+        // A point a minute from 60 %: full by 14:40, before its reset at 15:00.
+        XCTAssertEqual(try title([45, 50, 55, 60], resetsIn: hour), .init(text: "⚠︎ 5h full by 14:40", tone: .runsOut))
+        XCTAssertEqual(try title([52.5, 55, 57.5, 60], resetsIn: hour), .init(text: "5h 60% · ≈ 90%", tone: .normal))
+        XCTAssertEqual(try title([98, 99, 100], length: 7 * 86_400, resetsIn: 99 * hour), .init(text: "⚠︎ 7d full until Wed 17:00", tone: .runsOut))
+        // Without a forecast: a warning from 80 %, as the number shows it.
+        XCTAssertEqual(try title([79.4], resetsIn: hour), .init(text: "5h 79%", tone: .normal))
+        XCTAssertEqual(try title([79.5], resetsIn: hour), .init(text: "⚠︎ 5h 80%", tone: .warning))
+        // A forecast that holds needs no warning at 85 %.
+        XCTAssertEqual(try title([85, 85, 85, 85], resetsIn: hour), .init(text: "5h 85%", tone: .normal))
+        XCTAssertEqual(try title([99.6, 99.6, 99.6, 99.6], resetsIn: hour), .init(text: "⚠︎ 5h 100%", tone: .warning), "full, even holding")
     }
 
     func testRemainingTimeRoundsUpToTheMinute() {
@@ -188,6 +190,30 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(stored.fiveHour?.usedPercentage, 35, "the first one's idle repeat")
     }
 
+    /// News goes to the day's readings log for the pace: a changed reading
+    /// at once, the same one again only after the heartbeat, an idle repeat
+    /// never. Turning the option off forgets the log with the rest.
+    func testRecordLogsNewsForThePace() throws {
+        let folder = ClaudeUsageLimitsFile.readingsFolder(beside: fileURL)
+        func logged(_ window: String = "five_hour") -> [Double] {
+            QuotaReadingLog.read(in: folder, since: 0)[window]?.map(\.usedPercent) ?? []
+        }
+        try report("a", api: 100, fiveHour: 30, sevenDay: 18, at: now)
+        try report("a", api: 200, fiveHour: 30, sevenDay: 18, at: now + 60)
+        XCTAssertEqual(logged(), [30], "a new claude's first report waits for its next response; that one logs")
+        try report("a", api: 300, fiveHour: 31, sevenDay: 18, at: now + 120)
+        let beat = now + 120 + ClaudeUsageLimitsFile.readingHeartbeat
+        try report("a", api: 400, fiveHour: 31, sevenDay: 18, at: beat)
+        try report("a", api: 400, fiveHour: 31, sevenDay: 18, at: beat + ClaudeUsageLimitsFile.readingHeartbeat)
+        XCTAssertEqual(logged(), [30, 31, 31], "its prompt cache expired: a repeat, not a reading")
+        XCTAssertEqual(logged("seven_day"), [18, 18])
+        try report("a", session: "s2", api: 50_000, fiveHour: 12, sevenDay: 18, at: beat + 700)
+        XCTAssertEqual(logged(), [30, 31, 31], "/resume of an older session: its numbers are old")
+
+        ClaudeUsageLimitsFile.remove(at: fileURL)
+        XCTAssertEqual(QuotaReadingLog.read(in: folder, since: 0), [:])
+    }
+
     func testRecordTakesNothingFromOutsideNiruxOrWithoutLimits() throws {
         let report = try JSONSerialization.data(withJSONObject: payload(fiveHour: reading(30, resetsIn: hour)))
         XCTAssertFalse(ClaudeStatusLineCLI.record(payload: report, env: [:], now: now, url: fileURL))
@@ -238,6 +264,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         record(35)
         monitor.refresh(now: clock)
         XCTAssertEqual(shown.last??.fiveHour?.usedPercentage, 35, "a rewrite is read again")
+        XCTAssertEqual(monitor.readings["five_hour"]?.map(\.usedPercent), [30, 35], "the pace's readings come with it")
 
         reporting = false
         monitor.refresh(now: clock)
@@ -249,6 +276,134 @@ final class ClaudeUsageLimitsTests: XCTestCase {
 
         monitor.setEnabled(false)
         XCTAssertEqual(shown.last, .some(nil))
+    }
+
+    /// The binding limit and its pace: red once it runs out before its
+    /// reset, its agent's windows in the meters, Codex only when it binds.
+    @MainActor
+    func testIndicatorNamesTheBindingLimitAndItsPace() {
+        let indicator = ClaudeUsageIndicator()
+        indicator.calendar = utc
+        let claude = ClaudeUsageLimits(fiveHour: window(60, resetsAt: now + hour), sevenDay: window(20, resetsAt: now + 90 * hour))
+        indicator.update(limits: claude, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour)], now: now)
+        XCTAssertEqual(indicator.label.stringValue, "⚠︎ 5h full by 14:40")
+        XCTAssertEqual(indicator.label.textColor, Theme.Color.error)
+        XCTAssertEqual(indicator.meters.limits.map(\.length), [5 * hour, 7 * 24 * hour])
+        XCTAssertEqual(indicator.meters.limits.map(QuotaMeterView.projected), [100, 20], "the hatch runs to the reset's forecast")
+        XCTAssertTrue(indicator.view.toolTip?.contains("5h: full by 14:40, before its reset at 15:00") == true)
+        XCTAssertTrue(indicator.view.toolTip?.contains("Claude 7d: 20% used, resets Wed 08:00 (in 3d 18h)") == true, "every window, from what's shown")
+        XCTAssertTrue(indicator.view.accessibilityLabel()?.contains("7d 20% used") == true, "VoiceOver hears every window")
+        // A `/resume` of an older session left 12 % in the file: the logged readings still tell the pace.
+        let resumed = ClaudeUsageLimits(fiveHour: window(12, resetsAt: now + hour), sevenDay: window(20, resetsAt: now + 90 * hour))
+        indicator.update(limits: resumed, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour)], now: now)
+        XCTAssertEqual(indicator.label.stringValue, "⚠︎ 5h full by 14:40")
+        // A fresher file reading not logged yet (the first response after /clear) is what's shown.
+        let fresher = ClaudeUsageLimits(fiveHour: window(63, resetsAt: now + hour, reportedAt: now), sevenDay: window(20, resetsAt: now + 90 * hour))
+        indicator.update(limits: fresher, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour).map {
+            QuotaReading(time: $0.time - 60, usedPercent: $0.usedPercent, resetsAt: $0.resetsAt)
+        }], now: now)
+        XCTAssertEqual(indicator.limits.first { $0.length == 5 * hour }?.latest.usedPercent, 63)
+        let full = ClaudeUsageLimits(fiveHour: window(100, resetsAt: now + hour, reportedAt: now), sevenDay: window(20, resetsAt: now + 90 * hour))
+        indicator.update(limits: full, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour).map {
+            QuotaReading(time: $0.time - 60, usedPercent: $0.usedPercent, resetsAt: $0.resetsAt)
+        }], now: now)
+        XCTAssertEqual(indicator.limits.first { $0.length == 5 * hour }?.forecast, .reached, "shown full is full")
+
+        indicator.update(limits: claude, readings: ["five_hour": climb([52.5, 55, 57.5, 60], resetsAt: now + hour)], now: now)
+        XCTAssertEqual(indicator.label.stringValue, "5h 60% · ≈ 90%")
+        XCTAssertNotEqual(indicator.label.textColor, Theme.Color.error)
+
+        // Codex, nearly full, binds over a Claude that holds.
+        let codex = CodexRateLimits(primary: .init(usedPercent: 99, minutes: 300, resetsAt: now + hour), reportedAt: now)
+        let codexReadings = [98, 98.5, 99].enumerated().map { QuotaReading(time: now - Double(2 - $0.offset) * 450, usedPercent: $0.element, resetsAt: now + hour) }
+        indicator.update(codex: codex, readings: [300: codexReadings], now: now)
+        XCTAssertEqual(indicator.label.stringValue, "⚠︎ Codex 5h full by 14:15")
+        XCTAssertEqual(indicator.meters.limits.map(\.agent), [.codex])
+    }
+
+    /// A click (or VoiceOver's press) opens every limit with its meter,
+    /// pace and reset, Antigravity's as not published, and the Usage window.
+    @MainActor
+    func testPopoverListsEveryLimitAndOpensTheUsageWindow() throws {
+        let indicator = ClaudeUsageIndicator()
+        indicator.calendar = utc
+        var presented = 0
+        indicator.presentPopover = { _, _ in presented += 1 }
+        var usageOpened = 0
+        indicator.onShowUsage = { usageOpened += 1 }
+        let claude = ClaudeUsageLimits(fiveHour: window(60, resetsAt: now + hour), sevenDay: window(20, resetsAt: now + 90 * hour))
+        indicator.update(limits: claude, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour)], now: now)
+        indicator.update(codex: CodexRateLimits(primary: .init(usedPercent: 12, minutes: 300, resetsAt: now + 3 * hour), reportedAt: now - 60), now: now)
+
+        XCTAssertTrue(indicator.view.accessibilityPerformPress())
+        XCTAssertEqual(presented, 1)
+        indicator.view.frame = NSRect(x: 0, y: 0, width: 200, height: 22)
+        XCTAssertTrue(indicator.view.hitTest(NSPoint(x: 100, y: 11)) === indicator.view, "the label and meters don't take the click")
+        // The same words keep the same views.
+        let firstRow = indicator.popoverContent.view.subviews.first?.subviews.first
+        indicator.popoverContent.update(limits: indicator.limits, now: now, calendar: utc)
+        XCTAssertTrue(indicator.popoverContent.view.subviews.first?.subviews.first === firstRow)
+        let texts = indicator.popoverContent.texts
+        for expected in [
+            "Claude · 5-hour window", "60%", "⚠︎ Full by 14:40, 20m before it resets at 15:00",
+            "Claude · week", "20%", "Codex · 5-hour window", "12%", "Resets at 17:00 (in 3h)",
+            "Antigravity", "Not published: agy shows its quota only in its own /usage."
+        ] {
+            XCTAssertTrue(texts.contains(expected), "\(expected) in \(texts)")
+        }
+        XCTAssertEqual(texts.firstIndex(of: "Claude · week").map { $0 < texts.firstIndex(of: "Codex · 5-hour window")! }, true)
+        func buttons(in view: NSView) -> [NiruxButton] { ((view as? NiruxButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons) }
+        let usage = try XCTUnwrap(buttons(in: indicator.popoverContent.view).first { $0.title == "Usage…" })
+        usage.performClick(nil)
+        XCTAssertEqual(usageOpened, 1)
+        // The click that closed the transient popover doesn't open it again.
+        indicator.popoverDidClose(Notification(name: NSPopover.didCloseNotification))
+        XCTAssertTrue(indicator.view.accessibilityPerformPress())
+        XCTAssertEqual(presented, 1)
+
+        let holding = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([52.5, 55, 57.5, 60], resetsAt: now + hour), now: now))
+        XCTAssertEqual(UsageText.detail(holding, now: now, calendar: utc).text, "≈ 90% when it resets at 15:00 (in 1h)")
+    }
+
+    /// The tasks spending the session, under the limits, each with its
+    /// actions; an action goes out with its task.
+    @MainActor
+    func testPopoverListsWhatSpendsTheSessionWithItsActions() throws {
+        let indicator = ClaudeUsageIndicator()
+        indicator.calendar = utc
+        indicator.presentPopover = { _, _ in }
+        let row = QuotaBurnRow(
+            workspaceID: "task-1", title: "Search index rewrite", share: 0.64, points: 7.2, tokens: 2.4e6,
+            cause: "Each message rereads 612k · 6 subagents", actions: [.compactAtTurnEnd(column: UUID()), .contextOffer(.freshStart, column: UUID())]
+        )
+        var askedWith: [QuotaReading]?
+        indicator.burnRows = { readings in
+            askedWith = readings
+            return [row]
+        }
+        var taken: [String] = []
+        indicator.onBurnAction = { id, action in taken.append("\(id) \(action.title)") }
+        let readings = climb([45, 50, 55, 60], resetsAt: now + hour)
+        indicator.update(limits: ClaudeUsageLimits(fiveHour: window(60, resetsAt: now + hour)), readings: ["five_hour": readings], now: now)
+        XCTAssertTrue(indicator.view.accessibilityPerformPress())
+        XCTAssertEqual(askedWith, readings, "calibrated on the 5-hour readings")
+        let texts = indicator.popoverContent.texts
+        for expected in ["What spends your session · last 30 min", "Search index rewrite", "≈ 7%", "Each message rereads 612k · 6 subagents", "Compact at turn end", "Fresh start"] {
+            XCTAssertTrue(texts.contains(expected), "\(expected) in \(texts)")
+        }
+        func buttons(in view: NSView) -> [NiruxButton] { ((view as? NiruxButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons) }
+        try XCTUnwrap(buttons(in: indicator.popoverContent.view).first { $0.title == "Compact at turn end" }).performClick(nil)
+        XCTAssertEqual(taken, ["task-1 Compact at turn end"])
+    }
+
+    func testAQueuedCompactWaitsForRestAndYieldsToADraft() {
+        XCTAssertEqual(QueuedCompact.of(nil), .drop, "its claude left")
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(isBusy: true)), .wait)
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(hasDialog: true)), .wait)
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(hasQuestion: true)), .wait)
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(isBusy: true, hasDraft: true)), .wait, "typed ahead: it may be sent before the turn ends")
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(hasDraft: true)), .yield, "at rest, the user's words win")
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings()), .send)
     }
 
     @MainActor

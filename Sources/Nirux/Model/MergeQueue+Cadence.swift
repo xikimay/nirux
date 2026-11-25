@@ -23,9 +23,17 @@ extension MergeQueue {
         }
     }
 
+    /// A pull request's own head as a queue of `cadence` judges it: a
+    /// train's rider needs none of the required checks, which the train
+    /// runs on its code, only none red.
+    static func candidateVerdict(_ checks: CommitChecks, settings: BoardConfig.QueueSettings, cadence: Cadence) -> ChecksVerdict {
+        judge(checks, required: cadence == .train ? [] : settings.requiredChecks)
+    }
+
     static func strictCandidateRefusal(
-        for candidates: [ConfirmationReading.Candidate], settings: BoardConfig.QueueSettings, requireDisjoint: Bool
+        for candidates: [ConfirmationReading.Candidate], settings: BoardConfig.QueueSettings, cadence: Cadence
     ) -> String? {
+        let requireDisjoint = cadence == .expressDisjoint
         if requireDisjoint && candidates.count < 2 { return "Express needs at least two pull requests." }
         var owners: [String: Int] = [:]
         for candidate in candidates {
@@ -34,7 +42,7 @@ extension MergeQueue {
                 return "GitHub hasn’t confirmed that #\(number) is mergeable."
             }
             guard let checks = candidate.checks else { return "The checks for #\(number) are unknown." }
-            if let reason = judge(checks, required: settings.requiredChecks).expressRefusal(number: number) { return reason }
+            if let reason = candidateVerdict(checks, settings: settings, cadence: cadence).refusal(number: number) { return reason }
             guard let details = candidate.details, details.head == pr.headOid, details.baseBranch == settings.baseBranch else {
                 return "The changed files for the confirmed head of #\(number) are unknown."
             }
@@ -56,7 +64,7 @@ extension MergeQueue {
 }
 
 extension MergeQueue.ChecksVerdict {
-    func expressRefusal(number: Int) -> String? {
+    func refusal(number: Int) -> String? {
         if !allRequiredGreen { return "Required checks for #\(number) aren’t all green." }
         if !otherFailures.isEmpty { return "Red checks for #\(number): \(otherFailures.joined(separator: ", "))." }
         return nil

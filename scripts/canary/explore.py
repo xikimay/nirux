@@ -123,8 +123,9 @@ AUTOSTART = """
 [[ -o interactive ]] && NIRUX_CANARY_AGENT_LOG="$NIRUX_STATE_DIR/agent-$NIRUX_AGENT_UUID.jsonl" exec claude
 """
 
-# What claude keeps of the runner's environment: its login, never an API key.
-CLAUDE_ENVIRONMENT = ("HOME", "USER", "LOGNAME", "PATH", "SHELL", "LANG", "TERM", "TMPDIR", "CLAUDE_CONFIG_DIR")
+# What claude keeps of the runner's environment: its login (on CI, the subscription token), never an API key.
+CLAUDE_ENVIRONMENT = ("HOME", "USER", "LOGNAME", "PATH", "SHELL", "LANG", "TERM", "TMPDIR", "CLAUDE_CONFIG_DIR",
+                      "CLAUDE_CODE_OAUTH_TOKEN")
 
 
 def claude_environment(environ):
@@ -217,7 +218,7 @@ def build_world(app, work, seed):
 
 
 class Stopped(BaseException):
-    """SIGTERM (night.py's watcher, someone is back): every finally block runs, ending the copy and claude."""
+    """SIGTERM (a cancelled job): every finally block runs, ending the copy and claude."""
 
 
 def stop_on_sigterm():

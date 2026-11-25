@@ -19,10 +19,13 @@ extension NiruxApp {
     /// comes and goes on the limits' left.
     func setUpUsageLimits(window: NSWindow) {
         let indicator = ClaudeUsageIndicator()
+        indicator.onShowUsage = { [weak self] in self?.shell?.showUsageWindow() }
+        indicator.burnRows = { [weak self] readings in self?.shell?.quotaBurnRows(readings: readings) ?? [] }
+        indicator.onBurnAction = { [weak self] workspaceID, action in self?.shell?.takeBurnAction(action, workspaceID: workspaceID) }
         window.addTitlebarAccessoryViewController(indicator)
         let monitor = ClaudeUsageLimitsMonitor()
-        monitor.onUpdate = { [weak indicator] limits, now in
-            indicator?.update(limits: limits, now: now)
+        monitor.onUpdate = { [weak indicator, weak monitor] limits, now in
+            indicator?.update(limits: limits, readings: monitor?.readings ?? [:], now: now)
         }
         usageLimitsIndicator = indicator
         usageLimitsMonitor = monitor
@@ -40,10 +43,10 @@ extension NiruxApp {
         showCodexLimits()
     }
 
-    /// Codex's limits as the latest usage read found them, while the option
-    /// is on.
+    /// Codex's limits and readings as the latest usage read found them,
+    /// while the option is on.
     func showCodexLimits() {
-        let limits = usageLimitsMonitor?.isEnabled == true ? shell?.usageMonitor?.report?.codexLimits : nil
-        usageLimitsIndicator?.update(codex: limits, now: Date().timeIntervalSince1970)
+        let report = usageLimitsMonitor?.isEnabled == true ? shell?.usageMonitor?.report : nil
+        usageLimitsIndicator?.update(codex: report?.codexLimits, readings: report?.codexReadings ?? [:], now: Date().timeIntervalSince1970)
     }
 }

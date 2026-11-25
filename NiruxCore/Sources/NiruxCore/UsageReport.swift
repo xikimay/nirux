@@ -2,7 +2,7 @@ import Foundation
 
 /// What Nirux shows of the ledger: the last 24 hours and 7 days by source,
 /// task and space, the week day by day, each task's latest context, and the
-/// Codex limits last reported.
+/// Codex limits: the latest, and each window's readings over the week.
 public struct UsageReport: Equatable, Sendable {
     /// Who spent.
     public enum Source: String, CaseIterable, Sendable {
@@ -65,6 +65,17 @@ public struct UsageReport: Equatable, Sendable {
     /// By task ID.
     public var latestSessions: [String: LatestSession]
     public var codexLimits: CodexRateLimits?
+    /// By window length in minutes, oldest first.
+    public var codexReadings: [Int: [QuotaReading]]
+    /// Claude's weighted tokens (its sessions and their subagents) over the
+    /// last day, by minute since 1970: what calibrates its plan's percentages
+    /// (`QuotaCalibration`).
+    public var claudeMinutes: [Int: Double]
+    /// Claude's weighted tokens over the last `burnSpan`, by task ID; "" for
+    /// sessions outside tasks.
+    public var claudeBurn: [String: Double]
+
+    public static let burnSpan: TimeInterval = 30 * 60
 
     /// The earliest response a report counts at `now`: refresh the ledger
     /// since then.
@@ -100,6 +111,18 @@ public struct UsageReport: Equatable, Sendable {
         }
         latestSessions = latest
         codexLimits = sessions.compactMap(\.rateLimits).max { $0.reportedAt < $1.reportedAt }
+        codexReadings = CodexRateLimits.quotaReadings(sessions.flatMap(\.rateLimitReadings).filter { $0.reportedAt >= starts[0] })
+        var minutes: [Int: Double] = [:]
+        var burn: [String: Double] = [:]
+        for session in sessions where session.key.agent == .claude {
+            for event in session.events where event.timestamp >= now - 86_400 && event.timestamp <= now {
+                let weighted = event.counts.weighted(model: event.model)
+                minutes[Int(event.timestamp / 60), default: 0] += weighted
+                if event.timestamp >= now - Self.burnSpan { burn[session.attribution.taskID ?? "", default: 0] += weighted }
+            }
+        }
+        claudeMinutes = minutes
+        claudeBurn = burn
     }
 
     private static func dayStarts(now: TimeInterval, calendar: Calendar) -> [TimeInterval] {

@@ -303,7 +303,7 @@ extension MergeQueue.Engine {
                 drop(index, conflict(pullRequest))
                 continue
             }
-            let verdict = MergeQueue.judge(checks, required: [])
+            let verdict = MergeQueue.candidateVerdict(checks, settings: settings, cadence: cadence)
             if let refusal = trainRefusal(verdict, entry: entry, url: pullRequest.url) { return stop(refusal, on: index) }
             locals.append((index: index, local: local))
         }

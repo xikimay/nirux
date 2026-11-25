@@ -378,6 +378,22 @@ final class BoardStagesFactsTests: XCTestCase {
         ])
     }
 
+    /// A pull request's own run names its tests "test (selected)" (#818);
+    /// a train runs "test" on its code.
+    func testARequiredCheckThatRanOnlyAsSelectedCountsByThatRun() {
+        let read = { (checks: [GitHub.Check]) in
+            self.facts([self.row(workspaces: ["task"], pullRequest: self.pullRequest(12, checks: checks))], required: ["test"])
+                .lines[0].pullRequest
+        }
+        XCTAssertEqual(read([check("test (selected)", .success)])?.checks, .passed)
+        XCTAssertEqual(read([check("test (selected)", .success)])?.checkLines, [BoardStages.CheckLine(name: "test (selected)", result: "✓")])
+        XCTAssertEqual(read([check("test (selected)", .failure)])?.checks, .failed(["test (selected)"]))
+        XCTAssertEqual(read([check("test (selected)", .pending)])?.checks, .pending(since: 1_794_398_400, missing: []))
+        XCTAssertEqual(read([check("lint", .success)])?.checks, .pending(since: nil, missing: ["test"]), "neither ran")
+        XCTAssertEqual(read([check("test", .pending), check("test (selected)", .success)])?.checks,
+                       .pending(since: 1_794_398_400, missing: []), "its own run, once there, is the one that counts")
+    }
+
     func testEachCheckIsNamedWithItsResultThoseThatHoldItFirst() {
         let named = { (checks: [GitHub.Check], required: [String]) in
             BoardStages.checkLines(checks, required: required).map { line in

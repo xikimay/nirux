@@ -22,6 +22,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             ],
             "testOrganizeMenuItems": ["Organize"],
             "testResumeTaskMenuItem": ["Resume with…"],
+            "testPromoteToLeadMenuItem": [NiruxShellView.promoteToLeadTitle],
             "testNewSubtaskMenuItem": [SidebarView.newSubtaskTitle],
             "testAddRuleMenuItem": [SidebarView.addRuleTitle],
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
@@ -88,7 +89,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(menus[0].items.map(\.title), [
                 "Focus Column", "Close Column", "",
                 "Review Branch", "Ask Agent Why CI Failed", "Rerun Failed CI Jobs…", "",
-                "Resume with…", "New Sub-task…", "Organize", "",
+                "Resume with…", NiruxShellView.promoteToLeadTitle, "New Sub-task…", "Organize", "",
                 "Save Checkpoint…", "Checkpoints…", "Rename Workspace", "View/Edit Context…", SidebarView.addRuleTitle, "",
                 "Clean Up Worktree…", "Close Workspace"
             ])
@@ -132,6 +133,25 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Resume with…"], in: menu)
             XCTAssertEqual(harness.alerts.last, "Resume “Switch me” with another CLI?")
             XCTAssertTrue(harness.terminalRestarts.isEmpty, "Cancel preserves the current session")
+        }
+    }
+
+    /// Promote to Lead… on a task with no agent says why, and asks nothing.
+    func testPromoteToLeadMenuItem() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            shell.addWorkspace(title: "Grown", cwd: harness.worktree, profileID: lead.space)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            harness.waitUntil("its shell in front") {
+                guard let pty = task.columns.first?.pty, let shellPID = pty.shellPID else { return false }
+                return pty.foregroundProcess(snapshot: ProcessSnapshot())?.instance.pid == shellPID
+            }
+            let menu = shell.sidebar.workspaceActionMenu(workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), columnIndex: nil)
+            harness.perform([NiruxShellView.promoteToLeadTitle], in: menu)
+            XCTAssertEqual(shell.toast?.message, "No agent runs in this task: there is no conversation to promote.")
+            XCTAssertTrue(harness.alerts.isEmpty)
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
         }
     }
 
