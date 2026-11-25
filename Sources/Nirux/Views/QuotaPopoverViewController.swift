@@ -54,7 +54,7 @@ final class QuotaPopoverViewController: NSViewController {
         shown = words
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         burnActions = []
-        for limit in ordered { stack.addArrangedSubview(row(limit, now: now, calendar: calendar)) }
+        for limit in ordered { stack.addArrangedSubview(Self.limitRow(limit, now: now, calendar: calendar, width: Self.width - 2 * Theme.Space.lg)) }
         stack.addArrangedSubview(textRow(
             "Antigravity", value: "—",
             detail: "Not published: agy shows its quota only in its own /usage.", detailColor: Theme.Color.textTertiary
@@ -104,9 +104,11 @@ final class QuotaPopoverViewController: NSViewController {
         onBurnAction?(workspaceID, action)
     }
 
-    private func row(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> NSView {
+    /// A limit's row: its name and use, its meter, its pace and reset. The
+    /// Usage window shows the same.
+    static func limitRow(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar, width: CGFloat) -> NSView {
         let detail = UsageText.detail(limit, now: now, calendar: calendar)
-        let row = textRow(
+        let row = textRow(width: width,
             UsageText.longName(of: limit), value: "\(Int(limit.latest.usedPercent.rounded()))%",
             detail: detail.text, detailColor: detail.tone == .runsOut ? Theme.Color.error : Theme.Color.textSecondary
         )
@@ -123,6 +125,10 @@ final class QuotaPopoverViewController: NSViewController {
     }
 
     private func textRow(_ name: String, value: String, detail: String, detailColor: NSColor) -> NSStackView {
+        Self.textRow(width: Self.width - 2 * Theme.Space.lg, name, value: value, detail: detail, detailColor: detailColor)
+    }
+
+    private static func textRow(width: CGFloat, _ name: String, value: String, detail: String, detailColor: NSColor) -> NSStackView {
         let nameLabel = label(name, font: Theme.Font.caption, color: Theme.Color.textPrimary)
         let valueLabel = label(value, font: Theme.Font.captionDigits, color: Theme.Color.textPrimary)
         valueLabel.alignment = .right
@@ -132,15 +138,15 @@ final class QuotaPopoverViewController: NSViewController {
         let detailLabel = NSTextField(wrappingLabelWithString: detail)
         detailLabel.font = Theme.Font.caption
         detailLabel.textColor = detailColor
-        detailLabel.preferredMaxLayoutWidth = Self.width - 2 * Theme.Space.lg
+        detailLabel.preferredMaxLayoutWidth = width
         let row = NSStackView(views: [top, detailLabel])
         row.orientation = .vertical
         row.alignment = .leading
         row.spacing = Theme.Space.xs
         row.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            top.widthAnchor.constraint(equalToConstant: Self.width - 2 * Theme.Space.lg),
-            row.widthAnchor.constraint(equalToConstant: Self.width - 2 * Theme.Space.lg)
+            top.widthAnchor.constraint(equalToConstant: width),
+            row.widthAnchor.constraint(equalToConstant: width)
         ])
         return row
     }
@@ -160,6 +166,10 @@ final class QuotaPopoverViewController: NSViewController {
     }
 
     private func label(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
+        Self.label(text, font: font, color: color)
+    }
+
+    private static func label(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = font
         label.textColor = color

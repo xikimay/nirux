@@ -37,6 +37,20 @@ public enum QuotaCalibration {
     /// Below this rise, the ratio is mostly rounding.
     public static let minimumRise = 3.0
 
+    /// How much a limit rose each day from `dayStarts`: the rises between
+    /// consecutive readings of one window, each on the day of the later one
+    /// (a reset starts a new series, never a fall).
+    public static func dailyRise(_ readings: [QuotaReading], dayStarts: [TimeInterval]) -> [Double] {
+        var rise = Array(repeating: 0.0, count: dayStarts.count)
+        let sorted = readings.sorted { $0.time < $1.time }
+        for (previous, reading) in zip(sorted, sorted.dropFirst())
+        where abs(reading.resetsAt - previous.resetsAt) <= QuotaPace.sameWindow && reading.usedPercent > previous.usedPercent {
+            guard let day = dayStarts.lastIndex(where: { $0 <= reading.time }) else { continue }
+            rise[day] += reading.usedPercent - previous.usedPercent
+        }
+        return rise
+    }
+
     public static func pointsPerToken(_ readings: [QuotaReading], minutes: [Int: Double]) -> Double? {
         guard let latest = readings.max(by: { $0.time < $1.time }) else { return nil }
         let window = readings.filter { abs($0.resetsAt - latest.resetsAt) <= QuotaPace.sameWindow }

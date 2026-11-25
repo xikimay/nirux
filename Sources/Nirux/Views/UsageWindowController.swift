@@ -20,6 +20,19 @@ enum UsageReportText {
 
     static let taskRows = 12
 
+    /// The tasks, busiest first, for the table; points of Claude's weekly
+    /// limit from `week` over 7 days.
+    static func tableRows(_ period: UsageReport.Period, names: UsageNames, week: UsageWeek?, dayTasks: [[String: Double]]) -> [UsageTasksTable.Row] {
+        period.tasks.sorted { $0.value.weightedTokens > $1.value.weightedTokens }.prefix(taskRows).map { id, summary in
+            let claude = dayTasks.reduce(0.0) { $0 + ($1[id] ?? 0) }
+            return UsageTasksTable.Row(
+                title: names.tasks[id]?.title ?? "Closed task",
+                points: week?.pointsPerToken.flatMap { claude > 0 ? $0 * claude : nil },
+                tokens: summary.weightedTokens, peakContext: summary.peakContextTokens, subagents: summary.subagents.count
+            )
+        }
+    }
+
     static func name(of source: UsageReport.Source) -> String {
         switch source {
         case .claude: "Claude"
@@ -39,31 +52,22 @@ enum UsageReportText {
             period.sources[source].map { row(name(of: source), $0.weightedTokens) }
         }
         let leads = period.tasks.filter { names.tasks[$0.key]?.isLead == true }.values.reduce(0) { $0 + $1.weightedTokens }
+        let saves = { (tokens: Double, how: String) in tokens >= 1 ? "\(how) saves ≈ \(UsageText.share(tokens, of: total))" : "" }
         let causes = [
-            row("Context past \(UsageText.tokens(UsageSummary.heavyContextTokens))", period.total.heavyContextWeightedTokens),
-            row("Subagents (\(period.total.subagents.count))", period.total.subagentWeightedTokens),
-            row("Cold cache rewrites (\(period.total.coldRewrites))", period.total.coldRewriteWeightedTokens),
+            row("Context past \(UsageText.tokens(UsageSummary.heavyContextTokens))", period.total.heavyContextWeightedTokens,
+                [saves(period.total.heavyContextExcessWeightedTokens, "Compacting there")]),
+            row("Subagents (\(period.total.subagents.count))", period.total.subagentWeightedTokens,
+                [period.total.subagents.count > SidebarTaskUsage.subagentSoftCap ? "Past \(SidebarTaskUsage.subagentSoftCap) a session: start tasks" : ""]),
+            row("Cold cache rewrites (\(period.total.coldRewrites))", period.total.coldRewriteWeightedTokens,
+                [saves(period.total.coldRewriteWeightedTokens, "A fresh start after an idle hour")]),
             row("Leads", leads)
-        ]
-        let ranked = period.tasks.sorted { $0.value.weightedTokens > $1.value.weightedTokens }
-        var tasks = ranked.prefix(taskRows).map { id, summary in
-            row(names.tasks[id]?.title ?? "Closed task", summary.weightedTokens, [
-                "peak \(UsageText.tokens(summary.peakContextTokens))",
-                summary.subagents.isEmpty ? "" : "\(summary.subagents.count) subagents"
-            ])
-        }
-        let shown = ranked.prefix(taskRows).reduce(0) { $0 + $1.value.weightedTokens }
-        let rest = total - shown
-        if rest >= 1 {
-            tasks.append(row(ranked.count > taskRows ? "Other tasks and sessions" : "Outside tasks", rest))
-        }
+        ].filter { $0[1] != "0" }
         let spaces = period.spaces.sorted { $0.value.weightedTokens > $1.value.weightedTokens }.map { id, summary in
             row(names.spaces[id] ?? "Removed space", summary.weightedTokens)
         }
         return [
             Section(title: "By agent", rows: agents),
             Section(title: "Causes (they overlap)", rows: causes),
-            Section(title: "Tasks", rows: tasks),
             Section(title: "Spaces", rows: spaces)
         ].filter { !$0.rows.isEmpty }
     }
@@ -76,12 +80,20 @@ enum UsageReportText {
     }
 }
 
-/// The Usage window (⇧⌘U): where the tokens went over the last 24 hours or
-/// 7 days, by agent, day, cause, task and space. Read-only; numbers only.
+/// The Usage window (⇧⌘U): the plan limits on top, as the title bar's
+/// popover shows them; then where the tokens went over the last 24 hours or
+/// 7 days: Claude's week day by day in points of its weekly limit (by agent
+/// in tokens without its readings), the tasks, the causes and what each
+/// remedy saves, the spaces. Read-only; numbers only.
 final class UsageWindowController: NSWindowController {
     let period = NSSegmentedControl(labels: ["24 Hours", "7 Days"], trackingMode: .selectOne, target: nil, action: nil)
     let headline = NSTextField(labelWithString: "")
     private let chart = UsageDaysChart()
+    let weekChart = UsageWeekChart()
+    let tasksTable = UsageTasksTable()
+    let limitsStack = NSStackView()
+    private var limits: [QuotaLimit] = []
+    private var weekReadings: [QuotaReading] = []
     private let scroll = NSTextView.scrollableTextView()
     private var textView: NSTextView { scroll.documentView as! NSTextView }
     private var report: UsageReport?
@@ -89,7 +101,7 @@ final class UsageWindowController: NSWindowController {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 900),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: true
         )
         window.title = "Token Usage"
@@ -113,7 +125,10 @@ final class UsageWindowController: NSWindowController {
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 0, height: 4)
         scroll.drawsBackground = false
-        let stack = NSStackView(views: [period, headline, chart, scroll, note])
+        limitsStack.orientation = .vertical
+        limitsStack.alignment = .leading
+        limitsStack.spacing = Theme.Space.md
+        let stack = NSStackView(views: [limitsStack, period, headline, chart, weekChart, tasksTable, scroll, note])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Theme.Space.md
@@ -128,6 +143,10 @@ final class UsageWindowController: NSWindowController {
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             chart.heightAnchor.constraint(equalToConstant: 190),
+            weekChart.heightAnchor.constraint(equalToConstant: 190),
+            weekChart.widthAnchor.constraint(equalTo: chart.widthAnchor),
+            tasksTable.heightAnchor.constraint(equalToConstant: 170),
+            tasksTable.widthAnchor.constraint(equalTo: chart.widthAnchor),
             chart.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40),
             scroll.widthAnchor.constraint(equalTo: chart.widthAnchor),
             note.widthAnchor.constraint(equalTo: chart.widthAnchor)
@@ -138,9 +157,13 @@ final class UsageWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func update(report: UsageReport?, names: UsageNames) {
+    /// `limits` as the title bar reads them; `weekReadings`: Claude's weekly
+    /// limit over the week, which turns its days into points.
+    func update(report: UsageReport?, names: UsageNames, limits: [QuotaLimit] = [], weekReadings: [QuotaReading] = []) {
         self.report = report
         self.names = names
+        self.limits = limits
+        self.weekReadings = weekReadings
         render()
     }
 
@@ -155,8 +178,19 @@ final class UsageWindowController: NSWindowController {
         }
         let shown = period.selectedSegment == 0 ? report.day : report.week
         headline.stringValue = UsageReportText.headline(shown)
-        chart.isHidden = period.selectedSegment == 0
+        let starts = report.days.map(\.start)
+        let week = UsageWeek(rise: QuotaCalibration.dailyRise(weekReadings, dayStarts: starts), dayTasks: report.claudeDayTasks)
+        weekChart.show(week, dayStarts: starts, names: names.tasks.mapValues(\.title))
+        weekChart.isHidden = period.selectedSegment == 0 || week == nil
+        chart.isHidden = period.selectedSegment == 0 || week != nil
         chart.days = report.days
+        tasksTable.show(UsageReportText.tableRows(shown, names: names, week: period.selectedSegment == 0 ? nil : week, dayTasks: report.claudeDayTasks))
+        limitsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let width = (window?.contentLayoutRect.width ?? 640) - 40
+        for limit in limits.sorted(by: { ($0.agent == .claude ? 0 : 1, $0.length) < ($1.agent == .claude ? 0 : 1, $1.length) }) {
+            limitsStack.addArrangedSubview(QuotaPopoverViewController.limitRow(limit, now: report.generatedAt, calendar: .current, width: width))
+        }
+        limitsStack.isHidden = limits.isEmpty
         textView.textStorage?.setAttributedString(Self.text(UsageReportText.sections(shown, names: names)))
     }
 
