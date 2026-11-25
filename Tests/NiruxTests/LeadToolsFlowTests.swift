@@ -1310,6 +1310,21 @@ final class LeadToolsFlowTests: XCTestCase {
             harness.waitUntil("the Compact taken by hand") { compacts() == 2 }
             shell.updateSidebar()
             XCTAssertEqual(compacts(), 2, "never a second /compact")
+
+            // Compacted where Nirux can't see it (claude itself, or by hand):
+            // a light context sends nothing at rest.
+            hook(.userPromptSubmit)
+            shell.takeBurnAction(.compactAtTurnEnd(column: column.id), workspaceID: task.id)
+            monitor.report = UsageReport(sessions: [UsageSession(
+                key: UsageSessionKey(.claude, "t"), attribution: UsageAttribution(spaceID: lead.space, taskID: task.id), contextTokens: 40_000,
+                events: [UsageEvent(timestamp: now - 30, model: "claude-opus-5-5", counts: TokenCounts(input: 1_000, cacheRead: 39_000))]
+            )], now: now)
+            hook(.stop)
+            harness.waitUntil("the queue dropped at rest") {
+                shell.updateSidebar()
+                return shell.compactsAtTurnEnd.isEmpty
+            }
+            XCTAssertEqual(compacts(), 2)
         }
     }
 
