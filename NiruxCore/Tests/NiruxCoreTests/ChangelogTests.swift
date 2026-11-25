@@ -18,6 +18,8 @@ struct ChangelogTests {
         ("feat/budgets", ["new", "internal"], ["Sources/Nirux/Model/TaskBudget.swift"], .internal),
         ("fix/docs-typo", ["new"], ["docs/getting-started.md"], .new),
         ("fixes", [], [], .better),
+        ("feat/sidebar-crash", ["fixed"], ["Sources/Nirux/Views/SidebarView.swift"], .fixed),
+        ("feat/libghostty-2-3", [], ["Package.swift", "Package.resolved"], .better),
     ])
     func kind(branch: String, labels: [String], paths: [String], expected: Changelog.Kind) {
         #expect(Changelog.kind(branch: branch, labels: Set(labels), paths: paths) == expected)
@@ -66,9 +68,10 @@ struct ChangelogTests {
             Entry(pullRequest: 901, title: "Again", why: nil, kind: .better, build: 202611251854),
             Entry(pullRequest: 902, title: "New", why: nil, kind: .new, build: 202611251854),
         ]
-        let merged = old.adding(added, keepingBuildsFrom: 202608271854)
+        let merged = old.adding(added, through: "dc3366a0", keepingBuildsFrom: 202608271854)
         #expect(merged.entries.map(\.pullRequest) == [902, 901, 903, 900])
         #expect(merged.entries[1].title == "Again")
+        #expect(merged.commit == "dc3366a0")
     }
 
     @Test func entriesBetweenTwoBuildsAndMatchingWords() {
@@ -99,7 +102,7 @@ struct ChangelogTests {
         let log = Changelog(entries: [
             Entry(pullRequest: 916, title: "Columns: Escape keeps the card", why: nil, kind: .fixed, build: 2),
             Entry(pullRequest: 913, title: "⌘P: open a pull request", why: nil, kind: .new, build: 2),
-            Entry(pullRequest: 917, title: "Tests: a calmer clock", why: nil, kind: .internal, build: 2),
+            Entry(pullRequest: 917, title: "Tests: a calmer <details> clock", why: nil, kind: .internal, build: 2),
             Entry(pullRequest: 905, title: "Earlier build", why: nil, kind: .better, build: 1),
         ])
         #expect(log.releaseNotes(build: 2) == """
@@ -111,7 +114,7 @@ struct ChangelogTests {
 
         <details><summary>Under the hood (1)</summary>
 
-        - Tests: a calmer clock (#917)
+        - Tests: a calmer &lt;details&gt; clock (#917)
 
         </details>
         """)
@@ -120,12 +123,15 @@ struct ChangelogTests {
 
     @Test func theFileFormatStaysReadable() throws {
         let json = """
-        {"entries": [{"pullRequest": 913, "title": "⌘P: open a pull request", "why": "Finding it was slow.", "kind": "new", "build": 202611251854},
-                     {"pullRequest": 917, "title": "Tests: a calmer clock", "kind": "internal", "build": 202611251854}]}
+        {"commit": "dc3366a0", "entries": [{"pullRequest": 913, "title": "⌘P: open a pull request", "why": "Finding it was slow.", "kind": "new", "build": 202611251854},
+                     {"pullRequest": 917, "title": "Tests: a calmer clock", "kind": "internal", "build": 202611251854},
+                     {"pullRequest": 920, "title": "A kind from a newer nightly", "kind": "security", "build": 202611251854},
+                     {"pullRequest": 921, "kind": "fixed", "build": 202611251854}]}
         """
         let log = try JSONDecoder().decode(Changelog.self, from: Data(json.utf8))
-        #expect(log.entries.map(\.kind) == [.new, .internal])
+        #expect(log.entries.map(\.kind) == [.new, .internal, .better])
         #expect(log.entries[1].why == nil)
+        #expect(log.commit == "dc3366a0")
         #expect(try JSONDecoder().decode(Changelog.self, from: JSONEncoder().encode(log)) == log)
     }
 }

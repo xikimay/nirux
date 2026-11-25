@@ -6,13 +6,40 @@ import Foundation
 public struct Changelog: Codable, Equatable, Sendable {
     /// Newest build first; in a build, by kind, then by pull request.
     public var entries: [Entry]
+    /// The commit of main the entries reach: the next nightly adds what
+    /// landed after it, even when the nightly before it failed to.
+    public var commit: String?
 
-    public init(entries: [Entry] = []) {
+    public init(entries: [Entry] = [], commit: String? = nil) {
         self.entries = entries
+        self.commit = commit
+    }
+
+    enum CodingKeys: String, CodingKey { case entries, commit }
+
+    /// Leaves out the entries this version can't read, so a file a newer
+    /// nightly wrote still opens.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        entries = try container.decode([Readable<Entry>].self, forKey: .entries).compactMap(\.value)
+        commit = try container.decodeIfPresent(String.self, forKey: .commit)
+    }
+
+    private struct Readable<Value: Decodable>: Decodable {
+        let value: Value?
+
+        init(from decoder: Decoder) {
+            value = try? Value(from: decoder)
+        }
     }
 
     public enum Kind: String, Codable, CaseIterable, Sendable {
         case new, better, fixed, `internal`
+
+        /// A kind added after this version reads as an improvement.
+        public init(from decoder: Decoder) throws {
+            self = Kind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .better
+        }
 
         public var label: String {
             switch self {
@@ -47,16 +74,16 @@ public struct Changelog: Codable, Equatable, Sendable {
     static let maxWhyLength = 300
     /// Branch types whose work nobody sees in the app.
     static let internalBranchTypes: Set<String> = ["test", "ci", "refactor", "chore", "dependabot"]
-    /// Where the files the app ships from live.
-    static let shippedFolders = ["Sources/", "NiruxCore/Sources/", "Resources/"]
+    /// What the app is built from.
+    static let shippedPaths = ["Sources/", "NiruxCore/Sources/", "Resources/", "Package.swift", "Package.resolved", "NiruxCore/Package.swift", "scripts/bundle.sh"]
 
-    /// A label wins; otherwise a branch type or files outside the app make
-    /// it internal, a `fix/` branch a fix, and anything else an improvement.
+    /// A label named after a kind wins, `internal` first; otherwise a
+    /// branch type or files outside the app make it internal, a `fix/`
+    /// branch a fix, and anything else an improvement.
     public static func kind(branch: String, labels: Set<String>, paths: [String]) -> Kind {
-        if labels.contains(Kind.internal.rawValue) { return .internal }
-        if labels.contains(Kind.new.rawValue) { return .new }
+        if let labelled = [Kind.internal, .new, .fixed, .better].first(where: { labels.contains($0.rawValue) }) { return labelled }
         let type = branch.firstIndex(of: "/").map { String(branch[..<$0]) } ?? ""
-        let shipsNothing = !paths.isEmpty && !paths.contains { path in shippedFolders.contains { path.hasPrefix($0) } }
+        let shipsNothing = !paths.isEmpty && !paths.contains { path in shippedPaths.contains { path.hasPrefix($0) } }
         if internalBranchTypes.contains(type) || shipsNothing { return .internal }
         return type == "fix" ? .fixed : .better
     }
@@ -79,10 +106,10 @@ public struct Changelog: Codable, Equatable, Sendable {
 
     /// With `added` replacing the entries of the same pull requests, and
     /// without the builds before `oldest`.
-    public func adding(_ added: [Entry], keepingBuildsFrom oldest: Int) -> Changelog {
+    public func adding(_ added: [Entry], through commit: String, keepingBuildsFrom oldest: Int) -> Changelog {
         let replaced = Set(added.map(\.pullRequest))
         let kept = entries.filter { !replaced.contains($0.pullRequest) } + added
-        return Changelog(entries: kept.filter { $0.build >= oldest }.sorted(by: Self.isOrderedBefore))
+        return Changelog(entries: kept.filter { $0.build >= oldest }.sorted(by: Self.isOrderedBefore), commit: commit)
     }
 
     static func isOrderedBefore(_ a: Entry, _ b: Entry) -> Bool {
@@ -156,12 +183,17 @@ public struct Changelog: Codable, Equatable, Sendable {
         let shipped = entries.filter { $0.build == build }
         guard !shipped.isEmpty else { return "No pull request landed since the previous nightly." }
         return Kind.allCases.compactMap { kind -> String? in
-            let lines = shipped.filter { $0.kind == kind }.map { "- \($0.title) (#\($0.pullRequest))" }
+            let lines = shipped.filter { $0.kind == kind }.map { "- \(Self.literal($0.title)) (#\($0.pullRequest))" }
             guard !lines.isEmpty else { return nil }
             let list = lines.joined(separator: "\n")
             return kind == .internal
                 ? "<details><summary>\(kind.label) (\(lines.count))</summary>\n\n\(list)\n\n</details>"
                 : "### \(kind.label)\n\(list)"
         }.joined(separator: "\n\n")
+    }
+
+    /// A title GitHub shows as written, never as HTML.
+    static func literal(_ title: String) -> String {
+        title.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
     }
 }
