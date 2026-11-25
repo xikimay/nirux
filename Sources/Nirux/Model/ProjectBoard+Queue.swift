@@ -66,7 +66,7 @@ extension ProjectBoard {
         case .conflict?: return "conflict"
         case nil: break
         }
-        if let busy = MergeQueue.busyLabel(row.agent.state) { return "agent \(busy)" }
+        // An agent at work isn't one: the queue waits for it (`MergeQueue.confirmation`).
         return nil
     }
 
