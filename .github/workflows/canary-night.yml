@@ -1,0 +1,81 @@
+name: Canary night
+
+# Once a night on main, Claude explores the newest nightly build (the release asset Sparkle
+# installs) in a hidden copy, then the kept traces replay: scripts/canary/night.py. The
+# night's incidents go to one open issue labelled canary. The exploration needs the
+# CLAUDE_CODE_OAUTH_TOKEN secret (claude setup-token, then gh secret set
+# CLAUDE_CODE_OAUTH_TOKEN). Without it the job still replays the traces.
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary-night
+  cancel-in-progress: false
+
+jobs:
+  explore:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      CLAUDE_CODE_VERSION: 2.1.332
+    outputs:
+      incidents: ${{ steps.night.outputs.incidents }}
+    steps:
+      # The commit the nightly was built from, so the explorer and the copy agree.
+      - uses: actions/checkout@v5
+        with:
+          ref: nightly
+          persist-credentials: false
+      - name: Install Claude Code
+        run: npm install --global "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+      - name: Explore the nightly, then replay the kept traces
+        id: night
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: /usr/bin/python3 -B scripts/canary/night.py run "$RUNNER_TEMP/canary"
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-night-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/canary/evidence
+            ${{ runner.temp }}/canary/history
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Keep the issue text
+        if: always() && steps.night.outputs.incidents > 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-night-issue
+          path: ${{ runner.temp }}/canary/issue.md
+
+  # Apart, so the job that runs the model and the copy holds no write token.
+  report:
+    needs: explore
+    if: always() && needs.explore.outputs.incidents > 0
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: canary-night-issue
+          path: ${{ runner.temp }}/issue
+      - name: Comment on the open canary issue, or open one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 -B scripts/canary/night.py issue "$RUNNER_TEMP/issue/issue.md"
