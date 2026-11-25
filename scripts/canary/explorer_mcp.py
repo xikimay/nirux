@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import time
 
@@ -45,7 +46,7 @@ TOOLS = [
     {"name": "menu", "description": "Pick a menu item by its titles, e.g. [\"Space\", \"Next Space\"].",
      "inputSchema": {"type": "object", "properties": {"path": {"type": "array", "items": {"type": "string"}}},
                      "required": ["path"]}},
-    {"name": "key", "description": "One key press routed as a typed key, e.g. characters \"t\" with [\"command\"]. "
+    {"name": "key", "description": "One key press routed as a typed key, e.g. characters \"p\" with [\"command\", \"shift\"]. "
                                    "keyCode is the macOS virtual key code (Return 36, Escape 53, arrows 123-126).",
      "inputSchema": {"type": "object", "properties": {
          "characters": {"type": "string"}, "keyCode": {"type": "integer"},
@@ -61,6 +62,37 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
 ]
 ACTIONS = {"press", "menu", "key", "type"}
+# What opens a terminal (NiruxShortcuts.newTerminal, Columns › New Terminal): every terminal of the
+# copy runs a fake agent inside explore.sb, and the agent isn't handed one besides.
+SHELL_MENU_RE = re.compile(r"\bTerminal\b")
+SCHEMA_TYPES = {"string": str, "integer": int, "array": list}
+BUTTON_ROLES = {"AXButton", "AXMenuButton", "AXPopUpButton", "AXCheckBox", "AXRadioButton", "AXDisclosureTriangle"}
+
+
+def invalid(name, arguments):
+    """Why a call's arguments don't fit its tool's schema, or None."""
+    schema = next((tool["inputSchema"] for tool in TOOLS if tool["name"] == name), None)
+    if schema is None:
+        return f"Unknown tool {name}."
+    if not isinstance(arguments, dict):
+        return "Arguments must be an object."
+    for key in schema.get("required", []):
+        if key not in arguments:
+            return f"{key} is required."
+    for key, value in arguments.items():
+        spec = schema["properties"].get(key)
+        expected = SCHEMA_TYPES.get((spec or {}).get("type"))
+        if spec is None or (expected and (not isinstance(value, expected) or isinstance(value, bool))):
+            return f"{key} must be {(spec or {}).get('type', 'absent')}."
+        if expected is list and not all(isinstance(item, str) for item in value):
+            return f"{key} must hold strings."
+    return None
+
+
+def opens_shell(name, arguments):
+    if name == "key":
+        return arguments["characters"].lower() == "t" and set(arguments.get("modifiers") or []) == {"command"}
+    return name == "menu" and any(SHELL_MENU_RE.search(title) for title in arguments["path"])
 
 
 def elements(snapshot):
@@ -85,7 +117,7 @@ def look_lines(snapshot):
             value = element.get("value") or ""
             if not text and not value:
                 continue
-            state = " (disabled)" if element.get("control") and not element.get("enabled", True) else ""
+            state = " (disabled)" if element.get("role") in BUTTON_ROLES and not element.get("pressable") else ""
             lines.append(f"{element.get('role', '')} {text!r}" + (f" = {value[:80]!r}" if value else "") + state)
     return lines
 
@@ -154,15 +186,11 @@ class Explorer:
     # Oracles.
 
     def alive(self):
+        """Running, not a zombie: the runner, not this server, reaps the app."""
         if not self.pid:
             return True
-        try:
-            os.kill(self.pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        return True
+        state = subprocess.run(["/bin/ps", "-o", "stat=", "-p", str(self.pid)], capture_output=True, text=True)
+        return state.returncode == 0 and not state.stdout.strip().startswith("Z")
 
     def new_stderr(self):
         if not self.stderr or not self.stderr.exists():
@@ -229,7 +257,9 @@ class Explorer:
 
     def call(self, name, arguments):
         """(content, isError) for one tool call."""
-        refusal = self.refusal(name)
+        refusal = invalid(name, arguments) or self.refusal(name)
+        if not refusal and opens_shell(name, arguments):
+            refusal = "The canary opens no terminal: every one runs a fake agent."
         if refusal:
             return [{"type": "text", "text": refusal}], True
         budget = self.spend("calls")
@@ -300,7 +330,12 @@ def main(stdin=sys.stdin, stdout=sys.stdout, environ=os.environ):
     for line in stdin:
         if not line.strip():
             continue
-        reply = handle(explorer, json.loads(line))
+        try:
+            message = json.loads(line)
+            reply = handle(explorer, message)
+        except Exception as error:  # One bad call never ends the episode's server.
+            ident = message.get("id") if isinstance(locals().get("message"), dict) else None
+            reply = {"jsonrpc": "2.0", "id": ident, "error": {"code": -32603, "message": f"{type(error).__name__}: {error}"}}
         if reply is not None:
             stdout.write(json.dumps(reply) + "\n")
             stdout.flush()

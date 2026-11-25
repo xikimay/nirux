@@ -1,0 +1,18 @@
+(version 1)
+; The explorer's copy and everything it starts (zsh, git, fake agents): an
+; agent drives it, so it reads and writes only the run's throwaway folder
+; (WORK) and what macOS itself needs, and reaches no network but localhost.
+(allow default)
+(deny file-read-data file-write*)
+(deny network*)
+(allow file-read-data
+    (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin")
+    (subpath "/Library") (subpath "/private/etc") (subpath "/private/var/db")
+    (subpath "/dev") (literal "/") (literal "/private") (literal "/private/tmp"))
+(allow file-read-data file-write* (subpath (param "WORK")))
+(allow file-write* (subpath "/dev"))
+; /usr/bin/git is an xcrun shim: its cache sits in the user's temp folder, whatever TMPDIR says.
+(allow file-read-data file-write* (regex #"^/private/var/folders/[^/]+/[^/]+/T/xcrun_db"))
+(allow network* (local unix-socket) (remote unix-socket))
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-bind network-inbound (local ip "localhost:*"))

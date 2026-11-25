@@ -261,11 +261,11 @@ class App:
         if missing:
             raise InfrastructureError("requires " + ", ".join(missing))
 
-    def launch(self, channel=None):
+    def launch(self, channel=None, profile=HERE / "isolate.sb"):
         real_home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
         protected = {"CHECKOUT": HERE.parents[1], "STATE": real_home / "Library/Application Support/nirux",
                      "CLAUDE": real_home / ".claude", "CODEX": real_home / ".codex"}
-        args = ["/usr/bin/sandbox-exec", "-f", str(HERE / "isolate.sb")]
+        args = ["/usr/bin/sandbox-exec", "-f", str(profile), "-D", f"WORK={self.work.resolve()}"]
         for name, path in protected.items():
             args += ["-D", f"{name}={path.resolve()}"]
         args += [str(self.work / "Nirux.app/Contents/MacOS/Nirux"), "-IgnoreGhosttyConfig", "YES",

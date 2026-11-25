@@ -22,6 +22,12 @@ extension NiruxApp {
             guard let label = arguments["label"] as? String, let element = Self.pressTarget(label: label, in: windows) else {
                 return answer("Nothing enabled is labelled \(arguments["label"] ?? "").", true)
             }
+            guard element is NSControl || element is NSCell else {
+                // A custom view's own press says whether it did anything.
+                let pressed = element.accessibilityPerformPress()
+                return answer(pressed ? "Pressed \(label)." : "\(label) has nothing to do on a press.", !pressed)
+            }
+            // A control's action may open a modal alert: answer first.
             answer("Pressed \(label).", false)
             Self.press(element)
         case "key", "text":
@@ -244,7 +250,7 @@ extension NiruxApp {
                     "title": element.accessibilityTitle() ?? "",
                     "value": (element.accessibilityValue() as? CustomStringConvertible)?.description ?? "",
                     "enabled": element.isAccessibilityEnabled(),
-                    "control": controlEnabled(element) != nil,
+                    "pressable": isPressable(element),
                     // JSON has no NaN or infinity: an element off every screen has no frame.
                     "frame": edges.allSatisfy(\.isFinite) ? edges : NSNull(),
                 ])
@@ -266,13 +272,22 @@ extension NiruxApp {
         (element as? NSControl)?.isEnabled ?? (element as? NSCell)?.isEnabled
     }
 
+    /// Whether a person could press it: an enabled control, or a custom view
+    /// with a press of its own (which may still have nothing to do).
+    static func isPressable(_ element: NSAccessibilityProtocol) -> Bool {
+        if let enabled = controlEnabled(element) { return enabled }
+        guard let object = element as? NSObject else { return false }
+        let press = #selector(NSView.accessibilityPerformPress)
+        return type(of: object).instanceMethod(for: press) != NSView.instanceMethod(for: press)
+    }
+
     /// The first element labelled or titled `label` that a person could
-    /// click: a control must be enabled.
+    /// press.
     static func pressTarget(label: String, in windows: [NSWindow]) -> NSAccessibilityProtocol? {
         for window in windows {
             var stack: [NSAccessibilityProtocol] = [window]
             while let element = stack.popLast() {
-                if element.isAccessibilityElement(), controlEnabled(element) ?? true,
+                if element.isAccessibilityElement(), isPressable(element),
                    element.accessibilityLabel() == label || element.accessibilityTitle() == label {
                     return element
                 }

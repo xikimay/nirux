@@ -1,8 +1,11 @@
 import io
 import json
 from pathlib import Path
+import subprocess
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 import explore
 import explorer_mcp
@@ -14,7 +17,7 @@ BADGE = "1 agent waiting for you, Command J"
 
 def snapshot(*labels):
     return json.dumps({"windows": [{"title": "Nirux", "isKey": False, "firstResponder": "TerminalView",
-                                    "elements": [{"role": "AXButton", "label": label, "enabled": True} for label in labels]}]})
+                                    "elements": [{"role": "AXButton", "label": label, "pressable": True} for label in labels]}]})
 
 
 def terminals(alpha="", beta="", focused="Alpha"):
@@ -104,7 +107,7 @@ class ExplorerTests(unittest.TestCase):
         (self.root / "state/state.json").write_text("{")
         explorer = self.explorer(FakeChannel(snapshot=[NotTaken("snapshot")]))
         explorer.stderr_offset = len("launched\n")
-        text = explorer.call("key", {"characters": "t", "modifiers": ["command"]})[0][0]["text"]
+        text = explorer.call("key", {"characters": "k", "modifiers": ["command"]})[0][0]["text"]
         self.assertEqual(sorted(f["rule"] for f in self.lines("findings.jsonl")),
                          ["app-answers", "no-fatal-log", "state-json-valid"])
         self.assertIn("Fatal error: Index out of range", text)
@@ -145,6 +148,44 @@ class ExplorerTests(unittest.TestCase):
         text = explorer.call("terminal", {})[0][0]["text"]
         self.assertEqual(text, "Alpha column 0 (keyboard):\n$ ls\nREADME.md")
 
+    def test_a_malformed_call_is_refused_and_the_server_goes_on(self):
+        explorer = self.explorer(FakeChannel(snapshot=[snapshot("A")]))
+        for arguments, why in [({"text": 5}, "text must be string."), ({}, "text is required."),
+                               ({"text": "x", "extra": 1}, "extra must be absent.")]:
+            content, is_error = explorer.call("type", arguments)
+            self.assertTrue(is_error)
+            self.assertEqual(content[0]["text"], why)
+        self.assertEqual(explorer.call("menu", {"path": ["Space", 3]})[0][0]["text"], "path must hold strings.")
+        self.assertFalse(explorer.call("menu", {"path": ["Space", "Next Space"]})[1])
+        self.assertEqual(explorer.channel.calls[0], ("menu", {"path": ["Space", "Next Space"]}))
+
+    def test_nothing_that_opens_a_terminal_reaches_the_app(self):
+        explorer = self.explorer(FakeChannel())
+        for name, arguments in [("key", {"characters": "t", "modifiers": ["command"]}),
+                                ("key", {"characters": "T", "modifiers": ["command"]}),
+                                ("menu", {"path": ["Columns", "New Terminal"]})]:
+            content, is_error = explorer.call(name, arguments)
+            self.assertTrue(is_error, arguments)
+            self.assertIn("opens no terminal", content[0]["text"])
+        self.assertEqual(explorer.channel.calls, [])
+
+    def test_a_dead_app_reads_dead_although_nobody_reaped_it(self):
+        child = subprocess.Popen(["/usr/bin/true"])
+        explorer = explorer_mcp.Explorer({"CANARY_EXPLORER_RUN": str(self.root), "NIRUX_STATE_DIR": str(self.root),
+                                          "NIRUX_CANARY_TOKEN": "t", "CANARY_APP_PID": str(child.pid)}, channel=FakeChannel())
+        deadline = time.monotonic() + 5
+        while explorer.alive() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(explorer.alive(), "a zombie is dead")
+        child.wait()
+        running = subprocess.Popen(["/bin/sleep", "5"])
+        try:
+            explorer.pid = running.pid
+            self.assertTrue(explorer.alive())
+        finally:
+            running.kill()
+            running.wait()
+
     def test_notes_wait_for_a_person(self):
         self.explorer(FakeChannel()).call("note", {"text": "The badge says 2, one agent waits."})
         self.assertEqual([(n["text"], n["episode"]) for n in self.lines("notes.jsonl")],
@@ -152,29 +193,33 @@ class ExplorerTests(unittest.TestCase):
 
     def test_the_server_speaks_mcp_over_stdio(self):
         messages = [
+            "not json",
             {"jsonrpc": "2.0", "id": 1, "method": "server/discover"},
             {"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {"protocolVersion": "2025-11-25"}},
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             {"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
         ]
         out = io.StringIO()
-        explorer_mcp.main(io.StringIO("".join(json.dumps(m) + "\n" for m in messages)), out, {
+        explorer_mcp.main(io.StringIO("".join((m if isinstance(m, str) else json.dumps(m)) + "\n" for m in messages)), out, {
             "CANARY_EXPLORER_RUN": str(self.root), "NIRUX_STATE_DIR": str(self.root / "state"), "NIRUX_CANARY_TOKEN": "t",
         })
         replies = [json.loads(line) for line in out.getvalue().splitlines()]
-        self.assertEqual([r["id"] for r in replies], [1, 2, 3])
-        self.assertEqual(replies[0]["error"]["code"], -32601)
-        self.assertEqual(replies[1]["result"]["protocolVersion"], "2025-11-25")
-        self.assertEqual({t["name"] for t in replies[2]["result"]["tools"]},
+        self.assertEqual([r["id"] for r in replies], [None, 1, 2, 3])
+        self.assertEqual(replies[0]["error"]["code"], -32603, "a bad line answers an error and the server goes on")
+        self.assertEqual(replies[1]["error"]["code"], -32601)
+        self.assertEqual(replies[2]["result"]["protocolVersion"], "2025-11-25")
+        self.assertEqual({t["name"] for t in replies[3]["result"]["tools"]},
                          {"look", "press", "menu", "key", "type", "terminal", "render", "note"})
 
 
 class RunnerTests(unittest.TestCase):
     def test_claude_gets_the_canary_server_and_nothing_else(self):
         command = explore.claude_command("/bin/claude", model="opus", goal="Switch spaces",
-                                         server_environment={"NIRUX_CANARY_TOKEN": "t"}, max_turns=14)
+                                         server_environment={"NIRUX_CANARY_TOKEN": "t"}, max_turns=14, max_usd=2.5)
         self.assertEqual(command[:3], ["/bin/claude", "-p", "Goal: Switch spaces"])
         self.assertEqual(command[command.index("--tools") + 1], "")
+        self.assertEqual(command[command.index("--setting-sources") + 1], "", "no user settings, plugins or mode")
+        self.assertEqual(command[command.index("--max-budget-usd") + 1], "2.50")
         for flag in ("--strict-mcp-config", "--allowedTools=mcp__canary", "--no-session-persistence"):
             self.assertIn(flag, command)
         config = json.loads(next(a for a in command if a.startswith("--mcp-config="))[len("--mcp-config="):])
@@ -234,6 +279,31 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(picked, [texts["columns"], texts["keys"]])
         self.assertEqual(explore.pick_goals([], 4), [text for _, _, text in explore.GOALS])
 
+    def test_a_crash_at_launch_is_a_finding_with_its_report(self):
+        class CrashingApp:
+            def __init__(self, work, evidence, report, check_interrupt):
+                self.report, self.env, self.process = report, {"PATH": "/bin"}, None
+
+            def launch(self, channel, profile):
+                self.profile = profile
+                raise RuntimeError("Nirux exited with status -11")
+
+            def cleanup(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(explore, "App", CrashingApp), mock.patch.object(explore, "build_world"), \
+                mock.patch.object(explore, "package", lambda work, evidence, app, replay, metadata:
+                                  metadata.update(bundleSHA256="b")), \
+                mock.patch.object(explore.shutil, "which", return_value="/usr/local/bin/claude"):
+            evidence = Path(folder)
+            data = explore.explore(explore.parser().parse_args(["Nirux.app"]), evidence, evidence / "work")
+            self.assertTrue((evidence / "digest.md").exists())
+        self.assertEqual(data["verdict"], "fail")
+        self.assertEqual([(f["rule"], f["detail"]) for f in data["findings"]],
+                         [("app-alive", "Nirux exited at launch: Nirux exited with status -11")])
+        self.assertEqual(data["episodes"], [])
+
     def test_an_episode_reads_its_result_and_notes_make_the_digest(self):
         with tempfile.TemporaryDirectory() as folder:
             log = Path(folder) / "claude.jsonl"
@@ -241,7 +311,8 @@ class RunnerTests(unittest.TestCase):
                                       json.dumps({"type": "result", "num_turns": 7, "result": "Done."})]))
             self.assertEqual(explore.last_result(log)["num_turns"], 7)
         self.assertIn("- Episode 1, call 4: Stale count", explore.digest([{"episode": 1, "call": 4, "text": "Stale count"}]))
-        self.assertIn("(a|b) NIRUX_CANARY_AGENT_LOG", explore.AUTOSTART.format(agents="a|b"))
+        self.assertIn("[[ -o interactive ]] && NIRUX_CANARY_AGENT_LOG=", explore.AUTOSTART)
+        self.assertTrue(explore.AUTOSTART.strip().endswith("exec claude"), "every terminal runs the fake agent")
 
 
 if __name__ == "__main__":

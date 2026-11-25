@@ -113,11 +113,10 @@ for anything that looks wrong although no check failed (a wrong label, a lost fo
 Your tool calls are counted. When a tool says the budget is spent, stop. End with a short report: what you did, \
 which checks failed and how, what you noted."""
 
+# The explorer's world: every terminal runs a fake claude, never a shell
+# the agent could type commands into (explore.sb confines it besides).
 AUTOSTART = """
-# The explorer's world: each fixture task's terminal runs a fake claude.
-case $NIRUX_AGENT_UUID in
-  ({agents}) NIRUX_CANARY_AGENT_LOG="$NIRUX_STATE_DIR/agent-$NIRUX_AGENT_UUID.jsonl" exec claude;;
-esac
+[[ -o interactive ]] && NIRUX_CANARY_AGENT_LOG="$NIRUX_STATE_DIR/agent-$NIRUX_AGENT_UUID.jsonl" exec claude
 """
 
 # What claude keeps of the runner's environment: its login, never an API key.
@@ -128,7 +127,7 @@ def claude_environment(environ):
     return {key: environ[key] for key in CLAUDE_ENVIRONMENT if key in environ}
 
 
-def claude_command(claude, *, model, goal, server_environment, max_turns):
+def claude_command(claude, *, model, goal, server_environment, max_turns, max_usd):
     config = {"mcpServers": {"canary": {
         "command": sys.executable, "args": ["-B", str(HERE / "explorer_mcp.py")], "env": server_environment,
     }}}
@@ -136,7 +135,8 @@ def claude_command(claude, *, model, goal, server_environment, max_turns):
         claude, "-p", "Goal: " + goal, "--model", model,
         "--mcp-config=" + json.dumps(config), "--strict-mcp-config",
         "--tools", "", "--allowedTools=mcp__canary",
-        "--disable-slash-commands", "--no-session-persistence",
+        "--disable-slash-commands", "--no-session-persistence", "--setting-sources", "",
+        "--max-budget-usd", f"{max_usd:.2f}",
         "--settings", json.dumps({"disableAllHooks": True}),
         "--system-prompt", SYSTEM_PROMPT,
         "--output-format", "stream-json", "--verbose", "--max-turns", str(max_turns),
@@ -188,17 +188,17 @@ def build_world(app, work, seed):
     agents = [app.fake_agent(name) for name in ("claude", "codex", "agy")]
     app.env["PATH"] = f"{agents[0].parent}:{app.env['PATH']}"
     with (work / "home/.zshrc").open("a", encoding="utf-8") as rc:
-        rc.write(AUTOSTART.format(agents="|".join((world["agentAlphaID"], world["agentBetaID"]))))
+        rc.write(AUTOSTART)
     return world
 
 
-def run_episode(index, goal, *, claude, args, evidence, server_environment, deadline):
+def run_episode(index, goal, *, claude, args, evidence, server_environment, deadline, max_usd):
     folder = evidence / f"episode-{index}"
     folder.mkdir()
     log = folder / "claude.jsonl"
     command = claude_command(claude, model=args.model, goal=goal, server_environment=dict(
         server_environment, CANARY_EPISODE=str(index), CANARY_EPISODE_ACTIONS=str(args.episode_calls),
-    ), max_turns=args.episode_calls + 2)
+    ), max_turns=args.episode_calls + 2, max_usd=max_usd)
     timed_out = False
     with log.open("wb") as out:
         process = subprocess.Popen(command, cwd=folder, env=claude_environment(os.environ), stdin=subprocess.DEVNULL,
@@ -236,6 +236,18 @@ def quit_hidden(app, channel):
     return True
 
 
+def finish(report, evidence, findings, episodes):
+    """The run's report: the server's findings and the runner's, the notes as a digest."""
+    findings = read_jsonl(evidence / "findings.jsonl") + findings
+    notes = read_jsonl(evidence / "notes.jsonl")
+    (evidence / "digest.md").write_text(digest(notes), encoding="utf-8")
+    report.data.update(
+        verdict="fail" if findings else "pass", episodes=episodes, findings=distinct_findings(findings),
+        notes=len(notes), budget=json.loads((evidence / "budget.json").read_text()),
+    )
+    return report.data
+
+
 def explore(args, evidence, work, trace=None):
     """One run: Claude's episodes, or `trace` replayed without a model."""
     claude = shutil.which("claude")
@@ -261,7 +273,13 @@ def explore(args, evidence, work, trace=None):
     deadline = time.monotonic() + args.minutes * 60
     episodes, findings = [], []
     try:
-        app.launch(channel=channel)
+        try:
+            app.launch(channel=channel, profile=HERE / "explore.sb")
+        except RuntimeError as error:
+            # Nirux exited before its channel answered: a crash at launch.
+            findings.append({"rule": "app-alive", "detail": f"Nirux exited at launch: {error}", "episode": None,
+                             "call": None})
+            return finish(report, evidence, findings, [])
         server_environment = {
             "NIRUX_STATE_DIR": str(work / "state"), "NIRUX_CANARY_TOKEN": token,
             "CANARY_EXPLORER_RUN": str(evidence), "CANARY_APP_PID": str(app.process.pid),
@@ -275,8 +293,12 @@ def explore(args, evidence, work, trace=None):
             budget = json.loads((evidence / "budget.json").read_text())
             if budget["calls"] >= budget["callLimit"] or time.monotonic() >= deadline or app.process.poll() is not None:
                 break
+            spent = sum(episode.get("costUSD") or 0 for episode in episodes)
+            if spent >= args.max_usd:
+                break
             episodes.append(run_episode(index, goals[(index - 1) % len(goals)], claude=claude, args=args,
-                                        evidence=evidence, server_environment=server_environment, deadline=deadline))
+                                        evidence=evidence, server_environment=server_environment, deadline=deadline,
+                                        max_usd=args.max_usd - spent))
         if app.process.poll() is not None:
             # Between two actions, so no check saw it; a status 0 is a quit nobody asked for.
             findings.append({"rule": "app-alive", "detail": f"Nirux quit by itself (status {app.process.returncode})",
@@ -293,14 +315,7 @@ def explore(args, evidence, work, trace=None):
         if any(is_unexpected_process_exit(process) for process in processes):
             report.data["crashes"] = correlate_crash_reports(processes, None, evidence, wait_seconds=2.0)
             findings.append({"rule": "app-alive", "detail": "Nirux exited unexpectedly", "episode": None, "call": None})
-    findings = read_jsonl(evidence / "findings.jsonl") + findings
-    notes = read_jsonl(evidence / "notes.jsonl")
-    (evidence / "digest.md").write_text(digest(notes), encoding="utf-8")
-    report.data.update(
-        verdict="fail" if findings else "pass", episodes=episodes, findings=distinct_findings(findings),
-        notes=len(notes), budget=json.loads((evidence / "budget.json").read_text()),
-    )
-    return report.data
+    return finish(report, evidence, findings, episodes)
 
 
 def changed_paths(args):
@@ -362,6 +377,7 @@ def parser():
     root.add_argument("--renders", type=int, default=6)
     root.add_argument("--minutes", type=float, default=20)
     root.add_argument("--model", default="opus")
+    root.add_argument("--max-usd", type=float, default=3.0, help="dollars for the whole run (claude --max-budget-usd)")
     root.add_argument("--evidence-dir", type=Path)
     root.add_argument("--history-dir", type=Path)
     root.add_argument("--replay-trace", type=Path, help="replay a run's trace.jsonl without a model")

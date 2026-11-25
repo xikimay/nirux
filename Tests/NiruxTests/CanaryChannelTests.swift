@@ -186,8 +186,10 @@ final class CanaryChannelTests: XCTestCase {
         let custom = PressableView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
         window.contentView?.addSubview(custom)
         let snapshotted = NiruxApp.accessibilitySnapshot(of: window)["elements"] as? [[String: Any]] ?? []
-        XCTAssertEqual(snapshotted.first { $0["label"] as? String == "Custom" }?["control"] as? Bool, false)
-        XCTAssertEqual(buttons.map { $0["control"] as? Bool }, [true, true])
+        XCTAssertEqual(snapshotted.first { $0["label"] as? String == "Custom" }?["pressable"] as? Bool, true)
+        XCTAssertEqual(buttons.map { $0["pressable"] as? Bool }, [true, false])
+        window.contentView?.addSubview(NowhereView(frame: NSRect(x: 0, y: 0, width: 10, height: 10)))
+        XCTAssertNil(NiruxApp.pressTarget(label: "Nowhere", in: [window]), "a view without a press of its own")
         NiruxApp.press(try XCTUnwrap(NiruxApp.pressTarget(label: "Custom", in: [window])))
         XCTAssertEqual(custom.presses, 1)
         XCTAssertNil(NiruxApp.pressTarget(label: "Missing", in: [window]))
@@ -204,9 +206,16 @@ final class CanaryChannelTests: XCTestCase {
         let app = NiruxApp()
         app.mainWindow = window
         var answers: [(String, Bool)] = []
-        app.performCanaryRequest(request(token: token, tool: "press", arguments: ["label": "Board"])) { answers.append(($0, $1)) }
-        XCTAssertEqual(answers.map { $0.0 }, ["Pressed Board."])
-        XCTAssertEqual(answers.map { $0.1 }, [false])
+        let inert = PressableView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        inert.label = "Inert"
+        inert.action = false
+        window.contentView?.addSubview(inert)
+        for label in ["Board", "Inert"] {
+            app.performCanaryRequest(request(token: token, tool: "press", arguments: ["label": label])) { answers.append(($0, $1)) }
+        }
+        XCTAssertEqual(answers.map { $0.0 }, ["Pressed Board.", "Inert has nothing to do on a press."])
+        XCTAssertEqual(answers.map { $0.1 }, [false, true])
+        XCTAssertEqual(inert.presses, 1)
         XCTAssertEqual(target.picked, ["Board"])
     }
 
@@ -417,12 +426,15 @@ private final class Target: NSObject {
 
 private final class PressableView: NSView {
     var presses = 0
+    var label = "Custom"
+    /// Whether a press does something, as SidebarSectionToggleView's with an onPress.
+    var action = true
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .button }
-    override func accessibilityLabel() -> String? { "Custom" }
+    override func accessibilityLabel() -> String? { label }
     override func accessibilityPerformPress() -> Bool {
         presses += 1
-        return true
+        return action
     }
 }
 
