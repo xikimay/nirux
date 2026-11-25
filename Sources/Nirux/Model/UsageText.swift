@@ -136,9 +136,12 @@ extension UsageText {
             let clock = ClaudeUsageLimits.clockText(at, now: now, calendar: calendar)
             let resetClock = ClaudeUsageLimits.clockText(resetsAt, now: now, calendar: calendar)
             let before = ClaudeUsageLimits.remainingText(resetsAt - at)
-            return QuotaTitle(text: "Full by \(clock), \(before) before it resets at \(resetClock)".asWarning, tone: .runsOut)
-        case .atReset(let percent):
+            let sameDay = calendar.isDate(Date(timeIntervalSince1970: resetsAt), inSameDayAs: Date(timeIntervalSince1970: now))
+            return QuotaTitle(text: "Full by \(clock), \(before) before it resets \(sameDay ? "at " : "")\(resetClock)".asWarning, tone: .runsOut)
+        case .atReset(let percent) where percent > Int(limit.latest.usedPercent.rounded()):
             return QuotaTitle(text: "≈ \(percent)% when it \(reset)", tone: .normal)
+        case .atReset:
+            return QuotaTitle(text: reset.prefix(1).uppercased() + reset.dropFirst(), tone: .normal)
         case .quiet:
             return QuotaTitle(text: "No agent in Nirux spent it lately; it \(reset)", tone: .normal)
         case .unknown:
@@ -233,6 +236,18 @@ struct SidebarTaskUsage: Hashable {
 
     /// What the row says as a warning.
     var isWarning: Bool { isContextHeavy || isFanningOut || isOverBudget }
+
+    /// Why it spends, for the popover: "Each message rereads 612k · 6 subagents".
+    func burnCause(compactsAtTurnEnd: Bool) -> String? {
+        var parts: [String] = []
+        if isOverBudget, let budget { parts.append("past its \(UsageText.tokens(budget)) budget") }
+        if isContextHeavy, let contextTokens { parts.append("each message rereads \(UsageText.tokens(contextTokens))") }
+        if isFanningOut { parts.append("\(subagents) subagents") }
+        if compactsAtTurnEnd { parts.append("compacts at turn end") }
+        if parts.isEmpty, let contextTokens { parts.append("\(UsageText.tokens(contextTokens)) of context") }
+        guard let text = parts.first.map({ ([$0] + parts.dropFirst()).joined(separator: " · ") }) else { return nil }
+        return text.prefix(1).uppercased() + text.dropFirst()
+    }
 
     /// "142k · 4.2M": the context, then the week's spend.
     var text: String {

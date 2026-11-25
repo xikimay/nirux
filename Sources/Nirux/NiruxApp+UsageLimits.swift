@@ -20,6 +20,8 @@ extension NiruxApp {
     func setUpUsageLimits(window: NSWindow) {
         let indicator = ClaudeUsageIndicator()
         indicator.onShowUsage = { [weak self] in self?.shell?.showUsageWindow() }
+        indicator.burnRows = { [weak self] readings in self?.shell?.quotaBurnRows(readings: readings) ?? [] }
+        indicator.onBurnAction = { [weak self] workspaceID, action in self?.shell?.takeBurnAction(action, workspaceID: workspaceID) }
         window.addTitlebarAccessoryViewController(indicator)
         let monitor = ClaudeUsageLimitsMonitor()
         monitor.onUpdate = { [weak indicator, weak monitor] limits, now in

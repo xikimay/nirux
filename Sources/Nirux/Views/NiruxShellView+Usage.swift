@@ -82,6 +82,96 @@ extension NiruxShellView {
         taskUsage(of: workspace)?.isOverBudget ?? false
     }
 
+    static let burnRows = 3
+    static let burnActions = 3
+
+    /// The tasks spending Claude's session now, most first: each one's share
+    /// of the last `UsageReport.burnSpan`, its points of the 5-hour window when
+    /// `readings` calibrate them, why, and what its row offers.
+    func quotaBurnRows(readings: [QuotaReading]) -> [QuotaBurnRow] {
+        guard let report = usageMonitor?.report else { return [] }
+        let total = report.claudeBurn.values.reduce(0, +)
+        guard total > 0 else { return [] }
+        let pointsPerToken = QuotaCalibration.pointsPerToken(readings, minutes: report.claudeMinutes)
+        let top = report.claudeBurn.sorted { $0.value > $1.value }.compactMap { id, tokens in
+            workspaces.first { $0.id == id }.map { ($0, tokens) }
+        }.prefix(Self.burnRows)
+        let snapshot = ProcessSnapshot()
+        return top.map { workspace, tokens in
+            let queued = compactsAtTurnEnd.values.contains(workspace.id)
+            let usage = taskUsage(of: workspace)
+            return QuotaBurnRow(
+                workspaceID: workspace.id, title: workspace.title, share: tokens / total, points: pointsPerToken.map { $0 * tokens }, tokens: tokens,
+                cause: usage?.burnCause(compactsAtTurnEnd: queued),
+                actions: burnActions(of: workspace, usage: usage, queued: queued, snapshot: snapshot)
+            )
+        }
+    }
+
+    /// Its row's own offers (Compact, Fresh start, its budget's choices), and
+    /// "Compact at turn end" for a claude at work with a heavy context.
+    private func burnActions(of workspace: WorkspaceState, usage: SidebarTaskUsage?, queued: Bool, snapshot: ProcessSnapshot) -> [QuotaBurnRow.Action] {
+        let info = sidebar.lastInfos.first { $0.id == workspace.id }
+        var actions: [QuotaBurnRow.Action] = []
+        for (index, column) in workspace.columns.enumerated() {
+            if let offer = info?.columns.first(where: { $0.index == index })?.contextOffer {
+                actions += offer.choices.map { .contextOffer($0, column: column.id) }
+            } else if !queued, !snapshot.isEmpty, usage?.isContextHeavy == true, claudeHoldings(workspace, column, snapshot)?.isBusy == true {
+                actions.append(.compactAtTurnEnd(column: column.id))
+            }
+        }
+        for case .budget(let offer) in info?.cardActions ?? [] { actions += offer.choices.map { .budget($0) } }
+        // As many as a popover row holds.
+        return Array(actions.prefix(Self.burnActions))
+    }
+
+    func takeBurnAction(_ action: QuotaBurnRow.Action, workspaceID: String) {
+        guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
+        let workspace = workspaces[index]
+        switch action {
+        case .contextOffer(let choice, let columnID):
+            guard let column = workspace.columns.firstIndex(where: { $0.id == columnID }) else { return }
+            takeContextOffer(choice, workspaceIndex: index, columnIndex: column)
+        case .budget(let choice):
+            takeBudgetChoice(choice, workspaceID: workspaceID)
+        case .compactAtTurnEnd(let columnID):
+            guard workspace.columns.contains(where: { $0.id == columnID }) else { return }
+            compactsAtTurnEnd[columnID] = workspaceID
+            showToast("“\(workspace.title)” compacts when its turn ends.")
+            updateSidebar()
+        }
+    }
+
+    /// Each queued compaction whose claude rests types /compact once; one
+    /// whose claude left is dropped, one with the user's draft in its prompt
+    /// gives way and says so. A pass without the process table decides nothing.
+    func runCompactsAtTurnEnd(snapshot: ProcessSnapshot) {
+        guard !compactsAtTurnEnd.isEmpty, !snapshot.isEmpty else { return }
+        for (columnID, workspaceID) in compactsAtTurnEnd {
+            let workspace = workspaces.first { $0.id == workspaceID }
+            let column = workspace?.columns.first { $0.id == columnID }
+            let holdings = workspace.flatMap { workspace in column.flatMap { claudeHoldings(workspace, $0, snapshot) } }
+            switch QueuedCompact.of(holdings) {
+            case .wait:
+                continue
+            case .drop:
+                compactsAtTurnEnd[columnID] = nil
+            case .yield:
+                compactsAtTurnEnd[columnID] = nil
+                showToast("“\(workspace?.title ?? "")” won’t compact at turn end: its prompt holds a draft.")
+            case .send:
+                compactsAtTurnEnd[columnID] = nil
+                // Compacted another way meanwhile (typed by hand, or by claude
+                // itself): its context no longer weighs.
+                guard let workspace, taskUsage(of: workspace)?.isContextHeavy == true else { continue }
+                guard let uuid = column?.agentUUID, case .sent = sendTypedPrompt(agentUUID: uuid, prompt: "/compact") else {
+                    showToast("Couldn’t type /compact: claude’s prompt isn’t free.", tone: .error)
+                    continue
+                }
+            }
+        }
+    }
+
     func showUsageWindow() {
         let controller = usageWindow ?? UsageWindowController()
         usageWindow = controller
@@ -223,6 +313,7 @@ extension NiruxShellView {
         case .refuse(let message):
             showToast(message, tone: .error)
         case .typeCompact:
+            compactsAtTurnEnd[column.id] = nil
             guard case .sent = sendTypedPrompt(agentUUID: uuid, prompt: "/compact") else {
                 return showToast("Couldn’t type /compact: claude’s prompt isn’t free.", tone: .error)
             }

@@ -29,6 +29,26 @@ public enum QuotaForecast: Equatable, Sendable {
     case unknown
 }
 
+/// How many points of a window a weighted token is worth: the window's rise
+/// over Claude's spend between its first reading and its latest
+/// (`UsageReport.claudeMinutes`). An estimate: use elsewhere (claude.ai,
+/// another Mac) counts in the readings, never in the spend.
+public enum QuotaCalibration {
+    /// Below this rise, the ratio is mostly rounding.
+    public static let minimumRise = 3.0
+
+    public static func pointsPerToken(_ readings: [QuotaReading], minutes: [Int: Double]) -> Double? {
+        guard let latest = readings.max(by: { $0.time < $1.time }) else { return nil }
+        let window = readings.filter { abs($0.resetsAt - latest.resetsAt) <= QuotaPace.sameWindow }
+        guard let first = window.min(by: { $0.time < $1.time }), latest.usedPercent - first.usedPercent >= minimumRise else { return nil }
+        let tokens = minutes.reduce(0.0) { sum, entry in
+            let time = Double(entry.key) * 60
+            return time >= first.time && time < latest.time ? sum + entry.value : sum
+        }
+        return tokens > 0 ? (latest.usedPercent - first.usedPercent) / tokens : nil
+    }
+}
+
 /// A plan limit as Nirux shows it: its latest reading and its forecast.
 public struct QuotaLimit: Equatable, Sendable {
     public enum Agent: String, Sendable { case claude, codex }
