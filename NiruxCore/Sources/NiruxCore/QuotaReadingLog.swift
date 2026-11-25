@@ -13,8 +13,8 @@ public enum QuotaReadingLog {
         filePrefix + Date(timeIntervalSince1970: time).formatted(.iso8601.year().month().day()) + ".jsonl"
     }
 
-    /// One write under PIPE_BUF with O_APPEND: concurrent status lines never
-    /// interleave.
+    /// One O_APPEND write per call; the caller's lock
+    /// (`ClaudeUsageLimitsFile.record`) keeps concurrent writers apart.
     public static func append(_ readings: [String: QuotaReading], in folder: String) {
         guard let time = readings.values.map(\.time).max() else { return }
         var data = Data()

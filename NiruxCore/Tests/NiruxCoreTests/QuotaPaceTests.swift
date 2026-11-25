@@ -74,6 +74,13 @@ struct QuotaPaceTests {
             return
         }
         #expect(at >= now)
+        // Two minutes before its reset, filling in one: the time stays before the reset.
+        let late = (0..<4).map { QuotaReading(time: now - Double(3 - $0) * 300, usedPercent: 84 + Double($0) * 5, resetsAt: now + 120) }
+        guard case .runsOut(let lateAt) = QuotaPace.forecast(late, span: span, now: now) else {
+            Issue.record("no forecast")
+            return
+        }
+        #expect(lateAt >= now && lateAt < now + 120)
         // 99.7 % at the reset: not full.
         let near = readings([99.1, 99.3, 99.5], every: 450, resetsAt: now + 600)
         #expect(QuotaPace.forecast(near, span: span, now: now) == .atReset(percent: 99))

@@ -122,8 +122,8 @@ public enum QuotaPace {
         // 100 % shows only as running out.
         guard rate > 0, atReset >= 100 else { return .atReset(percent: min(99, Int(atReset.rounded()))) }
         let full = latest.time + (100 - latest.usedPercent) / rate
-        // Never a time already gone while the limit isn't full yet.
-        let rounded = max((full / rounding).rounded(.down) * rounding, (now / rounding).rounded(.up) * rounding)
+        // Never a time already gone while the limit isn't full yet, nor one past its reset.
+        let rounded = max((full / rounding).rounded(.down) * rounding, now)
         if case .runsOut(let shown) = previous, abs(shown - rounded) <= steadiness, shown > now, shown < latest.resetsAt {
             return .runsOut(at: shown)
         }
