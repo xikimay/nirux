@@ -337,6 +337,8 @@ final class ClaudeUsageLimitsTests: XCTestCase {
 
         XCTAssertTrue(indicator.view.accessibilityPerformPress())
         XCTAssertEqual(presented, 1)
+        indicator.view.frame = NSRect(x: 0, y: 0, width: 200, height: 22)
+        XCTAssertTrue(indicator.view.hitTest(NSPoint(x: 100, y: 11)) === indicator.view, "the label and meters don't take the click")
         // The same words keep the same views.
         let firstRow = indicator.popoverContent.view.subviews.first?.subviews.first
         indicator.popoverContent.update(limits: indicator.limits, now: now, calendar: utc)

@@ -4,8 +4,13 @@ import AppKit
 private final class PressableView: NSView {
     var onPress: (() -> Void)?
 
-    /// A click opens the popover, never drags the window.
+    /// A click opens the popover, never drags the window, wherever it lands
+    /// (the label and the meters would let the title bar drag it).
     override var mouseDownCanMoveWindow: Bool { false }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        frame.contains(point) && !isHidden ? self : nil
+    }
 
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .button }
