@@ -265,6 +265,18 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.dailyPassIsOn)
     }
 
+    /// A cold Lead's fresh start is on unless the file says; a file Nirux
+    /// can't read turns it off.
+    func testTheFreshStartSetting() throws {
+        XCTAssertTrue(SpaceDefaults().leadStartsFreshWhenCold)
+        let off = SpaceDefaultsStore.decode(Data(#"{"leadFreshStart": false}"#.utf8))
+        XCTAssertEqual(off.status, .loaded)
+        XCTAssertFalse(off.defaults.leadStartsFreshWhenCold)
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["leadFreshStart"] as? Bool, false)
+        XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.leadStartsFreshWhenCold)
+    }
+
     /// On unless the file says: every subagent on Opus, through the
     /// terminal; Fable for a new Claude Lead conversation, on its launch line
     /// only. A variable the user set for the space wins; a file Nirux can't

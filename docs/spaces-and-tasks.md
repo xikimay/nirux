@@ -155,3 +155,9 @@ Once a day, after 06:00, Nirux asks the Lead to look back at the space's day. Th
 It then proposes the rules that would have spared that friction, through **Rule proposed · Review** on its row. Nothing reaches the brief without you.
 
 Nirux asks only when something happened, and only once the Lead has been idle for 30 minutes and you have been away from Nirux for 10. For a day after, the Lead's row shows what the pass read ("Daily pass · 6 PRs, 1 flaky test, 2 rules proposed"), and its reply in its terminal says why. Turn it off or change its hour with **Daily pass** in Space Settings › Lead. You can also ask the Lead for a pass at any time.
+
+### A heavy or cold context
+
+Every message a Claude session sends reads its whole context again. Once a Claude column is at rest (its prompt waiting, no dialog, no question to you) with 280k of context or more, its card says so and offers **Compact** (Nirux types `/compact`, never after a draft) or **Fresh start** (a new conversation on the same model, handed the task's request, progress and next step; for the Lead, Restart Lead, which asks first). The same offer comes from 150k once the session has been idle for an hour: its cache expired, so its next message writes the whole context again. Nirux never chooses for you there.
+
+The Lead is the exception, behind **Fresh start after an idle hour** in Space Settings › Lead, on by default: a Claude Lead idle for an hour with 200k of context or more starts a new conversation by itself, unless it holds something that conversation would lose: a draft, a dialog, a question to you, a task's question it hasn't answered, or a merge queue it started. The new conversation is handed the last entry of the previous one and where to read the rest in Session History; its tasks, questions and brief stay.

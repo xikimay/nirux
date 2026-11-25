@@ -460,6 +460,9 @@ final class NiruxShellView: NSView {
             self?.noteCatchUpTaskAnswered(workspaceIndex: wsIndex)
             self?.interruptSilentAgent(workspaceIndex: wsIndex, columnIndex: colIndex, since: since)
         }
+        sidebar.onContextOffer = { [weak self] wsIndex, colIndex, choice in
+            self?.takeContextOffer(choice, workspaceIndex: wsIndex, columnIndex: colIndex)
+        }
         sidebar.onMissionTypeNow = { [weak self] wsIndex, colIndex, since in
             self?.typeWaitingMessagesNow(workspaceIndex: wsIndex, columnIndex: colIndex, since: since)
         }
