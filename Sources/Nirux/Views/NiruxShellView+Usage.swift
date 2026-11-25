@@ -116,9 +116,7 @@ extension NiruxShellView {
         for (index, column) in workspace.columns.enumerated() {
             if let offer = info?.columns.first(where: { $0.index == index })?.contextOffer {
                 actions += offer.choices.map { .contextOffer($0, column: column.id) }
-            } else if !queued, !snapshot.isEmpty, usage?.isContextHeavy == true, let pty = column.pty,
-                      let foreground = pty.foregroundProcess(snapshot: snapshot), foreground.interactiveAgent == .claude,
-                      leadHoldings(workspace, column: column, pty: pty, foreground: foreground, snapshot: snapshot).isBusy {
+            } else if !queued, !snapshot.isEmpty, usage?.isContextHeavy == true, claudeHoldings(workspace, column, snapshot)?.isBusy == true {
                 actions.append(.compactAtTurnEnd(column: column.id))
             }
         }
@@ -162,11 +160,7 @@ extension NiruxShellView {
         for (columnID, workspaceID) in compactsAtTurnEnd {
             let workspace = workspaces.first { $0.id == workspaceID }
             let column = workspace?.columns.first { $0.id == columnID }
-            var holdings: LeadHoldings?
-            if let workspace, let column, let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
-               foreground.interactiveAgent == .claude {
-                holdings = leadHoldings(workspace, column: column, pty: pty, foreground: foreground, snapshot: snapshot)
-            }
+            let holdings = workspace.flatMap { workspace in column.flatMap { claudeHoldings(workspace, $0, snapshot) } }
             switch QueuedCompact.of(holdings) {
             case .wait:
                 continue
