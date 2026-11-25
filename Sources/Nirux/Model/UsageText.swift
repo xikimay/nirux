@@ -53,13 +53,19 @@ extension QuotaLimit {
         codex: CodexRateLimits?, codexReadings: [Int: [QuotaReading]],
         previous: [QuotaLimit], now: TimeInterval
     ) -> [QuotaLimit] {
-        // The current window joins the readings only when none of its own is
-        // logged yet: logged ones come from responses, while the file also
-        // takes a `/resume`'s old numbers.
+        // The pace reads the logged readings (responses only); the file's
+        // window joins them only when none of its own is logged yet, since it
+        // also takes a `/resume`'s old numbers. What's shown is the newest.
         func limit(_ agent: Agent, _ length: TimeInterval, _ readings: [QuotaReading], _ latest: QuotaReading) -> QuotaLimit? {
             let held = previous.first { $0.agent == agent && $0.length == length }?.forecast
             let logged = readings.contains { abs($0.resetsAt - latest.resetsAt) <= QuotaPace.sameWindow }
-            return QuotaLimit(agent: agent, length: length, readings: logged ? readings : readings + [latest], now: now, previous: held)
+            guard var limit = QuotaLimit(agent: agent, length: length, readings: logged ? readings : readings + [latest], now: now, previous: held) else {
+                return nil
+            }
+            if latest.time > limit.latest.time, abs(latest.resetsAt - limit.latest.resetsAt) <= QuotaPace.sameWindow, latest.time <= now {
+                limit.latest = latest
+            }
+            return limit
         }
         let claudeWindows = [("five_hour", 5 * 3_600.0, claude?.fiveHour), ("seven_day", 7 * 86_400.0, claude?.sevenDay)]
         let claudeLimits = claudeWindows.compactMap { name, length, window in

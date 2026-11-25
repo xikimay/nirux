@@ -297,6 +297,12 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         let resumed = ClaudeUsageLimits(fiveHour: window(12, resetsAt: now + hour), sevenDay: window(20, resetsAt: now + 90 * hour))
         indicator.update(limits: resumed, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour)], now: now)
         XCTAssertEqual(indicator.label.stringValue, "⚠︎ 5h full by 14:40")
+        // A fresher file reading not logged yet (the first response after /clear) is what's shown.
+        let fresher = ClaudeUsageLimits(fiveHour: window(63, resetsAt: now + hour, reportedAt: now), sevenDay: window(20, resetsAt: now + 90 * hour))
+        indicator.update(limits: fresher, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour).map {
+            QuotaReading(time: $0.time - 60, usedPercent: $0.usedPercent, resetsAt: $0.resetsAt)
+        }], now: now)
+        XCTAssertEqual(indicator.limits.first { $0.length == 5 * hour }?.latest.usedPercent, 63)
 
         indicator.update(limits: claude, readings: ["five_hour": climb([52.5, 55, 57.5, 60], resetsAt: now + hour)], now: now)
         XCTAssertEqual(indicator.label.stringValue, "5h 60% · ≈ 90%")
