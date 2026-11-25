@@ -360,7 +360,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         indicator.presentPopover = { _, _ in }
         let row = QuotaBurnRow(
             workspaceID: "task-1", title: "Search index rewrite", share: 0.64, points: 7.2, tokens: 2.4e6,
-            cause: "Each message rereads 612k · 6 subagents", actions: [.compactAtTurnEnd(column: 0), .contextOffer(.freshStart, column: 1)]
+            cause: "Each message rereads 612k · 6 subagents", actions: [.compactAtTurnEnd(column: UUID()), .contextOffer(.freshStart, column: UUID())]
         )
         var askedWith: [QuotaReading]?
         indicator.burnRows = { readings in
@@ -387,7 +387,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(QueuedCompact.of(LeadHoldings(isBusy: true)), .wait)
         XCTAssertEqual(QueuedCompact.of(LeadHoldings(hasDialog: true)), .wait)
         XCTAssertEqual(QueuedCompact.of(LeadHoldings(hasQuestion: true)), .wait)
-        XCTAssertEqual(QueuedCompact.of(LeadHoldings(isBusy: true, hasDraft: true)), .drop, "the user's words win")
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(isBusy: true, hasDraft: true)), .yield, "the user's words win")
         XCTAssertEqual(QueuedCompact.of(LeadHoldings()), .send)
     }
 

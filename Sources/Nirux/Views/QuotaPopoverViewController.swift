@@ -49,7 +49,7 @@ final class QuotaPopoverViewController: NSViewController {
         let ordered = limits.sorted { ($0.agent == .claude ? 0 : 1, $0.length) < ($1.agent == .claude ? 0 : 1, $1.length) }
         let words = ordered.map { "\(UsageText.longName(of: $0)) \(Int($0.latest.usedPercent.rounded())) \(UsageText.detail($0, now: now, calendar: calendar).text)" }
             + [limits.map(\.latest.time).max().map { ClaudeUsageLimits.clockText($0, now: now, calendar: calendar) } ?? ""]
-            + burn.map { "\($0.workspaceID) \(burnValue($0)) \($0.cause ?? "") \($0.actions.map(\.title).joined(separator: ","))" }
+            + burn.map { String(describing: $0) }
         guard words != shown || stack.arrangedSubviews.isEmpty else { return }
         shown = words
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }

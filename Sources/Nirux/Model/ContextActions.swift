@@ -47,14 +47,14 @@ enum BudgetChoice: String, Hashable, Sendable, CaseIterable {
     }
 }
 
-/// What a Lead holds that a fresh start would lose.
 /// A task in the title bar popover's "what spends your session": its share
 /// of Claude's spend over `UsageReport.burnSpan`, about that many points of
 /// the 5-hour window (`QuotaCalibration`), why, and what its row offers.
 struct QuotaBurnRow: Equatable {
     enum Action: Equatable {
-        case contextOffer(ContextOffer.Choice, column: Int)
-        case compactAtTurnEnd(column: Int)
+        /// By its column's ID: columns move between the rows' build and a click.
+        case contextOffer(ContextOffer.Choice, column: UUID)
+        case compactAtTurnEnd(column: UUID)
         case budget(BudgetChoice)
 
         var title: String {
@@ -79,17 +79,19 @@ struct QuotaBurnRow: Equatable {
 /// What a queued "Compact at turn end" does at a sidebar pass, given what
 /// holds its claude (nil once its column is gone or runs no claude).
 enum QueuedCompact: Equatable {
-    case wait, send, drop
+    /// `yield`: the user's words in its prompt win over a compaction, and
+    /// the user is told.
+    case wait, send, drop, yield
 
     static func of(_ holdings: LeadHoldings?) -> QueuedCompact {
         guard let holdings else { return .drop }
-        // The user's words in its prompt win over a compaction.
-        if holdings.hasDraft { return .drop }
+        if holdings.hasDraft { return .yield }
         if holdings.isBusy || holdings.hasDialog || holdings.hasQuestion { return .wait }
         return .send
     }
 }
 
+/// What a Lead holds that a fresh start would lose.
 struct LeadHoldings: Equatable {
     /// Working, or a status Nirux can't trust.
     var isBusy = false

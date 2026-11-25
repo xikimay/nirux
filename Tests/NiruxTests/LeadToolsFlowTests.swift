@@ -1276,25 +1276,40 @@ final class LeadToolsFlowTests: XCTestCase {
             }
             hook(.sessionStart)
             hook(.userPromptSubmit)
-            let index = try XCTUnwrap(task.columns.firstIndex { $0 === column })
             harness.waitUntil("Compact at turn end, mid-turn") {
-                shell.quotaBurnRows(readings: []).first?.actions.contains(.compactAtTurnEnd(column: index)) == true
+                shell.quotaBurnRows(readings: []).first?.actions.contains(.compactAtTurnEnd(column: column.id)) == true
             }
             XCTAssertEqual(shell.quotaBurnRows(readings: []).first?.cause, "Each message rereads 612k")
+            func compacts() -> Int { worker.input.components(separatedBy: "/compact").count - 1 }
 
-            shell.takeBurnAction(.compactAtTurnEnd(column: index), workspaceID: task.id)
+            shell.takeBurnAction(.compactAtTurnEnd(column: column.id), workspaceID: task.id)
             XCTAssertEqual(shell.compactsAtTurnEnd[column.id], task.id)
+            shell.runCompactsAtTurnEnd(snapshot: ProcessSnapshot(entries: []))
+            XCTAssertEqual(shell.compactsAtTurnEnd[column.id], task.id, "a pass without the process table decides nothing")
             shell.updateSidebar()
-            XCTAssertFalse(worker.input.contains("/compact"), "it waits for the turn to end")
-            XCTAssertEqual(shell.quotaBurnRows(readings: []).first?.actions.contains(.compactAtTurnEnd(column: index)), false, "queued once")
+            XCTAssertEqual(compacts(), 0, "it waits for the turn to end")
+            XCTAssertEqual(shell.quotaBurnRows(readings: []).first?.actions.contains(.compactAtTurnEnd(column: column.id)), false, "queued once")
             XCTAssertEqual(shell.quotaBurnRows(readings: []).first?.cause, "Each message rereads 612k · compacts at turn end")
 
             hook(.stop)
             harness.waitUntil("/compact typed at rest") {
                 shell.updateSidebar()
-                return worker.input.contains("/compact")
+                return compacts() == 1
             }
             XCTAssertTrue(shell.compactsAtTurnEnd.isEmpty)
+
+            // Compacted another way meanwhile: the queued one goes, never a second /compact.
+            hook(.userPromptSubmit)
+            shell.takeBurnAction(.compactAtTurnEnd(column: column.id), workspaceID: task.id)
+            XCTAssertEqual(shell.compactsAtTurnEnd[column.id], task.id)
+            hook(.stop)
+            let index = try XCTUnwrap(task.columns.firstIndex { $0 === column })
+            let taskIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === task })
+            shell.takeContextOffer(.compact, workspaceIndex: taskIndex, columnIndex: index)
+            XCTAssertTrue(shell.compactsAtTurnEnd.isEmpty)
+            harness.waitUntil("the Compact taken by hand") { compacts() == 2 }
+            shell.updateSidebar()
+            XCTAssertEqual(compacts(), 2, "never a second /compact")
         }
     }
 
