@@ -112,6 +112,34 @@ struct QuotaPaceTests {
         #expect(QuotaLimit.binding([quiet, try limit(.codex, 5 * 3_600, [70, 80, 90, 98], resetsIn: 3_600)])?.agent == .codex, "one running out still comes first")
     }
 
+    @Test func calibrationTurnsTokensIntoPointsOfTheWindow() {
+        let window = [
+            QuotaReading(time: now - 3_600, usedPercent: 99, resetsAt: now - 60),
+            QuotaReading(time: now - 1_800, usedPercent: 10, resetsAt: now + 3_600),
+            QuotaReading(time: now, usedPercent: 20, resetsAt: now + 3_600)
+        ]
+        let minute = { (time: TimeInterval) in Int(time / 60) }
+        let minutes = [minute(now - 2_400): 7e6, minute(now - 1_200): 600_000, minute(now - 600): 400_000, minute(now + 60): 9e6]
+        // 10 points over the million tokens spent between 10 % and 20 %.
+        #expect(QuotaCalibration.pointsPerToken(window, minutes: minutes) == 1e-5)
+        #expect(QuotaCalibration.pointsPerToken(Array(window.prefix(2)) + [QuotaReading(time: now, usedPercent: 12, resetsAt: now + 3_600)], minutes: minutes) == nil)
+        #expect(QuotaCalibration.pointsPerToken(window, minutes: [:]) == nil)
+    }
+
+    @Test func theReportKeepsClaudesRecentSpendByMinuteAndTask() {
+        let task = UsageAttribution(spaceID: "space", taskID: "task")
+        func event(_ ago: TimeInterval, _ input: Int, subagent: String? = nil) -> UsageEvent {
+            UsageEvent(timestamp: now - ago, model: "claude-opus-5-5", counts: TokenCounts(input: input), subagentID: subagent)
+        }
+        let report = UsageReport(sessions: [
+            UsageSession(key: UsageSessionKey(.claude, "a"), attribution: task, events: [event(600, 100), event(900, 10, subagent: "s"), event(3_600, 1_000)]),
+            UsageSession(key: UsageSessionKey(.claude, "b"), events: [event(1_200, 20), event(2 * 86_400, 5_000)]),
+            UsageSession(key: UsageSessionKey(.codex, "c"), attribution: task, events: [event(60, 777)])
+        ], now: now)
+        #expect(report.claudeBurn == ["task": 110, "": 20])
+        #expect(report.claudeMinutes.values.reduce(0, +) == 1_130)
+    }
+
     @Test func silenceAfterTheLastReadingSlowsThePace() {
         // 80 → 90 % over 15 minutes, then nothing for 16: no "full by now".
         let stopped = (0..<3).map { QuotaReading(time: now - 1_860 + Double($0) * 450, usedPercent: 80 + Double($0) * 5, resetsAt: now + 3 * 3_600) }

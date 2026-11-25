@@ -6,6 +6,7 @@ extension NiruxShellView {
     func updateSidebar(snapshot: ProcessSnapshot? = nil) {
         dropTurnEndsLeftBehind()
         let snapshot = snapshot ?? ProcessSnapshot()
+        runCompactsAtTurnEnd(snapshot: snapshot)
         let processTableRead = !snapshot.isEmpty
         let now = Date().timeIntervalSince1970
         let visibleIndices = visibleWorkspaceIndices

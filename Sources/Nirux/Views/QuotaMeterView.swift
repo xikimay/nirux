@@ -1,5 +1,22 @@
 import AppKit
 
+/// A share as a hair bar, in the meters' look.
+final class QuotaShareBar: NSView {
+    var share: Double = 0 {
+        didSet { if share != oldValue { needsDisplay = true } }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let radius = bounds.height / 2
+        Theme.Color.lineStrong.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
+        guard share > 0 else { return }
+        Theme.Color.textSecondary.setFill()
+        let fill = NSRect(x: 0, y: 0, width: max(bounds.height, bounds.width * min(1, share)), height: bounds.height)
+        NSBezierPath(roundedRect: fill, xRadius: radius, yRadius: radius).fill()
+    }
+}
+
 /// Plan limits as hair meters, a row each: the used part filled, the
 /// projection to its reset hatched, both red once the limit runs out before
 /// its reset (`QuotaLimit.runsOut`), and a tick where time is in its window.
