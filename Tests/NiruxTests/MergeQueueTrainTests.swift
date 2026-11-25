@@ -166,7 +166,9 @@ final class MergeQueueTrainTests: XCTestCase {
         XCTAssertFalse(third.mutations.contains(.closePullRequest(number: 900)))
     }
 
-    func testABusyAgentHoldsTheWholeTrainForTenMinutesAtMost() throws {
+    /// A busy agent holds the train 10 minutes at most: then its rider
+    /// leaves the train, which lands the others; the queue stops on it after.
+    func testABusyAgentsRiderLeavesTheTrainAfterTenMinutes() throws {
         var world = world()
         world.locals["feat/14"] = MergeQueue.LocalState(busyAgents: ["claude working in “api”"])
         var github = TrainGitHub(world: world)
@@ -176,10 +178,27 @@ final class MergeQueueTrainTests: XCTestCase {
 
         let reason = try XCTUnwrap(queue.stopReason)
         XCTAssertEqual(reason.kind, .agentBusy)
-        XCTAssertEqual(reason.message, "An agent of #14 is still busy after 10 minutes: claude working in “api”.")
+        XCTAssertTrue(reason.message.hasPrefix("An agent of #14 is still busy after 10 minutes: claude working in “api”. It left the train."),
+                      reason.message)
+        XCTAssertTrue(queue.notes.contains { $0.message.hasPrefix("#14 left the train") })
         XCTAssertGreaterThanOrEqual(queue.now - start, MergeQueue.Limits.agentWait)
         XCTAssertEqual(queue.notes.filter { $0.message.hasPrefix("Waiting up to 10 minutes") }.count, 1)
-        XCTAssertEqual(queue.mutations, [])
+        XCTAssertFalse(queue.mutations.isEmpty, "the others went on")
+    }
+
+    /// Busy riders leave the train each with its own agents named.
+    func testEachBusyRiderLeavesTheTrainWithItsOwnAgents() {
+        var world = world()
+        world.locals["feat/12"] = MergeQueue.LocalState(busyAgents: ["claude working in “web”"])
+        world.locals["feat/14"] = MergeQueue.LocalState(busyAgents: ["codex working in “api”"])
+        var github = TrainGitHub(world: world)
+        var queue = queue()
+        queue.drive(&github)
+        let left = queue.notes.map(\.message).filter { $0.contains(" left the train: ") }
+        XCTAssertEqual(left, [
+            "#12 left the train: An agent of #12 is still busy after 10 minutes: claude working in “web”.",
+            "#14 left the train: An agent of #14 is still busy after 10 minutes: codex working in “api”."
+        ])
     }
 
     func testAPushAfterTheLastCheckStopsOnThatPullRequestOnceTheTrainLands() throws {
@@ -1054,6 +1073,8 @@ private struct TrainGitHub {
                 world.pullRequests[part] = MQ.pullRequest(part, head: pullRequest.headOid, state: .merged, mergeCommit: commit,
                                                           parents: [base, pullRequest.headOid])
             }
+        case .armAutoMerge, .disarmAutoMerge:
+            break
         case .closePullRequest(let number):
             if refusesClose { return .refused(status: 403, message: "Resource not accessible") }
             guard let open = world.pullRequests[number] else { return .refused(status: 404, message: "Not Found") }

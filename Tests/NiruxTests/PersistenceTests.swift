@@ -630,6 +630,19 @@ extension PersistedStateCodingTests {
         XCTAssertTrue(decoded.alertOnlyWhenClaudeAsks, "its own key")
     }
 
+    /// The Claude Mission hook: on for every install, the ones that predate
+    /// it too; off survives.
+    func testClaudeMissionHookIsOnUnlessTurnedOff() throws {
+        let legacy = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"missionHandoffsEnabled":true}"#.utf8))
+        XCTAssertTrue(legacy.claudeMissionHook)
+
+        let decoded = try JSONDecoder().decode(
+            PersistedSettings.self, from: JSONEncoder().encode(PersistedSettings(claudeMissionHook: false))
+        )
+        XCTAssertFalse(decoded.claudeMissionHook)
+        XCTAssertTrue(decoded.missionHandoffsEnabled, "its own key")
+    }
+
     /// The hint that an agent may be going in circles is on for a state
     /// file that predates it (SettingsWindowTests saves and reads it back).
     func testCirclingHintIsOnForAStateFileThatPredatesIt() throws {

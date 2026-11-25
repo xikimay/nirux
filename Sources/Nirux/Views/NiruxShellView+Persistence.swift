@@ -4,6 +4,8 @@ import AppKit
 
 extension NiruxShellView {
     func restoreState() {
+        // What the last run's agents left in the Mission mailbox.
+        defer { settleMissionMailbox() }
         // The spaces' logs, whether or not anything ever reads them.
         defer {
             LoopLog.lines.trimInBackground(spaceIDs: profiles.map(\.id))

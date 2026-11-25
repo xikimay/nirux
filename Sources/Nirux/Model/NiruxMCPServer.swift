@@ -28,7 +28,8 @@ enum NiruxMCPServer {
         You can hand part of your task to another agent: start_task starts a sub-task under your task, in its \
         own worktree; list_tasks shows your sub-tasks; tell gives one more work; reply answers their questions, \
         and ask_user hands one you can't settle to the user. Their questions and \
-        results are typed into your prompt as [Nirux Mission] messages, only once your turn is over: after \
+        results arrive as [Nirux Mission] messages, typed into your prompt once your turn is over or brought in \
+        by Nirux's hook: after \
         starting sub-tasks, go on with your own work or end your turn; don't poll or sleep. Report your own \
         result only once the sub-tasks you need are done. A sub-task can't start sub-tasks of its own. Where \
         start_task answers that the workspace isn't a task, use the nirux-worktree skill. When you ask the agent \

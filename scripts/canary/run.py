@@ -18,6 +18,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+from channel import ChannelError  # noqa: E402
 from crash_correlator import (  # noqa: E402
     correlate_crash_reports,
     DEFAULT_BUNDLE_ID,
@@ -260,11 +261,11 @@ class App:
         if missing:
             raise InfrastructureError("requires " + ", ".join(missing))
 
-    def launch(self):
+    def launch(self, channel=None, profile=HERE / "isolate.sb"):
         real_home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
         protected = {"CHECKOUT": HERE.parents[1], "STATE": real_home / "Library/Application Support/nirux",
                      "CLAUDE": real_home / ".claude", "CODEX": real_home / ".codex"}
-        args = ["/usr/bin/sandbox-exec", "-f", str(HERE / "isolate.sb")]
+        args = ["/usr/bin/sandbox-exec", "-f", str(profile), "-D", f"WORK={self.work.resolve()}"]
         for name, path in protected.items():
             args += ["-D", f"{name}={path.resolve()}"]
         args += [str(self.work / "Nirux.app/Contents/MacOS/Nirux"), "-IgnoreGhosttyConfig", "YES",
@@ -282,6 +283,13 @@ class App:
             "exitCode": None,
             "killedByCleanup": False,
         })
+        if channel is not None:
+            # A hidden copy (CanaryPresentation) has no key window: its channel answers.
+            try:
+                wait_for("the canary channel never answered", lambda: answers(channel), self.alive, timeout=60)
+            except TimeoutError as error:
+                raise InfrastructureError(str(error)) from error
+            return
         try:
             wait_for("no focused window", lambda: self.drive("window", probe=True), self.alive)
         except TimeoutError as error:
@@ -395,6 +403,14 @@ class App:
             except ProcessLookupError:
                 pass
         wait_for("could not reap canary children", lambda: not self.holders(), timeout=5)
+
+
+def answers(channel):
+    try:
+        channel.call("snapshot")
+    except ChannelError:
+        return False
+    return True
 
 
 def verify_layout(work, seed):

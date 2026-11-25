@@ -65,6 +65,38 @@ final class MergeQueueShellTests: XCTestCase {
         return queue
     }
 
+    /// queue_merge from an unattended Lead takes the pull request while a
+    /// nightly runs on the base and the task's agent works, and waits: a
+    /// refusal would be lost, nothing tries again.
+    @MainActor
+    func testTheLeadsQueueTakesThePullRequestAndWaitsForTheNightly() throws {
+        var world = readyWorld()
+        world.baseRuns = [MQ.run(2, head: MQ.sha("c"), status: "in_progress", conclusion: nil), MQ.run(1, head: MQ.sha("b"))]
+        world.local = MergeQueue.LocalState(busyAgents: ["claude working in “api”"])
+        let shell = makeShell(FakeQueueClient(world: world))
+        let queue = shell.mergeQueue(projectID: "project", repository: MQ.widgets)
+        queue.beginActivity = { NSObject() }
+        queue.endActivity = { _ in }
+        var candidate = MergeQueue.ConfirmationReading.Candidate(number: 52)
+        candidate.pullRequest = world.pullRequests[52]
+        candidate.details = MergeQueue.PullRequestDetails(
+            title: "Change", files: ["Sources/app.swift"], hasMoreFiles: false, head: MQ.sha("a"), baseBranch: "main", allPathsKnown: true
+        )
+        candidate.checks = world.checks[MQ.sha("a")]
+        candidate.comparison = .some(MergeQueue.Comparison(status: "ahead", aheadBy: 1, behindBy: 0, baseCommit: MQ.sha("0")))
+        candidate.local = world.local
+        var reading = MergeQueue.ConfirmationReading(settings: MQ.settings(), isDryRun: false)
+        reading.rateLimit = world.rateLimit
+        reading.baseMergeQueue = false
+        reading.baseRuns = world.baseRuns
+        reading.candidates = [candidate]
+
+        XCTAssertNil(queue.startFromLead(reading, numbers: [52], cadence: .standard, allowWithoutLocalReview: true))
+        XCTAssertTrue(queue.isRunning)
+        XCTAssertTrue(waitUntil("the wait for the nightly") { queue.engine?.statusText.contains("waiting for the nightly") == true })
+        queue.stop()
+    }
+
     // MARK: - Lead
 
     /// A queue the Lead started tells it once when it ends without a
@@ -476,6 +508,8 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertEqual(replies, [true])
         guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("not stopped") }
         XCTAssertTrue(reason.message.contains("Check #52 on GitHub: it may be merged."), reason.message)
+        XCTAssertFalse(client.mutations.contains { if case .disarmAutoMerge = $0 { true } else { false } },
+                       "a quit calls no auto-merge off: what is armed lands while Nirux is closed")
     }
 
     @MainActor
@@ -582,6 +616,8 @@ final class HeldMutationClient: MergeQueueGitHub, @unchecked Sendable {
 
     var isDryRun: Bool { false }
     var isHoldingMutation: Bool { lock.withLock { holding } }
+    /// The mutations answered at once (`mutate`).
+    var mutations: [MergeQueue.Mutation] { reads.mutations }
 
     func release() { gate.signal() }
 
@@ -589,7 +625,9 @@ final class HeldMutationClient: MergeQueueGitHub, @unchecked Sendable {
         reads.read(read, settings: settings)
     }
 
+    /// Holds a merge only: GitHub's auto-merge, armed or called off, answers at once.
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
+        guard case .merge = mutation else { return reads.mutate(mutation, settings: settings) }
         lock.withLock { holding = true }
         gate.wait()
         lock.withLock { holding = false }

@@ -396,7 +396,10 @@ extension SidebarView {
         button.setAccessibilityElement(true)
         button.setAccessibilityRole(.button)
         button.setAccessibilityLabel(Self.newTaskTitle)
-        button.onPress = { [weak self] in self?.onNewWorkspace?() }
+        button.onPress = { [weak self] in
+            self?.onNewWorkspace?()
+            return true
+        }
         addExpandedView(button)
         newTaskButton = button
         hitAreas.append(SidebarHitArea(frame: buttonFrame.insetBy(dx: -4, dy: -3), region: .newTask))
@@ -559,7 +562,6 @@ extension SidebarView {
         addExpandedView(titleLabel)
         let control = SidebarSectionToggleView(frame: frame)
         control.setAccessibilityLabel(label)
-        control.setAccessibilityEnabled(press != nil)
         control.acceptsFirstClick = press != nil
         control.toolTip = tip
         control.onPress = press
@@ -654,13 +656,20 @@ extension SidebarView {
             // VoiceOver's press: the menu a click on it opens.
             let index = workspace.index
             badge.onPress = { [weak self, weak badge] in
-                guard let self, let badge else { return }
+                guard let self, let badge else { return false }
                 workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
                     .popUp(positioning: nil, at: NSPoint(x: badge.frame.minX, y: badge.frame.minY), in: contentDocumentView)
+                return true
             }
         }
         columnHoverViews[workspace.index] = result.columnHoverViews
         approvalButtonViews.merge(result.approvalButtons) { _, new in new }
+        // VoiceOver's press: a click on the button's region.
+        for area in result.hitAreas {
+            guard let key = Self.armedButtonKey(for: area.region), let button = result.approvalButtons[key] else { continue }
+            let region = area.region
+            button.onPress = { [weak self] in self?.pressApprovalButton(region) ?? false }
+        }
         return result.bottomY
     }
 
