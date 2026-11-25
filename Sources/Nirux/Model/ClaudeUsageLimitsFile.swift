@@ -137,10 +137,13 @@ enum ClaudeUsageLimitsFile {
         var contents = existing
         var news = report.limits
         // Only a new response logs a reading: a differing repeat (`/resume`
-        // of an older session) brings old numbers at a new time.
+        // of an older session) brings old numbers at a new time, and so can
+        // a `claude` without a mark yet (a new process, a pruned mark); its
+        // next response logs.
         var isResponse = true
         if let reporter {
             let last = contents.reporters[reporter]
+            isResponse = last != nil
             if let last, last.sessionID != report.sessionID || (report.apiDuration ?? -1) <= (last.apiDuration ?? -1) {
                 isResponse = false
                 if ReporterMark.Reading(news.fiveHour) == last.fiveHour { news.fiveHour = nil }

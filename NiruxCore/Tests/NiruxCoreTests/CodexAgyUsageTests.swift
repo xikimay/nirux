@@ -12,6 +12,10 @@ struct CodexAgyUsageTests {
         try UsageFixture.write([
             UsageFixture.json(["type": "session_meta", "payload": ["id": "thread-1", "cwd": "/Users/dev/app"]]),
             UsageFixture.json(["type": "turn_context", "payload": ["model": "gpt-6.2-astra", "cwd": "/elsewhere"]]),
+            // A resumed rollout's first count repeats old limits without a response: no reading.
+            UsageFixture.json(["type": "event_msg", "timestamp": "2026-11-21T11:00:05.000Z", "payload": [
+                "type": "token_count", "rate_limits": ["primary": ["used_percent": 12.0, "window_minutes": 300, "resets_at": 1_795_300_000]]
+            ]]),
             UsageFixture.codexTokenCount(time: "2026-11-21T11:00:10.000Z", last: first, total: first),
             UsageFixture.codexTokenCount(time: "2026-11-21T11:00:11.000Z", last: first, total: first),
             UsageFixture.codexTokenCount(time: "2026-11-21T11:00:20.000Z", last: second, total: both)
