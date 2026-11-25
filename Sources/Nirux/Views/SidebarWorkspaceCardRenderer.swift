@@ -192,12 +192,13 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     /// "142k · 4.2M": the context of its latest session, then what the task
-    /// spent over the week; a warning once the context is worth compacting.
+    /// spent over the week; a warning once the context is worth compacting
+    /// or the session reached the subagents' soft cap.
     private func usageLabel() -> NSTextField? {
         guard let usage = workspace.usage else { return nil }
         let label = textLabel(
-            usage.isContextHeavy ? usage.text.asWarning : usage.text, font: Theme.Font.captionDigits,
-            color: usage.isContextHeavy ? .niruxWarning : Theme.Color.textTertiary
+            usage.isWarning ? usage.text.asWarning : usage.text, font: Theme.Font.captionDigits,
+            color: usage.isWarning ? .niruxWarning : Theme.Color.textTertiary
         )
         label.alignment = .right
         let toolTip = usage.toolTip(now: Date().timeIntervalSince1970)

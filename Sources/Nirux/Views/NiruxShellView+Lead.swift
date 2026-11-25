@@ -30,10 +30,12 @@ extension NiruxShellView {
     func startLead(spaceID: String) {
         guard Self.spaceCanHaveLead(spaceID), profiles.contains(where: { $0.id == spaceID }) else { return }
         if let lead = leadWorkspace(inSpace: spaceID) { return focusLead(lead) }
+        let defaults = SpaceDefaultsStore.defaults(forSpace: spaceID)
         addWorkspace(
             title: Self.leadTitle,
             cwd: defaultFolder(forSpace: spaceID),
-            agent: SpaceDefaultsStore.defaults(forSpace: spaceID).preferredLeadAgent,
+            agent: defaults.preferredLeadAgent,
+            agentModel: defaults.leadModel(for: defaults.preferredLeadAgent),
             profileID: spaceID,
             // Names its Claude session "Lead · <space>" (see SessionName).
             worktreeBranch: Self.leadTitle,
@@ -178,7 +180,11 @@ extension NiruxShellView {
             launched(false)
             return showToast("Couldn’t prepare the space’s safety settings. The Lead is still running.", tone: .error)
         }
-        guard let launch = Self.launch(of: agent, resume: sessionID.map(AgentResumeTarget.session), in: lead) else { return launched(false) }
+        // A resumed conversation keeps the model it ran.
+        let model = sessionID == nil ? SpaceDefaultsStore.defaults(forSpace: lead.profileID).leadModel(for: agent) : nil
+        guard let launch = Self.launch(of: agent, resume: sessionID.map(AgentResumeTarget.session), model: model, in: lead) else {
+            return launched(false)
+        }
         let command = freshAgentCommand(
             launch, in: lead, launchDirectory: lead.leadTerminal?.launchDirectory.flatMap(Self.existingDirectory) ?? lead.cwd, worktreeBranch: Self.leadTitle,
             handoverPrompt: sessionID == nil

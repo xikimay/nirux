@@ -275,6 +275,31 @@ final class SpaceDefaultsTests: XCTestCase {
         let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
         XCTAssertEqual(written?["leadFreshStart"] as? Bool, false)
         XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.leadStartsFreshWhenCold)
+    /// On unless the file says: every subagent on Opus, through the
+    /// terminal; Fable for a new Claude Lead conversation, on its launch line
+    /// only. A variable the user set for the space wins; a file Nirux can't
+    /// read leaves Claude Code's own choice.
+    func testTheClaudeModelSwitch() throws {
+        let on = SpaceDefaults()
+        XCTAssertTrue(on.splitsClaudeModels)
+        XCTAssertEqual(on.claudeModelEnvironment, ["CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"])
+        XCTAssertNil(on.shellEnvironment["ANTHROPIC_MODEL"], "never the Lead's whole terminal")
+        XCTAssertEqual(on.leadModel(for: .claude), "fable")
+        XCTAssertNil(on.leadModel(for: .codex))
+        XCTAssertNil(on.leadModel(for: .agy))
+        var mine = on
+        mine.environment = [SpaceDefaults.EnvironmentVariable(name: "CLAUDE_CODE_SUBAGENT_MODEL", value: "sonnet")]
+        XCTAssertEqual(mine.shellEnvironment["CLAUDE_CODE_SUBAGENT_MODEL"], "sonnet")
+        XCTAssertEqual(mine.shellEnvironment["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"], "1")
+
+        let off = SpaceDefaultsStore.decode(Data(#"{"claudeModelSplit": false}"#.utf8))
+        XCTAssertEqual(off.status, .loaded)
+        XCTAssertEqual(off.defaults.claudeModelEnvironment, [:])
+        XCTAssertNil(off.defaults.leadModel(for: .claude))
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["claudeModelSplit"] as? Bool, false)
+        XCTAssertEqual(SpaceDefaultsStore.unreadDefaults.claudeModelEnvironment, [:])
+        XCTAssertNil(SpaceDefaultsStore.unreadDefaults.leadModel(for: .claude))
     }
 
     /// A deleted space's defaults, setup scripts, proposed rules and logs go;

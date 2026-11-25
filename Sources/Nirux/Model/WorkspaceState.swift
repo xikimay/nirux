@@ -882,9 +882,10 @@ extension WorkspaceState {
             environment[NiruxLaunchAuthorization.environmentKey] = ""
             return environment
         }
-        // The space's variables, under Nirux's own: they never replace a
-        // NIRUX_ one (SpaceDefaults refuses those names anyway).
-        return environment.merging(SpaceDefaultsStore.defaults(forSpace: profileID).effectiveEnvironment) { nirux, _ in nirux }
+        // The space's variables and its Claude models, under Nirux's own:
+        // they never replace a NIRUX_ one (SpaceDefaults refuses those names
+        // anyway).
+        return environment.merging(SpaceDefaultsStore.defaults(forSpace: profileID).shellEnvironment) { nirux, _ in nirux }
     }
 
     // Pure builder so feature-gating of terminal metadata can be tested

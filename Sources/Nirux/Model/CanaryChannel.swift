@@ -12,6 +12,19 @@ enum CanaryChannel {
 
     /// The run's token when this launch may open the channel: 64 lowercase
     /// hex digits, on a state of its own. Nil for any other launch.
+    /// What a browser column may open. In a canary run only localhost and the
+    /// run's own folder: WebKit's network process runs outside the copy's
+    /// sandbox, whose network is localhost alone.
+    static func pagePolicy(environment: [String: String], stateDirectory: URL) -> (URL) -> Bool {
+        guard token(in: environment) != nil else { return { _ in true } }
+        let root = stateDirectory.deletingLastPathComponent().resolvingSymlinksInPath().path + "/"
+        return { url in
+            if url.isFileURL { return url.resolvingSymlinksInPath().path.hasPrefix(root) }
+            let local = ["localhost", "127.0.0.1", "::1"].contains(url.host ?? "")
+            return url.absoluteString == "about:blank" || (["http", "https", "ws", "wss"].contains(url.scheme ?? "") && local)
+        }
+    }
+
     static func token(in environment: [String: String]) -> String? {
         guard Persistence.stateDirectoryOverride(in: environment) != nil,
               let token = environment[tokenKey], token.utf8.count == 64,
