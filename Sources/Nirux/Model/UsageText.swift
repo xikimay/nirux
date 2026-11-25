@@ -99,8 +99,11 @@ extension UsageText {
             return QuotaTitle(text: "\(name) full until \(ClaudeUsageLimits.clockText(limit.latest.resetsAt, now: now, calendar: calendar))".asWarning, tone: .runsOut)
         case .runsOut(let at):
             return QuotaTitle(text: "\(name) full by \(ClaudeUsageLimits.clockText(at, now: now, calendar: calendar))".asWarning, tone: .runsOut)
-        case .atReset(let percent):
-            return QuotaTitle(text: percent > used ? "\(name) \(used)% · ≈ \(percent)%" : "\(name) \(used)%", tone: .normal)
+        case .atReset(let percent) where percent > used:
+            return QuotaTitle(text: "\(name) \(used)% · ≈ \(percent)%", tone: .normal)
+        case .atReset:
+            // Holding at a full 100 % still says so.
+            return used >= 100 ? QuotaTitle(text: "\(name) \(used)%".asWarning, tone: .warning) : QuotaTitle(text: "\(name) \(used)%", tone: .normal)
         case .quiet, .unknown:
             let text = "\(name) \(used)%"
             return used >= ClaudeUsageLimits.nearLimitPercent ? QuotaTitle(text: text.asWarning, tone: .warning) : QuotaTitle(text: text, tone: .normal)

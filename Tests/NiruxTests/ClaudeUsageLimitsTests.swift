@@ -122,23 +122,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(try title([79.5], resetsIn: hour), .init(text: "⚠︎ 5h 80%", tone: .warning))
         // A forecast that holds needs no warning at 85 %.
         XCTAssertEqual(try title([85, 85, 85, 85], resetsIn: hour), .init(text: "5h 85%", tone: .normal))
-    }
-
-    func testTooltipGivesEachResetAndWhenItWasReported() {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.locale = Locale(identifier: "en_GB")
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let limits = ClaudeUsageLimits(
-            fiveHour: window(25, resetsAt: now + 2 * hour + 600, reportedAt: now - 300),
-            sevenDay: window(18, resetsAt: now + 99 * hour, reportedAt: now - 300)
-        )
-        XCTAssertEqual(limits.tooltip(now: now, calendar: calendar).components(separatedBy: "\n"), [
-            "Claude plan usage limits",
-            "5-hour window: 25% used, resets at 16:10 (in 2h 10m)",
-            "Weekly limit: 18% used, resets Wed 17:00 (in 4d 3h)",
-            "Last reported at 13:55 by a Claude session in Nirux.",
-            "Use elsewhere (claude.ai, another Mac) counts from the next report."
-        ])
+        XCTAssertEqual(try title([99.6, 99.6, 99.6, 99.6], resetsIn: hour), .init(text: "⚠︎ 5h 100%", tone: .warning), "full, even holding")
     }
 
     func testRemainingTimeRoundsUpToTheMinute() {
@@ -306,6 +290,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(indicator.label.textColor, Theme.Color.error)
         XCTAssertEqual(indicator.meters.limits.map(\.length), [5 * hour, 7 * 24 * hour])
         XCTAssertTrue(indicator.view.toolTip?.contains("5h: full by 14:40, before its reset at 15:00") == true)
+        XCTAssertTrue(indicator.view.toolTip?.contains("Claude 7d: 20% used, resets Wed 08:00 (in 3d 18h)") == true, "every window, from what's shown")
         XCTAssertTrue(indicator.view.accessibilityLabel()?.contains("7d 20% used") == true, "VoiceOver hears every window")
         // A `/resume` of an older session left 12 % in the file: the logged readings still tell the pace.
         let resumed = ClaudeUsageLimits(fiveHour: window(12, resetsAt: now + hour), sevenDay: window(20, resetsAt: now + 90 * hour))

@@ -104,11 +104,11 @@ struct QuotaPaceTests {
         let full = try limit(.codex, 5 * 3_600, [98, 99, 100], resetsIn: 600)
         #expect(QuotaLimit.binding([fast, full, climbingWeek])?.id == full.id)
         #expect(QuotaLimit(agent: .claude, length: 3_600, readings: readings([10], resetsAt: now - 1), now: now) == nil)
-        // A week Codex last spent days ago, quiet at 85 %, gives way to a live 90 % forecast and even a 60 % one.
-        let quiet = try #require(QuotaLimit(agent: .codex, length: 7 * 86_400, readings: [QuotaReading(time: now - 3 * 86_400, usedPercent: 85, resetsAt: now + 86_400)], now: now))
+        // A limit no agent spent lately still counts by its use: a pause must not hide a nearly full window.
+        let quiet = try #require(QuotaLimit(agent: .claude, length: 5 * 3_600, readings: [QuotaReading(time: now - 2_400, usedPercent: 95, resetsAt: now + 3_600)], now: now))
         #expect(quiet.forecast == .quiet)
-        #expect(QuotaLimit.binding([quiet, session])?.id == session.id)
-        #expect(QuotaLimit.binding([quiet, week])?.id == week.id)
+        #expect(QuotaLimit.binding([week, quiet])?.id == quiet.id)
+        #expect(QuotaLimit.binding([quiet, try limit(.codex, 5 * 3_600, [70, 80, 90, 98], resetsIn: 3_600)])?.agent == .codex, "one running out still comes first")
     }
 
     @Test func theWeekTakesItsPaceOverADay() {

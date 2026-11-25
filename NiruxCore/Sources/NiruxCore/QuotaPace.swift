@@ -60,16 +60,15 @@ public struct QuotaLimit: Equatable, Sendable {
     }
 
     /// The limit that stops the agents first: a full one (the one back last),
-    /// then the one running out first, then the fullest by its reset; a quiet
-    /// one, which no agent spends, last.
+    /// then the one running out first, then the fullest by its reset (a limit
+    /// without a forecast by its use now).
     public static func binding(_ limits: [QuotaLimit]) -> QuotaLimit? {
         func rank(_ limit: QuotaLimit) -> (Int, Double) {
             switch limit.forecast {
             case .reached: (0, -limit.latest.resetsAt)
             case .runsOut(let at): (1, at)
             case .atReset(let percent): (2, -Double(percent))
-            case .unknown: (2, -limit.latest.usedPercent)
-            case .quiet: (3, -limit.latest.usedPercent)
+            case .quiet, .unknown: (2, -limit.latest.usedPercent)
             }
         }
         return limits.min { rank($0) < rank($1) }

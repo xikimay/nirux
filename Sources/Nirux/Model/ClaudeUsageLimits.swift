@@ -83,25 +83,6 @@ struct ClaudeUsageLimits: Codable, Equatable, Sendable {
         ClaudeUsageLimits(fiveHour: report.fiveHour ?? fiveHour, sevenDay: report.sevenDay ?? sevenDay)
     }
 
-    /// The tooltip: each window with its reset, then when it was reported.
-    func tooltip(now: TimeInterval, calendar: Calendar = .current) -> String {
-        var lines = ["Claude plan usage limits"]
-        if let fiveHour {
-            lines.append("5-hour window: \(fiveHour.displayedPercent)% used, \(Self.resetText(fiveHour.resetsAt, now: now, calendar: calendar))")
-        }
-        if let sevenDay {
-            lines.append("Weekly limit: \(sevenDay.displayedPercent)% used, \(Self.resetText(sevenDay.resetsAt, now: now, calendar: calendar))")
-        }
-        let reportedAt = max(fiveHour?.reportedAt ?? 0, sevenDay?.reportedAt ?? 0)
-        let reported = Date(timeIntervalSince1970: reportedAt)
-        let when = calendar.isDate(reported, inSameDayAs: Date(timeIntervalSince1970: now))
-            ? Self.format(reported, template: "jmm", calendar: calendar)
-            : Self.format(reported, template: "MMMdjmm", calendar: calendar)
-        lines.append("Last reported at \(when) by a Claude session in Nirux.")
-        lines.append("Use elsewhere (claude.ai, another Mac) counts from the next report.")
-        return lines.joined(separator: "\n")
-    }
-
     /// "resets at 17:30 (in 2h 10m)", "resets Tue 09:00 (in 4d 3h)".
     static func resetText(_ resetsAt: TimeInterval, now: TimeInterval, calendar: Calendar) -> String {
         let clock = clockText(resetsAt, now: now, calendar: calendar)
