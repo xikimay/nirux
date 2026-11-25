@@ -321,8 +321,8 @@ final class FakeQueueClient: MergeQueueGitHub, @unchecked Sendable {
 
 extension MergeQueueController {
     /// Waiting for the checks between two looks, no call out: a Stop then
-    /// ends the queue at once. The first look arms GitHub's auto-merge, and
-    /// a Stop during that call waits for its answer.
+    /// ends the queue at once. The first look asks to arm auto-merge, and a
+    /// Stop while that call is out waits for its answer.
     var waitsBetweenLooks: Bool {
         guard case .waitingForChecks? = engine?.currentEntry?.step,
               case .read(_, let after)? = engine?.request?.action else { return false }
