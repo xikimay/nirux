@@ -58,7 +58,8 @@ struct QuotaPaceTests {
         #expect(QuotaPace.forecast(climb, span: span, now: now, previous: .runsOut(at: shown - 300)) == .runsOut(at: fresh))
         // A held time that went by gives way.
         let later = now + 1_200
-        let forecast = QuotaPace.forecast(climb, span: span + 1_200, now: later, previous: .runsOut(at: later - 60))
+        let shifted = climb.map { QuotaReading(time: $0.time + 1_200, usedPercent: $0.usedPercent, resetsAt: $0.resetsAt + 1_200) }
+        let forecast = QuotaPace.forecast(shifted, span: span, now: later, previous: .runsOut(at: later - 60))
         guard case .runsOut(let moved) = forecast else {
             Issue.record("no forecast")
             return
@@ -84,6 +85,14 @@ struct QuotaPaceTests {
         // 99.7 % at the reset: not full.
         let near = readings([99.1, 99.3, 99.5], every: 450, resetsAt: now + 600)
         #expect(QuotaPace.forecast(near, span: span, now: now) == .atReset(percent: 99))
+    }
+
+    @Test func silenceAfterTheLastReadingSlowsThePace() {
+        // 80 → 90 % over 15 minutes, then nothing for 16: no "full by now".
+        let stopped = (0..<3).map { QuotaReading(time: now - 1_860 + Double($0) * 450, usedPercent: 80 + Double($0) * 5, resetsAt: now + 3 * 3_600) }
+        let forecast = QuotaPace.forecast(stopped, span: span, now: now)
+        if case .runsOut(let at) = forecast { #expect(at > now + 600, "the silence counts") }
+        #expect(QuotaPace.forecast(stopped, span: span, now: now - 960) != forecast, "while it spent, the pace was steeper")
     }
 
     @Test func theWeekTakesItsPaceOverADay() {

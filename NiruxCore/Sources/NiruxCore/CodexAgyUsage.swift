@@ -40,7 +40,7 @@ public struct CodexRolloutUsageParser: TranscriptLineParser, Sendable {
         let reading = (payload["rate_limits"] as? [String: Any]).flatMap { CodexRateLimits($0, reportedAt: timestamp) }
         let isResponse = consumeResponse(payload["info"] as? [String: Any], timestamp: timestamp)
         // A repeat without a response brings old numbers at a new time.
-        if let reading, isResponse || !reading.sameWindows(as: rateLimitReadings.last) {
+        if let reading, isResponse || rateLimitReadings.last.map({ !reading.sameWindows(as: $0) }) == true {
             rateLimitReadings.append(reading)
         }
     }
