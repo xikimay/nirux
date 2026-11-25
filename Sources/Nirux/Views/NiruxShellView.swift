@@ -91,6 +91,8 @@ final class NiruxShellView: NSView {
     var sessionLedger = AgentSessionLedger()
     /// What the agents spend (`startUsageMonitor`), and its window.
     var usageMonitor: UsageMonitor?
+    /// Each space's task budget (`refreshTaskBudgets`), by space ID; none: off.
+    var taskBudgets: [String: Int] = [:]
     var usageWindow: UsageWindowController?
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
