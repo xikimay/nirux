@@ -333,11 +333,16 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
 
     /// Unsaved changes and a running merge queue ask first, an update's
     /// relaunch too (see `terminateReply`).
+    /// A quit called off there (a shutdown's, an update's) leaves the next
+    /// one the user's (`quitIsUsers`).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let shell else { return .terminateNow }
-        return shell.terminateReply { quit in
+        let reply = shell.terminateReply { [weak self] quit in
+            if !quit { self?.quitIsUsers = true }
             NSApp.reply(toApplicationShouldTerminate: quit)
         }
+        if reply == .terminateCancel { quitIsUsers = true }
+        return reply
     }
 
     func applicationWillTerminate(_ notification: Notification) {

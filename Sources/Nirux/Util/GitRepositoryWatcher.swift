@@ -35,6 +35,25 @@ struct GitRepositoryLayout: Equatable, Sendable {
         self.commonDirectory = commonDirectory
     }
 
+    /// The tip of `branch`'s remote-tracking ref that moved last: a push or
+    /// a fetch writes it as a loose file. It is what the pull request's head
+    /// reads once GitHub has it. Nil when none is loose.
+    func remoteTrackingTip(of branch: String) -> String? {
+        guard let commonDirectory else { return nil }
+        let remotes = (commonDirectory as NSString).appendingPathComponent("refs/remotes")
+        let files = ((try? FileManager.default.contentsOfDirectory(atPath: remotes)) ?? []).map {
+            ((remotes as NSString).appendingPathComponent($0) as NSString).appendingPathComponent(branch)
+        }
+        let modified = { (path: String) in
+            (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+        }
+        guard let newest = files.compactMap({ path in modified(path).map { (path, $0) } }).max(by: { $0.1 < $1.1 }),
+              let tip = ProjectMemory.readText(newest.0, limit: 128)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              [40, 64].contains(tip.count), tip.allSatisfy(\.isHexDigit)
+        else { return nil }
+        return tip
+    }
+
     static func resolve(worktreeRoot: String) -> GitRepositoryLayout {
         let root = canonicalPath(worktreeRoot)
         let dotGit = (root as NSString).appendingPathComponent(".git")
