@@ -303,6 +303,11 @@ final class ClaudeUsageLimitsTests: XCTestCase {
             QuotaReading(time: $0.time - 60, usedPercent: $0.usedPercent, resetsAt: $0.resetsAt)
         }], now: now)
         XCTAssertEqual(indicator.limits.first { $0.length == 5 * hour }?.latest.usedPercent, 63)
+        let full = ClaudeUsageLimits(fiveHour: window(100, resetsAt: now + hour, reportedAt: now), sevenDay: window(20, resetsAt: now + 90 * hour))
+        indicator.update(limits: full, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour).map {
+            QuotaReading(time: $0.time - 60, usedPercent: $0.usedPercent, resetsAt: $0.resetsAt)
+        }], now: now)
+        XCTAssertEqual(indicator.limits.first { $0.length == 5 * hour }?.forecast, .reached, "shown full is full")
 
         indicator.update(limits: claude, readings: ["five_hour": climb([52.5, 55, 57.5, 60], resetsAt: now + hour)], now: now)
         XCTAssertEqual(indicator.label.stringValue, "5h 60% · ≈ 90%")
@@ -332,6 +337,8 @@ final class ClaudeUsageLimitsTests: XCTestCase {
 
         XCTAssertTrue(indicator.view.accessibilityPerformPress())
         XCTAssertEqual(presented, 1)
+        indicator.view.frame = NSRect(x: 0, y: 0, width: 200, height: 22)
+        XCTAssertTrue(indicator.view.hitTest(NSPoint(x: 100, y: 11)) === indicator.view, "the label and meters don't take the click")
         // The same words keep the same views.
         let firstRow = indicator.popoverContent.view.subviews.first?.subviews.first
         indicator.popoverContent.update(limits: indicator.limits, now: now, calendar: utc)
