@@ -192,6 +192,9 @@ final class WorkspaceState {
     /// The Lead wrote `nextStep` (or `blocker`), not the user: its next
     /// update may replace it. False for an empty field.
     var nextStepIsFromLead = false
+    /// The user let it spend past its space's budget (Continue on its card):
+    /// no warning, no pause of its follow-ups.
+    var passesBudget = false
     var blockerIsFromLead = false
     var unknownPhaseRawValue: String?
     /// Each review pass's latest run (docs/design/review-badges.md).

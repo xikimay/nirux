@@ -753,6 +753,8 @@ final class SidebarWorkspaceCardRenderer {
             add(SidebarInterruptBlockRenderer(
                 since: since, workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
             ).render())
+        case let .budget(budget):
+            add(SidebarBudgetBlockRenderer(budget: budget, workspaceIndex: workspace.index, x: x, width: width, top: top).render())
         case let .contextOffer(columnIndex, offer):
             add(SidebarContextOfferBlockRenderer(
                 offer: offer, workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top

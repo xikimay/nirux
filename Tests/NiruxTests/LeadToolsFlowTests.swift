@@ -1163,6 +1163,16 @@ final class LeadToolsFlowTests: XCTestCase {
                 $0.pullRequests[pullRequest.url] = PRFollowUp.Entry(stop: PRFollowUp.Stop(kind: .ci, cause: .rounds, head: "abc", at: now))
             }
             XCTAssertNotNil(shell.followUpRow(of: task), "its stop still shows past its budget")
+            XCTAssertTrue(taskRow.cardActions.contains(.budget(SpaceDefaults.defaultTaskBudget)))
+
+            // Continue: no warning, no pause, no choice; saved with the task.
+            shell.takeBudgetChoice(.keepGoing, workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }))
+            XCTAssertTrue(task.passesBudget)
+            XCTAssertFalse(shell.isOverBudget(task))
+            let continued = try XCTUnwrap(shell.sidebar.lastInfos.first { $0.id == task.id })
+            XCTAssertEqual(continued.usage?.isWarning, false)
+            XCTAssertFalse(continued.cardActions.contains { if case .budget = $0 { true } else { false } })
+            XCTAssertEqual(shell.persistedState().workspaces.first { $0.id == task.id }?.passesBudget, true)
         }
     }
 

@@ -45,6 +45,7 @@ final class SidebarView: NSView {
     /// silence it aims at.
     var onAgentInterrupt: ((Int, Int, TimeInterval) -> Void)?
     var onContextOffer: ((Int, Int, ContextOffer.Choice) -> Void)?
+    var onBudgetChoice: ((Int, BudgetChoice) -> Void)?
     /// Type it now clicked on a row of waiting Mission messages:
     /// (workspaceIndex, columnIndex, since).
     var onMissionTypeNow: ((Int, Int, TimeInterval) -> Void)?
@@ -723,7 +724,8 @@ final class SidebarView: NSView {
         case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _),
              .agentInterrupt(let workspaceIndex, _, _), .missionTypeNow(let workspaceIndex, _, _),
              .deferredAgentResume(let workspaceIndex, _, _), .turnAnswer(let workspaceIndex, _, _, _),
-             .missionAnswer(let workspaceIndex, _, _, _), .contextOffer(let workspaceIndex, _, _, _):
+             .missionAnswer(let workspaceIndex, _, _, _), .contextOffer(let workspaceIndex, _, _, _),
+             .budgetChoice(let workspaceIndex, _, _):
             clearHover()
             if let key = Self.armedButtonKey(for: area.region) {
                 setHoverTarget(.approvalButton(workspaceIndex: workspaceIndex, key: key))
@@ -801,7 +803,7 @@ final class SidebarView: NSView {
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
         case .permissionDecision, .agentResume, .agentInterrupt, .missionTypeNow, .deferredAgentResume, .turnAnswer, .missionAnswer,
-             .contextOffer, .actionBlock, .inert:
+             .contextOffer, .budgetChoice, .actionBlock, .inert:
             break // buttons go through trackApprovalClick; the block is inert
         }
     }
@@ -1009,7 +1011,7 @@ final class SidebarView: NSView {
                  .contextOffer(let workspaceIndex, let columnIndex, _, _):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
-                 .actionBlock(let workspaceIndex):
+                 .actionBlock(let workspaceIndex), .budgetChoice(let workspaceIndex, _, _):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
             case .spacePicker, .newTask, .archivedToggle, .board, .history, .inert, .link, .catchUp:
                 continue

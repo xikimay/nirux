@@ -270,6 +270,50 @@ final class UsageDisplayTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(SidebarTaskUsage(report, taskID: "task")).isOverBudget, "no budget")
     }
 
+    /// Past its budget, a task's card offers Continue, Fresh start and
+    /// Close…, which arm like Allow / Deny and click only for that budget.
+    @MainActor func testATaskPastItsBudgetOffersAChoice() throws {
+        let session = UsageSession(
+            key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "ws"), contextTokens: 90_000,
+            events: [event(60, input: 26_000_000, context: 90_000)]
+        )
+        var info = WorkspaceInfo(
+            id: "ws", index: 0, title: "check-video", profileID: WorkspaceProfile.defaultID, isInactive: false,
+            columnCount: 0, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
+            columns: [], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+            phase: .active, lastSummary: nil, lastActivityAt: nil
+        )
+        info.usage = SidebarTaskUsage(UsageReport(sessions: [session], now: now), taskID: "ws", budget: 25_000_000)
+        XCTAssertEqual(info.cardActions, [.budget(25_000_000)])
+        let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 800).render()
+        XCTAssertEqual(Set(result.approvalButtons.keys), Set(BudgetChoice.allCases.map {
+            SidebarHoverTarget.budgetChoiceButtonKey(workspaceIndex: 0, budget: 25_000_000, choice: $0)
+        }))
+        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260), accuracy: 0.5)
+        let keepGoing = SidebarHitRegion.budgetChoice(workspaceIndex: 0, budget: 25_000_000, choice: .keepGoing)
+        func click(_ released: SidebarHitRegion?) -> SidebarBudgetClick? {
+            SidebarView.budgetChoiceClick(pressed: keepGoing, released: released, clickCount: 1, armedAtPress: true, armedAtRelease: true)
+        }
+        XCTAssertEqual(click(keepGoing), SidebarBudgetClick(workspaceIndex: 0, choice: .keepGoing))
+        XCTAssertNil(click(.budgetChoice(workspaceIndex: 0, budget: 25_000_000, choice: .close)), "released on another")
+        XCTAssertNil(click(.budgetChoice(workspaceIndex: 0, budget: 50_000_000, choice: .keepGoing)), "the budget changed")
+
+        info.usage = SidebarTaskUsage(UsageReport(sessions: [session], now: now), taskID: "ws")
+        XCTAssertEqual(info.cardActions, [], "no budget, no choice")
+    }
+
+    /// Continue on the card outlives a relaunch; a task that never chose it
+    /// writes nothing.
+    func testContinuePastTheBudgetIsSaved() throws {
+        let passing = PersistedWorkspace(id: "a", title: "a", cwd: "/tmp", columns: [], focusedColumnIndex: 0, passesBudget: true)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(passing)) as? [String: Any])
+        XCTAssertEqual(json["passesBudget"] as? Bool, true)
+        XCTAssertTrue(try JSONDecoder().decode(PersistedWorkspace.self, from: JSONEncoder().encode(passing)).passesBudget)
+        let none = PersistedWorkspace(id: "b", title: "b", cwd: "/tmp", columns: [], focusedColumnIndex: 0)
+        let empty = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(none)) as? [String: Any])
+        XCTAssertNil(empty["passesBudget"])
+    }
+
     func testTheUsageWindowRanksTasksAndCountsWhatTheyLeaveOut() {
         let sessions = [
             UsageSession(key: UsageSessionKey(.claude, "a"), attribution: UsageAttribution(spaceID: "space", taskID: "lead"),

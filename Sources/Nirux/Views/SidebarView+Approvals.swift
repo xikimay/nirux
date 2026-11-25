@@ -53,6 +53,12 @@ struct SidebarInterruptClick: Equatable {
     let since: TimeInterval
 }
 
+/// A budget choice clicked under a task.
+struct SidebarBudgetClick: Equatable {
+    let workspaceIndex: Int
+    let choice: BudgetChoice
+}
+
 /// Compact or Fresh start clicked under a Claude column.
 struct SidebarContextOfferClick: Equatable {
     let workspaceIndex: Int
@@ -118,6 +124,8 @@ extension SidebarView {
             return SidebarHoverTarget.interruptButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
         case let .contextOffer(workspaceIndex, columnIndex, offer, choice):
             return SidebarHoverTarget.contextOfferButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, offer: offer, choice: choice)
+        case let .budgetChoice(workspaceIndex, budget, choice):
+            return SidebarHoverTarget.budgetChoiceButtonKey(workspaceIndex: workspaceIndex, budget: budget, choice: choice)
         case let .missionTypeNow(workspaceIndex, columnIndex, since):
             return SidebarHoverTarget.typeNowButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
         case let .deferredAgentResume(_, _, columnID):
@@ -200,6 +208,18 @@ extension SidebarView {
 
     /// The Compact or Fresh start a click makes, if any: the same rules, for
     /// the same offer and choice.
+    /// The budget choice a click makes, if any: the same rules, for the same
+    /// budget and choice.
+    static func budgetChoiceClick(
+        pressed: SidebarHitRegion, released: SidebarHitRegion?, clickCount: Int, armedAtPress: Bool, armedAtRelease: Bool
+    ) -> SidebarBudgetClick? {
+        guard clickCount == 1, armedAtPress, armedAtRelease,
+              case let .budgetChoice(_, pressedBudget, pressedChoice) = pressed,
+              case let .budgetChoice(workspaceIndex, releasedBudget, releasedChoice)? = released,
+              releasedBudget == pressedBudget, releasedChoice == pressedChoice else { return nil }
+        return SidebarBudgetClick(workspaceIndex: workspaceIndex, choice: releasedChoice)
+    }
+
     static func contextOfferClick(
         pressed: SidebarHitRegion,
         released: SidebarHitRegion?,
@@ -368,6 +388,12 @@ extension SidebarView {
         ) {
             lastButtonActionAt = time
             onContextOffer?(offer.workspaceIndex, offer.columnIndex, offer.choice)
+        } else if let budget = Self.budgetChoiceClick(
+            pressed: pressed, released: released, clickCount: clickCount,
+            armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+        ) {
+            lastButtonActionAt = time
+            onBudgetChoice?(budget.workspaceIndex, budget.choice)
         } else if let typeNow = Self.typeNowClick(
             pressed: pressed, released: released, clickCount: clickCount,
             armedAtPress: armedAtPress, armedAtRelease: armedAtRelease

@@ -31,11 +31,38 @@ extension NiruxShellView {
         updateSidebar()
     }
 
-    /// Its row's usage; a task's has its space's budget, a Lead's or a plain
-    /// workspace's none.
+    /// Its row's usage; a task's has its space's budget, unless the user let
+    /// it pass (`passesBudget`); a Lead's or a plain workspace's none.
     func taskUsage(of workspace: WorkspaceState) -> SidebarTaskUsage? {
         usageMonitor?.report.flatMap {
-            SidebarTaskUsage($0, taskID: workspace.id, budget: Self.isTask(workspace) ? taskBudgets[workspace.profileID] : nil)
+            SidebarTaskUsage(
+                $0, taskID: workspace.id,
+                budget: Self.isTask(workspace) && !workspace.passesBudget ? taskBudgets[workspace.profileID] : nil
+            )
+        }
+    }
+
+    /// Continue lifts the budget for this task; Fresh start resumes its
+    /// worker with the same agent and model in a new conversation; Close…
+    /// asks as Close Workspace does.
+    func takeBudgetChoice(_ choice: BudgetChoice, workspaceIndex: Int) {
+        guard let task = workspaces[safe: workspaceIndex], Self.isTask(task) else { return }
+        switch choice {
+        case .keepGoing:
+            task.passesBudget = true
+            saveState()
+            updateSidebar()
+        case .freshStart:
+            let snapshot = ProcessSnapshot()
+            guard let worker = taskWorker(task, snapshot: snapshot), let agent = worker.missionAgent(snapshot: snapshot) else {
+                return showToast("Nirux couldn’t tell which agent this task runs.", tone: .error)
+            }
+            let model = worker.pty?.foregroundProcess(snapshot: snapshot).flatMap { AgentModels.launchModel(arguments: $0.arguments) }
+            resumeTask(task, with: TaskAgentChoice(agent: agent, model: model), interactive: true, freshStart: true) { [weak self] message, failed in
+                self?.showToast(message, tone: failed ? .error : .info)
+            }
+        case .close:
+            requestCloseWorkspace(at: workspaceIndex)
         }
     }
 
