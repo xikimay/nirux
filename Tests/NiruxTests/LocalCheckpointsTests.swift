@@ -4,7 +4,13 @@ import XCTest
 @testable import Nirux
 
 final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
-    private func store(_ limits: LocalCheckpoints.Limits = .init(), workspace: String = "test") throws -> LocalCheckpoints {
+    /// `captureTimeout`: one no loaded runner uses up (a save runs about
+    /// ten `git` calls against the 5 s default); a capture past it keeps no file.
+    private func store(
+        _ limits: LocalCheckpoints.Limits = .init(), captureTimeout: TimeInterval = 120, workspace: String = "test"
+    ) throws -> LocalCheckpoints {
+        var limits = limits
+        limits.captureTimeout = captureTimeout
         let state = URL(fileURLWithPath: root + "/state")
         try FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
         return try LocalCheckpoints(stateDirectory: state, workspaceID: workspace, limits: limits)
@@ -126,11 +132,11 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         try write("README.md", Data([0, 255, 2]))
         let binary = try await store.diff(from: incomplete.id, to: nil, worktree: repo)
         XCTAssertNotNil(binary.warning)
-        XCTAssertTrue(binary.text.contains("Binary"))
+        XCTAssertTrue(binary.text.contains("Binary"), binary.text)
         XCTAssertFalse(binary.text.contains("@@"))
         try write("README.md", Data(repeating: 65, count: 65))
         let large = try await store.diff(from: complete.id, to: nil, worktree: repo)
-        XCTAssertTrue(large.text.localizedCaseInsensitiveContains("size limit"))
+        XCTAssertTrue(large.text.localizedCaseInsensitiveContains("size limit"), large.text)
         XCTAssertFalse(large.text.contains("@@"))
     }
 
@@ -245,7 +251,7 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         let limited = try store(.init(maxWorkspaceBytes: 1024)).save(worktree: repo, label: nil)
         XCTAssertTrue(limited.isIncomplete)
         XCTAssertTrue(limited.omissions.contains { $0.path == "README.md" && $0.reason == "Workspace byte limit" })
-        let timed = try store(.init(captureTimeout: 0)).save(worktree: repo, label: nil)
+        let timed = try store(captureTimeout: 0).save(worktree: repo, label: nil)
         XCTAssertTrue(timed.isIncomplete)
         XCTAssertTrue(timed.timedOut)
     }
