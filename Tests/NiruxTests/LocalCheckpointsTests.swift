@@ -4,13 +4,14 @@ import XCTest
 @testable import Nirux
 
 final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
-    /// `captureTimeout`: one no loaded runner uses up (a save runs about
-    /// ten `git` calls against the 5 s default); a capture past it keeps no file.
+    /// Limits with a capture time no loaded runner uses up (a save runs about
+    /// ten `git` calls against the 5 s default; a capture past it keeps no
+    /// file), then the test's own.
     private func store(
-        _ limits: LocalCheckpoints.Limits = .init(), captureTimeout: TimeInterval = 120, workspace: String = "test"
+        workspace: String = "test", _ adjust: (inout LocalCheckpoints.Limits) -> Void = { _ in }
     ) throws -> LocalCheckpoints {
-        var limits = limits
-        limits.captureTimeout = captureTimeout
+        var limits = LocalCheckpoints.Limits(captureTimeout: 120)
+        adjust(&limits)
         let state = URL(fileURLWithPath: root + "/state")
         try FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
         return try LocalCheckpoints(stateDirectory: state, workspaceID: workspace, limits: limits)
@@ -120,7 +121,7 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
     }
 
     func testDiffWarnsForEitherIncompleteCheckpointAndSkipsUnsafeInputs() async throws {
-        let store = try store(.init(maxSingleFileBytes: 64))
+        let store = try store { $0.maxSingleFileBytes = 64 }
         try write("README.md", "one")
         let complete = try store.save(worktree: repo, label: nil)
         try write("Sources/App.swift", Data(repeating: 65, count: 65))
@@ -230,7 +231,7 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         try write("config", "ghp_" + String(repeating: "x", count: 36))
         try write("utf16.txt", try XCTUnwrap(("ghp_" + String(repeating: "z", count: 36)).data(using: .utf16)))
         try write("normal.bin", Data([0, 255, 2]))
-        let saved = try store(.init(maxSingleFileBytes: 128)).save(worktree: repo, label: nil)
+        let saved = try store { $0.maxSingleFileBytes = 128 }.save(worktree: repo, label: nil)
         XCTAssertTrue(saved.isIncomplete)
         XCTAssertEqual(saved.files.map(\.path), ["normal.bin"])
         let omissions = Dictionary(uniqueKeysWithValues: saved.omissions.map { ($0.path, $0.reason) })
@@ -245,36 +246,37 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
     func testBudgetsAndTimeoutReportIncomplete() throws {
         try write("README.md", Data(repeating: 65, count: 910))
         try write("Sources/App.swift", "changed")
-        let count = try store(.init(maxFilesPerCapture: 1)).save(worktree: repo, label: nil)
+        let count = try store { $0.maxFilesPerCapture = 1 }.save(worktree: repo, label: nil)
         XCTAssertEqual(count.files.count, 1)
         XCTAssertEqual(count.omissions.map(\.reason), ["File count limit"])
-        let limited = try store(.init(maxWorkspaceBytes: 1024)).save(worktree: repo, label: nil)
+        let limited = try store { $0.maxWorkspaceBytes = 1024 }.save(worktree: repo, label: nil)
         XCTAssertTrue(limited.isIncomplete)
         XCTAssertTrue(limited.omissions.contains { $0.path == "README.md" && $0.reason == "Workspace byte limit" })
-        let timed = try store(captureTimeout: 0).save(worktree: repo, label: nil)
+        let timed = try store { $0.captureTimeout = 0 }.save(worktree: repo, label: nil)
         XCTAssertTrue(timed.isIncomplete)
         XCTAssertTrue(timed.timedOut)
     }
 
     func testEvictionByCountAndActualStoredBytes() throws {
-        for (name, limits) in [
-            ("count", LocalCheckpoints.Limits(maxCheckpointsPerWorkspace: 2)),
-            ("bytes", .init(maxWorkspaceBytes: 6_000))
-        ] {
-            let store = try store(limits, workspace: name)
+        let quotas: [(String, (inout LocalCheckpoints.Limits) -> Void)] = [
+            ("count", { $0.maxCheckpointsPerWorkspace = 2 }),
+            ("bytes", { $0.maxWorkspaceBytes = 6_000 })
+        ]
+        for (name, quota) in quotas {
+            let store = try store(workspace: name, quota)
             try write("README.md", Data(repeating: 65, count: 2_200))
             let saved = try (1...3).map { try store.save(worktree: repo, label: String($0)) }
             let entries = try store.list()
             XCTAssertEqual(entries.map(\.id), [saved[2].id, saved[1].id])
             XCTAssertFalse(FileManager.default.fileExists(atPath: store.folder.appendingPathComponent(saved[0].id.uuidString).path))
-            XCTAssertLessThanOrEqual(entries.reduce(0) { $0 + $1.storedBytes }, limits.maxWorkspaceBytes)
+            XCTAssertLessThanOrEqual(entries.reduce(0) { $0 + $1.storedBytes }, store.limits.maxWorkspaceBytes)
             try store.delete(saved[2].id)
             XCTAssertEqual(try store.list().map(\.id), [saved[1].id])
         }
     }
 
     func testUnknownFieldsAndFutureVersionsSurviveQuotaAndDeletion() throws {
-        let store = try store(.init(maxCheckpointsPerWorkspace: 2))
+        let store = try store { $0.maxCheckpointsPerWorkspace = 2 }
         let saved = try store.save(worktree: repo, label: nil)
         let url = store.folder.appendingPathComponent(saved.id.uuidString).appendingPathComponent("manifest.json")
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
