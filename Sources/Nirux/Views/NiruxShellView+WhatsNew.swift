@@ -23,6 +23,7 @@ extension NiruxShellView {
             failure: changelogStore == nil ? "this build doesn’t update from the nightlies." : changelogStore?.failure
         )
         showWhatsNewCardIfDue()
+        renderAvailableUpdate()
     }
 
     // MARK: - The card after an update
@@ -54,9 +55,16 @@ extension NiruxShellView {
               let shipped = store.changelog?.entries(after: seen, through: installed), !shipped.isEmpty
         else { return }
         guard shipped.contains(where: { $0.kind != .internal }) else { return markWhatsNewSeen() }
-        let card = WhatsNewCardView(shipped: shipped, seen: seen)
-        card.onDismiss = { [weak self] in self?.dismissWhatsNewCard() }
-        card.onSeeAll = { [weak self] in
+        let nightlies = Set(shipped.map(\.build)).count
+        let changes = shipped.filter { $0.kind != .internal }.count
+        let card = WhatsNewCardView(
+            shipped: shipped, title: "What’s new in Nirux",
+            subtitle: "Since \(Changelog.name(ofBuild: seen)): \(WhatsNewCardView.count(nightlies, "nightly", "nightlies")), "
+                + WhatsNewCardView.count(changes, "change", "changes"),
+            linesPerKind: 2, actions: ("Dismiss", "See All"), floats: true
+        )
+        card.onSecondary = { [weak self] in self?.dismissWhatsNewCard() }
+        card.onPrimary = { [weak self] in
             self?.dismissWhatsNewCard()
             self?.showWhatsNewWindow()
         }
@@ -119,5 +127,66 @@ extension NiruxShellView {
             cache: Persistence.stateDirectory.appendingPathComponent("changelog.json"),
             onChange: { [weak self] in self?.changelogDidChange() }
         )
+    }
+}
+
+// MARK: - Before an update
+
+/// An update Sparkle found.
+struct AvailableUpdate {
+    var build: Int
+    /// Downloaded: `install` installs and relaunches at once.
+    var isReady: Bool
+    var install: @MainActor () -> Void
+}
+
+extension NiruxShellView {
+    func showAvailableUpdate(_ update: AvailableUpdate) {
+        availableUpdate = update
+        renderAvailableUpdate()
+        changelogStore?.refresh()
+    }
+
+    /// "● Update ready · 9 changes" once the changelog holds the update's
+    /// build, its time until then; a click opens the popover.
+    func renderAvailableUpdate() {
+        guard let update = availableUpdate else { return }
+        let shipped = updateEntries(update)
+        let summary = shipped.contains { $0.build == update.build }
+            ? WhatsNewCardView.count(shipped.filter { $0.kind != .internal }.count, "change", "changes")
+            : Changelog.name(ofBuild: update.build)
+        statusBar.showUpdate(version: summary, ready: update.isReady)
+        statusBar.onInstall = { [weak self] in self?.toggleUpdatePopover() }
+    }
+
+    /// What the update brings since this build, and Install and Relaunch.
+    func toggleUpdatePopover() {
+        if let popover = updatePopover, popover.isShown { return popover.close() }
+        guard let update = availableUpdate else { return }
+        let installed = sideEffects.installedBuild()
+        let shipped = updateEntries(update)
+        let nightlies = WhatsNewCardView.count(Set(shipped.map(\.build)).count, "nightly", "nightlies")
+        let view = WhatsNewCardView(
+            shipped: shipped, title: "Nightly \(Changelog.name(ofBuild: update.build)) is \(update.isReady ? "ready" : "available")",
+            subtitle: shipped.isEmpty ? "Its changes show once the changelog is read." : "\(nightlies) since yours, \(Changelog.name(ofBuild: installed))",
+            linesPerKind: 6, actions: ("Later", "Install and Relaunch"), floats: false
+        )
+        let controller = NSViewController()
+        controller.view = view
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        popover.appearance = Theme.appearance
+        view.onSecondary = { [weak popover] in popover?.close() }
+        view.onPrimary = { [weak popover] in
+            popover?.close()
+            update.install()
+        }
+        updatePopover = popover
+        popover.show(relativeTo: statusBar.updateHitFrame, of: statusBar, preferredEdge: .maxY)
+    }
+
+    private func updateEntries(_ update: AvailableUpdate) -> [Changelog.Entry] {
+        changelogStore?.changelog?.entries(after: sideEffects.installedBuild(), through: update.build) ?? []
     }
 }

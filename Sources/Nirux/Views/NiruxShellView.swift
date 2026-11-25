@@ -111,6 +111,9 @@ final class NiruxShellView: NSView {
               foreground.interactiveAgent == .claude else { return nil }
         return self.leadHoldings(workspace, column: column, pty: pty, foreground: foreground, snapshot: snapshot)
     }
+    /// The update Sparkle found, until it installs.
+    var availableUpdate: AvailableUpdate?
+    var updatePopover: NSPopover?
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
     var workspaces: [WorkspaceState] {

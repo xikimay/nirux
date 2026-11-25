@@ -61,6 +61,7 @@ final class StatusBarView: NSView {
     private var copySummaryWidth: CGFloat = 0
     /// Set while hovering the update notice; reset when it goes away.
     private var showsPointingHand = false
+    private var updateIsReady = false
     var onInstall: (() -> Void)?
     var onCrashAction: ((CrashAction) -> Void)?
     var onQueueClick: (() -> Void)?
@@ -94,7 +95,7 @@ final class StatusBarView: NSView {
         label = lbl
 
         // Notice buttons (inline, right after label)
-        installButton = actionButton("Install ↗", action: #selector(installClicked))
+        installButton = actionButton("Install…", action: #selector(installClicked))
         let copy = actionButton(Self.copiedTitle, action: #selector(copySummaryClicked))
         copy.sizeToFit()
         copySummaryWidth = copy.frame.width
@@ -290,15 +291,18 @@ final class StatusBarView: NSView {
         super.mouseDown(with: event)
     }
 
-    /// Hit area covering label + install button
-    private var updateHitFrame: NSRect {
+    /// Hit area covering label + install button: where the update's popover
+    /// points.
+    var updateHitFrame: NSRect {
         guard let lbl = label, let btn = installButton, !btn.isHidden else { return .zero }
         return NSRect(x: lbl.frame.minX, y: 0,
                       width: btn.frame.maxX - lbl.frame.minX, height: bounds.height)
     }
 
-    func showUpdate(version: String) {
+    /// `ready`: downloaded, it installs at once.
+    func showUpdate(version: String, ready: Bool = false) {
         updateVersion = version
+        updateIsReady = ready
         render()
     }
 
@@ -364,7 +368,7 @@ final class StatusBarView: NSView {
             copySummaryButton?.isHidden = false
             openReportButton?.isHidden = false
         } else if let updateVersion {
-            label?.stringValue = "● Update available · \(updateVersion)"
+            label?.stringValue = "● Update \(updateIsReady ? "ready" : "available") · \(updateVersion)"
             label?.textColor = Theme.Color.accent.withAlphaComponent(0.8)
             installButton?.isHidden = false
         } else {
