@@ -50,6 +50,8 @@ public struct UsageReport: Equatable, Sendable {
         public var contextTokens: Int?
         public var contextWindow: Int?
         public var lastResponseAt: TimeInterval
+        /// The subagents it started.
+        public var subagents = 0
     }
 
     public static let dayCount = 7
@@ -92,7 +94,8 @@ public struct UsageReport: Equatable, Sendable {
                   let last = session.events.lazy.filter({ $0.subagentID == nil }).map(\.timestamp).max(),
                   last > latest[task]?.lastResponseAt ?? -.infinity else { continue }
             latest[task] = LatestSession(
-                key: session.key, contextTokens: session.contextTokens, contextWindow: session.contextWindow, lastResponseAt: last
+                key: session.key, contextTokens: session.contextTokens, contextWindow: session.contextWindow, lastResponseAt: last,
+                subagents: session.subagents
             )
         }
         latestSessions = latest
