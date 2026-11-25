@@ -129,6 +129,8 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController, NSPopoverDe
     }
 
     private func render(now: TimeInterval) {
+        // Loading the view later would reset the label's colour set below.
+        loadViewIfNeeded()
         defer { relayOutTitleBar() }
         renderedAt = now
         limits = QuotaLimit.current(
