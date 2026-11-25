@@ -86,7 +86,7 @@ final class LocalServerChipView: NSView, ColumnHeaderAccessory {
 
     var accessoryHeight: CGFloat { Self.height }
 
-    // The header drags the window; the chip, padding included, must not.
+    // As its header: the window moves from its title bar only.
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func resetCursorRects() {

@@ -7,7 +7,7 @@ import AppKit
 extension NiruxApp {
     typealias CanaryKey = (characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags)
 
-    func performCanaryRequest(_ request: LeadChannel.Request, answer: @MainActor (String, Bool) -> Void) {
+    func performCanaryRequest(_ request: LeadChannel.Request, answer: @escaping @MainActor (String, Bool) -> Void) {
         let arguments = request.argumentObject
         let windows = Self.canaryWindows(main: mainWindow)
         switch request.tool {
@@ -22,6 +22,12 @@ extension NiruxApp {
             guard let label = arguments["label"] as? String, let element = Self.pressTarget(label: label, in: windows) else {
                 return answer("Nothing enabled is labelled \(arguments["label"] ?? "").", true)
             }
+            guard element is NSControl || element is NSCell else {
+                // A custom view's own press says whether it did anything.
+                let pressed = element.accessibilityPerformPress()
+                return answer(pressed ? "Pressed \(label)." : "\(label) has nothing to do on a press.", !pressed)
+            }
+            // A control's action may open a modal alert: answer first.
             answer("Pressed \(label).", false)
             Self.press(element)
         case "key", "text":
@@ -41,6 +47,8 @@ extension NiruxApp {
             send(keys, to: window)
         case "snapshot":
             answer(Self.snapshotJSON(of: windows), false)
+        case "terminal":
+            Self.read(canaryTerminals) { answer($0, false) }
         case "render":
             guard let view = mainWindow?.contentView, let png = Self.renderPNG(of: view) else {
                 return answer("The main window didn't render.", true)
@@ -65,6 +73,50 @@ extension NiruxApp {
         let text: String
     }
 
+    /// A terminal of an open workspace, read as text (TerminalScreenText).
+    struct CanaryTerminal: Sendable {
+        let workspace: String
+        let column: Int
+        /// In the active workspace.
+        let active: Bool
+        /// The active workspace's focused column.
+        let focused: Bool
+        let read: @Sendable () -> String?
+    }
+
+    var canaryTerminals: [CanaryTerminal] {
+        guard let shell else { return [] }
+        return shell.workspaces.filter { !$0.isClosing }.flatMap { workspace in
+            workspace.columns.enumerated().compactMap { index, column -> CanaryTerminal? in
+                guard !column.isClosing, let session = column.pty?.terminalSession else { return nil }
+                let active = workspace === shell.activeWorkspace
+                return CanaryTerminal(
+                    workspace: workspace.title, column: index, active: active, focused: active && index == workspace.focusedIndex,
+                    read: { TerminalScreenText.read(session) }
+                )
+            }
+        }
+    }
+
+    /// Their last `lines` lines as JSON, read off the main thread: Ghostty
+    /// locks a terminal for the read.
+    nonisolated static func read(
+        _ terminals: [CanaryTerminal], lines: Int = 200, deliver: @escaping @MainActor @Sendable (String) -> Void
+    ) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let payload = ["terminals": terminals.map { terminal in
+                [
+                    "workspace": terminal.workspace, "column": terminal.column, "active": terminal.active, "focused": terminal.focused,
+                    "text": (terminal.read() ?? "").split(separator: "\n", omittingEmptySubsequences: false)
+                        .suffix(lines).joined(separator: "\n"),
+                ] as [String: Any]
+            }]
+            let data = (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? Data()
+            let json = String(decoding: data, as: UTF8.self)
+            DispatchQueue.main.async { @MainActor in deliver(json) }
+        }
+    }
+
     /// Where the canary looks and presses: an alert or a sheet first, then
     /// the main window, then the other windows on screen.
     static func canaryWindows(main: NSWindow?) -> [NSWindow] {
@@ -81,7 +133,8 @@ extension NiruxApp {
         for (depth, title) in path.enumerated() {
             guard let current = menu else { break }
             current.update()
-            guard let index = current.items.firstIndex(where: { $0.title == title }) else {
+            // A menu bar item shows its menu's title.
+            guard let index = current.items.firstIndex(where: { $0.title == title || $0.submenu?.title == title }) else {
                 return .failure(CanaryRefusal(text: "No menu item " + path.prefix(depth + 1).joined(separator: " › ") + "."))
             }
             guard depth == path.count - 1 else {
@@ -197,6 +250,7 @@ extension NiruxApp {
                     "title": element.accessibilityTitle() ?? "",
                     "value": (element.accessibilityValue() as? CustomStringConvertible)?.description ?? "",
                     "enabled": element.isAccessibilityEnabled(),
+                    "pressable": isPressable(element),
                     // JSON has no NaN or infinity: an element off every screen has no frame.
                     "frame": edges.allSatisfy(\.isFinite) ? edges : NSNull(),
                 ])
@@ -211,12 +265,29 @@ extension NiruxApp {
         ]
     }
 
-    /// The first enabled element labelled or titled `label`.
+    /// Whether a control (or its cell, a button's element) is enabled; nil
+    /// for a custom view, whose AXEnabled reads false although a person
+    /// can click it.
+    static func controlEnabled(_ element: NSAccessibilityProtocol) -> Bool? {
+        (element as? NSControl)?.isEnabled ?? (element as? NSCell)?.isEnabled
+    }
+
+    /// Whether a person could press it: an enabled control, or a custom view
+    /// with a press of its own (which may still have nothing to do).
+    static func isPressable(_ element: NSAccessibilityProtocol) -> Bool {
+        if let enabled = controlEnabled(element) { return enabled }
+        guard let object = element as? NSObject else { return false }
+        let press = #selector(NSView.accessibilityPerformPress)
+        return type(of: object).instanceMethod(for: press) != NSView.instanceMethod(for: press)
+    }
+
+    /// The first element labelled or titled `label` that a person could
+    /// press.
     static func pressTarget(label: String, in windows: [NSWindow]) -> NSAccessibilityProtocol? {
         for window in windows {
             var stack: [NSAccessibilityProtocol] = [window]
             while let element = stack.popLast() {
-                if element.isAccessibilityElement(), element.isAccessibilityEnabled(),
+                if element.isAccessibilityElement(), isPressable(element),
                    element.accessibilityLabel() == label || element.accessibilityTitle() == label {
                     return element
                 }

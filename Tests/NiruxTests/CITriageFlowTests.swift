@@ -313,25 +313,25 @@ final class CITriageFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let (workspace, reader) = try triaging(harness)
-            shell.ciTriageCenter.retryDelay = 0.3
+            let center = shell.ciTriageCenter
             reader.answers(CITriageInvestigation.Outcome())
             workspace.prInfo = Self.red
             shell.triageRedChecks(in: workspace)
             harness.waitUntil("the verdict") { workspace.ciTriage != nil }
             XCTAssertEqual(workspace.ciTriage?.verdict, .unsure)
-            XCTAssertNil(shell.ciTriageCenter.store.record(of: widgetsRun))
-            shell.triageRedChecks(in: workspace)
-            settle(0.1)
-            XCTAssertEqual(reader.requests.count, 1, "not at every read of the pull request")
+            XCTAssertNil(center.store.record(of: widgetsRun))
+            let retryAt = try XCTUnwrap(workspace.ciTriage?.retryAt)
+            XCTAssertEqual(retryAt, Date().timeIntervalSince1970 + center.retryDelay, accuracy: 60)
+            shell.triageRedChecks(in: workspace, now: retryAt - 1)
+            XCTAssertNil(center.inFlight[workspace.id], "not at every read of the pull request")
 
-            settle(0.3)
-            shell.triageRedChecks(in: workspace)
+            shell.triageRedChecks(in: workspace, now: retryAt)
             harness.waitUntil("the second read") { reader.requests.count == 2 }
-            harness.waitUntil("its end") { reader.wanted.count == 2 }
-            settle(0.4)
-            shell.triageRedChecks(in: workspace)
-            settle(0.1)
-            XCTAssertEqual(reader.requests.count, 2, "once more, not forever")
+            harness.waitUntil("its end") { center.inFlight[workspace.id] == nil }
+            XCTAssertNil(workspace.ciTriage?.retryAt)
+            shell.triageRedChecks(in: workspace, now: retryAt + 86_400)
+            XCTAssertNil(center.inFlight[workspace.id], "once more, not forever")
+            XCTAssertEqual(reader.requests.count, 2)
         }
     }
 

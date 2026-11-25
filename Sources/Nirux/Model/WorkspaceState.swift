@@ -242,8 +242,8 @@ final class WorkspaceState {
     /// A column's terminal title changed (fires before onMetadataChanged).
     var onColumnTitleChanged: ((ColumnState) -> Void)?
     var onFocusedColumnChanged: (() -> Void)?
-    /// The columns were laid out (`layoutAndScroll`): which ones show may
-    /// have changed.
+    /// The columns were laid out (`layoutAndScroll`), or a drag panned them
+    /// (`panDragCamera`): which ones show may have changed.
     var onColumnsLaidOut: (() -> Void)?
     var onGitContextChanged: (() -> Void)?
     /// A terminal link was cmd-clicked — the shell opens a browser column
@@ -882,9 +882,10 @@ extension WorkspaceState {
             environment[NiruxLaunchAuthorization.environmentKey] = ""
             return environment
         }
-        // The space's variables, under Nirux's own: they never replace a
-        // NIRUX_ one (SpaceDefaults refuses those names anyway).
-        return environment.merging(SpaceDefaultsStore.defaults(forSpace: profileID).effectiveEnvironment) { nirux, _ in nirux }
+        // The space's variables and its Claude models, under Nirux's own:
+        // they never replace a NIRUX_ one (SpaceDefaults refuses those names
+        // anyway).
+        return environment.merging(SpaceDefaultsStore.defaults(forSpace: profileID).shellEnvironment) { nirux, _ in nirux }
     }
 
     // Pure builder so feature-gating of terminal metadata can be tested
@@ -1482,9 +1483,11 @@ extension WorkspaceState {
 
     /// The pointer takes the card at `index` where it shows: a slide of the
     /// strip, or a glide of the card, on its way stops there. It has the
-    /// focus, and the camera holds until it is let go.
-    func beginColumnDrag(at index: Int) {
-        guard let column = columns[safe: index] else { return }
+    /// focus, and the camera holds until it is let go. False for a card on
+    /// its way out.
+    @discardableResult
+    func beginColumnDrag(at index: Int) -> Bool {
+        guard let column = columns[safe: index], !column.isClosing else { return false }
         focusedIndex = index
         holdCamera(for: index)
         heldCamera?.isDrag = true
@@ -1492,16 +1495,18 @@ extension WorkspaceState {
         column.cardLayers.forEach { $0.removeAnimation(forKey: ColumnState.glideKey) }
         draggedColumn = ColumnDrag(column: column.id, origin: index, x: x)
         place(column, at: x)
+        return true
     }
 
     /// The pointer holding the card brought its left edge to `x`: the card
     /// follows along the strip, its light and shadow with it, and takes the
     /// slot nearest it, or the one it came from while the pointer is
     /// `outside` the viewport. True when it changed slots: a layout makes
-    /// room.
+    /// room. A card closed meanwhile recedes where it lies.
     @discardableResult
     func dragColumn(to x: CGFloat, outside: Bool) -> Bool {
-        guard var drag = draggedColumn, let from = columns.firstIndex(where: { $0.id == drag.column }) else { return false }
+        guard var drag = draggedColumn, let from = columns.firstIndex(where: { $0.id == drag.column }), !columns[from].isClosing
+        else { return false }
         let column = columns[from]
         drag.x = max(Self.columnInset, min(x, stripView.frame.width - Self.columnInset - column.view.frame.width))
         draggedColumn = drag
@@ -1545,11 +1550,14 @@ extension WorkspaceState {
     /// view come to the pointer.
     func panDragCamera(by dx: CGFloat) {
         let viewport = containerView.bounds.width
-        guard draggedColumn != nil, var held = heldCamera, dx != 0, stripView.frame.width > viewport else { return }
-        held.x = min(max(held.x + dx, min(0, held.x)), max(stripView.frame.width - viewport, held.x))
+        guard draggedColumn != nil, var held = heldCamera, stripView.frame.width > viewport else { return }
+        let x = min(max(held.x + dx, min(0, held.x)), max(stripView.frame.width - viewport, held.x))
+        guard x != held.x else { return }
+        held.x = x
         heldCamera = held
-        lastCameraX = held.x
-        stripView.frame.origin.x = -held.x
+        lastCameraX = x
+        stripView.frame.origin.x = -x
+        onColumnsLaidOut?()
     }
 
     /// How far a drag's camera pans at each of its ticks, for a pointer at

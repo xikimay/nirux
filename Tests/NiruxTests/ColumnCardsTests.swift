@@ -1187,10 +1187,14 @@ final class ColumnCardsTests: XCTestCase {
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
         let strip = try strip(of: workspace)
         workspace.beginColumnDrag(at: 0)
+        var laidOut = 0
+        workspace.onColumnsLaidOut = { laidOut += 1 }
         workspace.panDragCamera(by: -50)
         XCTAssertEqual(workspace.lastCameraX, 0, "at the strip's start")
+        XCTAssertEqual(laidOut, 0)
         workspace.panDragCamera(by: 100)
         XCTAssertEqual(workspace.lastCameraX, 100)
+        XCTAssertEqual(laidOut, 1, "which cards show may have changed")
         XCTAssertEqual(strip.frame.minX, -100)
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
         XCTAssertEqual(workspace.lastCameraX, 100, "held there")
@@ -1221,6 +1225,26 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(narrow.lastCameraX, centred, "held as columns open")
         narrow.panDragCamera(by: 20)
         XCTAssertEqual(narrow.lastCameraX, centred + 20, "from where it was, without a jump")
+    }
+
+    /// A card on its way out is neither taken nor moved by a drag: it
+    /// recedes where it lies.
+    func testAClosingCardIsNeitherTakenNorMoved() {
+        let workspace = workspace(columns: 3)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let cards = workspace.columns
+        cards[1].isClosing = true
+        XCTAssertFalse(workspace.beginColumnDrag(at: 1))
+        XCTAssertNil(workspace.draggedColumn)
+
+        cards[1].isClosing = false
+        XCTAssertTrue(workspace.beginColumnDrag(at: 1))
+        cards[1].isClosing = true
+        let x = cards[1].view.frame.minX
+        XCTAssertFalse(workspace.dragColumn(to: 5_000, outside: false))
+        XCTAssertEqual(cards[1].view.frame.minX, x, "where it lies")
+        XCTAssertTrue(workspace.columns[1] === cards[1])
+        workspace.endColumnDrag(cancelled: true)
     }
 
     /// Taken mid-glide, a card stops where it shows.
@@ -1377,6 +1401,52 @@ final class ColumnCardsTests: XCTestCase {
                 + Array(repeating: (.periodic, edge), count: 80) + [(.leftMouseUp, edge)])
             XCTAssertTrue(workspace.columns.last === cards[0], "it reached the end of the row")
             XCTAssertEqual(workspace.focusedIndex, 3)
+        }
+    }
+
+    /// Passing under a floating rail, the viewport reaches past its edge: a
+    /// drag measures from where it rests, so the rail is outside and the
+    /// right edge still pans.
+    func testADragUnderAFloatingRailMeasuresFromWhereTheViewportRests() throws {
+        try withShell { shell in
+            shell.sideEffects.drawsGlass = { true }
+            shell.sideEffects.drawnTransparency = { $0 }
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            shell.interfaceTransparency = .tinted
+            shell.isSidebarExpanded = false
+            shell.sidebar.isExpanded = false
+            // The pass under the rail lasts; the test posts the drag's ticks.
+            shell.sideEffects.afterCommit = { _, _ in }
+            shell.sideEffects.runsDragTicks = { _ in }
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let cards = try halfCardsFromTheLeft(shell, count: 4)
+            shell.passUnderRail(workspace, for: 1)
+            XCTAssertGreaterThan(-shell.viewport.bounds.minX, WorkspaceState.panEdge, "it reaches under the rail")
+            let rest = shell.viewportRestFrame
+
+            let second = try XCTUnwrap(cards[1].header)
+            let from = second.convert(NSPoint(x: 4, y: second.bounds.midY), to: nil)
+            let onTheRail = NSPoint(x: rest.minX - 10, y: from.y)
+            XCTAssertGreaterThan(onTheRail.x, shell.viewport.frame.minX, "within the viewport as it reaches")
+            try press(second, at: from, events: [
+                (.leftMouseDragged, NSPoint(x: from.x + 10, y: from.y)), (.leftMouseDragged, NSPoint(x: rest.midX, y: from.y)),
+                (.leftMouseDragged, onTheRail), (.leftMouseUp, onTheRail)
+            ])
+            XCTAssertEqual(workspace.columns.map(ObjectIdentifier.init), cards.map(ObjectIdentifier.init), "over the rail is outside: back")
+
+            workspace.focusedIndex = 0
+            shell.relayout(animated: false)
+            XCTAssertGreaterThan(-shell.viewport.bounds.minX, WorkspaceState.panEdge, "still under the rail")
+            let first = try XCTUnwrap(cards[0].header)
+            let start = first.convert(NSPoint(x: 4, y: first.bounds.midY), to: nil)
+            let edge = NSPoint(x: rest.maxX - 2, y: start.y)
+            try press(first, at: start, events: [
+                (.leftMouseDragged, NSPoint(x: start.x + 10, y: start.y)), (.leftMouseDragged, NSPoint(x: rest.midX, y: start.y)),
+                (.leftMouseDragged, edge)
+            ] + Array(repeating: (.periodic, edge), count: 80) + [(.leftMouseUp, edge)])
+            XCTAssertTrue(workspace.columns.last === cards[0], "the right edge pans")
         }
     }
 
