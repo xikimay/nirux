@@ -1076,7 +1076,8 @@ final class LeadRestartFlowTests: XCTestCase {
 
     /// Its sub-tasks become the Lead's tasks: their Missions report to the
     /// Lead's agent, a question one asked reaches the promoted conversation,
-    /// and they list among the Lead's tasks.
+    /// and they list among the Lead's tasks. The Lead alone holds the
+    /// conversation then.
     func testItsSubtasksFollowItToTheLead() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -1128,6 +1129,19 @@ final class LeadRestartFlowTests: XCTestCase {
             try reportFirstTurnEnded(in: leadPty, agentUUID: lead.agentUUID, sessionID: sessionID)
             shell.typeMissionMessages()
             harness.waitUntil("the sub-task's question in the promoted conversation") { promoted.input.contains(question.message) }
+            // One process at a time: the task's column holds nothing to
+            // resume, at a relaunch or from Session History.
+            harness.waitUntil("the task's plain shell") {
+                guard let pty = column.pty, let shellPID = pty.shellPID else { return false }
+                return pty.foregroundProcess(snapshot: ProcessSnapshot())?.instance.pid == shellPID
+            }
+            let saved = shell.persistedState()
+            XCTAssertFalse(try XCTUnwrap(saved.workspaces.first { $0.id == task.id }).columns.contains { $0.claudeSessionID == sessionID })
+            XCTAssertTrue(try XCTUnwrap(saved.workspaces.first { $0.id == lead.workspace.id }).columns.contains { $0.claudeSessionID == sessionID })
+            let taskForeground = column.pty?.foregroundProcess(snapshot: ProcessSnapshot())
+            XCTAssertNotEqual(column.persistedClaudeRestore(foregroundProcess: taskForeground), .resume(sessionID))
+            let held = try XCTUnwrap(HeldAgentSession.find(sessionID, in: shell.agentSessionHolders(snapshot: ProcessSnapshot())))
+            XCTAssertEqual(held.workspaceID, lead.workspace.id)
         }
     }
 
