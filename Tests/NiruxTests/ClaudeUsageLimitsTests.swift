@@ -292,7 +292,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(indicator.meters.limits.map(QuotaMeterView.projected), [100, 20], "the hatch runs to the reset's forecast")
         XCTAssertTrue(indicator.view.toolTip?.contains("5h: full by 14:40, before its reset at 15:00") == true)
         XCTAssertTrue(indicator.view.toolTip?.contains("Claude 7d: 20% used, resets Wed 08:00 (in 3d 18h)") == true, "every window, from what's shown")
-        XCTAssertTrue(indicator.label.accessibilityLabel()?.contains("7d 20% used") == true, "VoiceOver hears every window")
+        XCTAssertTrue(indicator.view.accessibilityLabel()?.contains("7d 20% used") == true, "VoiceOver hears every window")
         // A `/resume` of an older session left 12 % in the file: the logged readings still tell the pace.
         let resumed = ClaudeUsageLimits(fiveHour: window(12, resetsAt: now + hour), sevenDay: window(20, resetsAt: now + 90 * hour))
         indicator.update(limits: resumed, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour)], now: now)
@@ -319,6 +319,50 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         indicator.update(codex: codex, readings: [300: codexReadings], now: now)
         XCTAssertEqual(indicator.label.stringValue, "⚠︎ Codex 5h full by 14:15")
         XCTAssertEqual(indicator.meters.limits.map(\.agent), [.codex])
+    }
+
+    /// A click (or VoiceOver's press) opens every limit with its meter,
+    /// pace and reset, Antigravity's as not published, and the Usage window.
+    @MainActor
+    func testPopoverListsEveryLimitAndOpensTheUsageWindow() throws {
+        let indicator = ClaudeUsageIndicator()
+        indicator.calendar = utc
+        var presented = 0
+        indicator.presentPopover = { _, _ in presented += 1 }
+        var usageOpened = 0
+        indicator.onShowUsage = { usageOpened += 1 }
+        let claude = ClaudeUsageLimits(fiveHour: window(60, resetsAt: now + hour), sevenDay: window(20, resetsAt: now + 90 * hour))
+        indicator.update(limits: claude, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour)], now: now)
+        indicator.update(codex: CodexRateLimits(primary: .init(usedPercent: 12, minutes: 300, resetsAt: now + 3 * hour), reportedAt: now - 60), now: now)
+
+        XCTAssertTrue(indicator.view.accessibilityPerformPress())
+        XCTAssertEqual(presented, 1)
+        indicator.view.frame = NSRect(x: 0, y: 0, width: 200, height: 22)
+        XCTAssertTrue(indicator.view.hitTest(NSPoint(x: 100, y: 11)) === indicator.view, "the label and meters don't take the click")
+        // The same words keep the same views.
+        let firstRow = indicator.popoverContent.view.subviews.first?.subviews.first
+        indicator.popoverContent.update(limits: indicator.limits, now: now, calendar: utc)
+        XCTAssertTrue(indicator.popoverContent.view.subviews.first?.subviews.first === firstRow)
+        let texts = indicator.popoverContent.texts
+        for expected in [
+            "Claude · 5-hour window", "60%", "⚠︎ Full by 14:40, 20m before it resets at 15:00",
+            "Claude · week", "20%", "Codex · 5-hour window", "12%", "Resets at 17:00 (in 3h)",
+            "Antigravity", "Not published: agy shows its quota only in its own /usage."
+        ] {
+            XCTAssertTrue(texts.contains(expected), "\(expected) in \(texts)")
+        }
+        XCTAssertEqual(texts.firstIndex(of: "Claude · week").map { $0 < texts.firstIndex(of: "Codex · 5-hour window")! }, true)
+        func buttons(in view: NSView) -> [NiruxButton] { ((view as? NiruxButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons) }
+        let usage = try XCTUnwrap(buttons(in: indicator.popoverContent.view).first { $0.title == "Usage…" })
+        usage.performClick(nil)
+        XCTAssertEqual(usageOpened, 1)
+        // The click that closed the transient popover doesn't open it again.
+        indicator.popoverDidClose(Notification(name: NSPopover.didCloseNotification))
+        XCTAssertTrue(indicator.view.accessibilityPerformPress())
+        XCTAssertEqual(presented, 1)
+
+        let holding = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([52.5, 55, 57.5, 60], resetsAt: now + hour), now: now))
+        XCTAssertEqual(UsageText.detail(holding, now: now, calendar: utc).text, "≈ 90% when it resets at 15:00 (in 1h)")
     }
 
     @MainActor
