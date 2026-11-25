@@ -110,8 +110,11 @@ extension MergeQueue {
         let isDryRun: Bool
         private(set) var items: [Item]
         let excluded: [Excluded]
-        /// Top of the sheet: the base may be broken, a run is going on it.
+        /// Top of the sheet: the base may be broken.
         let warnings: [String]
+        /// What the first merge waits for: a run going on the base. Said, never
+        /// a reason to refuse.
+        var waits: [String] = []
         /// Why Start is refused.
         let refusals: [String]
 
@@ -301,6 +304,7 @@ extension MergeQueue {
             items: items,
             excluded: excluded,
             warnings: reading.setupError == nil ? baseWarnings(reading.baseRuns, settings: settings) : [],
+            waits: reading.setupError == nil ? baseWaits(reading.baseRuns, settings: settings) : [],
             refusals: refusals,
             expressRefusal: strictCandidateRefusal(for: joining, settings: settings, requireDisjoint: true),
             trainRefusal: trainCandidateRefusal(for: joining, settings: settings)
@@ -324,20 +328,20 @@ extension MergeQueue {
     }
 
     /// The last post-merge run on the base failed: the base may already be
-    /// broken. One still running: the first merge waits for it.
+    /// broken.
     private static func baseWarnings(_ runs: [GitHub.WorkflowRun]?, settings: BoardConfig.QueueSettings) -> [String] {
-        guard let workflow = settings.postMergeWorkflow, let runs else { return [] }
-        let label = GitHub.workflowLabel(workflow)
-        var warnings: [String] = []
-        if let last = runs.first(where: \.isCompleted), GitHub.isFailedRun(last.conclusion) {
-            warnings.append("The last \(label) on \(settings.baseBranch) failed (\(Engine.short(last.headSha))"
-                + (last.title.map { ", “\($0)”" } ?? "") + "): the base may already be broken.")
-        }
-        if runs.contains(where: { !$0.isCompleted }) {
-            warnings.append("A \(label) is running on \(settings.baseBranch): the first merge waits for it, and the "
-                + "queue stops if it fails.")
-        }
-        return warnings
+        guard let workflow = settings.postMergeWorkflow, let last = runs?.first(where: \.isCompleted),
+              GitHub.isFailedRun(last.conclusion)
+        else { return [] }
+        return ["The last \(GitHub.workflowLabel(workflow)) on \(settings.baseBranch) failed (\(Engine.short(last.headSha))"
+            + (last.title.map { ", “\($0)”" } ?? "") + "): the base may already be broken."]
+    }
+
+    /// A post-merge run still going on the base: the first merge waits for it.
+    private static func baseWaits(_ runs: [GitHub.WorkflowRun]?, settings: BoardConfig.QueueSettings) -> [String] {
+        guard let workflow = settings.postMergeWorkflow, runs?.contains(where: { !$0.isCompleted }) == true else { return [] }
+        return ["A \(GitHub.workflowLabel(workflow)) is running on \(settings.baseBranch): the first merge waits for it, "
+            + "and the queue stops if it fails."]
     }
 
     private enum Placement {
@@ -364,9 +368,6 @@ extension MergeQueue {
             return leftOut("GitHub can’t compare its head \(Engine.short(pullRequest.headOid)) with \(settings.baseBranch).")
         }
         guard let local = candidate.local else { return leftOut("Its worktrees on this Mac couldn’t be checked.") }
-        if !local.busyAgents.isEmpty {
-            return leftOut(local.busyAgents.joined(separator: "; ") + ": wait until it is back at its prompt.")
-        }
         if let reason = local.worktrees.lazy.compactMap(localProblem).first { return leftOut(reason) }
         // What the Board's Reviews station says of it, the sheet says too: a click on its Merge station lists it for Start.
         let unreviewed: String? = candidate.missingReviews.isEmpty ? nil
@@ -386,6 +387,11 @@ extension MergeQueue {
         } else if candidate.comparison == nil {
             item.notes.append("Nirux couldn’t tell whether it is behind \(settings.baseBranch)"
                 + (candidate.compareError.map { " (\($0))" } ?? "") + ".")
+        }
+        if !local.busyAgents.isEmpty {
+            item.notes.append(local.busyAgents.joined(separator: "; ") + ": the queue waits up to "
+                + "\(Int(Limits.agentWait / 60)) minutes for it to be back at its prompt before merging, then leaves it "
+                + "for the next queue (a train goes on without it).")
         }
         if pullRequest.hasAutoMerge {
             item.notes.append("GitHub’s auto-merge is on: the queue calls it off and arms its own on the head it checks "

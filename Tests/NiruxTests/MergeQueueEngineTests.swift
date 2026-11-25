@@ -185,6 +185,29 @@ final class MergeQueueEngineTests: XCTestCase {
         }
     }
 
+    /// The last pull request of a fast cadence leaving busy: the post-merge
+    /// run of those merged before it is still checked before the queue ends.
+    func testAFastCadenceWhoseLastPullRequestLeavesBusyStillChecksThePostMergeRun() {
+        for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
+            var world = readyWorld()
+            world.pullRequests[53] = MQ.pullRequest(53, head: b)
+            world.checks[b] = MQ.checks(MQ.checkRun(id: 2))
+            world.locals["feat/53"] = MergeQueue.LocalState(busyAgents: ["claude working in “api”"])
+            if cadence == .expressDisjoint { world.behind = [a: 1, b: 2] }
+            var queue = fastQueue(cadence)
+            XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
+            world.merge(52, as: c)
+            queue.mutated(.sent)
+            queue.answer(world, until: { $0.pendingReads == [.pushRuns(commit: c)] })
+            XCTAssertTrue(queue.noted("#53 leaves the queue"), "\(cadence)")
+            XCTAssertEqual(queue.phase, .running, "\(cadence)")
+            world.pushRuns[c] = [MQ.run(22, head: c)]
+            queue.answer(world)
+            XCTAssertEqual(queue.phase, .finished, "\(cadence)")
+            XCTAssertTrue(queue.noted("Finished: 1 merged"), "\(cadence)")
+        }
+    }
+
     func testBatchStillUpdatesBehindBranchesBeforeMerging() {
         var world = readyWorld()
         world.behind[a] = 2
@@ -308,16 +331,30 @@ final class MergeQueueEngineTests: XCTestCase {
         XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
     }
 
-    func testABusyAgentStopsTheQueueAfterTenMinutes() {
+    /// An agent still busy after 10 minutes (at a dialog all night) holds
+    /// its pull request only: it leaves for the next queue, the next merges.
+    func testABusyAgentLeavesTheQueueAfterTenMinutesAndTheNextMerges() {
         var world = readyWorld()
-        world.local.busyAgents = ["codex waiting (permission: Bash) in “api”"]
-        var queue = started(world)
+        world.pullRequests[53] = MQ.pullRequest(53, head: b)
+        world.checks[b] = MQ.checks(MQ.checkRun(id: 2))
+        world.locals["feat/52"] = MergeQueue.LocalState(busyAgents: ["codex waiting (permission: Bash) in “api”"])
+        var queue = MQ.Harness(entries: [MQ.entry(52, head: a), MQ.entry(53, head: b)])
+        queue.start()
         let start = queue.now
-        XCTAssertNil(queue.run(world))
-        XCTAssertEqual(queue.stopReason?.kind, .agentBusy)
-        XCTAssertTrue(queue.stopReason?.message.contains("codex waiting (permission: Bash)") == true)
+        XCTAssertEqual(queue.run(world), .merge(number: 53, head: b, method: .merge))
+        guard case .stopped(let reason) = queue.engine.entries[0].step else { return XCTFail("#52 still in") }
+        XCTAssertEqual(reason.kind, .agentBusy)
+        XCTAssertTrue(reason.message.contains("codex waiting (permission: Bash)"), reason.message)
+        XCTAssertTrue(queue.noted("#52 leaves the queue"))
+        XCTAssertEqual(queue.phase, .running)
         XCTAssertGreaterThanOrEqual(queue.now - start, 600)
-        XCTAssertLessThan(queue.now - start, 640)
+
+        for cadence in [MergeQueue.Cadence.batchPostMerge, .expressDisjoint] {
+            var other = MQ.Harness(entries: [MQ.entry(52, head: a), MQ.entry(53, head: b)], cadence: cadence)
+            other.start()
+            XCTAssertEqual(other.run(world), .merge(number: 53, head: b, method: .merge), "\(cadence)")
+            XCTAssertTrue(other.noted("#52 leaves the queue"), "\(cadence)")
+        }
     }
 
     func testAnOpenDialogInAFocusedColumnCountsAsBusy() {

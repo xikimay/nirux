@@ -300,6 +300,8 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
         var typedAny = false
+        lazy var places = MissionWaitHook.mailbox.places()
+        lazy var hooksOn = Self.currentClaudeMissionHook()
         for delivery in MissionStore.shared.pendingPromptDeliveries(now: now)
         where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
             let mission = delivery.mission
@@ -316,6 +318,17 @@ extension NiruxShellView {
                 continue
             }
             guard !missionWaits.typing.contains(delivery.event.id) else { continue }
+            if agent == .claude, leaveToHook(
+                delivery, in: recipient, foreground: pty.foregroundProcess(snapshot: snapshot), places: places, now: now, enabled: hooksOn,
+                text: {
+                    MissionStore.shared.pendingPromptDelivery(delivery).flatMap {
+                        MissionPromptText.hookText(for: $0, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title)
+                    }
+                }
+            ) {
+                if recipient.id == seenAtPrompt, onSight == nil { onSight = .typed }
+                continue
+            }
             let refusal = pty.missionPromptRefusal(
                 runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now), snapshot: snapshot,
                 seenByUser: recipient.id == seenAtPrompt, agent: agent
@@ -482,13 +495,13 @@ extension NiruxShellView {
     /// prompt (a tell is given up then, an answer or a question counts as
     /// typed). One whose agent left before any of it did waits for the next
     /// free prompt.
-    private func finishTyping(_ delivery: MissionStore.AcceptedEvent, _ typed: TypedMessage, at timestamp: TimeInterval) {
+    func finishTyping(_ delivery: MissionStore.AcceptedEvent, _ typed: TypedMessage, at timestamp: TimeInterval) {
         let store = MissionStore.shared
         let id = delivery.event.id
         switch typed {
         case .left:
             break
-        case .sent, .inPrompt, .cut:
+        case .sent, .inPrompt, .cut, .endedBeforeEnter:
             let recorded = typed != .sent && delivery.event.kind == .instruction
                 ? store.noteInstructions(heldNotice: [], expired: [id], at: Date().timeIntervalSince1970)
                 : store.markTyped(delivery, at: delivery.event.kind == .question ? timestamp : Date().timeIntervalSince1970)
@@ -496,6 +509,7 @@ extension NiruxShellView {
             guard recorded else {
                 return MissionWaitLog.logger.error("A typed Mission message wasn't recorded: id=\(id.prefix(8), privacy: .public)")
             }
+            letterTyped(id)
         }
         missionWaits.typing.remove(id)
     }
@@ -515,6 +529,10 @@ extension NiruxShellView {
             user = "Only the start of \(what) for “\(recipient)” went into its prompt: it stopped taking it. Clear it there."
             writer = "Your message to “\(recipient)” was cut off: only its start reached its prompt, and Nirux won't type it again. "
                 + "Send it again (an answer's rest with tell) once its prompt is clear."
+        case .endedBeforeEnter:
+            user = "All of \(what) for “\(recipient)” went in, but its agent ended before Enter: it may not have read it."
+            writer = "Your message to “\(recipient)” went into its prompt, but its agent ended before Enter: it may not have read it, "
+                + "and Nirux won't type it again. Send it again once the task's agent is back."
         }
         if let sender { tellProposer(sender, writer) }
         showToast(user)
@@ -530,6 +548,8 @@ extension NiruxShellView {
         case inPrompt(why: String)
         /// Only its start reached the prompt.
         case cut
+        /// All of it went in, and its agent ended before Enter.
+        case endedBeforeEnter
     }
 
     /// `paste` (a bracketed paste) and Enter into `pty`: in one write when
@@ -571,6 +591,7 @@ extension NiruxShellView {
         rereads: Int = recordRereads, done: @escaping @MainActor @Sendable (TypedMessage) -> Void
     ) {
         guard workspaces.contains(where: { !$0.isClosing && $0.columns.contains { $0.pty === pty } }) else { return done(.left) }
+        sideEffects.willPressEnter(pty)
         let snapshot = ProcessSnapshot()
         func again(after delay: TimeInterval, tries: Int, rereads: Int) {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -582,6 +603,8 @@ extension NiruxShellView {
         }
         if snapshot.isEmpty, tries > 1 { return again(after: 0.5, tries: tries - 1, rereads: rereads) }
         guard !snapshot.isEmpty else { return done(.inPrompt(why: "Nirux couldn't read the running processes")) }
+        // Its agent ended after the paste, its exit maybe not read yet.
+        if let process, !snapshot.contains(process) { return done(.endedBeforeEnter) }
         // The paste's own keys are the last: anything since is someone's.
         guard pty.mayPressEnter(after: typedAt, for: process, snapshot: snapshot)
         else { return done(.inPrompt(why: "someone typed meanwhile or a dialog opened")) }

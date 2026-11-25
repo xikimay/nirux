@@ -304,6 +304,11 @@ struct PersistedSettings: Codable {
     /// Answer Claude permission dialogs from the sidebar (see
     /// `PermissionApproval`). On for a new install, as Mission handoffs.
     var sidebarApprovalsEnabled: Bool = true
+    /// Mission messages reach Claude Code through Nirux's waiter hook
+    /// instead of being typed into its terminal
+    /// (docs/design/mission-delivery.md, section 4). On by default: missing
+    /// decodes to true.
+    var claudeMissionHook: Bool = true
     /// See `KeepAwakeController`. On by default: missing decodes to true.
     var keepMacAwakeWhileAgentsWork: Bool = true
     /// `KeepAwakeController.isAwaitingChecks`, on the power adapter. Missing,
@@ -381,6 +386,7 @@ struct PersistedSettings: Codable {
         sidebarExpanded: Bool? = nil,
         missionHandoffsEnabled: Bool = true,
         sidebarApprovalsEnabled: Bool = true,
+        claudeMissionHook: Bool = true,
         onboardingChecklist: OnboardingChecklistState? = nil
     ) {
         self.claudeLaunchMode = claudeLaunchMode
@@ -390,6 +396,7 @@ struct PersistedSettings: Codable {
         self.sidebarExpanded = sidebarExpanded
         self.missionHandoffsEnabled = missionHandoffsEnabled
         self.sidebarApprovalsEnabled = sidebarApprovalsEnabled
+        self.claudeMissionHook = claudeMissionHook
         self.onboardingChecklist = onboardingChecklist
     }
 
@@ -402,6 +409,7 @@ struct PersistedSettings: Codable {
         case sidebarWidth
         case missionHandoffsEnabled
         case sidebarApprovalsEnabled
+        case claudeMissionHook
         case keepMacAwakeWhileAgentsWork
         case keepMacAwakeWhileChecksRun
         case animatesInterface
@@ -450,6 +458,7 @@ struct PersistedSettings: Codable {
         sidebarWidth = try? container.decode(Double.self, forKey: .sidebarWidth)
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? true
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? true
+        claudeMissionHook = try container.decodeIfPresent(Bool.self, forKey: .claudeMissionHook) ?? true
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
         keepMacAwakeWhileChecksRun = (try? container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileChecksRun)) ?? keepMacAwakeWhileAgentsWork
         animatesInterface = (try? container.decodeIfPresent(Bool.self, forKey: .animatesInterface)) ?? true
@@ -509,6 +518,7 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(sidebarWidth, forKey: .sidebarWidth)
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
+        try container.encode(claudeMissionHook, forKey: .claudeMissionHook)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
         try container.encode(keepMacAwakeWhileChecksRun, forKey: .keepMacAwakeWhileChecksRun)
         try container.encode(animatesInterface, forKey: .animatesInterface)

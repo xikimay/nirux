@@ -99,6 +99,16 @@ final class MergeQueueConfirmationTests: XCTestCase {
         }
         XCTAssertNil(refusal(good))
         XCTAssertNil(refusal(good, .batchPostMerge))
+        // What the queue waits for itself: an unattended Lead's hand-off would
+        // be lost, nothing tries again.
+        var waits = good
+        waits.baseRuns = [MQ.run(2, head: c, status: "in_progress", conclusion: nil), MQ.run(1, head: c)]
+        waits.candidates[1].local = MergeQueue.LocalState(busyAgents: ["claude working in “api”"])
+        XCTAssertNil(refusal(waits), "a nightly running, an agent at work")
+        XCTAssertEqual(MergeQueue.confirmation(waits).items.last?.notes, [
+            "claude working in “api”: the queue waits up to 10 minutes for it to be back at its prompt before merging, "
+                + "then leaves it for the next queue (a train goes on without it)."
+        ])
         XCTAssertNotNil(refusal(good, .expressDisjoint), "both PRs change the same path")
         var distinct = good
         distinct.candidates[1] = candidate(14, head: b, files: ["Other.swift"])
@@ -216,7 +226,6 @@ final class MergeQueueConfirmationTests: XCTestCase {
             candidate(1, head: a, pullRequest: MQ.pullRequest(1, head: a, isDraft: true)),
             candidate(2, head: a, pullRequest: MQ.pullRequest(2, head: a, repository: fork)),
             candidate(3, head: a, pullRequest: MQ.pullRequest(3, head: a, mergeable: "CONFLICTING")),
-            candidate(4, head: a, local: MergeQueue.LocalState(busyAgents: ["claude working in “api”"])),
             candidate(5, head: a, local: MergeQueue.LocalState(worktrees: [
                 MergeQueue.LocalWorktree(path: "/tmp/x/app.feat-5", problem: .trackedChanges)
             ])),
@@ -236,7 +245,6 @@ final class MergeQueueConfirmationTests: XCTestCase {
         XCTAssertEqual(reasons[1], "It is a draft.")
         XCTAssertEqual(reasons[2], "It comes from a fork: the queue only merges branches of acme/widgets.")
         XCTAssertEqual(reasons[3], "It conflicts with main: resolve that first.")
-        XCTAssertEqual(reasons[4], "claude working in “api”: wait until it is back at its prompt.")
         XCTAssertEqual(reasons[5], "Tracked files changed in /.../x/app.feat-5: commit or discard them first.")
         XCTAssertEqual(reasons[6], "Commits not on GitHub in /.../x/app.feat-6: push them first.")
         XCTAssertEqual(reasons[7], "It is merged.")
@@ -387,8 +395,10 @@ final class MergeQueueConfirmationTests: XCTestCase {
         let confirmation = MergeQueue.confirmation(reading([candidate(1, head: a)], baseRuns: runs))
 
         XCTAssertEqual(confirmation.warnings, [
-            "The last nightly on main failed (bbbbbbb, “Merge pull request #9”): the base may already be broken.",
-            "A nightly is running on main: the first merge waits for it, and the queue stops if it fails.",
+            "The last nightly on main failed (bbbbbbb, “Merge pull request #9”): the base may already be broken."
+        ])
+        XCTAssertEqual(confirmation.waits, [
+            "A nightly is running on main: the first merge waits for it, and the queue stops if it fails."
         ])
         XCTAssertTrue(confirmation.canStart, "a warning, not a refusal: a pull request may fix the nightly")
         let succeeded = MergeQueue.confirmation(reading([candidate(1, head: a)], baseRuns: [MQ.run(2, head: b), runs[1]]))

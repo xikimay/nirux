@@ -557,7 +557,7 @@ final class BoardStagesFactsTests: XCTestCase {
             (row(workspaces: ["task"], pullRequest: pullRequest(12, base: "feat/base", draft: true), stack: onMerged), "draft"),
             (row(workspaces: ["task"], pullRequest: pullRequest(12, base: "release")), "targets release"),
             (row(workspaces: ["task"], pullRequest: pullRequest(12, mergeable: "CONFLICTING")), "conflict"),
-            (busy, "agent working")
+            (busy, nil) // the queue waits for it
         ]
         for (row, refusal) in refusals {
             XCTAssertEqual(facts([row], queue: queue(.none)).lines[0].queue.refusal, refusal)

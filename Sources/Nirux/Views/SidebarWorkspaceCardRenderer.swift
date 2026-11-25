@@ -687,6 +687,7 @@ final class SidebarWorkspaceCardRenderer {
         button.cornerRadius = Theme.Radius.chip
         button.hoverFillColor = Theme.Color.accent.withAlphaComponent(0.14)
         button.toolTip = deferred.tooltip
+        button.setAccessibilityElement(true)
         button.setAccessibilityRole(.button)
         button.setAccessibilityLabel("Resume \(deferred.agent.rawValue) here")
         views.last?.setAccessibilityElement(false)
@@ -1182,6 +1183,7 @@ enum SidebarActionButton {
         // A capsule, as `NiruxButton`.
         button.cornerRadius = SidebarExpandedMetrics.buttonHeight / 2
         button.toolTip = label
+        button.setAccessibilityElement(true)
         button.setAccessibilityRole(.button)
         button.setAccessibilityLabel(label)
         return button
