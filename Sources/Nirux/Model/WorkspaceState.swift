@@ -192,6 +192,16 @@ final class WorkspaceState {
     /// The Lead wrote `nextStep` (or `blocker`), not the user: its next
     /// update may replace it. False for an empty field.
     var nextStepIsFromLead = false
+    /// When the user let it spend past its space's budget (Continue or
+    /// Fresh start on its card): for `budgetPassLifetime`, no warning and no
+    /// pause of its follow-ups.
+    var budgetPassedAt: TimeInterval?
+    /// As long as the 7 days a budget reads.
+    static let budgetPassLifetime: TimeInterval = 7 * 86_400
+
+    func passesBudget(at now: TimeInterval) -> Bool {
+        budgetPassedAt.map { now - $0 < Self.budgetPassLifetime } ?? false
+    }
     var blockerIsFromLead = false
     var unknownPhaseRawValue: String?
     /// Each review pass's latest run (docs/design/review-badges.md).

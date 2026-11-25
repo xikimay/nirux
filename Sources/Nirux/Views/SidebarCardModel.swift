@@ -197,6 +197,9 @@ extension WorkspaceInfo {
     /// (`rowSummary`) when it shows them; when it says something else first
     /// they get a line here, so every question opens and every clean-up
     /// shows.
+    /// Every column at its prompt, asking nothing (`ColumnInfo.isAtRest`).
+    var agentsRest: Bool { columns.allSatisfy(\.isAtRest) }
+
     var cardActions: [SidebarCardAction] {
         var actions: [SidebarCardAction] = []
         let names = columns.map(SidebarRenderer.columnName)
@@ -245,6 +248,12 @@ extension WorkspaceInfo {
         }
         if let heldMessages {
             actions.append(.heldMessages(heldMessages))
+        }
+        // Only a task's usage has a budget (`taskUsage(of:)`).
+        if let usage, usage.isOverBudget, let budget = usage.budget {
+            actions.append(.budget(SidebarBudgetOffer(
+                workspaceID: id, budget: budget, choices: agentsRest ? BudgetChoice.allCases : [.keepGoing, .close]
+            )))
         }
         // The blocker is the status line's, or waits behind what comes
         // first (the tooltip has it). The selected row adds the next step
@@ -313,6 +322,9 @@ enum SidebarCardAction: Hashable {
     /// A Claude column at rest whose context costs to go on with: Compact
     /// or Fresh start, never imposed.
     case contextOffer(columnIndex: Int, ContextOffer)
+    /// A task past its space's budget (D4): Continue, Fresh start or
+    /// Close…; its follow-ups wait meanwhile.
+    case budget(SidebarBudgetOffer)
 
     /// A nested row keeps its indent over it: it neither asks the user nor
     /// needs the width.
@@ -325,7 +337,7 @@ enum SidebarCardAction: Hashable {
     /// proposed rule waits on nothing: it stays as quiet.
     var isQuiet: Bool {
         switch self {
-        case .next, .reviewBadges, .ruleProposals, .dailyPass, .heldMessages, .leadRecovery, .contextOffer: return true
+        case .next, .reviewBadges, .ruleProposals, .dailyPass, .heldMessages, .leadRecovery, .contextOffer, .budget: return true
         case .missionQuestion(_, let question): return question.handOff == nil
         case .approval, .resume, .interrupt, .cleanup, .turnQuestion, .dialog, .waitingMessages, .missionRecommendation: return false
         }

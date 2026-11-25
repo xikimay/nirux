@@ -78,12 +78,6 @@ final class UsageDisplayTests: XCTestCase {
     }
 
     @MainActor func testAColumnIsAtRestOnlyAtItsPromptAskingNothing() throws {
-        func column(_ status: AgentStatus) -> ColumnInfo {
-            ColumnInfo(
-                index: 0, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
-                webTitle: nil, terminalTitle: nil, agentStatus: status, isEditor: false, editorFileName: nil
-            )
-        }
         let idle = column(.idle)
         XCTAssertTrue(idle.isAtRest)
         let working = column(.working)
@@ -268,6 +262,96 @@ final class UsageDisplayTests: XCTestCase {
         XCTAssertFalse(under.isOverBudget)
         XCTAssertFalse(under.isWarning)
         XCTAssertFalse(try XCTUnwrap(SidebarTaskUsage(report, taskID: "task")).isOverBudget, "no budget")
+    }
+
+    /// Past its budget, a task's card offers Continue, Fresh start (only
+    /// while its columns rest) and Close…; they arm like Allow / Deny and
+    /// click only for that task, budget and choice.
+    @MainActor func testATaskPastItsBudgetOffersAChoice() throws {
+        let offer = SidebarBudgetOffer(workspaceID: "ws", budget: 25_000_000, choices: BudgetChoice.allCases)
+        let info = overBudgetTask([column(.idle)])
+        XCTAssertEqual(info.cardActions, [.budget(offer)])
+        let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 800).render()
+        XCTAssertEqual(Set(result.approvalButtons.keys), Set(BudgetChoice.allCases.map {
+            SidebarHoverTarget.budgetChoiceButtonKey(offer: offer, choice: $0)
+        }))
+        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260), accuracy: 0.5)
+        XCTAssertEqual(overBudgetTask([column(.working)]).cardActions, [
+            .budget(SidebarBudgetOffer(workspaceID: "ws", budget: 25_000_000, choices: [.keepGoing, .close]))
+        ], "no Fresh start mid-turn")
+
+        let keepGoing = SidebarHitRegion.budgetChoice(workspaceIndex: 0, offer: offer, choice: .keepGoing)
+        func click(_ released: SidebarHitRegion?) -> SidebarBudgetClick? {
+            SidebarView.budgetChoiceClick(pressed: keepGoing, released: released, clickCount: 1, armedAtPress: true, armedAtRelease: true)
+        }
+        XCTAssertEqual(click(keepGoing), SidebarBudgetClick(workspaceID: "ws", choice: .keepGoing))
+        XCTAssertNil(click(.budgetChoice(workspaceIndex: 0, offer: offer, choice: .close)), "released on another")
+        let other = SidebarBudgetOffer(workspaceID: "other", budget: 25_000_000, choices: BudgetChoice.allCases)
+        XCTAssertNil(click(.budgetChoice(workspaceIndex: 0, offer: other, choice: .keepGoing)), "another task's, at the same place")
+        XCTAssertNotEqual(
+            SidebarHoverTarget.budgetChoiceButtonKey(offer: offer, choice: .keepGoing),
+            SidebarHoverTarget.budgetChoiceButtonKey(offer: other, choice: .keepGoing),
+            "another task's row moved there: not armed"
+        )
+        var unbudgeted = info
+        unbudgeted.usage = SidebarTaskUsage(UsageReport(sessions: [overBudgetSession], now: now), taskID: "ws")
+        XCTAssertEqual(unbudgeted.cardActions, [], "no budget, no choice")
+    }
+
+    /// VoiceOver's press on a budget choice, once armed, hands the shell its
+    /// task's id and the choice.
+    @MainActor func testABudgetChoicePressReachesItsTask() throws {
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 800))
+        let window = NSWindow(contentRect: sidebar.frame, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = sidebar
+        sidebar.isExpanded = true
+        sidebar.update(profiles: [], workspaces: [overBudgetTask([column(.idle)], isActive: true)])
+        var chosen: [String] = []
+        sidebar.onBudgetChoice = { chosen.append("\($0) \($1.rawValue)") }
+        let button = try XCTUnwrap(NiruxApp.pressTarget(label: BudgetChoice.keepGoing.accessibilityLabel, in: [window]))
+        XCTAssertFalse(button.accessibilityPerformPress(), "not armed yet")
+        let offer = SidebarBudgetOffer(workspaceID: "ws", budget: 25_000_000, choices: BudgetChoice.allCases)
+        waitUntil("armed") { sidebar.isApprovalButtonArmed(SidebarHoverTarget.budgetChoiceButtonKey(offer: offer, choice: .keepGoing)) }
+        XCTAssertTrue(button.accessibilityPerformPress())
+        XCTAssertEqual(chosen, ["ws keepGoing"])
+    }
+
+    /// Continue on the card outlives a relaunch; a task that never chose it
+    /// writes nothing.
+    func testContinuePastTheBudgetIsSaved() throws {
+        let passing = PersistedWorkspace(id: "a", title: "a", cwd: "/tmp", columns: [], focusedColumnIndex: 0, budgetPassedAt: 1_000)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(passing)) as? [String: Any])
+        XCTAssertEqual(json["budgetPassedAt"] as? Double, 1_000)
+        XCTAssertEqual(try JSONDecoder().decode(PersistedWorkspace.self, from: JSONEncoder().encode(passing)).budgetPassedAt, 1_000)
+        let none = PersistedWorkspace(id: "b", title: "b", cwd: "/tmp", columns: [], focusedColumnIndex: 0)
+        let empty = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(none)) as? [String: Any])
+        XCTAssertNil(empty["budgetPassedAt"])
+    }
+
+    private var overBudgetSession: UsageSession {
+        UsageSession(
+            key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "ws"), contextTokens: 90_000,
+            events: [event(60, input: 26_000_000, context: 90_000)]
+        )
+    }
+
+    @MainActor private func overBudgetTask(_ columns: [ColumnInfo], isActive: Bool = false) -> WorkspaceInfo {
+        var info = WorkspaceInfo(
+            id: "ws", index: 0, title: "check-video", profileID: WorkspaceProfile.defaultID, isInactive: false,
+            columnCount: columns.count, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: isActive,
+            columns: columns, prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+            phase: .active, lastSummary: nil, lastActivityAt: nil
+        )
+        info.usage = SidebarTaskUsage(UsageReport(sessions: [overBudgetSession], now: now), taskID: "ws", budget: 25_000_000)
+        return info
+    }
+
+    private func column(_ status: AgentStatus) -> ColumnInfo {
+        ColumnInfo(
+            index: 0, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
+            webTitle: nil, terminalTitle: nil, agentStatus: status, isEditor: false, editorFileName: nil
+        )
     }
 
     func testTheUsageWindowRanksTasksAndCountsWhatTheyLeaveOut() {

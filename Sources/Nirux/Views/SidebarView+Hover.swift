@@ -105,7 +105,8 @@ extension SidebarView {
         case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _),
              .agentInterrupt(let workspaceIndex, _, _), .missionTypeNow(let workspaceIndex, _, _),
              .deferredAgentResume(let workspaceIndex, _, _), .turnAnswer(let workspaceIndex, _, _, _),
-             .missionAnswer(let workspaceIndex, _, _, _), .contextOffer(let workspaceIndex, _, _, _):
+             .missionAnswer(let workspaceIndex, _, _, _), .contextOffer(let workspaceIndex, _, _, _),
+             .budgetChoice(let workspaceIndex, _, _):
             if let key = Self.armedButtonKey(for: area.region) {
                 setHoverTarget(.approvalButton(workspaceIndex: workspaceIndex, key: key))
             }
