@@ -1,15 +1,13 @@
 name: Package
 
-# The nightly packages and publishes only from main. A pull request that
-# changes how the app is built, bundled or launched packages it here first,
-# the way the nightly does (ad-hoc signed), checks the packaged terminal
-# runtime, and runs the launch check: once it is ready for review, then on
-# each push. A draft (work in progress, a flake gate) doesn't take a macOS
-# runner for it.
+# The nightly packages and publishes only from main. A train (nirux-train/*)
+# that changes how the app is built, bundled or launched packages it here
+# first, the way the nightly does (ad-hoc signed), checks the packaged
+# terminal runtime, and runs the launch check. Other pull requests only by
+# hand: `gh workflow run package.yml --ref <branch>`.
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - NiruxCore/Package.swift
       - Package.swift
@@ -24,6 +22,7 @@ on:
       - scripts/launch-check.sh
       - .github/workflows/nightly.yml
       - .github/workflows/package.yml
+  workflow_dispatch:
 
 concurrency:
   group: package-${{ github.ref }}
@@ -34,7 +33,7 @@ permissions:
 
 jobs:
   package:
-    if: ${{ !github.event.pull_request.draft }}
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'nirux-train/')
     runs-on: macos-15
     timeout-minutes: 30
     env:
