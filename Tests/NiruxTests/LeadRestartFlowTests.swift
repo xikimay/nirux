@@ -243,8 +243,10 @@ final class LeadRestartFlowTests: XCTestCase {
                     childAgentUUID: mission.childAgentUUID, kind: .completed, message: message, timestamp: time
                 ), enabled: false))
             }
-            func pastes() -> Int { standIn.input.components(separatedBy: "\u{1b}[200~").count - 1 }
-            func count(_ text: String) -> Int { standIn.input.components(separatedBy: text).count - 1 }
+            // A redraw's Ctrl+L can reach the stand-in (its process is perl) in the middle of a paste.
+            func input() -> String { standIn.input.replacingOccurrences(of: "\u{0C}", with: "") }
+            func pastes() -> Int { input().components(separatedBy: "\u{1b}[200~").count - 1 }
+            func count(_ text: String) -> Int { input().components(separatedBy: text).count - 1 }
             let now = Date().timeIntervalSince1970
             try result("Docs written.", at: now)
             shell.typeMissionMessages()
@@ -254,7 +256,7 @@ final class LeadRestartFlowTests: XCTestCase {
 
             try result("Export finished.", at: now - MissionResultBatch.window - 1)
             shell.typeMissionMessages()
-            harness.waitUntil("the Lead's results") { standIn.input.contains("Docs written.") }
+            harness.waitUntil("the Lead's results") { input().contains("Docs written.") }
             XCTAssertEqual(count("Export finished."), 1)
             XCTAssertEqual(pastes(), 1, "one paste, one wake")
 
@@ -274,7 +276,10 @@ final class LeadRestartFlowTests: XCTestCase {
             shell.typeMissionMessages()
             harness.waitUntil("the rest") { count(parts[19]) == 1 }
             XCTAssertEqual(pastes(), 3)
-            XCTAssertEqual(parts.map(count), Array(repeating: 1, count: parts.count), "each result once")
+            XCTAssertEqual(
+                parts.map(count), Array(repeating: 1, count: parts.count),
+                "each result once; Ctrl+L seen: \(standIn.input.contains("\u{0C}"))"
+            )
         }
     }
 
