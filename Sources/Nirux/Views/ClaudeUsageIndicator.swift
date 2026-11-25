@@ -1,11 +1,24 @@
 import AppKit
 
+/// The indicator's view: a click, or VoiceOver's press, opens the popover.
+private final class PressableView: NSView {
+    var onPress: (() -> Void)?
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityPerformPress() -> Bool {
+        onPress?()
+        return true
+    }
+}
+
 /// The binding plan limit at the trailing end of the main window's title
 /// bar: the one that stops the agents first (`QuotaLimit.binding`), Claude's
 /// from its status line (see `ClaudeUsageLimits`) or Codex's from its
 /// rollouts (`UsageMonitor`). Hair meters for that agent's windows, then its
 /// pace in words: "5h 68% · ≈ 87%", or in red "⚠︎ 5h full by 20:05" once it
-/// runs out before its reset. The tooltip gives every window. While the
+/// runs out before its reset. The tooltip gives every window; a click opens
+/// the popover with each one's meter, pace and reset. While the
 /// option is off or nothing is known it takes no room: the controller's
 /// `isHidden` only works for top and bottom accessories, so the view hides
 /// and shrinks to nothing itself. First of the trailing accessories, it
@@ -20,6 +33,22 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
 
     let label = NSTextField(labelWithString: "")
     let meters = QuotaMeterView()
+    let popoverContent = QuotaPopoverViewController()
+    /// The Usage window, from the popover.
+    var onShowUsage: (() -> Void)?
+    /// Shows the popover under the indicator; a test sets its own.
+    var presentPopover: (NSPopover, NSView) -> Void = { popover, view in
+        guard view.window != nil else { return }
+        popover.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+    }
+    private lazy var popover: NSPopover = {
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.appearance = Theme.appearance
+        popover.contentViewController = popoverContent
+        return popover
+    }()
+    private var renderedAt: TimeInterval = 0
     /// Times read in the user's calendar; a test sets its own.
     var calendar = Calendar.current
     /// The limits shown, each with its forecast: the next update holds them.
@@ -32,14 +61,20 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
     init() {
         super.init(nibName: nil, bundle: nil)
         layoutAttribute = .trailing
+        popoverContent.onShowUsage = { [weak self] in
+            self?.popover.performClose(nil)
+            self?.onShowUsage?()
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 0, height: Self.height))
+        let container = PressableView(frame: NSRect(x: 0, y: 0, width: 0, height: Self.height))
         container.isHidden = true
+        container.onPress = { [weak self] in self?.togglePopover() }
+        container.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(togglePopover)))
         label.font = Theme.Font.captionDigits
         label.textColor = Self.normalColor
         label.lineBreakMode = .byClipping
@@ -60,8 +95,17 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
         render(now: now)
     }
 
+    /// Opens the popover, or closes it when it shows.
+    @objc func togglePopover() {
+        if popover.isShown { return popover.performClose(nil) }
+        guard isShowing else { return }
+        popoverContent.update(limits: limits, now: renderedAt, calendar: calendar)
+        presentPopover(popover, view)
+    }
+
     private func render(now: TimeInterval) {
         defer { relayOutTitleBar() }
+        renderedAt = now
         limits = QuotaLimit.current(
             claude: claude, claudeReadings: claudeReadings, codex: codex, codexReadings: codexReadings, previous: limits, now: now
         )
@@ -72,8 +116,10 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
             label.toolTip = nil
             label.stringValue = ""
             meters.limits = []
+            if popover.isShown { popover.performClose(nil) }
             return
         }
+        if popover.isShown { popoverContent.update(limits: limits, now: now, calendar: calendar) }
         let title = UsageText.title(binding, now: now, calendar: calendar)
         label.stringValue = title.text
         label.textColor = switch title.tone {
@@ -86,7 +132,7 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
         let tooltip = tooltip(now: now)
         view.toolTip = tooltip
         label.toolTip = tooltip
-        label.setAccessibilityLabel(([title.text.replacingOccurrences(of: "⚠︎ ", with: "")] + limits.map { limit in
+        view.setAccessibilityLabel(([title.text.replacingOccurrences(of: "⚠︎ ", with: "")] + limits.map { limit in
             "\(UsageText.name(of: limit)) \(Int(limit.latest.usedPercent.rounded()))% used, \(UsageText.pace(limit, now: now, calendar: calendar))"
         }).joined(separator: ". "))
         label.sizeToFit()
