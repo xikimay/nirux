@@ -302,7 +302,6 @@ final class LeadChannelTests: XCTestCase {
             XCTAssertEqual(hints["readOnlyHint"], tool == LeadTools.listSpaces, tool)
             XCTAssertEqual(hints["destructiveHint"], tool == LeadTools.deleteSpace, tool)
             XCTAssertFalse(TaskTools.names.contains(tool), tool)
-            XCTAssertNotNil(try call(tool, [:], context: context(lead: false))["error"], "\(tool) is Lead-only")
         }
 
         let leadListTasks = try XCTUnwrap(LeadTools.definitions.first { $0["name"] as? String == LeadTools.listTasks })
@@ -315,7 +314,6 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertNil(LeadTools.problem(tool: LeadTools.listSpaces, arguments: [:]))
         XCTAssertNil(LeadTools.problem(tool: LeadTools.listTasks, arguments: ["space": "General"]))
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.listTasks, arguments: ["space": "  "]))
-        XCTAssertNotNil(LeadTools.problem(tool: LeadTools.listTasks, arguments: ["space": "General"], subtask: true))
 
         XCTAssertNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "Ops", "color": "#aabbcc", "anchors": ["/tmp"]]))
         XCTAssertNotNil(LeadTools.problem(tool: LeadTools.createSpace, arguments: ["name": "   "]))

@@ -97,6 +97,11 @@ struct ShellSideEffects {
         CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .leftMouseUp)
     }
 
+    /// A drag's own ticks (`HeldPress`) on or off: tests post theirs.
+    var runsDragTicks: @MainActor (_ on: Bool) -> Void = { on in
+        if on { NSEvent.startPeriodicEvents(afterDelay: 0.15, withPeriod: HeldPress.tickPeriod) } else { NSEvent.stopPeriodicEvents() }
+    }
+
     /// macOS's "Reduce motion" (System Settings › Accessibility › Display).
     var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 

@@ -1201,6 +1201,36 @@ final class LeadToolsFlowTests: XCTestCase {
     /// it checked; a day with a recorded review types the daily line into
     /// the Lead's terminal, once. After the Lead reads its day, its row and
     /// Space Settings say what the pass read.
+    /// A night where a task only waits (here on its red CI): the pass runs,
+    /// its morning line names it, and its quiet text proposes no rule.
+    func testADailyPassRunsOnANightWhereATaskOnlyWaits() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let profile = try XCTUnwrap(shell.profiles.first { $0.id == lead.space })
+            shell.addWorkspace(title: "Fix", cwd: harness.worktree, profileID: lead.space)
+            let fix = try XCTUnwrap(shell.workspaces.first { $0.title == "Fix" })
+            shell.refreshGitContextNow(for: fix)
+            harness.waitUntil("its branch") { fix.gitBranch == harness.worktreeBranch }
+            var red = PRInfo(number: 812, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil,
+                             mergeable: nil, url: "u", additions: nil, deletions: nil, changedFiles: nil)
+            red.headRefOid = "a"
+            fix.prInfo = red
+            var sent: [String] = []
+            shell.checkDailyPasses(now: Date().timeIntervalSince1970, isQuiet: { _ in true }, send: { _, text in sent.append(text) })
+            harness.waitUntil("the pass's read") { shell.dailyPassChecks.isEmpty }
+            XCTAssertEqual(sent.count, 1, "a task waits: the pass runs")
+
+            var result: (text: String, isError: Bool)?
+            shell.leadDailyPass(in: profile, lead: lead.workspace) { result = ($0, $1) }
+            harness.waitUntil("the daily pass response") { result != nil }
+            let text = try XCTUnwrap(result).text
+            XCTAssertTrue(text.contains("red CI, on the task: Fix (#812)"), text)
+            XCTAssertTrue(text.contains("Nothing to propose"), text)
+            XCTAssertFalse(text.contains("propose_rule"), text)
+        }
+    }
+
     func testTheDailyLineReachesAQuietLeadOnceItsHourStruck() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

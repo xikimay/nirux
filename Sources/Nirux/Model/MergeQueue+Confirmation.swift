@@ -312,6 +312,9 @@ extension MergeQueue {
     /// missing or running don't either: the train runs them.
     static func trainCandidateRefusal(for candidates: [ConfirmationReading.Candidate], settings: BoardConfig.QueueSettings) -> String? {
         for candidate in candidates {
+            if let pullRequest = candidate.pullRequest, pullRequest.hasAutoMerge {
+                return "A train can’t take #\(candidate.number): GitHub’s auto-merge is on (gh pr merge \(candidate.number) --disable-auto)."
+            }
             guard let checks = candidate.checks else { continue }
             if let first = judge(checks, required: []).otherFailures.first {
                 return "A train only takes pull requests whose checks are green: \(first) isn’t green on #\(candidate.number)."
@@ -384,6 +387,10 @@ extension MergeQueue {
             item.notes.append("Nirux couldn’t tell whether it is behind \(settings.baseBranch)"
                 + (candidate.compareError.map { " (\($0))" } ?? "") + ".")
         }
+        if pullRequest.hasAutoMerge {
+            item.notes.append("GitHub’s auto-merge is on: the queue calls it off and arms its own on the head it checks "
+                + "(a train can’t take it).")
+        }
         if pullRequest.mergeable == "UNKNOWN" {
             item.notes.append("GitHub is still computing whether it merges cleanly: the queue waits up to "
                 + "\(Int(Limits.mergeableUnknown / 60)) minutes for it.")
@@ -444,9 +451,6 @@ extension MergeQueue {
         }
         if pullRequest.headRepository != settings.gitHubRepository {
             return "It comes from a fork: the queue only merges branches of \(settings.repository)."
-        }
-        if pullRequest.hasAutoMerge {
-            return "It is set to auto-merge: disable that first (gh pr merge \(pullRequest.number) --disable-auto)."
         }
         if pullRequest.isInMergeQueue { return "It is in GitHub’s merge queue: remove it from there first." }
         return nil

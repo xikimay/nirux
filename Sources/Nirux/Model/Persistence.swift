@@ -66,6 +66,25 @@ enum Persistence {
         stateURL.deletingLastPathComponent()
     }
 
+    /// The space `workspaceID` was in at the last save, read from the
+    /// state.json in `stateDirectory` without the rest; nil when it can't
+    /// tell. For a process beside the app (the MCP server), whose launch
+    /// environment names the space the workspace was in then.
+    static func savedSpaceID(ofWorkspace workspaceID: String, stateDirectory: URL) -> String? {
+        struct Saved: Decodable {
+            struct Workspace: Decodable {
+                let id: String?
+                let profileID: String?
+            }
+            let workspaces: [Workspace]
+        }
+        guard let data = try? Data(contentsOf: stateDirectory.appendingPathComponent("state.json")),
+              let saved = try? JSONDecoder().decode(Saved.self, from: data),
+              let workspace = saved.workspaces.first(where: { $0.id == workspaceID })
+        else { return nil }
+        return workspace.profileID ?? WorkspaceProfile.defaultID
+    }
+
     private static func backupURL(_ index: Int, in dir: URL) -> URL {
         dir.appendingPathComponent("state.backup.\(index).json")
     }
@@ -287,6 +306,9 @@ struct PersistedSettings: Codable {
     var sidebarApprovalsEnabled: Bool = true
     /// See `KeepAwakeController`. On by default: missing decodes to true.
     var keepMacAwakeWhileAgentsWork: Bool = true
+    /// `KeepAwakeController.isAwaitingChecks`, on the power adapter. Missing,
+    /// it follows `keepMacAwakeWhileAgentsWork`.
+    var keepMacAwakeWhileChecksRun: Bool = true
     /// Lights that breathe and pulse, and the other animations of the
     /// interface. Off, states show without moving. On by default: missing
     /// decodes to true.
@@ -381,6 +403,7 @@ struct PersistedSettings: Codable {
         case missionHandoffsEnabled
         case sidebarApprovalsEnabled
         case keepMacAwakeWhileAgentsWork
+        case keepMacAwakeWhileChecksRun
         case animatesInterface
         case showClaudeUsageLimits
         case alertOnlyWhenClaudeAsks
@@ -428,6 +451,7 @@ struct PersistedSettings: Codable {
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? true
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? true
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
+        keepMacAwakeWhileChecksRun = (try? container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileChecksRun)) ?? keepMacAwakeWhileAgentsWork
         animatesInterface = (try? container.decodeIfPresent(Bool.self, forKey: .animatesInterface)) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
@@ -486,6 +510,7 @@ struct PersistedSettings: Codable {
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
+        try container.encode(keepMacAwakeWhileChecksRun, forKey: .keepMacAwakeWhileChecksRun)
         try container.encode(animatesInterface, forKey: .animatesInterface)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)

@@ -253,7 +253,7 @@ final class SidebarView: NSView {
     /// shows and the button is down. Tests say: events posted to the app
     /// move no button, and a drag made of them is lost once it holds
     /// still for a quarter of a second.
-    var rowPressHolds: @MainActor (NSWindow) -> Bool = { $0.isVisible && NSEvent.pressedMouseButtons & 1 != 0 }
+    var rowPressHolds: @MainActor (NSWindow) -> Bool = HeldPress.leftButtonHolds
 
     /// Active workspace the sidebar last auto-scrolled to. Used by
     /// `rebuildContent` so we only follow the active workspace when it
