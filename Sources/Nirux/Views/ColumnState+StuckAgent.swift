@@ -15,8 +15,8 @@ extension ColumnState {
             lastForegroundAgentSeenAt = now
             return
         }
-        // An empty snapshot can't tell; a process still listed is suspended
-        // (or not reaped yet): keep watching it.
+        // An empty snapshot can't tell; a process still listed is suspended:
+        // keep watching it.
         guard let process = lastForegroundAgent, !snapshot.isEmpty, !snapshot.contains(process.instance) else { return }
         lastForegroundAgent = nil
         // A headless run has no conversation to come back to.
