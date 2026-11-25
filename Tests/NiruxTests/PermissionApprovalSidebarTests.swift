@@ -237,10 +237,10 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         return SidebarPermissionApproval(request, now: 11)
     }
 
-    private func workspace(_ columns: [ColumnInfo]) -> WorkspaceInfo {
+    private func workspace(_ columns: [ColumnInfo], isActive: Bool = false) -> WorkspaceInfo {
         WorkspaceInfo(
             id: "ws", index: 2, title: "fix-login", profileID: WorkspaceProfile.defaultID, isInactive: false,
-            columnCount: columns.count, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
+            columnCount: columns.count, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: isActive,
             columns: columns, prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
             phase: .active, lastSummary: nil, lastActivityAt: nil
         )
@@ -458,6 +458,52 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         )
         XCTAssertEqual(decision?.workspaceIndex, 0, "the indices where it was released")
         XCTAssertEqual(decision?.columnIndex, 3)
+    }
+
+    /// VoiceOver's press on Allow, Deny or a paused agent's Resume, found
+    /// as an assistive app finds it, acts as a single click on it does: not
+    /// before it is armed.
+    func testAVoiceOverPressActsAsAClick() throws {
+        let block = try XCTUnwrap(approval("git push"))
+        let agent = SidebarDeferredAgent(agent: .claude, summary: "claude session", columnID: UUID())
+        let paused = ColumnInfo(
+            index: 0, processName: nil, abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
+            terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil, deferredAgent: agent
+        )
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 800))
+        let window = NSWindow(contentRect: sidebar.frame, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = sidebar
+        sidebar.isExpanded = true
+        // Its columns' chips, Resume among them, show on the task on screen.
+        sidebar.update(profiles: [], workspaces: [workspace([paused, column(block)], isActive: true)])
+        var decisions: [DecisionRegion] = []
+        sidebar.onPermissionDecision = { decisions.append(DecisionRegion(workspace: $0, column: $1, requestID: $2, behavior: $3)) }
+        var resumed: [[AnyHashable]] = []
+        sidebar.onDeferredAgentResume = { resumed.append([$0, $1, $2]) }
+        let resume = try XCTUnwrap(NiruxApp.pressTarget(label: "Resume claude here", in: [window]))
+        func button(_ behavior: PermissionApproval.Behavior) throws -> NSAccessibilityProtocol {
+            let choice = try XCTUnwrap(RequestChoices.permission(block).first {
+                if case .permission(behavior) = $0.choice { true } else { false }
+            })
+            return try XCTUnwrap(NiruxApp.pressTarget(label: choice.accessibilityLabel, in: [window]), choice.accessibilityLabel)
+        }
+
+        XCTAssertFalse(try button(.allow).accessibilityPerformPress(), "not armed yet")
+        XCTAssertFalse(resume.accessibilityPerformPress())
+        XCTAssertEqual(decisions, [])
+        XCTAssertEqual(resumed, [])
+        let keys = [PermissionApproval.Behavior.allow, .deny].map { SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: $0) }
+            + [SidebarHoverTarget.deferredResumeButtonKey(columnID: agent.columnID)]
+        waitUntil("armed") { keys.allSatisfy { sidebar.isApprovalButtonArmed($0) } }
+        XCTAssertTrue(try button(.allow).accessibilityPerformPress())
+        XCTAssertTrue(try button(.deny).accessibilityPerformPress())
+        XCTAssertTrue(resume.accessibilityPerformPress())
+        XCTAssertEqual(resumed, [[2, 0, agent.columnID]])
+        XCTAssertEqual(decisions, [
+            DecisionRegion(workspace: 2, column: 1, requestID: requestID, behavior: .allow),
+            DecisionRegion(workspace: 2, column: 1, requestID: requestID, behavior: .deny)
+        ])
     }
 
     /// A receiver killed without a report: once its deadline passes, #38's

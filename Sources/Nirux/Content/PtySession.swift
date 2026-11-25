@@ -1070,6 +1070,14 @@ final class PtySession: @unchecked Sendable {
         state.resize(cols: cols, rows: rows)
     }
 
+    /// Whether keys reach the program in front as they are typed (vim, htop):
+    /// in line mode, a key waits for Return, then for whoever reads next.
+    var readsKeysAsTyped: Bool {
+        var attributes = termios()
+        guard state.ptyFd >= 0, tcgetattr(state.ptyFd, &attributes) == 0 else { return false }
+        return attributes.c_lflag & tcflag_t(ICANON) == 0
+    }
+
     /// Force a SIGWINCH to the foreground process group so TUI apps redraw.
     /// Uses tcgetpgrp() to target the entire group (zsh + codex/claude/vim etc.)
     func forceRedraw() {

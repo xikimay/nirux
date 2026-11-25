@@ -480,6 +480,8 @@ final class RailItemView: NSView {
         item.flatMap { menuForTask?($0.id) }
     }
 
+    override func isAccessibilityEnabled() -> Bool { item != nil }
+
     override func accessibilityPerformPress() -> Bool {
         guard let item else { return false }
         onPress?(item.id, 1, ProcessInfo.processInfo.systemUptime)

@@ -137,6 +137,11 @@ final class GitRefreshCoordinator {
         }
     }
 
+    /// A push less than `PullRequestRefreshPolicy.pushFollowUp` ago.
+    func pushedRecently(_ workspace: WorkspaceState) -> Bool {
+        (entries[ObjectIdentifier(workspace)]?.pushFollowUpUntil ?? -.infinity) > clock()
+    }
+
     func notePullRequestRefresh(_ workspace: WorkspaceState) {
         entry(for: workspace).lastPullRequestRefresh = clock()
     }

@@ -27,9 +27,9 @@ final class SidebarBadgeView: NSView {
     var isCardHovered = false {
         didSet { if oldValue != isCardHovered { needsDisplay = true } }
     }
-    /// VoiceOver's press, for a badge that acts on its own (the Tasks
-    /// header's "+"); clicks go through the sidebar's hit areas.
-    var onPress: (() -> Void)?
+    /// VoiceOver's press: whether it acted. Clicks go through the
+    /// sidebar's hit areas.
+    var onPress: (() -> Bool)?
 
     init(text: String, textColor: NSColor, fillColor: NSColor, font: NSFont) {
         self.text = text
@@ -44,10 +44,10 @@ final class SidebarBadgeView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    override func isAccessibilityEnabled() -> Bool { true }
+
     override func accessibilityPerformPress() -> Bool {
-        guard let onPress else { return false }
-        onPress()
-        return true
+        onPress?() ?? false
     }
 
     /// The width that fits the symbol and the text, padded like a button.

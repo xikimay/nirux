@@ -37,6 +37,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsCodexLaunchModePopup: NSPopUpButton?
     weak var settingsAgyLaunchModePopup: NSPopUpButton?
     weak var settingsMissionHandoffsCheckbox: NSButton?
+    weak var settingsClaudeMissionHookCheckbox: NSButton?
     weak var settingsSidebarApprovalsCheckbox: NSButton?
     weak var settingsStuckAgentPopup: NSPopUpButton?
     weak var settingsCirclingHintCheckbox: NSButton?
@@ -79,6 +80,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             exit(ClaudeStatusLineCLI.run())
         case .mode(.toolsServer):
             exit(NiruxMCPServer.run())
+        case .mode(.missionWait(let mailbox)):
+            exit(MissionWaitHook.run(mailbox: mailbox))
         case .mode(.setupFailure(let workspaceID)):
             exit(SetupFailureSignal.run(workspaceID: workspaceID))
         case .mode(.hook(let kind, let payload)):
@@ -321,10 +324,11 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         }
     }
 
+    /// AppKit also asks when a panel closes while Nirux is hidden, as it
+    /// then counts no window on screen: only a shown Nirux can have had its
+    /// window closed.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        // A canary copy is hidden: AppKit counts no window of it as visible,
-        // so a popover closing would read as its last window closing.
-        !drivenByCanary
+        !sender.isHidden
     }
 
     /// Unsaved changes and a running merge queue ask first, an update's

@@ -395,17 +395,6 @@ final class CanaryChannelTests: XCTestCase {
         }
     }
 
-    /// A canary copy is hidden, so a popover closing never reads as its last
-    /// window closing and quits it; a normal launch quits with its window.
-    @MainActor
-    func testOnlyANormalLaunchQuitsWithItsLastWindow() {
-        for (environment, quits) in [(canaryEnvironment, false), ([:], true)] {
-            let app = NiruxApp()
-            app.presence = AppPresence(launchEnvironment: environment) {}
-            XCTAssertEqual(app.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared), quits, "\(environment)")
-        }
-    }
-
     /// A canary copy's browser opens localhost and the run's files only:
     /// WebKit's network process is outside the copy's sandbox.
     @MainActor

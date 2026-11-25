@@ -212,9 +212,17 @@ final class ColumnHeaderView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    /// As the terminal's title bar did: the window may move from the bar
-    /// (where the window allows it), never from its controls.
-    override var mouseDownCanMoveWindow: Bool { true }
+    /// A press on the bar, off its controls, may drag its column
+    /// (NiruxShellView+ColumnDrag): the window moves from its title bar only.
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let shell, shell.dragColumn(withHeader: self, press: event) else { return super.mouseDown(with: event) }
+    }
+
+    private var shell: NiruxShellView? {
+        sequence(first: superview, next: { $0?.superview }).lazy.compactMap { $0 as? NiruxShellView }.first
+    }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -444,9 +452,7 @@ final class ColumnHeaderView: NSView {
     /// first, as a click in it does, so the item can't reach the column
     /// the focus moved to meanwhile, nor one a keyboard press left focused.
     @objc func runColumnCommand(_ sender: NSMenuItem) {
-        guard let command = sender.representedObject as? ColumnCommand,
-              let shell = sequence(first: superview, next: { $0?.superview }).lazy.compactMap({ $0 as? NiruxShellView }).first,
-              shell.focusColumn(withHeader: self)
+        guard let command = sender.representedObject as? ColumnCommand, let shell, shell.focusColumn(withHeader: self)
         else { return }
         command.perform(shell)
     }

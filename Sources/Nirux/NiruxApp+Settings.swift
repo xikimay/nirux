@@ -55,6 +55,11 @@ extension NiruxApp {
         )
         keepAwake.state = NiruxShellView.currentKeepMacAwakeEnabled() ? .on : .off
         settingsKeepAwakeCheckbox = keepAwake
+        let keepAwakeForChecks = SettingsForm.checkbox(
+            "Keep Mac awake while pull request checks run, on the power adapter",
+            target: self, action: #selector(settingsKeepAwakeForChecksChanged(_:))
+        )
+        keepAwakeForChecks.state = NiruxShellView.currentKeepMacAwakeForChecksEnabled() ? .on : .off
 
         let resume = SettingsForm.popup(target: self, action: #selector(settingsAgentResumeChanged(_:)))
         for choice in AgentResumeOnLaunch.allCases {
@@ -89,6 +94,12 @@ extension NiruxApp {
                         + "last one stops: a queue asleep stops polling GitHub. The display still sleeps, and closing a "
                         + "MacBook's lid still sleeps it (except in clamshell mode).",
                     under: keepAwake
+                ),
+                keepAwakeForChecks,
+                SettingsForm.hint(
+                    "Checks of a pull request Nirux follows: a follow-up round, a merge wait or the Lead acts on "
+                        + "their result, which a sleeping Mac never reads. Not on battery.",
+                    under: keepAwakeForChecks
                 )
             ],
             [
@@ -391,6 +402,17 @@ extension NiruxApp {
         let handoffs = SettingsForm.checkbox("Mission handoffs", target: self, action: #selector(settingsMissionHandoffsChanged(_:)))
         handoffs.state = NiruxShellView.currentMissionHandoffsEnabled() ? .on : .off
         settingsMissionHandoffsCheckbox = handoffs
+        // A tooltip, as the circling hint's: the pane can't grow.
+        let missionHook = SettingsForm.checkbox(
+            "Hand Mission messages to Claude Code without typing",
+            target: self, action: #selector(settingsClaudeMissionHookChanged(_:))
+        )
+        missionHook.state = NiruxShellView.currentClaudeMissionHook() ? .on : .off
+        missionHook.toolTip = "Claude Code 2.1.331 or later takes them through Nirux's hook, idle or mid-turn, and a draft "
+            + "in its prompt stays. Off: Nirux types them at its next free prompt. Sessions started before a change keep "
+            + "their hook until they restart."
+        missionHook.setAccessibilityHelp(missionHook.toolTip)
+        settingsClaudeMissionHookCheckbox = missionHook
         let approvals = SettingsForm.checkbox(
             "Answer Claude permissions from the sidebar", target: self, action: #selector(settingsSidebarApprovalsChanged(_:))
         )
@@ -405,6 +427,7 @@ extension NiruxApp {
                     + "A space’s Lead and its tasks always do. New terminals pick up changes.",
                 under: handoffs
             ),
+            missionHook,
             approvals,
             SettingsForm.hint(
                 "Allow or deny once for columns you are not looking at: short commands, reads, "
@@ -464,6 +487,12 @@ extension NiruxApp {
         let enabled = sender.state == .on
         guard saveSetting(revert: Self.toggledBack(sender), { $0.keepMacAwakeWhileAgentsWork = enabled }) else { return }
         keepAwakeController?.setEnabled(enabled)
+    }
+
+    @objc func settingsKeepAwakeForChecksChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        guard saveSetting(revert: Self.toggledBack(sender), { $0.keepMacAwakeWhileChecksRun = enabled }) else { return }
+        keepAwakeController?.setWaitsForChecks(enabled)
     }
 
     /// "80%".
@@ -628,6 +657,11 @@ extension NiruxApp {
         }
     }
 
+    @objc func settingsClaudeMissionHookChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        saveSetting(revert: Self.toggledBack(sender)) { $0.claudeMissionHook = enabled }
+    }
+
     @objc func settingsSidebarApprovalsChanged(_ sender: NSButton) {
         let enabled = sender.state == .on
         guard saveSetting(revert: Self.toggledBack(sender), { $0.sidebarApprovalsEnabled = enabled }) else { return }
@@ -776,6 +810,7 @@ extension NiruxApp {
         settingsCodexLaunchModePopup = nil
         settingsAgyLaunchModePopup = nil
         settingsMissionHandoffsCheckbox = nil
+        settingsClaudeMissionHookCheckbox = nil
         settingsSidebarApprovalsCheckbox = nil
         settingsStuckAgentPopup = nil
         settingsCirclingHintCheckbox = nil

@@ -295,8 +295,8 @@ final class MergeQueueController {
         start(settings: settings, entries: entries, cadence: .standard)
     }
 
-    private func start(settings: BoardConfig.QueueSettings, entries: [MergeQueue.ConfirmedEntry],
-                       cadence: MergeQueue.Cadence, startedByLead: Bool = false) -> StartRefusal? {
+    func start(settings: BoardConfig.QueueSettings, entries: [MergeQueue.ConfirmedEntry],
+               cadence: MergeQueue.Cadence, startedByLead: Bool = false) -> StartRefusal? {
         guard !isRunning else { return .alreadyRunning }
         guard settings.gitHubRepository == queueRepository else { return .otherRepository }
         guard files != nil else { return .noProjectFolder }
@@ -323,7 +323,8 @@ final class MergeQueueController {
         runsElsewhere = false
         let driver = MergeQueueDriver(
             engine: MergeQueue.Engine(settings: settings, entries: entries, cadence: cadence, startedByLead: startedByLead,
-                                      trainBranch: MergeQueue.trainBranch(at: clock.date()), triagesFlakes: local.isTriageOn()),
+                                      trainBranch: MergeQueue.trainBranch(at: clock.date()), triagesFlakes: local.isTriageOn(),
+                                      armsAutoMerge: true),
             client: client, local: local, clock: clock
         )
         driver.onUpdate = { [weak self] engine, notes in self?.update(engine, notes: notes) }
@@ -354,8 +355,9 @@ final class MergeQueueController {
     }
 
     /// Stops before the next command; a call already sent finishes.
-    func stop(byLead: Bool = false) {
-        driver?.stop(byLead: byLead)
+    /// `keepingAutoMerge`: a quit, which leaves GitHub's auto-merge armed.
+    func stop(byLead: Bool = false, keepingAutoMerge: Bool = false) {
+        driver?.stop(byLead: byLead, keepingAutoMerge: keepingAutoMerge)
     }
 
     /// `queueSettings` only makes valid settings; this checks them again

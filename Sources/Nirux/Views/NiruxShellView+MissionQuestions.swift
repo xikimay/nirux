@@ -116,7 +116,8 @@ extension NiruxShellView {
                 if let pty = parent.pty, !pty.hasExited {
                     let process = foreground(parent)
                     foregroundKnown = process != nil
-                    var typedAt = question.parentTypedAt
+                    // Handed to its hook: it has it, or will at its next step.
+                    var typedAt = question.parentTypedAt ?? missionWaits.handedToHooks[question.id]
                     if let process, let previous = typedAt, previous < process.instance.startedAt,
                        parentEnd?.workspace.runsRestartedLead(process) == true {
                         typedAt = nil

@@ -158,6 +158,29 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(unreadable.status, .readOnly(.unknownSettings(["prFollowUp"])))
     }
 
+    /// "Tasks can manage spaces": on in General, off elsewhere, the default
+    /// written as nothing; a value this build can't read is off.
+    func testTasksManageSpacesInGeneralUnlessTurnedOff() throws {
+        let general = WorkspaceProfile.defaultID
+        XCTAssertTrue(SpaceDefaults().tasksCanManageSpaces(inSpace: general))
+        XCTAssertFalse(SpaceDefaults().tasksCanManageSpaces(inSpace: "ops"))
+        var defaults = SpaceDefaults()
+        defaults.setTasksManageSpaces(true, inSpace: general)
+        XCTAssertNil(defaults.tasksManageSpaces)
+        defaults.setTasksManageSpaces(true, inSpace: "ops")
+        XCTAssertEqual(defaults.tasksManageSpaces, true)
+        defaults.setTasksManageSpaces(false, inSpace: general)
+        XCTAssertFalse(defaults.tasksCanManageSpaces(inSpace: general))
+
+        let store = try store()
+        _ = try store.save(defaults, replacing: store.load()).get()
+        XCTAssertEqual(store.load().defaults.tasksManageSpaces, false)
+        try Data(#"{"tasksManageSpaces": "yes"}"#.utf8).write(to: store.fileURL)
+        let unreadable = store.load()
+        XCTAssertFalse(unreadable.defaults.tasksCanManageSpaces(inSpace: general))
+        XCTAssertEqual(unreadable.status, .readOnly(.unknownSettings(["tasksManageSpaces"])))
+    }
+
     /// Another Nirux saved since the window read the file: left alone.
     func testAFileChangedSinceLoadedIsNotOverwritten() throws {
         let store = try store()

@@ -12,9 +12,11 @@ final class ColumnShadowView: NSView {
     /// moves.
     static let liftDuration: CFTimeInterval = 0.22
     static let liftKey = "lift"
-    /// How far its cut-out spans past the card: either level's shadow,
-    /// a lift on its way included.
-    static let cutOutReach = max(Theme.Elevation.Level.column.reach, Theme.Elevation.Level.focusedColumn.reach)
+    /// How far its cut-out spans past the card: any level's shadow (a card
+    /// the pointer holds floats), a lift on its way included.
+    static let cutOutReach = max(
+        Theme.Elevation.Level.column.reach, Theme.Elevation.Level.focusedColumn.reach, Theme.Elevation.Level.floating.reach
+    )
 
     private let shadowLayer = CALayer()
     /// How high the card lies.

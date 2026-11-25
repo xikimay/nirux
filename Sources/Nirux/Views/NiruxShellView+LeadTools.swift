@@ -23,6 +23,9 @@ extension NiruxShellView {
         }
         let arguments = request.argumentObject
         if let problem = LeadTools.problem(tool: request.tool, arguments: arguments) { return answer(problem, true) }
+        if LeadTools.isSpaceCall(request.tool, arguments) {
+            return handleSpaceTool(request.tool, arguments, caller: spaceToolCaller(lead), in: space, answer: answer)
+        }
         let parent = NewTask.MissionParent(workspaceID: lead.id, agentUUID: request.agentUUID)
         switch request.tool {
         case LeadTools.startTask:
@@ -30,7 +33,7 @@ extension NiruxShellView {
                 self.leadStartTask(arguments, selection: selection, in: space, parent: parent, answer: answer)
             }
         case LeadTools.setTaskAfter: changeWaitingTask(arguments, in: space, answer: answer)
-        case LeadTools.listTasks: leadListTasks(arguments, in: space, lead: lead.id, answer: answer)
+        case LeadTools.listTasks: answer(leadTaskList(in: space, lead: lead.id), false)
         case LeadTools.tell: leadTell(arguments, in: space, lead: parent, answer: answer)
         case LeadTools.reply: leadReply(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.askUser: leadAskUser(arguments, in: space, lead: lead.id, answer: answer)
@@ -55,11 +58,6 @@ extension NiruxShellView {
         case LeadTools.interruptTask: leadInterruptTask(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.recordReview: leadRecordReview(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.dailyPass: leadDailyPass(in: space, lead: lead, answer: answer)
-        case LeadTools.listSpaces: answer(leadSpaceList(currentSpace: space), false)
-        case LeadTools.createSpace: leadCreateSpace(arguments, answer: answer)
-        case LeadTools.editSpace: leadEditSpace(arguments, answer: answer)
-        case LeadTools.deleteSpace: leadDeleteSpace(arguments, callerSpace: space, answer: answer)
-        case LeadTools.moveTaskToSpace: leadMoveTaskToSpace(arguments, callerSpace: space, answer: answer)
         default: answer("Unknown tool: \(request.tool)", true)
         }
     }
@@ -794,6 +792,8 @@ extension NiruxShellView {
                 : "Nirux hands it to “\(workspace.title)”’s Codex once its turn is over, a day at most; past an hour, "
                     + "a line tells you what holds it.") + " Codex takes it as text: a slash command doesn't run there."
             : typed ? "Nirux typed it into “\(workspace.title)”’s prompt."
+            : missionWaits.handedToHooks[instruction.id] != nil
+            ? "Nirux handed it to “\(workspace.title)”’s Claude Code without typing it: Claude takes it at its next step, mid-turn too."
             : missionWaits.typing.contains(instruction.id)
             ? "Nirux is typing it into “\(workspace.title)”’s prompt as its agent reads it; a line tells you if it doesn't all go in."
             : "Nirux types it into “\(workspace.title)”’s prompt at its next free prompt, a day at most; past an hour, "
@@ -854,8 +854,10 @@ extension NiruxShellView {
         typeMissionMessages()
         updateSidebar()
         let title = workspaces.first { $0.id == mission.childWorkspaceID }?.title ?? mission.branch
+        let handed = accepted.map { missionWaits.handedToHooks[$0.event.id] != nil } ?? false
         answer((accepts ? "Its recommendation sent as your answer" : "Answer sent")
-            + ": Nirux types it into “\(title)”’s prompt once its turn is over.", false)
+            + (handed ? ": Nirux handed it to “\(title)”’s Claude Code, which takes it at its next step."
+                : ": Nirux types it into “\(title)”’s prompt once its turn is over."), false)
     }
 
     private func leadAskUser(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {
