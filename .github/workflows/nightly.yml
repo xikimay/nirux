@@ -13,6 +13,8 @@ concurrency:
 
 permissions:
   contents: write
+  # The changelog reads the pull requests that landed.
+  pull-requests: read
 
 jobs:
   build:
@@ -249,6 +251,8 @@ jobs:
           ./scripts/generate-appcast.sh "$VERSION" "$BUILD_NUMBER" "$SIGNATURE" "$LENGTH" "$RELEASE_TAG"
 
       - name: Write release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Capture the previous nightly's commit BEFORE the rolling tag moves —
           # the changelog diffs against it.
@@ -258,7 +262,16 @@ jobs:
           else
             RANGE="HEAD~20..HEAD"
           fi
-          CHANGELOG=$(git log --pretty=format:'- %s (%h)' --no-merges "$RANGE" || echo "- maintenance")
+          # The pull requests that landed, which Nirux shows after an update.
+          # Without them, the release lists the commits and keeps the last
+          # published changelog.json.
+          if ./scripts/nightly-changelog.sh "$RANGE" "$BUILD_NUMBER" "$RUNNER_TEMP/changelog"; then
+            CHANGELOG=$(cat "$RUNNER_TEMP/changelog/notes.md")
+            echo "CHANGELOG_FILE=$RUNNER_TEMP/changelog/changelog.json" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Could not write the changelog; the release lists commits instead."
+            CHANGELOG=$(git log --pretty=format:'- %s (%h)' --no-merges "$RANGE" || echo "- maintenance")
+          fi
           if [ -z "$CHANGELOG" ]; then
             CHANGELOG="- maintenance"
           fi
@@ -304,7 +317,8 @@ jobs:
             --notes-file "$NOTES_FILE" \
             --prerelease \
             Nirux.app.zip \
-            appcast.xml
+            appcast.xml \
+            ${CHANGELOG_FILE:+"$CHANGELOG_FILE"}
 
       - name: Update rolling nightly release
         env:
@@ -321,6 +335,10 @@ jobs:
               --notes-file "$NOTES_FILE" \
               --prerelease
             gh release upload nightly Nirux.app.zip --clobber
+            # Before the appcast: an install that sees this build finds its entries.
+            if [ -n "${CHANGELOG_FILE:-}" ]; then
+              gh release upload nightly "$CHANGELOG_FILE" --clobber
+            fi
             gh release upload nightly appcast.xml --clobber
             git push --force origin "$GITHUB_SHA:refs/tags/nightly"
           else
