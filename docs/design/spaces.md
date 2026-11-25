@@ -258,8 +258,10 @@ New flow, built on the guarded typing `tell` already uses
   it works now; its MCP tools and instructions come from the new launch. The task's own
   Missions end without typing anything more, and it keeps its worktree, branch, pull
   request and row; its sub-tasks' Missions report to the Lead's agent, and they list among
-  the Lead's tasks. Only at rest, never a sub-task; Codex and Antigravity tasks
-  aren't promoted (an Antigravity conversation keeps running in its first folder).
+  the Lead's tasks. Only at rest, never a sub-task. A Codex or Antigravity task's Lead
+  starts afresh with that agent and the task's handover (an Antigravity conversation keeps
+  running in its first folder; a resumed Codex thread can't be told the Lead's role), and
+  the task keeps its worker.
   Antigravity reports turn state through OSC 7501. Its CLI rejects `mcpServers` in
   `--settings` and exposes server configuration through the persistent `agy mcp` commands.
   A Lead without MCP can answer with `"$NIRUX_CLI_PATH" --mission reply --event <id> --message "<answer>"`.
