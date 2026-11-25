@@ -265,6 +265,18 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.dailyPassIsOn)
     }
 
+    /// A Lead's results are grouped unless the file says; a file Nirux can't
+    /// read sends each at once.
+    func testTheGroupResultsSetting() throws {
+        XCTAssertTrue(SpaceDefaults().groupsResults)
+        let off = SpaceDefaultsStore.decode(Data(#"{"leadGroupsResults": false}"#.utf8))
+        XCTAssertEqual(off.status, .loaded)
+        XCTAssertFalse(off.defaults.groupsResults)
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["leadGroupsResults"] as? Bool, false)
+        XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.groupsResults)
+    }
+
     /// A deleted space's defaults, setup scripts, proposed rules and logs go;
     /// its brief stays, and its Claude settings stay empty for the launch
     /// lines that name them.

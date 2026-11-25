@@ -104,6 +104,8 @@ struct MissionWaitState {
     /// times a second, and the setting it reads is on disk.
     var shown: [UUID: SidebarWaitingMessages] = [:]
     var checkedAt: TimeInterval?
+    /// When the pass that types a Lead's grouped results is due.
+    var resultReleaseAt: TimeInterval?
     /// "<message id> <reason>" of each line written to the log, while the
     /// message waits: one line per message and reason.
     var logged: Set<String> = []
@@ -277,7 +279,9 @@ extension NiruxShellView {
         }
         let undelivered = store.pendingPromptDeliveries(now: now)
         withdrawStaleLetters(pending: Set(undelivered.map(\.event.id)))
-        let deliveries = undelivered.filter { missionWaits.handedToHooks[$0.event.id] == nil }
+        // A Lead's grouped results wait on purpose (`MissionResultBatch`).
+        let held = resultBatch(undelivered).held(now: now)
+        let deliveries = undelivered.filter { missionWaits.handedToHooks[$0.event.id] == nil && !held.contains($0.event.id) }
         let deliveryIDs = Set(deliveries.map(\.event.id))
         if !deliveries.isEmpty {
             let handoffsEnabled = missionWaits.handoffsEnabled.flatMap { $0.for == deliveryIDs ? $0.enabled : nil }

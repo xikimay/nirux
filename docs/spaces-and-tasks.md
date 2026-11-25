@@ -153,3 +153,5 @@ Once a day, after 06:00, Nirux asks the Lead to look back at the space's day. Th
 It then proposes the rules that would have spared that friction, through **Rule proposed · Review** on its row. Nothing reaches the brief without you.
 
 Nirux asks only when something happened, and only once the Lead has been idle for 30 minutes and you have been away from Nirux for 10. For a day after, the Lead's row shows what the pass read ("Daily pass · 6 PRs, 1 flaky test, 2 rules proposed"), and its reply in its terminal says why. Turn it off or change its hour with **Daily pass** in Space Settings › Lead. You can also ask the Lead for a pass at any time.
+
+**Group task results** (Space Settings › Lead, on by default) saves the Lead a wake per finished task: the results its tasks report within 3 minutes of the first one reach it together, in one message (or together through its Claude hook). Questions never wait.
