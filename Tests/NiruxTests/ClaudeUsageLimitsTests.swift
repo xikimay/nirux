@@ -198,7 +198,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         }
         try report("a", api: 100, fiveHour: 30, sevenDay: 18, at: now)
         try report("a", api: 200, fiveHour: 30, sevenDay: 18, at: now + 60)
-        XCTAssertEqual(logged(), [30], "the same reading a minute later waits for the heartbeat")
+        XCTAssertEqual(logged(), [30], "a new claude's first report waits for its next response; that one logs")
         try report("a", api: 300, fiveHour: 31, sevenDay: 18, at: now + 120)
         let beat = now + 120 + ClaudeUsageLimitsFile.readingHeartbeat
         try report("a", api: 400, fiveHour: 31, sevenDay: 18, at: beat)
