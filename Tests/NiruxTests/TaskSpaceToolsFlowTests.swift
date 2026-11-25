@@ -50,9 +50,16 @@ final class TaskSpaceToolsFlowTests: XCTestCase {
     ) throws -> [String: Any] {
         let line = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 1, "method": method, "params": params])
         let reply = Reply()
-        Thread { reply.data = NiruxMCPServer.reply(to: line, context: server) ?? Data() }.start()
+        Self.answer(line, from: server, into: reply)
         harness.waitUntil("the server's answer to \(method)", timeout: 60) { reply.data != nil }
         return try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(reply.data)) as? [String: Any])
+    }
+
+    /// The server's answer, on a thread of its own as it answers Claude.
+    /// Nonisolated: a closure formed in this main-actor class could be
+    /// compiled as the main actor's, and trap off the main thread.
+    private nonisolated static func answer(_ line: Data, from server: NiruxMCPServer.Context, into reply: Reply) {
+        Thread { reply.data = NiruxMCPServer.reply(to: line, context: server) ?? Data() }.start()
     }
 
     private func toolNames(_ server: NiruxMCPServer.Context, in harness: UIFlowHarness) throws -> [String] {
