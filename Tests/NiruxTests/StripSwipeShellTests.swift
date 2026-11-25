@@ -329,7 +329,7 @@ final class StripSwipeShellTests: XCTestCase {
             other.heldCamera = WorkspaceState.CameraHold(x: 0, column: other.columns[0].id, isDrag: true)
             shell.clickBegan(onColumn: nil)
             swipe(shell, over: try terminal(workspace, 1), [-20, -20], lifts: false)
-            waitUntil("the other hold let go", timeout: NSEvent.doubleClickInterval + 3) { other.heldCamera == nil }
+            waitUntil("the other hold let go") { other.heldCamera == nil }
             XCTAssertEqual(workspace.heldCamera?.isDrag, true)
         }
     }
