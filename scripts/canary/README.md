@@ -140,7 +140,7 @@ scripts/canary.sh /tmp/nirux-explore/explore-XXXXXXXX/Nirux.app.zip --explore \
 scripts/canary.sh Nirux.app --explore --replay-trace scripts/canary/traces/hidden-copy-quits-when-a-popover-closes.jsonl
 ```
 
-`--replay-traces DIR` replays every kept trace of a folder, each in a fresh copy; a trace that finds its bug again is a `regression`, one that doesn't is a pass under `trace:<name>`. `.github/workflows/canary-traces.yml` runs `scripts/canary/traces` this way after each merge to main, without a model.
+`--replay-traces DIR` replays every kept trace of a folder, each in a fresh copy; a trace that finds its bug again is a `regression`, one that doesn't is a pass under `trace:<name>`. `.github/workflows/canary-traces.yml` runs `scripts/canary/traces` this way every night at 03:00 UTC on main (and on demand, or on a pull request that changes the traces or the workflow), without a model.
 
 `--diff-base REF` puts first the goals that the files changed since REF touch. `traces/` keeps reduced traces: `hidden-copy-quits-when-a-popover-closes` (4 of the first run's 21 calls, 178 replays) quit the hidden copy before it stopped counting a closing popover as its last window.
 

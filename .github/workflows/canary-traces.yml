@@ -1,16 +1,11 @@
 name: Canary kept traces
 
 # The explorer's kept traces (scripts/canary/traces), replayed without a model in a hidden copy
-# after each merge: each one reproduced a bug that was fixed, so a finding is that bug back.
+# once a night on main: each one reproduced a bug that was fixed, so a finding is that bug back.
+# Nightly, not per merge: macOS runners are the bottleneck and trains merge several times a day.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Sources/**"
-      - "NiruxCore/**"
-      - "Package.swift"
-      - "Package.resolved"
-      - "scripts/canary/**"
+  schedule:
+    - cron: "0 3 * * *"
   # A change to this workflow or to the kept traces runs it before it merges.
   pull_request:
     paths:
