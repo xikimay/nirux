@@ -103,7 +103,8 @@ The copy runs on synthetic data: two spaces (Canary Alpha, Canary Beta), one tas
 Beta Child, a Mission of Alpha Parent), each with a fake agent named claude in its terminal. A fake agent reads \
 lines: "ask: <anything>" ends its turn on its one question, "Which one do you want: A or B?"; \
 "permission: <tool>" asks for a permission to use that tool; "exit" quits; anything else is a prompt it answers \
-with one turn. Their texts are synthetic: judge what Nirux shows of them, not their wording.
+with one turn. Their texts are synthetic: judge what Nirux shows of them, not their wording. The command bar's \
+badge counts the agents waiting other than the one on screen (what ⌘J visits).
 
 Work toward the goal you are given, and take unexpected but legitimate paths a hurried person might: fast \
 switches, closing and reopening, typing while something opens, shortcuts. After each action the canary runs its \
