@@ -79,14 +79,16 @@ enum MissionWaitHook {
     }
 
     /// Whether the model took `letter`, claimed at `claimedAt`, in: a line of
-    /// the turn that read it holds its text in `transcript`. Claude Code
-    /// writes it as the model reads it, mid-turn too; the line it queues the
-    /// hook's output with doesn't count.
+    /// the turn that read it holds its text in `transcript`, past where the
+    /// transcript ended when it was posted. Claude Code writes it as the
+    /// model reads it, mid-turn too; the line it queues the hook's output
+    /// with doesn't count. Off the main thread: a transcript passes 100 MB.
     static func modelRead(_ letter: MissionMailbox.Letter, claimedAt: TimeInterval, transcript path: String?) -> Bool {
         guard let path, let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped) else { return false }
         let needle = Data(jsonEscaped(String(String.UnicodeScalarView(letter.text.unicodeScalars.prefix(200)))).utf8)
         guard !needle.isEmpty else { return false }
-        var start = data.startIndex
+        let offset = letter.transcriptOffset.map { Int(clamping: $0) }.flatMap { $0 <= data.count ? $0 : nil } ?? 0
+        var start = data.startIndex + offset
         while start < data.endIndex, let found = data.range(of: needle, in: start..<data.endIndex) {
             let lineStart = data[..<found.lowerBound].lastIndex(of: 0x0A).map { $0 + 1 } ?? data.startIndex
             let lineEnd = data[found.upperBound...].firstIndex(of: 0x0A) ?? data.endIndex

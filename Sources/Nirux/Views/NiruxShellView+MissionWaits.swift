@@ -140,6 +140,9 @@ struct MissionWaitState {
     /// Mission messages a hook of their agent has, or is about to
     /// (`NiruxShellView.leaveToHook`), and since when: no prompt holds them.
     var handedToHooks: [String: TimeInterval] = [:]
+    /// Claims whose transcript is being read (`checkClaim`), and whether
+    /// their session ended.
+    var checkingClaims: [String: Bool] = [:]
 
     /// Nirux typed into `column`'s prompt: it says nothing of it until the
     /// next check.

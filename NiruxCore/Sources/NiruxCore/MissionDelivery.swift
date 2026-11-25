@@ -84,11 +84,15 @@ public struct MissionMailbox: Sendable {
         public var id: String
         public var text: String
         public var postedAt: TimeInterval
+        /// The size of its conversation's transcript when it was posted: a
+        /// reader looks for it only past there.
+        public var transcriptOffset: UInt64?
 
-        public init(id: String, text: String, postedAt: TimeInterval) {
+        public init(id: String, text: String, postedAt: TimeInterval, transcriptOffset: UInt64? = nil) {
             self.id = id
             self.text = text
             self.postedAt = postedAt
+            self.transcriptOffset = transcriptOffset
         }
     }
 

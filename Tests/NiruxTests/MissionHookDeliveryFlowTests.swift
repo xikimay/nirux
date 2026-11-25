@@ -40,11 +40,17 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
             shell.applyAgentHookEvents([try XCTUnwrap(AgentHookCenter.shared.dispatch(event))])
         }
 
-        /// The Lead's waiter claims what waits, as its claude runs the session.
-        func claim() throws -> MissionMailbox.Letter {
-            try mailbox.noteRunning(session, in: try XCTUnwrap(claude).instance.pid)
+        /// The Lead's waiter claims what waits, as its claude runs the session;
+        /// `byGone`: a claude no longer running took it.
+        func claim(byGone: Bool = false) throws -> MissionMailbox.Letter {
+            if !byGone { try mailbox.noteRunning(session, in: try XCTUnwrap(claude).instance.pid) }
             try mailbox.noteTranscript(transcript.path, of: session)
             return try XCTUnwrap(mailbox.claim(session, at: Date().timeIntervalSince1970).first)
+        }
+
+        /// The transcripts Nirux reads off the main thread are read.
+        func checked() {
+            waitUntil("the transcript read") { shell.missionWaits.checkingClaims.isEmpty }
         }
 
         /// The model reads `letter`: its turn's line in the transcript.
@@ -113,12 +119,13 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
             waiter = nil
             parent.shell.typeMissionMessages()
             try parent.hook(.stop)
+            parent.checked()
             XCTAssertFalse(parent.typed, "the hook has it")
             XCTAssertNil(parent.deliveredAt, "a turn that didn't read it proves nothing")
 
             try parent.read(letter)
             try parent.hook(.stop)
-            XCTAssertNotNil(parent.deliveredAt)
+            waitUntil("recorded") { parent.deliveredAt != nil }
             XCTAssertTrue(parent.mailbox.claims().isEmpty)
             parent.shell.typeMissionMessages()
             XCTAssertFalse(parent.typed, "delivered once")
@@ -128,7 +135,7 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
 
     /// Esc ends the turn that read it with no Stop: the session's end
     /// records it rather than sending it again.
-    func testASessionEndRecordsAClaimTheModelReadAndFreesOneItDidnt() throws {
+    func testASessionEndRecordsAClaimTheModelRead() throws {
         try UIFlowHarness.run { harness in
             let standIn = AgentStandIn()
             defer { standIn.remove() }
@@ -138,8 +145,44 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
             let letter = try parent.claim()
             try parent.read(letter)
             try parent.hook(.sessionEnd)
-            XCTAssertNotNil(parent.deliveredAt)
+            waitUntil("recorded") { parent.deliveredAt != nil }
             XCTAssertTrue(parent.mailbox.claims().isEmpty)
+            withExtendedLifetime(waiter) {}
+        }
+    }
+
+    /// A session that ends before the model read its claim frees it.
+    func testASessionEndFreesAClaimTheModelDidntRead() throws {
+        try UIFlowHarness.run { harness in
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            let parent = try makeParent(harness, standIn: standIn)
+            let waiter = try parent.mailbox.arm(parent.session)
+            parent.shell.typeMissionMessages()
+            _ = try parent.claim()
+            try parent.hook(.sessionEnd)
+            parent.checked()
+            XCTAssertTrue(parent.mailbox.claims().isEmpty)
+            XCTAssertNil(parent.mailbox.places()[parent.question.id].flatMap { if case .claimed = $0 { $0 } else { nil } })
+            withExtendedLifetime(waiter) {}
+        }
+    }
+
+    /// A pass finds the claude that claimed gone: what the model read counts,
+    /// and isn't sent again.
+    func testAPassRecordsAReadClaimWhoseClaudeIsGone() throws {
+        try UIFlowHarness.run { harness in
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            let parent = try makeParent(harness, standIn: standIn)
+            let waiter = try parent.mailbox.arm(parent.session)
+            parent.shell.typeMissionMessages()
+            try parent.read(try parent.claim(byGone: true))
+            parent.shell.typeMissionMessages()
+            waitUntil("recorded") { parent.deliveredAt != nil }
+            XCTAssertTrue(parent.mailbox.claims().isEmpty)
+            XCTAssertNil(parent.mailbox.places()[parent.question.id])
+            XCTAssertFalse(parent.typed)
             withExtendedLifetime(waiter) {}
         }
     }
@@ -228,7 +271,7 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
     }
 
     /// At launch, a claim whose claude went with the last run, unread, goes
-    /// again; the Lead's resumed waiter or typing carries it.
+    /// again rather than counting.
     func testAtLaunchAClaimNoModelReadGoesAgain() throws {
         try UIFlowHarness.run { harness in
             let standIn = AgentStandIn()
@@ -236,11 +279,28 @@ final class MissionHookDeliveryFlowTests: XCTestCase {
             let parent = try makeParent(harness, standIn: standIn)
             let waiter = try parent.mailbox.arm(parent.session)
             parent.shell.typeMissionMessages()
-            try parent.mailbox.noteTranscript(parent.transcript.path, of: parent.session)
-            XCTAssertEqual(parent.mailbox.claim(parent.session, at: Date().timeIntervalSince1970).count, 1, "no claude noted: it's gone")
+            _ = try parent.claim(byGone: true)
             parent.shell.restoreState()
+            parent.checked()
             XCTAssertTrue(parent.mailbox.claims().isEmpty)
             XCTAssertNil(parent.deliveredAt)
+            withExtendedLifetime(waiter) {}
+        }
+    }
+
+    /// At launch, a claim the model read before its claude went counts.
+    func testAtLaunchAClaimTheModelReadCounts() throws {
+        try UIFlowHarness.run { harness in
+            let standIn = AgentStandIn()
+            defer { standIn.remove() }
+            let parent = try makeParent(harness, standIn: standIn)
+            let waiter = try parent.mailbox.arm(parent.session)
+            parent.shell.typeMissionMessages()
+            try parent.read(try parent.claim(byGone: true))
+            parent.shell.restoreState()
+            waitUntil("recorded") { parent.deliveredAt != nil }
+            XCTAssertTrue(parent.mailbox.claims().isEmpty)
+            XCTAssertFalse(parent.typed)
             withExtendedLifetime(waiter) {}
         }
     }

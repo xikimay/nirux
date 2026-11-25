@@ -36,8 +36,10 @@ extension NiruxShellView {
                     place = nil
                     continue
                 }
-                if settle(claim, sessionEnded: true) == .recorded { return true }
-                place = nil
+                // Recorded if the model read it, else it goes again: the transcript says.
+                checkClaim(claim, sessionEnded: true)
+                missionWaits.handedToHooks[id] = missionWaits.handedToHooks[id] ?? now
+                return true
             case .retract(let conversation):
                 switch try? mailbox.retract(id, from: conversation) {
                 case .retracted?: place = .owed(conversation: conversation)
@@ -48,7 +50,10 @@ extension NiruxShellView {
                     return true
                 }
             case .post(let conversation):
-                guard let text = text(), (try? mailbox.post(.init(id: id, text: text, postedAt: now), to: conversation)) != nil else {
+                let offset = mailbox.transcript(of: conversation).flatMap { try? FileManager.default.attributesOfItem(atPath: $0)[.size] as? UInt64 }
+                guard let text = text(),
+                      (try? mailbox.post(.init(id: id, text: text, postedAt: now, transcriptOffset: offset), to: conversation)) != nil
+                else {
                     missionWaits.handedToHooks[id] = nil
                     return false
                 }
@@ -61,8 +66,8 @@ extension NiruxShellView {
         }
     }
 
-    /// Settles the claims of each session a hook event of `events` ends a
-    /// turn of, or ends: see `settle`.
+    /// Checks the claims of each session a hook event of `events` ends a
+    /// turn of, or ends (`checkClaim`).
     func settleHookClaims(after events: [AgentHookEvent]) {
         let ends = events.filter {
             $0.kind == .claude && $0.agentID == nil && $0.sessionID != nil && [.stop, .stopFailure, .sessionEnd].contains($0.name)
@@ -71,41 +76,48 @@ extension NiruxShellView {
         for claim in MissionWaitHook.mailbox.claims() {
             let later = ends.filter { $0.sessionID == claim.conversation && $0.timestamp >= claim.claimedAt }
             guard !later.isEmpty else { continue }
-            settle(claim, sessionEnded: later.contains { $0.name == .sessionEnd })
+            checkClaim(claim, sessionEnded: later.contains { $0.name == .sessionEnd })
         }
     }
 
     /// At launch: each claim the model took in counts as delivered; the
-    /// rest, whose claude went with the last run, go again (`settle`).
+    /// rest, whose claude went with the last run, go again (`checkClaim`).
     func settleMissionMailbox() {
         guard MissionStore.shared.ensureLoaded() else { return }
         let mailbox = MissionWaitHook.mailbox
         for claim in mailbox.claims() {
-            settle(claim, sessionEnded: !Self.claudeRuns(claim.conversation, since: claim.claimedAt, in: mailbox))
+            checkClaim(claim, sessionEnded: !Self.claudeRuns(claim.conversation, since: claim.claimedAt, in: mailbox))
         }
         mailbox.sweep(now: Date().timeIntervalSince1970)
     }
 
-    enum ClaimSettlement: Equatable {
-        /// The model took it in: delivered.
-        case recorded
-        /// Its session ended first: it goes again.
-        case released
-        /// Its turn may still read it.
-        case kept
+    /// Records `claim` as delivered once its session's transcript shows the
+    /// model read it; else frees it to go again when `sessionEnded`. The
+    /// transcript is read off the main thread; a session's end that comes
+    /// meanwhile counts for that read.
+    func checkClaim(_ claim: MissionMailbox.Claim, sessionEnded: Bool) {
+        let id = claim.letter.id
+        let checking = missionWaits.checkingClaims[id]
+        missionWaits.checkingClaims[id] = sessionEnded || checking == true
+        guard checking == nil else { return }
+        let transcript = MissionWaitHook.mailbox.transcript(of: claim.conversation)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let read = MissionWaitHook.modelRead(claim.letter, claimedAt: claim.claimedAt, transcript: transcript)
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.settle(claim, read: read) }
+            }
+        }
     }
 
-    /// Records `claim` as delivered once its session's transcript shows the
-    /// model read it; else frees it to go again when `sessionEnded`.
-    @discardableResult
-    func settle(_ claim: MissionMailbox.Claim, sessionEnded: Bool) -> ClaimSettlement {
+    private func settle(_ claim: MissionMailbox.Claim, read: Bool) {
         let mailbox = MissionWaitHook.mailbox
-        let read = MissionWaitHook.modelRead(claim.letter, claimedAt: claim.claimedAt, transcript: mailbox.transcript(of: claim.conversation))
-        guard read || sessionEnded else { return .kept }
+        let sessionEnded = missionWaits.checkingClaims.removeValue(forKey: claim.letter.id) ?? false
+        // Another settled it meanwhile.
+        guard read || sessionEnded, mailbox.claims().contains(claim) else { return }
         if read { recordHookDelivery(of: claim) }
         try? mailbox.forget(claim)
         missionWaits.handedToHooks[claim.letter.id] = nil
-        return read ? .recorded : .released
+        if !read { typeMissionMessages() }
     }
 
     /// Whether a `claude` started before `claimedAt` still runs

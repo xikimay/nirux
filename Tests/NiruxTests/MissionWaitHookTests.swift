@@ -90,5 +90,9 @@ final class MissionWaitHookTests: XCTestCase {
         try handle.close()
         XCTAssertTrue(MissionWaitHook.modelRead(letter, claimedAt: claimedAt, transcript: transcript.path))
         XCTAssertFalse(MissionWaitHook.modelRead(letter, claimedAt: claimedAt, transcript: nil))
+        // Only past where the transcript ended when it was posted.
+        var posted = letter
+        posted.transcriptOffset = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: transcript.path)[.size] as? UInt64)
+        XCTAssertFalse(MissionWaitHook.modelRead(posted, claimedAt: claimedAt, transcript: transcript.path))
     }
 }
