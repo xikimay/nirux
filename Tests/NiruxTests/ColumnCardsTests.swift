@@ -1227,8 +1227,8 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(narrow.lastCameraX, centred + 20, "from where it was, without a jump")
     }
 
-    /// A card on its way out is neither taken nor moved by a drag: it
-    /// recedes where it lies.
+    /// A card on its way out is neither taken nor moved by a drag, nor put
+    /// back by Escape: it recedes where it lies.
     func testAClosingCardIsNeitherTakenNorMoved() {
         let workspace = workspace(columns: 3)
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
@@ -1245,6 +1245,15 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(cards[1].view.frame.minX, x, "where it lies")
         XCTAssertTrue(workspace.columns[1] === cards[1])
         workspace.endColumnDrag(cancelled: true)
+
+        cards[1].isClosing = false
+        XCTAssertTrue(workspace.beginColumnDrag(at: 1))
+        XCTAssertTrue(workspace.dragColumn(to: 5_000, outside: false))
+        cards[1].isClosing = true
+        workspace.endColumnDrag(cancelled: true)
+        XCTAssertTrue(workspace.columns[2] === cards[1], "Escape leaves it where it lies")
+        XCTAssertEqual(workspace.focusedIndex, 2)
+        XCTAssertNil(workspace.draggedColumn)
     }
 
     /// Taken mid-glide, a card stops where it shows.
@@ -1477,6 +1486,34 @@ final class ColumnCardsTests: XCTestCase {
             try press(header, at: start, events: [(.leftMouseDragged, past), (.leftMouseDragged, above), (.leftMouseUp, above)])
             XCTAssertEqual(workspace.columns.map(ObjectIdentifier.init), order, "dropped outside")
             XCTAssertNil(workspace.heldCamera)
+        }
+    }
+
+    /// A card closed during the press (⌘W reaches the app until the press
+    /// drags) isn't lifted once the pointer passes the threshold.
+    func testAHeaderPressedOnACardThatStartsClosingLiftsNothing() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { true }
+            var ticks: [Bool] = []
+            shell.sideEffects.runsDragTicks = { ticks.append($0) }
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let cards = try halfCardsFromTheLeft(shell)
+            let header = try XCTUnwrap(cards[0].header)
+            let start = header.convert(NSPoint(x: 4, y: header.bounds.midY), to: nil)
+            let past = NSPoint(x: start.x + cards[1].view.frame.minX - cards[0].view.frame.minX, y: start.y)
+            let closes = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { _ in
+                cards[0].isClosing = true
+                return nil
+            }
+            defer { closes.map(NSEvent.removeMonitor) }
+
+            try press(header, at: start, events: [(.keyDown, start), (.leftMouseDragged, past), (.leftMouseUp, past)])
+            XCTAssertTrue(cards[0].isClosing, "the key reached the app")
+            XCTAssertEqual(ticks, [], "nothing lifted")
+            XCTAssertFalse(cards[0].isDragged)
+            XCTAssertNil(workspace.draggedColumn)
+            XCTAssertEqual(workspace.columns.map(ObjectIdentifier.init), cards.map(ObjectIdentifier.init))
+            cards[0].isClosing = false
         }
     }
 
