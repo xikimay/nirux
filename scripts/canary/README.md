@@ -142,19 +142,28 @@ scripts/canary.sh /tmp/nirux-explore/explore-XXXXXXXX/Nirux.app.zip --explore \
 scripts/canary.sh Nirux.app --explore --replay-trace scripts/canary/traces/hidden-copy-quits-when-a-popover-closes.jsonl
 ```
 
-`--replay-traces DIR` replays every kept trace of a folder, each in a fresh copy; a trace that finds its bug again is a `regression`, one that doesn't is a pass under `trace:<name>`. `.github/workflows/canary-traces.yml` runs `scripts/canary/traces` this way every night at 03:00 UTC on main (and on demand, or on a pull request that changes the traces or the workflow), without a model.
+`--replay-traces DIR` replays every kept trace of a folder, each in a fresh copy; a trace that finds its bug again is a `regression`, one that doesn't is a pass under `trace:<name>`. `.github/workflows/canary-traces.yml` runs `scripts/canary/traces` this way, without a model, on a pull request that changes the traces or the workflow (and on demand); the night run replays them every night on the nightly build.
 
 `--diff-base REF` puts first the goals that the files changed since REF touch. `traces/` keeps reduced traces: `hidden-copy-quits-when-a-popover-closes` (4 of the first run's 21 calls, 178 replays) quit the hidden copy before it stopped counting a closing popover as its last window.
 
-## Night run (off until installed)
+## Night run (GitHub Actions)
+
+`.github/workflows/canary-night.yml` runs `night.py run` at 02:00 UTC on main, and on demand. It runs on a hosted `macos-15` runner and never overlaps itself. It downloads the `nightly` release's `Nirux.app.zip`, the build Sparkle installs. The build is tested once it unpacks, `codesign --verify --deep --strict` passes and it has a build number. The scripts come from the commit the nightly was built from (the `nightly` tag). Then one explore run (50 calls, `--max-usd 3`) and every kept trace replay. Each step's output goes to a log in the evidence, not to the job's log. The job summary gives the app tested, how each step ended, and each incident with its replay:
 
 ```sh
-/usr/bin/python3 scripts/canary/night.py install --app /path/to/Nirux.app [--hour 3]   # turns it on
-/usr/bin/python3 scripts/canary/night.py uninstall                                     # turns it off
-/usr/bin/python3 scripts/canary/night.py digest                                        # what came since the last digest
+gh run download <run> --repo xikimay/nirux -n canary-night-<run> -D canary-night && scripts/canary.sh canary-night/evidence/explore-…/Nirux.app.zip --explore --replay-trace canary-night/evidence/explore-…/trace.jsonl
 ```
 
-Install copies the runner to `~/Library/Application Support/Nirux Canary/runner` (a task worktree goes away), resolves `claude` and puts its folder on the agent's PATH, and replaces an agent already loaded. The LaunchAgent (`com.xikimay.nirux.canary-night`, never at load) starts `night.py run` at the hour. It goes on only on AC power, with this user's session in front and the keyboard and mouse idle for 30 minutes, one run at a time; it runs one explore run (50 calls, `--max-usd`) then replays each kept trace. When someone touches the keyboard or mouse, or the idle check fails, it sends SIGTERM to `explore.py`, which ends its hidden copy and `claude -p`. Each night's runs and `digest.md` (how each step ended, new incidents with the replay their evidence allows, clean runs) go to the history folder's `night/<date>/`. `caffeinate` keeps the Mac awake while a run lasts; a Mac asleep at the hour skips the night (launchd runs the job at wake, the check sees the user back), unless the user adds a wake schedule (`sudo pmset repeat wakeorpoweron …`, system-wide: install prints it, never runs it). Nothing installs it but a person.
+The evidence and the ledger are the run's artifact (14 days). When there are incidents, a second job comments on the open issue labelled `canary`, or opens one. That job runs on `ubuntu-latest` with `issues: write` and no Claude token. The issue gives each incident's rule, classification, fingerprint and replay, never a finding's detail or a note, which can hold text the explorer read or typed.
+
+The exploration needs a repository secret that only the repository's owner can create:
+
+```sh
+claude setup-token                                   # prints a token for the Claude subscription
+gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo xikimay/nirux
+```
+
+Without it, the summary says the exploration was skipped and the traces still replay. The token goes to the exploration's `claude` alone (`CLAUDE_ENVIRONMENT`): never to the copy, which gets an environment of its own, nor to the traces or the logs. Any evidence file holding it is deleted before the upload.
 
 ## Workflow
 
