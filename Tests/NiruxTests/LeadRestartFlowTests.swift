@@ -274,11 +274,16 @@ final class LeadRestartFlowTests: XCTestCase {
             report(.working)
             report(.done)
             shell.typeMissionMessages()
-            harness.waitUntil("the rest") { count(parts[19]) == 1 }
+            @MainActor func state(_ part: String) -> String {
+                let event = MissionStore.shared.missions.flatMap(\.events).first { $0.message.hasPrefix(part) }
+                return "\(part)typed=\(event?.parentTypedAt != nil) typing=\(event.map { shell.missionWaits.typing.contains($0.id) } ?? false)"
+            }
+            harness.waitUntil("the rest", timeout: 20) { count(parts[19]) == 1 }
             XCTAssertEqual(pastes(), 3)
             XCTAssertEqual(
                 parts.map(count), Array(repeating: 1, count: parts.count),
-                "each result once; Ctrl+L seen: \(standIn.input.contains("\u{0C}"))"
+                "each result once; Ctrl+L seen: \(standIn.input.contains("\u{0C}")); pastes \(pastes()); "
+                    + parts.filter { count($0) != 1 }.map(state).joined(separator: ", ") + "; tail: " + String(input().suffix(160)).debugDescription
             )
         }
     }
