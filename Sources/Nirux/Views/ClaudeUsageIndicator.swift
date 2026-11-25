@@ -61,6 +61,8 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
     }
 
     private func render(now: TimeInterval) {
+        // Loading the view later would reset the label's colour set below.
+        loadViewIfNeeded()
         defer { relayOutTitleBar() }
         limits = QuotaLimit.current(
             claude: claude, claudeReadings: claudeReadings, codex: codex, codexReadings: codexReadings, previous: limits, now: now
