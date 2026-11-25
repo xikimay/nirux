@@ -98,6 +98,15 @@ final class NiruxShellView: NSView {
     /// Each space's task budget (`refreshTaskBudgets`), by space ID; none: off.
     var taskBudgets: [String: Int] = [:]
     var usageWindow: UsageWindowController?
+    /// "Compact at turn end" waiting for its claude to rest: column ID → task ID.
+    var compactsAtTurnEnd: [UUID: String] = [:]
+    /// What holds a column's claude (nil: none runs there), for the queued
+    /// compactions and their offer; a test sets its own.
+    lazy var claudeHoldings: (WorkspaceState, ColumnState, ProcessSnapshot) -> LeadHoldings? = { [weak self] workspace, column, snapshot in
+        guard let self, let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
+              foreground.interactiveAgent == .claude else { return nil }
+        return self.leadHoldings(workspace, column: column, pty: pty, foreground: foreground, snapshot: snapshot)
+    }
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
     var workspaces: [WorkspaceState] {
