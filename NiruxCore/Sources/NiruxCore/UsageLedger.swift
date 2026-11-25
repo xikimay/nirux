@@ -116,7 +116,9 @@ public struct UsageSession: Equatable, Sendable {
     public var contextTokens: Int?
     public var contextWindow: Int?
     public var subagents = 0
-    public var rateLimits: CodexRateLimits?
+    /// Codex's, oldest first.
+    public var rateLimitReadings: [CodexRateLimits] = []
+    public var rateLimits: CodexRateLimits? { rateLimitReadings.last }
     /// Its responses, then each subagent's, each in time order.
     public var events: [UsageEvent]
 
@@ -128,7 +130,7 @@ public struct UsageSession: Equatable, Sendable {
         contextTokens: Int? = nil,
         contextWindow: Int? = nil,
         subagents: Int = 0,
-        rateLimits: CodexRateLimits? = nil,
+        rateLimitReadings: [CodexRateLimits] = [],
         events: [UsageEvent]
     ) {
         self.key = key
@@ -138,7 +140,7 @@ public struct UsageSession: Equatable, Sendable {
         self.contextTokens = contextTokens
         self.contextWindow = contextWindow
         self.subagents = subagents
-        self.rateLimits = rateLimits
+        self.rateLimitReadings = rateLimitReadings
         self.events = events
     }
 }
@@ -318,7 +320,7 @@ public struct UsageLedger: Sendable {
             return session(
                 UsageSessionKey(.codex, id), cwd: parser.cwd, events: parser.events, model: parser.model,
                 contextTokens: parser.events.last?.contextTokens, contextWindow: parser.contextWindow,
-                rateLimits: parser.rateLimits
+                rateLimitReadings: parser.rateLimitReadings
             )
         }
         let agySessions = agy.values.map { reader in
@@ -348,12 +350,12 @@ public struct UsageLedger: Sendable {
         contextTokens: Int?,
         contextWindow: Int? = nil,
         subagents: Int = 0,
-        rateLimits: CodexRateLimits? = nil
+        rateLimitReadings: [CodexRateLimits] = []
     ) -> UsageSession {
         UsageSession(
             key: key, cwd: cwd, attribution: attributor.attribution(key, cwd: cwd), model: model,
             contextTokens: contextTokens, contextWindow: contextWindow, subagents: subagents,
-            rateLimits: rateLimits, events: events
+            rateLimitReadings: rateLimitReadings, events: events
         )
     }
 

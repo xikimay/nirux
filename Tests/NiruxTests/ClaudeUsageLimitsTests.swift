@@ -188,6 +188,30 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(stored.fiveHour?.usedPercentage, 35, "the first one's idle repeat")
     }
 
+    /// News goes to the day's readings log for the pace: a changed reading
+    /// at once, the same one again only after the heartbeat, an idle repeat
+    /// never. Turning the option off forgets the log with the rest.
+    func testRecordLogsNewsForThePace() throws {
+        let folder = ClaudeUsageLimitsFile.readingsFolder(beside: fileURL)
+        func logged(_ window: String = "five_hour") -> [Double] {
+            QuotaReadingLog.read(in: folder, since: 0)[window]?.map(\.usedPercent) ?? []
+        }
+        try report("a", api: 100, fiveHour: 30, sevenDay: 18, at: now)
+        try report("a", api: 200, fiveHour: 30, sevenDay: 18, at: now + 60)
+        XCTAssertEqual(logged(), [30], "a new claude's first report waits for its next response; that one logs")
+        try report("a", api: 300, fiveHour: 31, sevenDay: 18, at: now + 120)
+        let beat = now + 120 + ClaudeUsageLimitsFile.readingHeartbeat
+        try report("a", api: 400, fiveHour: 31, sevenDay: 18, at: beat)
+        try report("a", api: 400, fiveHour: 31, sevenDay: 18, at: beat + ClaudeUsageLimitsFile.readingHeartbeat)
+        XCTAssertEqual(logged(), [30, 31, 31], "its prompt cache expired: a repeat, not a reading")
+        XCTAssertEqual(logged("seven_day"), [18, 18])
+        try report("a", session: "s2", api: 50_000, fiveHour: 12, sevenDay: 18, at: beat + 700)
+        XCTAssertEqual(logged(), [30, 31, 31], "/resume of an older session: its numbers are old")
+
+        ClaudeUsageLimitsFile.remove(at: fileURL)
+        XCTAssertEqual(QuotaReadingLog.read(in: folder, since: 0), [:])
+    }
+
     func testRecordTakesNothingFromOutsideNiruxOrWithoutLimits() throws {
         let report = try JSONSerialization.data(withJSONObject: payload(fiveHour: reading(30, resetsIn: hour)))
         XCTAssertFalse(ClaudeStatusLineCLI.record(payload: report, env: [:], now: now, url: fileURL))

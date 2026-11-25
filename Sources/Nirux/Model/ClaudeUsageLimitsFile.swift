@@ -34,6 +34,8 @@ enum ClaudeUsageLimitsFile {
         var limits = ClaudeUsageLimits()
         /// What each `claude` process last reported (see `reporter`).
         var reporters: [String: ReporterMark] = [:]
+        /// When each window last went to the readings log, by its name there.
+        var logged: [String: TimeInterval] = [:]
 
         init() {}
 
@@ -42,6 +44,7 @@ enum ClaudeUsageLimitsFile {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             limits = try container.decode(ClaudeUsageLimits.self, forKey: .limits)
             reporters = (try? container.decodeIfPresent([String: ReporterMark].self, forKey: .reporters)) ?? [:]
+            logged = (try? container.decodeIfPresent([String: TimeInterval].self, forKey: .logged)) ?? [:]
         }
     }
 
@@ -85,6 +88,17 @@ enum ClaudeUsageLimitsFile {
         Persistence.stateDirectory.appendingPathComponent("claude-usage-limits.json")
     }
 
+    /// The readings log (`QuotaReadingLog`) beside the file, for the pace:
+    /// the state's `usage` folder, which the one-shot log shares (their file
+    /// prefixes keep them apart).
+    static func readingsFolder(beside url: URL = url) -> String {
+        url.deletingLastPathComponent().appendingPathComponent("usage").path
+    }
+
+    /// News that repeats the last logged reading goes to the log again only
+    /// this long after it: the pace needs to see a limit hold still.
+    static let readingHeartbeat: TimeInterval = 5 * 60
+
     static func load(from url: URL = url) -> ClaudeUsageLimits? {
         loadContents(from: url)?.limits
     }
@@ -122,9 +136,16 @@ enum ClaudeUsageLimitsFile {
         let existing = loadContents(from: url) ?? Contents()
         var contents = existing
         var news = report.limits
+        // Only a new response logs a reading: a differing repeat (`/resume`
+        // of an older session) brings old numbers at a new time, and so can
+        // a `claude` without a mark yet (a new process, a pruned mark); its
+        // next response logs.
+        var isResponse = true
         if let reporter {
             let last = contents.reporters[reporter]
+            isResponse = last != nil
             if let last, last.sessionID != report.sessionID || (report.apiDuration ?? -1) <= (last.apiDuration ?? -1) {
+                isResponse = false
                 if ReporterMark.Reading(news.fiveHour) == last.fiveHour { news.fiveHour = nil }
                 if ReporterMark.Reading(news.sevenDay) == last.sevenDay { news.sevenDay = nil }
             }
@@ -139,6 +160,14 @@ enum ClaudeUsageLimitsFile {
             contents.reporters[reporter] = mark
         }
         contents.limits = (contents.limits.current(at: now) ?? ClaudeUsageLimits()).updated(with: news)
+        var readings: [String: QuotaReading] = [:]
+        for (name, window, before) in [("five_hour", news.fiveHour, existing.limits.fiveHour), ("seven_day", news.sevenDay, existing.limits.sevenDay)] {
+            guard isResponse, let window else { continue }
+            let changed = before?.usedPercentage != window.usedPercentage || before?.resetsAt != window.resetsAt
+            guard changed || now - (contents.logged[name] ?? 0) >= readingHeartbeat else { continue }
+            readings[name] = QuotaReading(time: now, usedPercent: window.usedPercentage, resetsAt: window.resetsAt)
+            contents.logged[name] = now
+        }
         contents.reporters = contents.reporters
             .filter { $0.value.changedAt > now - reporterMemory }
             .sorted { $0.value.changedAt > $1.value.changedAt }
@@ -148,12 +177,21 @@ enum ClaudeUsageLimitsFile {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         guard let data = try? encoder.encode(contents) else { return false }
+        // The log first: the app reloads it when the file changes.
+        QuotaReadingLog.append(readings, in: readingsFolder(beside: url))
         return (try? data.write(to: url, options: .atomic)) != nil
     }
 
-    /// Turning the option off forgets what was reported.
+    /// Turning the option off forgets what was reported, readings included.
+    /// Under the lock when it comes within `lockWait`: a status line run in
+    /// flight must not log after it.
     static func remove(at url: URL = url) {
+        let lock = open(url.path + ".lock", O_RDWR | O_CREAT, 0o600)
+        defer { if lock >= 0 { close(lock) } }
+        let locked = lock >= 0 && acquire(lock)
+        defer { if locked { flock(lock, LOCK_UN) } }
         try? FileManager.default.removeItem(at: url)
+        QuotaReadingLog.removeAll(in: readingsFolder(beside: url))
     }
 
     static let lockWait: TimeInterval = 0.5
