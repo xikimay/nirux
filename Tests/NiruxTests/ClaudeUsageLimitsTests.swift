@@ -90,20 +90,38 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         """#.utf8).write(to: fileURL)
         let current = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: fileURL)?.current(at: now))
         XCTAssertEqual(current.fiveHour?.usedPercentage, ClaudeUsageLimits.maximumPercentage)
-        XCTAssertEqual(current.titleText, "5h 999%")
+        XCTAssertEqual(current.fiveHour?.displayedPercent, 999)
         XCTAssertNil(current.sevenDay, "a reset decades out never expires: dropped")
     }
 
     // MARK: - Display
 
-    func testTitleShowsTheReportedWindowsAndTurnsAtEightyPercent() {
-        let both = ClaudeUsageLimits(fiveHour: window(42.4, resetsAt: now + hour), sevenDay: window(79.4, resetsAt: now + 9 * hour))
-        XCTAssertEqual(both.titleText, "5h 42% · 7d 79%")
-        XCTAssertFalse(both.isNearLimit)
+    /// Readings every 5 minutes up to now.
+    private func climb(_ percents: [Double], resetsAt: TimeInterval) -> [QuotaReading] {
+        percents.enumerated().map { QuotaReading(time: now - Double(percents.count - 1 - $0.offset) * 300, usedPercent: $0.element, resetsAt: resetsAt) }
+    }
 
-        let near = ClaudeUsageLimits(sevenDay: window(79.5, resetsAt: now + 9 * hour))
-        XCTAssertEqual(near.titleText, "7d 80%")
-        XCTAssertTrue(near.isNearLimit, "the color agrees with the number shown")
+    private var utc: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_GB")
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    func testTitleSaysTheBindingLimitsPace() throws {
+        func title(_ percents: [Double], length: TimeInterval = 5 * 3600, resetsIn: TimeInterval) throws -> UsageText.QuotaTitle {
+            let limit = try XCTUnwrap(QuotaLimit(agent: .claude, length: length, readings: climb(percents, resetsAt: now + resetsIn), now: now))
+            return UsageText.title(limit, now: now, calendar: utc)
+        }
+        // A point a minute from 60 %: full by 14:40, before its reset at 15:00.
+        XCTAssertEqual(try title([45, 50, 55, 60], resetsIn: hour), .init(text: "⚠︎ 5h full by 14:40", tone: .runsOut))
+        XCTAssertEqual(try title([52.5, 55, 57.5, 60], resetsIn: hour), .init(text: "5h 60% · ≈ 90%", tone: .normal))
+        XCTAssertEqual(try title([98, 99, 100], length: 7 * 86_400, resetsIn: 99 * hour), .init(text: "⚠︎ 7d full until Wed 17:00", tone: .runsOut))
+        // Without a forecast: a warning from 80 %, as the number shows it.
+        XCTAssertEqual(try title([79.4], resetsIn: hour), .init(text: "5h 79%", tone: .normal))
+        XCTAssertEqual(try title([79.5], resetsIn: hour), .init(text: "⚠︎ 5h 80%", tone: .warning))
+        // A forecast that holds needs no warning at 85 %.
+        XCTAssertEqual(try title([85, 85, 85], resetsIn: hour), .init(text: "5h 85%", tone: .normal))
     }
 
     func testTooltipGivesEachResetAndWhenItWasReported() {
@@ -262,6 +280,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         record(35)
         monitor.refresh(now: clock)
         XCTAssertEqual(shown.last??.fiveHour?.usedPercentage, 35, "a rewrite is read again")
+        XCTAssertEqual(monitor.readings["five_hour"]?.map(\.usedPercent), [30, 35], "the pace's readings come with it")
 
         reporting = false
         monitor.refresh(now: clock)
@@ -273,6 +292,31 @@ final class ClaudeUsageLimitsTests: XCTestCase {
 
         monitor.setEnabled(false)
         XCTAssertEqual(shown.last, .some(nil))
+    }
+
+    /// The binding limit and its pace: red once it runs out before its
+    /// reset, its agent's windows in the meters, Codex only when it binds.
+    @MainActor
+    func testIndicatorNamesTheBindingLimitAndItsPace() {
+        let indicator = ClaudeUsageIndicator()
+        indicator.calendar = utc
+        let claude = ClaudeUsageLimits(fiveHour: window(60, resetsAt: now + hour), sevenDay: window(20, resetsAt: now + 90 * hour))
+        indicator.update(limits: claude, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour)], now: now)
+        XCTAssertEqual(indicator.label.stringValue, "⚠︎ 5h full by 14:40")
+        XCTAssertEqual(indicator.label.textColor, Theme.Color.error)
+        XCTAssertEqual(indicator.meters.limits.map(\.length), [5 * hour, 7 * 86_400])
+        XCTAssertTrue(indicator.view.toolTip?.contains("5h: full by 14:40, before its reset at 15:00") == true)
+
+        indicator.update(limits: claude, readings: ["five_hour": climb([52.5, 55, 57.5, 60], resetsAt: now + hour)], now: now)
+        XCTAssertEqual(indicator.label.stringValue, "5h 60% · ≈ 90%")
+        XCTAssertNotEqual(indicator.label.textColor, Theme.Color.error)
+
+        // Codex, nearly full, binds over a Claude that holds.
+        let codex = CodexRateLimits(primary: .init(usedPercent: 99, minutes: 300, resetsAt: now + hour), reportedAt: now)
+        let codexReadings = [98, 98.5, 99].enumerated().map { QuotaReading(time: now - Double(2 - $0.offset) * 450, usedPercent: $0.element, resetsAt: now + hour) }
+        indicator.update(codex: codex, readings: [300: codexReadings], now: now)
+        XCTAssertEqual(indicator.label.stringValue, "⚠︎ Codex 5h full by 14:15")
+        XCTAssertEqual(indicator.meters.limits.map(\.agent), [.codex])
     }
 
     @MainActor

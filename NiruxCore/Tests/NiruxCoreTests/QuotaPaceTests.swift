@@ -79,6 +79,26 @@ struct QuotaPaceTests {
         #expect(QuotaPace.forecast(near, span: span, now: now) == .atReset(percent: 99))
     }
 
+    @Test func theBindingLimitIsTheOneThatStopsTheAgentsFirst() throws {
+        func limit(_ agent: QuotaLimit.Agent, _ length: TimeInterval, _ percents: [Double], resetsIn: TimeInterval) throws -> QuotaLimit {
+            try #require(QuotaLimit(agent: agent, length: length, readings: readings(percents, resetsAt: now + resetsIn), now: now))
+        }
+        let week = try limit(.claude, 7 * 86_400, [70, 70, 70, 70], resetsIn: 86_400)
+        let session = try limit(.claude, 5 * 3_600, [52.5, 55, 57.5, 60], resetsIn: 3_600)
+        let codex = try limit(.codex, 5 * 3_600, [30, 30, 30, 30], resetsIn: 3_600)
+        #expect(session.forecast == .atReset(percent: 90))
+        #expect(QuotaLimit.binding([codex, week, session])?.id == session.id, "90 % at its reset beats 30 %")
+        // Half a point every 5 minutes: the week is full in under 5 hours.
+        let climbingWeek = try limit(.claude, 7 * 86_400, [70, 70.5, 71, 71.5], resetsIn: 86_400)
+        #expect(climbingWeek.runsOut && !session.runsOut)
+        #expect(QuotaLimit.binding([session, climbingWeek])?.id == climbingWeek.id)
+        let fast = try limit(.claude, 5 * 3_600, [45, 50, 55, 60], resetsIn: 3_600)
+        #expect(QuotaLimit.binding([climbingWeek, fast])?.id == fast.id, "it runs out first")
+        let full = try limit(.codex, 5 * 3_600, [98, 99, 100], resetsIn: 600)
+        #expect(QuotaLimit.binding([fast, full, climbingWeek])?.id == full.id)
+        #expect(QuotaLimit(agent: .claude, length: 3_600, readings: readings([10], resetsAt: now - 1), now: now) == nil)
+    }
+
     @Test func theWeekTakesItsPaceOverADay() {
         #expect(QuotaPace.span(forWindowOf: 5 * 3_600) == QuotaPace.sessionSpan)
         #expect(QuotaPace.span(forWindowOf: 7 * 86_400) == QuotaPace.weekSpan)

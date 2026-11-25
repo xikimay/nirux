@@ -45,6 +45,76 @@ enum UsageText {
     }
 }
 
+extension QuotaLimit {
+    /// Claude's windows from its status line and readings log, Codex's from
+    /// its rollouts; each forecast held from `previous` (`QuotaPace`).
+    static func current(
+        claude: ClaudeUsageLimits?, claudeReadings: [String: [QuotaReading]],
+        codex: CodexRateLimits?, codexReadings: [Int: [QuotaReading]],
+        previous: [QuotaLimit], now: TimeInterval
+    ) -> [QuotaLimit] {
+        func limit(_ agent: Agent, _ length: TimeInterval, _ readings: [QuotaReading], _ latest: QuotaReading) -> QuotaLimit? {
+            let held = previous.first { $0.agent == agent && $0.length == length }?.forecast
+            return QuotaLimit(agent: agent, length: length, readings: readings.contains(latest) ? readings : readings + [latest], now: now, previous: held)
+        }
+        let claudeWindows = [("five_hour", 5 * 3_600.0, claude?.fiveHour), ("seven_day", 7 * 86_400.0, claude?.sevenDay)]
+        let claudeLimits = claudeWindows.compactMap { name, length, window in
+            window.flatMap { window in
+                limit(.claude, length, claudeReadings[name] ?? [], QuotaReading(time: window.reportedAt, usedPercent: window.usedPercentage, resetsAt: window.resetsAt))
+            }
+        }
+        let codexLimits = [codex?.primary, codex?.secondary].compactMap { window -> QuotaLimit? in
+            guard let codex, let window, let minutes = window.minutes, let resetsAt = window.resetsAt else { return nil }
+            return limit(.codex, Double(minutes) * 60, codexReadings[minutes] ?? [], QuotaReading(time: codex.reportedAt, usedPercent: window.usedPercent, resetsAt: resetsAt))
+        }
+        return claudeLimits + codexLimits
+    }
+}
+
+extension UsageText {
+    struct QuotaTitle: Equatable {
+        enum Tone { case normal, warning, runsOut }
+        var text: String
+        var tone: Tone
+    }
+
+    /// "5h", "7d", "Codex 5h".
+    static func name(of limit: QuotaLimit) -> String {
+        (limit.agent == .codex ? "Codex " : "") + (window(minutes: Int(limit.length / 60)) ?? "")
+    }
+
+    /// The title bar's words for the binding limit: "5h 68% · ≈ 87%",
+    /// "⚠︎ 5h full by 20:05", "⚠︎ 7d full until Fri 10:15". Without a
+    /// forecast, a warning from `nearLimitPercent`, like a nearly full context.
+    static func title(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> QuotaTitle {
+        let name = name(of: limit)
+        let used = Int(limit.latest.usedPercent.rounded())
+        switch limit.forecast {
+        case .reached:
+            return QuotaTitle(text: "\(name) full until \(ClaudeUsageLimits.clockText(limit.latest.resetsAt, now: now, calendar: calendar))".asWarning, tone: .runsOut)
+        case .runsOut(let at):
+            return QuotaTitle(text: "\(name) full by \(ClaudeUsageLimits.clockText(at, now: now, calendar: calendar))".asWarning, tone: .runsOut)
+        case .atReset(let percent) where percent > used:
+            return QuotaTitle(text: "\(name) \(used)% · ≈ \(percent)%", tone: .normal)
+        case .atReset, .quiet, .unknown:
+            let text = "\(name) \(used)%"
+            return used >= ClaudeUsageLimits.nearLimitPercent ? QuotaTitle(text: text.asWarning, tone: .warning) : QuotaTitle(text: text, tone: .normal)
+        }
+    }
+
+    /// The pace in a tooltip's words: "full by 20:05, before its reset at 20:21".
+    static func pace(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> String {
+        let reset = ClaudeUsageLimits.clockText(limit.latest.resetsAt, now: now, calendar: calendar)
+        switch limit.forecast {
+        case .reached: return "full until its reset at \(reset)"
+        case .runsOut(let at): return "full by \(ClaudeUsageLimits.clockText(at, now: now, calendar: calendar)), before its reset at \(reset)"
+        case .atReset(let percent): return "about \(percent)% at its reset at \(reset)"
+        case .quiet: return "no agent in Nirux spent it lately"
+        case .unknown: return "too few readings yet to tell its pace"
+        }
+    }
+}
+
 extension ContextOffer {
     /// "Each message rereads 312k".
     var text: String {

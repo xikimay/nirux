@@ -29,6 +29,51 @@ public enum QuotaForecast: Equatable, Sendable {
     case unknown
 }
 
+/// A plan limit as Nirux shows it: its latest reading and its forecast.
+public struct QuotaLimit: Equatable, Sendable {
+    public enum Agent: String, Sendable { case claude, codex }
+
+    public var agent: Agent
+    /// 5 hours, a week.
+    public var length: TimeInterval
+    public var latest: QuotaReading
+    public var forecast: QuotaForecast
+
+    /// Stable across readings: what `previous` forecasts are found by.
+    public var id: String { "\(agent.rawValue).\(Int(length))" }
+
+    /// Nil without a reading of a window still running at `now`.
+    public init?(agent: Agent, length: TimeInterval, readings: [QuotaReading], now: TimeInterval, previous: QuotaForecast? = nil) {
+        guard let latest = readings.filter({ $0.time <= now }).max(by: { $0.time < $1.time }), latest.resetsAt > now else { return nil }
+        self.agent = agent
+        self.length = length
+        self.latest = latest
+        forecast = QuotaPace.forecast(readings, span: QuotaPace.span(forWindowOf: length), now: now, previous: previous)
+    }
+
+    /// Full before its reset, or already: the agents will stop.
+    public var runsOut: Bool {
+        switch forecast {
+        case .reached, .runsOut: true
+        default: false
+        }
+    }
+
+    /// The limit that stops the agents first: a full one (the one back last),
+    /// then the one running out first, then the fullest by its reset.
+    public static func binding(_ limits: [QuotaLimit]) -> QuotaLimit? {
+        func rank(_ limit: QuotaLimit) -> (Int, Double) {
+            switch limit.forecast {
+            case .reached: (0, -limit.latest.resetsAt)
+            case .runsOut(let at): (1, at)
+            case .atReset(let percent): (2, -Double(percent))
+            case .quiet, .unknown: (2, -limit.latest.usedPercent)
+            }
+        }
+        return limits.min { rank($0) < rank($1) }
+    }
+}
+
 /// The pace of a limit: the slope of its readings over a recent span, drawn
 /// as a straight line to its reset. A forecast that jumps loses trust, so it
 /// waits for enough readings, rounds its time and holds it until it moves

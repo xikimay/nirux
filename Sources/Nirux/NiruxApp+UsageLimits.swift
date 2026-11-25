@@ -21,8 +21,8 @@ extension NiruxApp {
         let indicator = ClaudeUsageIndicator()
         window.addTitlebarAccessoryViewController(indicator)
         let monitor = ClaudeUsageLimitsMonitor()
-        monitor.onUpdate = { [weak indicator] limits, now in
-            indicator?.update(limits: limits, now: now)
+        monitor.onUpdate = { [weak indicator, weak monitor] limits, now in
+            indicator?.update(limits: limits, readings: monitor?.readings ?? [:], now: now)
         }
         usageLimitsIndicator = indicator
         usageLimitsMonitor = monitor
@@ -40,10 +40,10 @@ extension NiruxApp {
         showCodexLimits()
     }
 
-    /// Codex's limits as the latest usage read found them, while the option
-    /// is on.
+    /// Codex's limits and readings as the latest usage read found them,
+    /// while the option is on.
     func showCodexLimits() {
-        let limits = usageLimitsMonitor?.isEnabled == true ? shell?.usageMonitor?.report?.codexLimits : nil
-        usageLimitsIndicator?.update(codex: limits, now: Date().timeIntervalSince1970)
+        let report = usageLimitsMonitor?.isEnabled == true ? shell?.usageMonitor?.report : nil
+        usageLimitsIndicator?.update(codex: report?.codexLimits, readings: report?.codexReadings ?? [:], now: Date().timeIntervalSince1970)
     }
 }

@@ -40,7 +40,7 @@ struct ClaudeUsageLimits: Codable, Equatable, Sendable {
     var fiveHour: Window?
     var sevenDay: Window?
 
-    /// From 80% of either window, the indicator says it as a warning.
+    /// From 80%, a window without a forecast is said as a warning.
     static let nearLimitPercent = 80
 
     /// The latest reset Claude Code itself accepts: a year out.
@@ -83,19 +83,6 @@ struct ClaudeUsageLimits: Codable, Equatable, Sendable {
         ClaudeUsageLimits(fiveHour: report.fiveHour ?? fiveHour, sevenDay: report.sevenDay ?? sevenDay)
     }
 
-    /// Whether a window reached `nearLimitPercent`.
-    var isNearLimit: Bool {
-        [fiveHour, sevenDay].contains { ($0?.displayedPercent ?? 0) >= Self.nearLimitPercent }
-    }
-
-    /// "5h 42% · 7d 18%", with the windows Claude Code reported.
-    var titleText: String {
-        var parts: [String] = []
-        if let fiveHour { parts.append("5h \(fiveHour.displayedPercent)%") }
-        if let sevenDay { parts.append("7d \(sevenDay.displayedPercent)%") }
-        return parts.joined(separator: " · ")
-    }
-
     var accessibilityText: String {
         var parts: [String] = []
         if let fiveHour { parts.append("5-hour window \(fiveHour.displayedPercent)% used") }
@@ -124,17 +111,16 @@ struct ClaudeUsageLimits: Codable, Equatable, Sendable {
 
     /// "resets at 17:30 (in 2h 10m)", "resets Tue 09:00 (in 4d 3h)".
     static func resetText(_ resetsAt: TimeInterval, now: TimeInterval, calendar: Calendar) -> String {
-        let date = Date(timeIntervalSince1970: resetsAt)
-        let today = Date(timeIntervalSince1970: now)
-        let clock: String
-        if calendar.isDate(date, inSameDayAs: today) {
-            clock = "at " + format(date, template: "jmm", calendar: calendar)
-        } else if resetsAt - now < 6 * 24 * 3600 {
-            clock = format(date, template: "EEEjmm", calendar: calendar)
-        } else {
-            clock = format(date, template: "MMMdjmm", calendar: calendar)
-        }
-        return "resets \(clock) (in \(remainingText(resetsAt - now)))"
+        let clock = clockText(resetsAt, now: now, calendar: calendar)
+        let sameDay = calendar.isDate(Date(timeIntervalSince1970: resetsAt), inSameDayAs: Date(timeIntervalSince1970: now))
+        return "resets \(sameDay ? "at " : "")\(clock) (in \(remainingText(resetsAt - now)))"
+    }
+
+    /// "17:30" today, "Tue 09:00" within 6 days, "Dec 2 09:00" further.
+    static func clockText(_ time: TimeInterval, now: TimeInterval, calendar: Calendar) -> String {
+        let date = Date(timeIntervalSince1970: time)
+        if calendar.isDate(date, inSameDayAs: Date(timeIntervalSince1970: now)) { return format(date, template: "jmm", calendar: calendar) }
+        return format(date, template: time - now < 6 * 24 * 3600 ? "EEEjmm" : "MMMdjmm", calendar: calendar)
     }
 
     /// "45m", "2h 10m", "4d 3h": two units at most, never seconds.
