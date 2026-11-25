@@ -351,6 +351,46 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(UsageText.detail(holding, now: now, calendar: utc).text, "≈ 90% when it resets at 15:00 (in 1h)")
     }
 
+    /// The tasks spending the session, under the limits, each with its
+    /// actions; an action goes out with its task.
+    @MainActor
+    func testPopoverListsWhatSpendsTheSessionWithItsActions() throws {
+        let indicator = ClaudeUsageIndicator()
+        indicator.calendar = utc
+        indicator.presentPopover = { _, _ in }
+        let row = QuotaBurnRow(
+            workspaceID: "task-1", title: "Search index rewrite", share: 0.64, points: 7.2, tokens: 2.4e6,
+            cause: "Each message rereads 612k · 6 subagents", actions: [.compactAtTurnEnd(column: 0), .contextOffer(.freshStart, column: 1)]
+        )
+        var askedWith: [QuotaReading]?
+        indicator.burnRows = { readings in
+            askedWith = readings
+            return [row]
+        }
+        var taken: [String] = []
+        indicator.onBurnAction = { id, action in taken.append("\(id) \(action.title)") }
+        let readings = climb([45, 50, 55, 60], resetsAt: now + hour)
+        indicator.update(limits: ClaudeUsageLimits(fiveHour: window(60, resetsAt: now + hour)), readings: ["five_hour": readings], now: now)
+        XCTAssertTrue(indicator.view.accessibilityPerformPress())
+        XCTAssertEqual(askedWith, readings, "calibrated on the 5-hour readings")
+        let texts = indicator.popoverContent.texts
+        for expected in ["What spends your session · last 30 min", "Search index rewrite", "≈ 7%", "Each message rereads 612k · 6 subagents", "Compact at turn end", "Fresh start"] {
+            XCTAssertTrue(texts.contains(expected), "\(expected) in \(texts)")
+        }
+        func buttons(in view: NSView) -> [NiruxButton] { ((view as? NiruxButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons) }
+        try XCTUnwrap(buttons(in: indicator.popoverContent.view).first { $0.title == "Compact at turn end" }).performClick(nil)
+        XCTAssertEqual(taken, ["task-1 Compact at turn end"])
+    }
+
+    func testAQueuedCompactWaitsForRestAndYieldsToADraft() {
+        XCTAssertEqual(QueuedCompact.of(nil), .drop, "its claude left")
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(isBusy: true)), .wait)
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(hasDialog: true)), .wait)
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(hasQuestion: true)), .wait)
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings(isBusy: true, hasDraft: true)), .drop, "the user's words win")
+        XCTAssertEqual(QueuedCompact.of(LeadHoldings()), .send)
+    }
+
     @MainActor
     func testIndicatorHidesWithoutLimitsAndTurnsNearTheLimit() {
         let indicator = ClaudeUsageIndicator()

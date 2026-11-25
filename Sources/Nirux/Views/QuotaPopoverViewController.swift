@@ -1,16 +1,20 @@
 import AppKit
 
 /// The title bar limit's popover: every plan limit Nirux knows, each with
-/// its meter, pace and reset; Antigravity's, which agy doesn't publish; when
-/// the latest reading came; and the Usage window.
+/// its meter, pace and reset; Antigravity's, which agy doesn't publish; the
+/// tasks spending Claude's session, each with what its row offers; when the
+/// latest reading came; and the Usage window.
 final class QuotaPopoverViewController: NSViewController {
     static let width: CGFloat = 320
 
     var onShowUsage: (() -> Void)?
+    /// A burning task's action, by its task ID.
+    var onBurnAction: ((String, QuotaBurnRow.Action) -> Void)?
     private let stack = NSStackView()
     /// What the rows last said: the same words keep the same views, so
     /// VoiceOver's place and a click in progress survive an update.
     private var shown: [String] = []
+    private var burnActions: [(String, QuotaBurnRow.Action)] = []
 
     override func loadView() {
         stack.orientation = .vertical
@@ -40,20 +44,64 @@ final class QuotaPopoverViewController: NSViewController {
         return walk(view)
     }
 
-    func update(limits: [QuotaLimit], now: TimeInterval, calendar: Calendar) {
+    func update(limits: [QuotaLimit], burn: [QuotaBurnRow] = [], now: TimeInterval, calendar: Calendar) {
         loadViewIfNeeded()
         let ordered = limits.sorted { ($0.agent == .claude ? 0 : 1, $0.length) < ($1.agent == .claude ? 0 : 1, $1.length) }
         let words = ordered.map { "\(UsageText.longName(of: $0)) \(Int($0.latest.usedPercent.rounded())) \(UsageText.detail($0, now: now, calendar: calendar).text)" }
             + [limits.map(\.latest.time).max().map { ClaudeUsageLimits.clockText($0, now: now, calendar: calendar) } ?? ""]
+            + burn.map { "\($0.workspaceID) \(burnValue($0)) \($0.cause ?? "") \($0.actions.map(\.title).joined(separator: ","))" }
         guard words != shown || stack.arrangedSubviews.isEmpty else { return }
         shown = words
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        burnActions = []
         for limit in ordered { stack.addArrangedSubview(row(limit, now: now, calendar: calendar)) }
         stack.addArrangedSubview(textRow(
             "Antigravity", value: "—",
             detail: "Not published: agy shows its quota only in its own /usage.", detailColor: Theme.Color.textTertiary
         ))
+        if !burn.isEmpty {
+            let heading = label("What spends your session · last 30 min", font: Theme.Font.captionEmphasized, color: Theme.Color.textSecondary)
+            stack.addArrangedSubview(heading)
+            for row in burn { stack.addArrangedSubview(burnRow(row)) }
+        }
         stack.addArrangedSubview(footer(readAt: limits.map(\.latest.time).max(), now: now, calendar: calendar))
+    }
+
+    /// Its estimated points of the 5-hour window when calibrated, else its
+    /// share of the spend; a bar of its share; why; its actions.
+    private func burnRow(_ row: QuotaBurnRow) -> NSView {
+        let view = textRow(row.title, value: burnValue(row), detail: row.cause ?? "", detailColor: Theme.Color.textSecondary)
+        view.toolTip = "\(Int((row.share * 100).rounded()))% of Claude’s spend over 30 minutes: \(UsageText.tokens(row.tokens)) tokens "
+            + UsageText.unitNote + (row.points == nil ? "" : ". Points of the 5-hour window are estimated from its readings.")
+        let bar = QuotaShareBar()
+        bar.share = row.share
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        view.insertArrangedSubview(bar, at: 1)
+        NSLayoutConstraint.activate([
+            bar.heightAnchor.constraint(equalToConstant: QuotaMeterView.barHeight),
+            bar.widthAnchor.constraint(equalTo: view.widthAnchor)
+        ])
+        if row.cause == nil { view.arrangedSubviews.last?.removeFromSuperview() }
+        guard !row.actions.isEmpty else { return view }
+        let buttons = row.actions.enumerated().map { offset, action in
+            let button = NiruxButton(
+                title: action.title, kind: offset == 0 ? .primary : .secondary, size: .small, target: self, action: #selector(takeBurnAction(_:))
+            )
+            button.tag = burnActions.count
+            burnActions.append((row.workspaceID, action))
+            return button
+        }
+        view.addArrangedSubview(NSStackView(views: buttons))
+        return view
+    }
+
+    private func burnValue(_ row: QuotaBurnRow) -> String {
+        row.points.map { "≈ \(max(1, Int($0.rounded())))%" } ?? "\(Int((row.share * 100).rounded()))% of it"
+    }
+
+    @objc private func takeBurnAction(_ sender: NSButton) {
+        guard let (workspaceID, action) = burnActions[safe: sender.tag] else { return }
+        onBurnAction?(workspaceID, action)
     }
 
     private func row(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> NSView {

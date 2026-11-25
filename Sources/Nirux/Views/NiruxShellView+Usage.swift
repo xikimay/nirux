@@ -82,6 +82,91 @@ extension NiruxShellView {
         taskUsage(of: workspace)?.isOverBudget ?? false
     }
 
+    static let burnRows = 3
+    static let burnActions = 3
+
+    /// The tasks spending Claude's session now, most first: each one's share
+    /// of the last `UsageReport.burnSpan`, its points of the 5-hour window when
+    /// `readings` calibrate them, why, and what its row offers.
+    func quotaBurnRows(readings: [QuotaReading]) -> [QuotaBurnRow] {
+        guard let report = usageMonitor?.report else { return [] }
+        let total = report.claudeBurn.values.reduce(0, +)
+        guard total > 0 else { return [] }
+        let pointsPerToken = QuotaCalibration.pointsPerToken(readings, minutes: report.claudeMinutes)
+        let snapshot = ProcessSnapshot()
+        let ranked = report.claudeBurn.filter { !$0.key.isEmpty }.sorted { $0.value > $1.value }
+        return ranked.compactMap { id, tokens -> QuotaBurnRow? in
+            guard let workspace = workspaces.first(where: { $0.id == id }) else { return nil }
+            let queued = compactsAtTurnEnd.values.contains(id)
+            let usage = taskUsage(of: workspace)
+            return QuotaBurnRow(
+                workspaceID: id, title: workspace.title, share: tokens / total, points: pointsPerToken.map { $0 * tokens }, tokens: tokens,
+                cause: usage?.burnCause(compactsAtTurnEnd: queued),
+                actions: burnActions(of: workspace, usage: usage, queued: queued, snapshot: snapshot)
+            )
+        }.prefix(Self.burnRows).map { $0 }
+    }
+
+    /// Its row's own offers (Compact, Fresh start, its budget's choices), and
+    /// "Compact at turn end" for a claude at work with a heavy context.
+    private func burnActions(of workspace: WorkspaceState, usage: SidebarTaskUsage?, queued: Bool, snapshot: ProcessSnapshot) -> [QuotaBurnRow.Action] {
+        let info = sidebar.lastInfos.first { $0.id == workspace.id }
+        var actions: [QuotaBurnRow.Action] = []
+        for (index, column) in workspace.columns.enumerated() {
+            if let offer = info?.columns.first(where: { $0.index == index })?.contextOffer {
+                actions += offer.choices.map { .contextOffer($0, column: index) }
+            } else if !queued, usage?.isContextHeavy == true, let pty = column.pty,
+                      let foreground = pty.foregroundProcess(snapshot: snapshot), foreground.interactiveAgent == .claude,
+                      leadHoldings(workspace, column: column, pty: pty, foreground: foreground, snapshot: snapshot).isBusy {
+                actions.append(.compactAtTurnEnd(column: index))
+            }
+        }
+        for case .budget(let offer) in info?.cardActions ?? [] { actions += offer.choices.map { .budget($0) } }
+        // As many as a popover row holds.
+        return Array(actions.prefix(Self.burnActions))
+    }
+
+    func takeBurnAction(_ action: QuotaBurnRow.Action, workspaceID: String) {
+        guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
+        switch action {
+        case .contextOffer(let choice, let column):
+            takeContextOffer(choice, workspaceIndex: index, columnIndex: column)
+        case .budget(let choice):
+            takeBudgetChoice(choice, workspaceID: workspaceID)
+        case .compactAtTurnEnd(let column):
+            guard let column = workspaces[index].columns[safe: column] else { return }
+            compactsAtTurnEnd[column.id] = workspaceID
+            showToast("“\(workspaces[index].title)” compacts when its turn ends.")
+            updateSidebar()
+        }
+    }
+
+    /// Each queued compaction whose claude rests types /compact once; one
+    /// whose claude left, or whose prompt holds the user's draft, is dropped.
+    func runCompactsAtTurnEnd(snapshot: ProcessSnapshot) {
+        for (columnID, workspaceID) in compactsAtTurnEnd {
+            let workspace = workspaces.first { $0.id == workspaceID }
+            let column = workspace?.columns.first { $0.id == columnID }
+            var holdings: LeadHoldings?
+            if let workspace, let column, let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
+               foreground.interactiveAgent == .claude {
+                holdings = leadHoldings(workspace, column: column, pty: pty, foreground: foreground, snapshot: snapshot)
+            }
+            switch QueuedCompact.of(holdings) {
+            case .wait:
+                continue
+            case .drop:
+                compactsAtTurnEnd[columnID] = nil
+            case .send:
+                compactsAtTurnEnd[columnID] = nil
+                guard let uuid = column?.agentUUID, case .sent = sendTypedPrompt(agentUUID: uuid, prompt: "/compact") else {
+                    showToast("Couldn’t type /compact: claude’s prompt isn’t free.", tone: .error)
+                    continue
+                }
+            }
+        }
+    }
+
     func showUsageWindow() {
         let controller = usageWindow ?? UsageWindowController()
         usageWindow = controller

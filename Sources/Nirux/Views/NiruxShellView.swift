@@ -94,6 +94,8 @@ final class NiruxShellView: NSView {
     /// Each space's task budget (`refreshTaskBudgets`), by space ID; none: off.
     var taskBudgets: [String: Int] = [:]
     var usageWindow: UsageWindowController?
+    /// "Compact at turn end" waiting for its claude to rest: column ID → task ID.
+    var compactsAtTurnEnd: [UUID: String] = [:]
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
     var workspaces: [WorkspaceState] {

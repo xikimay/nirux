@@ -1244,6 +1244,60 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// A task at work with a heavy context offers "Compact at turn end" in
+    /// the title bar popover; queued once, it types /compact when its turn
+    /// ends, not before.
+    func testCompactAtTurnEndTypesCompactOnceItsTurnEnds() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let started = try call(LeadTools.startTask, ["description": "Index rewrite"], lead: lead, in: harness)
+            XCTAssertFalse(started.isError, started.text)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Index rewrite" })
+            let now = Date().timeIntervalSince1970
+            let monitor = UsageMonitor(sources: UsageSources(home: harness.home), catalog: { UsageCatalog() })
+            monitor.report = UsageReport(sessions: [UsageSession(
+                key: UsageSessionKey(.claude, "t"), attribution: UsageAttribution(spaceID: lead.space, taskID: task.id), contextTokens: 612_000,
+                events: [UsageEvent(timestamp: now - 60, model: "claude-opus-5-5", counts: TokenCounts(input: 1_000, cacheRead: 611_000))]
+            )], now: now)
+            shell.usageMonitor = monitor
+            let column = try XCTUnwrap(shell.taskWorker(task, snapshot: ProcessSnapshot()))
+            let pty = try XCTUnwrap(column.pty)
+            let worker = AgentStandIn()
+            defer { worker.remove() }
+            harness.waitUntil("task shell") { pty.shellPID != nil }
+            pty.sendShellLaunchCommand("(\(worker.command()))")
+            harness.waitUntil("its Claude worker") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            let agentUUID = try XCTUnwrap(column.agentUUID)
+            func hook(_ name: AgentHookEvent.Name) {
+                _ = pty.applyAgentHook(AgentHookEvent(
+                    kind: .claude, name: name, agentUUID: agentUUID, sessionID: agentUUID, timestamp: Date().timeIntervalSince1970
+                ), isUserFocused: false)
+            }
+            hook(.sessionStart)
+            hook(.userPromptSubmit)
+            let index = try XCTUnwrap(task.columns.firstIndex { $0 === column })
+            harness.waitUntil("Compact at turn end, mid-turn") {
+                shell.quotaBurnRows(readings: []).first?.actions.contains(.compactAtTurnEnd(column: index)) == true
+            }
+            XCTAssertEqual(shell.quotaBurnRows(readings: []).first?.cause, "Each message rereads 612k")
+
+            shell.takeBurnAction(.compactAtTurnEnd(column: index), workspaceID: task.id)
+            XCTAssertEqual(shell.compactsAtTurnEnd[column.id], task.id)
+            shell.updateSidebar()
+            XCTAssertFalse(worker.input.contains("/compact"), "it waits for the turn to end")
+            XCTAssertEqual(shell.quotaBurnRows(readings: []).first?.actions.contains(.compactAtTurnEnd(column: index)), false, "queued once")
+            XCTAssertEqual(shell.quotaBurnRows(readings: []).first?.cause, "Each message rereads 612k · compacts at turn end")
+
+            hook(.stop)
+            harness.waitUntil("/compact typed at rest") {
+                shell.updateSidebar()
+                return worker.input.contains("/compact")
+            }
+            XCTAssertTrue(shell.compactsAtTurnEnd.isEmpty)
+        }
+    }
+
     @MainActor private func budgetOffer(of task: WorkspaceState, in shell: NiruxShellView) -> SidebarBudgetOffer? {
         shell.sidebar.lastInfos.first { $0.id == task.id }?.cardActions.lazy.compactMap {
             if case .budget(let offer) = $0 { offer } else { nil }

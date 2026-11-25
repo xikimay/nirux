@@ -48,6 +48,48 @@ enum BudgetChoice: String, Hashable, Sendable, CaseIterable {
 }
 
 /// What a Lead holds that a fresh start would lose.
+/// A task in the title bar popover's "what spends your session": its share
+/// of Claude's spend over `UsageReport.burnSpan`, about that many points of
+/// the 5-hour window (`QuotaCalibration`), why, and what its row offers.
+struct QuotaBurnRow: Equatable {
+    enum Action: Equatable {
+        case contextOffer(ContextOffer.Choice, column: Int)
+        case compactAtTurnEnd(column: Int)
+        case budget(BudgetChoice)
+
+        var title: String {
+            switch self {
+            case .contextOffer(let choice, _): choice.title
+            case .compactAtTurnEnd: "Compact at turn end"
+            case .budget(let choice): choice.title
+            }
+        }
+    }
+
+    var workspaceID: String
+    var title: String
+    /// 0…1 of Claude's spend over the span.
+    var share: Double
+    var points: Double?
+    var tokens: Double
+    var cause: String?
+    var actions: [Action]
+}
+
+/// What a queued "Compact at turn end" does at a sidebar pass, given what
+/// holds its claude (nil once its column is gone or runs no claude).
+enum QueuedCompact: Equatable {
+    case wait, send, drop
+
+    static func of(_ holdings: LeadHoldings?) -> QueuedCompact {
+        guard let holdings else { return .drop }
+        // The user's words in its prompt win over a compaction.
+        if holdings.hasDraft { return .drop }
+        if holdings.isBusy || holdings.hasDialog || holdings.hasQuestion { return .wait }
+        return .send
+    }
+}
+
 struct LeadHoldings: Equatable {
     /// Working, or a status Nirux can't trust.
     var isBusy = false
