@@ -9,6 +9,8 @@
     (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin")
     (subpath "/Library") (subpath "/private/etc") (subpath "/private/var/db")
     (subpath "/dev") (literal "/") (literal "/private") (literal "/private/tmp"))
+; git and xcrun from an Xcode install, not only from /Library's Command Line Tools.
+(allow file-read-data (regex #"^/Applications/Xcode[^/]*\.app/"))
 (allow file-read-data file-write* (subpath (param "WORK")))
 (allow file-write* (subpath "/dev"))
 ; /usr/bin/git is an xcrun shim: its cache sits in the user's temp folder, whatever TMPDIR says.
