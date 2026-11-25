@@ -39,6 +39,13 @@ enum NiruxMCPServer {
         build on what just landed: the queue lands it up to date.
         """
 
+    /// Added for a task whose space lets its tasks manage spaces.
+    static let taskSpaceInstructions = """
+        This space lets its tasks manage spaces: list_spaces, create_space, edit_space, delete_space, \
+        move_task_to_space, and list_tasks with space to read a space's tasks. Use them only when the user asks. \
+        Moving yourself, or deleting your own space, moves you too.
+        """
+
     /// For an agent outside a Nirux workspace, which has no task tools.
     static let skillInstructions = """
         To start a task, or a sub-task of yours, in its own worktree, use the nirux-worktree skill.
@@ -69,7 +76,8 @@ enum NiruxMCPServer {
     /// learns how to start a task, with its tools in a Nirux workspace.
     static func instructions(for context: Context) -> String {
         if context.isLead { return leadInstructions + "\n\n" + instructions }
-        return instructions + "\n\n" + (context.isWorkspaceAgent ? taskInstructions : skillInstructions)
+        guard context.isWorkspaceAgent else { return instructions + "\n\n" + skillInstructions }
+        return instructions + "\n\n" + taskInstructions + (context.tasksManageSpaces ? "\n\n" + taskSpaceInstructions : "")
     }
 
     /// `--mcp-config=<this server>` and `--allowedTools=<its tools>` for
@@ -139,16 +147,31 @@ enum NiruxMCPServer {
             nonEmpty("NIRUX_WORKSPACE_ID") != nil && nonEmpty("NIRUX_AGENT_UUID") != nil
                 && nonEmpty(NiruxLaunchAuthorization.environmentKey) != nil
         }
+        /// The space its workspace is in, as Nirux last saved it: a shell
+        /// keeps its launch's `NIRUX_PROFILE_ID` after its workspace moves.
+        var workspaceSpaceID: String? {
+            nonEmpty("NIRUX_WORKSPACE_ID").flatMap { Persistence.savedSpaceID(ofWorkspace: $0, stateDirectory: stateDirectory) } ?? spaceID
+        }
+
+        /// A task's agent whose space lets its tasks manage spaces, for the
+        /// tools it lists and learns about.
+        var tasksManageSpaces: Bool {
+            guard !isLead, isWorkspaceAgent, let space = workspaceSpaceID else { return false }
+            return SpaceDefaultsStore.defaults(forSpace: space, stateDirectory: stateDirectory).tasksCanManageSpaces(inSpace: space)
+        }
+
         /// The tools the app answers for this agent: the Lead's, or a task's.
+        /// The app refuses a task's space tools unless the space the task
+        /// is in when it calls lets its tasks manage spaces.
         var appToolNames: [String] {
             if isLead { return LeadTools.names }
-            return isWorkspaceAgent ? TaskTools.names : []
+            return isWorkspaceAgent ? TaskTools.callableNames : []
         }
 
         /// Their definitions, for `tools/list`.
         var appToolDefinitions: [[String: Any]] {
             if isLead { return LeadTools.definitions }
-            return isWorkspaceAgent ? TaskTools.definitions : []
+            return isWorkspaceAgent ? TaskTools.definitions(managingSpaces: tasksManageSpaces) : []
         }
         /// Tests shorten the Lead's calls' wait for the app.
         var leadTimeout: TimeInterval?

@@ -66,6 +66,25 @@ enum Persistence {
         stateURL.deletingLastPathComponent()
     }
 
+    /// The space `workspaceID` was in at the last save, read from the
+    /// state.json in `stateDirectory` without the rest; nil when it can't
+    /// tell. For a process beside the app (the MCP server), whose launch
+    /// environment names the space the workspace was in then.
+    static func savedSpaceID(ofWorkspace workspaceID: String, stateDirectory: URL) -> String? {
+        struct Saved: Decodable {
+            struct Workspace: Decodable {
+                let id: String?
+                let profileID: String?
+            }
+            let workspaces: [Workspace]
+        }
+        guard let data = try? Data(contentsOf: stateDirectory.appendingPathComponent("state.json")),
+              let saved = try? JSONDecoder().decode(Saved.self, from: data),
+              let workspace = saved.workspaces.first(where: { $0.id == workspaceID })
+        else { return nil }
+        return workspace.profileID ?? WorkspaceProfile.defaultID
+    }
+
     private static func backupURL(_ index: Int, in dir: URL) -> URL {
         dir.appendingPathComponent("state.backup.\(index).json")
     }
