@@ -86,7 +86,9 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
         let tooltip = tooltip(now: now)
         view.toolTip = tooltip
         label.toolTip = tooltip
-        label.setAccessibilityLabel(([title.text.replacingOccurrences(of: "⚠︎ ", with: "")] + paceLines(now: now)).joined(separator: ". "))
+        label.setAccessibilityLabel(([title.text.replacingOccurrences(of: "⚠︎ ", with: "")] + limits.map { limit in
+            "\(UsageText.name(of: limit)) \(Int(limit.latest.usedPercent.rounded()))% used, \(UsageText.pace(limit, now: now, calendar: calendar))"
+        }).joined(separator: ". "))
         label.sizeToFit()
         // The title bar sets the height; only the width follows the text.
         view.frame.size.width = Self.padding + Self.metersWidth + Theme.Space.sm + label.frame.width + Self.padding

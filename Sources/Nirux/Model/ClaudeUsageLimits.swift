@@ -83,13 +83,6 @@ struct ClaudeUsageLimits: Codable, Equatable, Sendable {
         ClaudeUsageLimits(fiveHour: report.fiveHour ?? fiveHour, sevenDay: report.sevenDay ?? sevenDay)
     }
 
-    var accessibilityText: String {
-        var parts: [String] = []
-        if let fiveHour { parts.append("5-hour window \(fiveHour.displayedPercent)% used") }
-        if let sevenDay { parts.append("weekly limit \(sevenDay.displayedPercent)% used") }
-        return "Claude usage limits: " + parts.joined(separator: ", ")
-    }
-
     /// The tooltip: each window with its reset, then when it was reported.
     func tooltip(now: TimeInterval, calendar: Calendar = .current) -> String {
         var lines = ["Claude plan usage limits"]

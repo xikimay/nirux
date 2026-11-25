@@ -60,14 +60,16 @@ public struct QuotaLimit: Equatable, Sendable {
     }
 
     /// The limit that stops the agents first: a full one (the one back last),
-    /// then the one running out first, then the fullest by its reset.
+    /// then the one running out first, then the fullest by its reset; a quiet
+    /// one, which no agent spends, last.
     public static func binding(_ limits: [QuotaLimit]) -> QuotaLimit? {
         func rank(_ limit: QuotaLimit) -> (Int, Double) {
             switch limit.forecast {
             case .reached: (0, -limit.latest.resetsAt)
             case .runsOut(let at): (1, at)
             case .atReset(let percent): (2, -Double(percent))
-            case .quiet, .unknown: (2, -limit.latest.usedPercent)
+            case .unknown: (2, -limit.latest.usedPercent)
+            case .quiet: (3, -limit.latest.usedPercent)
             }
         }
         return limits.min { rank($0) < rank($1) }
@@ -92,7 +94,7 @@ public enum QuotaPace {
     /// A new "runs out" time within this of the previous one keeps it.
     public static let steadiness: TimeInterval = 10 * 60
     /// Readings of one window share its reset, give or take this.
-    static let sameWindow: TimeInterval = 5 * 60
+    public static let sameWindow: TimeInterval = 5 * 60
 
     public static func span(forWindowOf length: TimeInterval) -> TimeInterval {
         length <= sessionWindow ? sessionSpan : weekSpan

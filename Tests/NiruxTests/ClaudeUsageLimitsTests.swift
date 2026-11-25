@@ -121,7 +121,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(try title([79.4], resetsIn: hour), .init(text: "5h 79%", tone: .normal))
         XCTAssertEqual(try title([79.5], resetsIn: hour), .init(text: "⚠︎ 5h 80%", tone: .warning))
         // A forecast that holds needs no warning at 85 %.
-        XCTAssertEqual(try title([85, 85, 85], resetsIn: hour), .init(text: "5h 85%", tone: .normal))
+        XCTAssertEqual(try title([85, 85, 85, 85], resetsIn: hour), .init(text: "5h 85%", tone: .normal))
     }
 
     func testTooltipGivesEachResetAndWhenItWasReported() {
@@ -306,6 +306,11 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(indicator.label.textColor, Theme.Color.error)
         XCTAssertEqual(indicator.meters.limits.map(\.length), [5 * hour, 7 * 86_400])
         XCTAssertTrue(indicator.view.toolTip?.contains("5h: full by 14:40, before its reset at 15:00") == true)
+        XCTAssertTrue(indicator.label.accessibilityLabel()?.contains("7d 20% used") == true, "VoiceOver hears every window")
+        // A `/resume` of an older session left 12 % in the file: the logged readings still tell the pace.
+        let resumed = ClaudeUsageLimits(fiveHour: window(12, resetsAt: now + hour), sevenDay: window(20, resetsAt: now + 90 * hour))
+        indicator.update(limits: resumed, readings: ["five_hour": climb([45, 50, 55, 60], resetsAt: now + hour)], now: now)
+        XCTAssertEqual(indicator.label.stringValue, "⚠︎ 5h full by 14:40")
 
         indicator.update(limits: claude, readings: ["five_hour": climb([52.5, 55, 57.5, 60], resetsAt: now + hour)], now: now)
         XCTAssertEqual(indicator.label.stringValue, "5h 60% · ≈ 90%")

@@ -104,6 +104,11 @@ struct QuotaPaceTests {
         let full = try limit(.codex, 5 * 3_600, [98, 99, 100], resetsIn: 600)
         #expect(QuotaLimit.binding([fast, full, climbingWeek])?.id == full.id)
         #expect(QuotaLimit(agent: .claude, length: 3_600, readings: readings([10], resetsAt: now - 1), now: now) == nil)
+        // A week Codex last spent days ago, quiet at 85 %, gives way to a live 90 % forecast and even a 60 % one.
+        let quiet = try #require(QuotaLimit(agent: .codex, length: 7 * 86_400, readings: [QuotaReading(time: now - 3 * 86_400, usedPercent: 85, resetsAt: now + 86_400)], now: now))
+        #expect(quiet.forecast == .quiet)
+        #expect(QuotaLimit.binding([quiet, session])?.id == session.id)
+        #expect(QuotaLimit.binding([quiet, week])?.id == week.id)
     }
 
     @Test func theWeekTakesItsPaceOverADay() {

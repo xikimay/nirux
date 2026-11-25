@@ -53,9 +53,13 @@ extension QuotaLimit {
         codex: CodexRateLimits?, codexReadings: [Int: [QuotaReading]],
         previous: [QuotaLimit], now: TimeInterval
     ) -> [QuotaLimit] {
+        // The current window joins the readings only when none of its own is
+        // logged yet: logged ones come from responses, while the file also
+        // takes a `/resume`'s old numbers.
         func limit(_ agent: Agent, _ length: TimeInterval, _ readings: [QuotaReading], _ latest: QuotaReading) -> QuotaLimit? {
             let held = previous.first { $0.agent == agent && $0.length == length }?.forecast
-            return QuotaLimit(agent: agent, length: length, readings: readings.contains(latest) ? readings : readings + [latest], now: now, previous: held)
+            let logged = readings.contains { abs($0.resetsAt - latest.resetsAt) <= QuotaPace.sameWindow }
+            return QuotaLimit(agent: agent, length: length, readings: logged ? readings : readings + [latest], now: now, previous: held)
         }
         let claudeWindows = [("five_hour", 5 * 3_600.0, claude?.fiveHour), ("seven_day", 7 * 86_400.0, claude?.sevenDay)]
         let claudeLimits = claudeWindows.compactMap { name, length, window in
@@ -84,8 +88,9 @@ extension UsageText {
     }
 
     /// The title bar's words for the binding limit: "5h 68% · ≈ 87%",
-    /// "⚠︎ 5h full by 20:05", "⚠︎ 7d full until Fri 10:15". Without a
-    /// forecast, a warning from `nearLimitPercent`, like a nearly full context.
+    /// "⚠︎ 5h full by 20:05", "⚠︎ 7d full until Fri 10:15". A forecast that
+    /// holds needs no warning; without one, a warning from
+    /// `nearLimitPercent`, like a nearly full context.
     static func title(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> QuotaTitle {
         let name = name(of: limit)
         let used = Int(limit.latest.usedPercent.rounded())
@@ -94,9 +99,9 @@ extension UsageText {
             return QuotaTitle(text: "\(name) full until \(ClaudeUsageLimits.clockText(limit.latest.resetsAt, now: now, calendar: calendar))".asWarning, tone: .runsOut)
         case .runsOut(let at):
             return QuotaTitle(text: "\(name) full by \(ClaudeUsageLimits.clockText(at, now: now, calendar: calendar))".asWarning, tone: .runsOut)
-        case .atReset(let percent) where percent > used:
-            return QuotaTitle(text: "\(name) \(used)% · ≈ \(percent)%", tone: .normal)
-        case .atReset, .quiet, .unknown:
+        case .atReset(let percent):
+            return QuotaTitle(text: percent > used ? "\(name) \(used)% · ≈ \(percent)%" : "\(name) \(used)%", tone: .normal)
+        case .quiet, .unknown:
             let text = "\(name) \(used)%"
             return used >= ClaudeUsageLimits.nearLimitPercent ? QuotaTitle(text: text.asWarning, tone: .warning) : QuotaTitle(text: text, tone: .normal)
         }
