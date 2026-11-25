@@ -1136,7 +1136,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertFalse(started.isError, started.text)
             let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Check export" })
             let now = Date().timeIntervalSince1970
-            func session(_ id: String, of workspace: WorkspaceState) -> UsageSession {
+            @MainActor func session(_ id: String, of workspace: WorkspaceState) -> UsageSession {
                 UsageSession(
                     key: UsageSessionKey(.claude, id), attribution: UsageAttribution(spaceID: lead.space, taskID: workspace.id),
                     events: [UsageEvent(timestamp: now - 60, model: "claude-opus-5-5", counts: TokenCounts(input: 30_000_000))]
