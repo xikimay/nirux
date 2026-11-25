@@ -74,6 +74,7 @@ final class TransparencyPicker: NSView {
 
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .radioGroup }
+    override func isAccessibilityEnabled() -> Bool { true }
     override func accessibilityLabel() -> String? { "Interface" }
     override func accessibilityChildren() -> [Any]? { tiles }
 
@@ -128,6 +129,7 @@ final class TransparencyPicker: NSView {
 
         override func isAccessibilityElement() -> Bool { true }
         override func accessibilityRole() -> NSAccessibility.Role? { .radioButton }
+        override func isAccessibilityEnabled() -> Bool { true }
         override func accessibilityLabel() -> String? { level.title }
         override func accessibilityValue() -> Any? { isSelected ? 1 : 0 }
         override func accessibilityPerformPress() -> Bool {

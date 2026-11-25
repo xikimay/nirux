@@ -548,6 +548,8 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
         }
     }
 
+    override func isAccessibilityEnabled() -> Bool { !isDeparted }
+
     override func accessibilityPerformPress() -> Bool {
         guard !isDeparted else { return false }
         onClick?()
