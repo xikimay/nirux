@@ -586,8 +586,8 @@ struct PersistedWorkspace: Codable {
     /// build before S13 drops them, and the fields become the user's.
     var nextStepIsFromLead: Bool
     var blockerIsFromLead: Bool
-    /// See `WorkspaceState.passesBudget`. Written only when true.
-    var passesBudget: Bool
+    /// See `WorkspaceState.budgetPassedAt`.
+    var budgetPassedAt: TimeInterval?
     /// `ReviewPass` raw values: a pass this build doesn't know is dropped
     /// on load, never a reason to fail the workspace.
     var reviewRuns: [String: ReviewRun]?
@@ -633,7 +633,7 @@ struct PersistedWorkspace: Codable {
         nextStep: String? = nil,
         blocker: String? = nil,
         nextStepIsFromLead: Bool = false,
-        passesBudget: Bool = false,
+        budgetPassedAt: TimeInterval? = nil,
         blockerIsFromLead: Bool = false,
         reviewRuns: [String: ReviewRun]? = nil,
         startedOutsideNirux: Bool = false,
@@ -665,7 +665,7 @@ struct PersistedWorkspace: Codable {
         self.nextStep = nextStep
         self.blocker = blocker
         self.nextStepIsFromLead = nextStepIsFromLead
-        self.passesBudget = passesBudget
+        self.budgetPassedAt = budgetPassedAt
         self.blockerIsFromLead = blockerIsFromLead
         self.reviewRuns = reviewRuns
         self.startedOutsideNirux = startedOutsideNirux
@@ -682,7 +682,7 @@ struct PersistedWorkspace: Codable {
         case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID, parentWorkspaceID, parentIsSettled
         case purpose, phase, lastSummary, lastSummaryIsManual, lastSummaryIsStatus, lastActivityAt
         case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
-        case passesBudget
+        case budgetPassedAt
         case leadAgentUUID
         case reportsToLead, reportsToTask
         case taskFolder, mergeWaits
@@ -713,7 +713,7 @@ struct PersistedWorkspace: Codable {
         nextStep = try container.decodeIfPresent(String.self, forKey: .nextStep)
         blocker = try container.decodeIfPresent(String.self, forKey: .blocker)
         nextStepIsFromLead = (try? container.decodeIfPresent(Bool.self, forKey: .nextStepIsFromLead)) ?? false
-        passesBudget = (try? container.decodeIfPresent(Bool.self, forKey: .passesBudget)) ?? false
+        budgetPassedAt = (try? container.decodeIfPresent(TimeInterval.self, forKey: .budgetPassedAt)) ?? nil
         blockerIsFromLead = (try? container.decodeIfPresent(Bool.self, forKey: .blockerIsFromLead)) ?? false
         // Only badges: a shape this build can't read never fails the state.
         reviewRuns = (try? container.decodeIfPresent([String: ReviewRun].self, forKey: .reviewRuns)) ?? nil
@@ -755,7 +755,7 @@ struct PersistedWorkspace: Codable {
         try container.encodeIfPresent(nextStep, forKey: .nextStep)
         try container.encodeIfPresent(blocker, forKey: .blocker)
         if nextStepIsFromLead { try container.encode(true, forKey: .nextStepIsFromLead) }
-        if passesBudget { try container.encode(true, forKey: .passesBudget) }
+        try container.encodeIfPresent(budgetPassedAt, forKey: .budgetPassedAt)
         if blockerIsFromLead { try container.encode(true, forKey: .blockerIsFromLead) }
         try container.encodeIfPresent(reviewRuns, forKey: .reviewRuns)
         if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }

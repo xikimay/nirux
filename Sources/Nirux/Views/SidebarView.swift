@@ -45,7 +45,7 @@ final class SidebarView: NSView {
     /// silence it aims at.
     var onAgentInterrupt: ((Int, Int, TimeInterval) -> Void)?
     var onContextOffer: ((Int, Int, ContextOffer.Choice) -> Void)?
-    var onBudgetChoice: ((Int, BudgetChoice) -> Void)?
+    var onBudgetChoice: ((String, BudgetChoice) -> Void)?
     /// Type it now clicked on a row of waiting Mission messages:
     /// (workspaceIndex, columnIndex, since).
     var onMissionTypeNow: ((Int, Int, TimeInterval) -> Void)?

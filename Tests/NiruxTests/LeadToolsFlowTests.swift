@@ -1163,17 +1163,92 @@ final class LeadToolsFlowTests: XCTestCase {
                 $0.pullRequests[pullRequest.url] = PRFollowUp.Entry(stop: PRFollowUp.Stop(kind: .ci, cause: .rounds, head: "abc", at: now))
             }
             XCTAssertNotNil(shell.followUpRow(of: task), "its stop still shows past its budget")
-            XCTAssertTrue(taskRow.cardActions.contains(.budget(SpaceDefaults.defaultTaskBudget)))
+            XCTAssertNotNil(budgetOffer(of: task, in: shell))
 
-            // Continue: no warning, no pause, no choice; saved with the task.
-            shell.takeBudgetChoice(.keepGoing, workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }))
-            XCTAssertTrue(task.passesBudget)
+            // Continue, through the sidebar's callback: no warning, no pause,
+            // no choice, for the 7 days a budget reads; saved with the task.
+            shell.sidebar.onBudgetChoice?(task.id, .keepGoing)
+            let passedAt = try XCTUnwrap(task.budgetPassedAt)
             XCTAssertFalse(shell.isOverBudget(task))
             let continued = try XCTUnwrap(shell.sidebar.lastInfos.first { $0.id == task.id })
             XCTAssertEqual(continued.usage?.isWarning, false)
-            XCTAssertFalse(continued.cardActions.contains { if case .budget = $0 { true } else { false } })
-            XCTAssertEqual(shell.persistedState().workspaces.first { $0.id == task.id }?.passesBudget, true)
+            XCTAssertNil(budgetOffer(of: task, in: shell))
+            task.budgetPassedAt = passedAt - WorkspaceState.budgetPassLifetime
+            XCTAssertTrue(shell.isOverBudget(task), "its 7 days rolled over")
+            task.budgetPassedAt = passedAt
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertEqual(shell.workspaces.first { $0.id == task.id }?.budgetPassedAt, passedAt, "read back at launch")
         }
+    }
+
+    /// Fresh start on a task past its budget starts its worker's new
+    /// conversation, same agent, only at rest, and lifts the budget; mid-turn
+    /// the card has none and a stale press waits. Close… asks first.
+    func testABudgetFreshStartWaitsForRestAndCloseAsks() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let started = try call(LeadTools.startTask, ["description": "Check export"], lead: lead, in: harness)
+            XCTAssertFalse(started.isError, started.text)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Check export" })
+            let now = Date().timeIntervalSince1970
+            let monitor = UsageMonitor(sources: UsageSources(home: harness.home), catalog: { UsageCatalog() })
+            monitor.report = UsageReport(sessions: [UsageSession(
+                key: UsageSessionKey(.claude, "t"), attribution: UsageAttribution(spaceID: lead.space, taskID: task.id),
+                events: [UsageEvent(timestamp: now - 60, model: "claude-opus-5-5", counts: TokenCounts(input: 30_000_000))]
+            )], now: now)
+            shell.usageMonitor = monitor
+            shell.taskBudgets = [lead.space: SpaceDefaults.defaultTaskBudget]
+            let pty = try XCTUnwrap(shell.taskWorker(task, snapshot: ProcessSnapshot())?.pty)
+            let worker = AgentStandIn(), fresh = AgentStandIn()
+            defer { worker.remove(); fresh.remove() }
+            harness.waitUntil("task shell") { pty.shellPID != nil }
+            pty.sendShellLaunchCommand("(\(worker.command()))")
+            harness.waitUntil("its Claude worker") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            harness.waitUntil("Fresh start at rest") {
+                shell.updateSidebar()
+                return budgetOffer(of: task, in: shell)?.choices == BudgetChoice.allCases
+            }
+
+            harness.restartedAgent = fresh.command()
+            shell.takeBudgetChoice(.freshStart, workspaceID: task.id)
+            harness.waitUntil("the new conversation") { task.budgetPassedAt != nil }
+            XCTAssertEqual(harness.terminalRestarts.count, 1)
+            XCTAssertNil(budgetOffer(of: task, in: shell))
+
+            // Mid-turn, past its budget again.
+            task.budgetPassedAt = nil
+            let column = try XCTUnwrap(shell.taskWorker(task, snapshot: ProcessSnapshot()))
+            let freshPty = try XCTUnwrap(column.pty)
+            harness.waitUntil("the new worker") { freshPty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            let agentUUID = try XCTUnwrap(column.agentUUID)
+            for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit] {
+                _ = freshPty.applyAgentHook(AgentHookEvent(
+                    kind: .claude, name: name, agentUUID: agentUUID, sessionID: agentUUID, timestamp: Date().timeIntervalSince1970
+                ), isUserFocused: false)
+            }
+            harness.waitUntil("no Fresh start mid-turn") {
+                shell.updateSidebar()
+                return budgetOffer(of: task, in: shell)?.choices == [.keepGoing, .close]
+            }
+            shell.takeBudgetChoice(.freshStart, workspaceID: task.id)
+            XCTAssertEqual(shell.toast?.message, "“Check export” is working or asking: Fresh start waits until it rests.")
+            XCTAssertEqual(harness.terminalRestarts.count, 1)
+            XCTAssertNil(task.budgetPassedAt)
+
+            let asked = harness.alerts.count
+            harness.alertResponses = [.alertSecondButtonReturn]
+            shell.takeBudgetChoice(.close, workspaceID: task.id)
+            XCTAssertEqual(harness.alerts.count, asked + 1)
+            XCTAssertFalse(task.isClosing, "Cancel")
+        }
+    }
+
+    @MainActor private func budgetOffer(of task: WorkspaceState, in shell: NiruxShellView) -> SidebarBudgetOffer? {
+        shell.sidebar.lastInfos.first { $0.id == task.id }?.cardActions.lazy.compactMap {
+            if case .budget(let offer) = $0 { offer } else { nil }
+        }.first
     }
 
     func testDailyPassRequiresAPullRequestReadForTheCurrentCheckout() throws {

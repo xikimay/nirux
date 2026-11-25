@@ -22,9 +22,10 @@ enum ContextOfferAction: Equatable {
 
 /// What a task past its budget offers on its card (`SidebarCardAction.budget`).
 enum BudgetChoice: String, Hashable, Sendable, CaseIterable {
-    /// Its budget no longer holds it: no warning, no pause.
+    /// Its budget no longer holds it for 7 days: no warning, no pause.
     case keepGoing
-    /// Its worker, same agent and model, in a new conversation with a handover.
+    /// Its worker, same agent and model, in a new conversation with a
+    /// handover; only while its columns rest. Lifts the budget too.
     case freshStart
     /// Close Workspace, which asks first.
     case close
