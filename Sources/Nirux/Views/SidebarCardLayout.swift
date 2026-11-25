@@ -197,6 +197,8 @@ struct SidebarCardLayout {
         var phrase = summary.lineText
         if summary.mark == .readyToMerge && step == .ready { phrase = "Checks passed" }
         else if summary.status.tone == .branch || (step == .merged && phrase == "Merged") { phrase = "" }
+        // The step's badge says Merged already: "in your build" alone.
+        else if step == .merged, let words = ChangelogStore.Shipping.allCases.map(\.words).first(where: { phrase == "Merged · " + $0 }) { phrase = words }
         else if let prefix, phrase.hasPrefix(prefix) { phrase = String(phrase.dropFirst(prefix.count)) }
         statusText = SidebarWorkspaceCardRenderer.statusText(summary, shown: phrase)
         let besideStep = rowWidth - stepWidth - Theme.Space.xs

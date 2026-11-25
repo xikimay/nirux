@@ -314,10 +314,11 @@ extension WorkspaceInfo {
         }
         switch pullRequest.state {
         case .merged:
+            let merged = ["Merged", shipping?.words].compactMap { $0 }.joined(separator: " · ")
             switch mergedCleanup {
-            case .available?: return row(.merged, "Merged · Clean up", .cleanUp, trailing: number, linkText: "Clean up")
+            case .available?: return row(.merged, "\(merged) · Clean up", .cleanUp, trailing: number, linkText: "Clean up")
             case .inProgress?: return row(.merged, "Merged · cleaning up…", nil, trailing: number)
-            case nil: return row(.merged, "Merged", nil, trailing: number)
+            case nil: return row(.merged, merged, nil, trailing: number)
             }
         case .open:
             if pullRequest.ciStatus == "PENDING" { return row(.checksRunning, "#\(pullRequest.number) · checks running", nil, trailing: age) }

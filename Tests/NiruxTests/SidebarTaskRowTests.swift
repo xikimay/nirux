@@ -196,6 +196,12 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(merged.status, SidebarStatusLine(text: "Merged · Clean up", tone: .neutral, action: .cleanUp, linkText: "Clean up"))
         XCTAssertEqual(merged.mark, .merged)
         XCTAssertEqual(line(pullRequest(.merged), cleanup: .inProgress).status.action, nil, "a second click does nothing")
+        var shipped = workspace([column()], pr: pullRequest(.merged), cleanup: .available)
+        shipped.shipping = .inYourBuild
+        XCTAssertEqual(shipped.rowSummary.status.text, "Merged · in your build · Clean up")
+        shipped.mergedCleanup = nil
+        shipped.shipping = .inNewerNightly
+        XCTAssertEqual(shipped.rowSummary.status.text, "Merged · in a newer nightly")
         XCTAssertEqual(line(pullRequest(.closed)).status.text, "fix/login")
     }
 
