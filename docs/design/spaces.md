@@ -250,6 +250,15 @@ New flow, built on the guarded typing `tell` already uses
   an initial prompt so it can establish which thread receives Mission messages. A manual
   Codex session can receive queued messages once its launch prompt or resume ID proves the
   thread. A bare Codex can collect a pending child event with `"$NIRUX_CLI_PATH" --mission receive`.
+- **Promote to Lead…** (a task's ⋯ menu, ⌘P) hands a Claude task's conversation to
+  its space's Lead column: the task's Claude ends, then `claude --resume` runs in the
+  Lead's column and checkout with the Lead's agent UUID, environment and launch options,
+  so the Lead's Missions follow it. A resumed Claude keeps the system prompt it recorded
+  (the space brief, the same for both) until it compacts, so its first prompt says where
+  it works now; its MCP tools and instructions come from the new launch. The task's own
+  Missions end without typing anything more, and it keeps its worktree, branch, pull
+  request and row. Only at rest, never with open sub-tasks; Codex and Antigravity tasks
+  aren't promoted (an Antigravity conversation keeps running in its first folder).
   Antigravity reports turn state through OSC 7501. Its CLI rejects `mcpServers` in
   `--settings` and exposes server configuration through the persistent `agy mcp` commands.
   A Lead without MCP can answer with `"$NIRUX_CLI_PATH" --mission reply --event <id> --message "<answer>"`.

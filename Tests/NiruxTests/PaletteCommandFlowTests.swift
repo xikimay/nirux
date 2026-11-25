@@ -26,6 +26,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testSessionHistoryCommand": ["Session History…"],
             "testTokenUsageCommand": ["Token Usage"],
             "testRestartLeadCommand": [NiruxShellView.restartLeadTitle],
+            "testPromoteToLeadCommand": [NiruxShellView.promoteToLeadTitle],
             "testProjectMemoryCommand": ["Space Memory…"],
             "testResumeAllAgentsCommand": ["Resume All Agents"],
             "testWorkspaceCommands": ["Rename Workspace", "Show/Hide Sidebar", "Show/Hide Archived", "Open Board"],
@@ -48,8 +49,10 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
             let titles = harness.paletteCommandTitles()
             XCTAssertEqual(titles.count, Set(titles).count, "two palette commands share a title: \(titles)")
-            // Restart Lead… is offered only in a space with a Lead.
-            _ = try harness.makeLead()
+            // Restart Lead… is offered only in a space with a Lead, Promote to
+            // Lead… on a task of a space that can have one.
+            let lead = try harness.makeLead()
+            harness.shell.addWorkspace(title: "task", cwd: harness.worktree, profileID: lead.space)
             let withLead = harness.paletteCommandTitles()
             XCTAssertEqual(withLead.count, Set(withLead).count, "two palette commands share a title: \(withLead)")
             Self.commandCoverage.checkEveryItemIsCovered(
@@ -191,6 +194,23 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.shell.closeActiveColumn()
             harness.waitUntil("the closed column's shell to go") { closedShell == nil }
             XCTAssertTrue(panel.isVisible)
+        }
+    }
+
+    /// Offered on the active task: a task with no agent hears why.
+    func testPromoteToLeadCommand() throws {
+        try UIFlowHarness.run { harness in
+            XCTAssertFalse(harness.paletteCommandTitles().contains(NiruxShellView.promoteToLeadTitle), "no task in General")
+            let lead = try harness.makeLead()
+            harness.shell.addWorkspace(title: "Grown", cwd: harness.worktree, profileID: lead.space)
+            let task = try XCTUnwrap(harness.shell.activeWorkspace)
+            harness.waitUntil("its shell in front") {
+                guard let pty = task.columns.first?.pty, let shellPID = pty.shellPID else { return false }
+                return pty.foregroundProcess(snapshot: ProcessSnapshot())?.instance.pid == shellPID
+            }
+            harness.runPaletteCommand(NiruxShellView.promoteToLeadTitle)
+            XCTAssertEqual(harness.shell.toast?.message, "No agent runs in this task: there is no conversation to promote.")
+            XCTAssertEqual(harness.terminalRestarts, [])
         }
     }
 

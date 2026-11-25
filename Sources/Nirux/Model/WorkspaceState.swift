@@ -389,6 +389,16 @@ extension WorkspaceState {
         noteThread(.status, by: .user, text: value)
     }
 
+    /// Its worker's conversation became its space's Lead: the row says so
+    /// until a new worker's turn or the user writes another line.
+    func noteConversationMovedToLead(at time: TimeInterval) {
+        guard !lastSummaryIsManual else { return }
+        let line = NiruxShellView.promotionNoticeLine
+        noteThread(.status, by: .nirux, text: line, time: time)
+        lastSummary = line
+        lastSummaryIsStatus = true
+    }
+
     private func noteThread(_ kind: TaskThread.Kind, by author: TaskThread.Author?, text: String?, time: TimeInterval? = nil) {
         onThreadEvent?(TaskThread.Event(time: time ?? Date().timeIntervalSince1970, kind: kind, by: author, text: text))
     }

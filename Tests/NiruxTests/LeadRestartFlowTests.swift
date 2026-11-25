@@ -8,13 +8,18 @@ import XCTest
 @MainActor
 final class LeadRestartFlowTests: XCTestCase {
     /// The Lead's shell running `command` as a child, `name`d: that process.
-    private func run(_ command: String, named name: String = "claude", in column: ColumnState, harness: UIFlowHarness) throws -> ProcessInstance {
+    /// `asLaunchLine`: sent as Nirux sends an agent's launch line, which
+    /// is no draft.
+    private func run(
+        _ command: String, named name: String = "claude", in column: ColumnState, harness: UIFlowHarness, asLaunchLine: Bool = false
+    ) throws -> ProcessInstance {
         let pty = try XCTUnwrap(column.pty)
         // The login shell can still be in canonical mode when the full launch arguments exceed MAX_CANON.
         let script = URL(fileURLWithPath: harness.root).appendingPathComponent("lead-worker-\(UUID().uuidString).sh")
         try command.write(to: script, atomically: true, encoding: .utf8)
         harness.waitUntil("its shell") { pty.shellPID != nil }
-        pty.sendRaw("(. \(NiruxShellView.shellQuotedArgument(script.path)))\n")
+        let line = "(. \(NiruxShellView.shellQuotedArgument(script.path)))"
+        if asLaunchLine { pty.sendShellLaunchCommand(line) } else { pty.sendRaw(line + "\n") }
         harness.waitUntil("its \(name)") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == name }
         return try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
     }
@@ -946,6 +951,173 @@ final class LeadRestartFlowTests: XCTestCase {
             shell.stopLead(spaceID: lead.space)
             harness.waitUntil("the Lead to close") { shell.leadWorkspace(inSpace: lead.space) == nil }
             harness.waitUntil("the pane to say so") { pane.restartButton.isHidden }
+        }
+    }
+
+    // MARK: - Promote to Lead
+
+    /// A task of `space` whose Claude stand-in proved `sessionID` with its
+    /// hooks; its turn over unless `turnEnded` is false.
+    private func makeTask(
+        _ title: String, in space: String, sessionID: String, standIn: AgentStandIn, harness: UIFlowHarness,
+        missionID: String? = nil, workspaceID: String = UUID().uuidString, agentUUID: String = UUID().uuidString,
+        turnEnded: Bool = true
+    ) throws -> (task: WorkspaceState, column: ColumnState, process: ProcessInstance) {
+        let shell = harness.shell
+        shell.addWorkspace(
+            title: title, cwd: harness.worktree, profileID: space, workspaceID: workspaceID, initialAgentUUID: agentUUID,
+            missionID: missionID, reportsToLead: missionID != nil
+        )
+        let task = try XCTUnwrap(shell.workspaces.first { $0.id == workspaceID })
+        let column = try XCTUnwrap(task.columns.first)
+        let process = try run(
+            standIn.command(arguments: NiruxMCPServer.claudeArguments(executable: "/test/Nirux")), in: column, harness: harness, asLaunchLine: true
+        )
+        let pty = try XCTUnwrap(column.pty)
+        let snapshot = ProcessSnapshot()
+        let foreground = try XCTUnwrap(pty.foregroundProcess(snapshot: snapshot))
+        for name in turnEnded ? [AgentHookEvent.Name.userPromptSubmit, .stop] : [.userPromptSubmit] {
+            let event = AgentHookEvent(kind: .claude, name: name, agentUUID: agentUUID, sessionID: sessionID,
+                                       emitterProcess: process, timestamp: Date().timeIntervalSince1970)
+            _ = column.admitClaudeHook(event, foregroundProcess: foreground, snapshot: snapshot)
+            _ = pty.applyAgentHook(event, isUserFocused: false)
+        }
+        return (task, column, process)
+    }
+
+    /// The task's Claude ends, then its conversation resumes in the Lead's
+    /// column, in the space's checkout, with the Lead's agent UUID and
+    /// environment: the Lead's tasks report to it, a relaunch resumes it
+    /// there, and a compaction rebuilds its system prompt from this launch.
+    /// The task keeps its worktree, branch and row; its own Mission ends
+    /// without a word to the Lead.
+    func testPromotingATaskResumesItsConversationInTheLeadsColumn() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let leadColumn = try XCTUnwrap(lead.workspace.leadTerminal)
+            let leadPty = try XCTUnwrap(leadColumn.pty)
+            let oldLead = AgentStandIn(), worker = AgentStandIn(), promoted = AgentStandIn()
+            defer { oldLead.remove(); worker.remove(); promoted.remove() }
+            let flags = NiruxMCPServer.claudeArguments(executable: "/test/Nirux")
+            let original = try run(oldLead.command(arguments: flags), in: leadColumn, harness: harness)
+            let question = try askLead(lead)
+            let (taskID, taskUUID) = (UUID().uuidString, UUID().uuidString)
+            let own = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: taskID, childAgentUUID: taskUUID, childAgentKind: "claude",
+                branch: "feat/coordinator", reportsToLead: true
+            ), enabled: true))
+            let ownQuestion = MissionEvent(
+                id: UUID().uuidString, missionID: own.id, childWorkspaceID: taskID, childAgentUUID: taskUUID,
+                kind: .question, message: "Shall I merge it?", timestamp: Date().timeIntervalSince1970
+            )
+            guard case .accepted = MissionStore.shared.process(ownQuestion, enabled: false) else {
+                return XCTFail("the task could not ask the Lead")
+            }
+            let sessionID = UUID().uuidString
+            let (task, column, process) = try makeTask(
+                "Coordinator", in: lead.space, sessionID: sessionID, standIn: worker, harness: harness,
+                missionID: own.id, workspaceID: taskID, agentUUID: taskUUID
+            )
+            let branch = GitWorktree.currentBranch(at: harness.worktree)
+            XCTAssertNotNil(branch)
+            let restartTask = shell.sideEffects.restartTaskTerminal
+            let promotedCommand = promoted.command(arguments: flags + ["--resume", sessionID], launchPrompt: NiruxShellView.leadPromotionPrompt)
+            shell.sideEffects.restartTaskTerminal = { [weak harness] target, command, canStop, starts in
+                harness?.restartedAgent = ":"
+                restartTask(target, command, canStop, starts)
+                harness?.restartedAgent = promotedCommand
+            }
+
+            harness.alertResponses = [.alertSecondButtonReturn]
+            let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === task })
+            harness.perform([NiruxShellView.promoteToLeadTitle], in: shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil))
+            XCTAssertEqual(harness.alerts.last, "Make “Coordinator” the Lead of “Tools”?", shell.toast?.message ?? "")
+            harness.waitUntil("the promoted conversation in the Lead's column") {
+                leadPty.foregroundProcess(snapshot: ProcessSnapshot())?.arguments.contains(sessionID) == true
+            }
+            XCTAssertEqual(harness.terminalRestarts.count, 2, "\(harness.terminalRestarts)")
+            XCTAssertTrue(harness.terminalRestarts.first?.contains(NiruxShellView.promotionNoticeLine) == true)
+            let command = try XCTUnwrap(harness.terminalRestarts.last)
+            for part in ["command claude --resume " + NiruxShellView.shellQuotedArgument(sessionID),
+                         NiruxShellView.leadPromotionPrompt, lead.workspace.cwd, harness.worktree] {
+                XCTAssertTrue(command.contains(part), part)
+            }
+            XCTAssertNotEqual(ProcessInstance.running(pid: original.pid), original)
+            XCTAssertNotEqual(ProcessInstance.running(pid: process.pid), process)
+            XCTAssertIdentical(leadColumn, lead.workspace.leadTerminal)
+            XCTAssertEqual(leadColumn.agentUUID, lead.agentUUID)
+            XCTAssertEqual(leadColumn.launchDirectory, lead.workspace.cwd)
+            XCTAssertEqual(leadColumn.launchEnvironment?[LeadChannel.environmentKey], "1")
+
+            XCTAssertTrue(shell.workspaces.contains { $0 === task })
+            XCTAssertEqual(GitWorktree.currentBranch(at: harness.worktree), branch)
+            XCTAssertEqual(task.lastSummary, NiruxShellView.promotionNoticeLine)
+            harness.waitUntil("the task's plain shell") {
+                guard let pty = column.pty, let shellPID = pty.shellPID else { return false }
+                return pty.foregroundProcess(snapshot: ProcessSnapshot())?.instance.pid == shellPID
+            }
+            XCTAssertEqual(MissionStore.shared.missions.first { $0.id == own.id }?.status, .completed)
+            XCTAssertFalse(MissionStore.shared.pendingPromptDeliveries().contains { $0.event.id == ownQuestion.id })
+
+            let relaunched = try XCTUnwrap(leadPty.foregroundProcess(snapshot: ProcessSnapshot()))
+            XCTAssertTrue(lead.workspace.runsRestartedLead(relaunched))
+            try reportFirstTurnEnded(in: leadPty, agentUUID: lead.agentUUID, sessionID: sessionID)
+            shell.typeMissionMessages()
+            harness.waitUntil("the Lead's question in the promoted conversation") { promoted.input.contains(question.message) }
+            XCTAssertFalse(promoted.input.contains(ownQuestion.message))
+            XCTAssertEqual(leadColumn.persistedClaudeRestore(foregroundProcess: relaunched), .resume(sessionID))
+        }
+    }
+
+    /// Mid-turn, the task's conversation stays where it is: nothing asks,
+    /// nothing stops. The Lead's own row offers no promotion.
+    func testATaskIsPromotedOnlyAtRest() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let worker = AgentStandIn()
+            defer { worker.remove() }
+            let (task, _, process) = try makeTask(
+                "Busy", in: lead.space, sessionID: UUID().uuidString, standIn: worker, harness: harness, turnEnded: false
+            )
+            XCTAssertTrue(shell.offersLeadPromotion(task))
+            XCTAssertFalse(shell.offersLeadPromotion(lead.workspace))
+            shell.requestLeadPromotion(of: task)
+            XCTAssertEqual(shell.toast?.message, "The task’s agent is working. Promote it once its turn ends.")
+            XCTAssertTrue(harness.alerts.isEmpty)
+            XCTAssertTrue(harness.terminalRestarts.isEmpty)
+            XCTAssertEqual(ProcessInstance.running(pid: process.pid), process)
+        }
+    }
+
+    /// A space with no Lead gets one, in its checkout, holding the
+    /// promoted conversation.
+    func testPromotingATaskOfASpaceWithoutALeadStartsOne() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+            let repository = SpaceAnchor(kind: .gitRepository(commonDir: harness.repo + "/.git"), name: "repo", isDefault: true)
+            let space = shell.workspaceStore.createProfile(named: "Solo", anchors: [repository], select: true).id
+            let worker = AgentStandIn()
+            defer { worker.remove() }
+            let sessionID = UUID().uuidString
+            let (task, _, process) = try makeTask("Grown", in: space, sessionID: sessionID, standIn: worker, harness: harness)
+            harness.alertResponses = [.alertSecondButtonReturn]
+            shell.requestLeadPromotion(of: task)
+            XCTAssertEqual(harness.alerts.last, "Make “Grown” the Lead of “Solo”?", shell.toast?.message ?? "")
+            harness.waitUntil("the new Lead's launch") { harness.agentLaunches.contains { $0.contains("--resume") } }
+            let lead = try XCTUnwrap(shell.leadWorkspace(inSpace: space))
+            let column = try XCTUnwrap(lead.leadTerminal)
+            let command = try XCTUnwrap(harness.agentLaunches.last)
+            XCTAssertTrue(command.hasPrefix("command claude --resume " + NiruxShellView.shellQuotedArgument(sessionID)), command)
+            XCTAssertTrue(command.contains(NiruxShellView.leadPromotionPrompt), command)
+            XCTAssertEqual(harness.agentLaunches.filter { $0.hasPrefix("command ") }.count, 1, "no fresh Lead launched beside it")
+            XCTAssertEqual(column.launchDirectory, harness.repo)
+            XCTAssertEqual(column.launchEnvironment?[LeadChannel.environmentKey], "1")
+            XCTAssertNotEqual(ProcessInstance.running(pid: process.pid), process)
+            XCTAssertTrue(shell.workspaces.contains { $0 === task })
         }
     }
 }
