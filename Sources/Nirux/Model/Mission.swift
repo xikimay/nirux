@@ -373,6 +373,35 @@ final class MissionStore {
         return updated == missions || commit(updated)
     }
 
+    /// A worker's conversation became its space's Lead, which reports to
+    /// nobody: its Missions as a child end, and nothing still waiting on
+    /// either side of them is typed.
+    func endChildMissions(workspaceID: String, agentUUID: String, at now: TimeInterval) -> Bool {
+        guard ensureLoaded() else { return false }
+        let updated = missions.map { original -> Mission in
+            guard original.childWorkspaceID == workspaceID, original.childAgentUUID == agentUUID else { return original }
+            var mission = original
+            mission.status = .completed
+            for index in mission.events.indices {
+                let event = mission.events[index]
+                switch event.kind {
+                case .question, .completed:
+                    guard event.parentConsumedAt == nil else { continue }
+                    mission.events[index].parentConsumedAt = now
+                    if event.kind == .question { mission.events[index].retiredAt = now }
+                case .instruction:
+                    guard event.childConsumedAt == nil, event.expiredAt == nil else { continue }
+                    mission.events[index].expiredAt = now
+                case .response, .acknowledged:
+                    continue
+                }
+            }
+            if mission != original { mission.updatedAt = now }
+            return mission
+        }
+        return updated == missions || commit(updated)
+    }
+
     struct AcceptedEvent {
         let mission: Mission
         let event: MissionEvent

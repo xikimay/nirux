@@ -2,7 +2,7 @@ import Foundation
 
 /// What Nirux shows of the ledger: the last 24 hours and 7 days by source,
 /// task and space, the week day by day, each task's latest context, and the
-/// Codex limits last reported.
+/// Codex limits: the latest, and each window's readings over the week.
 public struct UsageReport: Equatable, Sendable {
     /// Who spent.
     public enum Source: String, CaseIterable, Sendable {
@@ -65,6 +65,8 @@ public struct UsageReport: Equatable, Sendable {
     /// By task ID.
     public var latestSessions: [String: LatestSession]
     public var codexLimits: CodexRateLimits?
+    /// By window length in minutes, oldest first.
+    public var codexReadings: [Int: [QuotaReading]]
 
     /// The earliest response a report counts at `now`: refresh the ledger
     /// since then.
@@ -100,6 +102,7 @@ public struct UsageReport: Equatable, Sendable {
         }
         latestSessions = latest
         codexLimits = sessions.compactMap(\.rateLimits).max { $0.reportedAt < $1.reportedAt }
+        codexReadings = CodexRateLimits.quotaReadings(sessions.flatMap(\.rateLimitReadings).filter { $0.reportedAt >= starts[0] })
     }
 
     private static func dayStarts(now: TimeInterval, calendar: Calendar) -> [TimeInterval] {

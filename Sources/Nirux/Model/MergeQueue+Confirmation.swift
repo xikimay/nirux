@@ -65,15 +65,16 @@ extension MergeQueue {
                 }
             }
             for (item, candidate) in zip(confirmation.items, candidates) {
-                let itemWarnings = allowWithoutLocalReview ? item.otherWarnings : item.warnings
-                if let warning = itemWarnings.first { return "#\(candidate.number): \(warning)" }
+                if let warning = item.warnings(in: cadence, withLocalReview: !allowWithoutLocalReview).first {
+                    return "#\(candidate.number): \(warning)"
+                }
                 guard case .some(.some) = candidate.comparison else {
                     return "GitHub couldn’t compare #\(candidate.number) with \(settings.baseBranch)."
                 }
             }
             if let reason = confirmation.refusal(for: cadence) { return reason }
             if cadence == .expressDisjoint { return nil }
-            return MergeQueue.strictCandidateRefusal(for: candidates, settings: settings, requireDisjoint: false)
+            return MergeQueue.strictCandidateRefusal(for: candidates, settings: settings, cadence: cadence)
         }
     }
 
@@ -93,10 +94,17 @@ extension MergeQueue {
             /// kept separate so Lead auto-start can opt out of it without
             /// suppressing any other warning.
             var missingReviewWarning: String?
-            /// Warnings other than missing local review passes.
+            /// Required checks that ended neither green nor red on its head:
+            /// a train doesn't await its riders' own.
+            var notGreenWarning: String?
+            /// Warnings other than those.
             var otherWarnings: [String] = []
-            /// What may stop the queue, or deserves a look.
-            var warnings: [String] { (missingReviewWarning.map { [$0] } ?? []) + otherWarnings }
+
+            /// What may stop a queue of `cadence`, or deserves a look.
+            func warnings(in cadence: Cadence, withLocalReview: Bool = true) -> [String] {
+                [withLocalReview ? missingReviewWarning : nil, cadence == .train ? nil : notGreenWarning].compactMap { $0 }
+                    + otherWarnings
+            }
         }
 
         struct Excluded: Equatable, Sendable {
@@ -306,7 +314,7 @@ extension MergeQueue {
             warnings: reading.setupError == nil ? baseWarnings(reading.baseRuns, settings: settings) : [],
             waits: reading.setupError == nil ? baseWaits(reading.baseRuns, settings: settings) : [],
             refusals: refusals,
-            expressRefusal: strictCandidateRefusal(for: joining, settings: settings, requireDisjoint: true),
+            expressRefusal: strictCandidateRefusal(for: joining, settings: settings, cadence: .expressDisjoint),
             trainRefusal: trainCandidateRefusal(for: joining, settings: settings)
         )
     }
@@ -320,7 +328,7 @@ extension MergeQueue {
                 return "A train can’t take #\(candidate.number): GitHub’s auto-merge is on (gh pr merge \(candidate.number) --disable-auto)."
             }
             guard let checks = candidate.checks else { continue }
-            if let first = judge(checks, required: []).otherFailures.first {
+            if let first = candidateVerdict(checks, settings: settings, cadence: .train).otherFailures.first {
                 return "A train only takes pull requests whose checks are green: \(first) isn’t green on #\(candidate.number)."
             }
         }
@@ -408,8 +416,8 @@ extension MergeQueue {
                     + "if it fails again.")
             }
             if !verdict.notGreen.isEmpty {
-                item.otherWarnings.append("\(verdict.notGreen.joined(separator: ", ")): only a new run can turn it green, so "
-                    + "the queue will stop on it.")
+                item.notGreenWarning = "\(verdict.notGreen.joined(separator: ", ")): only a new run can turn it green, so "
+                    + "the queue will stop on it."
             }
             if !verdict.otherFailures.isEmpty {
                 item.otherWarnings.append("Red, though not required: \(verdict.otherFailures.joined(separator: ", ")). The "
@@ -499,9 +507,10 @@ extension MergeQueue {
     }
 
     /// Each required check on the head: "test ✓", "test ✗", "test ●",
-    /// "test not started", "test skipped".
+    /// "test not started", "test skipped"; one that ran only as
+    /// "<name> (selected)" by that run: "test (selected) ✓".
     static func checksText(_ checks: CommitChecks, required: [String]) -> String {
-        required.map { name in
+        selectedStandIns(required, in: checks).map { name in
             let verdict = judge(checks, required: [name])
             if verdict.allRequiredGreen { return "\(name) ✓" }
             if !verdict.failed.isEmpty || !verdict.failedStatuses.isEmpty { return "\(name) ✗" }
