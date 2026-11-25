@@ -194,7 +194,7 @@ final class SidebarWorkspaceCardRenderer {
     /// Why the task spends, once it does (`SidebarTaskUsage.chip`): its
     /// numbers stay in this tooltip and the title's.
     private func usageLabel() -> NSTextField? {
-        guard let usage = workspace.usage, let chip = usage.chip(now: Date().timeIntervalSince1970) else { return nil }
+        guard let usage = workspace.usage, let chip = usage.chip else { return nil }
         let label = textLabel(
             chip.isWarning ? chip.text.asWarning : chip.text, font: Theme.Font.captionDigits,
             color: chip.isWarning ? .niruxWarning : Theme.Color.textTertiary
