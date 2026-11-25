@@ -16,6 +16,12 @@
 (allow file-write* (subpath "/dev"))
 ; /usr/bin/git is an xcrun shim: its cache sits in the user's temp folder, whatever TMPDIR says.
 (allow file-read-data file-write* (regex #"^/private/var/folders/[^/]+/[^/]+/T/xcrun_db(-[A-Za-z0-9]+)?$"))
+; Nirux's own temp folder (Ghostty's generated config) and the fresh folder of each atomic save
+; (state.json, the channel's answers): the user's temp folder, whatever TMPDIR says. TemporaryItems
+; itself stays unlisted.
+(allow file-read-data file-write*
+    (regex #"^/private/var/folders/[^/]+/[^/]+/T/com\.xikimay\.nirux(/|$)")
+    (regex #"^/private/var/folders/[^/]+/[^/]+/T/TemporaryItems/NSIRD_Nirux_[^/]+(/|$)"))
 ; Sockets of the copy's own, under WORK; none of the user's (ssh-agent, launchd listeners).
 (allow network* (local unix-socket (subpath (param "WORK"))) (remote unix-socket (subpath (param "WORK"))))
 (allow network-outbound (remote ip "localhost:*"))

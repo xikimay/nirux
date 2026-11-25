@@ -285,7 +285,10 @@ class App:
         })
         if channel is not None:
             # A hidden copy (CanaryPresentation) has no key window: its channel answers.
-            wait_for("the canary channel never answered", lambda: answers(channel), self.alive, timeout=60)
+            try:
+                wait_for("the canary channel never answered", lambda: answers(channel), self.alive, timeout=60)
+            except TimeoutError as error:
+                raise InfrastructureError(str(error)) from error
             return
         try:
             wait_for("no focused window", lambda: self.drive("window", probe=True), self.alive)
