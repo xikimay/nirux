@@ -191,14 +191,13 @@ final class SidebarWorkspaceCardRenderer {
         return label
     }
 
-    /// "142k · 4.2M": the context of its latest session, then what the task
-    /// spent over the week; a warning once the context is worth compacting
-    /// or the session reached the subagents' soft cap.
+    /// Why the task spends, once it does (`SidebarTaskUsage.chip`): its
+    /// numbers stay in this tooltip and the title's.
     private func usageLabel() -> NSTextField? {
-        guard let usage = workspace.usage else { return nil }
+        guard let usage = workspace.usage, let chip = usage.chip(now: Date().timeIntervalSince1970) else { return nil }
         let label = textLabel(
-            usage.isWarning ? usage.text.asWarning : usage.text, font: Theme.Font.captionDigits,
-            color: usage.isWarning ? .niruxWarning : Theme.Color.textTertiary
+            chip.isWarning ? chip.text.asWarning : chip.text, font: Theme.Font.captionDigits,
+            color: chip.isWarning ? .niruxWarning : Theme.Color.textTertiary
         )
         label.alignment = .right
         let toolTip = usage.toolTip(now: Date().timeIntervalSince1970)
@@ -227,6 +226,7 @@ final class SidebarWorkspaceCardRenderer {
         if let next = workspace.nextStepText { lines.append("Next: \(next)") }
         if workspace.columns.contains(where: { $0.isEditor && $0.editorIsDirty }) { lines.append("Unsaved changes in the editor") }
         if workspace.lastActivityAt == nil { lines.append("No activity yet") }
+        if let usage = workspace.usage { lines.append(usage.toolTip(now: Date().timeIntervalSince1970)) }
         return lines.joined(separator: "\n")
     }
 

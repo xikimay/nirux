@@ -201,9 +201,11 @@ final class UsageDisplayTests: XCTestCase {
         let report = UsageReport(sessions: [session], now: now)
         XCTAssertNil(SidebarTaskUsage(report, taskID: "other"))
         let usage = try XCTUnwrap(SidebarTaskUsage(report, taskID: "task"))
-        XCTAssertEqual(usage.text, "300k · 4.3M")
+        XCTAssertEqual(usage.chip(now: now)?.text, "300k", "past 280k: each message rereads it")
         XCTAssertTrue(usage.isContextHeavy)
         let lines = usage.toolTip(now: now).components(separatedBy: "\n")
+        XCTAssertTrue(lines.contains("Context of its latest session: 300k tokens"), "the numbers live in the tooltip")
+        XCTAssertTrue(lines.contains("Last 7 days: 4.3M tokens, in Opus 5.5 input tokens at list prices"))
         XCTAssertTrue(lines.contains("Idle for 2h: its cache expired, the next message writes it again"))
         XCTAssertTrue(lines.contains("Subagents: 2%"))
         XCTAssertTrue(lines.contains("Past 280k of context: 98%"))
@@ -239,14 +241,33 @@ final class UsageDisplayTests: XCTestCase {
             info.usage = usage
             let labels = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 800).render().views
                 .compactMap { $0 as? NSTextField }
-            return labels.first { $0.stringValue.hasSuffix(usage.text) }?.stringValue
+            return usage.chip(now: Date().timeIntervalSince1970).flatMap { chip in labels.first { $0.stringValue.hasSuffix(chip.text) }?.stringValue }
         }
-        XCTAssertEqual(shown(capped), capped.text.asWarning)
-        XCTAssertEqual(shown(under), under.text)
+        XCTAssertEqual(shown(capped), "⚠︎ 5 subagents")
+        XCTAssertNil(shown(under), "a task that doesn't burn shows no number")
     }
 
     /// Past its space's budget, the row warns and says its follow-ups wait;
     /// under it, or with no budget, it says nothing of one.
+    /// A cold task says so without a warning; its share of the last half
+    /// hour, and a Lead's space's share of the week, are in the tooltip.
+    func testARowSaysWhyItSpendsAndKeepsItsSharesInTheTooltip() throws {
+        let report = UsageReport(sessions: [
+            UsageSession(
+                key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "task"), contextTokens: 210_000,
+                events: [event(4_000, input: 210_000, context: 210_000), event(600, input: 1_000, subagent: "a")]
+            ),
+            UsageSession(key: UsageSessionKey(.claude, "o"), events: [event(300, input: 3_000)])
+        ], now: now)
+        var usage = try XCTUnwrap(SidebarTaskUsage(report, taskID: "task"))
+        XCTAssertEqual(usage.chip(now: now)?.text, "Cold")
+        XCTAssertEqual(usage.chip(now: now)?.isWarning, false)
+        XCTAssertNil(usage.chip(now: now - 3_500), "its cache still warm")
+        XCTAssertTrue(usage.toolTip(now: now).contains("Last 30 minutes: 25% of Claude’s spend in Nirux"))
+        usage.spaceWeekShare = 0.62
+        XCTAssertTrue(usage.toolTip(now: now).contains("Its space: 62% of the week’s spend in Nirux"))
+    }
+
     func testARowWarnsPastItsBudget() throws {
         let session = UsageSession(
             key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: "space", taskID: "task"), contextTokens: 90_000,
@@ -256,6 +277,7 @@ final class UsageDisplayTests: XCTestCase {
         let over = try XCTUnwrap(SidebarTaskUsage(report, taskID: "task", budget: 25_000_000))
         XCTAssertTrue(over.isOverBudget)
         XCTAssertTrue(over.isWarning)
+        XCTAssertEqual(over.chip(now: now)?.text, "Budget")
         XCTAssertTrue(over.toolTip(now: now).components(separatedBy: "\n")
             .contains("Past its budget of 25M: its pull request's follow-ups wait (Space Settings › Defaults)"))
         let under = try XCTUnwrap(SidebarTaskUsage(report, taskID: "task", budget: 50_000_000))

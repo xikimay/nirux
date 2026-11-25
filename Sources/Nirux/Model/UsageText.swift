@@ -196,6 +196,10 @@ struct SidebarTaskUsage: Hashable {
     var subagents: Int
     /// Its space's 7-day budget (`SpaceDefaults.weeklyTaskBudget`).
     var budget: Int?
+    /// Its share of Claude's spend over the last `UsageReport.burnSpan`.
+    var recentShare: Double?
+    /// A Lead's: its space's share of the week's spend.
+    var spaceWeekShare: Double?
 
     /// From this many subagents in a session, the row warns: separate work
     /// goes to a task, which starts with a context of its own.
@@ -214,6 +218,8 @@ struct SidebarTaskUsage: Hashable {
         coldRewrites = week?.coldRewrites ?? 0
         subagents = latest?.subagents ?? 0
         self.budget = budget
+        let burn = report.claudeBurn.values.reduce(0, +)
+        recentShare = burn > 0 ? report.claudeBurn[taskID].map { $0 / burn } : nil
     }
 
     /// From there on, each message re-reads a context worth compacting.
@@ -239,9 +245,21 @@ struct SidebarTaskUsage: Hashable {
         return text.prefix(1).uppercased() + text.dropFirst()
     }
 
-    /// "142k · 4.2M": the context, then the week's spend.
-    var text: String {
-        [contextTokens.map(UsageText.tokens), UsageText.tokens(weekTokens)].compactMap { $0 }.joined(separator: " · ")
+    /// Idle past Claude Code's cache with a context worth writing again.
+    func isCold(now: TimeInterval) -> Bool {
+        guard let contextTokens, let lastResponseAt else { return false }
+        return contextTokens >= ContextOffer.coldContextTokens && now - lastResponseAt >= UsageSummary.hourCacheLifetime
+    }
+
+    /// What the row says, only once the task spends: why, in a word or a
+    /// number ("Budget", "612k", "6 subagents") as a warning, or "Cold";
+    /// nil otherwise. The numbers are in its tooltip.
+    func chip(now: TimeInterval) -> (text: String, isWarning: Bool)? {
+        if isOverBudget { return ("Budget", true) }
+        if isContextHeavy, let contextTokens { return (UsageText.tokens(contextTokens), true) }
+        if isFanningOut { return ("\(subagents) subagents", true) }
+        if isCold(now: now) { return ("Cold", false) }
+        return nil
     }
 
     func toolTip(now: TimeInterval) -> String {
@@ -268,6 +286,8 @@ struct SidebarTaskUsage: Hashable {
             lines.append("Past \(UsageText.tokens(UsageSummary.heavyContextTokens)) of context: \(UsageText.share(heavyContextTokens, of: weekTokens))")
         }
         if coldRewrites > 0 { lines.append("Cold cache rewrites: \(coldRewrites)") }
+        if let recentShare, recentShare > 0 { lines.append("Last 30 minutes: \(UsageText.share(recentShare, of: 1)) of Claude’s spend in Nirux") }
+        if let spaceWeekShare { lines.append("Its space: \(UsageText.share(spaceWeekShare, of: 1)) of the week’s spend in Nirux") }
         return lines.joined(separator: "\n")
     }
 }
