@@ -226,7 +226,7 @@ enum DailyPass {
             let rounds = headlines.filter { roundNumber($0) != nil }
             return MergedPullRequest(
                 number: number, title: AgentText.clean(title, maxLength: 200) ?? "", branch: json["headRefName"] as? String ?? "",
-                mergedAt: mergedAt, why: why(of: json["body"] as? String ?? ""),
+                mergedAt: mergedAt, why: PullRequestBody.why(json["body"] as? String ?? "", maxLength: maxWhyLength),
                 roundCommits: rounds, rounds: rounds.compactMap(roundNumber).max() ?? 0
             )
         }.sorted { $0.mergedAt < $1.mergedAt }
@@ -258,18 +258,6 @@ enum DailyPass {
             if named || ["of", "review"].contains(words.dropFirst(index + 2).first) { return number }
         }
         return nil
-    }
-
-    /// A body's "## Why" section on one line, else its first paragraph.
-    static func why(of body: String) -> String? {
-        let lines = body.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
-        let section: ArraySlice<String>
-        if let heading = lines.firstIndex(where: { $0.lowercased() == "## why" }) {
-            section = lines[(heading + 1)...].prefix { !$0.hasPrefix("#") }
-        } else {
-            section = lines.drop(while: \.isEmpty).prefix { !$0.isEmpty }
-        }
-        return AgentText.clean(section.joined(separator: " "), maxLength: maxWhyLength)
     }
 
     // MARK: - CI triage
