@@ -10,6 +10,39 @@ final class MissionDeliveryTests: XCTestCase {
     /// A Lead's results wait until the oldest is 3 minutes old, then go
     /// together; another Lead's group keeps its own window; questions, and
     /// results to a parent that doesn't group them, never wait.
+    /// A paste holds what fits under the sanitizer's cut, the first always.
+    func testAGroupGoesInPastesThatFit() {
+        let limit = 20
+        XCTAssertEqual(MissionResultBatch.fittingCount(["aaaaaaaa", "bbbbbbbb", "cccccccc"], limit: limit), 2, "8 + 2 + 8 = 18")
+        XCTAssertEqual(MissionResultBatch.fittingCount(["aaaaaaaa", "bbbbbbbbbb"], limit: limit), 2, "exactly 20")
+        XCTAssertEqual(MissionResultBatch.fittingCount([String(repeating: "a", count: 30), "b"], limit: limit), 1, "one too long still goes")
+        XCTAssertEqual(MissionResultBatch.fittingCount(["a"], limit: limit), 1)
+    }
+
+    /// Work a Lead sends a task while the task's result waits for its group
+    /// doesn't drop that result; later work still does, as before.
+    @MainActor func testAHeldResultOutlivesWorkSentDuringItsWindow() {
+        let result = MissionEvent(
+            id: "r", missionID: "m", childWorkspaceID: "task", childAgentUUID: "agent", kind: .completed,
+            message: "Done", inReplyTo: nil, timestamp: 1_000
+        )
+        func mission(tellAt time: TimeInterval, toLead: Bool = true) -> Mission {
+            var tell = MissionEvent(
+                id: "t", missionID: "m", childWorkspaceID: "task", childAgentUUID: "agent", kind: .instruction,
+                message: "Also fix the docs", inReplyTo: nil, timestamp: time
+            )
+            tell.childConsumedAt = time + 1
+            return Mission(
+                id: "m", parentWorkspaceID: "lead", parentAgentUUID: "lead-agent", childWorkspaceID: "task", childAgentUUID: "agent",
+                childAgentKind: "claude", branch: "feat/x", status: .active, createdAt: 0, updatedAt: time, events: [result, tell],
+                reportsToLead: toLead
+            )
+        }
+        XCTAssertTrue(MissionStore.awaitsParentReceipt(result, in: mission(tellAt: 1_100)), "sent while it waited")
+        XCTAssertFalse(MissionStore.awaitsParentReceipt(result, in: mission(tellAt: 1_000 + MissionResultBatch.window + 1)))
+        XCTAssertFalse(MissionStore.awaitsParentReceipt(result, in: mission(tellAt: 1_100, toLead: false)), "no group, as before")
+    }
+
     @MainActor func testALeadsResultsWaitForTheirWindowThenGoTogether() {
         let now: TimeInterval = 10_000
         func delivery(_ id: String, _ kind: MissionEvent.Kind, at time: TimeInterval, parent: String = "lead") -> MissionStore.AcceptedEvent {

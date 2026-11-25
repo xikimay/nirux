@@ -341,20 +341,31 @@ extension NiruxShellView {
             guard refusal == nil, let delivery = MissionStore.shared.pendingPromptDelivery(delivery) else { continue }
             // A Lead's grouped results, in one prompt: one wake for them all.
             let together = results.together(with: delivery).enumerated().compactMap { index, item -> (MissionStore.AcceptedEvent, String)? in
-                guard index == 0 || !missionWaits.typing.contains(item.event.id),
+                let childTitle = workspaces.first { $0.id == item.mission.childWorkspaceID }?.title
+                // A joined result the hook has, or may have claimed, isn't typed again.
+                guard index == 0 || (!missionWaits.typing.contains(item.event.id) && missionWaits.handedToHooks[item.event.id] == nil
+                          && !(agent == .claude && leaveToHook(
+                              item, in: recipient, foreground: pty.foregroundProcess(snapshot: snapshot), places: places, now: now,
+                              enabled: hooksOn,
+                              text: {
+                                  MissionStore.shared.pendingPromptDelivery(item).flatMap {
+                                      MissionPromptText.hookText(for: $0, childTitle: childTitle, parentTitle: parentWorkspace?.title)
+                                  }
+                              }
+                          ))),
                       let item = MissionStore.shared.pendingPromptDelivery(item),
-                      let text = MissionPromptText.text(
-                          for: item, childTitle: workspaces.first { $0.id == item.mission.childWorkspaceID }?.title,
-                          parentTitle: parentWorkspace?.title
-                      )
+                      let text = MissionPromptText.text(for: item, childTitle: childTitle, parentTitle: parentWorkspace?.title)
                 else { return nil }
                 return (item, text)
             }
-            guard together.first?.0.event.id == delivery.event.id,
-                  let paste = TypedPromptSanitizer.bracketedPaste(for: together.map(\.1).joined(separator: "\n\n"))
+            // What one paste holds; the rest waits for the next pass.
+            let fitting = Array(together.prefix(MissionResultBatch.fittingCount(together.map(\.1))))
+            guard fitting.first?.0.event.id == delivery.event.id,
+                  let paste = TypedPromptSanitizer.bracketedPaste(for: fitting.map(\.1).joined(separator: MissionResultBatch.separator))
             else { continue }
-            let typedItems = together.map(\.0)
-            typedTogether.formUnion(typedItems.map(\.event.id))
+            let typedItems = fitting.map(\.0)
+            // Those left out wait for the next pass, after this prompt's turn.
+            typedTogether.formUnion(together.map(\.0.event.id))
             let toChild = !Self.goesToParent(delivery.event)
             let byUser = delivery.event.answeredByUser == true
             // Its sender hears what stayed in the prompt: an agent, about its own message.
@@ -366,7 +377,8 @@ extension NiruxShellView {
             let front = pty.foregroundProcess(snapshot: snapshot)?.instance
             typeMissionPrompt(paste, into: pty, keepingInFront: front, typedByNirux: !byUser) { [weak self] typed in
                 guard let self else { return }
-                for item in typedItems { self.finishTyping(item, typed, at: now) }
+                // Cut, only the first's start surely went in: the rest go again.
+                for (index, item) in typedItems.enumerated() { self.finishTyping(item, typed == .cut && index > 0 ? .left : typed, at: now) }
                 let what = byUser ? "your answer" : typedItems.count > 1 ? "\(typedItems.count) task results" : "a Mission message"
                 self.reportUnsent(typed, what: what, for: recipientTitle, telling: sender)
                 // agy says when it takes a prompt (OSC 7501 working).

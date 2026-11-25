@@ -39,6 +39,20 @@ struct MissionResultBatch {
         return [delivery] + group.filter { $0.event.id != delivery.event.id }
     }
 
+    /// How many of `texts`, first ones first, one paste holds: their
+    /// lines joined stay within `limit` (`TypedPromptSanitizer` cuts the
+    /// rest), and the first always goes. The others wait for the next pass.
+    static func fittingCount(_ texts: [String], limit: Int = TypedPromptSanitizer.maxCharacters) -> Int {
+        var length = 0
+        for (index, text) in texts.enumerated() {
+            length += (index == 0 ? 0 : separator.unicodeScalars.count) + text.unicodeScalars.count
+            if length > limit { return max(1, index) }
+        }
+        return texts.count
+    }
+
+    static let separator = "\n\n"
+
     /// When the next waiting group is due.
     func nextRelease(now: TimeInterval) -> TimeInterval? {
         groups.values.map { Self.oldest($0) + Self.window }.filter { $0 > now }.min()

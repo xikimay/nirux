@@ -266,6 +266,8 @@ extension NiruxShellView {
     func setLeadGroupsResults(_ on: Bool, spaceID: String) {
         changeSpaceDefaults(spaceID: spaceID) { $0.leadGroupsResults = on ? nil : false }
         refreshSpaceSettingsLead()
+        // Off, what waited goes now.
+        if !on { typeMissionMessages() }
     }
 
     /// Saves `change` to the space's defaults.json at once. An unreadable
