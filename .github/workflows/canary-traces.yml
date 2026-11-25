@@ -1,0 +1,57 @@
+name: Canary kept traces
+
+# The explorer's kept traces (scripts/canary/traces), replayed without a model in a hidden copy
+# after each merge: each one reproduced a bug that was fixed, so a finding is that bug back.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Sources/**"
+      - "NiruxCore/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - "scripts/canary/**"
+  # A change to this workflow or to the kept traces runs it before it merges.
+  pull_request:
+    paths:
+      - ".github/workflows/canary-traces.yml"
+      - "scripts/canary/traces/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary-traces
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Build the ad-hoc bundle
+        run: |
+          set -o pipefail
+          swift build -c release 2>&1 | tail -20
+          scripts/bundle.sh 0.0.0 0 2>&1 | tail -5
+      - name: Replay the kept traces
+        run: |
+          scripts/canary.sh Nirux.app --explore --replay-traces scripts/canary/traces \
+            --evidence-dir "$RUNNER_TEMP/evidence" --history-dir "$RUNNER_TEMP/history"
+      - name: Keep the evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-traces-evidence
+          path: |
+            ${{ runner.temp }}/evidence/**/report.json
+            ${{ runner.temp }}/evidence/**/trace.jsonl
+            ${{ runner.temp }}/evidence/**/stderr.log
+            ${{ runner.temp }}/evidence/traces.json
+          if-no-files-found: ignore

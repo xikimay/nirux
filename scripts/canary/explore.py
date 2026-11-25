@@ -44,6 +44,7 @@ from scenarios import fixture_multi_agent  # noqa: E402
 from triage import normalize_error_text  # noqa: E402
 
 SCENARIO = "explore"
+INFRA = "infra_unavailable"
 EXIT_FINDINGS = 1
 # After a replay's last call, what it set off has this long to happen.
 SETTLE_SECONDS = 3
@@ -252,7 +253,7 @@ def finish(report, evidence, findings, episodes):
 def explore(args, evidence, work, trace=None):
     """One run: Claude's episodes, or `trace` replayed without a model."""
     claude = shutil.which("claude")
-    if not claude:
+    if not claude and trace is None:
         raise InfrastructureError("claude is not on PATH")
     seed = str(uuid.uuid4())
     metadata = {"version": 2, "scenario": SCENARIO, "seed": seed, "injectFailure": None,
@@ -353,6 +354,40 @@ def reduce(args, root):
     return result
 
 
+def replay_kept(args, root, ledger, commit, run=None):
+    """Each kept trace replayed in a fresh copy: a finding is a known bug back (regression)."""
+    def fresh(trace, evidence):
+        with tempfile.TemporaryDirectory(dir="/private/tmp", prefix="nirux-canary-") as folder:
+            return explore(args, evidence, Path(folder), trace=trace)
+
+    run = run or fresh
+    results = []
+    for path in sorted(args.replay_traces.glob("*.jsonl")):
+        evidence = Path(tempfile.mkdtemp(dir=root, prefix=f"trace-{path.stem}-"))
+        try:
+            data = run(read_jsonl(path), evidence)
+        except InfrastructureError as error:
+            data = {"verdict": INFRA, "error": str(error), "findings": []}
+        write_json(evidence / "report.json", data)
+        name = f"trace:{path.stem}"
+        if data["verdict"] == INFRA:
+            pass
+        elif data["findings"]:
+            for finding in data["findings"]:
+                ledger.record_incident(finding["fingerprint"], {"scenario": name, "rule": finding["rule"], "detail": finding["detail"]},
+                                       "regression", run_id=evidence.name, commit=commit, bundle_sha256=data.get("bundleSHA256"),
+                                       crashed=finding["rule"] == "app-alive", investigation_dir=evidence)
+        else:
+            ledger.record_pass(name, run_id=evidence.name, commit=commit, bundle_sha256=data.get("bundleSHA256"))
+        results.append({"trace": path.stem, "verdict": data["verdict"], "findings": len(data["findings"]),
+                        "report": str(evidence / "report.json")})
+    write_json(root / "traces.json", results)
+    print(json.dumps({"traces": results}))
+    if any(result["findings"] for result in results):
+        return EXIT_FINDINGS
+    return EXIT_INFRA if any(result["verdict"] == INFRA for result in results) else 0
+
+
 def record(ledger, data, evidence, commit, reproduced=()):
     """A finding a replay brought back is a regression; one exploration's, intermittent."""
     run_id = evidence.name
@@ -382,6 +417,7 @@ def parser():
     root.add_argument("--evidence-dir", type=Path)
     root.add_argument("--history-dir", type=Path)
     root.add_argument("--replay-trace", type=Path, help="replay a run's trace.jsonl without a model")
+    root.add_argument("--replay-traces", type=Path, help="replay every kept trace (*.jsonl) of a folder, each in a fresh copy")
     root.add_argument("--reduce", type=Path, help="shrink a run's trace.jsonl to the calls that bring back its finding")
     root.add_argument("--rule", help="with --reduce: the finding's rule (default: the run's first finding)")
     root.add_argument("--diff-base", help="put first the goals that the files changed since this ref touch")
@@ -392,6 +428,8 @@ def main(argv=None):
     args = parser().parse_args(argv)
     root = args.evidence_dir or Path(tempfile.mkdtemp(prefix="nirux-evidence-"))
     root.mkdir(parents=True, exist_ok=True)
+    if args.replay_traces:
+        return replay_kept(args, root.resolve(), IncidentLedger(args.history_dir or default_history_dir()), detect_commit())
     if args.reduce:
         result = reduce(args, root.resolve())
         print(json.dumps({key: result[key] for key in ("rule", "from", "reduced", "replays")}))

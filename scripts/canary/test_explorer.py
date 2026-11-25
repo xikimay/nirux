@@ -318,6 +318,30 @@ class RunnerTests(unittest.TestCase):
                          [("app-alive", "Nirux exited at launch: Nirux exited with status -11")])
         self.assertEqual(data["episodes"], [])
 
+    def test_kept_traces_replay_each_in_a_fresh_copy_and_a_failure_is_a_regression(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root, traces = Path(folder), Path(folder) / "traces"
+            traces.mkdir()
+            for name in ("fixed-bug", "back-again"):
+                (traces / f"{name}.jsonl").write_text(json.dumps({"tool": "menu", "arguments": {"path": ["Space"]}, "at": 1}) + "\n")
+            replayed = []
+
+            def run(trace, evidence):
+                replayed.append((trace[0]["tool"], evidence.name.split("-")[1]))
+                failed = "back-again" in evidence.name
+                return {"verdict": "fail" if failed else "pass", "bundleSHA256": "b", "findings": [
+                    {"fingerprint": "f", "rule": "app-alive", "detail": "Nirux quit by itself (status 0)"}] if failed else []}
+
+            args = explore.parser().parse_args(["Nirux.app", "--replay-traces", str(traces)])
+            code = explore.replay_kept(args, root, IncidentLedger(root / "history"), "c", run=run)
+            events = [json.loads(line) for line in (root / "history/events.jsonl").read_text().splitlines()]
+            summary = json.loads((root / "traces.json").read_text())
+        self.assertEqual(code, explore.EXIT_FINDINGS)
+        self.assertEqual(sorted(replayed), [("menu", "back"), ("menu", "fixed")])
+        self.assertEqual(sorted((e["scenario"], e["type"], e.get("classification")) for e in events),
+                         [("trace:back-again", "incident", "regression"), ("trace:fixed-bug", "pass", None)])
+        self.assertEqual([(s["trace"], s["findings"]) for s in summary], [("back-again", 1), ("fixed-bug", 0)])
+
     def test_an_episode_reads_its_result_and_notes_make_the_digest(self):
         with tempfile.TemporaryDirectory() as folder:
             log = Path(folder) / "claude.jsonl"
