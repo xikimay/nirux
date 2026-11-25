@@ -12,9 +12,14 @@ struct ChecksWatch: Equatable, Sendable {
         let pullRequest: PRInfo?
         /// Epoch seconds of the last read; nil: none yet.
         let readAt: TimeInterval?
-        /// A push less than `PullRequestRefreshPolicy.pushFollowUp` ago:
-        /// the read that shows its checks is still to come.
-        let pushedRecently: Bool
+        /// A push less than `PullRequestRefreshPolicy.pushFollowUp` ago.
+        let push: Push?
+    }
+
+    struct Push: Equatable, Sendable {
+        /// The branch's remote-tracking tip after it (nil: unread): only a
+        /// read showing it says anything of its checks.
+        let head: String?
     }
 
     /// A read older than this tells nothing: an archived workspace's, or
@@ -38,8 +43,11 @@ struct ChecksWatch: Equatable, Sendable {
         var next: [String: Seen] = [:]
         var awaits = false
         for read in reads {
-            // Until a read says its checks settled (a fetch moves the branch too).
-            if read.pushedRecently, read.pullRequest?.ciStatus.map({ Self.limit($0) != nil }) ?? true { awaits = true }
+            // Until a read of the pushed head says its checks settled (a fetch moves the branch too).
+            if let push = read.push {
+                let showsPush = push.head != nil && read.pullRequest?.headRefOid == push.head
+                if !showsPush || read.pullRequest?.ciStatus.map({ Self.limit($0) != nil }) ?? true { awaits = true }
+            }
             guard let pullRequest = read.pullRequest, pullRequest.state == .open, let readAt = read.readAt,
                   let status = pullRequest.ciStatus, let limit = Self.limit(status)
             else { continue }

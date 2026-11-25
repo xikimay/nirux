@@ -31,7 +31,7 @@ extension NiruxShellView {
         let reads = workspaces.map { workspace in
             ChecksWatch.Read(
                 id: workspace.id, pullRequest: workspace.prInfo, readAt: workspace.pullRequestReadAt,
-                pushedRecently: gitRefresh.pushedRecently(workspace)
+                push: gitRefresh.recentPush(workspace)
             )
         }
         keepAwake?.update(awaitingChecks: checksWatch.awaits(reads, now: Date().timeIntervalSince1970))

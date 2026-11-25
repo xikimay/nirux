@@ -410,10 +410,10 @@ final class KeepAwakeControllerTests: XCTestCase {
             return info
         }
         var watch = ChecksWatch()
-        func awaits(_ pullRequest: PRInfo?, readAt: TimeInterval = 0, pushed: Bool = false, now: TimeInterval) -> Bool {
-            watch.awaits([ChecksWatch.Read(id: "t", pullRequest: pullRequest, readAt: readAt, pushedRecently: pushed)], now: now)
+        func awaits(_ pullRequest: PRInfo?, readAt: TimeInterval = 0, push: ChecksWatch.Push? = nil, now: TimeInterval) -> Bool {
+            watch.awaits([ChecksWatch.Read(id: "t", pullRequest: pullRequest, readAt: readAt, push: push)], now: now)
         }
-        XCTAssertTrue(awaits(nil, pushed: true, now: 1), "a push before any read")
+        XCTAssertTrue(awaits(nil, push: .init(head: "d"), now: 1), "a push before any read")
         XCTAssertFalse(awaits(pr("SUCCESS"), now: 1))
         XCTAssertTrue(awaits(pr("PENDING"), readAt: 100, now: 100))
         XCTAssertFalse(awaits(pr("PENDING"), readAt: 100, now: 100 + ChecksWatch.readWindow), "a stale read")
@@ -425,14 +425,18 @@ final class KeepAwakeControllerTests: XCTestCase {
         XCTAssertTrue(awaits(pr("FAILURE", head: "b"), readAt: late + 300, now: late + 300))
         XCTAssertFalse(awaits(pr("FAILURE", head: "b"), readAt: late + 300 + ChecksWatch.failureLimit,
                               now: late + 300 + ChecksWatch.failureLimit), "red long enough for its round")
-        XCTAssertFalse(awaits(pr("SUCCESS", head: "d"), readAt: late + 2_000, pushed: true, now: late + 2_000),
+        XCTAssertFalse(awaits(pr("SUCCESS", head: "d"), readAt: late + 2_000, push: .init(head: "d"), now: late + 2_000),
                        "a fetch of a branch whose checks settled")
+        XCTAssertTrue(awaits(pr("SUCCESS", head: "d"), readAt: late + 2_000, push: .init(head: "e"), now: late + 2_000),
+                      "green, but not the pushed head")
+        XCTAssertTrue(awaits(pr("SUCCESS", head: "d"), readAt: late + 2_000, push: .init(head: nil), now: late + 2_000),
+                      "the pushed head unread")
 
         // A red pull request in the background is read every 10 minutes: the
         // stale moment between two reads keeps its clock.
         var red = ChecksWatch()
         func redAwaits(readAt: TimeInterval, now: TimeInterval) -> Bool {
-            red.awaits([ChecksWatch.Read(id: "r", pullRequest: pr("FAILURE", head: "c"), readAt: readAt, pushedRecently: false)], now: now)
+            red.awaits([ChecksWatch.Read(id: "r", pullRequest: pr("FAILURE", head: "c"), readAt: readAt, push: nil)], now: now)
         }
         XCTAssertTrue(redAwaits(readAt: 0, now: 0))
         XCTAssertFalse(redAwaits(readAt: 0, now: ChecksWatch.readWindow), "stale")
@@ -660,14 +664,16 @@ final class KeepAwakeShellTests: XCTestCase {
             let task = WorkspaceState(id: "task", title: "task", cwd: repo)
             shell.workspaceStore.appendWorkspace(task, activate: false)
             XCTAssertTrue(task.updateGitContext(context))
-            final class Answer { var ciStatus = "PENDING"; var reads = 0 }
+            final class Answer { var ciStatus = "PENDING"; var head = "a"; var context: GitContext?; var reads = 0 }
             let answer = Answer()
             shell.fetchPullRequest = { _, _, _, done in
                 answer.reads += 1
-                done(.success(context: context, info: PRInfo(
+                var info = PRInfo(
                     number: 7, state: .open, isDraft: false, ciStatus: answer.ciStatus, checks: [], reviewDecision: nil,
                     mergeable: "MERGEABLE", url: "https://example.invalid/o/r/pull/7", additions: nil, deletions: nil, changedFiles: nil
-                )))
+                )
+                info.headRefOid = answer.head
+                done(.success(context: answer.context ?? context, info: info))
             }
             shell.isOnACPower = { false }
             shell.refreshStuckAgents(appIsActive: false)
@@ -683,6 +689,45 @@ final class KeepAwakeShellTests: XCTestCase {
                 shell.refreshPRInfo(for: [task])
                 return task.prInfo?.ciStatus == "SUCCESS" && !controller.isAwaitingChecks
             })
+
+            // A commit (it empties the pull request read), then its push: a read
+            // still showing the old head, green, says nothing of the pushed one's checks.
+            try UIFlowHarness.git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "fix"], at: repo)
+            guard case .observed(let committed) = GitDetect.observe(at: repo), let pushed = committed.identity.head else {
+                return XCTFail("no commit")
+            }
+            XCTAssertTrue(task.updateGitContext(committed))
+            XCTAssertNil(task.prInfo)
+            answer.context = committed
+            let remoteRef = URL(fileURLWithPath: repo).appendingPathComponent(".git/refs/remotes/origin/feat/task")
+            try FileManager.default.createDirectory(at: remoteRef.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data((pushed + "\n").utf8).write(to: remoteRef)
+            shell.gitRefresh.noteChange(.remoteBranch, for: task)
+            XCTAssertEqual(shell.gitRefresh.recentPush(task)?.head, pushed, "the pushed tip, not the read emptied by the commit")
+            XCTAssertTrue(waitUntil("a read of the old head") {
+                shell.refreshPRInfo(for: [task])
+                return task.prInfo?.headRefOid == "a"
+            })
+            shell.updateKeepAwake()
+            XCTAssertTrue(controller.isAwaitingChecks, "green, but not the pushed head")
+            answer.head = pushed
+            XCTAssertTrue(waitUntil("a read of the pushed head") {
+                shell.refreshPRInfo(for: [task])
+                return task.prInfo?.headRefOid == pushed && !controller.isAwaitingChecks
+            })
+
+            // A fetch of a head GitHub shows already (updated there): settled, released at once.
+            let fetched = String(repeating: "c", count: 40)
+            answer.head = fetched
+            XCTAssertTrue(waitUntil("a read of GitHub's head") {
+                shell.refreshPRInfo(for: [task])
+                return task.prInfo?.headRefOid == fetched
+            })
+            try Data((fetched + "\n").utf8).write(to: remoteRef)
+            shell.gitRefresh.noteChange(.remoteBranch, for: task)
+            XCTAssertEqual(shell.gitRefresh.recentPush(task)?.head, fetched)
+            shell.updateKeepAwake()
+            XCTAssertFalse(controller.isAwaitingChecks, "the fetched head's checks settled")
         }
     }
 

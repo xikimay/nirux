@@ -192,8 +192,11 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
                 try setBuffer("quit\n", in: quitWebView)
                 harness.waitUntil("the edit") { quitEditor.unsavedPaths == [quit] }
                 let app = try XCTUnwrap(NSApp.delegate as? NiruxApp)
+                // A shutdown's quit, called off at the question: the next quit is the user's.
+                app.quitIsUsers = false
                 harness.alertResponses = [.alertSecondButtonReturn]
                 XCTAssertEqual(app.applicationShouldTerminate(NSApp), .terminateCancel)
+                XCTAssertTrue(app.quitIsUsers)
                 XCTAssertEqual(harness.alerts.count, asked + 9)
                 XCTAssertEqual(harness.alerts.last, "Save the changes to “quit.txt”?")
                 var replies: [Bool] = []
@@ -209,6 +212,17 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
                 harness.waitUntil("saved, then quitting") { replies == [true] }
                 XCTAssertEqual(try read(quit), "quit\n")
                 XCTAssertEqual(harness.alerts.count, asked + 11, "asked once each")
+
+                // A shutdown's quit whose save is refused (the file changed on disk): called off later, the next quit is the user's.
+                try setBuffer("again\n", in: quitWebView)
+                harness.waitUntil("the edit") { quitEditor.unsavedPaths == [quit] }
+                quitEditor.pauseFileWatch()
+                try write("disk\n", to: quit)
+                app.quitIsUsers = false
+                harness.alertResponses = [.alertFirstButtonReturn]
+                XCTAssertEqual(app.applicationShouldTerminate(NSApp), .terminateLater)
+                harness.waitUntil("the refused save called the quit off") { app.quitIsUsers }
+                XCTAssertEqual(try read(quit), "disk\n")
             }
         }
     }
