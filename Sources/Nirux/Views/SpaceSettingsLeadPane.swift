@@ -25,6 +25,8 @@ final class SpaceSettingsLeadPane: NSObject {
         var dailyPassHour = DailyPass.defaultHour
         /// "Group task results" (`SpaceDefaults.leadGroupsResults`).
         var groupsResults = true
+        /// "Fresh start after an idle hour" (`SpaceDefaults.leadFreshStart`).
+        var freshStart = true
         /// "Last pass: …", nil before the first.
         var lastPass: String?
         /// False while the space's defaults.json can't be written.
@@ -57,6 +59,7 @@ final class SpaceSettingsLeadPane: NSObject {
         var setDailyPass: @MainActor (Bool) -> Void = { _ in }
         var setDailyPassHour: @MainActor (Int) -> Void = { _ in }
         var setGroupsResults: @MainActor (Bool) -> Void = { _ in }
+        var setFreshStart: @MainActor (Bool) -> Void = { _ in }
     }
 
     static let width: CGFloat = 680
@@ -89,6 +92,8 @@ final class SpaceSettingsLeadPane: NSObject {
     private let dailyPassRow = NSStackView()
     let groupResultsSwitch = NSSwitch()
     private let groupResultsRow = NSStackView()
+    let freshStartSwitch = NSSwitch()
+    private let freshStartRow = NSStackView()
     private let alwaysSection = NSStackView()
 
     private(set) var model: Model
@@ -130,6 +135,9 @@ final class SpaceSettingsLeadPane: NSObject {
         groupResultsSwitch.state = model.groupsResults ? .on : .off
         groupResultsSwitch.isEnabled = model.canChangeDefaults
         groupResultsRow.isHidden = model.isGeneral
+        freshStartSwitch.state = model.freshStart ? .on : .off
+        freshStartSwitch.isEnabled = model.canChangeDefaults
+        freshStartRow.isHidden = model.isGeneral
         alwaysSection.isHidden = model.isGeneral
     }
 
@@ -185,6 +193,13 @@ final class SpaceSettingsLeadPane: NSObject {
         sender.state = model.groupsResults ? .on : .off
         guard !model.isGeneral, model.canChangeDefaults, wanted != model.groupsResults else { return }
         actions.setGroupsResults(wanted)
+    }
+
+    @objc func freshStartChanged(_ sender: NSSwitch) {
+        let wanted = sender.state == .on
+        sender.state = model.freshStart ? .on : .off
+        guard !model.isGeneral, model.canChangeDefaults, wanted != model.freshStart else { return }
+        actions.setFreshStart(wanted)
     }
 
     @objc func startsMergeQueueChanged(_ sender: NSSwitch) {
@@ -280,13 +295,19 @@ final class SpaceSettingsLeadPane: NSObject {
                        title: "Group task results",
                        hint: "Results its tasks report within 3 minutes reach the Lead together, in one message: it wakes once "
                            + "for them. Questions never wait.")
+        buildSwitchRow(freshStartRow, control: freshStartSwitch, action: #selector(freshStartChanged(_:)),
+                       title: "Fresh start after an idle hour",
+                       hint: "With 200k of context or more, a Claude Lead idle for an hour starts a new conversation: "
+                           + "its next message would write the whole context again. Its tasks, questions and brief stay.")
         agentPopup.addItems(withTitles: CodingAgent.launchable.map(\.productName))
         agentPopup.target = self
         agentPopup.action = #selector(agentChanged(_:))
         agentPopup.setAccessibilityLabel("Lead agent")
         agentPopup.toolTip = "Default agent when the Lead is stopped"
         agentRow.setViews([NSTextField(labelWithString: "Agent"), agentPopup], in: .leading)
-        let switches = NSStackView(views: [switchRow, agentRow, startsTasksRow, mergeQueueSection, dailyPassRow, groupResultsRow])
+        let switches = NSStackView(views: [
+            switchRow, agentRow, startsTasksRow, mergeQueueSection, dailyPassRow, freshStartRow, groupResultsRow
+        ])
         switches.orientation = .vertical
         switches.alignment = .leading
         switches.spacing = 16

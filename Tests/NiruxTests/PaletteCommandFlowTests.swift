@@ -205,6 +205,29 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
+    /// Fresh start on the Lead's card asks as Restart Lead does; a restart
+    /// hands the new conversation its handover and says it started.
+    func testALeadsFreshStartAsksAndHandsItsConversationOver() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            harness.waitUntil("the Lead's shell") { lead.workspace.leadTerminal?.pty?.shellPID != nil }
+            let index = try XCTUnwrap(harness.shell.workspaces.firstIndex { $0 === lead.workspace })
+            let column = try XCTUnwrap(lead.workspace.columns.firstIndex { $0 === lead.workspace.leadTerminal })
+            harness.shell.takeContextOffer(.freshStart, workspaceIndex: index, columnIndex: column)
+            harness.waitUntil("the confirmation") { harness.alerts.last == "Restart the Lead of “Tools”?" }
+            XCTAssertEqual(harness.terminalRestarts, [], "cancelled")
+
+            var started: Bool?
+            harness.shell.restartLead(
+                lead.workspace, agent: .claude, handover: ["Last conversation entry: Queue #824 when green."], focus: false
+            ) { started = $0 }
+            harness.waitUntil("the restart") { started != nil }
+            XCTAssertEqual(started, true)
+            XCTAssertEqual(harness.terminalRestarts.count, 1)
+            XCTAssertTrue(harness.terminalRestarts.last?.contains("Queue #824 when green.") == true)
+        }
+    }
+
     func testTokenUsageCommand() throws {
         try UIFlowHarness.run { harness in
             harness.runPaletteCommand("Token Usage")

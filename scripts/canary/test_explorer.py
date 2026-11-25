@@ -175,6 +175,8 @@ class ExplorerTests(unittest.TestCase):
             ("key", {"characters": "c", "modifiers": ["command"]}, "clipboard"),
             ("menu", {"path": ["Edit", "Paste"]}, "clipboard"),
             ("menu", {"path": ["Edit", "Cut"]}, "clipboard"),
+            ("press", {"label": "New Terminal"}, "opens no terminal"),
+            ("press", {"label": "Open Browser"}, "opens no browser"),
         ]:
             content, is_error = explorer.call(name, arguments)
             self.assertTrue(is_error, arguments)
@@ -182,6 +184,7 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(explorer.channel.calls, [])
         self.assertFalse(explorer_mcp.refused("menu", {"path": ["Columns", "Open Browser"]}, allows_browser=True))
         self.assertFalse(explorer_mcp.refused("key", {"characters": "p", "modifiers": ["command", "shift"]}))
+        self.assertFalse(explorer_mcp.refused("press", {"label": "New…"}))
 
     def test_a_dead_app_reads_dead_although_nobody_reaped_it(self):
         child = subprocess.Popen(["/usr/bin/true"])
@@ -199,6 +202,22 @@ class ExplorerTests(unittest.TestCase):
         finally:
             running.kill()
             running.wait()
+
+    def test_the_github_tool_changes_the_copys_github_as_from_outside(self):
+        world = self.root / "github/world.json"
+        world.parent.mkdir()
+        world.write_text(json.dumps({"repository": "acme/widgets", "pullRequests": [
+            {"number": 2, "headRefName": "canary-beta", "state": "OPEN", "checks": "pending"}]}))
+        explorer = self.explorer(FakeChannel(snapshot=[snapshot("A")]))
+        content, is_error = explorer.call("github", {"pull": 2, "event": "merge"})
+        self.assertFalse(is_error)
+        self.assertEqual(content[0]["text"], "Pull request #2: merge.\nChecks passed.")
+        self.assertEqual(json.loads(world.read_text())["pullRequests"][0]["state"], "MERGED")
+        explorer.call("github", {"pull": 2, "event": "checks-fail"})
+        self.assertEqual(json.loads(world.read_text())["pullRequests"][0]["checks"], "failure")
+        self.assertEqual(explorer.call("github", {"pull": 2, "event": "delete"})[0][0]["text"],
+                         "event must be one of merge, close, reopen, checks-pass, checks-fail, checks-run.")
+        self.assertIn("no pull request #9", explorer.call("github", {"pull": 9, "event": "merge"})[0][0]["text"])
 
     def test_notes_wait_for_a_person(self):
         self.explorer(FakeChannel()).call("note", {"text": "The badge says 2, one agent waits."})
@@ -223,7 +242,7 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(replies[1]["error"]["code"], -32601)
         self.assertEqual(replies[2]["result"]["protocolVersion"], "2025-11-25")
         self.assertEqual({t["name"] for t in replies[3]["result"]["tools"]},
-                         {"look", "press", "menu", "key", "type", "terminal", "render", "note"})
+                         {"look", "press", "menu", "key", "type", "terminal", "render", "github", "note"})
 
 
 class RunnerTests(unittest.TestCase):
@@ -317,6 +336,30 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual([(f["rule"], f["detail"]) for f in data["findings"]],
                          [("app-alive", "Nirux exited at launch: Nirux exited with status -11")])
         self.assertEqual(data["episodes"], [])
+
+    def test_kept_traces_replay_each_in_a_fresh_copy_and_a_failure_is_a_regression(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root, traces = Path(folder), Path(folder) / "traces"
+            traces.mkdir()
+            for name in ("fixed-bug", "back-again"):
+                (traces / f"{name}.jsonl").write_text(json.dumps({"tool": "menu", "arguments": {"path": ["Space"]}, "at": 1}) + "\n")
+            replayed = []
+
+            def run(trace, evidence):
+                replayed.append((trace[0]["tool"], evidence.name.split("-")[1]))
+                failed = "back-again" in evidence.name
+                return {"verdict": "fail" if failed else "pass", "bundleSHA256": "b", "findings": [
+                    {"fingerprint": "f", "rule": "app-alive", "detail": "Nirux quit by itself (status 0)"}] if failed else []}
+
+            args = explore.parser().parse_args(["Nirux.app", "--replay-traces", str(traces)])
+            code = explore.replay_kept(args, root, IncidentLedger(root / "history"), "c", run=run)
+            events = [json.loads(line) for line in (root / "history/events.jsonl").read_text().splitlines()]
+            summary = json.loads((root / "traces.json").read_text())
+        self.assertEqual(code, explore.EXIT_FINDINGS)
+        self.assertEqual(sorted(replayed), [("menu", "back"), ("menu", "fixed")])
+        self.assertEqual(sorted((e["scenario"], e["type"], e.get("classification")) for e in events),
+                         [("trace:back-again", "incident", "regression"), ("trace:fixed-bug", "pass", None)])
+        self.assertEqual([(s["trace"], s["findings"]) for s in summary], [("back-again", 1), ("fixed-bug", 0)])
 
     def test_an_episode_reads_its_result_and_notes_make_the_digest(self):
         with tempfile.TemporaryDirectory() as folder:

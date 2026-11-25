@@ -15,8 +15,18 @@ extension GitHub {
 
         /// The first executable gh among `candidates`. Looked up at each call,
         /// so a gh installed since launch is found.
-        static func installedPath(among candidates: [String] = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]) -> String? {
+        static func installedPath(
+            among candidates: [String] = candidates(environment: ProcessInfo.processInfo.environment,
+                                                    stateDirectory: Persistence.stateDirectory)
+        ) -> String? {
             candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        }
+
+        /// Where gh may be: Homebrew's, or in a canary run only the run's own
+        /// fake gh (scripts/canary/fake_gh.py), never the user's.
+        static func candidates(environment: [String: String], stateDirectory: URL) -> [String] {
+            guard CanaryChannel.token(in: environment) != nil else { return ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"] }
+            return [stateDirectory.deletingLastPathComponent().appendingPathComponent("agents/gh").path]
         }
 
         struct Call: Sendable {

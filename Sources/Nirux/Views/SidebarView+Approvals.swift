@@ -53,6 +53,13 @@ struct SidebarInterruptClick: Equatable {
     let since: TimeInterval
 }
 
+/// Compact or Fresh start clicked under a Claude column.
+struct SidebarContextOfferClick: Equatable {
+    let workspaceIndex: Int
+    let columnIndex: Int
+    let choice: ContextOffer.Choice
+}
+
 /// Type it now clicked on a row of waiting Mission messages.
 struct SidebarTypeNowClick: Equatable {
     let workspaceIndex: Int
@@ -109,6 +116,8 @@ extension SidebarView {
             return SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
         case let .agentInterrupt(workspaceIndex, columnIndex, since):
             return SidebarHoverTarget.interruptButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
+        case let .contextOffer(workspaceIndex, columnIndex, offer, choice):
+            return SidebarHoverTarget.contextOfferButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, offer: offer, choice: choice)
         case let .missionTypeNow(workspaceIndex, columnIndex, since):
             return SidebarHoverTarget.typeNowButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
         case let .deferredAgentResume(_, _, columnID):
@@ -187,6 +196,22 @@ extension SidebarView {
               case let .agentInterrupt(workspaceIndex, columnIndex, releasedSilence)? = released,
               releasedSilence == pressedSilence else { return nil }
         return SidebarInterruptClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: releasedSilence)
+    }
+
+    /// The Compact or Fresh start a click makes, if any: the same rules, for
+    /// the same offer and choice.
+    static func contextOfferClick(
+        pressed: SidebarHitRegion,
+        released: SidebarHitRegion?,
+        clickCount: Int,
+        armedAtPress: Bool,
+        armedAtRelease: Bool
+    ) -> SidebarContextOfferClick? {
+        guard clickCount == 1, armedAtPress, armedAtRelease,
+              case let .contextOffer(_, _, pressedOffer, pressedChoice) = pressed,
+              case let .contextOffer(workspaceIndex, columnIndex, releasedOffer, releasedChoice)? = released,
+              releasedOffer == pressedOffer, releasedChoice == pressedChoice else { return nil }
+        return SidebarContextOfferClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, choice: releasedChoice)
     }
 
     /// The Type it now a click makes, if any: the same rules, for the same
@@ -337,6 +362,12 @@ extension SidebarView {
         ) {
             lastButtonActionAt = time
             onAgentInterrupt?(interrupt.workspaceIndex, interrupt.columnIndex, interrupt.since)
+        } else if let offer = Self.contextOfferClick(
+            pressed: pressed, released: released, clickCount: clickCount,
+            armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+        ) {
+            lastButtonActionAt = time
+            onContextOffer?(offer.workspaceIndex, offer.columnIndex, offer.choice)
         } else if let typeNow = Self.typeNowClick(
             pressed: pressed, released: released, clickCount: clickCount,
             armedAtPress: armedAtPress, armedAtRelease: armedAtRelease

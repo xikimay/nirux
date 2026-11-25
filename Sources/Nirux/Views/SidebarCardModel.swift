@@ -239,6 +239,9 @@ extension WorkspaceInfo {
             if let waiting = column.waitingMessages {
                 actions.append(.waitingMessages(columnIndex: column.index, waiting))
             }
+            if let offer = column.contextOffer {
+                actions.append(.contextOffer(columnIndex: column.index, offer))
+            }
         }
         if let heldMessages {
             actions.append(.heldMessages(heldMessages))
@@ -307,6 +310,9 @@ enum SidebarCardAction: Hashable {
     case waitingMessages(columnIndex: Int, SidebarWaitingMessages)
     /// The Lead's messages held until other tasks' pull requests merge.
     case heldMessages(SidebarHeldMessages)
+    /// A Claude column at rest whose context costs to go on with: Compact
+    /// or Fresh start, never imposed.
+    case contextOffer(columnIndex: Int, ContextOffer)
 
     /// A nested row keeps its indent over it: it neither asks the user nor
     /// needs the width.
@@ -319,7 +325,7 @@ enum SidebarCardAction: Hashable {
     /// proposed rule waits on nothing: it stays as quiet.
     var isQuiet: Bool {
         switch self {
-        case .next, .reviewBadges, .ruleProposals, .dailyPass, .heldMessages, .leadRecovery: return true
+        case .next, .reviewBadges, .ruleProposals, .dailyPass, .heldMessages, .leadRecovery, .contextOffer: return true
         case .missionQuestion(_, let question): return question.handOff == nil
         case .approval, .resume, .interrupt, .cleanup, .turnQuestion, .dialog, .waitingMessages, .missionRecommendation: return false
         }
