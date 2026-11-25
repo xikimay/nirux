@@ -59,6 +59,19 @@ enum MissionPromptText {
         }
     }
 
+    /// The text a hook brings in for `delivery` (MissionWaitHook): a `tell`
+    /// says who sends it, as no prompt shows it typed; nil for one that starts
+    /// with a slash command, which only typing runs.
+    static func hookText(for delivery: MissionStore.AcceptedEvent, childTitle: String?, parentTitle: String?) -> String? {
+        guard let text = text(for: delivery, childTitle: childTitle, parentTitle: parentTitle) else { return nil }
+        guard delivery.event.kind == .instruction, !text.hasPrefix(prefix) else { return text }
+        guard !startsWithSlashCommand(text) else { return nil }
+        let sender = parentTitle.map {
+            "\"\(String(String.UnicodeScalarView(quoted($0).unicodeScalars.prefix(maxNameScalars))))\", which started this task"
+        } ?? "the agent that started this task"
+        return "\(prefix) From \(sender):\n" + text
+    }
+
     /// Under an answer that is the child's own recommendation.
     static let acceptedNote = "It is the answer you recommended."
     /// Under an answer to `question`, which the child moved past

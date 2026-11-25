@@ -2,10 +2,20 @@ import Foundation
 @testable import NiruxCore
 import Testing
 
+/// Serialized: the waiter tests time a wait the racing tests' threads would starve.
+@Suite(.serialized)
 struct MissionDeliveryTests {
     typealias Letter = MissionMailbox.Letter
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     var mailbox: MissionMailbox { MissionMailbox(root: root) }
+
+    /// `body` on a thread of its own, `delay` from now: no queue's width holds it back.
+    static func after(_ delay: TimeInterval, _ body: @escaping @Sendable () -> Void) {
+        Thread.detachNewThread {
+            Thread.sleep(forTimeInterval: delay)
+            body()
+        }
+    }
 
     @Test(arguments: [
         ([], false, nil),
@@ -182,6 +192,131 @@ struct MissionDeliveryTests {
         #expect(throws: MissionMailbox.InvalidName(name: name)) { try mailbox.post(Letter(id: name, text: "", postedAt: 1), to: "ok") }
         #expect(throws: MissionMailbox.InvalidName(name: name)) { try mailbox.retract(name, from: "ok") }
         #expect(mailbox.claim(name, at: 1).isEmpty)
+    }
+
+    @Test(arguments: [
+        (nil, "s", false, nil, ["s"], .post("s")),
+        (nil, "s", false, nil, [], .type),
+        (nil, nil, false, nil, ["s"], .type),
+        (nil, "s", false, "older", ["s"], .type),
+        (nil, "s", false, "s", ["s"], .post("s")),
+        (.waiting(conversation: "s"), "s", false, nil, ["s"], .leave),
+        (.waiting(conversation: "s"), "s", false, nil, [], .retract("s")),
+        (.waiting(conversation: "old"), "s", false, nil, ["old", "s"], .retract("old")),
+        (.claimed(conversation: "s", at: 1), "s", false, nil, [], .leave),
+        (.claimed(conversation: "old", at: 1), nil, false, nil, [], .leave),
+        (.claimed(conversation: "old", at: 1), "s", true, nil, ["s"], .release),
+        (.owed(conversation: "s"), "s", false, nil, ["s"], .type),
+    ] as [(MissionLetterPlace?, String?, Bool, String?, Set<String>, MissionHookStep)])
+    func aHookTakesAMessageOnlyWhileItsWaiterWaitsOnTheRecipientsConversation(
+        place: MissionLetterPlace?, recipient: String?, ended: Bool, sentTo: String?, armed: Set<String>, expected: MissionHookStep
+    ) {
+        #expect(MissionDeliveryPolicy.hookStep(place: place, recipient: recipient, ended: ended, sentTo: sentTo, isArmed: armed.contains) == expected)
+    }
+
+    @Test func placesSayWhereEachLetterWaitsOrWasClaimed() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        try mailbox.post(Letter(id: "a", text: "", postedAt: 1), to: "one")
+        try mailbox.post(Letter(id: "b", text: "", postedAt: 2), to: "two")
+        _ = mailbox.claim("two", at: 3)
+        try mailbox.post(Letter(id: "c", text: "", postedAt: 4), to: "one")
+        _ = try mailbox.retract("c", from: "one")
+        #expect(mailbox.places() == ["a": .waiting(conversation: "one"), "b": .claimed(conversation: "two", at: 3), "c": .owed(conversation: "one")])
+    }
+
+    @Test func oneWaiterAtATimeArmsAConversation() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(!mailbox.isArmed("session"))
+        var first = try mailbox.arm("session")
+        #expect(first != nil)
+        #expect(mailbox.isArmed("session"))
+        #expect(!mailbox.isArmed("other"))
+        #expect(try mailbox.arm("session") == nil)
+        first = nil
+        #expect(!mailbox.isArmed("session"))
+        #expect(try mailbox.arm("session") != nil)
+    }
+
+    @Test func aWaiterGetsWhatIsPostedWhileItWaits() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let box = mailbox
+        Self.after(0.2) {
+            _ = try? box.post(Letter(id: "late", text: "hello", postedAt: 1), to: "session")
+        }
+        let letters = box.letters(for: "session", whileRunning: getpid(), until: Date() + 10)
+        #expect(letters.map(\.text) == ["hello"])
+        #expect(mailbox.claims().map(\.letter.id) == ["late"])
+    }
+
+    @Test func aWaiterStopsWhenItsParentExitsOrItsTimeRunsOut() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let parent = Process()
+        parent.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        parent.arguments = ["30"]
+        try parent.run()
+        Self.after(0.2) { parent.terminate() }
+        let started = Date()
+        #expect(mailbox.letters(for: "session", whileRunning: parent.processIdentifier, until: started + 20).isEmpty)
+        #expect(Date().timeIntervalSince(started) < 10)
+        #expect(mailbox.letters(for: "session", whileRunning: getpid(), until: Date() + 0.3).isEmpty)
+        try mailbox.post(Letter(id: "kept", text: "", postedAt: 1), to: "session")
+        #expect(mailbox.waiting(for: "session").map(\.id) == ["kept"])
+    }
+
+    @Test func aWaiterLeavesOnceItsProcessRunsAnotherConversation() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let box = mailbox
+        try box.noteRunning("first", in: getpid())
+        Self.after(0.2) { try? box.noteRunning("first", in: getpid()) }
+        Self.after(0.4) { try? box.noteRunning("cleared", in: getpid()) }
+        let started = Date()
+        #expect(box.letters(for: "first", whileRunning: getpid(), until: started + 20).isEmpty)
+        #expect(Date().timeIntervalSince(started) > 0.3, "the same conversation again keeps it")
+        #expect(Date().timeIntervalSince(started) < 10)
+        #expect(box.running(in: getpid()) == "cleared")
+    }
+
+    @Test func aClaimedLetterMatchesItsWholeID() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        try mailbox.post(Letter(id: "a-b", text: "", postedAt: 1), to: "session")
+        _ = mailbox.claim("session", at: 2)
+        #expect(try mailbox.post(Letter(id: "b", text: "", postedAt: 3), to: "session"))
+    }
+
+    /// A waiter's lock and transcript note go with an empty conversation,
+    /// but never while a waiter holds it; one armed after is armed for real.
+    @Test func sweepingKeepsAConversationAWaiterHolds() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date().timeIntervalSince1970
+        try mailbox.post(Letter(id: "a", text: "", postedAt: now), to: "waiting")
+        try mailbox.post(Letter(id: "c", text: "", postedAt: now), to: "done")
+        _ = try mailbox.retract("c", from: "done")
+        try mailbox.markTyped("c", in: "done")
+        try mailbox.noteTranscript("/t.jsonl", of: "done")
+        _ = try mailbox.arm("done")
+        let waiter = try mailbox.arm("armed")
+        mailbox.sweep(now: now)
+        let left = try FileManager.default.contentsOfDirectory(atPath: root.path).filter { !$0.hasPrefix(".") }.sorted()
+        #expect(left == ["armed", "waiting"])
+        withExtendedLifetime(waiter) {}
+        let again = try mailbox.arm("done")
+        #expect(mailbox.isArmed("done"))
+        withExtendedLifetime(again) {}
+    }
+
+    @Test func aConversationIsRunByTheLiveProcessesItsWaitersNoted() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gone = Process()
+        gone.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+        try gone.run()
+        gone.waitUntilExit()
+        try mailbox.noteRunning("session", in: gone.processIdentifier)
+        try mailbox.noteRunning("session", in: getpid())
+        #expect(mailbox.processes(running: "session") == [getpid()])
+        try mailbox.noteRunning("cleared", in: getpid())
+        #expect(mailbox.processes(running: "session").isEmpty)
+        try mailbox.noteTranscript("/Users/me/.claude/projects/x/s.jsonl", of: "session")
+        #expect(mailbox.transcript(of: "session") == "/Users/me/.claude/projects/x/s.jsonl")
     }
 }
 

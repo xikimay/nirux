@@ -1,7 +1,8 @@
 import Foundation
 
 /// The Claude Code settings a space hands its sessions (Space Settings ›
-/// Safety), each part on its own switch. Claude Code merges a `--settings`
+/// Safety), each part on its own switch, and the hook that hands them their
+/// Mission messages (MissionWaitHook). Claude Code merges a `--settings`
 /// file over the user's own settings, which Nirux never writes; Nirux
 /// rewrites `<state dir>/projects/<space id>/claude-settings.json` before
 /// each launch in the space.
@@ -87,25 +88,39 @@ enum ClaudeSpaceSettings {
             var deny: [String]?
         }
         struct Sandbox: Codable, Equatable { var enabled: Bool }
+        struct Hook: Codable, Equatable {
+            var type = "command"
+            var command: String
+            var asyncRewake: Bool?
+            var timeout: Int?
+            var rewakeSummary: String?
+            var rewakeMessage: String?
+        }
+        struct HookGroup: Codable, Equatable { var hooks: [Hook] }
 
         var autoMode: AutoMode?
+        /// By event name.
+        var hooks: [String: [HookGroup]]?
         var permissions: Permissions?
         var sandbox: Sandbox?
     }
 
-    /// What `defaults` turns on, and the lines the user added, or nil for
-    /// nothing. The sandbox switched off writes nothing, so the user's own
+    /// What `defaults` turns on, the lines the user added and `hooks`, or
+    /// nil for nothing. The sandbox switched off writes nothing, so the user's own
     /// setting holds. `userEnvironment` is the user's `autoMode.environment`:
     /// Claude Code joins it with ours, then puts its own entries at the
     /// first "$defaults", and a list without one replaces them. Ours brings
     /// one only when the user's has no list of its own.
-    static func file(_ defaults: SpaceDefaults, repositories: [Repository], userEnvironment: [String]? = nil) -> File? {
+    static func file(
+        _ defaults: SpaceDefaults, repositories: [Repository], userEnvironment: [String]? = nil, hooks: [String: [File.HookGroup]]? = nil
+    ) -> File? {
         let keepsBuiltIn = userEnvironment?.isEmpty ?? true ? ["$defaults"] : []
         let trusted = defaults.isOn(.trustRepositories) ? repositories.map(environmentEntry) : []
         let environment = trusted + defaults.claudeEnvironment
         let deny = defaults.isOn(.denyIrreversible) ? denyRules : []
         let file = File(
             autoMode: environment.isEmpty ? nil : File.AutoMode(environment: keepsBuiltIn + environment),
+            hooks: hooks,
             permissions: deny.isEmpty && defaults.claudeAllow.isEmpty ? nil : File.Permissions(
                 allow: defaults.claudeAllow.isEmpty ? nil : defaults.claudeAllow, deny: deny.isEmpty ? nil : deny
             ),
@@ -203,10 +218,10 @@ enum ClaudeSpaceSettings {
     /// read. Throws when it can't be written.
     static func prepare(
         spaceID: String, defaults: SpaceDefaults, anchors: [SpaceAnchor], userEnvironment: [String]?,
-        stateDirectory: URL = Persistence.stateDirectory
+        hooks: [String: [File.HookGroup]]? = nil, stateDirectory: URL = Persistence.stateDirectory
     ) throws -> String? {
         guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory) else { return nil }
-        guard let content = file(defaults, repositories: repositories(anchors), userEnvironment: userEnvironment) else {
+        guard let content = file(defaults, repositories: repositories(anchors), userEnvironment: userEnvironment, hooks: hooks) else {
             try empty(spaceID: spaceID, stateDirectory: stateDirectory)
             return nil
         }

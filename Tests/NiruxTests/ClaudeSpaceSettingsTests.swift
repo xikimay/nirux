@@ -209,4 +209,49 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
             "command claude '--settings=/state/projects/S1/claude-settings.json'"
         )
     }
+
+    /// The Mission waiter (MissionWaitHook) goes in for a Claude Code that
+    /// runs it in the background, from where Nirux runs, even when the space
+    /// hands nothing else.
+    @MainActor
+    func testTheMissionWaiterRunsAtEachSessionStartAndTurnEndOfARecentClaude() throws {
+        let mailbox = URL(fileURLWithPath: "/state dir/mission-mailbox", isDirectory: true)
+        let proven = MissionWaitHook.claudeVersion
+        XCTAssertNil(MissionWaitHook.claudeHooks(executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", enabled: true, version: nil, mailbox: mailbox))
+        XCTAssertNil(
+            MissionWaitHook.claudeHooks(executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", enabled: false, version: proven, mailbox: mailbox),
+            "the pilot off in Settings"
+        )
+        XCTAssertNil(MissionWaitHook.claudeHooks(
+            executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", enabled: true,
+            version: ClaudeCodeVersion(major: proven.major, minor: proven.minor, patch: proven.patch - 1), mailbox: mailbox
+        ))
+        XCTAssertNil(MissionWaitHook.claudeHooks(executable: nil, enabled: true, version: proven, mailbox: mailbox))
+        let hooks = try XCTUnwrap(MissionWaitHook.claudeHooks(
+            executable: "/Applications/Nirux.app/Contents/MacOS/Nirux", enabled: true, version: proven, mailbox: mailbox
+        ))
+        XCTAssertEqual(Set(hooks.keys), ["SessionStart", "Stop"])
+        let waiter = try XCTUnwrap(hooks["Stop"]?.first?.hooks.first)
+        XCTAssertEqual(hooks["SessionStart"]?.first?.hooks, [waiter])
+        XCTAssertEqual(waiter.asyncRewake, true)
+        XCTAssertEqual(waiter.timeout, MissionWaitHook.timeout)
+        XCTAssertEqual(
+            waiter.command,
+            #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x '/Applications/Nirux.app/Contents/MacOS/Nirux' ]; then "#
+                + #"exec '/Applications/Nirux.app/Contents/MacOS/Nirux' --hook mission-wait '/state dir/mission-mailbox'; "#
+                + "else /bin/cat >/dev/null; fi"
+        )
+
+        var off = SpaceDefaults()
+        for part in ClaudeSpaceSettings.Part.allCases { off.set(part, on: false) }
+        XCTAssertNil(ClaudeSpaceSettings.file(off, repositories: [app]))
+        let file = try XCTUnwrap(ClaudeSpaceSettings.file(off, repositories: [app], hooks: hooks))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(file)) as? [String: Any])
+        XCTAssertEqual(Set(json.keys), ["hooks"])
+        let stop = try XCTUnwrap(((json["hooks"] as? [String: Any])?["Stop"] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]])
+        XCTAssertEqual(stop.first?["type"] as? String, "command")
+        XCTAssertEqual(stop.first?["asyncRewake"] as? Bool, true)
+        XCTAssertEqual(stop.first?["rewakeSummary"] as? String, MissionWaitHook.summary)
+        XCTAssertEqual(stop.first?["rewakeMessage"] as? String, MissionWaitHook.preamble)
+    }
 }
