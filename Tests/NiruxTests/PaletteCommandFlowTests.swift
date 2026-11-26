@@ -145,8 +145,8 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             // does: lines written behind the shell's back are the line
             // editor's to paint over (CI's bash redraws its wrapping prompt
             // on a SIGWINCH). The command it runs holds no match.
-            @MainActor func shellPrints(_ lines: [String], as name: String) throws {
-                harness.waitUntil("the shell's prompt") {
+            @MainActor func shellPrints(_ lines: [String], as name: String, line: UInt = #line) throws {
+                harness.waitUntil("the shell's prompt", line: line) {
                     pty.readsKeysAsTyped && pty.foregroundProcess(snapshot: ProcessSnapshot())?.instance.pid == pty.shellPID
                 }
                 let path = harness.root + "/\(name).txt"
