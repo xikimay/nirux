@@ -44,10 +44,20 @@ final class QuotaPopoverViewController: NSViewController {
         return walk(view)
     }
 
+    /// Claude's first, then Codex's, the shorter window first.
+    static func ordered(_ limits: [QuotaLimit]) -> [QuotaLimit] {
+        limits.sorted { ($0.agent == .claude ? 0 : 1, $0.length) < ($1.agent == .claude ? 0 : 1, $1.length) }
+    }
+
+    /// What a limit's row says.
+    static func words(of limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> String {
+        "\(UsageText.longName(of: limit)) \(Int(limit.latest.usedPercent.rounded())) \(UsageText.detail(limit, now: now, calendar: calendar).text)"
+    }
+
     func update(limits: [QuotaLimit], burn: [QuotaBurnRow] = [], now: TimeInterval, calendar: Calendar) {
         loadViewIfNeeded()
-        let ordered = limits.sorted { ($0.agent == .claude ? 0 : 1, $0.length) < ($1.agent == .claude ? 0 : 1, $1.length) }
-        let words = ordered.map { "\(UsageText.longName(of: $0)) \(Int($0.latest.usedPercent.rounded())) \(UsageText.detail($0, now: now, calendar: calendar).text)" }
+        let ordered = Self.ordered(limits)
+        let words = ordered.map { Self.words(of: $0, now: now, calendar: calendar) }
             + [limits.map(\.latest.time).max().map { ClaudeUsageLimits.clockText($0, now: now, calendar: calendar) } ?? ""]
             + burn.map { String(describing: $0) }
         guard words != shown || stack.arrangedSubviews.isEmpty else { return }
@@ -105,8 +115,9 @@ final class QuotaPopoverViewController: NSViewController {
     }
 
     /// A limit's row: its name and use, its meter, its pace and reset. The
-    /// Usage window shows the same.
-    static func limitRow(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar, width: CGFloat) -> NSView {
+    /// Usage window shows the same, without a `width`: its own ties the row
+    /// to the window's.
+    static func limitRow(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar, width: CGFloat? = nil) -> NSView {
         let detail = UsageText.detail(limit, now: now, calendar: calendar)
         let row = textRow(width: width,
             UsageText.longName(of: limit), value: "\(Int(limit.latest.usedPercent.rounded()))%",
@@ -128,7 +139,7 @@ final class QuotaPopoverViewController: NSViewController {
         Self.textRow(width: Self.width - 2 * Theme.Space.lg, name, value: value, detail: detail, detailColor: detailColor)
     }
 
-    private static func textRow(width: CGFloat, _ name: String, value: String, detail: String, detailColor: NSColor) -> NSStackView {
+    private static func textRow(width: CGFloat?, _ name: String, value: String, detail: String, detailColor: NSColor) -> NSStackView {
         let nameLabel = label(name, font: Theme.Font.caption, color: Theme.Color.textPrimary)
         let valueLabel = label(value, font: Theme.Font.captionDigits, color: Theme.Color.textPrimary)
         valueLabel.alignment = .right
@@ -138,16 +149,15 @@ final class QuotaPopoverViewController: NSViewController {
         let detailLabel = NSTextField(wrappingLabelWithString: detail)
         detailLabel.font = Theme.Font.caption
         detailLabel.textColor = detailColor
-        detailLabel.preferredMaxLayoutWidth = width
+        // 0: it wraps at the width its row gets.
+        detailLabel.preferredMaxLayoutWidth = width ?? 0
         let row = NSStackView(views: [top, detailLabel])
         row.orientation = .vertical
         row.alignment = .leading
         row.spacing = Theme.Space.xs
         row.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            top.widthAnchor.constraint(equalToConstant: width),
-            row.widthAnchor.constraint(equalToConstant: width)
-        ])
+        top.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
+        if let width { row.widthAnchor.constraint(equalToConstant: width).isActive = true }
         return row
     }
 

@@ -21,14 +21,12 @@ enum UsageReportText {
     static let taskRows = 12
 
     /// The tasks, busiest first, for the table; points of Claude's weekly
-    /// limit from `week` over 7 days.
-    static func tableRows(_ period: UsageReport.Period, names: UsageNames, week: UsageWeek?, dayTasks: [[String: Double]]) -> [UsageTasksTable.Row] {
+    /// limit from `week`.
+    static func tableRows(_ period: UsageReport.Period, names: UsageNames, week: UsageWeek?) -> [UsageTasksTable.Row] {
         let ranked = period.tasks.sorted { $0.value.weightedTokens > $1.value.weightedTokens }
         var rows = ranked.prefix(taskRows).map { id, summary in
-            let claude = dayTasks.reduce(0.0) { $0 + ($1[id] ?? 0) }
-            return UsageTasksTable.Row(
-                title: names.tasks[id]?.title ?? "Closed task",
-                points: week?.pointsPerToken.flatMap { claude > 0 ? $0 * claude : nil },
+            UsageTasksTable.Row(
+                title: names.tasks[id]?.title ?? "Closed task", points: week?.points[id],
                 tokens: summary.weightedTokens, peakContext: summary.peakContextTokens, subagents: summary.subagents.count
             )
         }
@@ -93,18 +91,24 @@ enum UsageReportText {
 /// popover shows them; then where the tokens went over the last 24 hours or
 /// 7 days: Claude's week day by day in points of its weekly limit (by agent
 /// in tokens without its readings), the tasks, the causes and what each
-/// remedy saves, the spaces. Read-only; numbers only.
+/// remedy saves, the spaces. Read-only; numbers only. It all scrolls: the
+/// limits, the chart and the table alone fill a short window.
 final class UsageWindowController: NSWindowController {
+    private static let inset: CGFloat = 20
+
     let period = NSSegmentedControl(labels: ["24 Hours", "7 Days"], trackingMode: .selectOne, target: nil, action: nil)
     let headline = NSTextField(labelWithString: "")
     private let chart = UsageDaysChart()
     let weekChart = UsageWeekChart()
     let tasksTable = UsageTasksTable()
     let limitsStack = NSStackView()
-    private var limits: [QuotaLimit] = []
+    /// As tall as its lines: each one truncates rather than wraps.
+    let textView = NSTextView(usingTextLayoutManager: false)
+    private lazy var textHeight = textView.heightAnchor.constraint(equalToConstant: 0)
+    /// What the limit rows last said: the same words keep the same rows, so
+    /// VoiceOver keeps its place.
+    private var limitWords: [String] = []
     private var weekReadings: [QuotaReading] = []
-    private let scroll = NSTextView.scrollableTextView()
-    private var textView: NSTextView { scroll.documentView as! NSTextView }
     private var report: UsageReport?
     private var names = UsageNames()
 
@@ -132,57 +136,90 @@ final class UsageWindowController: NSWindowController {
         note.textColor = Theme.Color.textTertiary
         textView.isEditable = false
         textView.drawsBackground = false
+        textView.isVerticallyResizable = false
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 0
         textView.textContainerInset = NSSize(width: 0, height: 4)
-        scroll.drawsBackground = false
         limitsStack.orientation = .vertical
         limitsStack.alignment = .leading
         limitsStack.spacing = Theme.Space.md
-        let stack = NSStackView(views: [limitsStack, period, headline, chart, weekChart, tasksTable, scroll, note])
+        limitsStack.isHidden = true
+        let stack = NSStackView(views: [limitsStack, period, headline, chart, weekChart, tasksTable, textView, note])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Theme.Space.md
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: Self.inset, bottom: 16, right: Self.inset)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let content = NSView()
-        content.addSubview(stack)
-        window.contentView = content
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: content.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+        let document = UsageDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        let scroll = NSScrollView()
+        scroll.documentView = document
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        window.contentView = scroll
+        // Widths from the stack, which never hides: the clip's, whichever
+        // scroller the user's setting shows.
+        let widths = [limitsStack, chart, weekChart, tasksTable, textView, note].map {
+            $0.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -2 * Self.inset)
+        }
+        NSLayoutConstraint.activate(widths + [
+            stack.topAnchor.constraint(equalTo: document.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
             chart.heightAnchor.constraint(equalToConstant: 190),
             weekChart.heightAnchor.constraint(equalToConstant: 190),
-            weekChart.widthAnchor.constraint(equalTo: chart.widthAnchor),
             tasksTable.heightAnchor.constraint(equalToConstant: 170),
-            tasksTable.widthAnchor.constraint(equalTo: chart.widthAnchor),
-            chart.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40),
-            scroll.widthAnchor.constraint(equalTo: chart.widthAnchor),
-            note.widthAnchor.constraint(equalTo: chart.widthAnchor)
+            textHeight
         ])
-        render()
+        renderReport()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    /// `limits` as the title bar reads them; `weekReadings`: Claude's weekly
-    /// limit over the week, which turns its days into points.
-    func update(report: UsageReport?, names: UsageNames, limits: [QuotaLimit] = [], weekReadings: [QuotaReading] = []) {
+    func update(report: UsageReport?, names: UsageNames) {
         self.report = report
         self.names = names
-        self.limits = limits
-        self.weekReadings = weekReadings
-        render()
+        renderReport()
     }
 
-    @objc private func periodChanged() { render() }
+    /// Claude's weekly limit over the week: it turns the days into points.
+    func update(weekReadings: [QuotaReading]) {
+        guard weekReadings != self.weekReadings else { return }
+        self.weekReadings = weekReadings
+        renderReport()
+    }
 
-    private func render() {
+    /// The limits as the title bar reads them, each row as wide as the window.
+    func update(limits: [QuotaLimit], now: TimeInterval = Date().timeIntervalSince1970, calendar: Calendar = .current) {
+        let ordered = QuotaPopoverViewController.ordered(limits)
+        let words = ordered.map { QuotaPopoverViewController.words(of: $0, now: now, calendar: calendar) }
+        guard words != limitWords else { return }
+        limitWords = words
+        limitsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for limit in ordered {
+            let row = QuotaPopoverViewController.limitRow(limit, now: now, calendar: calendar)
+            limitsStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: limitsStack.widthAnchor).isActive = true
+        }
+        limitsStack.isHidden = ordered.isEmpty
+    }
+
+    @objc private func periodChanged() { renderReport() }
+
+    private func renderReport() {
         guard let report else {
             headline.stringValue = "Reading the agents’ transcripts…"
             chart.days = []
-            textView.string = ""
+            weekChart.isHidden = true
+            tasksTable.show([])
+            setText(NSAttributedString())
             return
         }
         let shown = period.selectedSegment == 0 ? report.day : report.week
@@ -193,33 +230,50 @@ final class UsageWindowController: NSWindowController {
         weekChart.isHidden = period.selectedSegment == 0 || week == nil
         chart.isHidden = period.selectedSegment == 0 || week != nil
         chart.days = report.days
-        tasksTable.show(UsageReportText.tableRows(shown, names: names, week: period.selectedSegment == 0 ? nil : week, dayTasks: report.claudeDayTasks))
-        limitsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let width = (window?.contentLayoutRect.width ?? 640) - 40
-        for limit in limits.sorted(by: { ($0.agent == .claude ? 0 : 1, $0.length) < ($1.agent == .claude ? 0 : 1, $1.length) }) {
-            limitsStack.addArrangedSubview(QuotaPopoverViewController.limitRow(limit, now: Date().timeIntervalSince1970, calendar: .current, width: width))
-        }
-        limitsStack.isHidden = limits.isEmpty
-        textView.textStorage?.setAttributedString(Self.text(UsageReportText.sections(shown, names: names)))
+        tasksTable.show(UsageReportText.tableRows(shown, names: names, week: period.selectedSegment == 0 ? nil : week))
+        setText(Self.text(UsageReportText.sections(shown, names: names)))
     }
 
-    private static func text(_ sections: [UsageReportText.Section]) -> NSAttributedString {
+    private func setText(_ text: NSAttributedString) {
+        textView.textStorage?.setAttributedString(text)
+        guard let manager = textView.layoutManager, let container = textView.textContainer else { return }
+        manager.ensureLayout(for: container)
+        textHeight.constant = ceil(manager.usedRect(for: container).height + 2 * textView.textContainerInset.height)
+    }
+
+    /// Each row on a line of tab-separated columns; what a remedy saves goes
+    /// on a line of its own under its cause, too long to follow the columns.
+    static func text(_ sections: [UsageReportText.Section]) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.tabStops = [260, 310, 350, 415].map { NSTextTab(textAlignment: .left, location: $0) }
+        paragraph.tabStops = [260, 310].map { NSTextTab(textAlignment: .left, location: $0) }
         paragraph.lineBreakMode = .byTruncatingTail
+        let indented = paragraph.mutableCopy() as! NSMutableParagraphStyle
+        indented.firstLineHeadIndent = Theme.Space.md
+        indented.headIndent = Theme.Space.md
         let body: [NSAttributedString.Key: Any] = [
             .font: Theme.Font.captionDigits, .foregroundColor: Theme.Color.textSecondary, .paragraphStyle: paragraph
+        ]
+        let remedy: [NSAttributedString.Key: Any] = [
+            .font: Theme.Font.caption, .foregroundColor: Theme.Color.textTertiary, .paragraphStyle: indented
         ]
         let heading: [NSAttributedString.Key: Any] = [.font: Theme.Font.captionEmphasized, .foregroundColor: Theme.Color.textPrimary]
         let text = NSMutableAttributedString()
         for (index, section) in sections.enumerated() {
             text.append(NSAttributedString(string: (index == 0 ? "" : "\n") + section.title + "\n", attributes: heading))
             for row in section.rows {
-                text.append(NSAttributedString(string: row.joined(separator: "\t") + "\n", attributes: body))
+                text.append(NSAttributedString(string: row.prefix(3).joined(separator: "\t") + "\n", attributes: body))
+                for extra in row.dropFirst(3) where !extra.isEmpty {
+                    text.append(NSAttributedString(string: extra + "\n", attributes: remedy))
+                }
             }
         }
         return text
     }
+}
+
+/// The Usage window's scrolled content: from the top.
+private final class UsageDocumentView: NSView {
+    override var isFlipped: Bool { true }
 }
 
 /// The week day by day: a bar per day, its segments by source, in the

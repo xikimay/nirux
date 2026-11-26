@@ -174,9 +174,23 @@ extension NiruxShellView {
         }
     }
 
+    /// The report and the limits now; Claude's weekly readings once read
+    /// off the main thread: up to 8 days of them.
     func updateUsageWindow() {
-        let quota: (limits: [QuotaLimit], weekReadings: [QuotaReading]) = usageWindowQuota?() ?? ([], [])
-        usageWindow?.update(report: usageMonitor?.report, names: usageNames(), limits: quota.limits, weekReadings: quota.weekReadings)
+        guard let usageWindow else { return }
+        usageWindow.update(report: usageMonitor?.report, names: usageNames())
+        updateUsageWindowLimits()
+        guard let folder = usageWindowQuota?()?.readings else { return usageWindow.update(weekReadings: []) }
+        let since = Date().timeIntervalSince1970 - Double(QuotaReadingLog.keptDays) * 86_400
+        Task { [weak usageWindow] in
+            let week = await Task.detached { QuotaReadingLog.read(in: folder, since: since)["seven_day"] ?? [] }.value
+            usageWindow?.update(weekReadings: week)
+        }
+    }
+
+    /// The limits alone, as the title bar's monitor judges them.
+    func updateUsageWindowLimits() {
+        usageWindow?.update(limits: usageWindowQuota?()?.limits ?? [])
     }
 
     func showUsageWindow() {

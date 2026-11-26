@@ -153,6 +153,16 @@ struct QuotaPaceTests {
         #expect(QuotaCalibration.dailyRise(readings, dayStarts: days) == [15, 9, 3])
     }
 
+    @Test func windowsReportedInTurnEachRiseByTheirOwnClimb() {
+        // A session still on the last window after a reset, or a second account: A 40, B 10, A 41, B 11, A 42.
+        let a = now + 86_400, b = now + 6 * 86_400
+        let readings = [(40.0, a), (10, b), (41, a), (11, b), (42, a)].enumerated().map { index, reading in
+            QuotaReading(time: now + Double(index) * 60, usedPercent: reading.0, resetsAt: reading.1)
+        }
+        // A 2, and B 10 from 0 then 1: B came after the first reading.
+        #expect(QuotaCalibration.dailyRise(readings, dayStarts: [now]) == [13])
+    }
+
     @Test func theContextPastItsThresholdCountsWhatCompactingWouldSave() {
         let event = UsageEvent(timestamp: now, model: "claude-opus-5-5", counts: TokenCounts(input: 100_000), contextTokens: 400_000)
         let report = UsageReport(sessions: [UsageSession(key: UsageSessionKey(.claude, "a"), attribution: UsageAttribution(taskID: "t"), events: [event])], now: now)

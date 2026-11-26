@@ -101,15 +101,38 @@ final class UsageWeekChart: NSView, NSViewToolTipOwner {
     }
 
     private func drawLegend(_ week: UsageWeek) {
-        var x: CGFloat = 0
         let y = bounds.height - Self.legendHeight + 6
-        for (index, task) in week.tasks.enumerated() where week.days.contains(where: { ($0[safe: index] ?? 0) >= 0.5 }) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let attributes: [NSAttributedString.Key: Any] = [.font: Theme.Font.caption, .foregroundColor: Theme.Color.textSecondary, .paragraphStyle: paragraph]
+        let entries = week.tasks.indices.filter { index in week.days.contains { ($0[safe: index] ?? 0) >= 0.5 } }.map { index in
+            (index, NSAttributedString(string: name(of: week.tasks[index]), attributes: attributes))
+        }
+        let swatch: CGFloat = 12
+        let widths = Self.legendWidths(entries.map { swatch + ceil($0.1.size().width) + Theme.Space.md }, fitting: bounds.width)
+        var x: CGFloat = 0
+        for ((index, text), width) in zip(entries, widths) {
             color(at: index, of: week).setFill()
             NSBezierPath(roundedRect: NSRect(x: x, y: y + 2, width: 8, height: 8), xRadius: Theme.Radius.chartSwatch, yRadius: Theme.Radius.chartSwatch).fill()
-            let text = NSAttributedString(string: name(of: task), attributes: [.font: Theme.Font.caption, .foregroundColor: Theme.Color.textSecondary])
-            text.draw(at: NSPoint(x: x + 12, y: y - 1))
-            x += 12 + ceil(text.size().width) + Theme.Space.md
+            text.draw(in: NSRect(x: x + swatch, y: y - 1, width: max(0, width - swatch - Theme.Space.md), height: ceil(text.size().height)))
+            x += width
         }
+    }
+
+    /// Each legend entry's width: its own when they all fit, else the
+    /// widest ones share what the others leave, cut to an even part.
+    static func legendWidths(_ widths: [CGFloat], fitting available: CGFloat) -> [CGFloat] {
+        var left = available
+        var cap = CGFloat.infinity
+        for (index, width) in widths.sorted().enumerated() {
+            let share = left / CGFloat(widths.count - index)
+            if width > share {
+                cap = share
+                break
+            }
+            left -= width
+        }
+        return widths.map { min($0, cap) }
     }
 
     private static func center(_ string: String, in rect: NSRect, _ attributes: [NSAttributedString.Key: Any]) {
@@ -172,7 +195,7 @@ final class UsageTasksTable: NSScrollView, NSTableViewDataSource, NSTableViewDel
         case "task": return item.title
         case "points": return item.points.map { "≈ \(max(1, Int($0.rounded())))%" } ?? "—"
         case "tokens": return UsageText.tokens(item.tokens)
-        case "peak": return UsageText.tokens(item.peakContext)
+        case "peak": return item.peakContext > 0 ? UsageText.tokens(item.peakContext) : ""
         default: return item.subagents > 0 ? "\(item.subagents)" : ""
         }
     }
