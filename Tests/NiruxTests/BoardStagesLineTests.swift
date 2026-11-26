@@ -440,6 +440,9 @@ final class BoardStagesLineTests: XCTestCase {
         }
         let cleanUp = line(with(facts(pullRequest(merged: true))) { $0.cleanUp = .offered }).phrase
         XCTAssertEqual(cleanUp, BoardStages.Phrase(text: "Merged · Clean up", link: .cleanUp))
+        let shipped = line(with(facts(pullRequest(merged: true))) { $0.cleanUp = .offered; $0.shipping = .inYourBuild }).phrase
+        XCTAssertEqual(shipped, BoardStages.Phrase(text: "Merged · in your build · Clean up", link: .cleanUp))
+        XCTAssertEqual(line(with(facts(pullRequest(merged: true))) { $0.shipping = .inNewerNightly }).phrase.text, "Merged · in a newer nightly")
         let onto = BoardStages.Link.retarget(number: 53, onto: "main")
         let retarget = line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: Queue(list: .open))).phrase
         XCTAssertEqual(retarget, BoardStages.Phrase(text: "Base #52 merged · Retarget to main", link: onto))

@@ -30,6 +30,7 @@ extension BoardStages.TaskReading {
         reviewRequest = info.prInfo?.reviewRequest(hasFeedback: info.prFeedback != nil)
         flakyReason = info.ciFlakyReason
         cleanUp = info.mergedCleanup.map { $0 == .available ? .offered : .running }
+        shipping = info.shipping
         resume = Self.resume(of: info.columns)
         // The pull request detection found merged is one at the HEAD it merged at.
         mergedPullRequest = info.prInfo.flatMap { $0.state == .merged ? $0.number : nil }

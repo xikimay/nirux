@@ -25,6 +25,8 @@ extension BoardStages {
         var reviewRequest: ReviewRequest?
         var flakyReason: String?
         var cleanUp: CleanUp?
+        /// Its merged pull request, against the running nightly.
+        var shipping: ChangelogStore.Shipping?
         /// How its stopped agent can go on, as the sidebar offers it.
         var resume: Resume?
         /// The pull request of this repository its own detection says
@@ -261,6 +263,7 @@ extension BoardStages {
             ?? (facts.pullRequest?.isMerged == true && row.canCleanUp ? .offered : nil)
         // One that runs, as its path says: the phrase and "Merged today" say so too.
         if facts.cleanUp != nil, facts.folder?.isCleaningUp == true { facts.cleanUp = .running }
+        facts.shipping = isAboutRow ? reading.shipping : nil
         return facts
     }
 
