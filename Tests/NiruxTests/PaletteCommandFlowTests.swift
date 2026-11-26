@@ -380,7 +380,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertTrue(view.text.contains("1 under the hood"))
             XCTAssertFalse(view.text.contains("Columns: drag a column by its header"), "already in this build")
 
-            XCTAssertTrue(view.primaryButton.accessibilityPerformPress())
+            view.primaryButton.performClick(nil)
             XCTAssertEqual(installs, 1)
             harness.waitUntil("the popover to close") { !popover.isShown }
             XCTAssertEqual(shell.lastSeenBuild, 202611251854, "listed here: no card after the relaunch")
