@@ -40,6 +40,10 @@ final class NiruxShellView: NSView {
     var spacePlanGeneration = 0
     /// The pinch on the work under way (NiruxShellView+SpacePlan).
     var pinch = PinchGesture()
+    /// The two-finger scroll under way over the columns, and the monitor
+    /// that sees it first (NiruxShellView+StripSwipe).
+    var stripSwipe: StripSwipe?
+    var scrollMonitor: Any?
     /// The size of the workspace on screen, as `relayout` lays it out.
     var workspaceViewportSize: NSSize {
         let statusH = statusBar.hasContent ? StatusBarView.height : 0
@@ -94,6 +98,10 @@ final class NiruxShellView: NSView {
     /// Each space's task budget (`refreshTaskBudgets`), by space ID; none: off.
     var taskBudgets: [String: Int] = [:]
     var usageWindow: UsageWindowController?
+    var whatsNewWindow: WhatsNewWindowController?
+    /// The nightlies' changelog; nil in a build that doesn't update.
+    lazy var changelogStore: ChangelogStore? = makeChangelogStore()
+    var whatsNewCard: WhatsNewCardView?
     /// "Compact at turn end" waiting for its claude to rest: column ID → task ID.
     var compactsAtTurnEnd: [UUID: String] = [:]
     /// The title bar's limits, held forecasts included, and Claude's weekly
@@ -106,6 +114,9 @@ final class NiruxShellView: NSView {
               foreground.interactiveAgent == .claude else { return nil }
         return self.leadHoldings(workspace, column: column, pty: pty, foreground: foreground, snapshot: snapshot)
     }
+    /// The update Sparkle found, until it installs.
+    var availableUpdate: AvailableUpdate?
+    var updatePopover: NSPopover?
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
     var workspaces: [WorkspaceState] {
@@ -428,6 +439,10 @@ final class NiruxShellView: NSView {
             guard let task = self?.workspaces[safe: index] else { return false }
             return !task.isInactive && Self.isTask(task)
         }
+        sidebar.offersLeadPromotion = { [weak self] index in
+            guard let self, let task = self.workspaces[safe: index] else { return false }
+            return self.offersLeadPromotion(task)
+        }
         sidebar.offersSubtask = { [weak self] index in
             guard let self, let workspace = self.workspaces[safe: index], !workspace.isClosing else { return false }
             return self.offersSubtask(workspace)
@@ -638,6 +653,7 @@ final class NiruxShellView: NSView {
         applyChromeLayout(frames, animated: animated)
         railMayHaveChanged(animated: animated)
         layoutToast(frames)
+        layOutWhatsNewCard(frames)
         layOutWorkspaceCard(in: frames.viewport)
 
         // Each workspace fills the viewport; the strip stacks them and is
@@ -752,8 +768,26 @@ final class NiruxShellView: NSView {
         if !pinched(by: event.magnification, phase: event.phase, at: convert(event.locationInWindow, from: nil)) { super.magnify(with: event) }
     }
 
+    /// A scroll the views under the pointer leave (see `contentLeft(at:)`).
+    override func scrollWheel(with event: NSEvent) {
+        contentLeft(StripSwipe.Scroll(event))
+        super.scrollWheel(with: event)
+    }
+
+    /// A two-finger double tap the views under the fingers leave.
+    override func smartMagnify(with event: NSEvent) {
+        let hit = superview.flatMap { hitTest($0.convert(event.locationInWindow, from: nil)) }
+        if !fitColumn(over: hit) { super.smartMagnify(with: event) }
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window == nil, let monitor = scrollMonitor {
+            sideEffects.stopWatchingUserInput(monitor)
+            scrollMonitor = nil
+        } else if window != nil, scrollMonitor == nil {
+            scrollMonitor = sideEffects.watchScrolls { [weak self] in self?.scrolled($0) ?? false }
+        }
         relayout(animated: false)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.updateSidebar() }
 
@@ -900,6 +934,11 @@ extension NiruxShellView {
         guard let workspace = activeWorkspace else { return }
         workspace.columns[workspace.focusedIndex].cycleWidth()
         relayout(animated: true)
+        redrawTerminalsOnceSettled()
+    }
+
+    /// After a column's new width: the terminals redraw once the strip settled.
+    func redrawTerminalsOnceSettled() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.redrawAllTerminals()
         }
@@ -1241,7 +1280,8 @@ extension NiruxShellView {
         let wait = NSEvent.pressedMouseButtons & 1 != 0
             ? NSEvent.doubleClickInterval : NSEvent.doubleClickInterval - sideEffects.secondsSinceMouseUp()
         guard wait <= 0 else { return scheduleCameraRelease(after: wait) }
-        let held = workspaces.filter { $0.heldCamera != nil }
+        // A swipe under way keeps its hold.
+        let held = workspaces.filter { $0.heldCamera != nil && $0 !== swipedWorkspace }
         guard !held.isEmpty else { return }
         for workspace in held { workspace.heldCamera = nil }
         relayout(animated: true)

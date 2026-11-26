@@ -1152,6 +1152,8 @@ final class LeadToolsFlowTests: XCTestCase {
             let leadRow = try XCTUnwrap(shell.sidebar.lastInfos.first(where: \.isLead))
             XCTAssertNil(leadRow.usage?.budget, "a Lead spends past a task's budget by design")
             XCTAssertEqual(leadRow.usage?.isWarning, false)
+            XCTAssertEqual(leadRow.usage?.spaceWeekShare, 1, "its space spent the whole week")
+            XCTAssertNil(taskRow.usage?.spaceWeekShare)
 
             var pullRequest = PRInfo(
                 number: 9, state: .open, isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil, mergeable: nil,
@@ -1296,7 +1298,8 @@ final class LeadToolsFlowTests: XCTestCase {
             shell.updateSidebar()
             XCTAssertEqual(compacts(), 1, "once")
 
-            // A Compact taken another way clears its queued twin.
+            // A Compact taken by hand replaces its queued twin, typed or refused
+            // (the stand-in's screen now reads as a draft).
             holdings = LeadHoldings(isBusy: true)
             shell.takeBurnAction(.compactAtTurnEnd(column: column.id), workspaceID: task.id)
             let index = try XCTUnwrap(task.columns.firstIndex { $0 === column })

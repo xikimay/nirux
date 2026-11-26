@@ -479,6 +479,25 @@ the text stays flat and sharp.
   is followed at once, and stays within the strip. A press on an edge
   drags it only past 3 points; a dragged edge holds the camera until let
   go, through a focus moved meanwhile.
+- **Two fingers sideways** (`StripSwipe`): the content under the fingers
+  keeps a scroll it can take, once the fingers have gone 6 pt and twice
+  as far sideways as up or down. A scroll view answers at once, a terminal
+  by whether its program owns the mouse; a web page answers itself: its
+  WebKit rubber-bands only vertically, leaves a scroll it can't take
+  unhandled (`_webView:didNotHandleWheelEvent:`), and the web view passes
+  that up the responder chain to the shell. The first sideways event a page
+  leaves, that way, gives the strip the swipe, its travel counted from that
+  event: a page scrolled to its end hands on without a jump. Monaco
+  consumes a wheel only when it scrolls. Taken, the camera follows the
+  fingers (a drag's hold), with a rubber band past the ends of the cards'
+  Z1 cameras. At the lift, the camera the fingers' speed over the last
+  0.08 s would reach in 0.2 s picks the card; the strip glides there on a
+  spring leaving at that speed (at most the spring's own pace, so it never
+  passes the card), passing under a floating rail until it settles, or is
+  there at once without motion. The gesture's momentum stays with it; a
+  mouse's wheel never does, and the swipe ends with its momentum, at the
+  next touch, or when its cards change. Off when "Swipe between pages"
+  doesn't scroll with two fingers.
 - **Resizing from the centre** (same study, R3): only the focused card's
   two edges show a handle (its left one is its neighbour's). Centred
   between two neighbours (the camera centres it, or it is the middle of

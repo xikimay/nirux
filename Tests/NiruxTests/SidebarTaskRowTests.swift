@@ -196,6 +196,12 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(merged.status, SidebarStatusLine(text: "Merged · Clean up", tone: .neutral, action: .cleanUp, linkText: "Clean up"))
         XCTAssertEqual(merged.mark, .merged)
         XCTAssertEqual(line(pullRequest(.merged), cleanup: .inProgress).status.action, nil, "a second click does nothing")
+        var shipped = workspace([column()], pr: pullRequest(.merged), cleanup: .available)
+        shipped.shipping = .inYourBuild
+        XCTAssertEqual(shipped.rowSummary.status.text, "Merged · in your build · Clean up")
+        shipped.mergedCleanup = nil
+        shipped.shipping = .inNewerNightly
+        XCTAssertEqual(shipped.rowSummary.status.text, "Merged · in a newer nightly")
         XCTAssertEqual(line(pullRequest(.closed)).status.text, "fix/login")
     }
 
@@ -288,6 +294,28 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(held.rowSummary.status.text, "#39 · merge blocked by GitHub")
         task.boardProgress?.readyApartFromLocalReviews = false
         XCTAssertEqual(task.rowSummary.mark, .idle)
+    }
+
+    /// A train merges the base into what it lands: where the queue offers
+    /// trains, a pull request behind its base is ready.
+    func testBehindItsBaseIsReadyToMergeWhereTheQueueOffersTrains() throws {
+        let behind = try XCTUnwrap(PRDetect.pullRequestInfo(from: [
+            "number": 39, "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "BEHIND",
+            "statusCheckRollup": [["name": "test", "conclusion": "SUCCESS"]]
+        ]))
+        var task = workspace([column()], pr: behind)
+        task.boardProgress = SidebarBoardProgress(station: .merge, number: 39, mergeStep: .ready, offersTrains: true)
+        let layout = SidebarCardLayout(workspace: task, sidebarWidth: 260)
+        XCTAssertEqual(layout.summary.mark, .readyToMerge)
+        XCTAssertEqual(layout.stepTitle, "Ready #39")
+        XCTAssertEqual(task.rowSummary.status.text, "Ready to merge")
+        task.boardProgress = SidebarBoardProgress(station: .reviews, number: 39, readyApartFromLocalReviews: true, offersTrains: true)
+        XCTAssertEqual(task.rowSummary.status.text, "Ready to merge", "its local reviews apart, as a clean one")
+
+        task.boardProgress = SidebarBoardProgress(station: .merge, number: 39, mergeStep: .ready)
+        XCTAssertEqual(task.rowSummary.status.text, "#39 · checks passed", "no trains: GitHub's clean state")
+        task.boardProgress = SidebarBoardProgress(station: .reviews, number: 39, readyApartFromLocalReviews: true)
+        XCTAssertEqual(task.rowSummary.status.text, "#39 · checks passed")
     }
 
     func testWorkingRowsKeepTheirPullRequestProblemVisible() {

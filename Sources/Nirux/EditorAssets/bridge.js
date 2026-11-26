@@ -564,6 +564,7 @@
         wordWrap: wordWrap ? "on" : "off",
         minimap: { enabled: minimapEnabled },
         renderLineHighlight: "none",
+        scrollbar: { alwaysConsumeMouseWheel: false },
         renderSideBySide: true,
         useInlineViewWhenSpaceIsLimited: false,
         enableSplitViewResizing: true,
@@ -970,15 +971,21 @@
       inherit: true,
       rules: [],
       colors: {
-        "editor.background": "#1a1b26",
-        "editor.foreground": "#c0caf5",
-        "editorLineNumber.foreground": "#3b4261",
-        "editorLineNumber.activeForeground": "#7aa2f7",
-        "editor.selectionBackground": "#28344a",
-        "editor.lineHighlightBackground": "#1f2335",
-        "editorStickyScroll.background": "#1a1b26",
+        // Theme.Color.surface (the active tab's fill), textPrimary,
+        // textDisabled and textSecondary for line numbers, accent.
+        "editor.background": "#20202A",
+        "editor.foreground": "#ECECF1",
+        "editorLineNumber.foreground": "#4A4A56",
+        "editorLineNumber.activeForeground": "#A0A0AD",
+        "editor.selectionBackground": "#78A3F740",
+        "editor.inactiveSelectionBackground": "#78A3F726",
+        "editor.lineHighlightBackground": "#FFFFFF08",
+        "editorStickyScroll.background": "#20202A",
         "editorStickyScroll.shadow": "#00000066",
-        "editorStickyScrollHover.background": "#1f2335",
+        "editorStickyScrollHover.background": "#292933",
+        "editorGutter.background": "#20202A",
+        "editorWidget.background": "#292933",
+        "editorCursor.foreground": "#78A3F7",
         "editorBracketHighlight.foreground1": "#7aa2f7",
         "editorBracketHighlight.foreground2": "#e0af68",
         "editorBracketHighlight.foreground3": "#9ece6a",
@@ -1000,7 +1007,7 @@
         "diffEditorGutter.removedLineBackground": "#b94b5ecc",
         "diffEditorOverview.insertedForeground": "#41d487",
         "diffEditorOverview.removedForeground": "#ff6b7d",
-        "diffEditor.border": "#3b4261"
+        "diffEditor.border": "#FFFFFF1F"
       }
     });
 
@@ -1013,6 +1020,9 @@
       fontSize: 13,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
+      // A wheel the editor can't scroll goes on, to WebKit and then to the
+      // strip's swipe (StripSwipe).
+      scrollbar: { alwaysConsumeMouseWheel: false },
       renderLineHighlight: "all",
       smoothScrolling: true,
       stickyScroll: { enabled: true },

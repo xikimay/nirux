@@ -349,12 +349,15 @@ struct WorkspaceInfo: Hashable {
         guard let boardProgress, let prInfo else { return boardProgress }
         guard boardProgress.number == prInfo.number, prInfo.state != .closed else { return nil }
         if (boardProgress.mergeStep == .merged) != (prInfo.state == .merged) { return nil }
-        if boardProgress.mergeStep == .ready, prInfo.blocksMerge(hasFeedback: prFeedback != nil) { return nil }
+        if boardProgress.mergeStep == .ready,
+           prInfo.blocksMerge(hasFeedback: prFeedback != nil, offersTrains: boardProgress.offersTrains) { return nil }
         return boardProgress
     }
     var station: BoardStages.Station? { currentBoardProgress?.station }
     /// What the card shows after "#N merged"; nil shows nothing.
     var mergedCleanup: MergedCleanupOffer?
+    /// Its merged pull request, against the running nightly.
+    var shipping: ChangelogStore.Shipping?
     /// The space's Lead: first, never moved, dragged or parked.
     var isLead = false
     /// The task this one is listed under (a sub-task, or a Mission child):
@@ -515,7 +518,7 @@ enum WorktreeCleanupMenuOffer {
 enum WorkspaceSidebarAction {
     case startWaitingTask
     case moveUp, moveDown, markActive, markInactive
-    case close, rename, editContext, reviewBranch, resumeWith, newSubtask, moveOutOfParent
+    case close, rename, editContext, reviewBranch, resumeWith, promoteToLead, newSubtask, moveOutOfParent
     /// "Turn Off Lead…": Space Settings › Lead, where the Lead closes.
     case turnOffLead
     case restartLead

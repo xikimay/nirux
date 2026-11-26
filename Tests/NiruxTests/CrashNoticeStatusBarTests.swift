@@ -62,7 +62,7 @@ final class CrashNoticeStatusBarTests: XCTestCase {
         try XCTUnwrap(button("✕", in: bar)).performClick(nil)
         XCTAssertNil(bar.crashNotice)
         XCTAssertEqual(labelText(in: bar), "● Update available · nightly-2026.09.28")
-        XCTAssertEqual(visibleButtonTitles(in: bar), ["Install ↗", "✕"])
+        XCTAssertEqual(visibleButtonTitles(in: bar), ["Install…", "✕"])
         XCTAssertEqual(contentChanges, [true], "still showing a notice")
 
         try XCTUnwrap(button("✕", in: bar)).performClick(nil)

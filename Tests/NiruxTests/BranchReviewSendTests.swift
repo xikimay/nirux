@@ -94,7 +94,8 @@ final class BranchReviewSendTests: XCTestCase {
             let reading = OSAllocatedUnfairLock(initialState: false)
             let received = OSAllocatedUnfairLock(initialState: Data())
             let drained = DispatchSemaphore(value: 0)
-            Thread {
+            // Typed first, so that it stays nonisolated (ThreadClosureGuardTests).
+            let drain: @Sendable () -> Void = {
                 while !reading.withLock({ $0 }) { usleep(10_000) }
                 var buffer = [UInt8](repeating: 0, count: 4_096)
                 while true {
@@ -105,7 +106,8 @@ final class BranchReviewSendTests: XCTestCase {
                 }
                 close(reader)
                 drained.signal()
-            }.start()
+            }
+            Thread(block: drain).start()
             // More than a pipe holds.
             let payload = Data(repeating: 0x61, count: 200_000)
             let cancelled = OSAllocatedUnfairLock(initialState: false)

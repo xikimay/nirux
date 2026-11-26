@@ -4,7 +4,7 @@ Nirux follows the pull request of each workspace's branch and shows its state in
 
 ## The pull request line
 
-A workspace whose branch has an open pull request shows it in its status line: `#39 · checks passed`, `#39 · checks failed`, `Ready to merge`. Once the pull request is merged, the row reads `Merged`, followed by `Clean up` when its worktree can be removed (see [Cleaning up merged worktrees](spaces-and-tasks.md#cleaning-up-merged-worktrees)).
+A workspace whose branch has an open pull request shows it in its status line: `#39 · checks passed`, `#39 · checks failed`, `Ready to merge`. Where the Board's merge queue offers trains (merge method `merge`), a pull request behind its base reads `Ready to merge` too: the train merges the base into it. Once the pull request is merged, the row reads `Merged`, followed by `Clean up` when its worktree can be removed (see [Cleaning up merged worktrees](spaces-and-tasks.md#cleaning-up-merged-worktrees)).
 
 The selected row also has a PR link and, while the pull request is open and has checks, a CI link. Each opens in a browser column of the same workspace. CI opens the failed check, else the pull request's Checks tab.
 
