@@ -159,8 +159,8 @@ struct QuotaPaceTests {
         let readings = [(40.0, a), (10, b), (41, a), (11, b), (42, a)].enumerated().map { index, reading in
             QuotaReading(time: now + Double(index) * 60, usedPercent: reading.0, resetsAt: reading.1)
         }
-        // A 2, and B 10 from 0 then 1: B came after the first reading.
-        #expect(QuotaCalibration.dailyRise(readings, dayStarts: [now]) == [13])
+        // A 2 and B 1: B appeared while A still ran, so it starts at its own 10.
+        #expect(QuotaCalibration.dailyRise(readings, dayStarts: [now]) == [3])
     }
 
     @Test func theContextPastItsThresholdCountsWhatCompactingWouldSave() {

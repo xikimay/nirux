@@ -492,6 +492,21 @@ final class UsageDisplayTests: XCTestCase {
         XCTAssertTrue(controller.limitsStack.isHidden)
     }
 
+    /// Until the first read of the readings ends, the chart's place stays
+    /// empty: the agents' chart would show a moment before the week's.
+    @MainActor
+    func testTheUsageWindowShowsNoChartUntilItsReadingsAreRead() {
+        let controller = UsageWindowController()
+        defer { controller.close() }
+        controller.update(report: UsageReport(sessions: [], now: now), names: UsageNames())
+        XCTAssertTrue(controller.chart.isHidden)
+        XCTAssertFalse(controller.weekChart.isHidden)
+        XCTAssertNil(controller.weekChart.week)
+        controller.update(weekReadings: [])
+        XCTAssertFalse(controller.chart.isHidden, "no readings: the week by agent in tokens")
+        XCTAssertTrue(controller.weekChart.isHidden)
+    }
+
     /// The limit rows, the chart and the table follow the window's width,
     /// and a short window scrolls rather than squeeze the text to nothing.
     @MainActor
