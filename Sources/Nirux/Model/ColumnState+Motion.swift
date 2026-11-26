@@ -38,6 +38,16 @@ extension ColumnState {
             .scaledBy(x: scale, y: scale)
     }
 
+    /// The card stops passing, whole and opaque, done arriving: no pass's
+    /// end acts on it.
+    func endPass() {
+        passes += 1
+        view.layer?.removeAnimation(forKey: Self.passKey)
+        view.alphaValue = 1
+        isArriving = false
+        updateDepth()
+    }
+
     /// The card passes from `from` (nil: where it shows) to `scale` of
     /// its size about its middle and to `alpha`, held until the pass ends,
     /// on time; then `then`, unless another pass took the card meanwhile.

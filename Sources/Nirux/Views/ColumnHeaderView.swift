@@ -216,7 +216,15 @@ final class ColumnHeaderView: NSView {
     /// (NiruxShellView+ColumnDrag): the window moves from its title bar only.
     override var mouseDownCanMoveWindow: Bool { false }
 
+    /// When a single press landed on this header: a double-click is its
+    /// second press here, not one whose first landed on another view.
+    private var lastPress: TimeInterval?
+
     override func mouseDown(with event: NSEvent) {
+        let first = lastPress
+        lastPress = event.clickCount == 1 ? event.timestamp : nil
+        if event.clickCount == 2, let first, event.timestamp - first <= NSEvent.doubleClickInterval,
+           let shell, shell.headerDoubleClicked(self) { return }
         guard let shell, shell.dragColumn(withHeader: self, press: event) else { return super.mouseDown(with: event) }
     }
 
@@ -429,8 +437,10 @@ final class ColumnHeaderView: NSView {
     /// column's own items, bound to this header's column.
     func currentMenu() -> NSMenu {
         let menu = menuProvider?() ?? NSMenu()
-        for item in menu.items where item.representedObject is ColumnCommand {
+        for item in menu.items {
+            guard let command = item.representedObject as? ColumnCommand else { continue }
             item.target = self
+            if let shell, !command.isEnabled(shell, self) { item.action = nil }
         }
         guard !overflowButtons.isEmpty else { return menu }
         for (index, button) in overflowButtons.enumerated() {
@@ -469,14 +479,17 @@ final class ColumnHeaderView: NSView {
         ]
     }
 
-    /// A ⋯ item doing to the header's column what `mainMenuAction` does to
-    /// the focused one (`perform`), with that main-menu item's shortcut.
+    /// A ⋯ item doing to the header's column what `mainMenuAction`, if
+    /// any, does to the focused one (`perform`), with that main-menu
+    /// item's shortcut.
     static func columnItem(
-        _ title: String, mainMenuAction: Selector, perform: @escaping @MainActor (NiruxShellView) -> Void
+        _ title: String, mainMenuAction: Selector? = nil,
+        isEnabled: @escaping @MainActor (NiruxShellView, ColumnHeaderView) -> Bool = { _, _ in true },
+        perform: @escaping @MainActor (NiruxShellView) -> Void
     ) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: #selector(runColumnCommand(_:)), keyEquivalent: "")
-        item.representedObject = ColumnCommand(perform)
-        if let shortcut = NSApp?.mainMenu.flatMap({ Self.item(in: $0, action: mainMenuAction) }) {
+        item.representedObject = ColumnCommand(perform, isEnabled: isEnabled)
+        if let mainMenuAction, let shortcut = NSApp?.mainMenu.flatMap({ Self.item(in: $0, action: mainMenuAction) }) {
             item.keyEquivalent = shortcut.keyEquivalent
             item.keyEquivalentModifierMask = shortcut.keyEquivalentModifierMask
         }
@@ -496,9 +509,15 @@ final class ColumnHeaderView: NSView {
 @MainActor
 final class ColumnCommand: NSObject {
     let perform: @MainActor (NiruxShellView) -> Void
+    /// It can act on the column of the header now; else its item is disabled.
+    let isEnabled: @MainActor (NiruxShellView, ColumnHeaderView) -> Bool
 
-    init(_ perform: @escaping @MainActor (NiruxShellView) -> Void) {
+    init(
+        _ perform: @escaping @MainActor (NiruxShellView) -> Void,
+        isEnabled: @escaping @MainActor (NiruxShellView, ColumnHeaderView) -> Bool
+    ) {
         self.perform = perform
+        self.isEnabled = isEnabled
     }
 }
 
