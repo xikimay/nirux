@@ -25,7 +25,9 @@ extension NiruxShellView {
         else { return }
         guard closingColumn !== workspace.leadTerminal else { return refuseClosingLead() }
         // Last column closes the workspace — same confirmation as the sidebar.
-        guard workspace.openColumns.count > 1 else { return requestCloseWorkspace(at: activeWSIndex) }
+        guard closingColumn.isFront || workspace.openRowColumns.count > 1 else { return requestCloseWorkspace(at: activeWSIndex) }
+        // Up without the focus, the front column goes back first.
+        if workspace.isFrontShown, !closingColumn.isFront { return hideFront(in: workspace) }
         guard confirmCloseColumn(closingColumn, in: workspace) else { return }
         afterUnsavedEdits(in: [closingColumn]) { [weak self] in
             guard let self, self.canStillClose(closingColumn, in: workspace) else { return }
@@ -57,7 +59,7 @@ extension NiruxShellView {
     func finishColumnClose(_ closingColumn: ColumnState, in workspace: WorkspaceState) {
         closingColumn.view.layer?.removeAnimation(forKey: ColumnState.passKey)
         // By identity: the index can shift during the animation.
-        guard workspace.columns.count > 1,
+        guard closingColumn.isFront || workspace.columns.filter({ !$0.isFront }).count > 1,
               let closingIndex = workspace.columns.firstIndex(where: { $0 === closingColumn })
         else {
             abortColumnClose(closingColumn, in: workspace)
@@ -143,7 +145,7 @@ extension NiruxShellView {
     /// work kept running under, or a save.
     private func canStillClose(_ column: ColumnState, in workspace: WorkspaceState) -> Bool {
         workspaces.contains { $0 === workspace } && !workspace.isClosing
-            && workspace.openColumns.count > 1 && workspace.openColumns.contains { $0 === column }
+            && (column.isFront || workspace.openRowColumns.count > 1) && workspace.openColumns.contains { $0 === column }
     }
 
     /// Close a specific column of a specific workspace (sidebar context
@@ -151,8 +153,8 @@ extension NiruxShellView {
     /// workspace; this mirrors its non-animated bookkeeping.
     func closeColumn(workspaceIndex: Int, columnIndex: Int) {
         guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing,
-              workspace.openColumns.count > 1,
-              let column = workspace.columns[safe: columnIndex], !column.isClosing
+              let column = workspace.columns[safe: columnIndex], !column.isClosing,
+              column.isFront || workspace.openRowColumns.count > 1
         else { return }
         guard column !== workspace.leadTerminal else { return refuseClosingLead() }
         guard confirmCloseColumn(column, in: workspace) else { return }

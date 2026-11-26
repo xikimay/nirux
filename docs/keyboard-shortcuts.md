@@ -38,6 +38,7 @@ Standard macOS shortcuts (copy, paste, quit) work as usual and are not listed. M
 | `Ctrl+Cmd+Left` / `Ctrl+Cmd+Right` | Focus the previous or next column, also while you type in a text field |
 | `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |
 | `Cmd+E` | Step the focused column through preset widths |
+| `Cmd+Y` | Send the front editor back, or bring it up again as it was |
 
 While you type in a text field (the editor, a field of a web page, the address bar, a find field), the arrow shortcuts act on the text first:
 

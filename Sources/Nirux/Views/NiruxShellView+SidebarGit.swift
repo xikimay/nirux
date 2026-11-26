@@ -237,6 +237,7 @@ extension NiruxShellView {
                       followUp: followUpRow(of: workspace),
                       heldMessages: SidebarHeldMessages(workspace.mergeWaits), waitingTask: workspace.waitingStart?.waitingState)
         info.usage = taskUsage(of: workspace)
+        info.frontPill = workspace.frontPill
         info.shipping = workspace.prInfo.flatMap { pullRequest in
             pullRequest.state == .merged
                 ? changelogStore?.shipping(ofPullRequestAt: pullRequest.url, installedBuild: sideEffects.installedBuild()) : nil
@@ -370,8 +371,8 @@ extension NiruxShellView {
         if let workspace = activeWorkspace,
            let wsInfo = infos.first(where: { $0.index == activeWSIndex }) {
             columnIndicator.update(
-                columnCount: workspace.columns.count, focusedIndex: workspace.focusedIndex,
-                columnSignals: wsInfo.columns.map(\.offScreenAttention)
+                columnCount: workspace.rowCount, focusedIndex: workspace.focusedIndex < workspace.rowCount ? workspace.focusedIndex : workspace.frontReturnIndex,
+                columnSignals: wsInfo.columns.prefix(workspace.rowCount).map(\.offScreenAttention)
             )
         } else {
             // An empty space: no columns to point at.

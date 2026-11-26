@@ -27,6 +27,8 @@ enum Theme {
         ]
         /// Above a surface: drag ghosts, menus, popovers, a toolbar's fields.
         static let raised = NSColor(hex: 0x292933)
+        /// Over the row while the front editor column is up: dim, never blurred.
+        static let frontShade = NSColor.black.withAlphaComponent(0.42)
 
         static let fillHover = NSColor.white.withAlphaComponent(0.05)
         static let fillPressed = NSColor.white.withAlphaComponent(0.09)

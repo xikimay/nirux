@@ -25,7 +25,7 @@ extension NiruxShellView {
             stripSwipe = scroll.phase == .began ? swipe(at: scroll.time, over: hit()) : nil
         }
         guard var swipe = stripSwipe else { return false }
-        guard let workspace = activeWorkspace, workspace.columns.map(\.id) == swipe.columns else {
+        guard let workspace = activeWorkspace, workspace.columns.prefix(workspace.rowCount).map(\.id) == swipe.columns else {
             // The cards changed under the fingers.
             letGoOfStrip()
             return false
@@ -40,7 +40,7 @@ extension NiruxShellView {
     /// `WKWebView.passOnUnhandled`): what lies under the fingers can't
     /// scroll that way.
     func contentLeft(_ scroll: StripSwipe.Scroll) {
-        guard var swipe = stripSwipe, let workspace = activeWorkspace, workspace.columns.map(\.id) == swipe.columns else { return }
+        guard var swipe = stripSwipe, let workspace = activeWorkspace, workspace.columns.prefix(workspace.rowCount).map(\.id) == swipe.columns else { return }
         let step = swipe.declined(scroll)
         stripSwipe = swipe
         apply(step, to: workspace)
@@ -84,14 +84,14 @@ extension NiruxShellView {
     }
 
     private func swipe(at time: TimeInterval, over hit: NSView?) -> StripSwipe? {
-        guard sideEffects.swipesBetweenPages(), let workspace = activeWorkspace, !workspace.columns.isEmpty,
+        guard sideEffects.swipesBetweenPages(), let workspace = activeWorkspace, workspace.rowCount > 0, !workspace.isFrontShown,
               let hit, hit.isDescendant(of: workspace.containerView) else { return nil }
         let viewport = workspace.containerView.bounds.width
         let widths = workspace.columnFrames.map(\.width)
         return StripSwipe(
             began: time, reach: Self.reach(under: hit, in: workspace.containerView), camera: workspace.shownCameraX,
             stops: widths.indices.map { WorkspaceState.camera(for: widths, focus: $0, viewport: viewport) },
-            focus: workspace.focusedIndex, viewport: viewport, columns: workspace.columns.map(\.id)
+            focus: workspace.focusedIndex, viewport: viewport, columns: workspace.columns.prefix(workspace.rowCount).map(\.id)
         )
     }
 

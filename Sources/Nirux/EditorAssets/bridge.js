@@ -275,6 +275,13 @@
     return line === model.getLineCount();
   }
 
+  // Esc that nothing in the page took (Monaco's widgets, a selection and
+  // the find field stop it first) asks the app to send a front editor back.
+  window.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+    postToSwift({ type: "escapeKey" });
+  });
+
   // Each code editor's niruxCaretAtTextEdge, set as a key arrives, before
   // Monaco looks it up (capturing on the window, ahead of Monaco's own
   // listeners): true only on the editor with the caret, for a first press
@@ -926,6 +933,11 @@
       case "toggleMinimap": toggleMinimap(); break;
       case "getSelection": reportSelection(msg.requestID); break;
       case "moveCaretToTextEdge": moveCaretToTextEdge(msg.edge); break;
+      case "takeKeyboard":
+        // Opened without the keyboard, nothing has the page's focus yet.
+        var focused = document.activeElement;
+        if ((!focused || focused === document.body) && diffMode !== "pierre" && diffMode !== "pierre-group") activeEditor().focus();
+        break;
       case "textEdgeDestinations":
         textEdgeDestinations = { left: !!msg.left, right: !!msg.right, up: !!msg.up, down: !!msg.down };
         break;

@@ -30,6 +30,10 @@ extension NiruxApp {
         shell?.cycleActiveColumnWidth()
     }
 
+    @objc func toggleFrontEditor(_ sender: Any?) {
+        shell?.toggleFront()
+    }
+
     @objc func newWorkspace(_ sender: Any?) {
         shell?.showNewPanel()
     }
@@ -347,6 +351,7 @@ extension NiruxApp {
         colMenu.addItem(withTitle: "Open Browser", action: #selector(openBrowser(_:)), shortcut: .openBrowser)
         colMenu.addItem(withTitle: "Open Isolated Test Browser", action: #selector(openIsolatedTestBrowser(_:)), keyEquivalent: "")
         colMenu.addItem(withTitle: "Open Editor", action: #selector(openEditor(_:)), keyEquivalent: "")
+        colMenu.addItem(withTitle: "Show or Hide Front Editor", action: #selector(toggleFrontEditor(_:)), shortcut: .frontEditor)
         colMenu.addItem(withTitle: "Import Browser Cookies", action: #selector(importBrowserCookies(_:)), keyEquivalent: "")
 
         // Cmd+1…9: jump straight to column N (iTerm-style tab switching).
