@@ -1367,7 +1367,10 @@ extension WorkspaceState {
         let previouslyFocusedColumn = columns[safe: focusedIndex]
         let previousFocusedIndex = focusedIndex
         let focusWasFront = previousFocusedIndex == frontIndex
-        if closesFront { setFrontShown(false, duration: nil) }
+        if closesFront {
+            setFrontShown(false, duration: nil)
+            frontHost.showPill(nil)
+        }
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()
         col.light?.removeFromSuperview()

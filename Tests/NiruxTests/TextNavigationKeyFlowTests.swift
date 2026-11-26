@@ -503,6 +503,27 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
+    /// An agent's open while the user types waits behind a pill instead of
+    /// coming up over them; the pill brings it up with the keyboard.
+    func testAgentOpenWhileTypingWaitsBehindAPill() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let terminal = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.terminalView)
+            harness.window.makeFirstResponder(terminal)
+            shell.lastTypedAt = ProcessInfo.processInfo.systemUptime
+            shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
+            XCTAssertFalse(workspace.isFrontShown)
+            XCTAssertEqual(workspace.front?.editorColumn?.activePath, harness.repo + "/README.md")
+            XCTAssertIdentical(harness.window.firstResponder, terminal)
+
+            workspace.frontHost.onPillClick()
+            XCTAssertTrue(workspace.isFrontShown)
+            let front = try XCTUnwrap(workspace.front)
+            XCTAssertIdentical(harness.window.firstResponder, UIFlowHarness.descendant(of: front.view, as: WKWebView.self))
+        }
+    }
+
     /// A click on the shaded row sends the front editor back and gives the
     /// clicked column the focus and the keyboard.
     func testClickOnTheRowSendsTheFrontEditorBack() throws {

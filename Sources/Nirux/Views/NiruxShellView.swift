@@ -282,6 +282,8 @@ final class NiruxShellView: NSView {
     /// tells a pending dismissal whether it still applies.
     var toast: ToastView?
     var toastGeneration = 0
+    /// When the user last typed text (a key without Command), as `NSEvent.timestamp`.
+    var lastTypedAt: TimeInterval = 0
     var toastShownAt: TimeInterval = 0
     /// The Board tab's form (see NiruxShellView+BoardSettings).
     var boardSettingsPanel: BoardSettingsPanel?

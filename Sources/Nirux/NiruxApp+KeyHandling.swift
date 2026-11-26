@@ -221,6 +221,7 @@ extension NiruxApp {
     /// its terminal keys here too (NiruxApp+Canary).
     func routeMainWindowKey(_ event: NSEvent) -> NSEvent? {
         guard let shell else { return event }
+        if !event.modifierFlags.contains(.command) { shell.lastTypedAt = event.timestamp }
         // Before the key is handled, so a toast it shows stays.
         shell.dismissToastOnInput()
         shell.workspaceCardSawKey(event)

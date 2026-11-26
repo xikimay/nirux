@@ -20,6 +20,7 @@ extension NiruxShellView {
     func showFront(in workspace: WorkspaceState, takeKeyboard: Bool) {
         guard let front = workspace.front, let index = workspace.frontIndex else { return }
         if workspace.focusedIndex < workspace.rowCount { workspace.frontReturnIndex = workspace.focusedIndex }
+        workspace.frontHost.showPill(nil)
         let rises = !workspace.isFrontShown
         let moves = agentLightsMayMove && workspace === activeWorkspace
         workspace.setFrontShown(true, duration: moves ? Self.arrivalDuration : nil)
@@ -55,7 +56,14 @@ extension NiruxShellView {
 
     /// A click on the shaded row sends the front column back and gives the
     /// clicked column the focus.
+    /// The user typed text in the last 2 s: an agent's open waits behind a pill.
+    var userIsTyping: Bool { ProcessInfo.processInfo.systemUptime - lastTypedAt < 2 }
+
     func wireFrontColumn(_ workspace: WorkspaceState) {
+        workspace.frontHost.onPillClick = { [weak self, weak workspace] in
+            guard let self, let workspace else { return }
+            self.showFront(in: workspace, takeKeyboard: true)
+        }
         workspace.frontHost.onShadeClick = { [weak self, weak workspace] point in
             guard let self, let workspace else { return }
             self.hideFront(in: workspace, focusing: workspace.rowColumnIndex(at: point) ?? workspace.frontReturnIndex)

@@ -289,10 +289,7 @@ extension NiruxShellView {
                 return
             }
 
-            guard let editor = self.editorColumn(in: workspace, cwd: cwd) else {
-                self.showToast("Couldn’t open an editor for the changes", tone: .error)
-                return
-            }
+            guard let editor = self.editorColumn(in: workspace, cwd: cwd) else { return }
             editor.showDiffCollection(
                 title: "Uncommitted Changes (\(paths.count))",
                 paths: paths,
@@ -315,13 +312,20 @@ extension NiruxShellView {
 
     /// The editor a diff of `cwd` shows in: the front one, made again
     /// rooted there when it holds another folder and no unsaved edit (git
-    /// runs in its folder).
+    /// runs in its folder). Nil, saying why, when there is none.
     func editorColumn(in workspace: WorkspaceState, cwd: String) -> EditorColumn? {
         if let editor = workspace.front?.editorColumn, editor.workspaceCwd != cwd, let index = workspace.frontIndex {
-            guard editor.unsavedPaths.isEmpty else { return nil }
+            guard editor.unsavedPaths.isEmpty else {
+                showToast("Save or close the front editor’s changes first: they’re in another folder", tone: .error)
+                return nil
+            }
             workspace.closeColumn(at: index)
         }
-        return frontEditor(in: workspace, cwd: cwd)
+        guard let editor = frontEditor(in: workspace, cwd: cwd) else {
+            showToast("Couldn’t open an editor for the changes", tone: .error)
+            return nil
+        }
+        return editor
     }
 
     // MARK: - Worktree Skill
@@ -1013,6 +1017,10 @@ extension NiruxShellView {
         editor.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
         // A file that couldn't open leaves it as it was.
         guard editor.currentPath == editor.absolutePath(for: path) else { return }
+        // An agent's open while the user types waits behind a pill.
+        if !takeFocus, userIsTyping, !workspace.isFrontShown {
+            return workspace.frontHost.showPill((path as NSString).lastPathComponent)
+        }
         showFront(in: workspace, takeKeyboard: takeFocus)
     }
 

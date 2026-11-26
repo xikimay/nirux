@@ -8,6 +8,9 @@ import AppKit
 final class FrontColumnHost: NSView {
     private let shade = FrontShadeView()
     private let cardShadow = ColumnShadowView(frame: .zero)
+    private let pill = FrontPill()
+    /// Gets a click on the pill.
+    var onPillClick: () -> Void = {}
     private(set) var isShown = false
     private var fades = 0
     static let fadeKey = "frontFade"
@@ -28,12 +31,18 @@ final class FrontColumnHost: NSView {
             view.isHidden = true
             addSubview(view)
         }
+        pill.isHidden = true
+        pill.onClick = { [weak self] in self?.onPillClick() }
+        addSubview(pill)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    override func hitTest(_ point: NSPoint) -> NSView? { isShown ? super.hitTest(point) : nil }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if isShown { return super.hitTest(point) }
+        return !pill.isHidden && pill.frame.contains(convert(point, from: superview)) ? pill : nil
+    }
 
     /// The column's view, above the shade and its shadow.
     func addFront(_ view: NSView) { addSubview(view) }
@@ -42,6 +51,20 @@ final class FrontColumnHost: NSView {
     func place(front frame: NSRect) {
         shade.frame = bounds
         cardShadow.frame = frame
+        placePill()
+    }
+
+    /// What the column down holds, shown at the top of the row while the
+    /// user types, so as not to come up over them; nil hides it.
+    func showPill(_ title: String?) {
+        pill.title = title
+        pill.isHidden = title == nil
+        placePill()
+    }
+
+    private func placePill() {
+        let size = pill.fittingSize
+        pill.frame = NSRect(x: floor((bounds.width - size.width) / 2), y: bounds.height - size.height - Theme.Space.md, width: size.width, height: size.height)
     }
 
     /// Up, the shade and the shadow show and the shade takes the row's
@@ -71,6 +94,54 @@ final class FrontColumnHost: NSView {
         guard fades == fade else { return }
         shade.isHidden = true
         cardShadow.isHidden = true
+    }
+}
+
+/// "<file> ⌘Y": the front column has something new; a click brings it up.
+private final class FrontPill: NSView {
+    private let fill = CALayer()
+    private let label = NSTextField(labelWithString: "")
+    var onClick: () -> Void = {}
+    var title: String? {
+        didSet {
+            label.stringValue = (title ?? "") + "  " + NiruxShortcuts.frontEditor.chord.display
+            setAccessibilityLabel(title.map { "Show \($0) in the front editor" })
+        }
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        fill.backgroundColor = Theme.Color.accent.cgColor
+        layer?.addSublayer(fill)
+        label.font = Theme.Font.captionEmphasized
+        label.textColor = Theme.Color.canvas
+        addSubview(label)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var fittingSize: NSSize {
+        let text = label.fittingSize
+        return NSSize(width: ceil(text.width) + Theme.Space.md * 2, height: ceil(text.height) + Theme.Space.sm)
+    }
+
+    override func layout() {
+        super.layout()
+        fill.frame = bounds
+        fill.cornerRadius = bounds.height / 2
+        let text = label.fittingSize
+        label.frame = NSRect(x: Theme.Space.md, y: floor((bounds.height - text.height) / 2), width: bounds.width - Theme.Space.md * 2, height: text.height)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { onClick() }
+    override func accessibilityPerformPress() -> Bool {
+        onClick()
+        return true
     }
 }
 
