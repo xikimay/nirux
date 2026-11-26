@@ -380,6 +380,8 @@ struct WorkspaceInfo: Hashable {
     /// The Lead's messages it holds until other tasks' pull requests merge.
     var heldMessages: SidebarHeldMessages?
     var waitingTask: MergeWait.WaitingState?
+    /// What waits in its front editor (`WorkspaceState.frontPill`).
+    var frontPill: String?
     /// Its context and its week's spend (`UsageMonitor`).
     var usage: SidebarTaskUsage?
     var isNested: Bool { parentTitle != nil }

@@ -249,6 +249,7 @@ extension WorkspaceInfo {
         if let heldMessages {
             actions.append(.heldMessages(heldMessages))
         }
+        if let frontPill { actions.append(.frontPill(frontPill)) }
         // Only a task's usage has a budget (`taskUsage(of:)`).
         if let usage, usage.isOverBudget, let budget = usage.budget {
             actions.append(.budget(SidebarBudgetOffer(
@@ -319,6 +320,9 @@ enum SidebarCardAction: Hashable {
     case waitingMessages(columnIndex: Int, SidebarWaitingMessages)
     /// The Lead's messages held until other tasks' pull requests merge.
     case heldMessages(SidebarHeldMessages)
+    /// What an agent opened in the task's front editor while the user was
+    /// busy: a click on the row brings it up.
+    case frontPill(String)
     /// A Claude column at rest whose context costs to go on with: Compact
     /// or Fresh start, never imposed.
     case contextOffer(columnIndex: Int, ContextOffer)
@@ -337,7 +341,7 @@ enum SidebarCardAction: Hashable {
     /// proposed rule waits on nothing: it stays as quiet.
     var isQuiet: Bool {
         switch self {
-        case .next, .reviewBadges, .ruleProposals, .dailyPass, .heldMessages, .leadRecovery, .contextOffer, .budget: return true
+        case .next, .reviewBadges, .ruleProposals, .dailyPass, .heldMessages, .frontPill, .leadRecovery, .contextOffer, .budget: return true
         case .missionQuestion(_, let question): return question.handOff == nil
         case .approval, .resume, .interrupt, .cleanup, .turnQuestion, .dialog, .waitingMessages, .missionRecommendation: return false
         }

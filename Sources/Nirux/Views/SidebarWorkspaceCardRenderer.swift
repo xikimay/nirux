@@ -834,6 +834,16 @@ final class SidebarWorkspaceCardRenderer {
                 width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
             )
             append(label)
+        case .frontPill(let file):
+            let label = NSTextField.sidebarLine(NSAttributedString(string: file + "  " + NiruxShortcuts.frontEditor.chord.display, attributes: [
+                .font: Theme.Font.captionEmphasized, .foregroundColor: Theme.Color.accent
+            ]))
+            label.toolTip = "An agent showed this while you were busy: click the task to see it in its front editor."
+            label.frame = NSRect(
+                x: layout.indentX, y: top - Metrics.actionLineHeight,
+                width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
+            )
+            append(label)
         case .heldMessages(let held):
             let label = NSTextField.sidebarLine(NSAttributedString(string: held.line, attributes: [
                 .font: Theme.Font.caption, .foregroundColor: Theme.Color.textSecondary
