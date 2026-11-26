@@ -98,7 +98,7 @@ final class UsageWindowController: NSWindowController {
 
     let period = NSSegmentedControl(labels: ["24 Hours", "7 Days"], trackingMode: .selectOne, target: nil, action: nil)
     let headline = NSTextField(labelWithString: "")
-    private let chart = UsageDaysChart()
+    let chart = UsageDaysChart()
     let weekChart = UsageWeekChart()
     let tasksTable = UsageTasksTable()
     let limitsStack = NSStackView()
@@ -108,7 +108,9 @@ final class UsageWindowController: NSWindowController {
     /// What the limit rows last said: the same words keep the same rows, so
     /// VoiceOver keeps its place.
     private var limitWords: [String] = []
-    private var weekReadings: [QuotaReading] = []
+    /// Nil until the first read ends: no chart until then, or the agents'
+    /// would show a moment before the week's replaces it.
+    private var weekReadings: [QuotaReading]?
     private var report: UsageReport?
     private var names = UsageNames()
 
@@ -225,10 +227,12 @@ final class UsageWindowController: NSWindowController {
         let shown = period.selectedSegment == 0 ? report.day : report.week
         headline.stringValue = UsageReportText.headline(shown)
         let starts = report.days.map(\.start)
-        let week = UsageWeek(rise: QuotaCalibration.dailyRise(weekReadings, dayStarts: starts), dayTasks: report.claudeDayTasks)
+        let week = weekReadings.flatMap { UsageWeek(rise: QuotaCalibration.dailyRise($0, dayStarts: starts), dayTasks: report.claudeDayTasks) }
+        let reading = weekReadings == nil
         weekChart.show(week, dayStarts: starts, names: names.tasks.mapValues(\.title))
-        weekChart.isHidden = period.selectedSegment == 0 || week == nil
-        chart.isHidden = period.selectedSegment == 0 || week != nil
+        // While reading, the week's chart holds the place empty.
+        weekChart.isHidden = period.selectedSegment == 0 || (week == nil && !reading)
+        chart.isHidden = period.selectedSegment == 0 || week != nil || reading
         chart.days = report.days
         tasksTable.show(UsageReportText.tableRows(shown, names: names, week: period.selectedSegment == 0 ? nil : week))
         setText(Self.text(UsageReportText.sections(shown, names: names)))

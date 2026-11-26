@@ -21,6 +21,9 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     /// A reply typed in a turn question's notification: where it goes,
     /// its text, and the workspace and column to show when it can't go.
     var onQuickReply: ((QuickReplyTarget, String, String, Int?) -> Void)?
+    /// The quota alert's Compact at turn end: its task and column; false
+    /// when it no longer applies.
+    var onQuotaCompact: ((String, UUID) -> Bool)?
 
     /// The turn end a notification's Reply answers: that agent's, then.
     struct QuickReplyTarget: Equatable {
@@ -55,6 +58,9 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     nonisolated static let quickReplyAction = "turnQuestionReply"
     /// A failure that looks flaky: the rerun comes first.
     private static let flakyCIFailureCategory = "ciFailureFlaky"
+    /// A plan limit about to fill, its top spender offering a compaction.
+    private static let quotaCategory = "quotaAlert"
+    nonisolated static let quotaCompactAction = "quotaCompactAtTurnEnd"
 
     /// UNUserNotificationCenter requires a signed bundle with an identifier;
     /// `swift run` debug binaries have neither and would raise.
@@ -76,7 +82,9 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
             identifier: Self.quickReplyAction, title: "Reply…", options: [.authenticationRequired],
             textInputButtonTitle: "Send", textInputPlaceholder: "Your answer"
         )
+        let compact = UNNotificationAction(identifier: Self.quotaCompactAction, title: "Compact at turn end", options: [])
         center.setNotificationCategories([
+            UNNotificationCategory(identifier: Self.quotaCategory, actions: [compact], intentIdentifiers: []),
             UNNotificationCategory(identifier: Self.turnQuestionCategory, actions: [reply], intentIdentifiers: []),
             UNNotificationCategory(identifier: Self.ciFailureCategory, actions: [whyFailed, rerunFailed], intentIdentifiers: []),
             UNNotificationCategory(identifier: Self.flakyCIFailureCategory, actions: [rerunFailed, whyFailed], intentIdentifiers: [])
@@ -208,6 +216,39 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         post(content)
     }
 
+    /// A plan limit about to fill, or full (`QuotaAlerter`): a click opens
+    /// the task that spends it most; its button queues that task's
+    /// compaction. Not while the app is active (the title bar says it): it
+    /// comes once Nirux is in the background, if still due.
+    func postQuotaAlert(_ notice: () -> QuotaAlerter.Notice) -> Bool {
+        guard !NSApp.isActive, isAvailable else { return false }
+        let notice = notice()
+        let content = UNMutableNotificationContent()
+        content.title = notice.title
+        content.body = notice.body
+        content.sound = .default
+        var info: [String: Any] = [:]
+        if let workspaceID = notice.workspaceID { info["workspaceID"] = workspaceID }
+        if let column = notice.compactColumn {
+            info["compactColumn"] = column.uuidString
+            content.categoryIdentifier = Self.quotaCategory
+        }
+        content.userInfo = info
+        post(content)
+        return true
+    }
+
+    /// The quota alert's button pressed once its task no longer offers
+    /// Compact at turn end: said where the user is. A click opens the task.
+    func postQuotaCompactRefused(workspaceID: String) {
+        guard !NSApp.isActive else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Compact at turn end no longer applies"
+        content.body = "Its claude is no longer mid-turn with a heavy context: its row offers what applies now."
+        content.userInfo = ["workspaceID": workspaceID]
+        post(content)
+    }
+
     /// Post a "download finished" notification; clicking reveals the file
     /// in Finder. Suppressed while the app is active.
     func postDownloadFinished(filename: String, fileURL: URL) {
@@ -267,6 +308,8 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         let ciFailureAction: CIFailureAction?
         let quickReply: String?
         let quickReplyTarget: QuickReplyTarget?
+        /// The column whose compaction the quota alert's button queues.
+        let quotaCompactColumn: UUID?
 
         init(userInfo: [AnyHashable: Any], actionIdentifier: String, userText: String?) {
             workspaceID = userInfo["workspaceID"] as? String
@@ -275,6 +318,8 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
             ciFailureAction = CIFailureAction(rawValue: actionIdentifier)
             quickReply = actionIdentifier == NiruxNotifier.quickReplyAction ? userText : nil
             quickReplyTarget = QuickReplyTarget(userInfo: userInfo)
+            quotaCompactColumn = actionIdentifier == NiruxNotifier.quotaCompactAction
+                ? (userInfo["compactColumn"] as? String).flatMap(UUID.init(uuidString:)) : nil
         }
     }
 
@@ -289,6 +334,11 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         // does when it can't).
         if let quickReply = click.quickReply, let target = click.quickReplyTarget, let workspaceID = click.workspaceID {
             onQuickReply?(target, quickReply, workspaceID, click.columnIndex)
+            return
+        }
+        // Queued without bringing Nirux forward; refused, a banner says so there.
+        if let workspaceID = click.workspaceID, let column = click.quotaCompactColumn {
+            if onQuotaCompact?(workspaceID, column) == false { postQuotaCompactRefused(workspaceID: workspaceID) }
             return
         }
         comeForward()

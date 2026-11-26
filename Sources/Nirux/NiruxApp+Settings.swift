@@ -355,6 +355,11 @@ extension NiruxApp {
         )
         flakyCI.state = current.triageCIFailures ? .on : .off
         settingsTriageCIFailuresCheckbox = flakyCI
+        let quota = SettingsForm.checkbox(
+            "Warn before a plan limit fills", target: self, action: #selector(settingsWarnQuotaForecastChanged(_:))
+        )
+        quota.state = current.warnQuotaForecast ? .on : .off
+        settingsWarnQuotaForecastCheckbox = quota
 
         return SettingsForm.pane([
             [
@@ -387,6 +392,13 @@ extension NiruxApp {
                         + "the workspace's Claude Code runs on that account). XCTest and Swift build logs only. "
                         + "Nirux never reruns by itself.",
                     under: flakyCI
+                ),
+                quota,
+                SettingsForm.hint(
+                    "Once per window: when the pace of a Claude or Codex limit fills it 20 minutes or more before "
+                        + "its reset, then once it is full. Claude's alerts name the task that spends it most. Read "
+                        + "from the agents in Nirux; nothing is sent.",
+                    under: quota
                 ),
                 SettingsForm.hint(
                     "Banners and sounds, shown while Nirux is in the background, follow System Settings › "
@@ -724,6 +736,11 @@ extension NiruxApp {
         applyCITriage(enabled: enabled, readsFinalMessages: AgentHookCenter.shared.readsFinalMessages)
     }
 
+    @objc func settingsWarnQuotaForecastChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        _ = saveSetting(revert: Self.toggledBack(sender), { $0.warnQuotaForecast = enabled })
+    }
+
     static func currentTriageCIFailures() -> Bool {
         PersistedSettings.effective(Persistence.load()?.settings).triageCIFailures
     }
@@ -820,6 +837,7 @@ extension NiruxApp {
         settingsTurnStatusCheckbox = nil
         settingsCatchUpCheckbox = nil
         settingsTriageCIFailuresCheckbox = nil
+        settingsWarnQuotaForecastCheckbox = nil
     }
 }
 
