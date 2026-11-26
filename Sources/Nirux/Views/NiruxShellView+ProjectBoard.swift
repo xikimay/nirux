@@ -129,7 +129,7 @@ extension NiruxShellView {
         let workspace = location.workspace
         let isBoard = { (column: ColumnState) in column === location.column }
         guard workspace.columns.contains(where: isBoard) else { return }
-        if workspace.openColumns.count == 1 { workspace.addColumn() }
+        if workspace.openRowColumns.count == 1 { workspace.addColumn() }
         // Found again: the shell goes in beside the focused column.
         guard let index = workspace.columns.firstIndex(where: isBoard) else { return }
         workspace.closeColumn(at: index)

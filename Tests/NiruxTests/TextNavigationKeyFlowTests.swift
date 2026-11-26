@@ -7,7 +7,7 @@ import XCTest
 /// interceptor and menu bar: it edits the text that has the keyboard,
 /// and Control+Cmd+Arrow still navigates from there, as does Cmd+Arrow
 /// with the editor's caret already at that edge. A focused editor column
-/// has the keyboard, unless an agent's open focused it.
+/// has the keyboard; an agent's open brings the front editor up without it.
 @MainActor
 final class TextNavigationKeyFlowTests: XCTestCase {
     private enum Arrow: UInt16 {
@@ -144,13 +144,14 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 press(.right, [.command], in: harness)
                 harness.waitUntil("the column on the right", timeout: 5) { workspace.focusedIndex == editorIndex + 1 }
 
-                // An agent's open focuses the editor column, the keyboard
-                // stays in the terminal.
+                // An agent's open brings the front editor up; the focus and
+                // the keyboard stay where they were.
                 let terminal = harness.window.firstResponder
                 harness.shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
-                XCTAssertEqual(workspace.focusedIndex, editorIndex)
+                XCTAssertTrue(workspace.isFrontShown)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex + 1)
                 UIFlowHarness.run("window.webkit.messageHandlers.nirux.postMessage({ type: 'textEdgeKey', edge: 'left' }); 0", in: webView)
-                XCTAssertEqual(workspace.focusedIndex, editorIndex, "an edge key navigated without the editor's keyboard")
+                XCTAssertEqual(workspace.focusedIndex, editorIndex + 1, "an edge key navigated without the editor's keyboard")
                 XCTAssertIdentical(harness.window.firstResponder, terminal)
             }
         }
@@ -382,7 +383,8 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             @MainActor func open(_ file: String) throws {
                 shell.openEditorFromURL(try agentOpen(harness.repo + "/" + file, in: workspace))
                 XCTAssertIdentical(shell.activeWorkspace, workspace)
-                XCTAssertNotNil(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
+                XCTAssertTrue(workspace.isFrontShown)
+                XCTAssertEqual(workspace.front?.editorColumn?.activePath, harness.repo + "/" + file)
             }
             let terminal = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.terminalView)
             harness.window.makeFirstResponder(terminal)
@@ -396,8 +398,11 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             shell.addWorkspace(title: "other", cwd: harness.repo)
             let other = try XCTUnwrap(shell.activeWorkspace?.columns.first?.terminalView)
             XCTAssertIdentical(harness.window.firstResponder, other)
+            // The switch brings the agent's workspace forward: the keyboard
+            // goes to its focused column, not into the one out of view nor
+            // the front editor.
             try open("README.md")
-            XCTAssertIdentical(harness.window.firstResponder, other)
+            XCTAssertIdentical(harness.window.firstResponder, terminal)
         }
     }
 
@@ -426,49 +431,95 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
-    /// The user's moves to an editor column give it the keyboard, even to
-    /// the one an agent's open focused without it: Cmd+1…9, the sidebar, a
-    /// workspace switch, Cmd+W on its neighbour.
-    func testUserMovesGiveTheEditorTheKeyboard() throws {
+    /// The user's moves to the front editor an agent brought up give it the
+    /// keyboard: Cmd+1…9, the sidebar, a workspace switch. ⌘Y sends it back
+    /// to the terminal it came from and brings it up again as it was.
+    func testUserMovesGiveTheFrontEditorTheKeyboard() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let workspace = try XCTUnwrap(shell.activeWorkspace)
-            let terminal = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.terminalView)
+            let terminalIndex = workspace.focusedIndex
+            let terminal = try XCTUnwrap(workspace.columns[safe: terminalIndex]?.terminalView)
             harness.window.makeFirstResponder(terminal)
             shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
-            let editorIndex = workspace.focusedIndex
-            let editor = try XCTUnwrap(workspace.columns[safe: editorIndex]?.editorColumn)
+            let frontIndex = try XCTUnwrap(workspace.frontIndex)
+            let editor = try XCTUnwrap(workspace.front?.editorColumn)
             let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
             XCTAssertIdentical(harness.window.firstResponder, terminal)
 
-            shell.focusColumn(number: editorIndex + 1)
-            XCTAssertIdentical(harness.window.firstResponder, webView, "Cmd+\(editorIndex + 1)")
+            shell.focusColumn(number: frontIndex + 1)
+            XCTAssertIdentical(harness.window.firstResponder, webView, "Cmd+\(frontIndex + 1)")
             harness.window.makeFirstResponder(terminal)
-            shell.sidebar.onColumnClicked?(shell.activeWSIndex, editorIndex)
+            shell.sidebar.onColumnClicked?(shell.activeWSIndex, frontIndex)
             XCTAssertIdentical(harness.window.firstResponder, webView, "the sidebar")
 
             shell.addWorkspace(title: "other", cwd: harness.repo)
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }))
             XCTAssertIdentical(harness.window.firstResponder, webView, "the workspace switch")
 
-            workspace.addColumn()
-            shell.relayout(animated: false)
-            harness.window.makeFirstResponder(workspace.columns[safe: editorIndex + 1]?.terminalView)
-            XCTAssertEqual(workspace.focusedIndex, editorIndex + 1)
-            shell.closeActiveColumn()
-            harness.waitUntil("the column to close", timeout: 10) { workspace.columns.count == editorIndex + 1 }
-            XCTAssertIdentical(harness.window.firstResponder, webView, "Cmd+W")
+            shell.toggleFront()
+            XCTAssertFalse(workspace.isFrontShown)
+            XCTAssertEqual(workspace.focusedIndex, terminalIndex)
+            XCTAssertIdentical(harness.window.firstResponder, terminal, "⌘Y down")
+            shell.toggleFront()
+            XCTAssertTrue(workspace.isFrontShown)
+            XCTAssertIdentical(workspace.front?.editorColumn, editor)
+            XCTAssertEqual(editor.activePath, harness.repo + "/README.md")
+            XCTAssertIdentical(harness.window.firstResponder, webView, "⌘Y up")
+        }
+    }
 
-            // Unless an agent's open focused the editor while the column
-            // closed.
-            workspace.addColumn()
-            shell.relayout(animated: false)
-            harness.window.makeFirstResponder(workspace.columns[safe: editorIndex + 1]?.terminalView)
-            shell.closeActiveColumn()
+    // MARK: - Front editor
+
+    /// Brought up by an agent, the front editor stands centred over the row,
+    /// which stays where it was; Esc that nothing in it takes sends it back,
+    /// the terminal it came from taking the focus and the keyboard.
+    func testFrontEditorLeavesTheRowWhereItWas() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let terminalIndex = workspace.focusedIndex
+            let terminal = try XCTUnwrap(workspace.columns[safe: terminalIndex]?.terminalView)
+            harness.window.makeFirstResponder(terminal)
+            let row = workspace.columnFrames
             shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
-            XCTAssertEqual(workspace.focusedIndex, editorIndex)
-            harness.waitUntil("the column to close", timeout: 10) { workspace.columns.count == editorIndex + 1 }
-            XCTAssertNotIdentical(harness.window.firstResponder, webView, "Cmd+W during an agent's open")
+            let front = try XCTUnwrap(workspace.front)
+            XCTAssertTrue(workspace.isFrontShown)
+            XCTAssertFalse(front.view.isHidden)
+            XCTAssertEqual(workspace.columnFrames, row, "the row moved")
+            XCTAssertEqual(front.view.frame.midX, workspace.frontHost.bounds.midX, accuracy: 1)
+
+            shell.focusColumnByIndex(try XCTUnwrap(workspace.frontIndex))
+            let webView = try XCTUnwrap(UIFlowHarness.descendant(of: front.view, as: WKWebView.self))
+            XCTAssertIdentical(harness.window.firstResponder, webView)
+            waitForMonacoText(in: webView)
+            UIFlowHarness.run(
+                "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); 0", in: webView
+            )
+            harness.waitUntil("the front editor to go back") { !workspace.isFrontShown }
+            XCTAssertEqual(workspace.focusedIndex, terminalIndex)
+            XCTAssertIdentical(harness.window.firstResponder, terminal)
+            XCTAssertEqual(workspace.columnFrames, row)
+        }
+    }
+
+    /// A click on the shaded row sends the front editor back and gives the
+    /// clicked column the focus and the keyboard.
+    func testClickOnTheRowSendsTheFrontEditorBack() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let terminalIndex = workspace.focusedIndex
+            let column = try XCTUnwrap(workspace.columns[safe: terminalIndex])
+            shell.openInEditorColumn(path: harness.repo + "/README.md")
+            XCTAssertTrue(workspace.isFrontShown)
+            XCTAssertEqual(workspace.focusedIndex, workspace.frontIndex)
+            let frame = column.view.frame
+            let point = workspace.frontHost.convert(NSPoint(x: frame.midX, y: frame.midY), from: column.view.superview)
+            workspace.frontHost.onShadeClick(point)
+            XCTAssertFalse(workspace.isFrontShown)
+            XCTAssertEqual(workspace.focusedIndex, terminalIndex)
+            XCTAssertIdentical(harness.window.firstResponder, column.terminalView)
         }
     }
 
@@ -483,7 +534,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             let fieldEditor = try XCTUnwrap(harness.window.firstResponder as? NSTextView)
 
             harness.shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
-            XCTAssertNotNil(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
+            XCTAssertTrue(workspace.isFrontShown)
             XCTAssertIdentical(harness.window.firstResponder, fieldEditor)
             XCTAssertTrue((fieldEditor.delegate as? NSView)?.isDescendant(of: browser) == true, "another field has the keyboard")
         }
@@ -500,24 +551,33 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         ))
     }
 
-    /// Opens `path` at `line` in a new editor column, as a terminal's file
-    /// link does: Monaco has the keyboard.
-    private func openWithKeyboard(_ path: String, line: Int, in harness: UIFlowHarness) throws -> (Int, WKWebView) {
+    /// Adds an editor column to the row on `path` at `line`, as a restored
+    /// one is, with the keyboard.
+    private func addRowEditor(_ path: String, line: Int? = nil, in harness: UIFlowHarness) throws -> (Int, EditorColumn) {
         let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
-        harness.shell.openInEditorColumn(path: path, line: line)
+        workspace.addEditorColumn(workspaceCwd: harness.repo)
         let editorIndex = workspace.focusedIndex
         let editor = try XCTUnwrap(workspace.columns[safe: editorIndex]?.editorColumn)
+        harness.shell.wireEditor(editor)
+        editor.open(path: path, line: line)
+        harness.shell.relayout(animated: false)
+        harness.shell.focusActiveTerminal(in: harness.window, editorTakesKeyboard: true)
+        return (editorIndex, editor)
+    }
+
+    /// Opens `path` at `line` in an editor column of the row, the caret as
+    /// a terminal's file link leaves it: Monaco has the keyboard.
+    private func openWithKeyboard(_ path: String, line: Int, in harness: UIFlowHarness) throws -> (Int, WKWebView) {
+        let (editorIndex, editor) = try addRowEditor(path, line: line, in: harness)
         let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
         XCTAssertIdentical(harness.window.firstResponder, webView)
         waitForMonacoText(in: webView)
         return (editorIndex, webView)
     }
 
-    /// Opens README.md in a new editor column, its Monaco with the keyboard.
+    /// Opens README.md in an editor column of the row, its Monaco with the keyboard.
     private func openEditorWithKeyboard(in harness: UIFlowHarness) throws -> (EditorColumn, WKWebView) {
-        let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
-        harness.shell.openEditorColumn()
-        let editor = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
+        let (_, editor) = try addRowEditor(harness.repo + "/README.md", in: harness)
         harness.waitUntil("the editor to open README.md") { editor.activePath == harness.repo + "/README.md" }
         // A click in Monaco gives it the keyboard.
         let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))

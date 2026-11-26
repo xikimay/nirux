@@ -366,8 +366,8 @@ extension NiruxShellView {
         if let workspace = activeWorkspace,
            let wsInfo = infos.first(where: { $0.index == activeWSIndex }) {
             columnIndicator.update(
-                columnCount: workspace.columns.count, focusedIndex: workspace.focusedIndex,
-                columnSignals: wsInfo.columns.map(\.offScreenAttention)
+                columnCount: workspace.rowCount, focusedIndex: workspace.focusedIndex < workspace.rowCount ? workspace.focusedIndex : workspace.frontReturnIndex,
+                columnSignals: wsInfo.columns.prefix(workspace.rowCount).map(\.offScreenAttention)
             )
         } else {
             // An empty space: no columns to point at.

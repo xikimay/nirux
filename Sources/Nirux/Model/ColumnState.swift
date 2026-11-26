@@ -19,6 +19,8 @@ final class ColumnState {
     private(set) var hasSurface = false
     var webViewColumn: WebViewColumn?
     var editorColumn: EditorColumn?
+    /// The workspace's front editor column (`WorkspaceState.front`), not one of its row.
+    var isFront = false
     /// The Project Board this column shows.
     private(set) var projectBoard: ProjectBoardController?
     /// The branch this column reviews.

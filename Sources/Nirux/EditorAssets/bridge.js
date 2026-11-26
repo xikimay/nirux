@@ -275,6 +275,13 @@
     return line === model.getLineCount();
   }
 
+  // Esc that nothing in the page took (Monaco's widgets, a selection and
+  // the find field stop it first) asks the app to send a front editor back.
+  window.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+    postToSwift({ type: "escapeKey" });
+  });
+
   // Each code editor's niruxCaretAtTextEdge, set as a key arrives, before
   // Monaco looks it up (capturing on the window, ahead of Monaco's own
   // listeners): true only on the editor with the caret, for a first press

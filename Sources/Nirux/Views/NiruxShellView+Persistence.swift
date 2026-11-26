@@ -399,7 +399,7 @@ extension NiruxShellView {
                     id: workspace.id, title: workspace.title,
                     cwd: Self.persistedWorkspaceCwd(for: workspace),
                     columns: persistedColumns(of: workspace, snapshot: snapshot),
-                    focusedColumnIndex: workspace.focusedIndex,
+                    focusedColumnIndex: workspace.focusedIndex < workspace.rowCount ? workspace.focusedIndex : workspace.frontReturnIndex,
                     profileID: workspace.profileID,
                     isInactive: workspace.isInactive,
                     missionID: workspace.missionID,
@@ -441,7 +441,8 @@ extension NiruxShellView {
     }
 
     private func persistedColumns(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> [PersistedColumn] {
-        workspace.columns.filter { $0.waitingTask == nil }.map { column in
+        // The front editor column isn't restored: what it showed was a look.
+        workspace.columns.filter { $0.waitingTask == nil && !$0.isFront }.map { column in
             var persisted = persistedColumn(column, in: workspace, snapshot: snapshot)
             persisted.unfitPreset = column.unfitFraction.map(Double.init)
             return persisted

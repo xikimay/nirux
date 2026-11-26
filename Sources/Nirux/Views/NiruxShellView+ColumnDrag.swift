@@ -10,7 +10,7 @@ extension NiruxShellView {
     /// when its column isn't in the workspace on screen.
     func dragColumn(withHeader header: ColumnHeaderView, press: NSEvent) -> Bool {
         guard let window, let workspace = activeWorkspace,
-              let column = workspace.columns.first(where: { $0.header === header && !$0.isClosing })
+              let column = workspace.columns.first(where: { $0.header === header && !$0.isClosing }), !column.isFront
         else { return false }
         var isDragging = false
         // The pointer's place on the card, from its left edge.

@@ -583,6 +583,7 @@ final class NiruxShellView: NSView {
         workspace.onTerminalOpenFile = { [weak self] targetWorkspace, path, line in
             self?.openInEditorColumn(path: path, line: line, in: targetWorkspace)
         }
+        wireFrontColumn(workspace)
         workspace.onResumeExitedAgent = { [weak self] targetWorkspace, column in
             self?.resumeExitedAgent(in: targetWorkspace, column: column)
         }
@@ -906,22 +907,25 @@ extension NiruxShellView {
     enum HDir { case left, right }
     func focusColumn(_ dir: HDir) {
         guard let workspace = activeWorkspace else { return }
-        if let index = adjacentColumnIndex(dir) { workspace.focusedIndex = index }
+        if let index = adjacentColumnIndex(dir) { return focusColumnByIndex(index) }
         relayout(animated: true)
         updateSidebar()
         focusActiveTerminal(in: window, editorTakesKeyboard: true)
     }
 
-    /// The column beside the focused one in the active workspace, if any.
+    /// The row column beside the focused one in the active workspace, if
+    /// any; from the front column, the one it came from.
     func adjacentColumnIndex(_ dir: HDir) -> Int? {
         guard let workspace = activeWorkspace else { return nil }
+        if workspace.focusedIndex == workspace.frontIndex { return workspace.frontReturnIndex }
         let index = workspace.focusedIndex + (dir == .left ? -1 : 1)
-        return workspace.columns.indices.contains(index) ? index : nil
+        return (0..<workspace.rowCount).contains(index) ? index : nil
     }
 
     func cycleActiveColumnWidth() {
         guard let workspace = activeWorkspace else { return }
-        workspace.columns[workspace.focusedIndex].cycleWidth()
+        // Up, the front column is the one in view.
+        (workspace.isFrontShown ? workspace.front : workspace.columns[safe: workspace.focusedIndex])?.cycleWidth()
         relayout(animated: true)
         redrawTerminalsOnceSettled()
     }
@@ -1234,7 +1238,11 @@ extension NiruxShellView {
     }
 
     func focusColumnByIndex(_ index: Int) {
-        guard let workspace = activeWorkspace, workspace.columns.indices.contains(index), workspace.focusedIndex != index else { return }
+        guard let workspace = activeWorkspace, workspace.columns.indices.contains(index) else { return }
+        // To the front column it comes up; to the row, the row comes forward.
+        if index == workspace.frontIndex { return showFront(in: workspace, takeKeyboard: true) }
+        if workspace.isFrontShown { return hideFront(in: workspace, focusing: index) }
+        guard workspace.focusedIndex != index else { return }
         workspace.focusedIndex = index
         relayout(animated: true)
         updateSidebar()
@@ -1292,7 +1300,7 @@ extension NiruxShellView {
     /// without the keyboard: going to it then hands the keyboard over.
     func goToColumn(_ index: Int) {
         guard let workspace = activeWorkspace, workspace.columns.indices.contains(index) else { return }
-        if workspace.focusedIndex == index, workspace.columns[index].isEditor {
+        if workspace.focusedIndex == index, workspace.columns[index].isEditor, !workspace.columns[index].isFront {
             focusActiveTerminal(in: window, editorTakesKeyboard: true)
         } else {
             focusColumnByIndex(index)

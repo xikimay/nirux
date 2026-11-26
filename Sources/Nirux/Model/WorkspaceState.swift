@@ -35,6 +35,9 @@ final class WorkspaceState {
     var focusedIndex: Int = 0 {
         didSet {
             guard focusedIndex != oldValue else { return }
+            // Focused, the front column is up; the focus moving in the row
+            // brings the row forward.
+            if focusedIndex == frontIndex { setFrontShown(true, duration: nil) } else { setFrontShown(false, duration: nil) }
             onFocusedColumnChanged?()
         }
     }
@@ -42,6 +45,20 @@ final class WorkspaceState {
     /// Where the camera stays while the pointer works on a card; nil: where
     /// the strip wants it.
     var heldCamera: CameraHold?
+
+    /// The editor column in front of the row (docs/workspaces-and-columns.md,
+    /// "The front editor"): centred over the row, which dims behind it while
+    /// it is up. Last in `columns`, out of the row's layout; it hands the
+    /// focus back to `frontReturnIndex`, the row column it came from.
+    var front: ColumnState? { columns.last.flatMap { $0.isFront ? $0 : nil } }
+    var frontIndex: Int? { front == nil ? nil : columns.count - 1 }
+    var frontReturnIndex = 0
+    private(set) var isFrontShown = false
+    /// The row's columns, first in `columns`: all but the front one.
+    var rowCount: Int { front == nil ? columns.count : columns.count - 1 }
+    /// The row's columns not on their way out.
+    var openRowColumns: [ColumnState] { columns.filter { !$0.isClosing && !$0.isFront } }
+    let frontHost = FrontColumnHost()
     /// The card the pointer holds by its header, if any (`beginColumnDrag`).
     private(set) var draggedColumn: ColumnDrag?
     /// Where it works; a waiting task's moves once, to its worktree
@@ -321,6 +338,7 @@ final class WorkspaceState {
         stripView = NSView()
         stripView.wantsLayer = true
         containerView.addSubview(stripView)
+        containerView.addSubview(frontHost)
 
         if let firstColumn {
             insertColumn(firstColumn)
@@ -954,12 +972,49 @@ extension WorkspaceState {
         return environment
     }
 
+    /// Into the row, after its focused column (the one the front column
+    /// came from, while that one has the focus), which comes forward.
     private func insertColumn(_ col: ColumnState) {
-        let insertAt = columns.isEmpty ? 0 : min(focusedIndex + 1, columns.count)
+        let origin = focusedIndex < rowCount ? focusedIndex : frontReturnIndex
+        let insertAt = columns.isEmpty ? 0 : min(origin + 1, rowCount)
         columns.insert(col, at: insertAt)
         stripView.addSubview(col.view)
+        if front != nil, insertAt <= frontReturnIndex { frontReturnIndex += 1 }
         focusedIndex = insertAt
         makeResizeHandle()
+        setFrontShown(false, duration: nil)
+    }
+
+    /// The front editor column, made rooted at `workspaceCwd` unless there
+    /// is one; nil while the workspace waits to start.
+    func addFrontEditorColumn(workspaceCwd: String) -> ColumnState? {
+        if let front { return front }
+        guard !isWaitingTask else { return nil }
+        let col = ColumnState(editorWorkspaceCwd: workspaceCwd)
+        col.isFront = true
+        col.widthFraction = ColumnWidth.twoThirds.fraction
+        col.view.isHidden = true
+        frontReturnIndex = min(focusedIndex, max(rowCount - 1, 0))
+        columns.append(col)
+        frontHost.addFront(col.view)
+        makeResizeHandle()
+        return col
+    }
+
+    /// The front column comes up over the row, or goes back down: the
+    /// shade fades over `duration` (nil: at once). Its card's own pass is
+    /// the shell's (`NiruxShellView.showFront`).
+    func setFrontShown(_ shown: Bool, duration: CFTimeInterval?) {
+        guard front != nil, shown != isFrontShown else { return }
+        isFrontShown = shown
+        frontHost.setShown(shown, duration: duration)
+        if duration == nil { front?.view.isHidden = !shown }
+    }
+
+    /// The row column under `point` (in `frontHost`), if any.
+    func rowColumnIndex(at point: NSPoint) -> Int? {
+        let x = stripView.convert(point, from: frontHost).x
+        return columns.prefix(rowCount).firstIndex { $0.view.frame.minX <= x && x < $0.view.frame.maxX }
     }
 
     /// One resize handle per column (its right edge), always the topmost
@@ -972,7 +1027,7 @@ extension WorkspaceState {
         handle.onDragStart = { [weak self, weak handle] in
             guard let self, let handle, let edge = self.resizeHandles.firstIndex(of: handle),
                   edge == self.focusedIndex || edge == self.focusedIndex - 1 else { return nil }
-            let widths = self.columns.map(\.view.frame.width)
+            let widths = self.columns.prefix(self.rowCount).map(\.view.frame.width)
             let centred = Self.centres(widths, focus: self.focusedIndex, viewport: self.containerView.bounds.width)
             return (widths, self.stripView.frame.width, self.lastCameraX, self.focusedIndex, centred)
         }
@@ -991,7 +1046,7 @@ extension WorkspaceState {
             guard let self, let handle, let edge = self.resizeHandles.firstIndex(of: handle),
                   edge == self.focusedIndex || edge == self.focusedIndex - 1 else { return }
             let viewport = self.containerView.bounds.width, focus = self.focusedIndex
-            let widths = self.columns.map(\.view.frame.width)
+            let widths = self.columns.prefix(self.rowCount).map(\.view.frame.width)
             let share = Self.share(
                 edge: edge, focus: focus, count: widths.count, centred: Self.centres(widths, focus: focus, viewport: viewport)
             )
@@ -1073,8 +1128,8 @@ extension WorkspaceState {
     /// began leaves it there.
     private func drag(edge: Int, from start: ColumnResizeHandle.Start, by delta: CGFloat) {
         let viewport = containerView.bounds.width, focus = start.focus
-        guard focus == focusedIndex, start.widths.count == columns.count else { return }
-        let share = Self.share(edge: edge, focus: focus, count: columns.count, centred: start.centred)
+        guard focus == focusedIndex, start.widths.count == rowCount else { return }
+        let share = Self.share(edge: edge, focus: focus, count: rowCount, centred: start.centred)
         let pull = edge == focus ? delta : -delta, width = start.widths[focus]
         let near = edge == focus ? focus + 1 : focus - 1, far = edge == focus ? focus - 1 : focus + 1
         // Each side takes half the card's room, so that it stops centred.
@@ -1163,6 +1218,7 @@ extension WorkspaceState {
     /// Holds the camera where the strip shows for the column at `index`: a
     /// slide on its way stops there.
     func holdCamera(for index: Int) {
+        guard index < rowCount else { return }
         stripView.frame.origin.x = shownStripX
         stripView.layer?.removeAnimation(forKey: Self.slideKey)
         lastCameraX = -stripView.frame.origin.x
@@ -1219,8 +1275,8 @@ extension WorkspaceState {
     /// keep theirs as they are. Half a point over, so that `width(_:in:)`
     /// floors it back to the same width whatever the rounding.
     private func setColumnWidths(_ widths: [CGFloat], viewport: CGFloat) {
-        let laidOut = columns.map(\.view.frame.width)
-        guard widths.count == columns.count, widths != laidOut else { return }
+        let laidOut = columns.prefix(rowCount).map(\.view.frame.width)
+        guard widths.count == laidOut.count, widths != laidOut else { return }
         for (index, width) in widths.enumerated() where width != laidOut[index] {
             columns[index].widthFraction = min(Self.maxWidthFraction, max(Self.minWidthFraction, (width + Self.columnGap + 0.5) / max(Self.span(viewport), 1)))
         }
@@ -1305,9 +1361,13 @@ extension WorkspaceState {
     }
 
     func closeColumn(at index: Int) {
-        guard columns.count > 1 else { return }
+        let closesFront = index == frontIndex
+        // The row keeps a column.
+        guard closesFront || rowCount > 1 else { return }
         let previouslyFocusedColumn = columns[safe: focusedIndex]
         let previousFocusedIndex = focusedIndex
+        let focusWasFront = previousFocusedIndex == frontIndex
+        if closesFront { setFrontShown(false, duration: nil) }
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()
         col.light?.removeFromSuperview()
@@ -1318,6 +1378,14 @@ extension WorkspaceState {
         }
         if focusedIndex >= columns.count {
             focusedIndex = columns.count - 1
+        }
+        if closesFront {
+            if focusWasFront { focusedIndex = min(frontReturnIndex, columns.count - 1) }
+        } else if front != nil {
+            if index < frontReturnIndex { frontReturnIndex -= 1 }
+            frontReturnIndex = min(frontReturnIndex, max(rowCount - 1, 0))
+            // The row's last column gone, the focus stays in the row.
+            if !focusWasFront, focusedIndex >= rowCount { focusedIndex = max(rowCount - 1, 0) }
         }
         if focusedIndex == previousFocusedIndex,
            columns[safe: focusedIndex] !== previouslyFocusedColumn {
@@ -1333,7 +1401,7 @@ extension WorkspaceState {
     /// Moves the column at `from` to `to`, the others keeping their order;
     /// it takes the focus.
     func moveColumn(at from: Int, to: Int) {
-        guard columns.indices.contains(from), columns.indices.contains(to) else { return }
+        guard (0..<rowCount).contains(from), (0..<rowCount).contains(to) else { return }
         columns.insert(columns.remove(at: from), at: to)
         focusedIndex = to
     }
@@ -1358,7 +1426,7 @@ extension WorkspaceState {
     /// The strip that holds the columns: its size, and each column's frame
     /// in it.
     var stripSize: NSSize { stripView.frame.size }
-    var columnFrames: [NSRect] { columns.map(\.view.frame) }
+    var columnFrames: [NSRect] { columns.prefix(rowCount).map(\.view.frame) }
 
     /// What a width fraction of 1 spans, its gap included: the viewport
     /// less the air at its edges, plus one gap. Two halves then fill the
@@ -1384,22 +1452,24 @@ extension WorkspaceState {
         fitAll: Bool = false, skipTerminalResize: Bool = false, glides: Bool = false
     ) {
         defer { onColumnsLaidOut?() }
-        guard !columns.isEmpty else { return }
-        let shown = glides ? columns.map(\.shownPlace) : []
+        layoutFront(viewportWidth: viewportWidth, height: height, skipTerminalResize: skipTerminalResize)
+        let row = Array(columns.prefix(rowCount))
+        guard !row.isEmpty else { return }
+        let shown = glides ? row.map(\.shownPlace) : []
 
         let gap = Self.columnGap, inset = Self.columnInset
         let innerHeight = max(0, height - inset * 2)
         let widths = fitAll
-            ? Array(repeating: Self.width(1 / CGFloat(columns.count), in: viewportWidth), count: columns.count)
-            : columns.map { size(of: $0, viewportWidth: viewportWidth, height: height).width }
-        let totalWidth = widths.reduce(0, +) + gap * CGFloat(columns.count - 1) + inset * 2
+            ? Array(repeating: Self.width(1 / CGFloat(row.count), in: viewportWidth), count: row.count)
+            : row.map { size(of: $0, viewportWidth: viewportWidth, height: height).width }
+        let totalWidth = widths.reduce(0, +) + gap * CGFloat(row.count - 1) + inset * 2
 
         NiruxDebugLog.log("layoutAndScroll ws=\(id.prefix(8)) viewportW=\(viewportWidth) h=\(height) "
             + "widths=\(widths.map { Int($0) }) fitAll=\(fitAll)")
 
         // 2. Position each column, a card with air around it
         var xOffset = inset
-        for (index, col) in columns.enumerated() {
+        for (index, col) in row.enumerated() {
             // Terminal frames are always set explicitly by layoutWithHeader;
             // autoresizing would push intermediate sizes to Ghostty during a
             // window resize before this layout pass runs (garbled display).
@@ -1426,7 +1496,8 @@ extension WorkspaceState {
             // Resize handle straddling the air at this column's right edge.
             if resizeHandles.indices.contains(index) {
                 let handle = resizeHandles[index]
-                handle.isHidden = fitAll || draggedColumn != nil || (index != focusedIndex && index != focusedIndex - 1)
+                handle.isHidden = fitAll || draggedColumn != nil || isFrontShown
+                    || (index != focusedIndex && index != focusedIndex - 1)
                 handle.frame = NSRect(
                     x: xOffset + widths[index] + gap / 2 - Self.resizeHandleWidth / 2,
                     y: 0,
@@ -1441,6 +1512,7 @@ extension WorkspaceState {
         // Handles must stay above every column view, whichever order the
         // columns were inserted in.
         for handle in resizeHandles { stripView.addSubview(handle) }
+        for handle in resizeHandles.dropFirst(row.count) { handle.isHidden = true }
         stripView.frame = NSRect(x: stripView.frame.origin.x, y: 0, width: totalWidth, height: height)
 
         // 3. Camera (`camera(for:focus:viewport:)`), unless a hold keeps it
@@ -1453,7 +1525,9 @@ extension WorkspaceState {
         } else if let held = heldCamera, totalWidth > viewportWidth {
             cameraX = max(0, min(held.x, totalWidth - viewportWidth))
         } else {
-            cameraX = Self.camera(for: widths, focus: focusedIndex, viewport: viewportWidth)
+            // The front column leaves the row where it was.
+            let rowFocus = focusedIndex < row.count ? focusedIndex : min(frontReturnIndex, row.count - 1)
+            cameraX = Self.camera(for: widths, focus: rowFocus, viewport: viewportWidth)
         }
 
         lastCameraX = cameraX
@@ -1473,6 +1547,21 @@ extension WorkspaceState {
             anim.isRemovedOnCompletion = true
             layer.add(anim, forKey: Self.slideKey)
         }
+    }
+
+    /// The front column, centred over the viewport whatever the camera,
+    /// at its width fraction and a column's height.
+    private func layoutFront(viewportWidth: CGFloat, height: CGFloat, skipTerminalResize: Bool) {
+        frontHost.frame = NSRect(x: 0, y: 0, width: viewportWidth, height: height)
+        guard let front else { return }
+        let size = size(of: front, viewportWidth: viewportWidth, height: height)
+        let frame = NSRect(x: floor((viewportWidth - size.width) / 2), y: Self.columnInset, width: size.width, height: size.height)
+        if front.view.frame.size != frame.size { front.view.layer?.removeAnimation(forKey: ColumnState.passKey) }
+        front.view.frame = frame
+        frontHost.place(front: frame)
+        front.layoutWithHeader(width: size.width, height: size.height, resizeTerminal: !skipTerminalResize)
+        front.view.layer?.masksToBounds = true
+        front.view.layer?.cornerRadius = Theme.Radius.column
     }
 
     /// The column's shadow, made on first use: under every column of the
@@ -1511,6 +1600,7 @@ extension WorkspaceState {
     /// The one definition of "in view": for the lights, the agents
     /// restored on sight, a branch review.
     func showsColumn(at index: Int) -> Bool {
+        if index == frontIndex { return isFrontShown }
         guard let column = columns[safe: index] else { return false }
         let frame = column.view.frame
         return NiruxShellView.showsColumn(
@@ -1572,8 +1662,8 @@ extension WorkspaceState {
         draggedColumn = drag
         place(column, at: drag.x)
         let to = outside
-            ? min(drag.origin, columns.count - 1)
-            : Self.slot(nearest: drag.x, among: columns.filter { $0 !== column }.map(\.view.frame.width))
+            ? min(drag.origin, rowCount - 1)
+            : Self.slot(nearest: drag.x, among: columns.prefix(rowCount).filter { $0 !== column }.map(\.view.frame.width))
         guard to != from else { return false }
         moveColumn(at: from, to: to)
         return true
