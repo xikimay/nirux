@@ -101,6 +101,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     var onSendSelectionShortcut: (() -> Void)?
     /// Esc that nothing in the page took (no widget, selection or find).
     var onEscapeKey: (() -> Void)?
+    /// It is its workspace's front column (`ColumnState.isFront`).
+    var isFront = false
 
     /// The edge of Monaco's text a Cmd+Arrow moves the caret to.
     enum TextEdge: String, CaseIterable {

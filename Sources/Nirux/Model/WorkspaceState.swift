@@ -997,14 +997,71 @@ extension WorkspaceState {
         if let front { return front }
         guard !isWaitingTask else { return nil }
         let col = ColumnState(editorWorkspaceCwd: workspaceCwd)
+        appendFront(col, returningTo: focusedIndex)
+        makeResizeHandle()
+        return col
+    }
+
+    /// `col`, out of the row, becomes the front column, down, coming back
+    /// to row column `index`.
+    private func appendFront(_ col: ColumnState, returningTo index: Int) {
         col.isFront = true
         col.widthFraction = ColumnWidth.twoThirds.fraction
         col.view.isHidden = true
-        frontReturnIndex = min(focusedIndex, max(rowCount - 1, 0))
         columns.append(col)
         frontHost.addFront(col.view)
-        makeResizeHandle()
-        return col
+        frontReturnIndex = min(index, max(rowCount - 1, 0))
+    }
+
+    /// The front column `col`, out of `columns`, goes into the row at
+    /// `index`, shown at once.
+    private func insertIntoRow(_ col: ColumnState, at index: Int, widthFraction: CGFloat) {
+        col.isFront = false
+        col.widthFraction = widthFraction
+        col.endPass()
+        col.view.isHidden = false
+        stripView.addSubview(col.view)
+        columns.insert(col, at: index)
+    }
+
+    /// The front column goes into the row after the column it came from,
+    /// at half the window, with the focus: the row makes room.
+    func dockFront() {
+        guard let front, let index = frontIndex else { return }
+        setFrontShown(false, duration: nil)
+        columns.remove(at: index)
+        let to = min(frontReturnIndex + 1, columns.count)
+        insertIntoRow(front, at: to, widthFraction: ColumnWidth.half.fraction)
+        focusedIndex = to
+    }
+
+    /// Row editor column `index` becomes the front column, down until the
+    /// shell brings it up; a front column there was takes its place in the
+    /// row, at its width. False when the row would lose its last column.
+    @discardableResult
+    func bringToFront(_ index: Int) -> Bool {
+        guard (0..<rowCount).contains(index), columns[index].isEditor, front != nil || openRowColumns.count > 1 else { return false }
+        setFrontShown(false, duration: nil)
+        let focused = columns[safe: focusedIndex]
+        let column = columns.remove(at: index)
+        if let old = front {
+            columns.removeLast()
+            insertIntoRow(old, at: index, widthFraction: column.widthFraction)
+        }
+        for view in [column.shadow, column.light] { view?.removeFromSuperview() }
+        column.shadow = nil
+        column.light = nil
+        column.endPass()
+        column.view.layer?.removeAnimation(forKey: ColumnState.glideKey)
+        appendFront(column, returningTo: index)
+        // The focus stays on its row column; from the one going up, it
+        // goes to the one now in its place.
+        if let focused, let at = columns.firstIndex(where: { $0 === focused }), at < rowCount {
+            focusedIndex = at
+        } else {
+            focusedIndex = frontReturnIndex
+        }
+        return true
     }
 
     /// The front column comes up over the row, or goes back down: the

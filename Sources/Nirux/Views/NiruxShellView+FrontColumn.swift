@@ -70,6 +70,39 @@ extension NiruxShellView {
         }
     }
 
+    /// Double-click on a column's header, Keep in Row and Bring to Centre:
+    /// the front column goes into the row, a row editor comes up as the
+    /// front one. False for any other column.
+    @discardableResult
+    func toggleColumnPlace(_ column: ColumnState, in workspace: WorkspaceState) -> Bool {
+        if column.isFront {
+            let moves = agentLightsMayMove && workspace === activeWorkspace
+            workspace.setFrontShown(false, duration: moves ? Self.closeDuration : nil)
+            workspace.dockFront()
+            relayout(animated: true)
+            updateSidebar()
+            arrive(column, in: workspace)
+            if workspace === activeWorkspace { focusActiveTerminal(in: window, editorTakesKeyboard: true) }
+            return true
+        }
+        guard column.isEditor, let index = workspace.columns.firstIndex(where: { $0 === column }),
+              workspace.bringToFront(index) else { return false }
+        showFront(in: workspace, takeKeyboard: true)
+        return true
+    }
+
+    /// A double-click on `header`, a column's of the active workspace.
+    func headerDoubleClicked(_ header: ColumnHeaderView) -> Bool {
+        guard let workspace = activeWorkspace,
+              let column = workspace.columns.first(where: { $0.header === header && !$0.isClosing }) else { return false }
+        return toggleColumnPlace(column, in: workspace)
+    }
+
+    func toggleFocusedColumnPlace() {
+        guard let workspace = activeWorkspace, let column = workspace.columns[safe: workspace.focusedIndex] else { return }
+        toggleColumnPlace(column, in: workspace)
+    }
+
     /// Esc in a front editor that nothing in it took sends the column back.
     func editorEscaped(_ editor: EditorColumn) {
         guard let workspace = workspaces.first(where: { $0.front?.editorColumn === editor }) else { return }

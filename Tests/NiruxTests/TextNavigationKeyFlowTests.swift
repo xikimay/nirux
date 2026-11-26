@@ -523,6 +523,62 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
+    /// A double-click on its header puts the front editor in the row after
+    /// the terminal it came from, with the keyboard; another brings it back
+    /// up as the front editor, the same editor on the same file.
+    func testFrontEditorGoesIntoTheRowAndBack() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let terminalIndex = workspace.focusedIndex
+            let rowCount = workspace.rowCount
+            shell.openInEditorColumn(path: harness.repo + "/README.md")
+            let column = try XCTUnwrap(workspace.front)
+            let editor = try XCTUnwrap(column.editorColumn)
+            let header = try XCTUnwrap(column.header)
+            let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+
+            XCTAssertTrue(shell.headerDoubleClicked(header))
+            XCTAssertNil(workspace.front)
+            XCTAssertEqual(workspace.rowCount, rowCount + 1)
+            XCTAssertIdentical(workspace.columns[safe: terminalIndex + 1], column)
+            XCTAssertEqual(workspace.focusedIndex, terminalIndex + 1)
+            XCTAssertIdentical(harness.window.firstResponder, webView, "in the row")
+
+            XCTAssertTrue(shell.headerDoubleClicked(header))
+            XCTAssertIdentical(workspace.front, column)
+            XCTAssertTrue(workspace.isFrontShown)
+            XCTAssertEqual(workspace.rowCount, rowCount)
+            XCTAssertEqual(editor.activePath, harness.repo + "/README.md")
+            XCTAssertIdentical(harness.window.firstResponder, webView, "back up")
+        }
+    }
+
+    /// Bring to Centre on a row editor while a front one waits: the two
+    /// swap, the front one taking the row editor's place and width.
+    func testRowEditorComesUpInTheFrontOnesPlace() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.openInEditorColumn(path: harness.repo + "/README.md")
+            let oldFront = try XCTUnwrap(workspace.front)
+            shell.toggleFront()
+            XCTAssertFalse(workspace.isFrontShown)
+            let (index, editor) = try addRowEditor(harness.repo + "/README.md", in: harness)
+            let row = try XCTUnwrap(workspace.columns[safe: index])
+            let width = row.widthFraction
+            let rowCount = workspace.rowCount
+
+            XCTAssertTrue(shell.headerDoubleClicked(try XCTUnwrap(row.header)))
+            XCTAssertIdentical(workspace.front, row)
+            XCTAssertTrue(workspace.isFrontShown)
+            XCTAssertIdentical(workspace.columns[safe: index], oldFront)
+            XCTAssertEqual(oldFront.widthFraction, width)
+            XCTAssertEqual(workspace.rowCount, rowCount)
+            XCTAssertIdentical(harness.window.firstResponder, UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+        }
+    }
+
     /// An agent's open for a task not on screen keeps the view and the
     /// keyboard: the pill waits on the task's sidebar row, whose click
     /// brings the front editor up with the keyboard.

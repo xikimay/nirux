@@ -10,13 +10,15 @@ extension EditorColumn {
         // Up the responder chain to the app, like the menu's item.
         searchButton.action = #selector(NiruxApp.showWorkspaceSearch(_:))
         header.trailingButtons = [diffButton, searchButton]
-        header.menuProvider = { Self.headerMenu() }
+        header.menuProvider = { [weak self] in Self.headerMenu(isFront: self?.isFront ?? false) }
         addSubview(header)
     }
 
-    /// The editor's ⋯ menu: its main-menu items, then the column's.
-    private static func headerMenu() -> NSMenu {
+    /// The editor's ⋯ menu: where it lies, its main-menu items, then the column's.
+    private static func headerMenu(isFront: Bool) -> NSMenu {
         let menu = NSMenu()
+        menu.addItem(ColumnHeaderView.columnItem(isFront ? "Keep in Row" : "Bring to Centre") { $0.toggleFocusedColumnPlace() })
+        menu.addItem(.separator())
         menu.addItem(ColumnHeaderView.columnItem("Save All", mainMenuAction: #selector(NiruxApp.saveAllInEditor(_:))) {
             $0.saveAllInEditor()
         })

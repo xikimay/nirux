@@ -217,6 +217,7 @@ final class ColumnHeaderView: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2, let shell, shell.headerDoubleClicked(self) { return }
         guard let shell, shell.dragColumn(withHeader: self, press: event) else { return super.mouseDown(with: event) }
     }
 
@@ -469,14 +470,15 @@ final class ColumnHeaderView: NSView {
         ]
     }
 
-    /// A ⋯ item doing to the header's column what `mainMenuAction` does to
-    /// the focused one (`perform`), with that main-menu item's shortcut.
+    /// A ⋯ item doing to the header's column what `mainMenuAction`, if
+    /// any, does to the focused one (`perform`), with that main-menu
+    /// item's shortcut.
     static func columnItem(
-        _ title: String, mainMenuAction: Selector, perform: @escaping @MainActor (NiruxShellView) -> Void
+        _ title: String, mainMenuAction: Selector? = nil, perform: @escaping @MainActor (NiruxShellView) -> Void
     ) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: #selector(runColumnCommand(_:)), keyEquivalent: "")
         item.representedObject = ColumnCommand(perform)
-        if let shortcut = NSApp?.mainMenu.flatMap({ Self.item(in: $0, action: mainMenuAction) }) {
+        if let mainMenuAction, let shortcut = NSApp?.mainMenu.flatMap({ Self.item(in: $0, action: mainMenuAction) }) {
             item.keyEquivalent = shortcut.keyEquivalent
             item.keyEquivalentModifierMask = shortcut.keyEquivalentModifierMask
         }

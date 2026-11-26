@@ -20,7 +20,9 @@ final class ColumnState {
     var webViewColumn: WebViewColumn?
     var editorColumn: EditorColumn?
     /// The workspace's front editor column (`WorkspaceState.front`), not one of its row.
-    var isFront = false
+    var isFront = false {
+        didSet { editorColumn?.isFront = isFront }
+    }
     /// The Project Board this column shows.
     private(set) var projectBoard: ProjectBoardController?
     /// The branch this column reviews.
