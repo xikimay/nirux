@@ -423,7 +423,9 @@ final class ColumnHeaderViewTests: XCTestCase {
         XCTAssertEqual(editor.header.context, "Sources/App")
         XCTAssertTrue(editor.diffButton.isEnabled)
         XCTAssertFalse(editor.diffButton.isOn)
-        XCTAssertEqual(editor.header.currentMenu().items.first?.title, "Save All")
+        XCTAssertEqual(editor.header.currentMenu().items.prefix(3).map(\.title), ["Bring to Centre", "", "Save All"])
+        editor.isFront = true
+        XCTAssertEqual(editor.header.currentMenu().items.first?.title, "Keep in Row")
     }
 
     func testEditorContextIsTheDirectoryInTheWorkspace() {

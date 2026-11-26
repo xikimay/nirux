@@ -20,7 +20,9 @@ final class ColumnState {
     var webViewColumn: WebViewColumn?
     var editorColumn: EditorColumn?
     /// The workspace's front editor column (`WorkspaceState.front`), not one of its row.
-    var isFront = false
+    var isFront = false {
+        didSet { editorColumn?.isFront = isFront }
+    }
     /// The Project Board this column shows.
     private(set) var projectBoard: ProjectBoardController?
     /// The branch this column reviews.
@@ -33,6 +35,9 @@ final class ColumnState {
     var widthFraction: CGFloat = ColumnWidth.half.fraction {
         didSet { if oldValue == ColumnWidth.full.fraction { unfitFraction = nil } }
     }
+    /// Its width in the row, kept while it is the front column
+    /// (`WorkspaceState.bringToFront`): it docks back at it.
+    var rowWidthFraction: CGFloat?
     /// The width a fit to the window (`toggleFit`) comes back to, while
     /// the column stays fitted.
     private(set) var unfitFraction: CGFloat?
