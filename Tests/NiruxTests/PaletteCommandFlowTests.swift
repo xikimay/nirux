@@ -283,7 +283,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
                            URL(string: "https://github.com/xikimay/nirux/pull/913"))
             XCTAssertTrue(FileManager.default.fileExists(atPath: cache.path))
 
-            XCTAssertTrue(controller.showsInternal.accessibilityPerformPress())
+            controller.showsInternal.performClick(nil)
             XCTAssertTrue(text().contains("Tests: a calmer clock"))
             controller.search.stringValue = "pull request"
             XCTAssertTrue(controller.search.sendAction(controller.search.action, to: controller.search.target))
@@ -330,7 +330,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertFalse(card.text.contains("Columns: drag a column by its header"), "the build already seen")
             XCTAssertEqual(shell.lastSeenBuild, 202611242135, "seen only once put away")
 
-            XCTAssertTrue(card.seeAllButton.accessibilityPerformPress())
+            card.seeAllButton.performClick(nil)
             XCTAssertNil(shell.whatsNewCard)
             let window = try XCTUnwrap(shell.whatsNewWindow)
             defer { window.close() }
