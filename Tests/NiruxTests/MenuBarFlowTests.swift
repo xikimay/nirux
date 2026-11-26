@@ -158,6 +158,11 @@ final class MenuBarFlowTests: XCTestCase {
             shell.onboardingState = .dismissed
             bar.run(["Help", "Getting Started"])
             XCTAssertEqual(shell.onboardingState, .pending)
+
+            bar.run(["Help", "What’s New"])
+            let whatsNew = try XCTUnwrap(shell.whatsNewWindow)
+            defer { whatsNew.close() }
+            XCTAssertTrue(whatsNew.window?.isVisible == true)
         }
     }
 }

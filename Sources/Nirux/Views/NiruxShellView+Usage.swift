@@ -12,9 +12,7 @@ extension NiruxShellView {
         refreshTaskBudgets()
         monitor.onReport = { [weak self] report in
             self?.refreshTaskBudgets()
-            if let self, let window = usageWindow, window.window?.isVisible == true {
-                window.update(report: report, names: usageNames())
-            }
+            if let self, usageWindow?.window?.isVisible == true { updateUsageWindow() }
             self?.startColdLeadsAfresh(now: report.generatedAt)
             onReport(report)
         }
@@ -34,12 +32,16 @@ extension NiruxShellView {
     /// Its row's usage; a task's has its space's budget, unless the user let
     /// it pass for now (`budgetPassedAt`); a Lead's or a plain workspace's none.
     func taskUsage(of workspace: WorkspaceState) -> SidebarTaskUsage? {
-        usageMonitor?.report.flatMap {
-            SidebarTaskUsage(
-                $0, taskID: workspace.id,
+        usageMonitor?.report.flatMap { report in
+            var usage = SidebarTaskUsage(
+                report, taskID: workspace.id,
                 budget: Self.isTask(workspace) && !workspace.passesBudget(at: Date().timeIntervalSince1970)
                     ? taskBudgets[workspace.profileID] : nil
             )
+            if workspace.isLead, report.week.total.weightedTokens > 0 {
+                usage?.spaceWeekShare = (report.week.spaces[workspace.profileID]?.weightedTokens ?? 0) / report.week.total.weightedTokens
+            }
+            return usage
         }
     }
 
@@ -182,10 +184,29 @@ extension NiruxShellView {
         }
     }
 
+    /// The report and the limits now; Claude's weekly readings once read
+    /// off the main thread: up to 8 days of them.
+    func updateUsageWindow() {
+        guard let usageWindow else { return }
+        usageWindow.update(report: usageMonitor?.report, names: usageNames())
+        updateUsageWindowLimits()
+        guard let folder = usageWindowQuota?()?.readings else { return usageWindow.update(weekReadings: []) }
+        let since = Date().timeIntervalSince1970 - Double(QuotaReadingLog.keptDays) * 86_400
+        Task { [weak usageWindow] in
+            let week = await Task.detached { QuotaReadingLog.read(in: folder, since: since)["seven_day"] ?? [] }.value
+            usageWindow?.update(weekReadings: week)
+        }
+    }
+
+    /// The limits alone, as the title bar's monitor judges them.
+    func updateUsageWindowLimits() {
+        usageWindow?.update(limits: usageWindowQuota?()?.limits ?? [])
+    }
+
     func showUsageWindow() {
         let controller = usageWindow ?? UsageWindowController()
         usageWindow = controller
-        controller.update(report: usageMonitor?.report, names: usageNames())
+        updateUsageWindow()
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
     }
@@ -314,6 +335,9 @@ extension NiruxShellView {
     func takeContextOffer(_ choice: ContextOffer.Choice, workspaceIndex: Int, columnIndex: Int) {
         guard let workspace = workspaces[safe: workspaceIndex], let column = workspace.columns[safe: columnIndex],
               let uuid = column.agentUUID, let pty = column.pty else { return }
+        // The user's own choice replaces a queued "Compact at turn end",
+        // whether or not it goes through.
+        compactsAtTurnEnd[column.id] = nil
         let foreground = pty.foregroundProcess(snapshot: ProcessSnapshot())
         let action = ContextOfferAction.of(
             choice, hasDraft: pty.hasPromptDraft, isLead: workspace.isLead,
@@ -323,7 +347,6 @@ extension NiruxShellView {
         case .refuse(let message):
             showToast(message, tone: .error)
         case .typeCompact:
-            compactsAtTurnEnd[column.id] = nil
             guard case .sent = sendTypedPrompt(agentUUID: uuid, prompt: "/compact") else {
                 return showToast("Couldn’t type /compact: claude’s prompt isn’t free.", tone: .error)
             }

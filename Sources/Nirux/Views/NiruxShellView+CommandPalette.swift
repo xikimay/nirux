@@ -81,6 +81,15 @@ extension NiruxShellView {
                 self?.showUsageWindow()
             },
             PaletteAction(
+                icon: .symbol("sparkles"), title: "What’s New", subtitle: "What the nightlies brought, by build", shortcut: nil,
+                // A typed ' never matches ’.
+                ranking: PaletteRanking.Candidate(
+                    title: "What’s New", keys: ["What's New", "What the nightlies brought, by build", "changelog", "release notes"]
+                )
+            ) { [weak self] in
+                self?.showWhatsNewWindow()
+            },
+            PaletteAction(
                 icon: .symbol("plus.forwardslash.minus"), title: "Toggle Editor Diff", subtitle: "Show the diff for the active editor file",
                 shortcut: .toggleEditorDiff
             ) { [weak self] in
@@ -105,7 +114,16 @@ extension NiruxShellView {
                 self.requestRestartLead(spaceID: self.activeProfileID)
             }
         ]
-        return restartLead + CodingAgent.launchable.map { agent in
+        let promote = activeWorkspace.flatMap { offersLeadPromotion($0) ? $0 : nil }.map { task in
+            [PaletteAction(
+                icon: .agent(.claude), title: Self.promoteToLeadTitle,
+                subtitle: "Make “\(task.title)”’s conversation the space’s Lead, in the space’s checkout", shortcut: nil
+            ) { [weak self, weak task] in
+                guard let self, let task else { return }
+                self.requestLeadPromotion(of: task)
+            }]
+        } ?? []
+        return restartLead + promote + CodingAgent.launchable.map { agent in
             PaletteAction(
                 icon: .agent(agent), title: "Open \(agent.productName)",
                 subtitle: "Launch \(agent.fullName) in a new terminal", shortcut: nil

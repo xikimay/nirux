@@ -94,6 +94,7 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         webView.setValue(false, forKey: "drawsBackground")
         // Pinch to zoom the page's text.
         webView.allowsMagnification = true
+        webView.bouncesOnlyVertically()
         webView.underPageBackgroundColor = Theme.Color.canvas
         addSubview(webView)
         addSubview(header)
@@ -369,6 +370,12 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
     }
 
     // MARK: - WKUIDelegate
+
+    /// A scroll the page didn't handle goes on to the strip (`StripSwipe`).
+    @objc(_webView:didNotHandleWheelEvent:)
+    func webView(_ webView: WKWebView, didNotHandleWheelEvent event: NSEvent) {
+        webView.passOnUnhandled(event)
+    }
 
     /// A link that asks for a new window opens in the browser.
     func webView(

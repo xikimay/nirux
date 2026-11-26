@@ -1,12 +1,10 @@
 name: Canary kept traces
 
 # The explorer's kept traces (scripts/canary/traces), replayed without a model in a hidden copy
-# once a night on main: each one reproduced a bug that was fixed, so a finding is that bug back.
-# Nightly, not per merge: macOS runners are the bottleneck and trains merge several times a day.
+# built from a pull request that changes them, before it merges: each one reproduced a bug that
+# was fixed, so a finding is that bug back. canary-night.yml replays them every night on the
+# nightly build.
 on:
-  schedule:
-    - cron: "0 3 * * *"
-  # A change to this workflow or to the kept traces runs it before it merges.
   pull_request:
     paths:
       - ".github/workflows/canary-traces.yml"

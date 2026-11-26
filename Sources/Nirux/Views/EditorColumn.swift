@@ -6,7 +6,7 @@ import WebKit
 /// has its own Monaco model on the JS side, and the tab bar under the
 /// column header lets the user switch between them.
 @MainActor
-final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
+final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
     let workspaceCwd: String
 
     /// Tabs in display order. Real files map 1:1 to Monaco models; virtual
@@ -244,8 +244,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private func setupWebView(config: WKWebViewConfiguration) {
         config.userContentController.add(self, name: "nirux")
         webView.navigationDelegate = self
+        webView.uiDelegate = self
+        webView.bouncesOnlyVertically()
         webView.setValue(false, forKey: "drawsBackground")
-        webView.underPageBackgroundColor = Theme.Color.base
+        webView.underPageBackgroundColor = Theme.Color.surface
         addSubview(webView)
 
         // Conflict banner floats over the editor surface — added last so it
@@ -1283,6 +1285,14 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             drainSaveRequests()
             showLoadFailure(message: "The editor process crashed.", showRetry: true)
         }
+    }
+
+    // MARK: - WKUIDelegate
+
+    /// A scroll the page didn't handle goes on to the strip (`StripSwipe`).
+    @objc(_webView:didNotHandleWheelEvent:)
+    func webView(_ webView: WKWebView, didNotHandleWheelEvent event: NSEvent) {
+        webView.passOnUnhandled(event)
     }
 
     // MARK: - WKScriptMessageHandler

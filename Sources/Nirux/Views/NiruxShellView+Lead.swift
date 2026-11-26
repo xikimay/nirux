@@ -26,16 +26,17 @@ extension NiruxShellView {
     /// workspace opens on top of the space and takes the focus, its agent
     /// started, the Board beside it unless the space shows its Board in
     /// another workspace (one Board per space). One Lead per space: a space
-    /// that has one focuses it.
-    func startLead(spaceID: String) {
+    /// that has one focuses it. `startsAgent` false: its column waits for
+    /// the caller's launch.
+    func startLead(spaceID: String, startsAgent: Bool = true) {
         guard Self.spaceCanHaveLead(spaceID), profiles.contains(where: { $0.id == spaceID }) else { return }
         if let lead = leadWorkspace(inSpace: spaceID) { return focusLead(lead) }
         let defaults = SpaceDefaultsStore.defaults(forSpace: spaceID)
         addWorkspace(
             title: Self.leadTitle,
             cwd: defaultFolder(forSpace: spaceID),
-            agent: defaults.preferredLeadAgent,
-            agentModel: defaults.leadModel(for: defaults.preferredLeadAgent),
+            agent: startsAgent ? defaults.preferredLeadAgent : nil,
+            agentModel: startsAgent ? defaults.leadModel(for: defaults.preferredLeadAgent) : nil,
             profileID: spaceID,
             // Names its Claude session "Lead · <space>" (see SessionName).
             worktreeBranch: Self.leadTitle,
@@ -87,6 +88,7 @@ extension NiruxShellView {
     /// may carry a handover after it.
     nonisolated static func isLeadRestart(prompt: String?, agent: CodingAgent) -> Bool {
         prompt?.hasPrefix(leadRestartPrompt(for: agent)) == true || prompt == leadRelaunchPrompt(for: agent)
+            || prompt?.hasPrefix(leadPromotionPrompt) == true
     }
 
     nonisolated static func leadRestartPrompt(for agent: CodingAgent) -> String {
@@ -169,10 +171,12 @@ extension NiruxShellView {
     }
 
     /// `handover`: lines after a fresh conversation's restart prompt.
+    /// `resumePrompt`: a resumed conversation's, in place of the relaunch's.
     /// `focus`: the Lead comes to the front, as for the user's restart.
     /// `launched`: whether its new agent started.
     func restartLead(
-        _ lead: WorkspaceState, agent: CodingAgent, resuming sessionID: String? = nil, handover: [String] = [], focus: Bool = true,
+        _ lead: WorkspaceState, agent: CodingAgent, resuming sessionID: String? = nil, resumePrompt: String? = nil,
+        handover: [String] = [], focus: Bool = true,
         launched: @escaping (Bool) -> Void = { _ in }
     ) {
         let file = agent == .claude ? claudeSpaceSettingsFile(for: lead) : nil
@@ -188,7 +192,8 @@ extension NiruxShellView {
         let command = freshAgentCommand(
             launch, in: lead, launchDirectory: lead.leadTerminal?.launchDirectory.flatMap(Self.existingDirectory) ?? lead.cwd, worktreeBranch: Self.leadTitle,
             handoverPrompt: sessionID == nil
-                ? ([Self.leadRestartPrompt(for: agent)] + handover).joined(separator: "\n") : Self.leadRelaunchPrompt(for: agent),
+                ? ([Self.leadRestartPrompt(for: agent)] + handover).joined(separator: "\n")
+                : resumePrompt ?? Self.leadRelaunchPrompt(for: agent),
             settingsFiles: file.map { [lead.profileID: $0] } ?? [:]
         )
         defer {
@@ -204,6 +209,7 @@ extension NiruxShellView {
             lead.addColumn(agentUUID: lead.leadAgentUUID ?? reportedTo ?? UUID().uuidString)
             guard let column = lead.columns[safe: lead.focusedIndex] else { return launched(false) }
             lead.leadAgentUUID = column.agentUUID
+            column.handedClaudeSessionID = agent == .claude ? sessionID : nil
             relayout(animated: false)
             column.recordLeadSafety(file: file)
             sideEffects.launchAgent(column, command)
@@ -218,8 +224,10 @@ extension NiruxShellView {
                   canRelaunchLeadSession(sessionID, agent: agent, in: column) else { return launched(false) }
             column.relaunchingLeadSessionID = sessionID
         }
+        column.handedClaudeSessionID = agent == .claude ? sessionID : nil
         refreshLaunch(of: column, in: lead)
-        let started = { (started: Bool) -> Bool in
+        let started = { [weak column] (started: Bool) -> Bool in
+            if !started { column?.handedClaudeSessionID = nil }
             launched(started)
             return started
         }

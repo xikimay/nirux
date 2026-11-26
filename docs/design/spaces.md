@@ -250,6 +250,20 @@ New flow, built on the guarded typing `tell` already uses
   an initial prompt so it can establish which thread receives Mission messages. A manual
   Codex session can receive queued messages once its launch prompt or resume ID proves the
   thread. A bare Codex can collect a pending child event with `"$NIRUX_CLI_PATH" --mission receive`.
+- **Promote to Lead…** (a task's ⋯ menu, ⌘P) hands a Claude task's conversation to
+  its space's Lead column: the task's Claude ends, then `claude --resume` runs in the
+  Lead's column and checkout with the Lead's agent UUID, environment and launch options,
+  so the Lead's Missions follow it. A resumed Claude keeps the system prompt it recorded
+  (the space brief, the same for both) until it compacts, so its first prompt says where
+  it works now; its MCP tools and instructions come from the new launch. The task's own
+  Missions end without typing anything more, and it keeps its worktree, branch, pull
+  request and row; its sub-tasks' Missions report to the Lead's agent, and they list among
+  the Lead's tasks. Only at rest, never a sub-task. A Codex or Antigravity task's Lead
+  starts afresh with that agent and the task's handover (an Antigravity conversation keeps
+  running in its first folder; a resumed Codex thread can't be told the Lead's role), and
+  the task keeps its worker, told in one line that its sub-tasks moved. From the
+  hand-over on, the Lead's column saves the conversation it resumes, so a quit while
+  its previous session ends resumes the promoted one.
   Antigravity reports turn state through OSC 7501. Its CLI rejects `mcpServers` in
   `--settings` and exposes server configuration through the persistent `agy mcp` commands.
   A Lead without MCP can answer with `"$NIRUX_CLI_PATH" --mission reply --event <id> --message "<answer>"`.
@@ -336,7 +350,9 @@ New flow, built on the guarded typing `tell` already uses
     landed; a task's instructions say to merge the base only then. The default
     protects the user's prepared list. When the
     user requests a replacement, an opted-in Lead can pass `replace: true`.
-    The same preflight checks the requested order and cadence. A proposal that
+    The same preflight checks the requested order and cadence. In a train, a
+    pull request's own head needs none of the required checks, only none red:
+    the train runs them on its code. A proposal that
     needs manual review opens the confirmation sheet. An open sheet, a running
     queue or a selection changed during preflight prevents replacement.
   - `merge_queue_status(repo?)` reports the phase, cadence, current step,

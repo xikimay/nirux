@@ -99,7 +99,7 @@ extension MergeQueue {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-        return "nirux-train/" + formatter.string(from: date)
+        return MergeTrain.branchPrefix + formatter.string(from: date)
     }
 }
 
@@ -303,7 +303,7 @@ extension MergeQueue.Engine {
                 drop(index, conflict(pullRequest))
                 continue
             }
-            let verdict = MergeQueue.judge(checks, required: [])
+            let verdict = MergeQueue.candidateVerdict(checks, settings: settings, cadence: cadence)
             if let refusal = trainRefusal(verdict, entry: entry, url: pullRequest.url) { return stop(refusal, on: index) }
             locals.append((index: index, local: local))
         }

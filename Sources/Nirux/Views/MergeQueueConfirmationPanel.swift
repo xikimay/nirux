@@ -218,7 +218,7 @@ final class MergeQueueConfirmationPanel: NSObject {
                 for note in item.notes {
                     add(note, color: Self.secondaryText, font: Theme.Font.caption, indent: 34, trailing: 90, gap: 2)
                 }
-                for warning in item.warnings {
+                for warning in item.warnings(in: confirmation.cadence) {
                     add(warning.asWarning, color: Self.warningColor, font: Theme.Font.caption, indent: 34, trailing: 90,
                         gap: 2)
                 }

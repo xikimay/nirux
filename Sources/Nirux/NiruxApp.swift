@@ -293,6 +293,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     private func setupStatusBarNotices() {
         setupUpdater()
         checkForCrashReports()
+        shell?.startWhatsNewAfterUpdate()
     }
 
     /// The main screen's visible area, inset by 50 pt.

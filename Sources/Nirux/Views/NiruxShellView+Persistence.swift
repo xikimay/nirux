@@ -253,9 +253,9 @@ extension NiruxShellView {
         // Clamp into the drag bounds: a hand-edited or corrupt widthPreset
         // must not restore an invisible sliver or an over-wide column.
         let fraction = CGFloat(persistedColumn.widthPreset)
-        workspace.columns.last?.widthFraction = min(
-            WorkspaceState.maxWidthFraction,
-            max(WorkspaceState.minWidthFraction, fraction)
+        workspace.columns.last?.restoreWidth(
+            min(WorkspaceState.maxWidthFraction, max(WorkspaceState.minWidthFraction, fraction)),
+            unfit: persistedColumn.unfitPreset.map { CGFloat($0) }
         )
     }
 
@@ -398,7 +398,7 @@ extension NiruxShellView {
                 PersistedWorkspace(
                     id: workspace.id, title: workspace.title,
                     cwd: Self.persistedWorkspaceCwd(for: workspace),
-                    columns: workspace.columns.filter { $0.waitingTask == nil }.map { persistedColumn($0, in: workspace, snapshot: snapshot) },
+                    columns: persistedColumns(of: workspace, snapshot: snapshot),
                     focusedColumnIndex: workspace.focusedIndex,
                     profileID: workspace.profileID,
                     isInactive: workspace.isInactive,
@@ -440,6 +440,14 @@ extension NiruxShellView {
         )
     }
 
+    private func persistedColumns(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> [PersistedColumn] {
+        workspace.columns.filter { $0.waitingTask == nil }.map { column in
+            var persisted = persistedColumn(column, in: workspace, snapshot: snapshot)
+            persisted.unfitPreset = column.unfitFraction.map(Double.init)
+            return persisted
+        }
+    }
+
     private func persistedColumn(
         _ col: ColumnState,
         in workspace: WorkspaceState,
@@ -475,8 +483,8 @@ extension NiruxShellView {
             }
             col.restoredColumn = nil
         }
-        let kind: ColumnKind
-        let webURL: String?
+        var kind: ColumnKind
+        var webURL: String?
         var editorOpenFiles: [String]?
         var editorActiveFile: String?
         var claudeMode: ClaudeLaunchMode?
@@ -509,6 +517,15 @@ extension NiruxShellView {
             }
         } else {
             kind = .terminal; webURL = nil
+        }
+        if let handed = col.handedClaudeSessionID {
+            if claudeRestore?.sessionID == handed {
+                col.handedClaudeSessionID = nil
+            } else {
+                kind = .claudeCode
+                webURL = nil
+                claudeRestore = .resume(handed)
+            }
         }
         // What the column says next launch, until its agent resumes.
         let isAgent = [.claudeCode, .codex, .agy].contains(kind)

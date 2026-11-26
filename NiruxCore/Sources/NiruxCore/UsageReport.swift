@@ -74,6 +74,9 @@ public struct UsageReport: Equatable, Sendable {
     /// Claude's weighted tokens over the last `burnSpan`, by task ID; "" for
     /// sessions outside tasks.
     public var claudeBurn: [String: Double]
+    /// Claude's weighted tokens day by day (as `days`), by task ID; "" for
+    /// sessions outside tasks: how each day's rise of its weekly limit splits.
+    public var claudeDayTasks: [[String: Double]]
 
     public static let burnSpan: TimeInterval = 30 * 60
 
@@ -123,6 +126,14 @@ public struct UsageReport: Equatable, Sendable {
         }
         claudeMinutes = minutes
         claudeBurn = burn
+        var dayTasks = Array(repeating: [String: Double](), count: starts.count)
+        for session in sessions where session.key.agent == .claude {
+            for event in session.events where event.timestamp >= starts[0] {
+                guard let index = starts.lastIndex(where: { $0 <= event.timestamp }) else { continue }
+                dayTasks[index][session.attribution.taskID ?? "", default: 0] += event.counts.weighted(model: event.model)
+            }
+        }
+        claudeDayTasks = dayTasks
     }
 
     private static func dayStarts(now: TimeInterval, calendar: Calendar) -> [TimeInterval] {

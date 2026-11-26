@@ -28,7 +28,12 @@ final class ColumnState {
     /// Column width as a fraction of the columns viewport (0.15…2.0).
     /// Freeform (drag the resize handles); the ColumnWidth presets are just
     /// named stops the width cycler snaps to.
-    var widthFraction: CGFloat = ColumnWidth.half.fraction
+    var widthFraction: CGFloat = ColumnWidth.half.fraction {
+        didSet { if oldValue == ColumnWidth.full.fraction { unfitFraction = nil } }
+    }
+    /// The width a fit to the window (`toggleFit`) comes back to, while
+    /// the column stays fitted.
+    private(set) var unfitFraction: CGFloat?
     private(set) var pty: PtySession?
     /// Close in flight: ⌘W removes the column after its exit animation.
     var isClosing = false
@@ -118,6 +123,10 @@ final class ColumnState {
 
     /// Session History treats this column as the holder while the old Lead is stopping.
     var relaunchingLeadSessionID: String?
+    /// A Claude conversation this column was handed to resume (a Lead
+    /// relaunched or promoted): saves name it until its `claude` holds it,
+    /// so a quit meanwhile resumes it rather than the session it replaces.
+    var handedClaudeSessionID: String?
     var leadSafetyAtLaunch: ClaudeSpaceSettings.File?
     /// Spec needed to respawn the shell after it exits.
     private var terminalSpec: (cwd: String, shellArgs: [String], environment: [String: String])?
@@ -598,6 +607,18 @@ final class ColumnState {
         NiruxDebugLog.log("cycleWidth -> \(widthFraction)")
     }
 
+    /// Fills the window or, filling it, goes back to the width it had
+    /// (`ColumnWidth.fitToggled`).
+    func toggleFit() {
+        (widthFraction, unfitFraction) = ColumnWidth.fitToggled(widthFraction, unfit: unfitFraction)
+    }
+
+    /// A saved width, and the one its fit comes back to.
+    func restoreWidth(_ fraction: CGFloat, unfit: CGFloat?) {
+        widthFraction = fraction
+        unfitFraction = fraction == ColumnWidth.full.fraction ? unfit : nil
+    }
+
     /// AgentHookCenter entry point: the agent in this column just asked for
     /// attention — forward to the workspace-level notification wiring.
     func notifyAgentAttention(reason: AgentAttentionReason?) {
@@ -985,6 +1006,12 @@ extension ColumnState: TerminalSurfaceHoverLinkDelegate {
 
 enum ColumnWidth: CaseIterable {
     case full, twoThirds, half, third, quarter
+
+    /// A fit's width, and the one to come back to: a column filling the
+    /// window goes back to `unfit` (half without one); any other fills it.
+    static func fitToggled(_ fraction: CGFloat, unfit: CGFloat?) -> (fraction: CGFloat, unfit: CGFloat?) {
+        abs(fraction - full.fraction) < 0.001 ? (unfit ?? half.fraction, nil) : (full.fraction, fraction)
+    }
 
     var fraction: CGFloat {
         switch self {

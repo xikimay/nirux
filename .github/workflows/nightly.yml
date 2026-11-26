@@ -13,6 +13,8 @@ concurrency:
 
 permissions:
   contents: write
+  # The changelog reads the pull requests that landed.
+  pull-requests: read
 
 jobs:
   build:
@@ -248,17 +250,38 @@ jobs:
 
           ./scripts/generate-appcast.sh "$VERSION" "$BUILD_NUMBER" "$SIGNATURE" "$LENGTH" "$RELEASE_TAG"
 
+      # The pull requests that landed, which Nirux shows after an update. It
+      # never holds the build up: without it the release lists the commits,
+      # and the next nightly continues from the last changelog published.
+      - name: Write the changelog
+        id: changelog
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          START=$(git rev-parse -q --verify 'nightly^{commit}' || git rev-parse HEAD~20)
+          ./scripts/nightly-changelog.sh "$START" "$BUILD_NUMBER" "$RUNNER_TEMP/changelog"
+
       - name: Write release notes
+        env:
+          CHANGELOG_OUTCOME: ${{ steps.changelog.outcome }}
         run: |
           # Capture the previous nightly's commit BEFORE the rolling tag moves —
-          # the changelog diffs against it.
+          # the commit list diffs against it.
           PREV_SHA=$(git rev-parse -q --verify 'nightly^{commit}' || echo "")
           if [ -n "$PREV_SHA" ]; then
             RANGE="$PREV_SHA..HEAD"
           else
             RANGE="HEAD~20..HEAD"
           fi
-          CHANGELOG=$(git log --pretty=format:'- %s (%h)' --no-merges "$RANGE" || echo "- maintenance")
+          if [ "$CHANGELOG_OUTCOME" = success ]; then
+            CHANGELOG=$(cat "$RUNNER_TEMP/changelog/notes.md")
+            echo "CHANGELOG_FILE=$RUNNER_TEMP/changelog/changelog.json" >> "$GITHUB_ENV"
+          else
+            echo "::error title=Changelog::No changelog for this build; the release lists commits instead."
+            CHANGELOG=$(git log --pretty=format:'- %s (%h)' --no-merges "$RANGE" || echo "- maintenance")
+          fi
           if [ -z "$CHANGELOG" ]; then
             CHANGELOG="- maintenance"
           fi
@@ -305,6 +328,12 @@ jobs:
             --prerelease \
             Nirux.app.zip \
             appcast.xml
+          # Without its dated copy, the rolling release keeps the previous
+          # changelog too: the next nightly continues from that one.
+          if [ -n "${CHANGELOG_FILE:-}" ] && ! gh release upload "$RELEASE_TAG" "$CHANGELOG_FILE"; then
+            echo "::error title=Changelog::Could not attach changelog.json to $RELEASE_TAG."
+            echo "CHANGELOG_FILE=" >> "$GITHUB_ENV"
+          fi
 
       - name: Update rolling nightly release
         env:
@@ -321,6 +350,11 @@ jobs:
               --notes-file "$NOTES_FILE" \
               --prerelease
             gh release upload nightly Nirux.app.zip --clobber
+            # Before the appcast: an install that sees this build finds its entries.
+            if [ -n "${CHANGELOG_FILE:-}" ]; then
+              gh release upload nightly "$CHANGELOG_FILE" --clobber \
+                || echo "::error title=Changelog::Could not attach changelog.json to nightly."
+            fi
             gh release upload nightly appcast.xml --clobber
             git push --force origin "$GITHUB_SHA:refs/tags/nightly"
           else
@@ -331,6 +365,10 @@ jobs:
               --prerelease \
               Nirux.app.zip \
               appcast.xml
+            if [ -n "${CHANGELOG_FILE:-}" ]; then
+              gh release upload nightly "$CHANGELOG_FILE" \
+                || echo "::error title=Changelog::Could not attach changelog.json to nightly."
+            fi
           fi
 
       - name: Prune old dated nightly releases

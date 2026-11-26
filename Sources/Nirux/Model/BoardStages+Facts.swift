@@ -25,6 +25,8 @@ extension BoardStages {
         var reviewRequest: ReviewRequest?
         var flakyReason: String?
         var cleanUp: CleanUp?
+        /// Its merged pull request, against the running nightly.
+        var shipping: ChangelogStore.Shipping?
         /// How its stopped agent can go on, as the sidebar offers it.
         var resume: Resume?
         /// The pull request of this repository its own detection says
@@ -261,6 +263,7 @@ extension BoardStages {
             ?? (facts.pullRequest?.isMerged == true && row.canCleanUp ? .offered : nil)
         // One that runs, as its path says: the phrase and "Merged today" say so too.
         if facts.cleanUp != nil, facts.folder?.isCleaningUp == true { facts.cleanUp = .running }
+        facts.shipping = isAboutRow ? reading.shipping : nil
         return facts
     }
 
@@ -331,6 +334,7 @@ extension BoardStages {
             || pullRequest.baseRefName == repository.baseBranch
         // Merged: its checks no longer hold anything, and none is named.
         let latest = isMerged ? [] : GitHub.latest(pullRequest.checks)
+        let required = MergeQueue.selectedStandIns(repository.requiredChecks) { name in latest.contains { $0.matches(name) } }
         let request: ReviewRequest?
         switch pullRequest.reviewDecision {
         case "CHANGES_REQUESTED": request = .changesRequested
@@ -344,9 +348,9 @@ extension BoardStages {
             mergeabilityUnknown: !isMerged && !pullRequest.isConflicting && pullRequest.mergeable != "MERGEABLE",
             isConflicting: pullRequest.isConflicting,
             base: pullRequest.baseRefName ?? repository.baseBranch ?? "", isOnBaseBranch: isOnBaseBranch,
-            checks: isMerged ? .passed : checks(latest: latest, required: repository.requiredChecks),
+            checks: isMerged ? .passed : checks(latest: latest, required: required),
             reviewRequest: request, stack: stack, url: pullRequest.url,
-            checkLines: isMerged ? [] : checkLines(latest: latest, required: repository.requiredChecks)
+            checkLines: isMerged ? [] : checkLines(latest: latest, required: required)
         )
     }
 
