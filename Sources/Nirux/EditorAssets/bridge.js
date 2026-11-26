@@ -933,6 +933,11 @@
       case "toggleMinimap": toggleMinimap(); break;
       case "getSelection": reportSelection(msg.requestID); break;
       case "moveCaretToTextEdge": moveCaretToTextEdge(msg.edge); break;
+      case "takeKeyboard":
+        // Opened without the keyboard, nothing has the page's focus yet.
+        var focused = document.activeElement;
+        if ((!focused || focused === document.body) && diffMode !== "pierre" && diffMode !== "pierre-group") activeEditor().focus();
+        break;
       case "textEdgeDestinations":
         textEdgeDestinations = { left: !!msg.left, right: !!msg.right, up: !!msg.up, down: !!msg.down };
         break;
