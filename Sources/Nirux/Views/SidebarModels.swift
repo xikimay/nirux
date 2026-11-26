@@ -356,6 +356,8 @@ struct WorkspaceInfo: Hashable {
     var station: BoardStages.Station? { currentBoardProgress?.station }
     /// What the card shows after "#N merged"; nil shows nothing.
     var mergedCleanup: MergedCleanupOffer?
+    /// Its merged pull request, against the running nightly.
+    var shipping: ChangelogStore.Shipping?
     /// The space's Lead: first, never moved, dragged or parked.
     var isLead = false
     /// The task this one is listed under (a sub-task, or a Mission child):

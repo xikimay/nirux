@@ -39,6 +39,23 @@ public final class ChangelogStore {
         repository.appendingPathComponent("pull/\(number)")
     }
 
+    /// Where a merged pull request stands against the running nightly.
+    public enum Shipping: Equatable, CaseIterable, Sendable {
+        case inYourBuild, inNewerNightly
+
+        public var words: String { self == .inYourBuild ? "in your build" : "in a newer nightly" }
+    }
+
+    /// Nil for a pull request of another repository, one the changelog
+    /// doesn't list (yet), or a build that isn't a nightly.
+    public func shipping(ofPullRequestAt url: String, installedBuild: Int) -> Shipping? {
+        let prefix = repository.absoluteString + "/pull/"
+        guard Changelog.date(ofBuild: installedBuild) != nil, url.hasPrefix(prefix), let number = Int(url.dropFirst(prefix.count)),
+              let build = changelog?.entries.first(where: { $0.pullRequest == number })?.build
+        else { return nil }
+        return build <= installedBuild ? .inYourBuild : .inNewerNightly
+    }
+
     /// Fetches the published changelog, one fetch at a time, and keeps it on
     /// disk; `onChange` follows either way.
     @discardableResult

@@ -20,6 +20,20 @@ struct ChangelogStoreTests {
         #expect(withoutFeed == nil && elsewhere == nil)
     }
 
+    @Test func aMergedPullRequestSaysWhetherItIsInTheRunningBuild() async throws {
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let data = try JSONEncoder().encode(published)
+        let made = ChangelogStore(feed: Self.feed, cache: cache, load: { _ in data }, onChange: {})
+        let store = try #require(made)
+        await store.refresh().value
+        let url = "https://github.com/xikimay/nirux/pull/913"
+        #expect(store.shipping(ofPullRequestAt: url, installedBuild: 202611251854) == .inYourBuild)
+        #expect(store.shipping(ofPullRequestAt: url, installedBuild: 202611242135) == .inNewerNightly)
+        #expect(store.shipping(ofPullRequestAt: url, installedBuild: 0) == nil, "a development build")
+        #expect(store.shipping(ofPullRequestAt: "https://github.com/xikimay/nirux/pull/914", installedBuild: 202611251854) == nil)
+        #expect(store.shipping(ofPullRequestAt: "https://github.com/acme/nirux/pull/913", installedBuild: 202611251854) == nil)
+    }
+
     @Test func aFetchIsKeptForTheNextLaunch() async throws {
         defer { try? FileManager.default.removeItem(at: cache) }
         let data = try JSONEncoder().encode(published)
