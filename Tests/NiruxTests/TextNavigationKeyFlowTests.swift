@@ -481,7 +481,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             let terminal = try XCTUnwrap(workspace.columns[safe: terminalIndex]?.terminalView)
             harness.window.makeFirstResponder(terminal)
             let row = workspace.columnFrames
-            shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
+            shell.openEditorFromURL(try agentOpen(harness.repo + "/" + UIFlowHarness.searchTarget, in: workspace))
             let front = try XCTUnwrap(workspace.front)
             XCTAssertTrue(workspace.isFrontShown)
             XCTAssertFalse(front.view.isHidden)

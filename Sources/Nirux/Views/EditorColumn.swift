@@ -48,6 +48,11 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         case disk
     }
     private var diffModeByPath: [String: EditorDiffMode] = [:]
+    /// Markdown tabs shown rendered. One opened in the front editor starts
+    /// so, one opened in the row as source; the header's toggle changes it,
+    /// and a diff, ⌘F or an open at a line ends it. It stays with the tab as
+    /// the column moves.
+    private(set) var renderedPaths: Set<String> = []
     private(set) var diffGroupTabs: [String: DiffGroupTab] = [:]
     /// The title of the active tab when it shows several files' diff.
     var activeDiffGroupTitle: String? { activePath.flatMap { diffGroupTabs[$0]?.title } }
@@ -103,6 +108,11 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     var onEscapeKey: (() -> Void)?
     /// It is its workspace's front column (`ColumnState.isFront`).
     var isFront = false
+    /// A web link clicked in a rendered tab.
+    var onOpenLink: ((URL) -> Void)?
+    /// Where Copy Draft puts the text.
+    var pasteboard = NSPasteboard.general
+    private var copiedFlashGeneration = 0
 
     /// The edge of Monaco's text a Cmd+Arrow moves the caret to.
     enum TextEdge: String, CaseIterable {
@@ -145,6 +155,11 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     let header = ColumnHeaderView()
     let diffButton = ColumnHeaderButton(symbol: Theme.Symbol.diff, toolTip: "Toggle Editor Diff")
     let searchButton = ColumnHeaderButton(symbol: Theme.Symbol.search, toolTip: "Search Workspace")
+    /// On a Markdown tab: its source or its rendered text.
+    let renderButton = ColumnHeaderButton(symbol: Theme.Symbol.renderedText, toolTip: "Show Rendered")
+    /// On a draft.
+    let copyDraftButton = NiruxButton(title: EditorColumn.copyDraftTitle, kind: .primary, size: .small)
+    static let copyDraftTitle = "Copy Draft"
     private let tabBar: EditorTabBar
     private let fileTree: EditorFileTree
     private let treeDivider: NSView
@@ -393,6 +408,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
 
         // Already open → just switch.
         if tabPaths.contains(absolute) {
+            // A line shows in the source.
+            if line != nil, renderedPaths.contains(absolute) { setRendered(false, of: absolute) }
             switchTo(path: absolute, takeFocus: takeFocus)
             if let line {
                 var payload: [String: Any] = ["type": "goToLine", "path": absolute, "line": line]
@@ -518,6 +535,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         if activate {
             activePath = absolute
         }
+        // Not one opened at a line or for its diff: those show in the source.
+        if isFront, line == nil, Self.isRenderable(absolute), diffModeByPath[absolute] == nil {
+            renderedPaths.insert(absolute)
+        }
 
         refreshTabBar()
         if activate {
@@ -533,6 +554,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
             "activate": activate,
             "version": newTextVersion(of: absolute)
         ]
+        payload.merge(tabFlags(of: absolute)) { $1 }
         if let line { payload["line"] = line }
         Self.applyNavFlags(&payload, endLine: endLine, takeFocus: takeFocus)
         sendBridge(payload)
@@ -568,6 +590,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         }
         fileTree.reveal(absolutePath: path)
         var payload: [String: Any] = ["type": "switchTab", "path": path]
+        payload.merge(tabFlags(of: path)) { $1 }
         Self.applyNavFlags(&payload, endLine: nil, takeFocus: takeFocus)
         sendBridge(payload)
         // Known gap: re-entering a saved diff intent below still grabs
@@ -603,6 +626,59 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     /// edits straight from the diff.
     func toggleDiff() {
         toggleDiff(mode: selectedDiffMode)
+    }
+
+    /// The header's toggle: the active Markdown tab rendered, or its source.
+    func toggleRendered() {
+        guard let path = currentPath, Self.isRenderable(path) else { return }
+        setRendered(!renderedPaths.contains(path), of: path)
+    }
+
+    /// `find`: Monaco's find opens on the source, as ⌘F asked.
+    private func setRendered(_ rendered: Bool, of path: String, find: Bool = false) {
+        if rendered { renderedPaths.insert(path) } else { renderedPaths.remove(path) }
+        // Before a diff ends: the page then shows the reading view at once.
+        sendBridge(["type": "setRendered", "path": path, "rendered": rendered, "find": find])
+        if rendered {
+            diffModeByPath.removeValue(forKey: path)
+            diffLoadGeneration += 1
+            if diffActivePath == path { return exitDiff() }
+        }
+        refreshHeader()
+    }
+
+    /// A diff shows the tab's text, over the reading view: once it is in,
+    /// the tab no longer renders.
+    private func endRendering(of path: String) {
+        guard renderedPaths.remove(path) != nil else { return }
+        sendBridge(["type": "setRendered", "path": path, "rendered": false])
+    }
+
+    /// Copy Draft: the active draft's text, unsaved edits included, as plain
+    /// text; the button says so for a moment.
+    func copyDraft() {
+        guard let path = currentPath, Self.isDraft(path) else { return }
+        webView.callAsyncJavaScript("return window.niruxBridge.text(path)", arguments: ["path": path], in: nil, in: .page) { [weak self] result in
+            guard let self else { return }
+            guard case .success(let value) = result, let text = value as? String else {
+                return self.showToast("Couldn’t copy the draft", tone: .error)
+            }
+            self.pasteboard.clearContents()
+            self.pasteboard.setString(text, forType: .string)
+            self.flashCopied()
+        }
+    }
+
+    private func flashCopied() {
+        copiedFlashGeneration += 1
+        let generation = copiedFlashGeneration
+        copyDraftButton.title = "Copied ✓"
+        header.needsLayout = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { @MainActor [weak self] in
+            guard let self, self.copiedFlashGeneration == generation else { return }
+            self.copyDraftButton.title = Self.copyDraftTitle
+            self.header.needsLayout = true
+        }
     }
 
     /// Toggle word wrap in the Monaco surface (and diff surface when active).
@@ -826,8 +902,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
                 case .text(let original):
                     self.diffActivePath = path
                     self.diffActiveBase = .git(mode)
-                    self.refreshTabBar()
                     self.sendBridge(["type": "enterDiff", "path": path, "original": original])
+                    self.endRendering(of: path)
+                    self.refreshTabBar()
                 }
             }
         }
@@ -879,6 +956,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         encodingByPath.removeValue(forKey: path)
         diskModifiedWhileDirty.remove(path)
         diffModeByPath.removeValue(forKey: path)
+        renderedPaths.remove(path)
         diffGroupTabs.removeValue(forKey: path)
         if diffActivePath == path {
             diffLoadGeneration += 1
@@ -906,7 +984,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
                 if let group = diffGroupTabs[next] {
                     sendDiffGroup(group)
                 } else {
-                    sendBridge(["type": "switchTab", "path": next])
+                    var payload: [String: Any] = ["type": "switchTab", "path": next]
+                    payload.merge(tabFlags(of: next)) { $1 }
+                    sendBridge(payload)
                     fileTree.reveal(absolutePath: next)
                     if let mode = diffModeByPath[next] {
                         enterDiff(for: next, mode: mode)
@@ -937,12 +1017,29 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         // buffer to the wrong file. focus: false because a background disk
         // sync must never grab the keyboard — e.g. an agent edits the file
         // it just revealed while the user is typing in a terminal.
-        sendBridge([
+        var payload: [String: Any] = [
             "type": "openFile", "path": path, "content": content,
             "activate": path == activePath, "focus": false, "keepEdits": keepingEdits,
             "version": newTextVersion(of: path)
-        ])
+        ]
+        payload.merge(tabFlags(of: path)) { $1 }
+        sendBridge(payload)
         return true
+    }
+
+    /// How the page shows `path` (bridge.js's `adoptTabFlags`).
+    private func tabFlags(of path: String) -> [String: Any] {
+        ["rendered": renderedPaths.contains(path), "draft": Self.isDraft(path)]
+    }
+
+    /// A text the nirux-draft skill wrote, in its `mktemp` folder.
+    nonisolated static func isDraft(_ path: String) -> Bool {
+        ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent.hasPrefix("nirux-draft-")
+    }
+
+    /// A Markdown file that isn't a draft: it can show rendered.
+    nonisolated static func isRenderable(_ path: String) -> Bool {
+        ["md", "markdown"].contains((path as NSString).pathExtension.lowercased()) && !isDraft(path)
     }
 
     private func newTextVersion(of path: String) -> Int {
@@ -1245,8 +1342,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         diffLoadGeneration += 1
         diffActivePath = path
         diffActiveBase = .disk
-        refreshTabBar()
         sendBridge(["type": "enterDiff", "viewer": "monaco", "path": path, "original": disk.content])
+        endRendering(of: path)
+        refreshTabBar()
     }
 
     /// Take Disk: the buffer becomes the file on disk, its edits gone; a
@@ -1376,6 +1474,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
             onSendSelectionShortcut?()
         case "escapeKey":
             onEscapeKey?()
+        case "findInSource":
+            guard let path = body["path"] as? String, path == currentPath, renderedPaths.contains(path) else { return }
+            setRendered(false, of: path, find: true)
+        case "openLink":
+            guard let text = body["url"] as? String, let url = BranchReviewView.webLink(text) else { return }
+            onOpenLink?(url)
         case "textEdgeKey":
             guard let edge = (body["edge"] as? String).flatMap(TextEdge.init(rawValue:)) else { return }
             onTextEdgeKey?(edge)

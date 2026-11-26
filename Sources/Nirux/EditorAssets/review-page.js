@@ -11,7 +11,8 @@
   // Blocks: { type: "heading", level, spans } | { type: "paragraph", spans }
   // | { type: "list", ordered, start, items: [{ spans, checked, lists }] }
   // | { type: "code", text }
-  // | { type: "quote", blocks } | { type: "rule" }.
+  // | { type: "quote", blocks } | { type: "rule" }
+  // | { type: "table", align: [null | "left" | "center" | "right"], head: [spans], rows: [[spans]] }.
   //
   // A branch can write anything here: the parser keeps every regular
   // expression linear and every loop moving, and nests quotes and lists
@@ -68,14 +69,17 @@
         index = parsed.next;
         continue;
       }
+      const table = parseTable(lines, index);
+      if (table) {
+        blocks.push(table.table);
+        index = table.next;
+        continue;
+      }
       // A paragraph, up to a blank line or another block. Its first line is
       // always in it: no line can stop the parse.
       const paragraph = [line.trim()];
       index++;
-      while (
-        index < lines.length && !/^\s*$/.test(lines[index]) && !parseHeading(lines[index])
-        && !/^\s{0,3}(```|~~~)/.test(lines[index]) && !isQuote(lines[index]) && !listItem(lines[index])
-      ) {
+      while (index < lines.length && !endsParagraph(lines[index]) && !tableHead(lines, index)) {
         paragraph.push(lines[index++].trim());
       }
       blocks.push({ type: "paragraph", spans: parseInline(paragraph.join(" ")) });
@@ -85,6 +89,50 @@
 
   function isQuote(line) {
     return /^\s{0,3}>/.test(line);
+  }
+
+  // A blank line, or one that starts another block.
+  function endsParagraph(line) {
+    return /^\s*$/.test(line) || !!parseHeading(line) || /^\s{0,3}(```|~~~)/.test(line) || isQuote(line) || !!listItem(line);
+  }
+
+  // A GitHub table from `start`: a row of cells, a row of dashes with as
+  // many (a ":" on a side aligns its column), then rows up to a line that
+  // ends a paragraph. A row keeps at most the header's cells, and no empty
+  // ones are added: a wide header over many short rows stays linear.
+  function parseTable(lines, start) {
+    const head = tableHead(lines, start);
+    if (!head) return null;
+    const rows = [];
+    let index = start + 2;
+    while (index < lines.length && !endsParagraph(lines[index])) {
+      rows.push(tableCells(lines[index++]).slice(0, head.align.length).map(parseInline));
+    }
+    return { table: { type: "table", align: head.align, head: head.cells.map(parseInline), rows }, next: index };
+  }
+
+  // The header's cells and each column's alignment, when a table starts at
+  // `index`; null otherwise.
+  function tableHead(lines, index) {
+    const line = lines[index];
+    const below = lines[index + 1];
+    if (below === undefined || !line.includes("|") || !below.includes("|")) return null;
+    const cells = tableCells(line);
+    const dashes = tableCells(below);
+    if (dashes.length !== cells.length || !dashes.every((cell) => /^:?-+:?$/.test(cell))) return null;
+    const align = dashes.map((cell) => {
+      if (cell.startsWith(":")) return cell.endsWith(":") ? "center" : "left";
+      return cell.endsWith(":") ? "right" : null;
+    });
+    return { cells, align };
+  }
+
+  // A row's cells, its outer pipes dropped; "\|" is a pipe in a cell.
+  function tableCells(line) {
+    let text = line.trim();
+    if (text.startsWith("|")) text = text.slice(1);
+    if (text.endsWith("|") && !text.endsWith("\\|")) text = text.slice(0, -1);
+    return text.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, "|").trim());
   }
 
   // "## Title ##": the closing run of "#" goes only after a space, as in

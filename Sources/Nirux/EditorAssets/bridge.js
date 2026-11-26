@@ -4,7 +4,9 @@
   var editor = null;
   var diffEditor = null;
   var diffMode = null;
-  // path -> { model, cleanValue, contentListener }
+  // path -> { model, cleanValue, contentListener, rendered, draft,
+  // readingTop }. `rendered` and `draft` are Swift's word on the tab;
+  // `readingTop`: where its reading view was scrolled.
   var models = {};
   var currentPath = null;
   var diffOriginalModel = null;
@@ -16,6 +18,7 @@
   var pierreRenderTimer = null;
   var pendingMessages = [];
   var statusEl = document.getElementById("status");
+  var markdownView = document.getElementById("markdown-view");
   // Per-tab view state (scroll + cursor) so switching tabs restores position.
   var viewStates = {};
   var wordWrap = false;
@@ -46,14 +49,66 @@
     statusEl.classList.add("hidden");
   }
 
+  // The active tab's own view: Monaco, or its Markdown rendered.
   function showEditorSurface() {
-    document.getElementById("editor").style.display = "block";
+    var rendered = showsRendered();
+    var editorRoot = document.getElementById("editor");
+    var wasHidden = editorRoot.style.display === "none";
+    // See showPierreDiffSurface.
+    if (rendered && editorRoot.contains(document.activeElement)) document.activeElement.blur();
+    editorRoot.style.display = rendered ? "none" : "block";
+    markdownView.style.display = rendered ? "block" : "none";
     document.getElementById("diff-editor").style.display = "none";
     if (pierreDiffRoot) pierreDiffRoot.style.display = "none";
+    if (rendered) {
+      drawMarkdown();
+      markdownView.scrollTop = models[currentPath].readingTop || 0;
+    } else if (editor && wasHidden) {
+      editor.layout();
+    }
+  }
+
+  // The active tab is a Markdown file Swift shows rendered, and no diff
+  // is over it.
+  function showsRendered() {
+    var entry = currentPath && models[currentPath];
+    return !!entry && !!entry.rendered && diffMode === null;
+  }
+
+  function drawMarkdown() {
+    markdownView.replaceChildren(window.MarkdownView.markdown(models[currentPath].model.getValue(), openLink));
+  }
+
+  // Swift checks the link again, then the browser opens it.
+  function openLink(url) {
+    postToSwift({ type: "openLink", url: url });
+  }
+
+  function focusShownView() {
+    if (showsRendered()) markdownView.focus();
+    else activeEditor().focus();
+  }
+
+  function adoptTabFlags(entry, payload) {
+    entry.rendered = !!payload.rendered;
+    entry.draft = !!payload.draft;
+  }
+
+  // A draft wraps, without line numbers; other tabs follow the wrap toggle.
+  function applyTabOptions() {
+    var entry = currentPath && models[currentPath];
+    var draft = !!entry && !!entry.draft;
+    editor.updateOptions({ wordWrap: draft || wordWrap ? "on" : "off", lineNumbers: draft ? "off" : "on" });
+  }
+
+  // Where the reading view was, before a diff or the source hides it.
+  function keepReadingTop() {
+    if (showsRendered()) models[currentPath].readingTop = markdownView.scrollTop;
   }
 
   function showMonacoDiffSurface() {
     document.getElementById("editor").style.display = "none";
+    markdownView.style.display = "none";
     document.getElementById("diff-editor").style.display = "block";
     if (pierreDiffRoot) pierreDiffRoot.style.display = "none";
   }
@@ -64,6 +119,7 @@
     // the menu. Only a blur before the hide clears it.
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     document.getElementById("editor").style.display = "none";
+    markdownView.style.display = "none";
     document.getElementById("diff-editor").style.display = "none";
     if (pierreDiffRoot) pierreDiffRoot.style.display = "block";
   }
@@ -114,6 +170,8 @@
         scheduleDiffDecorations();
       } else if (diffMode === "pierre" && currentPath === path) {
         schedulePierreRender();
+      } else if (currentPath === path && showsRendered()) {
+        drawMarkdown();
       }
     });
     models[path] = entry;
@@ -138,10 +196,13 @@
       // then reports the buffer clean.
       models[path].cleanValue = content;
       models[path].version = payload.version;
+      adoptTabFlags(models[path], payload);
       models[path].model.setValue(content);
       monaco.editor.setModelLanguage(models[path].model, lang);
     } else {
-      ensureModel(path, content, lang).version = payload.version;
+      var entry = ensureModel(path, content, lang);
+      entry.version = payload.version;
+      adoptTabFlags(entry, payload);
     }
     if (payload.activate === false) return;
     switchToPath(path, payload.focus);
@@ -154,10 +215,12 @@
   // a user mid-keystroke in a terminal must not suddenly type into the
   // source file. If the editor itself already holds focus, keep focusing —
   // the model just changed under the caret, and focus must follow content
-  // or the next keystroke edits an invisible buffer.
+  // or the next keystroke edits an invisible buffer. So for the reading
+  // view.
   function shouldFocus(target, focus) {
     if (focus !== false) return true;
-    return typeof target.hasTextFocus === "function" && target.hasTextFocus();
+    return (typeof target.hasTextFocus === "function" && target.hasTextFocus())
+      || (markdownView.contains(document.activeElement) && document.hasFocus());
   }
 
   function revealLine(line, column, endLine, focus) {
@@ -181,12 +244,12 @@
       };
       target.setSelection(range);
       target.revealRangeInCenter(range);
-      if (refocus) target.focus();
+      if (refocus) focusShownView();
       return;
     }
     target.revealLineInCenter(line);
     target.setPosition({ lineNumber: line, column: column || 1 });
-    if (refocus) target.focus();
+    if (refocus) focusShownView();
   }
 
   function activeEditor() {
@@ -279,7 +342,27 @@
   // the find field stop it first) asks the app to send a front editor back.
   window.addEventListener("keydown", function (event) {
     if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+    // A selection in the reading view takes it, as Monaco's does.
+    var selection = window.getSelection();
+    if (showsRendered() && selection && !selection.isCollapsed && markdownView.contains(selection.anchorNode)) {
+      selection.removeAllRanges();
+      event.preventDefault();
+      return;
+    }
     postToSwift({ type: "escapeKey" });
+  });
+
+  // On a rendered tab, ⌘F asks Swift for its source, with Monaco's find;
+  // ⌘S and ⌘P do what they do in Monaco.
+  window.addEventListener("keydown", function (event) {
+    if (!showsRendered() || event.defaultPrevented || event.isComposing) return;
+    if (!event.metaKey || event.shiftKey || event.altKey || event.ctrlKey) return;
+    var key = String(event.key).toLowerCase();
+    if (key === "f") postToSwift({ type: "findInSource", path: currentPath });
+    else if (key === "s") requestSave();
+    else if (key === "p") postToSwift({ type: "filePickerRequest" });
+    else return;
+    event.preventDefault();
   });
 
   // Each code editor's niruxCaretAtTextEdge, set as a key arrives, before
@@ -354,13 +437,16 @@
     // Save where we were in the file we're leaving.
     if (currentPath && models[currentPath]) {
       viewStates[currentPath] = editor.saveViewState();
+      keepReadingTop();
     }
     currentPath = path;
     editor.setModel(entry.model);
+    applyTabOptions();
     if (viewStates[path]) {
       editor.restoreViewState(viewStates[path]);
     }
-    if (refocus) editor.focus();
+    showEditorSurface();
+    if (refocus) focusShownView();
     postToSwift({ type: "ready", path: path });
     reportDirtyFor(path);
   }
@@ -375,7 +461,25 @@
     Object.keys(pendingSaves).forEach(function (saveID) {
       if (pendingSaves[saveID].path === path) delete pendingSaves[saveID];
     });
-    if (currentPath === path) currentPath = null;
+    if (currentPath === path) {
+      currentPath = null;
+      if (diffMode === null) showEditorSurface();
+    }
+  }
+
+  // Swift's toggle between a Markdown tab's source and its rendered text;
+  // `find`: Monaco's find then opens, as ⌘F asked.
+  function setRendered(path, rendered, find) {
+    var entry = models[path];
+    if (!entry) return;
+    // Monaco's find field, say.
+    var hadFocus = !!document.activeElement && document.activeElement !== document.body;
+    if (path === currentPath) keepReadingTop();
+    entry.rendered = !!rendered;
+    if (path !== currentPath || diffMode !== null) return;
+    showEditorSurface();
+    if (hadFocus || find) focusShownView();
+    if (find && !rendered) editor.getAction("actions.find").run();
   }
 
   function markSaved(path, saveID) {
@@ -552,6 +656,7 @@
   function enterMonacoDiff(path, originalContent) {
     var entry = models[path];
     if (!entry) return;
+    keepReadingTop();
     if (diffMode === "pierre") exitPierreDiff();
     diffMode = "monaco";
     clearDiffDecorations();
@@ -644,6 +749,7 @@
       return;
     }
 
+    keepReadingTop();
     if (diffMode === "monaco") exitMonacoDiff();
     diffMode = "pierre";
     pierreOriginalContent = originalContent || "";
@@ -653,6 +759,7 @@
 
   function enterPierreDiffGroup(payload) {
     if (!window.NiruxPierreDiff || !pierreDiffRoot) return;
+    keepReadingTop();
     if (diffMode === "monaco") exitMonacoDiff();
     diffMode = "pierre-group";
     pierreOriginalContent = "";
@@ -791,7 +898,7 @@
     hideStatus();
     if (editor) {
       editor.layout();
-      if (focus !== false) editor.focus();
+      if (focus !== false) focusShownView();
     }
   }
 
@@ -862,11 +969,12 @@
     target.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Digit0, function () { resetFontZoom(); });
   }
 
+  // A draft always wraps.
   function toggleWordWrap() {
+    if (currentPath && models[currentPath] && models[currentPath].draft) return;
     wordWrap = !wordWrap;
-    var wrap = wordWrap ? "on" : "off";
-    if (editor) editor.updateOptions({ wordWrap: wrap });
-    if (diffEditor) diffEditor.updateOptions({ wordWrap: wrap });
+    if (editor) applyTabOptions();
+    if (diffEditor) diffEditor.updateOptions({ wordWrap: wordWrap ? "on" : "off" });
   }
 
   function toggleMinimap() {
@@ -884,7 +992,7 @@
     // Pierre diff modes render outside Monaco: the regular editor is
     // hidden but keeps its pre-diff selection — never paste that.
     var pierreActive = diffMode && diffMode !== "monaco";
-    if (pierreActive || !currentPath || !model || !sel || sel.isEmpty()) {
+    if (pierreActive || showsRendered() || !currentPath || !model || !sel || sel.isEmpty()) {
       postToSwift({ type: "selection", requestID: requestID, path: "" });
       return;
     }
@@ -905,7 +1013,11 @@
   function handleMessage(msg) {
     switch (msg.type) {
       case "openFile": applyOpen(msg); break;
-      case "switchTab": switchToPath(msg.path, msg.focus); break;
+      case "switchTab":
+        if (models[msg.path]) adoptTabFlags(models[msg.path], msg);
+        switchToPath(msg.path, msg.focus);
+        break;
+      case "setRendered": setRendered(msg.path, msg.rendered, msg.find); break;
       case "closeTab": closeTab(msg.path); break;
       case "markSaved": markSaved(msg.path, msg.saveID); break;
       case "saveRefused": delete pendingSaves[msg.saveID]; break;
@@ -936,7 +1048,11 @@
       case "takeKeyboard":
         // Opened without the keyboard, nothing has the page's focus yet.
         var focused = document.activeElement;
-        if ((!focused || focused === document.body) && diffMode !== "pierre" && diffMode !== "pierre-group") activeEditor().focus();
+        if (showsRendered()) {
+          if (!markdownView.contains(focused)) markdownView.focus();
+        } else if ((!focused || focused === document.body) && diffMode !== "pierre" && diffMode !== "pierre-group") {
+          activeEditor().focus();
+        }
         break;
       case "textEdgeDestinations":
         textEdgeDestinations = { left: !!msg.left, right: !!msg.right, up: !!msg.up, down: !!msg.down };
@@ -974,6 +1090,11 @@
     },
     setTheme: function (name) {
       if (window.monaco) monaco.editor.setTheme(name);
+    },
+    // A tab's text, unsaved edits included; null for a tab it doesn't hold.
+    text: function (path) {
+      var entry = models[path];
+      return entry ? entry.model.getValue() : null;
     }
   };
 

@@ -946,6 +946,7 @@ extension NiruxShellView {
             guard let self, let editor else { return }
             self.editorEscaped(editor)
         }
+        editor.onOpenLink = { [weak self] in self?.sideEffects.openURL($0) }
         editor.onOpenBranchReview = { [weak self, weak editor] in
             guard let self, let editor else { return }
             // The editor's folder: its Full Branch Diff is that branch's.

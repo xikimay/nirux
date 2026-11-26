@@ -269,6 +269,8 @@ final class CanaryChannelTests: XCTestCase {
                 harness.shell.openEditorColumn()
                 let editor = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
                 harness.waitUntil("the editor to open README.md") { editor.activePath == harness.repo + "/README.md" }
+                // It reads rendered in the front editor: its source takes the keys.
+                editor.renderButton.performClick(nil)
                 let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
                 harness.window.makeFirstResponder(webView)
                 harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
