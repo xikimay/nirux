@@ -75,13 +75,14 @@ final class QuotaAlerter {
 
     private let isEnabled: () -> Bool
     private let burner: () -> QuotaBurnRow?
-    /// Whether it went out: none while Nirux is the active app.
-    private let post: (Notice) -> Bool
+    /// Whether it went out: none while Nirux is the active app. It builds
+    /// the notice (`burner` reads the process table) only to post it.
+    private let post: (() -> Notice) -> Bool
     private let store: QuotaAlertStore
     /// By `QuotaAlert.key`, the reset of the window it went out for.
     private(set) var sent: [String: TimeInterval]
 
-    init(isEnabled: @escaping () -> Bool, burner: @escaping () -> QuotaBurnRow?, post: @escaping (Notice) -> Bool, store: QuotaAlertStore = QuotaAlertStore()) {
+    init(isEnabled: @escaping () -> Bool, burner: @escaping () -> QuotaBurnRow?, post: @escaping (() -> Notice) -> Bool, store: QuotaAlertStore = QuotaAlertStore()) {
         self.isEnabled = isEnabled
         self.burner = burner
         self.post = post
@@ -96,7 +97,7 @@ final class QuotaAlerter {
         if !due.isEmpty {
             // Off, they count as handled: the setting isn't read again until the next window.
             let enabled = isEnabled()
-            for alert in due where !enabled || post(notice(for: alert, now: now, calendar: calendar)) {
+            for alert in due where !enabled || post({ notice(for: alert, now: now, calendar: calendar) }) {
                 sent[alert.key] = alert.limit.latest.resetsAt
             }
         }

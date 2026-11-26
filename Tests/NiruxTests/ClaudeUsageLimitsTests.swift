@@ -412,10 +412,14 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         )
         let store = QuotaAlertStore(url: FileManager.default.temporaryDirectory.appendingPathComponent("quota-alerts-\(UUID().uuidString).json"))
         defer { try? FileManager.default.removeItem(at: store.url) }
+        var burnerReads = 0
         func alerter() -> QuotaAlerter {
-            QuotaAlerter(isEnabled: { enabled }, burner: { burner }, post: { notice in
+            QuotaAlerter(isEnabled: { enabled }, burner: {
+                burnerReads += 1
+                return burner
+            }, post: { notice in
                 guard !active else { return false }
-                posted.append(notice)
+                posted.append(notice())
                 return true
             }, store: store)
         }
@@ -435,6 +439,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         active = true
         alerts.check([nextWindow], now: now, calendar: utc)
         XCTAssertEqual(posted, [], "held back while Nirux is the active app")
+        XCTAssertEqual(burnerReads, 0, "nothing built for a notice that can't go out")
         active = false
         alerts.check([nextWindow], now: now, calendar: utc)
         alerts.check([nextWindow], now: now, calendar: utc)

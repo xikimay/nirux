@@ -220,8 +220,9 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     /// the task that spends it most; its button queues that task's
     /// compaction. Not while the app is active (the title bar says it): it
     /// comes once Nirux is in the background, if still due.
-    func postQuotaAlert(_ notice: QuotaAlerter.Notice) -> Bool {
+    func postQuotaAlert(_ notice: () -> QuotaAlerter.Notice) -> Bool {
         guard !NSApp.isActive, isAvailable else { return false }
+        let notice = notice()
         let content = UNMutableNotificationContent()
         content.title = notice.title
         content.body = notice.body

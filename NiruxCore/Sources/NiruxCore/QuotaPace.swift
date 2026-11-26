@@ -50,11 +50,14 @@ public enum QuotaCalibration {
         let sorted = readings.sorted { $0.time < $1.time }
         for (index, reading) in sorted.enumerated() {
             let window = highest.firstIndex { abs($0.resetsAt - reading.resetsAt) <= QuotaPace.sameWindow }
-            let reset = !highest.isEmpty && highest.allSatisfy { earlier in
-                earlier.resetsAt <= reading.time
-                    || !sorted[(index + 1)...].contains { abs($0.resetsAt - earlier.resetsAt) <= QuotaPace.sameWindow }
+            // Read only for a window's first reading: it scans the later ones.
+            func reset() -> Bool {
+                !highest.isEmpty && highest.allSatisfy { earlier in
+                    earlier.resetsAt <= reading.time
+                        || !sorted[(index + 1)...].contains { abs($0.resetsAt - earlier.resetsAt) <= QuotaPace.sameWindow }
+                }
             }
-            let from = window.map { highest[$0].usedPercent } ?? (reset ? 0 : reading.usedPercent)
+            let from = window.map { highest[$0].usedPercent } ?? (reset() ? 0 : reading.usedPercent)
             if let window { highest[window].usedPercent = max(from, reading.usedPercent) } else { highest.append(reading) }
             guard reading.usedPercent > from, let day = dayStarts.lastIndex(where: { $0 <= reading.time }) else { continue }
             rise[day] += reading.usedPercent - from
