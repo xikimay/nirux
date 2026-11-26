@@ -139,7 +139,8 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.shell.addWorkspace(title: "other", cwd: harness.worktree)
             let other = try XCTUnwrap(harness.shell.activeWorkspace)
             let column = try XCTUnwrap(other.columns.first)
-            let session = try XCTUnwrap(column.pty?.terminalSession)
+            let pty = try XCTUnwrap(column.pty)
+            let session = pty.terminalSession
             harness.waitUntil("the terminal's surface") { session.readViewportText() != nil }
             let needle = "flow-scrollback-needle"
             let rows = (1...200).map { [20, 100, 150].contains($0) ? "\(needle) \($0)" : "row \($0)" }
@@ -157,7 +158,11 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(panel.rows.map(\.place), Array(repeating: "other › Terminal 1", count: 3))
             XCTAssertEqual(panel.statusLabel?.stringValue, "3 matches in 1 of 2 terminals")
 
-            session.receive("\(needle) 201\r\n\(needle) 202\r\n")
+            // Printed by the shell, as a program's output is: written past
+            // its prompt behind its back, a line is the line editor's to
+            // paint over when it redraws (CI's bash, its prompt wrapping).
+            harness.waitUntil("the shell's prompt") { pty.readsKeysAsTyped }
+            pty.sendRaw("printf '\(needle) %s\\n' 201 202\n")
             harness.waitUntil("the new matches") { TerminalScreenText.read(session)?.contains("\(needle) 202") == true }
             harness.press(.down, in: field.window)
             harness.press(.returnKey, in: field.window)
