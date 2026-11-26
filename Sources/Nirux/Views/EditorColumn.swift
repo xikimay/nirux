@@ -99,6 +99,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     /// Monaco resolved Cmd+Opt+Enter outside the find widget — the shell
     /// runs the send-selection flow.
     var onSendSelectionShortcut: (() -> Void)?
+    /// Esc that nothing in the page took (no widget, selection or find).
+    var onEscapeKey: (() -> Void)?
 
     /// The edge of Monaco's text a Cmd+Arrow moves the caret to.
     enum TextEdge: String, CaseIterable {
@@ -536,9 +538,11 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     }
 
     /// Gives Monaco the keyboard, as a click in it would: its column got
-    /// the focus. The page refocuses what Monaco had focused.
+    /// the focus. The page refocuses what Monaco had focused, or with
+    /// nothing focused yet (opened without the keyboard), the code editor.
     func takeKeyboard() {
         window?.makeFirstResponder(webView)
+        sendBridge(["type": "takeKeyboard"])
     }
 
     /// Switch the active tab. The model already exists on the JS side; we
@@ -839,7 +843,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         }
     }
 
-    private func absolutePath(for path: String) -> String {
+    func absolutePath(for path: String) -> String {
         (path as NSString).isAbsolutePath
             ? path
             : (workspaceCwd as NSString).appendingPathComponent(path)
@@ -1368,6 +1372,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
             onFilePickerRequest?(self)
         case "sendSelectionShortcut":
             onSendSelectionShortcut?()
+        case "escapeKey":
+            onEscapeKey?()
         case "textEdgeKey":
             guard let edge = (body["edge"] as? String).flatMap(TextEdge.init(rawValue:)) else { return }
             onTextEdgeKey?(edge)

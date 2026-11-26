@@ -52,6 +52,8 @@ enum NiruxShortcuts: CaseIterable {
     case searchWorkspace
     case searchEverywhere
     case toggleEditorDiff
+    /// The front editor column up over the row, or back down as it was.
+    case frontEditor
     case toggleSidebar
     case nextWaitingAgent
     case board
@@ -75,6 +77,7 @@ enum NiruxShortcuts: CaseIterable {
         case .searchWorkspace: KeyChord("f", [.command, .shift])
         case .searchEverywhere: KeyChord("f", [.command, .option])
         case .toggleEditorDiff: KeyChord("d", [.command, .shift])
+        case .frontEditor: KeyChord("y")
         case .toggleSidebar: KeyChord("s", [.command, .control])
         case .nextWaitingAgent: KeyChord("j")
         case .board: KeyChord("b", [.command, .control])

@@ -45,6 +45,10 @@ Terminals are drawn by Ghostty's engine and follow the appearance settings of yo
 
 The editor opens files in tabs, with a file tree, a search across the workspace, the list of git changes and a diff view for each file (`Shift+Cmd+D`). `Cmd+S` never writes over a file that changed on disk: the editor says so, and Compare, Take Disk or Keep Mine settles it. Closing a tab, the column, the workspace or Nirux with unsaved changes asks to save them first. `Option+Cmd+Return` sends the selection to the agent's terminal.
 
+#### The front editor
+
+What an agent shows, a terminal's file link, a search result, the palette's Open Editor and a diff of the changes open in the front editor: a full editor column that comes to the centre in front of the row. The row stays where it was and dims behind it, sharp. Opened by an agent, it leaves the keyboard where you were typing, and while you type it waits behind a pill at the top of the row ("README.md ⌘Y") instead of coming up over you. For a task that isn't on screen, the view stays where it is and the pill waits on the task's row in the sidebar: a click on the row brings the front editor up. Opened by you, it takes the keyboard. `Cmd+Y`, `Esc` in it (when no find field, suggestion or selection takes it) or a click on the row sends it back as it is, its tabs, scroll and selection kept, and `Cmd+Y` brings it up again, so you can switch between it and your terminals. A click on the row gives the column you clicked the keyboard. It isn't restored at launch. An editor column restored in the row keeps opening files itself while you work in it.
+
 ### Browser
 
 A browser column keeps its URL history, downloads files to `~/Downloads`, and opens the Web Inspector with `Option+Cmd+I`. `Cmd+F` finds text in the page and counts the matches.

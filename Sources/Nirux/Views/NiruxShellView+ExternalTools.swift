@@ -289,10 +289,7 @@ extension NiruxShellView {
                 return
             }
 
-            guard let editor = self.editorColumn(in: workspace, cwd: cwd) else {
-                self.showToast("Couldn’t open an editor for the changes", tone: .error)
-                return
-            }
+            guard let editor = self.editorColumn(in: workspace, cwd: cwd) else { return }
             editor.showDiffCollection(
                 title: "Uncommitted Changes (\(paths.count))",
                 paths: paths,
@@ -304,21 +301,30 @@ extension NiruxShellView {
     }
 
     func focusEditor(_ editor: EditorColumn, in workspace: WorkspaceState) {
-        guard let column = workspace.columns.firstIndex(where: { $0.editorColumn === editor }),
-              let index = workspaces.firstIndex(where: { $0 === workspace }) else { return }
-        workspace.focusedIndex = column
+        guard let index = workspaces.firstIndex(where: { $0 === workspace }) else { return }
         activeWSIndex = index
+        if workspace.front?.editorColumn === editor { return showFront(in: workspace, takeKeyboard: true) }
+        guard let column = workspace.columns.firstIndex(where: { $0.editorColumn === editor }) else { return }
+        workspace.focusedIndex = column
         relayout(animated: false)
         updateSidebar()
     }
 
+    /// The editor a diff of `cwd` shows in: the front one, made again
+    /// rooted there when it holds another folder and no unsaved edit (git
+    /// runs in its folder). Nil, saying why, when there is none.
     func editorColumn(in workspace: WorkspaceState, cwd: String) -> EditorColumn? {
-        if let existing = workspace.columns.compactMap({ $0.editorColumn }).first(where: { $0.workspaceCwd == cwd }) {
-            return existing
+        if let editor = workspace.front?.editorColumn, editor.workspaceCwd != cwd, let index = workspace.frontIndex {
+            guard editor.unsavedPaths.isEmpty else {
+                showToast("Save or close the front editor’s changes first: they’re in another folder", tone: .error)
+                return nil
+            }
+            workspace.closeColumn(at: index)
         }
-        workspace.addEditorColumn(workspaceCwd: cwd)
-        guard let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn else { return nil }
-        wireEditor(editor)
+        guard let editor = frontEditor(in: workspace, cwd: cwd) else {
+            showToast("Couldn’t open an editor for the changes", tone: .error)
+            return nil
+        }
         return editor
     }
 
@@ -911,16 +917,11 @@ extension NiruxShellView {
     func openEditorColumn() {
         guard let workspace = activeWorkspace else { return }
         let cwd = workspace.focusedWorkingDirectory
-        let starter = Self.pickStarterFile(in: cwd)
-        workspace.addEditorColumn(initialFile: starter, workspaceCwd: cwd)
-
-        if let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn {
-            wireEditor(editor)
+        guard let editor = frontEditor(in: workspace, cwd: cwd) else { return }
+        if editor.currentPath == nil, let starter = Self.pickStarterFile(in: cwd) {
+            editor.open(path: starter)
         }
-
-        relayout(animated: false)
-        updateSidebar()
-        focusActiveTerminal(in: window, editorTakesKeyboard: true)
+        showFront(in: workspace, takeKeyboard: true)
     }
 
     /// Wires every callback an `EditorColumn` needs back into the shell view.
@@ -941,6 +942,10 @@ extension NiruxShellView {
             self.navigate(fromTextEdge: edge, of: editor)
         }
         editor.textEdgeDestinations = { [weak self] in self?.textEdgeDestinations() ?? [] }
+        editor.onEscapeKey = { [weak self, weak editor] in
+            guard let self, let editor else { return }
+            self.editorEscaped(editor)
+        }
         editor.onOpenBranchReview = { [weak self, weak editor] in
             guard let self, let editor else { return }
             // The editor's folder: its Full Branch Diff is that branch's.
@@ -992,67 +997,43 @@ extension NiruxShellView {
         }
     }
 
-    /// Open a file in an editor column at an optional line. If the target
-    /// workspace doesn't yet have an editor column, one is added; otherwise
-    /// the existing one is reused so search results don't pile up new
-    /// columns. Used by the workspace-wide search panel and terminal
-    /// file: links (which pass the workspace the link was clicked in).
+    /// Open a file at an optional line, for the workspace search panel,
+    /// terminal file links (which pass the workspace the link was clicked
+    /// in), agents and the palette. The row editor the user works in keeps
+    /// its files; anything else shows in the front column, the row left as
+    /// it is. `takeFocus`: the editor takes the keyboard.
     func openInEditorColumn(
         path: String, line: Int? = nil, endLine: Int? = nil, workspaceCwd: String? = nil,
         takeFocus: Bool = true, interactive: Bool = true,
         in targetWorkspace: WorkspaceState? = nil
     ) {
         guard let workspace = targetWorkspace ?? activeWorkspace else { return }
-        let editorRoot = workspaceCwd ?? workspace.focusedWorkingDirectory
-        let existingEditor = workspace.columns
-            .compactMap { $0.editorColumn }
-            .first { $0.workspaceCwd == editorRoot }
-            ?? (workspaceCwd == nil ? workspace.columns.compactMap { $0.editorColumn }.first : nil)
-        // Opened for the user, the editor takes the keyboard, as a browser
-        // column does (`openWebView`).
-        defer { if takeFocus, workspace === activeWorkspace { focusActiveTerminal(in: window, editorTakesKeyboard: true) } }
-
-        // focusedIndex moves even for takeFocus:false opens: the camera
-        // only keeps the FOCUSED column visible, so leaving it put could
-        // reveal entirely off-screen in wide layouts. Keyboard focus is
-        // protected separately (the focus:false bridge flag) — the trade
-        // is that column-level commands (Cmd+W etc.) now target the
-        // agent-opened editor, which conveniently makes Cmd+W a dismiss.
-        if let existing = existingEditor {
-            existing.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
-            if let idx = workspace.columns.firstIndex(where: { $0.editorColumn === existing }) {
-                workspace.focusedIndex = idx
-                relayout(animated: false)
-                updateSidebar()
-            }
+        if let focused = workspace.columns[safe: workspace.focusedIndex], !focused.isFront, let editor = focused.editorColumn {
+            editor.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
+            if takeFocus, workspace === activeWorkspace { focusActiveTerminal(in: window, editorTakesKeyboard: true) }
             return
         }
-        // Column first, single open after wiring — an initialFile + second
-        // line-targeted open would run the failure alert / large-file
-        // confirmation twice for the same file.
-        workspace.addEditorColumn(workspaceCwd: editorRoot)
-        if let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn {
-            wireEditor(editor)
-            editor.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
+        guard let editor = frontEditor(in: workspace, cwd: workspaceCwd ?? workspace.focusedWorkingDirectory) else { return }
+        editor.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
+        // A file that couldn't open leaves it as it was.
+        guard editor.currentPath == editor.absolutePath(for: path) else { return }
+        // An agent's open while the user types, or for a task not on
+        // screen, waits behind a pill: over the row and on the task's row.
+        if !takeFocus, userIsTyping || workspace !== activeWorkspace, !workspace.isFrontShown {
+            workspace.frontPill = (path as NSString).lastPathComponent
+            return updateSidebar()
         }
-        relayout(animated: false)
-        updateSidebar()
+        showFront(in: workspace, takeKeyboard: takeFocus)
     }
 
     /// Entry point for `nirux://open-editor` (agents opening a snippet from
-    /// the terminal). Switches to the requested workspace when it resolves;
-    /// an unknown or absent workspace falls through to the active one.
-    /// Non-interactive and unfocused: a URL-triggered open must never pop a
-    /// blocking modal (any app can fire the URL) nor move keyboard focus
-    /// into the buffer while the user is typing elsewhere.
+    /// the terminal), in the requested workspace when it resolves, else the
+    /// active one. Non-interactive and unfocused: a URL-triggered open must
+    /// never pop a blocking modal (any app can fire the URL) nor move the
+    /// keyboard or the view while the user is busy elsewhere.
     func openEditorFromURL(_ request: OpenEditorRequest) {
-        var target: WorkspaceState?
-        if let id = request.workspaceID,
-           let index = workspaces.firstIndex(where: { $0.id == id }) {
-            target = workspaces[index]
-            // Its focused column can be the editor an earlier open focused.
-            if target !== activeWorkspace { switchToWorkspace(index, editorTakesKeyboard: false) }
-        }
+        // A task not on screen keeps the view: its sidebar row says what waits.
+        let target = request.workspaceID.flatMap { id in workspaces.first { $0.id == id } }
         openInEditorColumn(
             path: request.file, line: request.line, endLine: request.endLine,
             takeFocus: false, interactive: false, in: target
