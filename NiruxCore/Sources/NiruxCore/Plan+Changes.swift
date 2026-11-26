@@ -75,10 +75,12 @@ extension Plan {
     public mutating func link(_ id: String, toWorkspace workspaceID: String, by author: Author) throws {
         guard let path = lines.path(to: id) else { throw Refusal.noLine(id) }
         var line = lines[path: path]
+        let parent = parent(at: path)
         guard line.kind != .feature else { throw Refusal.isFeature(id) }
-        guard Self.may(author, .link, line, under: parent(at: path)) else { throw Refusal.notAllowed(.link) }
+        guard Self.fits(line.kind, under: parent?.kind) else { throw Refusal.misplaced(line.kind, under: parent?.kind) }
+        guard Self.may(author, .link, line, under: parent) else { throw Refusal.notAllowed(.link) }
         if let linked = line.workspaceID { throw Refusal.linked(linked) }
-        guard self.line(ofWorkspace: workspaceID) == nil else { throw Refusal.linked(workspaceID) }
+        guard !carries(workspaceID) else { throw Refusal.linked(workspaceID) }
         line.kind = .session
         line.workspaceID = workspaceID
         line.isForUser = false
@@ -145,14 +147,16 @@ extension Plan {
         guard line.workspaceID == nil || line.kind == .session, line.after == nil || line.isPlanned, !line.isForUser || line.kind == .step
         else { throw Refusal.fieldsDontFitKind }
         guard self.line(line.id) == nil, !proposals.contains(where: { $0.id == line.id }) else { throw Refusal.takenID(line.id) }
-        if let workspaceID = line.workspaceID,
-           self.line(ofWorkspace: workspaceID) != nil || proposals.contains(where: { $0.line.workspaceID == workspaceID }) {
-            throw Refusal.linked(workspaceID)
-        }
+        if let workspaceID = line.workspaceID, carries(workspaceID) { throw Refusal.linked(workspaceID) }
         if let after = line.after {
             guard let awaited = self.line(after) else { throw Refusal.noLine(after) }
             guard awaited.kind != .feature else { throw Refusal.isFeature(after) }
         }
+    }
+
+    /// A line or a proposal has this workspace already.
+    private func carries(_ workspaceID: String) -> Bool {
+        line(ofWorkspace: workspaceID) != nil || proposals.contains { $0.line.workspaceID == workspaceID }
     }
 
     private func parent(at path: [Int]) -> Line? {

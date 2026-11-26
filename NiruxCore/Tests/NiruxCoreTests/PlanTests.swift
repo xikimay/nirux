@@ -199,6 +199,9 @@ struct PlanTests {
         #expect(throws: Plan.Refusal.misplaced(Line.Kind(rawValue: "note"), under: nil)) {
             try plan.add(line("m", Line.Kind(rawValue: "note")), to: .top)
         }
+        #expect(throws: Plan.Refusal.misplaced(Line.Kind(rawValue: "note"), under: nil)) {
+            try plan.link("n", toWorkspace: "w7", by: .user)
+        }
     }
 
     @Test func aProposalKeepsItsSourceAndJoinsThePlanOnlyWhenTaken() throws {
@@ -216,6 +219,7 @@ struct PlanTests {
         try plan.propose(line("letter", .session, by: .lead, at: 3, after: "printer"), to: .top)
         try plan.propose(line("running", .session, by: .lead, at: 3, workspace: "w5"), to: .top)
         #expect(throws: Plan.Refusal.linked("w5")) { try plan.propose(line("again", .session, by: .lead, workspace: "w5"), to: .top) }
+        #expect(throws: Plan.Refusal.linked("w5")) { try plan.link("printer", toWorkspace: "w5", by: .user) }
         #expect(throws: Plan.Refusal.takenID("reply")) { try plan.propose(line("reply", .todo, by: .lead), to: .top) }
         #expect(plan.line("sync") == nil)
         #expect(try JSONDecoder().decode(Plan.self, from: JSONEncoder().encode(plan)) == plan)
