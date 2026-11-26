@@ -188,6 +188,7 @@ extension NiruxApp {
     func helpMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: "Help")
         menu.addItem(withTitle: "Getting Started", action: #selector(showGettingStarted(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "What’s New", action: #selector(showWhatsNew(_:)), keyEquivalent: "")
         let item = NSMenuItem()
         item.tag = Self.helpMenuTag
         item.submenu = menu

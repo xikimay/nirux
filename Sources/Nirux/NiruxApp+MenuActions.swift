@@ -132,6 +132,10 @@ extension NiruxApp {
         shell?.showUsageWindow()
     }
 
+    @objc func showWhatsNew(_ sender: Any?) {
+        shell?.showWhatsNewWindow()
+    }
+
     @objc func toggleEditorDiff(_ sender: Any?) {
         shell?.toggleEditorDiff()
     }

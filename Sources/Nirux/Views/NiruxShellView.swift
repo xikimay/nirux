@@ -98,6 +98,10 @@ final class NiruxShellView: NSView {
     /// Each space's task budget (`refreshTaskBudgets`), by space ID; none: off.
     var taskBudgets: [String: Int] = [:]
     var usageWindow: UsageWindowController?
+    var whatsNewWindow: WhatsNewWindowController?
+    /// The nightlies' changelog; nil in a build that doesn't update.
+    lazy var changelogStore: ChangelogStore? = makeChangelogStore()
+    var whatsNewCard: WhatsNewCardView?
     /// "Compact at turn end" waiting for its claude to rest: column ID → task ID.
     var compactsAtTurnEnd: [UUID: String] = [:]
     /// What holds a column's claude (nil: none runs there), for the queued
@@ -107,6 +111,9 @@ final class NiruxShellView: NSView {
               foreground.interactiveAgent == .claude else { return nil }
         return self.leadHoldings(workspace, column: column, pty: pty, foreground: foreground, snapshot: snapshot)
     }
+    /// The update Sparkle found, until it installs.
+    var availableUpdate: AvailableUpdate?
+    var updatePopover: NSPopover?
     /// Resumes under way, and columns just launched to resume a session.
     let sessionResume = SessionResumeState()
     var workspaces: [WorkspaceState] {
@@ -653,6 +660,7 @@ final class NiruxShellView: NSView {
         applyChromeLayout(frames, animated: animated)
         railMayHaveChanged(animated: animated)
         layoutToast(frames)
+        layOutWhatsNewCard(frames)
         layOutWorkspaceCard(in: frames.viewport)
 
         // Each workspace fills the viewport; the strip stacks them and is

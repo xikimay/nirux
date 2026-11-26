@@ -474,6 +474,8 @@ extension BoardStages {
         var lastActivityAt: TimeInterval?
         /// Its merged pull request's worktree is still there.
         var cleanUp: CleanUp?
+        /// Its merged pull request, against the running nightly.
+        var shipping: ChangelogStore.Shipping?
         /// Where its work is on disk; nil for a pull request checked out
         /// nowhere here.
         var folder: Folder?
@@ -759,10 +761,11 @@ extension BoardStages {
                 return Reading(.failed, label, since: last, detail: text(stop.message))
             }
             if pullRequest.isMerged {
+                let merged = ["Merged", facts.shipping?.words].compactMap { $0 }.joined(separator: " · ")
                 switch facts.cleanUp {
-                case .offered?: return Reading(.merged, "Merged · \(Link.cleanUp.title)", link: .cleanUp)
+                case .offered?: return Reading(.merged, "\(merged) · \(Link.cleanUp.title)", link: .cleanUp)
                 case .running?: return Reading(.merged, "Merged · \(CleanUp.runningWords)")
-                case nil: return Reading(.merged, "Merged")
+                case nil: return Reading(.merged, merged)
                 }
             }
             // Whatever its station: nothing lands on a merged branch.

@@ -238,6 +238,10 @@ extension NiruxShellView {
                       heldMessages: SidebarHeldMessages(workspace.mergeWaits), waitingTask: workspace.waitingStart?.waitingState)
         info.usage = taskUsage(of: workspace)
         info.frontPill = workspace.frontPill
+        info.shipping = workspace.prInfo.flatMap { pullRequest in
+            pullRequest.state == .merged
+                ? changelogStore?.shipping(ofPullRequestAt: pullRequest.url, installedBuild: sideEffects.installedBuild()) : nil
+        }
         return info
     }
 

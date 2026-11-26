@@ -249,7 +249,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         webView.uiDelegate = self
         webView.bouncesOnlyVertically()
         webView.setValue(false, forKey: "drawsBackground")
-        webView.underPageBackgroundColor = Theme.Color.base
+        webView.underPageBackgroundColor = Theme.Color.surface
         addSubview(webView)
 
         // Conflict banner floats over the editor surface — added last so it
