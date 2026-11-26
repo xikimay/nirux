@@ -98,6 +98,10 @@ final class NiruxShellView: NSView {
     /// Each space's task budget (`refreshTaskBudgets`), by space ID; none: off.
     var taskBudgets: [String: Int] = [:]
     var usageWindow: UsageWindowController?
+    var whatsNewWindow: WhatsNewWindowController?
+    /// The nightlies' changelog; nil in a build that doesn't update.
+    lazy var changelogStore: ChangelogStore? = makeChangelogStore()
+    var whatsNewCard: WhatsNewCardView?
     /// "Compact at turn end" waiting for its claude to rest: column ID → task ID.
     var compactsAtTurnEnd: [UUID: String] = [:]
     /// What holds a column's claude (nil: none runs there), for the queued
@@ -643,6 +647,7 @@ final class NiruxShellView: NSView {
         applyChromeLayout(frames, animated: animated)
         railMayHaveChanged(animated: animated)
         layoutToast(frames)
+        layOutWhatsNewCard(frames)
         layOutWorkspaceCard(in: frames.viewport)
 
         // Each workspace fills the viewport; the strip stacks them and is

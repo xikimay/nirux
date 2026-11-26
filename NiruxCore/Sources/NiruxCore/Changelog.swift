@@ -93,6 +93,30 @@ public struct Changelog: Codable, Equatable, Sendable {
         entries.filter { $0.build > previous && $0.build <= current }
     }
 
+    /// What a nightly brought, as a changelog shows it.
+    public struct Nightly: Equatable, Sendable {
+        public var build: Int
+        public var entries: [Entry]
+
+        public init(build: Int, entries: [Entry]) {
+            self.build = build
+            self.entries = entries
+        }
+    }
+
+    /// The entries matching `query`, by nightly, newest first; the internal
+    /// work only when asked.
+    public func nightlies(matching query: String, includingInternal: Bool) -> [Nightly] {
+        let shown = entries(matching: query).filter { includingInternal || $0.kind != .internal }
+        return shown.reduce(into: [Nightly]()) { nightlies, entry in
+            if nightlies.last?.build == entry.build {
+                nightlies[nightlies.count - 1].entries.append(entry)
+            } else {
+                nightlies.append(Nightly(build: entry.build, entries: [entry]))
+            }
+        }
+    }
+
     /// The entries holding every word of `query` in their title, their Why
     /// or their "#number", ignoring case and accents.
     public func entries(matching query: String) -> [Entry] {
@@ -135,6 +159,17 @@ public struct Changelog: Codable, Equatable, Sendable {
         )
         guard (1_000...9_999).contains(parts.year!), parts.isValidDate(in: utc) else { return nil }
         return utc.date(from: parts)
+    }
+
+    /// "Nov 25, 19:54" where the nightly was built at 18:54 UTC and the clock
+    /// reads Paris time; "Build 42" for a number that isn't a minute.
+    public static func name(ofBuild build: Int, in timeZone: TimeZone = .current) -> String {
+        guard let date = date(ofBuild: build) else { return "Build \(build)" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "MMM d, HH:mm"
+        return formatter.string(from: date)
     }
 
     public static func build(at date: Date) -> Int {

@@ -88,6 +88,28 @@ struct ChangelogTests {
         #expect(log.entries(matching: "board number").map(\.pullRequest) == [913])
     }
 
+    @Test func nightliesGroupTheMatchingEntriesNewestFirst() {
+        let log = Changelog(entries: [
+            Entry(pullRequest: 913, title: "⌘P: open a pull request", why: nil, kind: .new, build: 3),
+            Entry(pullRequest: 917, title: "Tests: a calmer clock", why: nil, kind: .internal, build: 3),
+            Entry(pullRequest: 905, title: "Columns: pin a column", why: nil, kind: .better, build: 2),
+            Entry(pullRequest: 908, title: "Tests: the stand-in waits", why: nil, kind: .internal, build: 2),
+            Entry(pullRequest: 897, title: "Terminal: Ctrl+L", why: nil, kind: .fixed, build: 1),
+        ])
+        #expect(log.nightlies(matching: "", includingInternal: false).map { $0.entries.map(\.pullRequest) } == [[913], [905], [897]])
+        #expect(log.nightlies(matching: "", includingInternal: true).map(\.build) == [3, 2, 1])
+        #expect(log.nightlies(matching: "tests", includingInternal: true) == [
+            Changelog.Nightly(build: 3, entries: [log.entries[1]]), Changelog.Nightly(build: 2, entries: [log.entries[3]]),
+        ])
+        #expect(log.nightlies(matching: "tests", includingInternal: false).isEmpty)
+    }
+
+    @Test func buildsAreNamedInTheLocalTime() throws {
+        let paris = try #require(TimeZone(identifier: "Europe/Paris"))
+        #expect(Changelog.name(ofBuild: 202611251854, in: paris) == "Nov 25, 19:54")
+        #expect(Changelog.name(ofBuild: 42, in: paris) == "Build 42")
+    }
+
     @Test func buildNumbersAreUTCMinutes() throws {
         let date = try #require(Changelog.date(ofBuild: 202611251854))
         #expect(date == Date(timeIntervalSince1970: 1_795_632_840))
