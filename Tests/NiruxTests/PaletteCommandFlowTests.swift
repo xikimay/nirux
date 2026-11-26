@@ -25,6 +25,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testAgentCommands": ["Open Claude Code", "Open Codex", "Open Antigravity", "Next Waiting Agent"],
             "testSessionHistoryCommand": ["Session History…"],
             "testTokenUsageCommand": ["Token Usage"],
+            "testWhatsNewCommand": ["What’s New"],
             "testRestartLeadCommand": [NiruxShellView.restartLeadTitle],
             "testPromoteToLeadCommand": [NiruxShellView.promoteToLeadTitle],
             "testProjectMemoryCommand": ["Space Memory…"],
@@ -245,6 +246,100 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(started, true)
             XCTAssertEqual(harness.terminalRestarts.count, 1)
             XCTAssertTrue(harness.terminalRestarts.last?.contains("Queue #824 when green.") == true)
+        }
+    }
+
+    /// The cached changelog shows at once, the published one replaces it;
+    /// the internal work and the search filter it, and each number links
+    /// its pull request.
+    func testWhatsNewCommand() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let published = Changelog(entries: [
+                Changelog.Entry(pullRequest: 913, title: "⌘P: open a pull request by its number", why: "Finding a PR meant scanning the Board.",
+                                kind: .new, build: 202611251854),
+                Changelog.Entry(pullRequest: 917, title: "Tests: a calmer clock", why: nil, kind: .internal, build: 202611251854),
+                Changelog.Entry(pullRequest: 905, title: "Columns: pin a column", why: nil, kind: .better, build: 202611250520)
+            ])
+            let data = try JSONEncoder().encode(published)
+            let cache = FileManager.default.temporaryDirectory.appendingPathComponent("changelog-\(UUID().uuidString).json")
+            defer { try? FileManager.default.removeItem(at: cache) }
+            shell.changelogStore = ChangelogStore(
+                feed: "https://github.com/xikimay/nirux/releases/download/nightly/appcast.xml", cache: cache,
+                load: { _ in data }, onChange: { [weak shell] in shell?.changelogDidChange() }
+            )
+
+            harness.runPaletteCommand("What’s New")
+            let controller = try XCTUnwrap(shell.whatsNewWindow)
+            defer { controller.close() }
+            harness.waitUntil("the published changelog") { controller.textView.string.contains("⌘P: open a pull request by its number") }
+            let text = { controller.textView.string }
+            XCTAssertTrue(text().contains("Finding a PR meant scanning the Board."))
+            XCTAssertTrue(text().contains("Columns: pin a column"))
+            XCTAssertFalse(text().contains("Tests: a calmer clock"))
+            let storage = try XCTUnwrap(controller.textView.textStorage)
+            let number = (storage.string as NSString).range(of: "#913")
+            XCTAssertEqual(storage.attribute(.link, at: number.location, effectiveRange: nil) as? URL,
+                           URL(string: "https://github.com/xikimay/nirux/pull/913"))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: cache.path))
+
+            controller.showsInternal.performClick(nil)
+            XCTAssertTrue(text().contains("Tests: a calmer clock"))
+            controller.search.stringValue = "pull request"
+            XCTAssertTrue(controller.search.sendAction(controller.search.action, to: controller.search.target))
+            XCTAssertTrue(text().contains("#913"))
+            XCTAssertFalse(text().contains("Columns: pin a column"))
+            let store = try XCTUnwrap(shell.changelogStore)
+            harness.waitUntil("the fetch to end") { !store.isRefreshing }
+        }
+    }
+
+    /// After an update, the card lists what the builds since the last one
+    /// seen brought; See All opens the window and marks the build seen, so
+    /// the next launch shows no card.
+    func testWhatsNewCardAfterAnUpdate() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let seenFile = FileManager.default.temporaryDirectory.appendingPathComponent("whats-new-seen-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: seenFile) }
+            shell.sideEffects.whatsNewSeenFile = seenFile
+            shell.sideEffects.installedBuild = { 202611251854 }
+            try "202611242135".write(to: seenFile, atomically: true, encoding: .utf8)
+            let published = Changelog(entries: [
+                Changelog.Entry(pullRequest: 913, title: "⌘P: open a pull request by its number", why: nil, kind: .new, build: 202611251854),
+                Changelog.Entry(pullRequest: 917, title: "Tests: a calmer clock", why: nil, kind: .internal, build: 202611251854),
+                Changelog.Entry(pullRequest: 906, title: "Missions: Enter is never pressed for an agent that left", why: nil,
+                                kind: .fixed, build: 202611250520),
+                Changelog.Entry(pullRequest: 896, title: "Columns: drag a column by its header", why: nil, kind: .new, build: 202611242135)
+            ])
+            let data = try JSONEncoder().encode(published)
+            let cache = FileManager.default.temporaryDirectory.appendingPathComponent("changelog-\(UUID().uuidString).json")
+            defer { try? FileManager.default.removeItem(at: cache) }
+            shell.changelogStore = ChangelogStore(
+                feed: "https://github.com/xikimay/nirux/releases/download/nightly/appcast.xml", cache: cache,
+                load: { _ in data }, onChange: { [weak shell] in shell?.changelogDidChange() }
+            )
+
+            shell.startWhatsNewAfterUpdate()
+            harness.waitUntil("the card after the update") { shell.whatsNewCard != nil }
+            let card = try XCTUnwrap(shell.whatsNewCard)
+            XCTAssertTrue(card.text.contains("⌘P: open a pull request by its number"))
+            XCTAssertTrue(card.text.contains("Missions: Enter is never pressed for an agent that left"))
+            XCTAssertTrue(card.text.contains("2 nightlies, 2 changes"))
+            XCTAssertTrue(card.text.contains("1 under the hood"))
+            XCTAssertFalse(card.text.contains("Columns: drag a column by its header"), "the build already seen")
+            XCTAssertEqual(shell.lastSeenBuild, 202611242135, "seen only once put away")
+
+            card.seeAllButton.performClick(nil)
+            XCTAssertNil(shell.whatsNewCard)
+            let window = try XCTUnwrap(shell.whatsNewWindow)
+            defer { window.close() }
+            XCTAssertTrue(window.window?.isVisible == true)
+            XCTAssertEqual(shell.lastSeenBuild, 202611251854)
+            let store = try XCTUnwrap(shell.changelogStore)
+            harness.waitUntil("the window's fetch") { !store.isRefreshing }
+            shell.startWhatsNewAfterUpdate()
+            XCTAssertNil(shell.whatsNewCard, "a later launch of the same build")
         }
     }
 

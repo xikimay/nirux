@@ -106,6 +106,13 @@ struct ShellSideEffects {
         if on { NSEvent.startPeriodicEvents(afterDelay: 0.15, withPeriod: HeldPress.tickPeriod) } else { NSEvent.stopPeriodicEvents() }
     }
 
+    /// This build's number (`CFBundleVersion`); 0 for a development build.
+    var installedBuild: @MainActor () -> Int = { Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "") ?? 0 }
+
+    /// Where the card after an update keeps the last build it showed: in the
+    /// state folder, which `NIRUX_STATE_DIR` moves.
+    var whatsNewSeenFile = Persistence.stateDirectory.appendingPathComponent("whats-new-seen")
+
     /// macOS's "Reduce motion" (System Settings › Accessibility › Display).
     var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 

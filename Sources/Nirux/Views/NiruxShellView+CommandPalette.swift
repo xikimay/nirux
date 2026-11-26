@@ -81,6 +81,15 @@ extension NiruxShellView {
                 self?.showUsageWindow()
             },
             PaletteAction(
+                icon: .symbol("sparkles"), title: "What’s New", subtitle: "What the nightlies brought, by build", shortcut: nil,
+                // A typed ' never matches ’.
+                ranking: PaletteRanking.Candidate(
+                    title: "What’s New", keys: ["What's New", "What the nightlies brought, by build", "changelog", "release notes"]
+                )
+            ) { [weak self] in
+                self?.showWhatsNewWindow()
+            },
+            PaletteAction(
                 icon: .symbol("plus.forwardslash.minus"), title: "Toggle Editor Diff", subtitle: "Show the diff for the active editor file",
                 shortcut: .toggleEditorDiff
             ) { [weak self] in
