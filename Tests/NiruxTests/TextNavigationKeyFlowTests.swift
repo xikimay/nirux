@@ -559,20 +559,30 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
-    /// A header's double-click is two presses on it: a second press whose
-    /// first went elsewhere (the pill, the shade) leaves the column there.
+    /// A header's double-click is two presses on it within the interval: a
+    /// second press whose first went elsewhere (the pill, the shade), or
+    /// came too long before, leaves the column there.
     func testHeaderDoubleClickNeedsBothPressesOnIt() throws {
         try UIFlowHarness.run { harness in
             let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
             harness.shell.openInEditorColumn(path: harness.repo + "/README.md")
             let column = try XCTUnwrap(workspace.front)
             let header = try XCTUnwrap(column.header)
+            let interval = NSEvent.doubleClickInterval
+            let start = ProcessInfo.processInfo.systemUptime
+            let press = { (clickCount: Int, at: TimeInterval) in
+                header.mouseDown(with: try self.mousePress(on: header, clickCount: clickCount, at: start + at, in: harness))
+            }
 
-            header.mouseDown(with: try mousePress(on: header, clickCount: 2, in: harness))
+            try press(2, 0)
             XCTAssertIdentical(workspace.front, column, "its first press went elsewhere")
 
-            header.mouseDown(with: try mousePress(on: header, clickCount: 1, in: harness))
-            header.mouseDown(with: try mousePress(on: header, clickCount: 2, in: harness))
+            try press(1, 10)
+            try press(2, 10 + interval + 0.05)
+            XCTAssertIdentical(workspace.front, column, "just past the interval")
+
+            try press(1, 20)
+            try press(2, 20 + interval / 2)
             XCTAssertNil(workspace.front, "both on it: in the row")
         }
     }
@@ -695,11 +705,14 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         ))
     }
 
-    /// A left press on the middle of `view`, the `clickCount`th in a row, now.
-    private func mousePress(on view: NSView, clickCount: Int, in harness: UIFlowHarness) throws -> NSEvent {
+    /// A left press on the middle of `view`, the `clickCount`th in a row, at
+    /// `timestamp`.
+    private func mousePress(
+        on view: NSView, clickCount: Int, at timestamp: TimeInterval, in harness: UIFlowHarness
+    ) throws -> NSEvent {
         try XCTUnwrap(NSEvent.mouseEvent(
             with: .leftMouseDown, location: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil),
-            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: harness.window.windowNumber,
+            modifierFlags: [], timestamp: timestamp, windowNumber: harness.window.windowNumber,
             context: nil, eventNumber: 0, clickCount: clickCount, pressure: 1
         ))
     }

@@ -108,7 +108,8 @@ final class SettingsWindowTests: XCTestCase {
                 ("generateTaskNames", { try self.click(app.settingsTaskNamesCheckbox) }),
                 ("showTurnStatus", { try self.click(app.settingsTurnStatusCheckbox) }),
                 ("showCatchUp", { try self.click(app.settingsCatchUpCheckbox) }),
-                ("triageCIFailures", { try self.click(app.settingsTriageCIFailuresCheckbox) })
+                ("triageCIFailures", { try self.click(app.settingsTriageCIFailuresCheckbox) }),
+                ("warnQuotaForecast", { try self.click(app.settingsWarnQuotaForecastCheckbox) })
             ]
             for step in steps {
                 let before = try savedSettings()

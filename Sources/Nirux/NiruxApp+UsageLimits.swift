@@ -22,6 +22,14 @@ extension NiruxApp {
         indicator.onShowUsage = { [weak self] in self?.shell?.showUsageWindow() }
         indicator.burnRows = { [weak self] readings in self?.shell?.quotaBurnRows(readings: readings) ?? [] }
         indicator.onBurnAction = { [weak self] workspaceID, action in self?.shell?.takeBurnAction(action, workspaceID: workspaceID) }
+        let alerter = QuotaAlerter(
+            isEnabled: { PersistedSettings.effective(Persistence.load()?.settings).warnQuotaForecast },
+            burner: { [weak self] in
+                self?.shell?.quotaBurnRows(readings: self?.usageLimitsMonitor?.readings["five_hour"] ?? []).first
+            },
+            post: { NiruxNotifier.shared.postQuotaAlert($0) }
+        )
+        indicator.onLimits = { limits, now in alerter.check(limits, now: now) }
         window.addTitlebarAccessoryViewController(indicator)
         let monitor = ClaudeUsageLimitsMonitor()
         monitor.onUpdate = { [weak self, weak indicator, weak monitor] limits, now in
