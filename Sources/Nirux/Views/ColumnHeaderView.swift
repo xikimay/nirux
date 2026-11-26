@@ -223,8 +223,8 @@ final class ColumnHeaderView: NSView {
     override func mouseDown(with event: NSEvent) {
         let first = lastPress
         lastPress = event.clickCount == 1 ? event.timestamp : nil
-        if event.clickCount == 2, let first, event.timestamp - first <= NSEvent.doubleClickInterval,
-           let shell, shell.headerDoubleClicked(self) { return }
+        _ = first
+        if event.clickCount == 2, let shell, shell.headerDoubleClicked(self) { return }
         guard let shell, shell.dragColumn(withHeader: self, press: event) else { return super.mouseDown(with: event) }
     }
 
@@ -440,7 +440,7 @@ final class ColumnHeaderView: NSView {
         for item in menu.items {
             guard let command = item.representedObject as? ColumnCommand else { continue }
             item.target = self
-            if let shell, !command.isEnabled(shell, self) { item.action = nil }
+            _ = command
         }
         guard !overflowButtons.isEmpty else { return menu }
         for (index, button) in overflowButtons.enumerated() {

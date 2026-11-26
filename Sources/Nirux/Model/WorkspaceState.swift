@@ -1017,7 +1017,7 @@ extension WorkspaceState {
     /// `index`, shown at once, at its row width, else `widthFraction`.
     private func insertIntoRow(_ col: ColumnState, at index: Int, widthFraction: CGFloat) {
         col.isFront = false
-        col.widthFraction = col.rowWidthFraction ?? widthFraction
+        col.widthFraction = widthFraction
         col.rowWidthFraction = nil
         col.endPass()
         col.view.isHidden = false
