@@ -1,4 +1,5 @@
 import AppKit
+import GhosttyTerminal
 import XCTest
 @testable import Nirux
 
@@ -134,6 +135,8 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
     /// brings that column forward, find bar open, and Ghostty scrolls to
     /// that very match.
     func testSearchEverywhere() throws {
+        let zzLog = ZZDebugLog.start()
+        defer { TerminalDebugLog.disable() }
         try UIFlowHarness.run { harness in
             let home = try XCTUnwrap(harness.shell.activeWorkspace)
             harness.shell.addWorkspace(title: "other", cwd: harness.worktree)
@@ -148,6 +151,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertFalse(session.readViewportText()?.contains("\(needle) 100\n") ?? true, "the match starts on screen")
             harness.shell.focusWorkspace(id: home.id)
 
+            zzLog.add("ZZ home focused, opening Search Everywhere")
             harness.runPaletteCommand("Search Everywhere")
             let field = try XCTUnwrap(harness.waitForField(placeholder: GlobalSearchPanel.placeholder))
             harness.type(needle.uppercased(), into: field)
@@ -157,8 +161,15 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(panel.rows.map(\.place), Array(repeating: "other › Terminal 1", count: 3))
             XCTAssertEqual(panel.statusLabel?.stringValue, "3 matches in 1 of 2 terminals")
 
+            let missing = ProcessInfo.processInfo.environment["ZZ_FORCE_MISS"] != nil ? "never-printed" : "\(needle) 202"
+            zzLog.add("ZZ injecting 201/202")
             session.receive("\(needle) 201\r\n\(needle) 202\r\n")
-            harness.waitUntil("the new matches") { TerminalScreenText.read(session)?.contains("\(needle) 202") == true }
+            var polls = 0
+            NiruxTests.waitUntil("the new matches \(ZZDiag.dump(session: session, column: column, harness: harness, log: zzLog, needle: missing))") {
+                polls += 1
+                if polls % 50 == 1 { zzLog.add("ZZ poll \(polls) shellPID=\(String(describing: column.pty?.shellPID)) exited=\(column.pty?.hasExited ?? true)") }
+                return TerminalScreenText.read(session)?.contains(missing) == true
+            }
             harness.press(.down, in: field.window)
             harness.press(.returnKey, in: field.window)
             XCTAssertFalse(panel.isVisible)
