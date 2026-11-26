@@ -104,6 +104,9 @@ final class NiruxShellView: NSView {
     var whatsNewCard: WhatsNewCardView?
     /// "Compact at turn end" waiting for its claude to rest: column ID → task ID.
     var compactsAtTurnEnd: [UUID: String] = [:]
+    /// The title bar's limits, held forecasts included, and the folder of
+    /// their readings log, while the option is on: the Usage window's.
+    var usageWindowQuota: (() -> (limits: [QuotaLimit], readings: String)?)?
     /// What holds a column's claude (nil: none runs there), for the queued
     /// compactions and their offer; a test sets its own.
     lazy var claudeHoldings: (WorkspaceState, ColumnState, ProcessSnapshot) -> LeadHoldings? = { [weak self] workspace, column, snapshot in

@@ -159,6 +159,9 @@ public struct UsageSummary: Equatable, Sendable {
     /// The part of `weightedTokens` spent with a context of
     /// `heavyContextTokens` or more.
     public var heavyContextWeightedTokens = 0.0
+    /// The part of those that the context past `heavyContextTokens` cost:
+    /// what compacting there would have saved, about.
+    public var heavyContextExcessWeightedTokens = 0.0
     public var lastActivity: TimeInterval = 0
     public private(set) var sessions: Set<UsageSessionKey> = []
     /// As `<session ID>/<subagent ID>`.
@@ -184,7 +187,10 @@ public struct UsageSummary: Equatable, Sendable {
         peakContextTokens = max(peakContextTokens, event.contextTokens)
         lastActivity = max(lastActivity, event.timestamp)
         sessions.insert(session)
-        if event.contextTokens >= Self.heavyContextTokens { heavyContextWeightedTokens += weighted }
+        if event.contextTokens >= Self.heavyContextTokens {
+            heavyContextWeightedTokens += weighted
+            heavyContextExcessWeightedTokens += weighted * Double(event.contextTokens - Self.heavyContextTokens) / Double(event.contextTokens)
+        }
         if let subagentID = event.subagentID {
             subagentWeightedTokens += weighted
             subagents.insert(session.id + "/" + subagentID)

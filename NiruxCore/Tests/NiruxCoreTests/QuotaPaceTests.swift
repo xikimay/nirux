@@ -140,6 +140,37 @@ struct QuotaPaceTests {
         #expect(report.claudeMinutes.values.reduce(0, +) == 1_130)
     }
 
+    @Test func aLimitsDailyRiseFollowsItsWindowsAcrossAReset() {
+        let days = [now - 2 * 86_400, now - 86_400, now]
+        let readings = [
+            QuotaReading(time: now - 2 * 86_400 + 60, usedPercent: 10, resetsAt: now - 86_400 + 600),
+            QuotaReading(time: now - 2 * 86_400 + 3_600, usedPercent: 25, resetsAt: now - 86_400 + 600),
+            // The week reset: the new window climbed to 2 %, no fall.
+            QuotaReading(time: now - 86_400 + 1_200, usedPercent: 2, resetsAt: now + 6 * 86_400),
+            QuotaReading(time: now - 86_400 + 7_200, usedPercent: 9, resetsAt: now + 6 * 86_400),
+            QuotaReading(time: now + 60, usedPercent: 12, resetsAt: now + 6 * 86_400)
+        ]
+        #expect(QuotaCalibration.dailyRise(readings, dayStarts: days) == [15, 9, 3])
+    }
+
+    @Test func windowsReportedInTurnEachRiseByTheirOwnClimb() {
+        // A session still on the last window after a reset, or a second account: A 40, B 10, A 41, B 11, A 42.
+        let a = now + 86_400, b = now + 6 * 86_400
+        let readings = [(40.0, a), (10, b), (41, a), (11, b), (42, a)].enumerated().map { index, reading in
+            QuotaReading(time: now + Double(index) * 60, usedPercent: reading.0, resetsAt: reading.1)
+        }
+        // A 2, and B 10 from 0 then 1: B came after the first reading.
+        #expect(QuotaCalibration.dailyRise(readings, dayStarts: [now]) == [13])
+    }
+
+    @Test func theContextPastItsThresholdCountsWhatCompactingWouldSave() {
+        let event = UsageEvent(timestamp: now, model: "claude-opus-5-5", counts: TokenCounts(input: 100_000), contextTokens: 400_000)
+        let report = UsageReport(sessions: [UsageSession(key: UsageSessionKey(.claude, "a"), attribution: UsageAttribution(taskID: "t"), events: [event])], now: now)
+        #expect(report.day.total.heavyContextWeightedTokens == 100_000)
+        #expect(report.day.total.heavyContextExcessWeightedTokens == 30_000)
+        #expect(report.claudeDayTasks.last == ["t": 100_000])
+    }
+
     @Test func silenceAfterTheLastReadingSlowsThePace() {
         // 80 → 90 % over 15 minutes, then nothing for 16: no "full by now".
         let stopped = (0..<3).map { QuotaReading(time: now - 1_860 + Double($0) * 450, usedPercent: 80 + Double($0) * 5, resetsAt: now + 3 * 3_600) }

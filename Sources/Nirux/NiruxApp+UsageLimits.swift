@@ -24,11 +24,16 @@ extension NiruxApp {
         indicator.onBurnAction = { [weak self] workspaceID, action in self?.shell?.takeBurnAction(action, workspaceID: workspaceID) }
         window.addTitlebarAccessoryViewController(indicator)
         let monitor = ClaudeUsageLimitsMonitor()
-        monitor.onUpdate = { [weak indicator, weak monitor] limits, now in
+        monitor.onUpdate = { [weak self, weak indicator, weak monitor] limits, now in
             indicator?.update(limits: limits, readings: monitor?.readings ?? [:], now: now)
+            self?.shell?.updateUsageWindowLimits()
         }
         usageLimitsIndicator = indicator
         usageLimitsMonitor = monitor
+        shell?.usageWindowQuota = { [weak indicator, weak monitor] in
+            guard monitor?.isEnabled == true else { return nil }
+            return (indicator?.limits ?? [], ClaudeUsageLimitsFile.readingsFolder())
+        }
         monitor.setEnabled(Self.currentShowClaudeUsageLimits())
     }
 
@@ -41,6 +46,7 @@ extension NiruxApp {
         if !enabled { ClaudeUsageLimitsFile.remove() }
         usageLimitsMonitor?.setEnabled(enabled)
         showCodexLimits()
+        shell?.updateUsageWindow()
     }
 
     /// Codex's limits and readings as the latest usage read found them,
@@ -48,5 +54,6 @@ extension NiruxApp {
     func showCodexLimits() {
         let report = usageLimitsMonitor?.isEnabled == true ? shell?.usageMonitor?.report : nil
         usageLimitsIndicator?.update(codex: report?.codexLimits, readings: report?.codexReadings ?? [:], now: Date().timeIntervalSince1970)
+        shell?.updateUsageWindowLimits()
     }
 }

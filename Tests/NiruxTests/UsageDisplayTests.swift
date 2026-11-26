@@ -378,6 +378,7 @@ final class UsageDisplayTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testTheUsageWindowRanksTasksAndCountsWhatTheyLeaveOut() {
         let sessions = [
             UsageSession(key: UsageSessionKey(.claude, "a"), attribution: UsageAttribution(spaceID: "space", taskID: "lead"),
@@ -389,13 +390,125 @@ final class UsageDisplayTests: XCTestCase {
         let week = UsageReport(sessions: sessions, now: now).week
         let names = UsageNames(tasks: ["lead": .init(title: "Lead", isLead: true)], spaces: ["space": "Nirux"])
         XCTAssertEqual(UsageReportText.headline(week), "1k tokens · 3 responses · 3 sessions")
-        XCTAssertEqual(UsageReportText.sections(week, names: names).map(\.title), ["By agent", "Causes (they overlap)", "Tasks", "Spaces"])
+        XCTAssertEqual(UsageReportText.sections(week, names: names).map(\.title), ["By agent", "Causes (they overlap)", "Spaces"])
         let rows = Dictionary(uniqueKeysWithValues: UsageReportText.sections(week, names: names).map { ($0.title, $0.rows) })
         XCTAssertEqual(rows["By agent"], [["Claude", "900", "90%"], ["Codex", "100", "10%"]])
-        XCTAssertEqual(rows["Causes (they overlap)"]?.last, ["Leads", "600", "60%"])
-        XCTAssertEqual(rows["Tasks"], [
-            ["Lead", "600", "60%", "peak 600", ""], ["Closed task", "300", "30%", "peak 300", ""], ["Outside tasks", "100", "10%"]
-        ])
+        XCTAssertEqual(rows["Causes (they overlap)"], [["Leads", "600", "60%"]], "causes at zero are left out")
         XCTAssertEqual(rows["Spaces"], [["Nirux", "1k", "100%"]])
+        // The tasks go to the table, in points of the weekly limit when calibrated.
+        let calibrated = UsageWeek(rise: [0, 0, 0, 0, 0, 0, 9], dayTasks: [[:], [:], [:], [:], [:], [:], ["lead": 600, "closed": 300]])
+        let table = UsageReportText.tableRows(week, names: names, week: calibrated)
+        XCTAssertEqual(table.map(\.title), ["Lead", "Closed task", "Outside tasks"])
+        XCTAssertEqual(table.first?.points ?? 0, 6, accuracy: 0.001)
+        XCTAssertEqual(table.first?.tokens, 600)
+        let view = UsageTasksTable()
+        view.show(table)
+        XCTAssertEqual(view.text(row: 2, column: "peak"), "", "what the rows leave out has no context of its own")
+    }
+
+    /// A task's points are its share of each day's rise: the days before
+    /// the readings began rose by nothing that can be split.
+    func testATasksWeekCountsOnlyTheDaysItsLimitRose() {
+        let starts = UsageReport(sessions: [], now: now).days.map(\.start)
+        let session = UsageSession(
+            key: UsageSessionKey(.claude, "a"), attribution: UsageAttribution(spaceID: "space", taskID: "a"),
+            events: [
+                UsageEvent(timestamp: starts[0] + 60, model: "claude-opus-5-5", counts: TokenCounts(input: 30_000_000)),
+                UsageEvent(timestamp: starts[6] + 60, model: "claude-opus-5-5", counts: TokenCounts(input: 1_000_000))
+            ]
+        )
+        let report = UsageReport(sessions: [session], now: now)
+        // The readings began today: 2 points, all of them today's million.
+        let week = UsageWeek(rise: [0, 0, 0, 0, 0, 0, 2], dayTasks: report.claudeDayTasks)
+        let rows = UsageReportText.tableRows(report.week, names: UsageNames(), week: week)
+        XCTAssertEqual(rows.first?.points ?? 0, 2, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testTheWeeksLegendFitsTheChart() {
+        XCTAssertEqual(UsageWeekChart.legendWidths([40, 60], fitting: 400), [40, 60], "all fit: their own widths")
+        XCTAssertEqual(UsageWeekChart.legendWidths([40, 300, 300], fitting: 400), [40, 180, 180], "the long ones share what the short one leaves")
+    }
+
+    /// A cause says what its remedy saves, as a share of the period.
+    @MainActor
+    func testTheUsageWindowSaysWhatEachRemedySaves() {
+        let heavy = UsageEvent(timestamp: now - 60, model: "claude-opus-5-5", counts: TokenCounts(input: 1_000), contextTokens: 560_000)
+        let week = UsageReport(sessions: [UsageSession(key: UsageSessionKey(.claude, "a"), events: [heavy, event(120, input: 1_000)])], now: now).week
+        let causes = UsageReportText.sections(week, names: UsageNames()).first { $0.title == "Causes (they overlap)" }?.rows
+        XCTAssertEqual(causes?.first, ["Context past 280k", "1k", "50%", "Compacting there saves ≈ 25%"])
+        let text = UsageWindowController.text(UsageReportText.sections(week, names: UsageNames())).string
+        XCTAssertTrue(text.contains("50%\nCompacting there saves ≈ 25%\n"), "a line of its own: after the columns, it was cut at the window's minimum width")
+    }
+
+    /// Each day's rise of Claude's weekly limit splits between tasks by
+    /// their share of that day's spend; the busiest by name, the rest as one.
+    func testTheWeekSplitsEachDaysRiseByTask() throws {
+        let week = try XCTUnwrap(UsageWeek(rise: [0, 10, 6], dayTasks: [[:], ["a": 600, "b": 400], ["a": 100, "": 200]]))
+        XCTAssertEqual(week.tasks, ["a", "b", ""])
+        XCTAssertEqual(week.days, [[0, 0, 0], [6, 4, 0], [2, 0, 4]])
+        XCTAssertEqual(week.points, ["a": 8, "b": 4])
+        let elsewhere = try XCTUnwrap(UsageWeek(rise: [10, 5], dayTasks: [[:], ["a": 1_000]]))
+        XCTAssertEqual(elsewhere.points, ["a": 5], "a rise with no spend in Nirux goes to no task")
+        XCTAssertNil(UsageWeek(rise: [0, 0, 0], dayTasks: [[:], [:], [:]]), "no readings, no points")
+    }
+
+    /// The window shows the limits on top and, with the weekly readings,
+    /// the week in points of the limit rather than tokens.
+    /// A window with a report, Claude's weekly limit and its readings.
+    @MainActor
+    private func usageWindow() throws -> (UsageWindowController, QuotaLimit, [QuotaReading]) {
+        let starts = UsageReport(sessions: [], now: now).days.map(\.start)
+        let session = UsageSession(
+            key: UsageSessionKey(.claude, "a"), attribution: UsageAttribution(spaceID: "space", taskID: "lead"),
+            events: [UsageEvent(timestamp: starts[6] + 60, model: "claude-opus-5-5", counts: TokenCounts(input: 1_000))]
+        )
+        let resetsAt = now + 3 * 86_400
+        let readings = [QuotaReading(time: starts[6] + 30, usedPercent: 40, resetsAt: resetsAt), QuotaReading(time: starts[6] + 90, usedPercent: 52, resetsAt: resetsAt)]
+        let limit = try XCTUnwrap(QuotaLimit(agent: .claude, length: 7 * 86_400, readings: readings, now: now))
+        let controller = UsageWindowController()
+        controller.update(report: UsageReport(sessions: [session], now: now), names: UsageNames(tasks: ["lead": .init(title: "Lead", isLead: true)], spaces: ["space": "Nirux"]))
+        controller.update(limits: [limit], now: now)
+        controller.update(weekReadings: readings)
+        return (controller, limit, readings)
+    }
+
+    @MainActor
+    func testTheUsageWindowShowsTheLimitsAndTheWeekInPoints() throws {
+        let (controller, limit, _) = try usageWindow()
+        defer { controller.close() }
+        XCTAssertEqual(controller.limitsStack.arrangedSubviews.count, 1)
+        XCTAssertFalse(controller.weekChart.isHidden)
+        XCTAssertEqual(controller.weekChart.week?.days.last?.reduce(0, +), 12)
+        XCTAssertEqual(controller.tasksTable.text(row: 0, column: "task"), "Lead")
+        XCTAssertEqual(controller.tasksTable.text(row: 0, column: "points"), "≈ 12%")
+        let row = controller.limitsStack.arrangedSubviews.first
+        controller.update(limits: [limit], now: now)
+        XCTAssertIdentical(controller.limitsStack.arrangedSubviews.first, row, "the same words keep the same row: VoiceOver keeps its place")
+
+        controller.update(limits: [], now: now)
+        controller.update(weekReadings: [])
+        XCTAssertTrue(controller.weekChart.isHidden, "without readings, the week by agent in tokens")
+        XCTAssertTrue(controller.limitsStack.isHidden)
+    }
+
+    /// The limit rows, the chart and the table follow the window's width,
+    /// and a short window scrolls rather than squeeze the text to nothing.
+    @MainActor
+    func testTheUsageWindowFollowsItsSizeAndScrolls() throws {
+        let (controller, _, _) = try usageWindow()
+        defer { controller.close() }
+        let window = try XCTUnwrap(controller.window)
+        let scroll = try XCTUnwrap(window.contentView as? NSScrollView)
+        for size in [NSSize(width: 900, height: 720), NSSize(width: 560, height: 480)] {
+            window.setContentSize(size)
+            window.layoutIfNeeded()
+            XCTAssertEqual(scroll.frame.size, size, "nothing holds the window bigger")
+            let width = try XCTUnwrap(scroll.documentView).frame.width - 40
+            XCTAssertEqual(controller.limitsStack.arrangedSubviews.first?.frame.width ?? 0, width, accuracy: 0.5)
+            XCTAssertEqual(controller.weekChart.frame.width, width, accuracy: 0.5)
+            XCTAssertEqual(controller.tasksTable.frame.width, width, accuracy: 0.5)
+            XCTAssertGreaterThan(controller.textView.frame.height, 60, "the agents, causes and spaces keep their lines")
+        }
     }
 }

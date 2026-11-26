@@ -395,14 +395,23 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
     func testTokenUsageCommand() throws {
         try UIFlowHarness.run { harness in
+            let now = Date().timeIntervalSince1970
+            let limit = try XCTUnwrap(QuotaLimit(
+                agent: .claude, length: 5 * 3_600, readings: [QuotaReading(time: now - 60, usedPercent: 40, resetsAt: now + 3_600)], now: now
+            ))
+            let readings = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+            harness.shell.usageWindowQuota = { ([limit], readings) }
             harness.runPaletteCommand("Token Usage")
             let controller = try XCTUnwrap(harness.shell.usageWindow)
             defer { controller.close() }
             harness.waitUntil("the Usage window") { controller.window?.isVisible == true }
             XCTAssertEqual(controller.headline.stringValue, "Reading the agents’ transcripts…")
+            XCTAssertEqual(controller.limitsStack.arrangedSubviews.count, 1, "the limits show before the first report")
+            harness.shell.usageWindowQuota = { nil }
+            harness.shell.updateUsageWindowLimits()
+            XCTAssertTrue(controller.limitsStack.isHidden, "the option off, the limits go")
 
             let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
-            let now = Date().timeIntervalSince1970
             let session = UsageSession(
                 key: UsageSessionKey(.claude, "s"), attribution: UsageAttribution(spaceID: workspace.profileID, taskID: workspace.id),
                 events: [
