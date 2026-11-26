@@ -13,16 +13,20 @@ public struct Plan: Codable, Equatable, Sendable {
     public init() {}
 
     public struct Line: Codable, Equatable, Sendable, Identifiable {
-        public enum Kind: String, Codable, Sendable {
+        /// Open: a kind a later build adds is kept as it is, and fits nowhere here.
+        public struct Kind: RawRepresentable, Codable, Hashable, Sendable {
+            public let rawValue: String
+            public init(rawValue: String) { self.rawValue = rawValue }
+
             /// A label that groups lines.
-            case feature
+            public static let feature = Kind(rawValue: "feature")
             /// Something the user does.
-            case todo
+            public static let todo = Kind(rawValue: "todo")
             /// Work the Lead does itself.
-            case lead
+            public static let lead = Kind(rawValue: "lead")
             /// A task, planned until it has a workspace.
-            case session
-            case step
+            public static let session = Kind(rawValue: "session")
+            public static let step = Kind(rawValue: "step")
         }
 
         public let id: String

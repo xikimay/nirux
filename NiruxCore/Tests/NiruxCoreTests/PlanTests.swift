@@ -134,7 +134,11 @@ struct PlanTests {
         }
         #expect(throws: Plan.Refusal.takenID("fix")) { try plan.add(line("fix", .todo), to: .top) }
         #expect(throws: Plan.Refusal.linked("w1")) { try plan.add(line("again", .session, workspace: "w1"), to: .top) }
+        #expect(throws: Plan.Refusal.fieldsDontFitKind) { try plan.add(line("t", .todo, workspace: "w9"), to: .top) }
+        #expect(throws: Plan.Refusal.fieldsDontFitKind) { try plan.add(line("t", .todo, forUser: true), to: .top) }
+        #expect(throws: Plan.Refusal.takenID("t")) { try plan.add(line("t", .todo), to: .feature(title: "New", id: "t")) }
         try plan.add(line("sub", .session), to: .under("pages"))
+        try plan.add(line("call", .session), to: .under("printer"))
         #expect(ids(plan.line("pages")?.children) == ["reproduce", "fix", "sub"])
     }
 
@@ -148,10 +152,11 @@ struct PlanTests {
         #expect(throws: Plan.Refusal.linked("w1")) { try plan.link("pages", toWorkspace: "w9", by: .user) }
         #expect(throws: Plan.Refusal.isFeature("export")) { try plan.link("export", toWorkspace: "w9", by: .user) }
 
+        try plan.check("printer", by: .user, at: 2)
         try plan.link("printer", toWorkspace: "w2", by: .user)
         #expect(ids(plan.lines) == ["export", "printer"])
         let printer = try #require(plan.line(ofWorkspace: "w2"))
-        #expect(printer.id == "printer" && printer.kind == .session)
+        #expect(printer.id == "printer" && printer.kind == .session && !printer.isChecked)
         #expect(ids(printer.children) == ["call"])
         try plan.link("call", toWorkspace: "w3", by: .lead)
         let call = try #require(plan.line("call"))
@@ -164,8 +169,9 @@ struct PlanTests {
     @Test func aCheckedLineReleasesThePlannedSessionsAfterIt() throws {
         var plan = try day()
         #expect(throws: Plan.Refusal.noLine("nothing")) { try plan.add(line("x", .session, after: "nothing"), to: .top) }
-        #expect(throws: Plan.Refusal.onlyPlannedSessionsWait) { try plan.add(line("x", .todo, after: "printer"), to: .top) }
-        #expect(throws: Plan.Refusal.onlyPlannedSessionsWait) {
+        #expect(throws: Plan.Refusal.isFeature("export")) { try plan.add(line("x", .session, after: "export"), to: .top) }
+        #expect(throws: Plan.Refusal.fieldsDontFitKind) { try plan.add(line("x", .todo, after: "printer"), to: .top) }
+        #expect(throws: Plan.Refusal.fieldsDontFitKind) {
             try plan.add(line("x", .session, workspace: "w9", after: "printer"), to: .top)
         }
         try plan.add(line("texts", .session, after: "printer"), to: .under("export"))
@@ -183,6 +189,18 @@ struct PlanTests {
         #expect(plan.line("page")?.after == nil)
     }
 
+    @Test func aKindALaterBuildAddsIsKeptButFitsNowhere() throws {
+        var plan = try JSONDecoder().decode(Plan.self, from: Data(#"""
+        {"proposals": [], "lines": [{"id": "n", "kind": "note", "title": "n", "isForUser": false, "isUnseen": false,
+          "origin": {"by": "user", "at": 1}, "children": []}]}
+        """#.utf8))
+        #expect(plan.line("n")?.kind == Line.Kind(rawValue: "note"))
+        #expect(try JSONDecoder().decode(Plan.self, from: JSONEncoder().encode(plan)) == plan)
+        #expect(throws: Plan.Refusal.misplaced(Line.Kind(rawValue: "note"), under: nil)) {
+            try plan.add(line("m", Line.Kind(rawValue: "note")), to: .top)
+        }
+    }
+
     @Test func aProposalKeepsItsSourceAndJoinsThePlanOnlyWhenTaken() throws {
         var plan = try day()
         let slack = Plan.Source(name: "Slack", url: "https://example.slack.com/archives/C1/p1", why: "a mention at 08:12")
@@ -195,6 +213,9 @@ struct PlanTests {
         try plan.propose(line("conflicts", .session, by: .lead, at: 3, source: linear), to: .feature(title: "sync", id: "sync2"))
         try plan.propose(line("comments", .step, by: .lead, at: 3), to: .under("pages"))
         try plan.propose(line("quote", .step, by: .lead, at: 3), to: .under("printer"))
+        try plan.propose(line("letter", .session, by: .lead, at: 3, after: "printer"), to: .top)
+        try plan.propose(line("running", .session, by: .lead, at: 3, workspace: "w5"), to: .top)
+        #expect(throws: Plan.Refusal.linked("w5")) { try plan.propose(line("again", .session, by: .lead, workspace: "w5"), to: .top) }
         #expect(throws: Plan.Refusal.takenID("reply")) { try plan.propose(line("reply", .todo, by: .lead), to: .top) }
         #expect(plan.line("sync") == nil)
         #expect(try JSONDecoder().decode(Plan.self, from: JSONEncoder().encode(plan)) == plan)
@@ -211,7 +232,7 @@ struct PlanTests {
         #expect(throws: Plan.Refusal.noProposal("comments")) { try plan.take("comments", by: .user) }
 
         try plan.remove("printer", by: .user)
-        #expect(throws: Plan.Refusal.noLine("printer")) { try plan.take("quote", by: .user) }
-        #expect(plan.proposals.map(\.id) == ["quote"])
+        #expect(plan.proposals.map(\.id) == ["letter", "running"])
+        #expect(plan.proposals.first?.line.after == nil)
     }
 }

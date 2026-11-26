@@ -18,7 +18,7 @@ extension Plan {
         case misplaced(Line.Kind, under: Line.Kind?)
         case notAllowed(Change)
         case isFeature(String)
-        case onlyPlannedSessionsWait
+        case fieldsDontFitKind
         /// The workspace already has its line.
         case linked(String)
 
@@ -38,7 +38,7 @@ extension Plan {
             case .notAllowed(.propose): "Only the Lead proposes lines."
             case .notAllowed(.take): "Only the user, or the Lead on their word, takes or drops a proposal."
             case .isFeature(let id): "\(id) is a feature: check or start its lines instead."
-            case .onlyPlannedSessionsWait: "Only a planned session waits for a line."
+            case .fieldsDontFitKind: "Only a session has a workspace, only a planned one waits for a line, and only a step is for the user."
             case .linked(let workspaceID): "Workspace \(workspaceID) already has its line in the plan."
             }
         }
@@ -83,15 +83,20 @@ extension Plan {
         line.workspaceID = workspaceID
         line.isForUser = false
         line.after = nil
+        line.checkedAt = nil
         lines[path: path] = line
     }
 
-    /// Removes a line and what it holds; what waited for them waits for the user's go instead.
+    /// Removes a line with what it holds and the proposals placed under them; what waited for them waits for the
+    /// user's go instead.
     public mutating func remove(_ id: String, by author: Author) throws {
         guard author == .user else { throw Refusal.notAllowed(.remove) }
         guard let path = lines.path(to: id) else { throw Refusal.noLine(id) }
         let gone = Set([lines.remove(at: path)].flattened.map(\.id))
-        lines.updateEach { if let after = $0.after, gone.contains(after) { $0.after = nil } }
+        let stopWaiting = { (line: inout Line) in if let after = line.after, gone.contains(after) { line.after = nil } }
+        lines.updateEach(stopWaiting)
+        proposals.removeAll { if case .under(let parent) = $0.place { gone.contains(parent) } else { false } }
+        proposals.indices.forEach { stopWaiting(&proposals[$0].line) }
     }
 
     /// The user looked at the line: its dot and those of the lines under it go.
@@ -137,11 +142,16 @@ extension Plan {
 
     private func validate(_ line: Line) throws {
         guard !line.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Refusal.noTitle }
+        guard line.workspaceID == nil || line.kind == .session, line.after == nil || line.isPlanned, !line.isForUser || line.kind == .step
+        else { throw Refusal.fieldsDontFitKind }
         guard self.line(line.id) == nil, !proposals.contains(where: { $0.id == line.id }) else { throw Refusal.takenID(line.id) }
-        if let workspaceID = line.workspaceID, self.line(ofWorkspace: workspaceID) != nil { throw Refusal.linked(workspaceID) }
+        if let workspaceID = line.workspaceID,
+           self.line(ofWorkspace: workspaceID) != nil || proposals.contains(where: { $0.line.workspaceID == workspaceID }) {
+            throw Refusal.linked(workspaceID)
+        }
         if let after = line.after {
-            guard line.isPlanned else { throw Refusal.onlyPlannedSessionsWait }
-            guard self.line(after) != nil else { throw Refusal.noLine(after) }
+            guard let awaited = self.line(after) else { throw Refusal.noLine(after) }
+            guard awaited.kind != .feature else { throw Refusal.isFeature(after) }
         }
     }
 
@@ -167,6 +177,7 @@ extension Plan {
             }
             var feature = Line(id: id, kind: .feature, title: title, by: author, at: time)
             try validate(feature)
+            guard ![line].flattened.contains(where: { $0.id == id }) else { throw Refusal.takenID(id) }
             try Self.allow(author, change, feature, under: nil)
             try Self.allow(author, change, line, under: feature)
             feature.isUnseen = author != .user
@@ -184,13 +195,14 @@ extension Plan {
         guard may(author, change, line, under: parent) else { throw Refusal.notAllowed(change) }
     }
 
+    private static let holds: [Line.Kind?: Set<Line.Kind>] = [
+        nil: [.feature, .todo, .lead, .session],
+        .feature: [.todo, .lead, .session],
+        .todo: [.step, .session], .lead: [.step, .session], .session: [.step, .session]
+    ]
+
     private static func fits(_ kind: Line.Kind, under parent: Line.Kind?) -> Bool {
-        switch parent {
-        case nil: kind != .step
-        case .feature: kind == .todo || kind == .lead || kind == .session
-        case .step: false
-        case .todo, .lead, .session: kind == .step || kind == .session
-        }
+        holds[parent]?.contains(kind) == true
     }
 
     /// An agent's tool reaches its own session's line only.
