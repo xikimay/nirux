@@ -1014,10 +1014,11 @@ extension WorkspaceState {
     }
 
     /// The front column `col`, out of `columns`, goes into the row at
-    /// `index`, shown at once.
+    /// `index`, shown at once, at its row width, else `widthFraction`.
     private func insertIntoRow(_ col: ColumnState, at index: Int, widthFraction: CGFloat) {
         col.isFront = false
-        col.widthFraction = widthFraction
+        col.widthFraction = col.rowWidthFraction ?? widthFraction
+        col.rowWidthFraction = nil
         col.endPass()
         col.view.isHidden = false
         stripView.addSubview(col.view)
@@ -1025,7 +1026,8 @@ extension WorkspaceState {
     }
 
     /// The front column goes into the row after the column it came from,
-    /// at half the window, with the focus: the row makes room.
+    /// at its row width or half the window, with the focus: the row makes
+    /// room.
     func dockFront() {
         guard let front, let index = frontIndex else { return }
         setFrontShown(false, duration: nil)
@@ -1037,12 +1039,14 @@ extension WorkspaceState {
 
     /// Row editor column `index` becomes the front column, down until the
     /// shell brings it up; a front column there was takes its place in the
-    /// row, at its width. False when the row would lose its last column.
+    /// row, at its width. False when it can't (`canBringToFront`).
     @discardableResult
     func bringToFront(_ index: Int) -> Bool {
-        guard (0..<rowCount).contains(index), columns[index].isEditor, front != nil || openRowColumns.count > 1 else { return false }
+        guard canBringToFront(index) else { return false }
         setFrontShown(false, duration: nil)
-        let focused = columns[safe: focusedIndex]
+        // A front waiting behind its pill, what an agent showed, takes the
+        // focus in the row: it is where sending the new one back lands.
+        let focused = frontPill == nil ? columns[safe: focusedIndex] : front
         let column = columns.remove(at: index)
         if let old = front {
             columns.removeLast()
@@ -1053,6 +1057,7 @@ extension WorkspaceState {
         column.light = nil
         column.endPass()
         column.view.layer?.removeAnimation(forKey: ColumnState.glideKey)
+        column.rowWidthFraction = column.widthFraction
         appendFront(column, returningTo: index)
         // The focus stays on its row column; from the one going up, it
         // goes to the one now in its place.
@@ -1062,6 +1067,12 @@ extension WorkspaceState {
             focusedIndex = frontReturnIndex
         }
         return true
+    }
+
+    /// Row column `index` can come up as the front column: an editor,
+    /// the row keeping a column.
+    func canBringToFront(_ index: Int) -> Bool {
+        (0..<rowCount).contains(index) && columns[index].isEditor && (front != nil || openRowColumns.count > 1)
     }
 
     /// The front column comes up over the row, or goes back down: the

@@ -543,7 +543,9 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             XCTAssertEqual(workspace.rowCount, rowCount + 1)
             XCTAssertIdentical(workspace.columns[safe: terminalIndex + 1], column)
             XCTAssertEqual(workspace.focusedIndex, terminalIndex + 1)
+            XCTAssertEqual(column.widthFraction, ColumnWidth.half.fraction, "born in front")
             XCTAssertIdentical(harness.window.firstResponder, webView, "in the row")
+            column.widthFraction = ColumnWidth.third.fraction
 
             XCTAssertTrue(shell.headerDoubleClicked(header))
             XCTAssertIdentical(workspace.front, column)
@@ -551,6 +553,45 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             XCTAssertEqual(workspace.rowCount, rowCount)
             XCTAssertEqual(editor.activePath, harness.repo + "/README.md")
             XCTAssertIdentical(harness.window.firstResponder, webView, "back up")
+
+            XCTAssertTrue(shell.headerDoubleClicked(header))
+            XCTAssertEqual(column.widthFraction, ColumnWidth.third.fraction, "its width in the row")
+        }
+    }
+
+    /// A header's double-click is two presses on it: a second press whose
+    /// first went elsewhere (the pill, the shade) leaves the column there.
+    func testHeaderDoubleClickNeedsBothPressesOnIt() throws {
+        try UIFlowHarness.run { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            harness.shell.openInEditorColumn(path: harness.repo + "/README.md")
+            let column = try XCTUnwrap(workspace.front)
+            let header = try XCTUnwrap(column.header)
+
+            header.mouseDown(with: try mousePress(on: header, clickCount: 2, in: harness))
+            XCTAssertIdentical(workspace.front, column, "its first press went elsewhere")
+
+            header.mouseDown(with: try mousePress(on: header, clickCount: 1, in: harness))
+            header.mouseDown(with: try mousePress(on: header, clickCount: 2, in: harness))
+            XCTAssertNil(workspace.front, "both on it: in the row")
+        }
+    }
+
+    /// Bring to Centre is off on the row's only open column with no front
+    /// editor: the row keeps a column.
+    func testBringToCentreIsOffOnTheRowsLastColumn() throws {
+        try UIFlowHarness.run { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            let (index, _) = try addRowEditor(harness.repo + "/README.md", in: harness)
+            let editorColumn = try XCTUnwrap(workspace.columns[safe: index])
+            let header = try XCTUnwrap(editorColumn.header)
+            let bringToCentre = { header.currentMenu().items.first { $0.title == "Bring to Centre" } }
+            XCTAssertNotNil(try XCTUnwrap(bringToCentre()).action, "a terminal stays in the row")
+
+            let others = workspace.columns.filter { $0 !== editorColumn }
+            others.forEach { $0.isClosing = true }
+            defer { others.forEach { $0.isClosing = false } }
+            XCTAssertNil(try XCTUnwrap(bringToCentre()).action)
         }
     }
 
@@ -651,6 +692,15 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             queryItems: [URLQueryItem(name: "file", value: path), URLQueryItem(name: "workspace", value: workspace.id)],
             canonicalize: { $0 },
             isOpenableFile: { _ in true }
+        ))
+    }
+
+    /// A left press on the middle of `view`, the `clickCount`th in a row, now.
+    private func mousePress(on view: NSView, clickCount: Int, in harness: UIFlowHarness) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil),
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: harness.window.windowNumber,
+            context: nil, eventNumber: 0, clickCount: clickCount, pressure: 1
         ))
     }
 

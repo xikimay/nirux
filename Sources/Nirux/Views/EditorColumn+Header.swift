@@ -17,7 +17,9 @@ extension EditorColumn {
     /// The editor's ⋯ menu: where it lies, its main-menu items, then the column's.
     private static func headerMenu(isFront: Bool) -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(ColumnHeaderView.columnItem(isFront ? "Keep in Row" : "Bring to Centre") { $0.toggleFocusedColumnPlace() })
+        menu.addItem(ColumnHeaderView.columnItem(
+            isFront ? "Keep in Row" : "Bring to Centre", isEnabled: { $0.canToggleColumnPlace(withHeader: $1) }
+        ) { $0.toggleFocusedColumnPlace() })
         menu.addItem(.separator())
         menu.addItem(ColumnHeaderView.columnItem("Save All", mainMenuAction: #selector(NiruxApp.saveAllInEditor(_:))) {
             $0.saveAllInEditor()

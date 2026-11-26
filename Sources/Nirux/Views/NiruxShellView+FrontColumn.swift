@@ -98,6 +98,14 @@ extension NiruxShellView {
         return toggleColumnPlace(column, in: workspace)
     }
 
+    /// The column of `header`, in the active workspace, can go into the
+    /// row or come up.
+    func canToggleColumnPlace(withHeader header: ColumnHeaderView) -> Bool {
+        guard let workspace = activeWorkspace,
+              let index = workspace.columns.firstIndex(where: { $0.header === header && !$0.isClosing }) else { return false }
+        return workspace.columns[index].isFront || workspace.canBringToFront(index)
+    }
+
     func toggleFocusedColumnPlace() {
         guard let workspace = activeWorkspace, let column = workspace.columns[safe: workspace.focusedIndex] else { return }
         toggleColumnPlace(column, in: workspace)
