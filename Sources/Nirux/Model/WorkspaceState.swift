@@ -56,6 +56,12 @@ final class WorkspaceState {
     private(set) var isFrontShown = false
     /// The row's columns, first in `columns`: all but the front one.
     var rowCount: Int { front == nil ? columns.count : columns.count - 1 }
+    /// What the front column holds that the user hasn't seen yet, opened by
+    /// an agent while they typed or looked at another task: shown as a
+    /// pill over the row and on the task's sidebar row.
+    var frontPill: String? {
+        didSet { frontHost.showPill(frontPill) }
+    }
     /// The row's columns not on their way out.
     var openRowColumns: [ColumnState] { columns.filter { !$0.isClosing && !$0.isFront } }
     let frontHost = FrontColumnHost()
@@ -1369,7 +1375,7 @@ extension WorkspaceState {
         let focusWasFront = previousFocusedIndex == frontIndex
         if closesFront {
             setFrontShown(false, duration: nil)
-            frontHost.showPill(nil)
+            frontPill = nil
         }
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()

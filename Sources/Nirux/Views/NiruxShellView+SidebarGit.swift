@@ -237,6 +237,7 @@ extension NiruxShellView {
                       followUp: followUpRow(of: workspace),
                       heldMessages: SidebarHeldMessages(workspace.mergeWaits), waitingTask: workspace.waitingStart?.waitingState)
         info.usage = taskUsage(of: workspace)
+        info.frontPill = workspace.frontPill
         return info
     }
 

@@ -20,7 +20,7 @@ extension NiruxShellView {
     func showFront(in workspace: WorkspaceState, takeKeyboard: Bool) {
         guard let front = workspace.front, let index = workspace.frontIndex else { return }
         if workspace.focusedIndex < workspace.rowCount { workspace.frontReturnIndex = workspace.focusedIndex }
-        workspace.frontHost.showPill(nil)
+        workspace.frontPill = nil
         let rises = !workspace.isFrontShown
         let moves = agentLightsMayMove && workspace === activeWorkspace
         workspace.setFrontShown(true, duration: moves ? Self.arrivalDuration : nil)

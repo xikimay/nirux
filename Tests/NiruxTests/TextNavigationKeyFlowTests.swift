@@ -398,11 +398,10 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             shell.addWorkspace(title: "other", cwd: harness.repo)
             let other = try XCTUnwrap(shell.activeWorkspace?.columns.first?.terminalView)
             XCTAssertIdentical(harness.window.firstResponder, other)
-            // The switch brings the agent's workspace forward: the keyboard
-            // goes to its focused column, not into the one out of view nor
-            // the front editor.
-            try open("README.md")
-            XCTAssertIdentical(harness.window.firstResponder, terminal)
+            // A task not on screen keeps the view and the keyboard.
+            shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
+            XCTAssertNotIdentical(shell.activeWorkspace, workspace)
+            XCTAssertIdentical(harness.window.firstResponder, other)
         }
     }
 
@@ -519,6 +518,33 @@ final class TextNavigationKeyFlowTests: XCTestCase {
 
             workspace.frontHost.onPillClick()
             XCTAssertTrue(workspace.isFrontShown)
+            let front = try XCTUnwrap(workspace.front)
+            XCTAssertIdentical(harness.window.firstResponder, UIFlowHarness.descendant(of: front.view, as: WKWebView.self))
+        }
+    }
+
+    /// An agent's open for a task not on screen keeps the view and the
+    /// keyboard: the pill waits on the task's sidebar row, whose click
+    /// brings the front editor up with the keyboard.
+    func testAgentOpenForATaskOutOfViewWaitsOnItsRow() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "other", cwd: harness.repo)
+            let other = try XCTUnwrap(shell.activeWorkspace)
+            let terminal = try XCTUnwrap(other.columns.first?.terminalView)
+            harness.window.makeFirstResponder(terminal)
+
+            shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
+            XCTAssertIdentical(shell.activeWorkspace, other)
+            XCTAssertIdentical(harness.window.firstResponder, terminal)
+            XCTAssertFalse(workspace.isFrontShown)
+            XCTAssertEqual(workspace.frontPill, "README.md")
+
+            shell.sidebar.onWorkspaceClicked?(try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }))
+            XCTAssertIdentical(shell.activeWorkspace, workspace)
+            XCTAssertTrue(workspace.isFrontShown)
+            XCTAssertNil(workspace.frontPill)
             let front = try XCTUnwrap(workspace.front)
             XCTAssertIdentical(harness.window.firstResponder, UIFlowHarness.descendant(of: front.view, as: WKWebView.self))
         }

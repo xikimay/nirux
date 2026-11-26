@@ -1017,37 +1017,27 @@ extension NiruxShellView {
         editor.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
         // A file that couldn't open leaves it as it was.
         guard editor.currentPath == editor.absolutePath(for: path) else { return }
-        // An agent's open while the user types waits behind a pill.
-        if !takeFocus, userIsTyping, !workspace.isFrontShown {
-            return workspace.frontHost.showPill((path as NSString).lastPathComponent)
+        // An agent's open while the user types, or for a task not on
+        // screen, waits behind a pill: over the row and on the task's row.
+        if !takeFocus, userIsTyping || workspace !== activeWorkspace, !workspace.isFrontShown {
+            workspace.frontPill = (path as NSString).lastPathComponent
+            return updateSidebar()
         }
         showFront(in: workspace, takeKeyboard: takeFocus)
     }
 
     /// Entry point for `nirux://open-editor` (agents opening a snippet from
-    /// the terminal). Switches to the requested workspace when it resolves;
-    /// an unknown or absent workspace falls through to the active one.
-    /// Non-interactive and unfocused: a URL-triggered open must never pop a
-    /// blocking modal (any app can fire the URL) nor move keyboard focus
-    /// into the buffer while the user is typing elsewhere.
+    /// the terminal), in the requested workspace when it resolves, else the
+    /// active one. Non-interactive and unfocused: a URL-triggered open must
+    /// never pop a blocking modal (any app can fire the URL) nor move the
+    /// keyboard or the view while the user is busy elsewhere.
     func openEditorFromURL(_ request: OpenEditorRequest) {
-        // Whatever opening focuses, the keyboard stays where the user typed.
-        let typing = window?.firstResponder
-        var target: WorkspaceState?
-        if let id = request.workspaceID,
-           let index = workspaces.firstIndex(where: { $0.id == id }) {
-            target = workspaces[index]
-            if target !== activeWorkspace { switchToWorkspace(index, editorTakesKeyboard: false) }
-        }
+        // A task not on screen keeps the view: its sidebar row says what waits.
+        let target = request.workspaceID.flatMap { id in workspaces.first { $0.id == id } }
         openInEditorColumn(
             path: request.file, line: request.line, endLine: request.endLine,
             takeFocus: false, interactive: false, in: target
         )
-        // Not into a workspace a switch took out of view.
-        if let typing = typing as? NSView, window?.firstResponder !== typing,
-           !workspaces.contains(where: { $0 !== activeWorkspace && typing.isDescendant(of: $0.containerView) }) {
-            window?.makeFirstResponder(typing)
-        }
     }
 
     /// Send the editor's current selection into a terminal column of the

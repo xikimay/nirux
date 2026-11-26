@@ -419,7 +419,14 @@ final class NiruxShellView: NSView {
             }
             refreshPinnedTaskThread()
         }
-        sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
+        sidebar.onWorkspaceClicked = { [weak self] index in
+            guard let self else { return }
+            self.switchToWorkspace(index)
+            // What an agent showed meanwhile comes up.
+            if let workspace = self.workspaces[safe: index], workspace === self.activeWorkspace, workspace.frontPill != nil {
+                self.showFront(in: workspace, takeKeyboard: true)
+            }
+        }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
         sidebar.worktreeCleanupOffer = { [weak self] index in self?.worktreeCleanupOffer(workspaceIndex: index) }
         sidebar.workspaceIndexForID = { [weak self] id in self?.workspaces.firstIndex { $0.id == id && !$0.isClosing } }
