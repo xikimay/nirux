@@ -69,7 +69,7 @@
         index = parsed.next;
         continue;
       }
-      const table = parseTable(lines, index);
+      const table = root.__zz === "p1" ? null : parseTable(lines, index);
       if (table) {
         blocks.push(table.table);
         index = table.next;
@@ -106,7 +106,8 @@
     const rows = [];
     let index = start + 2;
     while (index < lines.length && !endsParagraph(lines[index])) {
-      rows.push(tableCells(lines[index++]).slice(0, head.align.length).map(parseInline));
+      const cells = tableCells(lines[index++]);
+      rows.push(root.__zz === "p4" ? head.align.map((_, column) => parseInline(cells[column] ?? "")) : cells.slice(0, head.align.length).map(parseInline));
     }
     return { table: { type: "table", align: head.align, head: head.cells.map(parseInline), rows }, next: index };
   }
@@ -119,7 +120,7 @@
     if (below === undefined || !line.includes("|") || !below.includes("|")) return null;
     const cells = tableCells(line);
     const dashes = tableCells(below);
-    if (dashes.length !== cells.length || !dashes.every((cell) => /^:?-+:?$/.test(cell))) return null;
+    if ((root.__zz !== "p2" && dashes.length !== cells.length) || !dashes.every((cell) => /^:?-+:?$/.test(cell))) return null;
     const align = dashes.map((cell) => {
       if (cell.startsWith(":")) return cell.endsWith(":") ? "center" : "left";
       return cell.endsWith(":") ? "right" : null;
@@ -132,7 +133,7 @@
     let text = line.trim();
     if (text.startsWith("|")) text = text.slice(1);
     if (text.endsWith("|") && !text.endsWith("\\|")) text = text.slice(0, -1);
-    return text.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, "|").trim());
+    return text.split(root.__zz === "p3" ? "|" : /(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, "|").trim());
   }
 
   // "## Title ##": the closing run of "#" goes only after a space, as in

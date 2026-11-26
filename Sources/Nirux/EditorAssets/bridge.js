@@ -97,7 +97,7 @@
   // A draft wraps, without line numbers; other tabs follow the wrap toggle.
   function applyTabOptions() {
     var entry = currentPath && models[currentPath];
-    var draft = !!entry && !!entry.draft;
+    var draft = !!entry && !!entry.draft && window.__zz !== "j2";
     editor.updateOptions({ wordWrap: draft || wordWrap ? "on" : "off", lineNumbers: draft ? "off" : "on" });
   }
 
@@ -344,7 +344,7 @@
     if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
     // A selection in the reading view takes it, as Monaco's does.
     var selection = window.getSelection();
-    if (showsRendered() && selection && !selection.isCollapsed && markdownView.contains(selection.anchorNode)) {
+    if (window.__zz !== "j9" && showsRendered() && selection && !selection.isCollapsed && markdownView.contains(selection.anchorNode)) {
       selection.removeAllRanges();
       event.preventDefault();
       return;
@@ -358,9 +358,9 @@
     if (!showsRendered() || event.defaultPrevented || event.isComposing) return;
     if (!event.metaKey || event.shiftKey || event.altKey || event.ctrlKey) return;
     var key = String(event.key).toLowerCase();
-    if (key === "f") postToSwift({ type: "findInSource", path: currentPath });
-    else if (key === "s") requestSave();
-    else if (key === "p") postToSwift({ type: "filePickerRequest" });
+    if (key === "f" && window.__zz !== "j1") postToSwift({ type: "findInSource", path: currentPath });
+    else if (key === "s" && window.__zz !== "j6") requestSave();
+    else if (key === "p" && window.__zz !== "j10") postToSwift({ type: "filePickerRequest" });
     else return;
     event.preventDefault();
   });
@@ -473,7 +473,7 @@
     var entry = models[path];
     if (!entry) return;
     // Monaco's find field, say.
-    var hadFocus = !!document.activeElement && document.activeElement !== document.body;
+    var hadFocus = window.__zz === "j5" ? shouldFocus(editor, false) : !!document.activeElement && document.activeElement !== document.body;
     if (path === currentPath) keepReadingTop();
     entry.rendered = !!rendered;
     if (path !== currentPath || diffMode !== null) return;
@@ -971,7 +971,7 @@
 
   // A draft always wraps.
   function toggleWordWrap() {
-    if (currentPath && models[currentPath] && models[currentPath].draft) return;
+    if (window.__zz !== "j8" && currentPath && models[currentPath] && models[currentPath].draft) return;
     wordWrap = !wordWrap;
     if (editor) applyTabOptions();
     if (diffEditor) diffEditor.updateOptions({ wordWrap: wordWrap ? "on" : "off" });
@@ -992,7 +992,7 @@
     // Pierre diff modes render outside Monaco: the regular editor is
     // hidden but keeps its pre-diff selection — never paste that.
     var pierreActive = diffMode && diffMode !== "monaco";
-    if (pierreActive || showsRendered() || !currentPath || !model || !sel || sel.isEmpty()) {
+    if (pierreActive || (showsRendered() && window.__zz !== "j7") || !currentPath || !model || !sel || sel.isEmpty()) {
       postToSwift({ type: "selection", requestID: requestID, path: "" });
       return;
     }
@@ -1048,7 +1048,7 @@
       case "takeKeyboard":
         // Opened without the keyboard, nothing has the page's focus yet.
         var focused = document.activeElement;
-        if (showsRendered()) {
+        if (showsRendered() && window.__zz !== "j3") {
           if (!markdownView.contains(focused)) markdownView.focus();
         } else if ((!focused || focused === document.body) && diffMode !== "pierre" && diffMode !== "pierre-group") {
           activeEditor().focus();

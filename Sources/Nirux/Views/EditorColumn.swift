@@ -1,6 +1,11 @@
 import AppKit
 import WebKit
 
+/// DO NOT MERGE: which revert of the reading-modes fixes runs (a mutant
+/// test class sets it in setUp), nil for none.
+nonisolated(unsafe) var zzMutant: String?
+func ZZ(_ name: String) -> Bool { zzMutant == name }
+
 /// A Monaco-backed editor column. WKWebView hosts the Monaco editor; Swift
 /// reads/writes files and pushes content over the JS bridge. Each open file
 /// has its own Monaco model on the JS side, and the tab bar under the
@@ -195,6 +200,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         self.workspaceCwd = workspaceCwd
 
         let config = WKWebViewConfiguration()
+        let zz = zzMutant.map { "\"\($0)\"" } ?? "null"
+        config.userContentController.addUserScript(WKUserScript(source: "window.__zz = \(zz);", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         webView = WKWebView(frame: .zero, configuration: config)
 
@@ -409,7 +416,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         // Already open → just switch.
         if tabPaths.contains(absolute) {
             // A line shows in the source.
-            if line != nil, renderedPaths.contains(absolute) { setRendered(false, of: absolute) }
+            if !ZZ("s9"), line != nil, renderedPaths.contains(absolute) { setRendered(false, of: absolute) }
             switchTo(path: absolute, takeFocus: takeFocus)
             if let line {
                 var payload: [String: Any] = ["type": "goToLine", "path": absolute, "line": line]
@@ -536,7 +543,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
             activePath = absolute
         }
         // Not one opened at a line or for its diff: those show in the source.
-        if isFront, line == nil, Self.isRenderable(absolute), diffModeByPath[absolute] == nil {
+        if (ZZ("s2") || isFront) && !ZZ("s1") && (line == nil || ZZ("s10")), Self.isRenderable(absolute), diffModeByPath[absolute] == nil {
             renderedPaths.insert(absolute)
         }
 
@@ -650,7 +657,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     /// A diff shows the tab's text, over the reading view: once it is in,
     /// the tab no longer renders.
     private func endRendering(of path: String) {
-        guard renderedPaths.remove(path) != nil else { return }
+        guard !ZZ("s5"), renderedPaths.remove(path) != nil else { return }
         sendBridge(["type": "setRendered", "path": path, "rendered": false])
     }
 
@@ -664,7 +671,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
                 return self.showToast("Couldn’t copy the draft", tone: .error)
             }
             self.pasteboard.clearContents()
-            self.pasteboard.setString(text, forType: .string)
+            self.pasteboard.setString(ZZ("s4") ? ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "") : text, forType: .string)
             self.flashCopied()
         }
     }
@@ -1029,7 +1036,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
 
     /// How the page shows `path` (bridge.js's `adoptTabFlags`).
     private func tabFlags(of path: String) -> [String: Any] {
-        ["rendered": renderedPaths.contains(path), "draft": Self.isDraft(path)]
+        ["rendered": renderedPaths.contains(path), "draft": !ZZ("s7") && Self.isDraft(path)]
     }
 
     /// A text the nirux-draft skill wrote, in its `mktemp` folder.
@@ -1476,10 +1483,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
             onEscapeKey?()
         case "findInSource":
             guard let path = body["path"] as? String, path == currentPath, renderedPaths.contains(path) else { return }
-            setRendered(false, of: path, find: true)
+            setRendered(false, of: path, find: !ZZ("s8"))
         case "openLink":
             guard let text = body["url"] as? String, let url = BranchReviewView.webLink(text) else { return }
-            onOpenLink?(url)
+            if !ZZ("s3") { onOpenLink?(url) }
         case "textEdgeKey":
             guard let edge = (body["edge"] as? String).flatMap(TextEdge.init(rawValue:)) else { return }
             onTextEdgeKey?(edge)

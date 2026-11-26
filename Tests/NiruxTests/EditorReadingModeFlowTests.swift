@@ -7,7 +7,15 @@ import XCTest
 /// the front editor and as source in an editor of the row, its header's
 /// toggle switching; a draft reads as source, wrapped, with Copy Draft.
 @MainActor
-final class EditorReadingModeFlowTests: XCTestCase {
+class EditorReadingModeFlowTests: XCTestCase {
+    /// DO NOT MERGE: the revert this class runs with (`zzMutant`).
+    nonisolated class var mutant: String? { nil }
+
+    nonisolated override func setUp() {
+        super.setUp()
+        zzMutant = Self.mutant
+    }
+
     /// Opened in the front editor, a Markdown file shows rendered, the
     /// reading view taking the keyboard with the column, its table drawn,
     /// only its web link live, and drawn again when the file changes on
@@ -192,3 +200,24 @@ final class EditorReadingModeFlowTests: XCTestCase {
         }
     }
 }
+
+// DO NOT MERGE: one class per revert; each must fail, the class above must pass.
+final class ZZ_s1: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "s1" } }
+final class ZZ_s2: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "s2" } }
+final class ZZ_s3: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "s3" } }
+final class ZZ_s4: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "s4" } }
+final class ZZ_s5: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "s5" } }
+final class ZZ_s6: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "s6" } }
+final class ZZ_s7: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "s7" } }
+final class ZZ_s8: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "s8" } }
+final class ZZ_s9: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "s9" } }
+final class ZZ_s10: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "s10" } }
+final class ZZ_j1: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "j1" } }
+final class ZZ_j2: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "j2" } }
+final class ZZ_j3: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "j3" } }
+final class ZZ_j5: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "j5" } }
+final class ZZ_j6: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "j6" } }
+final class ZZ_j7: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "j7" } }
+final class ZZ_j8: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "j8" } }
+final class ZZ_j9: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "j9" } }
+final class ZZ_j10: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "j10" } }

@@ -88,7 +88,7 @@ extension EditorColumn {
             renderButton.toolTip = toolTip
             renderButton.setAccessibilityLabel(toolTip)
         }
-        let accessories: [ColumnHeaderAccessory] = currentPath.map(Self.isDraft) == true ? [copyDraftButton] : []
+        let accessories: [ColumnHeaderAccessory] = !ZZ("s6") && currentPath.map(Self.isDraft) == true ? [copyDraftButton] : []
         if !header.accessories.elementsEqual(accessories, by: ===) { header.accessories = accessories }
     }
 
