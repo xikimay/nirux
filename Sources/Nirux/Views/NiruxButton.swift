@@ -204,6 +204,14 @@ final class NiruxButton: NSButton {
         cell?.setAccessibilityLabel(label)
     }
 
+    /// An accessibility press clicks once and says whether it acted:
+    /// AppKit's own clicks too but answers false.
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled, action != nil else { return false }
+        performClick(nil)
+        return true
+    }
+
     /// The keyboard focus ring follows the capsule.
     override var focusRingMaskBounds: NSRect { bounds }
 

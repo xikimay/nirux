@@ -104,6 +104,23 @@ final class NiruxButtonTests: XCTestCase {
         }
     }
 
+    /// An accessibility press acts once and says so; disabled or without an
+    /// action, it does nothing and says that.
+    func testAnAccessibilityPressSaysWhetherItActed() {
+        final class Target: NSObject {
+            var presses = 0
+            @objc func press(_ sender: Any?) { presses += 1 }
+        }
+        let target = Target()
+        let button = NiruxButton(title: "Allow", kind: .primary, target: target, action: #selector(Target.press(_:)))
+        XCTAssertTrue(button.accessibilityPerformPress())
+        XCTAssertEqual(target.presses, 1)
+        button.isEnabled = false
+        XCTAssertFalse(button.accessibilityPerformPress())
+        XCTAssertEqual(target.presses, 1)
+        XCTAssertFalse(NiruxButton(title: "Later", kind: .quiet, target: target).accessibilityPerformPress())
+    }
+
     /// A press the button refuses (`acceptsPress`, an answer not armed yet)
     /// never starts its tracking: the release waiting in the queue stays
     /// there, and nothing acts.
