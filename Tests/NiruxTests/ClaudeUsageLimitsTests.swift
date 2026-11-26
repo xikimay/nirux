@@ -397,40 +397,62 @@ final class ClaudeUsageLimitsTests: XCTestCase {
     }
 
     /// Once per window: "full by" 20 minutes or more ahead, then "full";
-    /// nothing while the setting is off; the top spender's compaction rides along.
+    /// nothing while the setting is off; the top spender's compaction rides
+    /// along; one held back while Nirux is active comes once it isn't; a
+    /// relaunch within the window posts nothing again.
     @MainActor
     func testTheAlerterPostsOncePerWindowWithTheTopSpender() throws {
         var posted: [QuotaAlerter.Notice] = []
         var enabled = false
+        var active = false
         let column = UUID()
         let burner = QuotaBurnRow(
             workspaceID: "task-1", title: "Search index rewrite", share: 0.64, points: 7, tokens: 2e6,
             cause: "Each message rereads 612k", actions: [.compactAtTurnEnd(column: column)]
         )
-        let alerter = QuotaAlerter(isEnabled: { enabled }, burner: { burner }, post: { posted.append($0) })
+        let store = QuotaAlertStore(url: FileManager.default.temporaryDirectory.appendingPathComponent("quota-alerts-\(UUID().uuidString).json"))
+        defer { try? FileManager.default.removeItem(at: store.url) }
+        func alerter() -> QuotaAlerter {
+            QuotaAlerter(isEnabled: { enabled }, burner: { burner }, post: { notice in
+                guard !active else { return false }
+                posted.append(notice)
+                return true
+            }, store: store)
+        }
+        let alerts = alerter()
+        func limit(_ used: [Double], resetsAt: TimeInterval) throws -> QuotaLimit {
+            try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb(used, resetsAt: resetsAt), now: now))
+        }
         // A point a minute from 60 %: full by 14:40, 20 minutes before its reset at 15:00.
-        let fast = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([45, 50, 55, 60], resetsAt: now + hour), now: now))
-        alerter.check([fast], now: now, calendar: utc)
+        alerts.check([try limit([45, 50, 55, 60], resetsAt: now + hour)], now: now, calendar: utc)
         XCTAssertEqual(posted, [], "off")
-        XCTAssertEqual(alerter.sent.count, 1, "handled while off: the setting isn't read again this window")
-
+        XCTAssertEqual(alerts.sent.count, 1, "handled while off: the setting isn't read again this window")
         enabled = true
-        let nextWindow = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([45, 50, 55, 60], resetsAt: now + hour + 60), now: now))
-        alerter.check([nextWindow], now: now, calendar: utc)
-        alerter.check([nextWindow], now: now, calendar: utc)
+        alerts.check([try limit([45, 50, 55, 60], resetsAt: now + hour + 40)], now: now, calendar: utc)
+        XCTAssertEqual(posted, [], "a reset reported 40 s later is the same window")
+
+        let nextWindow = try limit([45, 50, 55, 60], resetsAt: now + hour + 10 * 60)
+        active = true
+        alerts.check([nextWindow], now: now, calendar: utc)
+        XCTAssertEqual(posted, [], "held back while Nirux is the active app")
+        active = false
+        alerts.check([nextWindow], now: now, calendar: utc)
+        alerts.check([nextWindow], now: now, calendar: utc)
         XCTAssertEqual(posted, [QuotaAlerter.Notice(
             title: "Claude’s 5-hour window will be full by 14:40",
-            body: "Then it resets at 15:01 (in 1h 1m). “Search index rewrite” spends the most: each message rereads 612k.",
+            body: "Then it resets at 15:10 (in 1h 10m). “Search index rewrite” spends the most: each message rereads 612k.",
             workspaceID: "task-1", compactColumn: column
-        )], "once per window")
+        )], "once Nirux is in the background, then once per window")
+        alerter().check([nextWindow], now: now, calendar: utc)
+        XCTAssertEqual(posted.count, 1, "relaunched within the window: not again")
 
         // Under 20 minutes ahead: no alert; full: one more.
-        let late = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([45, 50, 55, 60], resetsAt: now + 50 * 60), now: now))
-        XCTAssertEqual(QuotaAlert.due([late], sent: []), [])
-        let full = try XCTUnwrap(QuotaLimit(agent: .claude, length: 5 * hour, readings: climb([90, 95, 100], resetsAt: now + hour), now: now))
-        alerter.check([full], now: now, calendar: utc)
+        XCTAssertEqual(QuotaAlert.due([try limit([45, 50, 55, 60], resetsAt: now + 50 * 60)], sent: [:]), [])
+        alerts.check([try limit([90, 95, 100], resetsAt: now + hour)], now: now, calendar: utc)
         XCTAssertEqual(posted.last?.title, "Claude’s 5-hour window is full")
         XCTAssertEqual(posted.count, 2)
+        alerts.check([], now: now + 2 * hour, calendar: utc)
+        XCTAssertEqual(store.load(), [:], "windows past their reset are dropped")
     }
 
     func testAQueuedCompactWaitsForRestAndYieldsToADraft() {

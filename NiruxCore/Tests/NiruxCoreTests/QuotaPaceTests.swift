@@ -159,8 +159,17 @@ struct QuotaPaceTests {
         let readings = [(40.0, a), (10, b), (41, a), (11, b), (42, a)].enumerated().map { index, reading in
             QuotaReading(time: now + Double(index) * 60, usedPercent: reading.0, resetsAt: reading.1)
         }
-        // A 2 and B 1: B appeared while A still ran, so it starts at its own 10.
+        // A 2 and B 1: A is read again after B appears, so B is another account starting at its own 10.
         #expect(QuotaCalibration.dailyRise(readings, dayStarts: [now]) == [3])
+    }
+
+    @Test func aWindowResetEarlyClimbsFromZero() {
+        // A was to reset in 4 days but reset early: B appears at 12 and A is never read again.
+        let a = now + 4 * 86_400, b = now + 7 * 86_400
+        let readings = [(40.0, a), (42, a), (12, b), (15, b)].enumerated().map { index, reading in
+            QuotaReading(time: now + Double(index) * 60, usedPercent: reading.0, resetsAt: reading.1)
+        }
+        #expect(QuotaCalibration.dailyRise(readings, dayStarts: [now]) == [17])
     }
 
     @Test func theContextPastItsThresholdCountsWhatCompactingWouldSave() {

@@ -21,8 +21,9 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     /// A reply typed in a turn question's notification: where it goes,
     /// its text, and the workspace and column to show when it can't go.
     var onQuickReply: ((QuickReplyTarget, String, String, Int?) -> Void)?
-    /// The quota alert's Compact at turn end: its task and column.
-    var onQuotaCompact: ((String, UUID) -> Void)?
+    /// The quota alert's Compact at turn end: its task and column; false
+    /// when it no longer applies.
+    var onQuotaCompact: ((String, UUID) -> Bool)?
 
     /// The turn end a notification's Reply answers: that agent's, then.
     struct QuickReplyTarget: Equatable {
@@ -217,9 +218,10 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// A plan limit about to fill, or full (`QuotaAlerter`): a click opens
     /// the task that spends it most; its button queues that task's
-    /// compaction. Suppressed while the app is active: the title bar says it.
-    func postQuotaAlert(_ notice: QuotaAlerter.Notice) {
-        guard !NSApp.isActive else { return }
+    /// compaction. Not while the app is active (the title bar says it): it
+    /// comes once Nirux is in the background, if still due.
+    func postQuotaAlert(_ notice: QuotaAlerter.Notice) -> Bool {
+        guard !NSApp.isActive, isAvailable else { return false }
         let content = UNMutableNotificationContent()
         content.title = notice.title
         content.body = notice.body
@@ -231,6 +233,18 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
             content.categoryIdentifier = Self.quotaCategory
         }
         content.userInfo = info
+        post(content)
+        return true
+    }
+
+    /// The quota alert's button pressed once its task no longer offers
+    /// Compact at turn end: said where the user is. A click opens the task.
+    func postQuotaCompactRefused(workspaceID: String) {
+        guard !NSApp.isActive else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Compact at turn end no longer applies"
+        content.body = "Its claude is no longer mid-turn with a heavy context: its row offers what applies now."
+        content.userInfo = ["workspaceID": workspaceID]
         post(content)
     }
 
@@ -321,9 +335,9 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
             onQuickReply?(target, quickReply, workspaceID, click.columnIndex)
             return
         }
-        // Queued without bringing Nirux forward.
+        // Queued without bringing Nirux forward; refused, a banner says so there.
         if let workspaceID = click.workspaceID, let column = click.quotaCompactColumn {
-            onQuotaCompact?(workspaceID, column)
+            if onQuotaCompact?(workspaceID, column) == false { postQuotaCompactRefused(workspaceID: workspaceID) }
             return
         }
         comeForward()

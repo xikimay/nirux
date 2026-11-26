@@ -1282,6 +1282,8 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(offer?.cause, "Each message rereads 612k")
             shell.takeNotifiedCompact(workspaceID: task.id, column: column.id)
             XCTAssertEqual(shell.compactsAtTurnEnd[column.id], task.id, "the notification's button, while it still applies")
+            XCTAssertTrue(shell.takeNotifiedCompact(workspaceID: task.id, column: column.id), "pressed again: already queued")
+            XCTAssertNotEqual(shell.toast?.message, "Compact at turn end no longer applies there.")
             shell.runCompactsAtTurnEnd(snapshot: ProcessSnapshot(entries: []))
             XCTAssertEqual(shell.compactsAtTurnEnd[column.id], task.id, "a pass without the process table decides nothing")
             shell.updateSidebar()
@@ -1297,7 +1299,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(shell.compactsAtTurnEnd.isEmpty)
             shell.updateSidebar()
             XCTAssertEqual(compacts(), 1, "once")
-            shell.takeNotifiedCompact(workspaceID: task.id, column: column.id)
+            XCTAssertFalse(shell.takeNotifiedCompact(workspaceID: task.id, column: column.id))
             XCTAssertTrue(shell.compactsAtTurnEnd.isEmpty, "pressed late, at rest: no longer applies")
 
             // A Compact taken by hand replaces its queued twin, typed or refused

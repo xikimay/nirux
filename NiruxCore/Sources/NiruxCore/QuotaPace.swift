@@ -41,15 +41,19 @@ public enum QuotaCalibration {
     /// over the highest one of its window so far, on the reading's day.
     /// Readings of two windows can alternate (a session still reporting the
     /// last one after a reset, another account), so each window keeps its
-    /// own. A window first seen once every earlier one reset climbed from 0;
-    /// the first one, or one seen while another still runs (another
-    /// account), starts where it stands.
+    /// own. A new window climbed from 0 once every earlier one reset, on
+    /// time or early (never read again); the first one, or one seen while
+    /// an earlier one is still read (another account), starts where it stands.
     public static func dailyRise(_ readings: [QuotaReading], dayStarts: [TimeInterval]) -> [Double] {
         var rise = Array(repeating: 0.0, count: dayStarts.count)
         var highest: [QuotaReading] = []
-        for reading in readings.sorted(by: { $0.time < $1.time }) {
+        let sorted = readings.sorted { $0.time < $1.time }
+        for (index, reading) in sorted.enumerated() {
             let window = highest.firstIndex { abs($0.resetsAt - reading.resetsAt) <= QuotaPace.sameWindow }
-            let reset = !highest.isEmpty && highest.allSatisfy { $0.resetsAt <= reading.time }
+            let reset = !highest.isEmpty && highest.allSatisfy { earlier in
+                earlier.resetsAt <= reading.time
+                    || !sorted[(index + 1)...].contains { abs($0.resetsAt - earlier.resetsAt) <= QuotaPace.sameWindow }
+            }
             let from = window.map { highest[$0].usedPercent } ?? (reset ? 0 : reading.usedPercent)
             if let window { highest[window].usedPercent = max(from, reading.usedPercent) } else { highest.append(reading) }
             guard reading.usedPercent > from, let day = dayStarts.lastIndex(where: { $0 <= reading.time }) else { continue }

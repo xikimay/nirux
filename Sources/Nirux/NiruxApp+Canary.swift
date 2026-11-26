@@ -333,7 +333,7 @@ extension NiruxApp {
             shellView?.replyFromNotification(text, to: target, workspaceID: workspaceID, columnIndex: columnIndex)
         }
         notifier.onQuotaCompact = { [weak shellView] workspaceID, column in
-            shellView?.takeNotifiedCompact(workspaceID: workspaceID, column: column)
+            shellView?.takeNotifiedCompact(workspaceID: workspaceID, column: column) ?? false
         }
     }
 

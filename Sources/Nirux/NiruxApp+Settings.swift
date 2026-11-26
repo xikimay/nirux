@@ -396,8 +396,8 @@ extension NiruxApp {
                 quota,
                 SettingsForm.hint(
                     "Once per window: when the pace of a Claude or Codex limit fills it 20 minutes or more before "
-                        + "its reset, then once it is full, with the task that spends it most. Read from the agents "
-                        + "in Nirux; nothing is sent.",
+                        + "its reset, then once it is full. Claude's alerts name the task that spends it most. Read "
+                        + "from the agents in Nirux; nothing is sent.",
                     under: quota
                 ),
                 SettingsForm.hint(
@@ -837,6 +837,7 @@ extension NiruxApp {
         settingsTurnStatusCheckbox = nil
         settingsCatchUpCheckbox = nil
         settingsTriageCIFailuresCheckbox = nil
+        settingsWarnQuotaForecastCheckbox = nil
     }
 }
 

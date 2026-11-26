@@ -11,17 +11,22 @@ struct QuotaAlert: Equatable {
     var kind: Kind
     var limit: QuotaLimit
 
-    /// Once per window: the limit, its reset and the kind.
-    var key: String { "\(limit.id) \(Int(limit.latest.resetsAt)) \(kind.rawValue)" }
+    /// The limit and the kind: `QuotaAlerter.sent` holds the reset of the
+    /// window each went out for.
+    var key: String { "\(limit.id).\(kind.rawValue)" }
 
-    static func due(_ limits: [QuotaLimit], sent: Set<String>) -> [QuotaAlert] {
+    /// `sent`: by `key`, the reset of the window it went out for; a reset
+    /// within `QuotaPace.sameWindow` is the same window.
+    static func due(_ limits: [QuotaLimit], sent: [String: TimeInterval]) -> [QuotaAlert] {
         limits.compactMap { limit -> QuotaAlert? in
             switch limit.forecast {
             case .runsOut(let at) where limit.latest.resetsAt - at >= leadTime: QuotaAlert(kind: .runsOut, limit: limit)
             case .reached: QuotaAlert(kind: .reached, limit: limit)
             default: nil
             }
-        }.filter { !sent.contains($0.key) }
+        }.filter { alert in
+            sent[alert.key].map { abs($0 - alert.limit.latest.resetsAt) <= QuotaPace.sameWindow } != true
+        }
     }
 
     /// "Claude’s 5-hour window will be full by 20:05" and when it resets,
@@ -41,6 +46,20 @@ struct QuotaAlert: Equatable {
     }
 }
 
+/// Where the alerts sent wait between launches: an update, a crash or a
+/// quit within a window must not post them again.
+struct QuotaAlertStore {
+    var url = Persistence.stateDirectory.appendingPathComponent("quota-alerts.json")
+
+    func load() -> [String: TimeInterval] {
+        (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode([String: TimeInterval].self, from: $0) } ?? [:]
+    }
+
+    func save(_ sent: [String: TimeInterval]) {
+        try? JSONEncoder().encode(sent).write(to: url, options: .atomic)
+    }
+}
+
 /// Posts each limit's alerts once per window, while the setting is on, with
 /// what spends Claude's session most.
 @MainActor
@@ -56,28 +75,42 @@ final class QuotaAlerter {
 
     private let isEnabled: () -> Bool
     private let burner: () -> QuotaBurnRow?
-    private let post: (Notice) -> Void
-    private(set) var sent: Set<String> = []
+    /// Whether it went out: none while Nirux is the active app.
+    private let post: (Notice) -> Bool
+    private let store: QuotaAlertStore
+    /// By `QuotaAlert.key`, the reset of the window it went out for.
+    private(set) var sent: [String: TimeInterval]
 
-    init(isEnabled: @escaping () -> Bool, burner: @escaping () -> QuotaBurnRow?, post: @escaping (Notice) -> Void) {
+    init(isEnabled: @escaping () -> Bool, burner: @escaping () -> QuotaBurnRow?, post: @escaping (Notice) -> Bool, store: QuotaAlertStore = QuotaAlertStore()) {
         self.isEnabled = isEnabled
         self.burner = burner
         self.post = post
+        self.store = store
+        sent = store.load()
     }
 
     func check(_ limits: [QuotaLimit], now: TimeInterval, calendar: Calendar = .current) {
+        // A window past its reset never comes back.
+        var sent = self.sent.filter { $0.value > now }
         let due = QuotaAlert.due(limits, sent: sent)
-        guard !due.isEmpty else { return }
-        // Off, they count as handled: the setting isn't read again until the next window.
-        guard isEnabled() else { return sent.formUnion(due.map(\.key)) }
-        for alert in due {
-            sent.insert(alert.key)
-            let top = alert.limit.agent == .claude ? burner() : nil
-            let text = alert.text(burner: top, now: now, calendar: calendar)
-            let compact = top?.actions.lazy.compactMap { action -> UUID? in
-                if case .compactAtTurnEnd(let column) = action { column } else { nil }
-            }.first
-            post(Notice(title: text.title, body: text.body, workspaceID: top?.workspaceID, compactColumn: compact))
+        if !due.isEmpty {
+            // Off, they count as handled: the setting isn't read again until the next window.
+            let enabled = isEnabled()
+            for alert in due where !enabled || post(notice(for: alert, now: now, calendar: calendar)) {
+                sent[alert.key] = alert.limit.latest.resetsAt
+            }
         }
+        guard sent != self.sent else { return }
+        self.sent = sent
+        store.save(sent)
+    }
+
+    private func notice(for alert: QuotaAlert, now: TimeInterval, calendar: Calendar) -> Notice {
+        let top = alert.limit.agent == .claude ? burner() : nil
+        let text = alert.text(burner: top, now: now, calendar: calendar)
+        let compact = top?.actions.lazy.compactMap { action -> UUID? in
+            if case .compactAtTurnEnd(let column) = action { column } else { nil }
+        }.first
+        return Notice(title: text.title, body: text.body, workspaceID: top?.workspaceID, compactColumn: compact)
     }
 }
