@@ -44,17 +44,27 @@ final class QuotaPopoverViewController: NSViewController {
         return walk(view)
     }
 
+    /// Claude's first, then Codex's, the shorter window first.
+    static func ordered(_ limits: [QuotaLimit]) -> [QuotaLimit] {
+        limits.sorted { ($0.agent == .claude ? 0 : 1, $0.length) < ($1.agent == .claude ? 0 : 1, $1.length) }
+    }
+
+    /// What a limit's row says.
+    static func words(of limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> String {
+        "\(UsageText.longName(of: limit)) \(Int(limit.latest.usedPercent.rounded())) \(UsageText.detail(limit, now: now, calendar: calendar).text)"
+    }
+
     func update(limits: [QuotaLimit], burn: [QuotaBurnRow] = [], now: TimeInterval, calendar: Calendar) {
         loadViewIfNeeded()
-        let ordered = limits.sorted { ($0.agent == .claude ? 0 : 1, $0.length) < ($1.agent == .claude ? 0 : 1, $1.length) }
-        let words = ordered.map { "\(UsageText.longName(of: $0)) \(Int($0.latest.usedPercent.rounded())) \(UsageText.detail($0, now: now, calendar: calendar).text)" }
+        let ordered = Self.ordered(limits)
+        let words = ordered.map { Self.words(of: $0, now: now, calendar: calendar) }
             + [limits.map(\.latest.time).max().map { ClaudeUsageLimits.clockText($0, now: now, calendar: calendar) } ?? ""]
             + burn.map { String(describing: $0) }
         guard words != shown || stack.arrangedSubviews.isEmpty else { return }
         shown = words
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         burnActions = []
-        for limit in ordered { stack.addArrangedSubview(row(limit, now: now, calendar: calendar)) }
+        for limit in ordered { stack.addArrangedSubview(Self.limitRow(limit, now: now, calendar: calendar, width: Self.width - 2 * Theme.Space.lg)) }
         stack.addArrangedSubview(textRow(
             "Antigravity", value: "—",
             detail: "Not published: agy shows its quota only in its own /usage.", detailColor: Theme.Color.textTertiary
@@ -104,9 +114,12 @@ final class QuotaPopoverViewController: NSViewController {
         onBurnAction?(workspaceID, action)
     }
 
-    private func row(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar) -> NSView {
+    /// A limit's row: its name and use, its meter, its pace and reset. The
+    /// Usage window shows the same, without a `width`: its own ties the row
+    /// to the window's.
+    static func limitRow(_ limit: QuotaLimit, now: TimeInterval, calendar: Calendar, width: CGFloat? = nil) -> NSView {
         let detail = UsageText.detail(limit, now: now, calendar: calendar)
-        let row = textRow(
+        let row = textRow(width: width,
             UsageText.longName(of: limit), value: "\(Int(limit.latest.usedPercent.rounded()))%",
             detail: detail.text, detailColor: detail.tone == .runsOut ? Theme.Color.error : Theme.Color.textSecondary
         )
@@ -123,6 +136,10 @@ final class QuotaPopoverViewController: NSViewController {
     }
 
     private func textRow(_ name: String, value: String, detail: String, detailColor: NSColor) -> NSStackView {
+        Self.textRow(width: Self.width - 2 * Theme.Space.lg, name, value: value, detail: detail, detailColor: detailColor)
+    }
+
+    private static func textRow(width: CGFloat?, _ name: String, value: String, detail: String, detailColor: NSColor) -> NSStackView {
         let nameLabel = label(name, font: Theme.Font.caption, color: Theme.Color.textPrimary)
         let valueLabel = label(value, font: Theme.Font.captionDigits, color: Theme.Color.textPrimary)
         valueLabel.alignment = .right
@@ -132,16 +149,15 @@ final class QuotaPopoverViewController: NSViewController {
         let detailLabel = NSTextField(wrappingLabelWithString: detail)
         detailLabel.font = Theme.Font.caption
         detailLabel.textColor = detailColor
-        detailLabel.preferredMaxLayoutWidth = Self.width - 2 * Theme.Space.lg
+        // 0: it wraps at the width its row gets.
+        detailLabel.preferredMaxLayoutWidth = width ?? 0
         let row = NSStackView(views: [top, detailLabel])
         row.orientation = .vertical
         row.alignment = .leading
         row.spacing = Theme.Space.xs
         row.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            top.widthAnchor.constraint(equalToConstant: Self.width - 2 * Theme.Space.lg),
-            row.widthAnchor.constraint(equalToConstant: Self.width - 2 * Theme.Space.lg)
-        ])
+        top.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
+        if let width { row.widthAnchor.constraint(equalToConstant: width).isActive = true }
         return row
     }
 
@@ -160,6 +176,10 @@ final class QuotaPopoverViewController: NSViewController {
     }
 
     private func label(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
+        Self.label(text, font: font, color: color)
+    }
+
+    private static func label(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = font
         label.textColor = color
