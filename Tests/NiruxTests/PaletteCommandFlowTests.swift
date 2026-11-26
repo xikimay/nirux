@@ -141,10 +141,20 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             let column = try XCTUnwrap(other.columns.first)
             let pty = try XCTUnwrap(column.pty)
             let session = pty.terminalSession
-            harness.waitUntil("the terminal's surface") { session.readViewportText() != nil }
+            // The terminal's text comes from its shell, as a program's output
+            // does: lines written behind the shell's back are the line
+            // editor's to paint over (CI's bash redraws its wrapping prompt
+            // on a SIGWINCH). The command it runs holds no match.
+            @MainActor func shellPrints(_ lines: [String], as name: String) throws {
+                harness.waitUntil("the shell's prompt") {
+                    pty.readsKeysAsTyped && pty.foregroundProcess(snapshot: ProcessSnapshot())?.instance.pid == pty.shellPID
+                }
+                let path = harness.root + "/\(name).txt"
+                try lines.map { $0 + "\n" }.joined().write(toFile: path, atomically: true, encoding: .utf8)
+                pty.sendRaw("cat '\(path)'\n")
+            }
             let needle = "flow-scrollback-needle"
-            let rows = (1...200).map { [20, 100, 150].contains($0) ? "\(needle) \($0)" : "row \($0)" }
-            session.receive(rows.joined(separator: "\r\n") + "\r\n")
+            try shellPrints((1...200).map { [20, 100, 150].contains($0) ? "\(needle) \($0)" : "row \($0)" }, as: "scrollback")
             harness.waitUntil("the rows on screen") { session.readViewportText()?.contains("row 200") == true }
             XCTAssertFalse(session.readViewportText()?.contains("\(needle) 100\n") ?? true, "the match starts on screen")
             harness.shell.focusWorkspace(id: home.id)
@@ -158,11 +168,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(panel.rows.map(\.place), Array(repeating: "other › Terminal 1", count: 3))
             XCTAssertEqual(panel.statusLabel?.stringValue, "3 matches in 1 of 2 terminals")
 
-            // Printed by the shell, as a program's output is: written past
-            // its prompt behind its back, a line is the line editor's to
-            // paint over when it redraws (CI's bash, its prompt wrapping).
-            harness.waitUntil("the shell's prompt") { pty.readsKeysAsTyped }
-            pty.sendRaw("printf '\(needle) %s\\n' 201 202\n")
+            try shellPrints(["\(needle) 201", "\(needle) 202"], as: "new-matches")
             harness.waitUntil("the new matches") { TerminalScreenText.read(session)?.contains("\(needle) 202") == true }
             harness.press(.down, in: field.window)
             harness.press(.returnKey, in: field.window)
