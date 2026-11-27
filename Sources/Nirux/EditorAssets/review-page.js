@@ -127,7 +127,9 @@
     return { cells, align };
   }
 
-  // A row's cells, its outer pipes dropped; "\|" is a pipe in a cell.
+  // A row's cells, its outer pipes dropped. Split as GitHub splits them: a
+  // pipe right after a backslash is in its cell ("C:\\|" too), that
+  // backslash dropped (GitHub's other backslash escapes aren't read).
   function tableCells(line) {
     let text = line.trim();
     if (text.startsWith("|")) text = text.slice(1);

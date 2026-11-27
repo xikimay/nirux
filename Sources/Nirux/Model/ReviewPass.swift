@@ -51,7 +51,7 @@ enum ReviewPass: String, Codable, CaseIterable {
 
     /// By the command's own name, the last `:` segment: a plugin's
     /// `plugin:code-review` counts.
-    private static func command(_ name: String) -> ReviewPass? {
+    static func command(_ name: String) -> ReviewPass? {
         switch name.split(separator: ":").last?.lowercased() {
         case "code-review": .codeReview
         case "premortem": .premortem

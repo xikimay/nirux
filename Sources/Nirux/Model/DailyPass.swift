@@ -449,6 +449,9 @@ enum DailyPass {
         var tasks: [TaskActivity] = []
         /// The forgotten tasks the last read listed (`ForgottenTask.key`).
         var reported: Set<String> = []
+        /// The review starts in the window the checklist reached
+        /// (`ReviewChecklist.reached`).
+        var checklistReach = ReviewChecklist.Tally()
 
         /// Anything for the pass to read. What GitHub didn't say isn't: a
         /// signed-out gh would make every day one.
@@ -458,6 +461,7 @@ enum DailyPass {
                 || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty || !threadWaits.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }
                 || forgottenTasks(tasks, now: window.end).contains { !reported.contains($0.key) }
+                || checklistReach.isBroken
         }
 
         /// The pass runs on news, or on anything waiting: its morning line
@@ -544,7 +548,7 @@ enum DailyPass {
             let quiet = header + "\n\n" + morningSection(facts) + "\n\nNothing happened since \(since): no review recorded, "
                 + "\(merged)\(failure)no Mission message held, no rule decided. Nothing to propose"
                 + (tasks.text == nil ? ": say so in one line." : ".")
-            let sections = [gitHubSection(facts), tasks.text].compactMap { $0 }
+            let sections = [gitHubSection(facts), checklistSection(facts), tasks.text].compactMap { $0 }
             return Digest(text: ([quiet] + sections).joined(separator: "\n\n"), readUntil: window.end, listed: tasks.listed)
         }
         // The rules before the facts; each section lists its facts in time
@@ -553,7 +557,7 @@ enum DailyPass {
         for limit in limits {
             parts = [
                 Part(text: morningSection(facts)).kept(), Part(text: instructions(facts)).kept(), Part(text: gitHubSection(facts)).kept(),
-                rulesSection(facts, limit).kept(),
+                Part(text: checklistSection(facts)).kept(), rulesSection(facts, limit).kept(),
                 forgottenSection(forgotten, reported: facts.reported, limit), findingsSection(facts, limit),
                 pullRequestsSection(facts, limit), ciSection(facts, limit, timeZone: timeZone), missionsSection(facts, limit, timeZone: timeZone),
                 threadWaitsSection(facts, limit)
@@ -633,6 +637,20 @@ enum DailyPass {
             ? "The next pass reads this window again. Read what you need with gh meanwhile."
             : "Read what you need with gh."
         return section("What GitHub didn’t say", lines + [after], total: lines.count + 1)
+    }
+
+    /// The review starts the checklist missed, as counted. Only none in
+    /// several sessions asks for a task: Nirux tells a review's fork by a
+    /// file Claude Code doesn't document (`ReviewChecklist.forkedSkill`).
+    private static func checklistSection(_ facts: Facts) -> String? {
+        let tally = facts.checklistReach
+        guard tally.reached < tally.started else { return nil }
+        let line = tally.isBroken
+            ? "- The review checklist reached none of \(tally.started) /code-review starts in this window, in \(tally.sessions) sessions: "
+                + "Nirux may no longer tell a review's fork from other subagents. Start a task to find out."
+            : "- The review checklist reached \(tally.reached) of \(tally.started) /code-review starts in this window "
+                + "(an approximate count: nothing to do)."
+        return section("Review checklist", [line], total: 1)
     }
 
     /// The tasks forgotten at the window's end, those the last read didn't

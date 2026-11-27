@@ -39,7 +39,7 @@ struct SpaceDefaultsStore: Sendable {
 
     /// A deleted space's defaults (copies set aside included) and setup
     /// scripts, which may hold secrets, go with it, and the rules its Lead
-    /// proposed, its prompts' log, its review findings, its daily pass and its plan;
+    /// proposed, its prompts' log, its review findings and checklist log, its daily pass and its plan;
     /// its brief stays. Its Claude settings
     /// are emptied, not removed: its workspaces go on in General, and their
     /// columns' launch lines name the file.
@@ -53,8 +53,8 @@ struct SpaceDefaultsStore: Sendable {
               let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
         else { return }
         for name in names where name == fileName || name.hasPrefix("defaults.corrupt.") || name == SpaceSetupScript.folderName
-            || [RuleProposalStore.fileName, LoopLog.lines.fileName, ReviewFindings.lines.fileName, DailyPassState.fileName, Plan.Store.fileName]
-                .contains(name) {
+            || [RuleProposalStore.fileName, LoopLog.lines.fileName, ReviewFindings.lines.fileName, ReviewChecklist.reaches.fileName,
+                DailyPassState.fileName, Plan.Store.fileName].contains(name) {
             do {
                 try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             } catch {

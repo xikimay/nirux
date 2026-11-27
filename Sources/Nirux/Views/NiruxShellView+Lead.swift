@@ -287,6 +287,7 @@ extension NiruxShellView {
             agent: defaults?.defaults.preferredLeadAgent ?? .claude,
             dailyPass: defaults?.defaults.dailyPassIsOn ?? false,
             dailyPassHour: defaults?.defaults.dailyPassHour ?? DailyPass.defaultHour,
+            reviewChecklist: defaults?.defaults.reviewChecklistIsOn ?? false,
             groupsResults: defaults?.defaults.groupsResults ?? false,
             freshStart: defaults?.defaults.leadStartsFreshWhenCold ?? false,
             dayPlan: defaults?.defaults.plansTheDay ?? false,
@@ -299,6 +300,12 @@ extension NiruxShellView {
     /// (on is the default, so it writes nothing).
     func setLeadStartsTasks(_ on: Bool, spaceID: String) {
         changeSpaceDefaults(spaceID: spaceID) { $0.leadStartsTasks = on ? nil : false }
+        refreshSpaceSettingsLead()
+    }
+
+    /// "Review checklist", as "Starts tasks without asking".
+    func setReviewChecklist(_ on: Bool, spaceID: String) {
+        changeSpaceDefaults(spaceID: spaceID) { $0.reviewChecklist = on ? nil : false }
         refreshSpaceSettingsLead()
     }
 

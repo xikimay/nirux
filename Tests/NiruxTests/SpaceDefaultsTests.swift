@@ -277,6 +277,18 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.groupsResults)
     }
 
+    /// The review checklist is on unless the file says; a file Nirux can't
+    /// read turns it off.
+    func testTheReviewChecklistSetting() throws {
+        XCTAssertTrue(SpaceDefaults().reviewChecklistIsOn)
+        let off = SpaceDefaultsStore.decode(Data(#"{"reviewChecklist": false}"#.utf8))
+        XCTAssertEqual(off.status, .loaded)
+        XCTAssertFalse(off.defaults.reviewChecklistIsOn)
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["reviewChecklist"] as? Bool, false)
+        XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.reviewChecklistIsOn)
+    }
+
     /// A cold Lead's fresh start is on unless the file says; a file Nirux
     /// can't read turns it off.
     func testTheFreshStartSetting() throws {
@@ -345,7 +357,8 @@ final class SpaceDefaultsTests: XCTestCase {
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("setup"), withIntermediateDirectories: true)
         try Data("npm ci\n".utf8).write(to: folder.appendingPathComponent("setup/web-1.sh"))
         try Data("Goals.\n".utf8).write(to: folder.appendingPathComponent("brief.md"))
-        for name in [RuleProposalStore.fileName, LoopLog.lines.fileName, ReviewFindings.lines.fileName, DailyPassState.fileName] {
+        let logs = [RuleProposalStore.fileName, LoopLog.lines.fileName, ReviewFindings.lines.fileName, ReviewChecklist.reaches.fileName]
+        for name in logs + [DailyPassState.fileName] {
             try Data("{}\n".utf8).write(to: folder.appendingPathComponent(name))
         }
         let settings = folder.appendingPathComponent(ClaudeSpaceSettings.fileName)
