@@ -29,7 +29,16 @@ struct PlanToolsTests {
         #expect(plan.line("a")?.origin.source == Plan.Source(name: "Slack", url: "https://example.slack.com/p1", why: "a mention at 08:12"))
         #expect(plan.line("c")?.workspaceID == "w1")
         #expect(plan.line("d")?.isForUser == true)
+        _ = try plan.add(["kind": "session", "title": "Fonts again", "detail": "Embed both fonts.\n- Inter\n\t- Mono\u{202E}"], task: nil, newID: ids.make, at: 5)
+        #expect(plan.line("g")?.detail == "Embed both fonts.\n- Inter\n- Mono")
+        #expect(plan.text(tasks: { _ in nil }).contains("“Embed both fonts. / - Inter / - Mono”"))
 
+        #expect(throws: Plan.Problem("under must be a line's id, as read_plan shows it.")) {
+            try plan.add(["kind": "step", "title": "x", "under": 7], task: nil, newID: ids.make, at: 6)
+        }
+        #expect(throws: Plan.Problem("after must be a line's id, as read_plan shows it.")) {
+            try plan.add(["kind": "session", "title": "x", "after": ["a"]], task: nil, newID: ids.make, at: 6)
+        }
         #expect(throws: Plan.Problem("feat/page-breaks is in the plan already, as c: only the user moves lines.")) {
             try plan.add(["kind": "session"], task: task, newID: ids.make, at: 6)
         }
@@ -76,23 +85,26 @@ struct PlanToolsTests {
         let ids = IDs()
         let mine = Plan.Task(workspaceID: "w1", title: "feat/page-breaks")
         let other = Plan.Task(workspaceID: "w2", title: "feat/fonts")
-        #expect(try plan.steps([:], of: mine, newID: ids.make, at: 1) == "You have no steps yet.")
+        #expect(try plan.steps([:], of: mine, tasks: { _ in nil }, newID: ids.make, at: 1) == "You have no steps yet.")
         #expect(plan.lines.isEmpty)
-        _ = try plan.steps(["add": ["Reproduce", "Fix the height"]], of: mine, newID: ids.make, at: 2)
-        _ = try plan.steps(["add": ["Choose: embed or link"], "for_user": true], of: other, newID: ids.make, at: 3)
+        _ = try plan.steps(["add": ["Reproduce", "Fix the height"]], of: mine, tasks: { _ in nil }, newID: ids.make, at: 2)
+        _ = try plan.steps(["add": ["Choose: embed or link"], "for_user": true], of: other, tasks: { _ in nil }, newID: ids.make, at: 3)
         let line = try #require(plan.line(ofWorkspace: "w1"))
         #expect(line.origin.by == .nirux && line.title == "feat/page-breaks")
         #expect(line.children.map(\.id) == ["b", "c"])
-        #expect(throws: Plan.Problem("e isn't one of your steps.")) { try plan.steps(["check": ["e"]], of: mine, newID: ids.make, at: 4) }
-        #expect(throws: Plan.Refusal.notAllowed(.check)) { try plan.steps(["check": ["e"]], of: other, newID: ids.make, at: 4) }
-        #expect(try plan.steps(["check": ["b"], "add": ["Test 3 long documents"]], of: mine, newID: ids.make, at: 5) == """
+        #expect(throws: Plan.Problem("e isn't one of your steps.")) { try plan.steps(["check": ["e"]], of: mine, tasks: { _ in nil }, newID: ids.make, at: 4) }
+        #expect(throws: Plan.Refusal.notAllowed(.check)) { try plan.steps(["check": ["e"]], of: other, tasks: { _ in nil }, newID: ids.make, at: 4) }
+        #expect(try plan.steps(["check": ["b"], "add": ["Test 3 long documents"]], of: mine, tasks: { _ in nil }, newID: ids.make, at: 5) == """
             Your steps, in order:
             - [x] Reproduce (step b)
             - [ ] Fix the height (step c, current)
             - [ ] Test 3 long documents (step f)
             """)
-        #expect(throws: Plan.Problem("add must list strings, none blank.")) { try plan.steps(["add": [" "]], of: mine, newID: ids.make, at: 6) }
-        #expect(throws: Plan.Problem("check must be a string.")) { try plan.steps(["check": [12345]], of: mine, newID: ids.make, at: 6) }
+        #expect(throws: Plan.Problem("add must list strings, none blank.")) { try plan.steps(["add": [" "]], of: mine, tasks: { _ in nil }, newID: ids.make, at: 6) }
+        #expect(throws: Plan.Problem("check must be a string.")) { try plan.steps(["check": [12345]], of: mine, tasks: { _ in nil }, newID: ids.make, at: 6) }
+        try plan.add(Plan.Line(id: "sub", kind: .session, title: "Fonts", by: .lead, at: 6, workspaceID: "w3"), to: .under(line.id))
+        let listed = try plan.steps([:], of: mine, tasks: { $0 == "w3" ? "feat/fonts, working" : nil }, newID: ids.make, at: 7)
+        #expect(listed.hasSuffix("- [ ] Fonts (session sub: feat/fonts, working)"), "a sub-task runs")
     }
 
     @Test func readPlanShowsEveryLineWithItsIdAndTheProposalsApart() throws {
@@ -100,8 +112,8 @@ struct PlanToolsTests {
         let ids = IDs()
         let task = Plan.Task(workspaceID: "w1", title: "feat/page-breaks")
         _ = try plan.add(["kind": "session", "feature": "Export PDF"], task: task, newID: ids.make, at: 1)
-        _ = try plan.steps(["add": ["Reproduce", "Fix the height"]], of: task, newID: ids.make, at: 2)
-        _ = try plan.steps(["check": ["c"]], of: task, newID: ids.make, at: 3)
+        _ = try plan.steps(["add": ["Reproduce", "Fix the height"]], of: task, tasks: { _ in nil }, newID: ids.make, at: 2)
+        _ = try plan.steps(["check": ["c"]], of: task, tasks: { _ in nil }, newID: ids.make, at: 3)
         _ = try plan.add(["kind": "todo", "title": "Reply to the printer", "source": "Mail", "why": "received 07:50"], task: nil, newID: ids.make, at: 4)
         _ = try plan.add(["kind": "session", "title": "Fonts", "detail": "Embed them", "after": "e"], task: nil, newID: ids.make, at: 5)
         _ = try plan.add(["kind": "lead", "title": "Relaunch #415", "feature": "Export PDF", "propose": true], task: nil, newID: ids.make, at: 6)
@@ -123,7 +135,8 @@ struct PlanToolsTests {
             _ = try long.add(["kind": "todo", "title": String(repeating: "x", count: Plan.maxTitleLength)], task: nil, newID: { count += 1; return "t\(count)" }, at: 1)
         }
         let text = long.text(tasks: { _ in nil })
-        #expect(text.count < Plan.maxTextLength + 40 && text.hasSuffix(" more lines."))
+        #expect(text.count < Plan.maxTextLength + 40)
+        #expect(text.components(separatedBy: "\n").last?.hasPrefix("… and ") == true && text.hasSuffix(" more lines."))
     }
 
     @Test func anIDAProposalHoldsForANewFeatureIsNeverHandedOut() throws {
@@ -158,5 +171,20 @@ struct PlanToolsTests {
         try Data(newer.utf8).write(to: url)
         let loaded = store.load()
         #expect(loaded.plan.line("a") != nil && loaded.readOnlyReason == "A newer Nirux keeps this plan.")
+    }
+
+    @Test func aChangeThatWouldPassTheSizeLoadReadsIsRefused() throws {
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent(Plan.Store.fileName)
+        _ = try Plan.Store(fileURL: url).update { try $0.add(["kind": "todo", "title": "Reply"], task: nil, newID: { "a" }, at: 1) }
+        let written = try Data(contentsOf: url)
+        // Room for this plan, not for one more line of 120 characters.
+        let store = Plan.Store(fileURL: url, maxBytes: written.count + 100)
+        #expect(throws: Plan.Problem(Plan.Store.fullReason)) {
+            try store.update { try $0.add(["kind": "todo", "title": String(repeating: "x", count: Plan.maxTitleLength)], task: nil, newID: { "b" }, at: 2) }
+        }
+        #expect(try Data(contentsOf: url) == written)
+        let loaded = store.load()
+        #expect(loaded.readOnlyReason == nil && loaded.plan.lines.map(\.id) == ["a"])
     }
 }

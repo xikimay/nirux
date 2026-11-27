@@ -41,7 +41,7 @@ extension Plan {
         guard let title = try Self.text(arguments, "title", limit: Self.maxTitleLength) ?? (kind == .session ? task?.title : nil) else {
             throw Problem("title must say what the line is, in at most \(Self.maxTitleLength) characters.")
         }
-        let under = Self.string(arguments, "under")
+        let under = try Self.lineID(arguments, "under")
         let feature = try Self.text(arguments, "feature", limit: Self.maxTitleLength)
         guard under == nil || feature == nil else { throw Problem("Pass under or feature, not both.") }
         var next = self
@@ -56,8 +56,8 @@ extension Plan {
         }
         let line = Line(
             id: id, kind: kind, title: title, by: .lead, at: now, source: try Self.source(arguments),
-            detail: try Self.text(arguments, "detail", limit: Self.maxDetailLength), isForUser: try Self.flag(arguments, "for_user"),
-            workspaceID: kind == .session ? task?.workspaceID : nil, after: Self.string(arguments, "after")
+            detail: try Self.lines(arguments, "detail", limit: Self.maxDetailLength), isForUser: try Self.flag(arguments, "for_user"),
+            workspaceID: kind == .session ? task?.workspaceID : nil, after: try Self.lineID(arguments, "after")
         )
         if proposes { try next.propose(line, to: place) } else { try next.add(line, to: place) }
         self = next
@@ -74,8 +74,10 @@ extension Plan {
         return (done ? "Checked" : "Unchecked") + " “\(line(id)?.title ?? id)”."
     }
 
-    /// task_steps: checks, then adds, then answers the task's steps.
-    public mutating func steps(_ arguments: [String: Any], of task: Task, newID: () -> String, at now: TimeInterval) throws -> String {
+    /// task_steps: checks, then adds, then answers the task's steps. `tasks` as for read_plan.
+    public mutating func steps(
+        _ arguments: [String: Any], of task: Task, tasks: (String) -> String?, newID: () -> String, at now: TimeInterval
+    ) throws -> String {
         let adds = try Self.texts(arguments, "add", limit: Self.maxTitleLength)
         let checks = try Self.texts(arguments, "check", limit: Self.maxTitleLength)
         let forUser = try Self.flag(arguments, "for_user")
@@ -93,7 +95,7 @@ extension Plan {
         }
         self = next
         guard let line = line(ofWorkspace: task.workspaceID), !line.children.isEmpty else { return "You have no steps yet." }
-        return Self.cut(["Your steps, in order:"] + line.children.flatMap { describe($0, under: line, depth: 0, tasks: { _ in nil }) })
+        return Self.cut(["Your steps, in order:"] + line.children.flatMap { describe($0, under: line, depth: 0, tasks: tasks) })
     }
 
     /// read_plan. `tasks` names a workspace's task and its state; nil for one that closed.
@@ -129,7 +131,7 @@ extension Plan {
         default: facts = ["\(line.kind.rawValue) \(line.id)"]
         }
         if let source = line.origin.source { facts.append([source.name, source.url, source.why].compactMap { $0 }.joined(separator: " ")) }
-        if let detail = line.detail { facts.append("“\(detail)”") }
+        if let detail = line.detail { facts.append("“" + detail.replacingOccurrences(of: "\n", with: " / ") + "”") }
         let box = line.kind == .feature ? "" : line.isChecked ? "[x] " : "[ ] "
         return box + line.title + " (" + (facts + extra).joined(separator: ", ") + ")"
     }
@@ -164,7 +166,7 @@ extension Plan {
     private static func cut(_ rows: [String]) -> String {
         var text = ""
         for (index, row) in rows.enumerated() {
-            guard text.count + row.count < maxTextLength else { return text + "… and \(rows.count - index) more lines." }
+            guard text.count + row.count < maxTextLength else { return text + "\n… and \(rows.count - index) more lines." }
             text += (text.isEmpty ? "" : "\n") + row
         }
         return text
@@ -187,6 +189,23 @@ extension Plan {
         guard let text = AgentText.clean(raw, maxLength: limit * 4) else { return nil }
         guard text.count <= limit else { throw Problem("\(key) must hold at most \(limit) characters.") }
         return text
+    }
+
+    /// Text kept on its lines, each cleaned: what a planned session's agent starts with.
+    private static func lines(_ arguments: [String: Any], _ key: String, limit: Int) throws -> String? {
+        guard let value = arguments[key], !(value is NSNull) else { return nil }
+        guard let raw = value as? String else { throw Problem("\(key) must be a string.") }
+        let text = raw.components(separatedBy: .newlines).map { AgentText.clean($0, maxLength: limit * 4) ?? "" }
+            .joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count <= limit else { throw Problem("\(key) must hold at most \(limit) characters.") }
+        return text.isEmpty ? nil : text
+    }
+
+    /// A line's id; nil when left out or blank.
+    private static func lineID(_ arguments: [String: Any], _ key: String) throws -> String? {
+        guard let value = arguments[key], !(value is NSNull) else { return nil }
+        guard value is String else { throw Problem("\(key) must be a line's id, as read_plan shows it.") }
+        return string(arguments, key)
     }
 
     private static func texts(_ arguments: [String: Any], _ key: String, limit: Int) throws -> [String] {

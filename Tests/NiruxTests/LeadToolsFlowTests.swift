@@ -917,13 +917,6 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
-    /// record_review keeps each review of any task of the space (one the
-    /// user started too) as its next round, and refuses a workspace that
-    /// isn't a task; daily_pass then lists the findings by kind and the
-    /// tasks it may have forgotten (a merged pull request's, a result's
-    /// with nothing after it, each dated by its last turn or commit; never
-    /// a plain checkout's or an archived task's), and the window it read is
-    /// where the next pass starts.
     func testTheDayPlanKeepsTheLeadsLinesAndATasksOwnSteps() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -947,6 +940,8 @@ final class LeadToolsFlowTests: XCTestCase {
             let forUser = try call(PlanTools.addToPlan, ["kind": "step", "title": "Pick the delimiter", "for_user": true, "task": "Export CSV"],
                                    lead: lead, in: harness)
             XCTAssertTrue(forUser.text.hasSuffix("at the end of “Export CSV”."), forUser.text)
+            let wrongType = try call(PlanTools.addToPlan, ["kind": "session", "task": 3], lead: lead, in: harness)
+            XCTAssertTrue(wrongType.isError && wrongType.text.hasPrefix("task must name"), wrongType.text)
             let line = try XCTUnwrap(try XCTUnwrap(Plan.Store(spaceID: lead.space)).load().plan.line(ofWorkspace: workspaceID))
             XCTAssertEqual(line.children.map(\.title), ["Parse the header", "Write the rows", "Pick the delimiter"])
             let choice = line.children[2].id
@@ -957,6 +952,13 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// record_review keeps each review of any task of the space (one the
+    /// user started too) as its next round, and refuses a workspace that
+    /// isn't a task; daily_pass then lists the findings by kind and the
+    /// tasks it may have forgotten (a merged pull request's, a result's
+    /// with nothing after it, each dated by its last turn or commit; never
+    /// a plain checkout's or an archived task's), and the window it read is
+    /// where the next pass starts.
     func testTheLeadRecordsReviewsAndReadsItsDay() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

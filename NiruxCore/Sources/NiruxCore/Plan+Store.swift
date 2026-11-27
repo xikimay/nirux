@@ -10,10 +10,15 @@ extension Plan {
         public static let maxFileBytes = 1 << 20
 
         public let fileURL: URL
+        /// What load reads, so what update writes: tests make it small.
+        public let maxBytes: Int
 
-        public init(fileURL: URL) {
+        public init(fileURL: URL, maxBytes: Int = Store.maxFileBytes) {
             self.fileURL = fileURL
+            self.maxBytes = maxBytes
         }
+
+        public static let fullReason = "The plan is full: the user removes lines first."
 
         public struct Loaded: Equatable, Sendable {
             public var plan: Plan
@@ -26,7 +31,7 @@ extension Plan {
         }
 
         public func load() -> Loaded {
-            switch RegularFileRead.read(fileURL, maxBytes: Self.maxFileBytes) {
+            switch RegularFileRead.read(fileURL, maxBytes: maxBytes) {
             case .missing:
                 return Loaded(plan: Plan())
             case .unreadableBytes:
@@ -42,17 +47,25 @@ extension Plan {
         }
 
         /// Changes the plan as the file has it, and writes it when the change changed anything: a file it can't
-        /// replace still answers what changes nothing.
+        /// replace still answers what changes nothing. A change that would pass the size load reads is refused, so
+        /// the file is always one load takes.
         public func update<Result>(_ change: (inout Plan) throws -> Result) throws -> Result {
             let loaded = load()
             var plan = loaded.plan
             let result = try change(&plan)
             guard plan != loaded.plan else { return result }
             if let reason = loaded.readOnlyReason { throw Problem(reason) }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .sortedKeys
+            let data: Data
             do {
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = .sortedKeys
-                try PrivateFileWrite.write(encoder.encode(File(schemaVersion: Self.schemaVersion, plan: plan)), to: fileURL)
+                data = try encoder.encode(File(schemaVersion: Self.schemaVersion, plan: plan))
+            } catch {
+                throw Problem("Nirux couldn't save the plan: \(error.localizedDescription)")
+            }
+            guard data.count <= maxBytes else { throw Problem(Self.fullReason) }
+            do {
+                try PrivateFileWrite.write(data, to: fileURL)
             } catch {
                 throw Problem("Nirux couldn't save the plan: \(error.localizedDescription)")
             }

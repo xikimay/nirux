@@ -69,7 +69,9 @@ removing that line hands them back to the user's go.
 `Plan.Store` keeps a space's plan in `plan.json` beside its brief, written by
 the app only, 0600 and atomically. A file it can't take as a plan (not one it
 decodes, a newer `schemaVersion`, too large, unreadable just now) is never
-replaced: changes are refused with the reason, reads still answer.
+replaced: changes are refused with the reason, reads still answer. A change
+that would make the file larger than a load reads (1 MB) is refused too ("the
+plan is full"), so the file on disk is always one Nirux reads back.
 
 The tools are listed only where the space's day plan is on
 (`SpaceDefaults.dayPlan`, off by default, no switch shown until the sidebar

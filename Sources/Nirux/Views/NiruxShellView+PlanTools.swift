@@ -14,8 +14,11 @@ extension NiruxShellView {
                 let loaded = store.load()
                 answer(loaded.plan.text(tasks: planTaskName) + (loaded.readOnlyReason.map { "\n" + $0 } ?? ""), false)
             case PlanTools.addToPlan:
+                if let value = arguments["task"], !(value is NSNull), !(value is String) {
+                    throw Plan.Problem("task must name a task of this space, as list_tasks shows it.")
+                }
                 let task = try LeadTools.string(arguments, "task").map { name in
-                    guard let workspace = spaceTask(name, in: space) else { throw Plan.Problem(Self.noSpaceTask(name)) }
+                    guard let workspace = spaceTask(name, in: space) else { throw Plan.Problem(noSpaceTask(name, in: space)) }
                     return Plan.Task(workspaceID: workspace.id, title: workspace.title)
                 }
                 answer(try store.update { try $0.add(arguments, task: task, newID: Self.newPlanID, at: now) }, false)
@@ -31,7 +34,8 @@ extension NiruxShellView {
         guard let store = planStore(ofSpace: caller.profileID) else { return answer(Self.dayPlanIsOff, true) }
         let task = Plan.Task(workspaceID: caller.id, title: caller.title)
         do {
-            answer(try store.update { try $0.steps(arguments, of: task, newID: Self.newPlanID, at: Date().timeIntervalSince1970) }, false)
+            let now = Date().timeIntervalSince1970
+            answer(try store.update { try $0.steps(arguments, of: task, tasks: planTaskName, newID: Self.newPlanID, at: now) }, false)
         } catch {
             answer(String(describing: error), true)
         }
@@ -57,7 +61,4 @@ extension NiruxShellView {
         String((0..<5).compactMap { _ in "abcdefghjkmnpqrstuvwxyz".randomElement() })
     }
 
-    private static func noSpaceTask(_ name: String) -> String {
-        "No task of this space is named “\(name)”, or several share that name: use its title or branch from list_tasks."
-    }
 }
