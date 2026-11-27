@@ -65,6 +65,7 @@ final class SpaceKnowledgeTests: XCTestCase {
         return id
     }
 
+    @discardableResult
     private func recheck(serves: Bool = true, at now: TimeInterval) -> SpaceKnowledge.Pass {
         SpaceKnowledge.recheck(spaceID: spaceID, serves: serves, now: now, stateDirectory: state)
     }

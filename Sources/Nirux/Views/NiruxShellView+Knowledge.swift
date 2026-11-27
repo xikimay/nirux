@@ -116,9 +116,10 @@ extension NiruxShellView {
         }
         let leadFolder = lead?.cwd
         let spaceID = space.id
+        let named = anchor
         Self.knowledgeQueue.async {
             // A space without anchors: the Lead's own repository.
-            guard let anchor = anchor ?? leadFolder.flatMap({ FolderIdentity.identify($0, timeout: 10)?.anchor }), let key = anchor.key,
+            guard let anchor = named ?? leadFolder.flatMap({ FolderIdentity.identify($0, timeout: 10)?.anchor }), let key = anchor.key,
                   let store = SpaceKnowledge.store(spaceID: spaceID)
             else {
                 return DispatchQueue.main.async { answer("Nirux can’t tell which repository this brick is about: pass repo.", true) }
