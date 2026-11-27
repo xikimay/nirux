@@ -43,9 +43,10 @@ final class EditorDiffFlowTests: XCTestCase {
         }
     }
 
-    /// Uncommitted Changes: a row for each file that changed (an unchanged
-    /// one has none), naming its folder and file and its lines added and
-    /// removed, then its diff, or why it isn't compared; a click on the row
+    /// Uncommitted Changes: a row for each file listed that changed (an
+    /// unchanged one with text has none), naming its folder and file and its
+    /// lines added and removed, then its diff, or why it has none to show
+    /// (too large, binary, empty, its text unchanged); a click on the row
     /// folds it.
     func testGroupDiffHasOneRowPerChangedFile() throws {
         try UIFlowHarness.run { harness in
@@ -53,18 +54,38 @@ final class EditorDiffFlowTests: XCTestCase {
             try "Same.\n".write(toFile: repo + "/docs/same.txt", atomically: true, encoding: .utf8)
             let big = String(repeating: "x\n", count: 210_000)
             try big.write(toFile: repo + "/big.txt", atomically: true, encoding: .utf8)
-            try UIFlowHarness.git(["add", "docs/same.txt", "big.txt"], at: repo)
+            try "".write(toFile: repo + "/gone.txt", atomically: true, encoding: .utf8)
+            try "a\r\nb\r\n".write(toFile: repo + "/crlf.txt", atomically: true, encoding: .utf8)
+            try "".write(toFile: repo + "/kept.txt", atomically: true, encoding: .utf8)
+            try "abc\n".write(toFile: repo + "/bin.dat", atomically: true, encoding: .utf8)
+            try Data([0, 255, 2]).write(to: URL(fileURLWithPath: repo + "/gone.bin"))
+            try FileManager.default.createDirectory(atPath: repo + "/old", withIntermediateDirectories: true)
+            try "a\n".write(toFile: repo + "/old/a.txt", atomically: true, encoding: .utf8)
+            try UIFlowHarness.git(["add", "docs/same.txt", "big.txt", "gone.txt", "crlf.txt", "kept.txt", "bin.dat", "gone.bin", "old/a.txt"], at: repo)
             try UIFlowHarness.git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "same"], at: repo)
             try "Find it elsewhere.\n".write(toFile: repo + "/" + UIFlowHarness.searchTarget, atomically: true, encoding: .utf8)
             try (big + "y\n").write(toFile: repo + "/big.txt", atomically: true, encoding: .utf8)
+            try FileManager.default.removeItem(atPath: repo + "/gone.txt")
+            try "".write(toFile: repo + "/empty.txt", atomically: true, encoding: .utf8)
+            try "a\nb\n".write(toFile: repo + "/crlf.txt", atomically: true, encoding: .utf8)
+            try Data([0, 1, 3]).write(to: URL(fileURLWithPath: repo + "/bin.dat"))
+            try FileManager.default.removeItem(atPath: repo + "/gone.bin")
+            try FileManager.default.removeItem(atPath: repo + "/old")
             harness.shell.openInEditorColumn(path: repo + "/README.md")
             let editor = try XCTUnwrap(harness.shell.activeWorkspace?.front?.editorColumn)
             let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
-            editor.showDiffCollection(title: "Uncommitted Changes (4)", paths: ["README.md", UIFlowHarness.searchTarget, "docs/same.txt", "big.txt"], mode: .head)
-            let shown = waitForDiffs("the changed files", in: webView) { $0.rows.count == 3 && $0.types.count == 2 }
-            XCTAssertEqual(shown?.rows, ["|README.md|+2|−0", "docs/|search-target.txt|+1|−1", "|big.txt"])
-            XCTAssertEqual(shown?.types, ["single", "single"])
-            XCTAssertEqual(shown?.notes, ["Too large to compare (\(big.utf8.count + 2) bytes)."])
+            let paths = ["README.md", UIFlowHarness.searchTarget, "docs/same.txt", "big.txt", "empty.txt", "gone.txt", "crlf.txt", "bin.dat", "gone.bin", "kept.txt", "old/a.txt"]
+            editor.showDiffCollection(title: "Uncommitted Changes (11)", paths: paths, mode: .head)
+            let shown = waitForDiffs("the changed files", in: webView) { $0.rows.count == 10 && $0.types.count == 4 }
+            XCTAssertEqual(shown?.rows, [
+                "|README.md|+2|−0", "docs/|search-target.txt|+1|−1", "|big.txt", "|empty.txt", "|gone.txt", "|crlf.txt|+2|−2", "|bin.dat", "|gone.bin", "|kept.txt",
+                "old/|a.txt|+0|−1"
+            ])
+            XCTAssertEqual(shown?.types, ["single", "single", "single", "single"])
+            XCTAssertEqual(shown?.notes, [
+                "Too large to compare (\(big.utf8.count + 2) bytes).", "Empty file added.", "Empty file removed.",
+                "Binary or unreadable, not compared.", "Binary or unreadable, not compared.", "No change in its text."
+            ])
             // The folder reads left to right, its end by the name.
             UIFlowHarness.waitForAnswer("docs/ in order", to: Self.folderOrder, in: webView) { $0 == "d<" }
 
@@ -114,10 +135,34 @@ final class EditorDiffFlowTests: XCTestCase {
             harness.waitUntil("the shown line") { editor.header.context == "Line 1" }
             editor.toggleDiff()
             harness.waitUntil("the draft's diff") { editor.diffActivePath == draft }
-            XCTAssertEqual(editor.header.context, "Line 1")
             UIFlowHarness.waitForAnswer("Monaco's diff", to: Self.diffWrap, in: webView) { $0 == "off" }
+            harness.waitUntil("the page's word") { editor.diffViewer == "monaco" }
+            XCTAssertEqual(editor.header.context, "Line 1")
             editor.toggleWordWrap()
             UIFlowHarness.waitForAnswer("the diff wrapped", to: Self.diffWrap, in: webView) { $0 == "on" }
+        }
+    }
+
+    /// A file's diff pierre fails to draw shows in Monaco's, which keeps an
+    /// agent's shown lines highlighted, as the header says.
+    func testDiffPierreCantDrawShowsInMonaco() throws {
+        try UIFlowHarness.run { harness in
+            let readme = harness.repo + "/README.md"
+            harness.shell.openInEditorColumn(path: readme, line: 1, endLine: 2, takeFocus: false)
+            let editor = try XCTUnwrap(harness.shell.activeWorkspace?.front?.editorColumn)
+            let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+            harness.waitUntil("the shown lines") { editor.header.context == "Lines 1–2" }
+            UIFlowHarness.waitForAnswer("the page to show README.md", to: "\(Self.mainEditor).getModel().getValue()", in: webView) { $0.hasPrefix("# Flow") }
+            UIFlowHarness.run("""
+                (function () {
+                  window.NiruxPierreDiff = Object.assign({}, window.NiruxPierreDiff, { createReview: function () { throw new Error('no review'); } });
+                })()
+                """, in: webView)
+            editor.toggleDiff()
+            harness.waitUntil("README.md's diff") { editor.diffActivePath == readme }
+            UIFlowHarness.waitForAnswer("Monaco's diff", to: Self.diffWrap, in: webView) { !$0.isEmpty }
+            harness.waitUntil("the page's word") { editor.diffViewer == "monaco" }
+            XCTAssertEqual(editor.header.context, "Lines 1–2")
         }
     }
 

@@ -9,19 +9,22 @@
   // The runs that turn `a` into `b` (arrays of comparable lines):
   // [{ type: "equal" | "delete" | "insert", count }], in order, each block
   // of changes as its deletions then its insertions. Myers' diff, the
-  // fewest changes; past `maxChanges` or `maxWork`, the middle between
-  // the first and last change reads as replaced whole.
+  // fewest changes; past `maxChanges` or `maxWork` (lines times changes
+  // looked for), the middle between the first and last change reads as
+  // replaced whole.
   const maxChanges = 2000;
-  const maxWork = 50000000;
+  // Hunks are drawn once a file; the Monaco diff's marks at each
+  // keystroke, as cheap as the old LCS's 2M cells.
+  const work = Object.freeze({ drawn: 50000000, typing: 2000000 });
 
-  function lineScript(a, b) {
+  function lineScript(a, b, maxWork = work.drawn) {
     let prefix = 0;
     while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
     let suffix = 0;
     while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) suffix++;
     const left = a.slice(prefix, a.length - suffix);
     const right = b.slice(prefix, b.length - suffix);
-    const steps = shortestSteps(left, right) ?? [...left.map(() => "delete"), ...right.map(() => "insert")];
+    const steps = shortestSteps(left, right, maxWork) ?? [...left.map(() => "delete"), ...right.map(() => "insert")];
     const runs = [];
     const push = (type, count) => {
       if (count === 0) return;
@@ -53,7 +56,7 @@
 
   // Myers' steps from `a` to `b` ("equal", "delete", "insert"); null past
   // the bounds. `trace[d]`: each diagonal's furthest x before step d.
-  function shortestSteps(a, b) {
+  function shortestSteps(a, b, maxWork) {
     const n = a.length;
     const m = b.length;
     const offset = n + m + 1;
@@ -105,28 +108,22 @@
     return steps.reverse();
   }
 
-  // A text's lines, each with what ended it (CRLF, CR, LF; none for the
-  // last when the text doesn't end with one).
+  // A text's lines as git splits them, at LF (a CR stays in its line),
+  // each with whether a newline ends it.
   function textLines(text) {
-    const source = String(text ?? "");
-    const lines = [];
-    let start = 0;
-    for (const match of source.matchAll(/\r\n|\r|\n/g)) {
-      lines.push({ text: source.slice(start, match.index), ending: match[0] });
-      start = match.index + match[0].length;
-    }
-    if (start < source.length) lines.push({ text: source.slice(start), ending: "" });
+    const lines = String(text ?? "").split("\n").map((line) => ({ text: line, ended: true }));
+    const last = lines.pop();
+    if (last.text !== "") lines.push({ text: last.text, ended: false });
     return lines;
   }
 
   // The hunks between two texts, with `context` unchanged lines around
-  // each change, as git writes them. A last line gaining or losing its
-  // newline is a change; which break ends a line isn't (Monaco's buffer
-  // keeps one per file, git's eol settings convert them).
+  // each change, as git writes them, a checkpoint's alike: a CR is part of
+  // its line, a last line gaining or losing its newline a change.
   function hunks(original, modified, context = 3) {
     const before = textLines(original);
     const after = textLines(modified);
-    const key = (line) => (line.ending === "" ? line.text : line.text + "\n");
+    const key = (line) => (line.ended ? line.text + "\n" : line.text);
     const rows = [];
     let o = 0;
     let n = 0;
@@ -157,7 +154,7 @@
       const lines = [];
       for (const row of slice) {
         lines.push({ kind: row.kind, text: row.line.text });
-        if (row.line.ending === "") lines.push({ kind: "noNewlineMarker" });
+        if (!row.line.ended) lines.push({ kind: "noNewlineMarker" });
       }
       return { oldStart: oldCount === 0 ? oldFirst - 1 : oldFirst, newStart: newCount === 0 ? newFirst - 1 : newFirst, lines };
     });
@@ -176,5 +173,5 @@
     return { added, removed };
   }
 
-  root.DiffText = Object.freeze({ lineScript, hunks, lineCounts });
+  root.DiffText = Object.freeze({ lineScript, hunks, lineCounts, work });
 })(typeof window !== "undefined" ? window : globalThis);

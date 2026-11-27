@@ -203,6 +203,10 @@
   // they were before it, as `now` does until it is moved along.
   function editsShownRange(path, entry, event) {
     var lines = entry.shownRange.now;
+    var range = entry.model.getDecorationRange(entry.shownRange.decorations[0]);
+    // Enter at the end of their last line leaves the highlight as long;
+    // Enter inside it grows it.
+    var asLong = !!range && range.endLineNumber - range.startLineNumber === lines.end - lines.start;
     var touched = event.changes.some(function (change) {
       var range = change.range;
       // Whole lines above taken out, or lines added above, the first shown
@@ -210,11 +214,10 @@
       var above = range.endLineNumber === lines.start && range.endColumn === 1
         && (change.text === "" ? range.startColumn === 1 : /\n$/.test(change.text));
       // A line added below them: Enter at the end of the last.
-      var below = range.startLineNumber === lines.end && range.endLineNumber === lines.end && range.startColumn === range.endColumn
-        && range.startColumn === entry.model.getLineMaxColumn(lines.end) && /^(\r\n|\r|\n)/.test(change.text);
+      var below = asLong && range.startLineNumber === lines.end && range.endLineNumber === lines.end
+        && range.startColumn === range.endColumn && /^(\r\n|\r|\n)/.test(change.text);
       return !above && !below && range.startLineNumber <= lines.end && range.endLineNumber >= lines.start;
     });
-    var range = entry.model.getDecorationRange(entry.shownRange.decorations[0]);
     if (touched || !range) return true;
     var now = entry.shownRange.now;
     if (now.start !== range.startLineNumber || now.end !== range.endLineNumber) {
@@ -633,7 +636,7 @@
     var ops = [];
     var originalLine = 1;
     var modifiedLine = 1;
-    DiffText.lineScript(splitLines(originalText), splitLines(modifiedText)).forEach(function (run) {
+    DiffText.lineScript(splitLines(originalText), splitLines(modifiedText), DiffText.work.typing).forEach(function (run) {
       if (run.type === "delete") ops.push({ type: "delete", line: originalLine, count: run.count });
       if (run.type === "insert") ops.push({ type: "insert", line: modifiedLine, count: run.count });
       if (run.type !== "insert") originalLine += run.count;
@@ -768,6 +771,7 @@
       applyDiffDecorations();
     }, 0);
     diffEditor.getModifiedEditor().focus();
+    tellDiffViewer(path, "monaco");
   }
 
   function exitMonacoDiff() {
@@ -796,6 +800,12 @@
     pierreOriginalContent = originalContent || "";
     pierreGroupPayload = null;
     renderPierreDiff();
+    if (diffMode === "pierre") tellDiffViewer(path, "pierre");
+  }
+
+  // Swift's header names highlighted lines over Monaco's diff only.
+  function tellDiffViewer(path, viewer) {
+    postToSwift({ type: "diffViewer", path: path, viewer: viewer });
   }
 
   function enterPierreDiffGroup(payload) {
@@ -827,9 +837,15 @@
   // A tab's own diff: its tab names the file, so no row of its own.
   function renderPierreDiff() {
     if (diffMode !== "pierre" || !currentPath || !models[currentPath]) return;
-    var file = { path: currentPath, hunks: DiffText.hunks(pierreOriginalContent, models[currentPath].model.getValue()) };
     showPierreDiffSurface();
-    var drawn = diffReview && diffHolder && file.hunks.length > 0 ? redrawFile(diffHolder, file) : drawOwnDiff(file);
+    var drawn;
+    try {
+      var file = { path: currentPath, hunks: DiffText.hunks(pierreOriginalContent, models[currentPath].model.getValue()) };
+      drawn = diffReview && diffHolder && file.hunks.length > 0 ? redrawFile(diffHolder, file) : drawOwnDiff(file);
+    } catch (error) {
+      postDiffFailure(error);
+      drawn = false;
+    }
     // pierre couldn't draw it: Monaco's diff instead.
     if (!drawn) enterMonacoDiff(currentPath, pierreOriginalContent);
   }

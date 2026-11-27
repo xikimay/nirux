@@ -75,13 +75,29 @@ final class DiffTextScriptTests: XCTestCase {
         XCTAssertLessThan(Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1e9, 1)
     }
 
-    /// Lines end at CRLF, CR or LF, and which one doesn't count: the buffer
-    /// keeps one per file, git's eol settings convert them.
-    func testLinesEndAtAnyLineBreak() throws {
+    /// Lines end at LF, as git and a checkpoint split them: a CR is part of
+    /// its line.
+    func testLinesEndAtLF() throws {
         XCTAssertEqual(try call("hunks", "a\rb\r", "a\rc\r"), #"[{"oldStart":1,"newStart":1,"lines":["#
-            + #"{"kind":"context","text":"a"},{"kind":"removed","text":"b"},{"kind":"added","text":"c"}]}]"#)
-        XCTAssertEqual(try call("hunks", "a\r\nb\r\n", "a\nc\n"), #"[{"oldStart":1,"newStart":1,"lines":["#
-            + #"{"kind":"context","text":"a"},{"kind":"removed","text":"b"},{"kind":"added","text":"c"}]}]"#)
-        XCTAssertEqual(try call("hunks", "a\r\nb\r\n", "a\nb\n"), "[]")
+            + #"{"kind":"removed","text":"a\rb\r"},{"kind":"noNewlineMarker"},{"kind":"added","text":"a\rc\r"},{"kind":"noNewlineMarker"}]}]"#)
+        XCTAssertEqual(try call("hunks", "a\r\nb\n", "a\nb\n"), #"[{"oldStart":1,"newStart":1,"lines":["#
+            + #"{"kind":"removed","text":"a\r"},{"kind":"added","text":"a"},{"kind":"context","text":"b"}]}]"#)
+    }
+
+    /// The Monaco diff's marks, redone at each keystroke, give up past 2M
+    /// steps (about 50 changes in a 20,000-line file): 100 scattered changes
+    /// read as replaced between the first and last, at once.
+    func testMarksAtEachKeystrokeStayWithinTheirBound() throws {
+        let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+        let runs = context.evaluateScript("""
+            (function () {
+              const a = Array.from({ length: 20000 }, (_, i) => "line " + i);
+              const b = a.map((line, i) => (i % 200 === 100 ? "changed " + i : line));
+              return DiffText.lineScript(a, b, DiffText.work.typing).map((run) => run.type + ":" + run.count).join(",");
+            })()
+            """)?.toString()
+        let seconds = Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1e9
+        XCTAssertEqual(runs, "equal:100,delete:19801,insert:19801,equal:99")
+        XCTAssertLessThan(seconds, 0.25)
     }
 }

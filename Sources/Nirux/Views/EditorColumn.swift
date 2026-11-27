@@ -39,7 +39,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     private var diskModifiedWhileDirty: Set<String> = []
     /// Path currently shown in diff mode, or nil when the
     /// regular editor is active. Resets on tab switch — diff is per-tab.
-    private(set) var diffActivePath: String?
+    private(set) var diffActivePath: String? {
+        didSet { if diffActivePath != oldValue { diffViewer = nil } }
+    }
+    /// The viewer the page says the active diff is in ("pierre", "monaco"):
+    /// its own fallback to Monaco included.
+    private(set) var diffViewer: String?
     /// What the diff on screen compares with.
     private(set) var diffActiveBase: DiffBase?
     enum DiffBase: Equatable {
@@ -926,12 +931,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         return payload
     }
 
-    /// Whether the tab's diff is pierre's, which neither wraps nor shows
-    /// highlighted lines: a draft's and Compare's are Monaco's.
-    var showsPierreDiff: Bool {
-        guard let path = diffActivePath, path == activePath, case .git? = diffActiveBase else { return false }
-        return !draftPaths.contains(path)
-    }
+    /// Whether the tab's diff is pierre's, which shows no highlighted lines
+    /// (a draft's and Compare's are Monaco's, as is one pierre failed to draw).
+    var showsPierreDiff: Bool { diffActivePath == activePath && diffViewer == "pierre" }
 
     private func enterDiff(for path: String, mode: EditorDiffMode) {
         diffLoadGeneration += 1
@@ -953,6 +955,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
                     NSLog("%@", "[EditorColumn] no git \(mode.rawValue) content for \(path) — file untracked, git missing, or branch base unavailable")
                     self.forgetFailedDiffMode(path: path)
                     self.showToast(Self.noDiffOriginalText(path: path, cwd: cwd, mode: mode))
+                case .binary:
+                    self.forgetFailedDiffMode(path: path)
+                    self.showToast("This file isn’t text, so it isn’t compared")
                 case .tooLarge(let byteCount):
                     NSLog("%@", "[EditorColumn] git \(mode.rawValue) original of \(path) too large to diff (\(byteCount) bytes)")
                     self.forgetFailedDiffMode(path: path)
@@ -960,7 +965,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
                 case .text(let original):
                     self.diffActivePath = path
                     self.diffActiveBase = .git(mode)
-                    self.sendBridge(["type": "enterDiff", "path": path, "original": original, "viewer": self.showsPierreDiff ? "pierre" : "monaco"])
+                    self.sendBridge(["type": "enterDiff", "path": path, "original": original, "viewer": self.draftPaths.contains(path) ? "monaco" : "pierre"])
                     self.endRendering(of: path)
                     self.refreshTabBar()
                 }
@@ -1568,6 +1573,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         case "ready":
             // Monaco confirmed model swap; nothing to do.
             break
+        case "diffViewer":
+            guard let path = body["path"] as? String, path == diffActivePath else { return }
+            diffViewer = body["viewer"] as? String
+            refreshHeader()
         case "error":
             if let msg = body["message"] as? String {
                 NSLog("[EditorColumn] bridge error: \(msg)")
@@ -1596,6 +1605,8 @@ extension EditorColumn {
     /// The comparison side of a diff.
     enum DiffOriginal: Equatable, Sendable {
         case text(String)
+        /// Not text (a NUL byte, or no UTF-8), so never compared.
+        case binary
         /// Over the caller's size limit, so never loaded.
         case tooLarge(byteCount: UInt64)
     }
@@ -1633,7 +1644,16 @@ extension EditorColumn {
 
     private nonisolated static func relativeGitPath(of absPath: String, cwd: String) -> String? {
         let cwdPath = URL(fileURLWithPath: cwd).standardizedFileURL.path
-        let absolutePath = URL(fileURLWithPath: absPath).standardizedFileURL.path
+        // Through the deepest folder that still exists, as `cwd` is:
+        // standardizing drops a /private only from a path that exists, and a
+        // deleted file (or folder) doesn't.
+        var folder = URL(fileURLWithPath: absPath)
+        var rest: [String] = []
+        while folder.path != "/", !FileManager.default.fileExists(atPath: folder.path) {
+            rest.insert(folder.lastPathComponent, at: 0)
+            folder = folder.deletingLastPathComponent()
+        }
+        let absolutePath = rest.reduce(folder.standardizedFileURL) { $0.appendingPathComponent($1) }.path
         guard absolutePath == cwdPath || absolutePath.hasPrefix(cwdPath + "/") else { return nil }
         let rel = String(absolutePath.dropFirst(cwdPath.count))
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -1665,15 +1685,28 @@ extension EditorColumn {
             return nil
         case .tooLarge(let byteCount):
             return largeDiffPlaceholderPayload(of: absPath, relativePath: rel, byteCount: byteCount)
+        case .binary:
+            return ["path": rel, "name": rel, "note": notText]
         case .text(let original):
-            let modified = fileContent(at: absPath) ?? ""
-            return [
-                "path": rel,
-                "name": rel,
-                "original": original,
-                "modified": modified
-            ]
+            let present = FileManager.default.fileExists(atPath: absPath)
+            guard let modified = present ? fileContent(at: absPath) : "" else {
+                return ["path": rel, "name": rel, "note": notText]
+            }
+            var payload: [String: Any] = ["path": rel, "name": rel, "original": original, "modified": modified]
+            // No lines to show: say what changed, as a checkpoint does.
+            if original.isEmpty, modified.isEmpty {
+                payload["note"] = !present ? "Empty file removed."
+                    : existsAtBase(rel, cwd: cwd, mode: mode) ? "No change in its text." : "Empty file added."
+            }
+            return payload
         }
+    }
+
+    private nonisolated static let notText = "Binary or unreadable, not compared."
+
+    private nonisolated static func existsAtBase(_ rel: String, cwd: String, mode: EditorDiffMode) -> Bool {
+        guard let base = mode == .head ? "HEAD" : GitCommand.branchBaseRef(cwd: cwd) else { return false }
+        return GitCommand.output(["cat-file", "-e", "\(base):\(rel)"], cwd: cwd) != nil
     }
 
     private nonisolated static func largeDiffPlaceholderPayload(
@@ -1712,6 +1745,8 @@ extension EditorColumn {
             .flatMap({ UInt64($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
         else { return nil }
         guard byteCount <= maxBytes else { return .tooLarge(byteCount: byteCount) }
-        return GitCommand.output(["cat-file", "blob", object], cwd: cwd).map(DiffOriginal.text)
+        guard let text = GitCommand.output(["cat-file", "blob", object], cwd: cwd) else { return nil }
+        // GitCommand reads a blob that isn't UTF-8 as "".
+        return text.contains("\0") || text.isEmpty && byteCount > 0 ? .binary : .text(text)
     }
 }
