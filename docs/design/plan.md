@@ -1,7 +1,7 @@
 # Day plan
 
 > **Design record:** in progress. The model, the store, the agents' tools, the sidebar's feature folders, calm
-> rows and planned sessions are built, behind Space Settings › Lead › "Day plan (preview)", off by default.
+> rows, planned sessions and the Lead island are built, behind Space Settings › Lead › "Day plan (preview)", off by default.
 
 Status: study approved by the user on 2026-11-27 ("on va tester puis si chiant
 on avisera plus tard"): directions 1 (calm rows) and 3 (the Lead island), with
@@ -129,6 +129,17 @@ asking, else in the New sheet. Without a Lead it waits for Start. A session
 being made, waiting in the New sheet or in a queued proposal, or taken can't
 start a second time: Start, the sheet and `start_task` say so. A waiting task
 closed before it starts gives its line back, planned.
+
+## The Lead island
+
+While the space plans the day and has a Lead, a glass capsule sits left of the
+command bar: ✦, the Lead's first open line, and how many to-dos wait for the
+user. A press opens its panel: "Now · Lead", "For you" (the to-dos, each with
+Done, which checks it as the user and may start what waited for it), "Next"
+(the Lead's other lines, then the planned sessions, each saying what it waits
+for). The Lead's lines outside any feature leave its row for the island; its
+row stays in the sidebar (the study's mock took the row away too: the user
+decides later whether it goes).
 
 ## Pull requests
 

@@ -176,6 +176,8 @@ final class SidebarView: NSView {
     var lastInfos: [WorkspaceInfo] = []
     /// The space's day plan while it is on (SidebarView+Plan).
     var plan: Plan?
+    /// The Lead island shows the Lead's lines: they leave its row.
+    var leadLinesInIsland = false
     /// A planned session's Start, with its line's id.
     var onStartPlanned: ((String) -> Void)?
     /// Features the user folded, kept until the app quits.
@@ -564,6 +566,7 @@ final class SidebarView: NSView {
             hasher.combine(catchUp)
             hasher.combine(plan)
             hasher.combine(foldedFeatures)
+            hasher.combine(leadLinesInIsland)
         }
         hasher.combine(animates)
         hasher.combine(navigation)

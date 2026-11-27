@@ -34,7 +34,8 @@ extension SidebarView {
         let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive && !$0.isLead }
         let rows = planRows(activeInfos)
         // Without the Lead's row, its lines end the Tasks section.
-        let planned = leadInfos.isEmpty ? (tasks: rows.tasks + rows.lead, lead: [PlanRow]()) : rows
+        let planned = leadInfos.isEmpty ? (tasks: rows.tasks + rows.lead, lead: [PlanRow]())
+            : leadLinesInIsland ? (tasks: rows.tasks, lead: []) : rows
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
         let listedInactiveInfos = inactiveInfos.filter(listsWorkspace)
         let activeProfile = lastProfiles.first(where: { $0.isActive })

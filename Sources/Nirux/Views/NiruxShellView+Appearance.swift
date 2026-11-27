@@ -22,9 +22,11 @@ extension NiruxShellView {
         // One resolver for the window and its glass.
         let resolve = sideEffects.drawnTransparency
         commandBarToolbar?.bar.resolveLevel = resolve
+        commandBarToolbar?.island.resolveLevel = resolve
         requestsState.inbox?.resolveLevel = resolve
         requestsState.callout?.resolveLevel = resolve
         commandBarToolbar?.bar.level = level
+        commandBarToolbar?.island.level = level
         requestsState.inbox?.level = level
         requestsState.callout?.level = level
         requestsState.inboxPanel?.invalidateShadowWhenDrawn()

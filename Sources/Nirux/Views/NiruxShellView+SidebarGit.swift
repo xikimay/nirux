@@ -125,6 +125,7 @@ extension NiruxShellView {
         sidebar.catchUp = sidebarCatchUp(infos: infos)
         sidebar.navigation = sidebarNavigation
         sidebar.plan = plan
+        refreshLeadIsland(plan: plan)
         sidebar.update(profiles: profileInfos, workspaces: infos)
         // The requests: what ⌘J would visit, through ⌘J's own queue, that
         // waits for the user's answer; the command bar counts them.
