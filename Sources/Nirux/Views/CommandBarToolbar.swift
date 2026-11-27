@@ -84,8 +84,9 @@ final class CommandBarToolbar: NSObject, NSToolbarDelegate {
         }
     }
 
-    /// The island with `content`, or none.
-    func showIsland(_ content: LeadIslandView.Content?) {
+    /// The island with `content`, or none; true while it is on screen (not in the » menu, not before the window).
+    @discardableResult
+    func showIsland(_ content: LeadIslandView.Content?) -> Bool {
         if let content { island.show(content) }
         let index = toolbar.items.firstIndex { $0.itemIdentifier == Self.islandItemID }
         if content != nil, index == nil {
@@ -93,12 +94,17 @@ final class CommandBarToolbar: NSObject, NSToolbarDelegate {
         } else if content == nil, let index {
             toolbar.removeItem(at: index)
         }
+        return content != nil && island.window != nil && !island.isHiddenOrHasHiddenAncestor
     }
 
     static func islandItem(_ island: LeadIslandView) -> NSToolbarItem {
         let item = NSToolbarItem(itemIdentifier: islandItemID)
         item.view = island
         item.label = "Lead"
+        // In the » menu, the panel under the bar.
+        let menu = NSMenuItem(title: "Lead…", action: #selector(LeadIslandView.pressed), keyEquivalent: "")
+        menu.target = island
+        item.menuFormRepresentation = menu
         item.isBordered = false
         if #available(macOS 26, *) { item.style = .plain }
         return item

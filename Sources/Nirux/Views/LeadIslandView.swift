@@ -92,7 +92,10 @@ final class LeadIslandView: NSView {
         button.frame = bounds.insetBy(dx: Theme.Space.xs, dy: Theme.Space.xs)
     }
 
-    @objc private func pressed() { onPress?() }
+    @objc func pressed() { onPress?() }
+
+    /// The capsule, without its gap to the bar.
+    var capsuleRect: NSRect { glass.frame }
 }
 
 /// The island's panel: the Lead's line now, the user's to-dos with Done, then the Lead's next lines and the planned

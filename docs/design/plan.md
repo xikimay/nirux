@@ -137,8 +137,10 @@ command bar: ✦, the Lead's first open line, and how many to-dos wait for the
 user. A press opens its panel: "Now · Lead", "For you" (the to-dos, each with
 Done, which checks it as the user and may start what waited for it), "Next"
 (the Lead's other lines, then the planned sessions, each saying what it waits
-for). The Lead's lines outside any feature leave its row for the island; its
-row stays in the sidebar (the study's mock took the row away too: the user
+for). The Lead's lines outside any feature leave its row for the island while
+the island is on screen (in a narrow window it goes to the » menu, where
+"Lead…" opens the panel under the bar, and the lines stay); its row stays in
+the sidebar (the study's mock took the row away too: the user
 decides later whether it goes).
 
 ## Pull requests

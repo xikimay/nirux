@@ -46,8 +46,12 @@ final class LeadIslandTests: XCTestCase {
         let toolbar = CommandBarToolbar(bar: CommandBarView(level: .opaque))
         toolbar.install(in: host)
         XCTAssertFalse(toolbar.toolbar.items.contains { $0.view === toolbar.island })
+        XCTAssertFalse(CommandBarToolbar(bar: CommandBarView(level: .opaque)).showIsland(LeadIslandView.Content(now: nil, forYou: 0)),
+                       "with no window, the sidebar keeps the Lead's lines")
         toolbar.showIsland(LeadIslandView.Content(now: "Run the noon train", forYou: 1))
         XCTAssertEqual(toolbar.toolbar.items.map(\.itemIdentifier), [CommandBarToolbar.islandItemID, CommandBarToolbar.barItemID])
+        host.contentView?.superview?.layoutSubtreeIfNeeded()
+        XCTAssertTrue(toolbar.showIsland(LeadIslandView.Content(now: "Run the noon train", forYou: 1)), "on screen beside the bar")
         XCTAssertEqual(toolbar.island.button.accessibilityLabel(), "Lead, Run the noon train, 1 for you")
         toolbar.showIsland(nil)
         XCTAssertEqual(toolbar.toolbar.items.map(\.itemIdentifier), [CommandBarToolbar.barItemID])
