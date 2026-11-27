@@ -1,7 +1,7 @@
 # Day plan
 
-> **Design record:** in progress. The model, the store and the agents' tools are built, behind a space switch
-> that is off; nothing shows the plan yet.
+> **Design record:** in progress. The model, the store, the agents' tools and the sidebar's feature folders are
+> built, behind Space Settings › Lead › "Day plan (preview)", off by default.
 
 Status: study approved by the user on 2026-11-27 ("on va tester puis si chiant
 on avisera plus tard"): directions 1 (calm rows) and 3 (the Lead island), with
@@ -85,6 +85,22 @@ descriptions.
 - A task's agent: `task_steps`, its own steps only: add at the end, check
   its own, read them back. Its first step makes its task's line at the end
   of the plan.
+
+## In the sidebar
+
+While the space's day plan is on, Tasks lists each feature first, in the
+plan's order: a fold row with its done lines over all of them and a small
+ring, then its tasks' rows (nested, as sub-tasks are), its to-dos ("you"), its
+Lead lines ("Lead") and its planned sessions ("Planned"). Then come the tasks in
+no feature, as before, then the loose to-dos and planned sessions. Sessions
+under a to-do, a Lead line or a session list with their feature. The Lead's
+lines outside any feature sit under its row, or end Tasks while the space has
+no Lead. A task in a feature leaves its own place, and doesn't drag. A folded
+feature keeps the tasks asking the user or on screen, with their sub-tasks,
+and says how many of its lines wait for the user: its to-dos, its tasks and
+sub-tasks asking, an agent stopped at the user's step (amber while one of
+those is an agent). Folds last until the app quits; nothing is edited from the
+sidebar yet. The switch's tools reach an agent at its next start.
 
 ## Pull requests
 

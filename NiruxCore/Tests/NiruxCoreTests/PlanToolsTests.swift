@@ -167,6 +167,9 @@ struct PlanToolsTests {
         #expect(try Data(contentsOf: url) == Data("{not json".utf8))
         #expect(try store.update { $0.text(tasks: { _ in nil }) } == "The plan is empty.")
 
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
+        #expect(store.load().readsAgain && !Plan.Store(fileURL: folder.appendingPathComponent("none")).load().readsAgain)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         let newer = String(decoding: written, as: UTF8.self).replacingOccurrences(of: #""schemaVersion":1"#, with: #""schemaVersion":2"#)
         try Data(newer.utf8).write(to: url)
         let loaded = store.load()

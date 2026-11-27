@@ -141,6 +141,8 @@ enum Theme {
         /// A space's colour square in the glass interface: barely rounded,
         /// so it never reads as a state's dot.
         static let spaceMark: CGFloat = 2
+        /// A to-do's box in the day plan.
+        static let box: CGFloat = 2.5
         /// Buttons, fields, rows.
         static let control: CGFloat = 6
         /// Cards, tiles.

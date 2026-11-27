@@ -114,7 +114,7 @@ extension SidebarView {
             setHoverTarget(.workspaceCard(workspaceIndex))
         case .link:
             if let card = cardIndex(at: point) { setHoverTarget(.workspaceCard(card)) }
-        case .catchUp, .inert:
+        case .catchUp, .inert, .featureFold:
             setHoverTarget(nil)
         }
     }
