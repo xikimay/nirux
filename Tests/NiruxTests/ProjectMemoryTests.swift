@@ -297,7 +297,7 @@ final class ProjectMemoryTests: XCTestCase {
         loaded.state.bricks[base.id] = BrickState()
         let brief = ProjectMemory.RuleFile(url: URL(fileURLWithPath: "/tmp/brief.md"), label: "Space brief", rules: [
             ProjectMemory.Rule(text: "**Glass** stays in a child view (\(base.id)).", lines: 1...1),
-            ProjectMemory.Rule(text: "**Tests** wait on state.", lines: 2...2)
+            ProjectMemory.Rule(text: "**Tests** wait on state (b-0123456789ab, another space's).", lines: 2...2)
         ])
         let gap = KnowledgeFlag(time: 5, kind: .gap, brick: nil, about: "merge train", text: "riders are inner merges", evidence: nil, task: "w1")
         let dismissed = KnowledgeFlag(time: 6, kind: .gap, brick: nil, about: "old", text: "read", evidence: nil, task: "w1")
@@ -316,7 +316,9 @@ final class ProjectMemoryTests: XCTestCase {
         let closed = knowledge(loaded)
         XCTAssertEqual(closed.entries[0].badge, "flagged")
         XCTAssertNil(closed.entries[1].badge)
-        XCTAssertTrue(ProjectMemory.summary(of: closed).hasSuffix("1 flagged"), ProjectMemory.summary(of: closed))
+        XCTAssertEqual(ProjectMemory.summary(of: closed), "2 always · 1 when relevant · 1 flagged · 1 gap flagged by agents",
+                       "the brick counts, a gap isn't knowledge agents get, another space's id flags nothing")
+        XCTAssertFalse(ProjectMemory.entries(in: closed, text: "", scope: .whenRelevant).contains { closed.entries[$0].isFlag })
     }
 
     func testLinks() throws {

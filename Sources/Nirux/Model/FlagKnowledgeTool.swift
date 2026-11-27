@@ -50,17 +50,23 @@ enum FlagKnowledgeTool {
         guard let about = text("about"), let said = text("text") else { return refused("about and text must be strings.") }
         let evidence = text("evidence").flatMap { $0.isEmpty ? nil : $0 }
         if let problem = KnowledgeFlag.problem(about: about, text: said, evidence: evidence) { return refused(problem) }
-        guard context.isLead || context.isWorkspaceAgent, let spaceID = context.workspaceSpaceID ?? context.spaceID,
+        // The space whose bricks the agent was served (the hook's), else its workspace's.
+        guard context.isLead || context.isWorkspaceAgent, let spaceID = context.spaceID ?? context.workspaceSpaceID,
               let store = SpaceKnowledge.store(spaceID: spaceID, stateDirectory: context.stateDirectory)
         else { return refused("Only an agent Nirux started in a space can flag its knowledge.") }
+        if arguments["brick"] != nil, !(arguments["brick"] is String) { return refused("brick must be a brick's id (b-…).") }
         let brick = text("brick").flatMap { $0.isEmpty ? nil : $0 }
         if let brick {
             guard KnowledgeLinks.isBrickID(brick), store.load().bricks[brick] != nil else { return refused("This space holds no brick \(brick).") }
         }
         let task = context.nonEmpty("NIRUX_WORKSPACE_ID")
-        let again = KnowledgeFlag.load(in: store).contains { flag in
-            flag.task == task && flag.kind == kind && flag.brick == brick && now - flag.time < repeatWindow
-                && ProjectMemory.folded(flag.about) == ProjectMemory.folded(about)
+        let flags = KnowledgeFlag.load(in: store)
+        let today = flags.filter { $0.task == task && now - $0.time < repeatWindow }
+        guard today.count < KnowledgeFlag.maxPerTaskPerDay else {
+            return refused("You flagged \(today.count) things today: tell the user the rest in your reply.")
+        }
+        let again = today.contains { flag in
+            flag.kind == kind && flag.brick == brick && ProjectMemory.folded(flag.about) == ProjectMemory.folded(about)
         }
         guard !again else { return refused("You flagged this already today: the user has it.") }
         do {

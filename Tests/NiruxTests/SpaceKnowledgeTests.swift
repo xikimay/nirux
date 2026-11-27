@@ -153,13 +153,26 @@ final class SpaceKnowledgeTests: XCTestCase {
     func testAgentsFlaggingABrickWrongCountLikeCorrections() throws {
         let id = try validated(brick())
         recheck(at: 100)
+        try KnowledgeFlag.append(KnowledgeFlag(time: 140, kind: .error, brick: id, about: "clip", text: "never had it", evidence: nil, task: "lead"), in: store)
+        KnowledgeUse.append([KnowledgeUse(time: 145, brick: id, kind: .got, task: "w1", agent: "claude")], in: store)
         try KnowledgeFlag.append(KnowledgeFlag(time: 150, kind: .error, brick: id, about: "clip", text: "the code sets bounds", evidence: nil, task: "w1"), in: store)
         try KnowledgeFlag.append(KnowledgeFlag(time: 151, kind: .gap, brick: nil, about: "train", text: "riders are inner merges", evidence: nil, task: "w2"), in: store)
-        XCTAssertEqual(recheck(at: 200).suspected, [], "one task's flag is shown, not acted on; a gap names no brick")
+        XCTAssertEqual(recheck(at: 200).suspected, [], "one task's flag counts, a task that never had it doesn't, a gap names no brick")
         KnowledgeUse.append([KnowledgeUse(time: 210, brick: id, kind: .corrected, task: "w2", agent: "claude")], in: store)
         XCTAssertEqual(recheck(at: 220).suspected, [id])
         guard case .suspect(let why)? = store.load().status(of: id, now: 221, macOS: SpaceKnowledge.macOS) else { return XCTFail("not suspect") }
         XCTAssertTrue(why.hasPrefix("You and agents"), why)
+    }
+
+    func testAgentsAloneNeedThreeTasksToMakeABrickSuspect() throws {
+        let id = try validated(brick())
+        recheck(at: 100)
+        for (index, task) in ["w1", "w2", "w3"].enumerated() {
+            KnowledgeUse.append([KnowledgeUse(time: 110 + Double(index), brick: id, kind: .got, task: task, agent: "agy")], in: store)
+            try KnowledgeFlag.append(KnowledgeFlag(time: 120 + Double(index), kind: .contradiction, brick: id, about: "clip",
+                                                   text: "the code disagrees", evidence: nil, task: task), in: store)
+            XCTAssertEqual(recheck(at: 200 + Double(index)).suspected, index == 2 ? [id] : [], "after \(index + 1) task(s)")
+        }
     }
 
     func testAnUnansweredCheckIsTriedAgainAtTheNextPass() throws {
@@ -335,6 +348,11 @@ final class FlagKnowledgeToolTests: XCTestCase {
         XCTAssertTrue(FlagKnowledgeTool.call(gap, context: context(), now: 200).isError, "the same flag from the same task, the same day")
         XCTAssertFalse(FlagKnowledgeTool.call(gap, context: context(workspace: "w2"), now: 200).isError, "another task may")
         XCTAssertTrue(store.load().bricks.isEmpty)
+        for number in 2...5 {
+            XCTAssertFalse(FlagKnowledgeTool.call(["kind": "gap", "about": "gap \(number)", "text": "t"], context: context(), now: 300).isError)
+        }
+        XCTAssertTrue(FlagKnowledgeTool.call(["kind": "gap", "about": "one more", "text": "t"], context: context(), now: 300).isError,
+                      "five a day per task")
     }
 
     func testWhatAFlagCantHold() {

@@ -42,6 +42,9 @@ public struct KnowledgeFlag: Codable, Equatable, Sendable {
     public static let maxAbout = 80
     public static let maxText = 300
     public static let maxEvidence = 200
+    /// Flags a task may write in a day, and kept at most by a trim.
+    public static let maxPerTaskPerDay = 5
+    static let maxKept = 1_000
     static let maxFileBytes = 1_000_000
 
     /// Why it can't be recorded, or nil: short single lines, nothing that
@@ -58,35 +61,53 @@ public struct KnowledgeFlag: Codable, Equatable, Sendable {
         return nil
     }
 
+    static let lockName = "flags.lock"
+
+    /// Appends `flag` under the lock a trim takes.
     public static func append(_ flag: KnowledgeFlag, in store: KnowledgeStore) throws {
         let url = store.folder.appendingPathComponent(fileName)
-        try FileManager.default.createDirectory(at: store.folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        var info = stat()
-        if stat(url.path, &info) == 0, info.st_size >= maxFileBytes { throw CocoaError(.fileWriteOutOfSpace) }
         var line = try JSONEncoder().encode(flag)
         line.append(UInt8(ascii: "\n"))
-        let descriptor = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        defer { close(descriptor) }
-        guard line.withUnsafeBytes({ write(descriptor, $0.baseAddress, $0.count) }) == line.count else {
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        var failure: Error?
+        let ran = store.locked(lockName, attempts: 100) {
+            var info = stat()
+            if stat(url.path, &info) == 0, info.st_size >= maxFileBytes { return failure = CocoaError(.fileWriteOutOfSpace) }
+            let descriptor = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0o600)
+            guard descriptor >= 0 else { return failure = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            defer { close(descriptor) }
+            if line.withUnsafeBytes({ write(descriptor, $0.baseAddress, $0.count) }) != line.count {
+                failure = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
         }
+        if !ran { throw POSIXError(.EBUSY) }
+        if let failure { throw failure }
     }
 
     public static func load(in store: KnowledgeStore) -> [KnowledgeFlag] {
-        guard let data = RegularFileRead.read(store.folder.appendingPathComponent(fileName), maxBytes: maxFileBytes + 65_536).contents
-        else { return [] }
+        loadIfReadable(in: store) ?? []
+    }
+
+    /// Nil when the file is there but couldn't be read.
+    public static func loadIfReadable(in store: KnowledgeStore) -> [KnowledgeFlag]? {
+        let data: Data
+        switch RegularFileRead.read(store.folder.appendingPathComponent(fileName), maxBytes: maxFileBytes + 65_536) {
+        case .missing: return []
+        case .data(let read): data = read
+        case .notARegularFile, .tooLarge, .unreadableBytes: return nil
+        }
         let decoder = JSONDecoder()
         return data.split(separator: UInt8(ascii: "\n")).compactMap { try? decoder.decode(KnowledgeFlag.self, from: $0) }
     }
 
     /// Rewrites the file without the flags past `keptDays`, when it has some.
     public static func trim(in store: KnowledgeStore, now: TimeInterval) {
-        let flags = load(in: store)
-        let kept = flags.filter { now - $0.time < Double(keptDays) * 86_400 }
-        guard kept.count < flags.count else { return }
-        let lines = kept.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }
-        try? KnowledgeStore.writePrivately(lines.reduce(Data(), +), to: store.folder.appendingPathComponent(fileName))
+        store.locked(lockName, attempts: 300) {
+            let flags = load(in: store)
+            let kept = flags.filter { now - $0.time < Double(keptDays) * 86_400 }.suffix(maxKept)
+            guard kept.count < flags.count else { return }
+            let lines = kept.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }
+            try? KnowledgeStore.writePrivately(lines.reduce(Data(), +), to: store.folder.appendingPathComponent(fileName))
+        }
     }
 
     /// Says a brick is wrong: it counts toward suspicion.
@@ -100,8 +121,14 @@ extension KnowledgeText {
         let patterns = [
             #"-----BEGIN [A-Z ]*PRIVATE KEY"#, #"\bgh[pousr]_[A-Za-z0-9]{20,}"#, #"\bgithub_pat_[A-Za-z0-9_]{20,}"#,
             #"\bsk-[A-Za-z0-9_-]{20,}"#, #"\bxox[abprs]-[A-Za-z0-9-]{10,}"#, #"\bAKIA[0-9A-Z]{16}\b"#, #"\bAIza[0-9A-Za-z_-]{30,}"#,
-            #"(?i)\b(password|passwd|secret|token|api[_-]?key)\s*[:=]\s*\S{6,}"#,
-            #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#, #"(?:\+|\b00)\d[\d .-]{8,}\d"#
+            // A value given, quoted or with a digit: not "token = makeToken()".
+            #"(?i)\b(password|passwd|secret|token|api[_-]?key)\s*[:=]\s*(["'][^"'\s]{6,}["']|(?=[A-Za-z_./+-]*\d)[A-Za-z0-9_./+-]{8,}(?![\w(]))"#,
+            #"\bBearer\s+[A-Za-z0-9._~+/-]{20,}"#, #"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"#,
+            // An address: a domain of words, not "icon@2x.png".
+            // (not a git remote, not a noreply address)
+            #"(?<![\w.%+-])(?!git@)(?![\w.+-]*no-?reply@)[A-Za-z0-9._%+-]+@[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z0-9-]+)*\.(?!(png|jpe?g|gif|svg|pdf|swift|json|md|txt|html?|js|css)\b)[A-Za-z]{2,}\b"#,
+            // An international number: "+33 6 12 34 56 78", not "+0000 2026-11-27".
+            #"\+\d{1,3}[ .]?\d(?:[ .]?\d){7,12}\b"#, #"\b0[1-9](?:[ .]\d{2}){4}\b"#
         ]
         return patterns.contains { text.range(of: $0, options: .regularExpression) != nil }
     }

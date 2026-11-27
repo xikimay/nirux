@@ -136,6 +136,26 @@ public struct KnowledgeStore: Sendable {
         try Self.writePrivately(try Self.encoded(served), to: servedURL)
     }
 
+    /// Runs `body` holding the lock file `name` of the folder; false, with
+    /// nothing run, once `attempts` tries 10 ms apart fail. An append and the
+    /// trim that rewrites the same file never cross.
+    @discardableResult
+    public func locked(_ name: String, attempts: Int, _ body: () -> Void) -> Bool {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let descriptor = open(folder.appendingPathComponent(name).path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+        for _ in 0..<attempts {
+            if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {
+                body()
+                flock(descriptor, LOCK_UN)
+                return true
+            }
+            usleep(10_000)
+        }
+        return false
+    }
+
     /// Session files untouched for `days` go: a session that old is over.
     public func removeSessions(olderThan days: Double, now: TimeInterval) {
         let folder = sessionsFolder
@@ -265,8 +285,25 @@ extension KnowledgeStore.Loaded {
         brick.suspectBecause = nil
         brick.failedAt = nil
         brick.failedBecause = nil
+        brick.expiredAt = nil
         state.bricks[id] = brick
         return true
+    }
+
+    /// Stamps when each standing brick was first seen expired, and clears it
+    /// once it isn't; true when something changed.
+    public mutating func stampExpiries(now: TimeInterval, macOS: Int) -> Bool {
+        var changed = false
+        for (id, brick) in bricks {
+            var stamped = state(of: id)
+            let expired: Bool
+            if case .expired = brick.status(stamped, now: now, macOS: macOS) { expired = true } else { expired = false }
+            guard expired != (stamped.expiredAt != nil) else { continue }
+            stamped.expiredAt = expired ? now : nil
+            state.bricks[id] = stamped
+            changed = true
+        }
+        return changed
     }
 
     public mutating func close(_ id: String, because reason: String, now: TimeInterval) -> Bool {

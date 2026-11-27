@@ -31,6 +31,9 @@ public struct BrickState: Codable, Equatable, Sendable {
     /// never closes a brick for good.
     public var failedAt: TimeInterval?
     public var failedBecause: String?
+    /// When a pass first saw it expired: what a brick resting on it compares
+    /// its confirmation with.
+    public var expiredAt: TimeInterval?
     public var replacedBy: String?
     public var suspectAt: TimeInterval?
     public var suspectBecause: String?

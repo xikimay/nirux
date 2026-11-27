@@ -117,7 +117,8 @@ suspect, expired, or itself flagged), a brick resting on it is **flagged**,
 and not served until the user confirms it after that ("Still True") or
 closes it; down the chain too. A rule or memory citing it shows "flagged"
 in Space Memory and in `memory_search`'s excerpt, with which brick and why:
-the user edits it.
+the user edits it. An id the space doesn't hold (a CLAUDE.md shared with
+another space, a proposal) flags nothing.
 
 ## Flags
 
@@ -126,11 +127,16 @@ else to `knowledge/flags.jsonl` (90 days): a **gap** (a fact the knowledge
 lacked), an **error** (a brick proven wrong: a test, CI, the code), a
 **contradiction** (two bricks, or a brick and the code, disagree). One line
 each; text that looks like a secret or contact details is refused; the
-same flag from a task once a day.
+same flag once, five flags at most, per task and day; the newest 1,000
+are kept. The space is the one whose bricks the agent was served.
 
-- A flag naming a brick shows on its card; an error or contradiction counts
-  like a correction: from two tasks since the brick was last confirmed, it
-  is suspect. That is also how CI breaking on a brick reaches it.
+- A flag naming a brick shows on its card (those since its last
+  confirmation); an error or contradiction from a task that received the
+  brick counts like a correction. Two tasks since the brick was last
+  confirmed make it suspect when one of them is the user's correction;
+  agents alone need three (a Lead and its task, or one CI failure in a
+  train, may share one misreading). That is also how CI breaking on a brick
+  reaches it.
 - A flag naming no brick is listed in Space Memory for the user, who
   dismisses it or asks the Lead for a brick. No agent proposes bricks from
   flags on its own.

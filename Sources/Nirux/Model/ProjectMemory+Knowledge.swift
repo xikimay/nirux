@@ -69,6 +69,11 @@ extension ProjectMemory {
         var badge: String?
         /// The bricks its text cites: it rests on them.
         var cites: [String] = []
+
+        var isFlag: Bool {
+            if case .flag = source { return true }
+            return false
+        }
     }
 
     /// The space's bricks, as the list shows them.
@@ -100,11 +105,13 @@ extension ProjectMemory {
             return Bricks(loaded: loaded, reach: reach, serves: serves, now: now, macOS: SpaceKnowledge.macOS, flags: flags)
         }
 
-        /// The first brick `cites` names that agents don't get now, and why.
+        /// The first brick of this space `cites` names that agents don't get
+        /// now, and why. An id the space doesn't hold (a shared CLAUDE.md, a
+        /// proposal) says nothing.
         func flaggedBase(in cites: [String]) -> (id: String, why: String)? {
             for id in cites {
-                guard let status = status(of: id) else { return (id, "this space holds no such brick") }
-                if status != .open { return (id, status.title + (status.reason.map { ": \($0)" } ?? "")) }
+                guard let status = status(of: id), status != .open else { continue }
+                return (id, status.title + (status.reason.map { ": \($0)" } ?? ""))
             }
             return nil
         }
@@ -259,7 +266,8 @@ extension ProjectMemory {
             }
         }
 
-        func count(_ scope: Scope) -> Int { entries.filter { $0.scope == scope }.count }
+        /// Agents' flags aren't knowledge they get: counted apart.
+        func count(_ scope: Scope) -> Int { entries.filter { $0.scope == scope && !$0.isFlag }.count }
 
         /// What a write acts on for `entry`, resolved now; nil for the
         /// team's rules, which change in the editor.
@@ -324,7 +332,7 @@ extension ProjectMemory {
         let words = text.split(whereSeparator: \.isWhitespace).map { folded(String($0)) }
         return knowledge.entries.indices.filter { index in
             let entry = knowledge.entries[index]
-            let inScope = scope == nil || entry.scope == scope || (scope == .always && entry.scope == .team)
+            let inScope = scope == nil || (!entry.isFlag && (entry.scope == scope || (scope == .always && entry.scope == .team)))
             return inScope && words.allSatisfy(entry.searchText.contains)
         }
     }
@@ -339,6 +347,8 @@ extension ProjectMemory {
         if waiting > 0 { counted.append("\(waiting) brick\(waiting == 1 ? "" : "s") to validate") }
         let flagged = knowledge.entries.filter { $0.badge == "flagged" }.count
         if flagged > 0 { counted.append("\(flagged) flagged") }
+        let gaps = knowledge.entries.filter(\.isFlag).count
+        if gaps > 0 { counted.append("\(gaps) gap\(gaps == 1 ? "" : "s") flagged by agents") }
         return counted.isEmpty ? "Nothing yet" : counted.joined(separator: " · ")
     }
 

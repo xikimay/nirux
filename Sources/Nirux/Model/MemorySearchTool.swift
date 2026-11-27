@@ -124,8 +124,8 @@ enum MemorySearchTool {
         }
         let excerpt = HistorySearch.excerpt(of: text, terms: terms) ?? "[Excerpt withheld.]"
         // It rests on a brick agents no longer get: said, so it isn't taken as is.
-        let flagged = knowledge.bricks?.flaggedBase(in: entry.cites).map { " [Flagged: it rests on \($0.id), \($0.why)]" } ?? ""
-        return "[\(entry.scope.title) · \(BranchReview.visible(source))] " + bounded(excerpt, bytes: maxExcerptBytes) + flagged
+        let flagged = knowledge.bricks?.flaggedBase(in: entry.cites).map { bounded(BranchReview.visible(" [Flagged: it rests on \($0.id), \($0.why)]"), bytes: 300) } ?? ""
+        return "[\(entry.scope.title) · \(BranchReview.visible(source))] " + bounded(excerpt, bytes: maxExcerptBytes - flagged.utf8.count) + flagged
     }
 
     private static func bounded(_ text: String, bytes: Int) -> String {

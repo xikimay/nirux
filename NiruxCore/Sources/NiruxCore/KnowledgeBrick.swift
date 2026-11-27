@@ -200,8 +200,11 @@ extension KnowledgeBrick {
         }
         guard (1...Self.maxProofs).contains(proofs.count) else { return "A brick needs 1 to \(Self.maxProofs) proofs." }
         if let bases = restsOn {
-            guard bases.count <= Self.maxBases, bases.allSatisfy(KnowledgeLinks.isBrickID) else {
-                return "rests_on names at most \(Self.maxBases) bricks by their ids (b-…)."
+            guard bases.count <= Self.maxBases, bases.allSatisfy(KnowledgeLinks.isBrickID), Set(bases).count == bases.count else {
+                return "rests_on names at most \(Self.maxBases) bricks by their ids (b-…), each once."
+            }
+            if let replaced = replaces, bases.contains(replaced) {
+                return "A brick can't rest on the brick it replaces."
             }
         }
         for proof in proofs {

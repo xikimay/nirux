@@ -56,10 +56,12 @@ public struct ServedKnowledge: Codable, Equatable, Sendable {
         ServedKnowledge(bricks: loaded.ordered.compactMap { id, brick in
             let state = loaded.state(of: id)
             guard loaded.status(of: id, now: now, macOS: macOS)?.isServed == true else { return nil }
+            let bounds = loaded.servedBounds(of: id, macOS: macOS)
             return Brick(
                 id: id, sentence: brick.sentence, subject: brick.subject, anchor: brick.scope.anchor, name: brick.scope.name,
                 paths: brick.scope.paths, proof: brick.proofs.map(\.label).joined(separator: " · "),
-                servedUntil: brick.expiry(state), macOS: brick.macOS == nil ? nil : state.reconfirmedMacOS ?? brick.macOS
+                // A brick resting on others stops with the first of them.
+                servedUntil: bounds.until, macOS: bounds.macOS
             )
         })
     }

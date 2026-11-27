@@ -42,6 +42,43 @@ struct KnowledgeLinksTests {
         #expect(loaded.resting(on: base.id) == [middle.id])
     }
 
+    @Test func confirmingTheTopOfAChainClearsItWhateverItsBaseIs() {
+        var loaded = KnowledgeStore.Loaded()
+        let base = Self.brick(1)
+        let middle = Self.brick(2, restsOn: [base.id])
+        let top = Self.brick(3, restsOn: [middle.id])
+        for brick in [base, middle, top] { loaded.bricks[brick.id] = brick }
+        _ = loaded.close(base.id, because: "gone", now: 20)
+        _ = loaded.reconfirm(top.id, now: 30, macOS: 27)
+        #expect(loaded.status(of: top.id, now: 31, macOS: 27) == .open, "its base is flagged since 20, it was confirmed at 30")
+        guard case .flagged? = loaded.status(of: middle.id, now: 31, macOS: 27) else { Issue.record("middle cleared"); return }
+        var tied = KnowledgeStore.Loaded()
+        let system = KnowledgeBrickTests.brick("A fact that holds on one macOS only, one sentence.", proofs: [.file(path: "s.swift")], macOS: 26)
+        let resting = Self.brick(4, restsOn: [system.id])
+        for brick in [system, resting] { tied.bricks[brick.id] = brick }
+        let stamped = tied.stampExpiries(now: 40, macOS: 27)
+        #expect(stamped)
+        guard case .flagged? = tied.status(of: resting.id, now: 41, macOS: 27) else { Issue.record("not flagged"); return }
+        _ = tied.reconfirm(resting.id, now: 50, macOS: 27)
+        #expect(tied.status(of: resting.id, now: 51, macOS: 27) == .open, "confirmed after its base expired")
+    }
+
+    @Test func aRestingBrickStopsBeingServedWithItsBase() {
+        var loaded = KnowledgeStore.Loaded()
+        let base = Self.brick(1).with(proofs: [.pullRequest(1)])
+        let resting = Self.brick(2, restsOn: [base.id])
+        for brick in [base, resting] { loaded.bricks[brick.id] = brick }
+        let served = ServedKnowledge.compile(loaded, now: 10, macOS: 27).bricks.first { $0.id == resting.id }
+        #expect(served?.servedUntil == base.expiry(BrickState()), "a stale served.json stops it with its base")
+    }
+
+    @Test func aBrickRestsOnEachOnceAndNeverOnWhatItReplaces() {
+        #expect(Self.brick(1, restsOn: ["b-0123456789ab", "b-0123456789ab"]).problem != nil)
+        var replacing = Self.brick(1, restsOn: ["b-0123456789ab"])
+        replacing.replaces = "b-0123456789ab"
+        #expect(replacing.problem?.contains("replaces") == true)
+    }
+
     @Test func aBrickMayRestOnlyOnBricksAgentsGet() {
         var loaded = KnowledgeStore.Loaded()
         let base = Self.brick(1)
@@ -58,10 +95,16 @@ struct KnowledgeLinksTests {
         #expect(KnowledgeFlag.problem(about: "", text: "x", evidence: nil) != nil)
         #expect(KnowledgeFlag.problem(about: "a", text: "two\nlines", evidence: nil) != nil)
         for leak in ["token = ghp_0123456789abcdefghijABCDEFGHIJ", "password: hunter22secret", "write to jane.doe@example.com",
-                     "call +33 6 12 34 56 78", "key sk-ant-0123456789abcdefghijklmnop", "-----BEGIN RSA PRIVATE KEY-----"] {
+                     "call +33 6 12 34 56 78", "key sk-ant-0123456789abcdefghijklmnop", "-----BEGIN RSA PRIVATE KEY-----",
+                     "ring 06 12 34 56 78", "Authorization: Bearer abcdefghijklmnopqrstuvwxyz012345", "secret = \"s3cr3t-value\""] {
             #expect(KnowledgeFlag.problem(about: "x", text: leak, evidence: nil) != nil, "\(leak)")
         }
-        #expect(KnowledgeFlag.problem(about: "x", text: "commit 0123456789abcdef0123456789abcdef01234567 on main", evidence: nil) == nil, "a SHA isn't a secret")
+        for ordinary in ["commit 0123456789abcdef0123456789abcdef01234567 on main", "Resources/icon@2x.png has the wrong size",
+                         "the run at +0000 2026-11-27 broke it", "PR #793 merged at 12:04:55", "macOS 27.2 and Swift 6.2",
+                         "the remote is git@github.com:acme/app.git", "commits by noreply@anthropic.com", "let token = makeToken()",
+                         "secret: keychainItem", "pkg@1.2.3-beta.rc"] {
+            #expect(KnowledgeFlag.problem(about: "x", text: ordinary, evidence: nil) == nil, "\(ordinary)")
+        }
     }
 
     @Test func flagsAreKeptNinetyDaysAndOnlyThoseOnABrickFaultIt() throws {
@@ -84,6 +127,12 @@ struct KnowledgeLinksTests {
 }
 
 extension KnowledgeBrick {
+    func with(proofs: [Proof]) -> KnowledgeBrick {
+        var brick = self
+        brick.proofs = proofs
+        return brick
+    }
+
     func with(restsOn: [String]?) -> KnowledgeBrick {
         var brick = self
         brick.restsOn = restsOn

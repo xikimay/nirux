@@ -365,11 +365,15 @@ final class ProjectMemoryPreview: NSView {
         }
         if let macOS = brick.macOS { lines.append("Reviewed again on each new macOS (validated on macOS \(state.reconfirmedMacOS ?? macOS)).") }
         if let bases = brick.restsOn, !bases.isEmpty {
-            lines.append("Rests on " + bases.map { "\($0) (\(bricks.status(of: $0)?.title ?? "gone"))" }.joined(separator: ", ") + ".")
+            lines.append("Rests on " + bases.map { base in
+                let status = bricks.status(of: base)
+                return "\(base) (\(status == .open ? "served" : status?.title ?? "gone"))"
+            }.joined(separator: ", ") + ".")
         }
         let resting = bricks.loaded.resting(on: id)
         if !resting.isEmpty { lines.append("Bricks resting on it: " + resting.joined(separator: ", ") + ".") }
-        let flags = bricks.flags.filter { $0.brick == id }
+        // Flags since the user last confirmed it: older ones were answered.
+        let flags = bricks.flags.filter { $0.brick == id && $0.time > (state.reconfirmedAt ?? 0) }
         if !flags.isEmpty {
             lines.append("")
             lines.append("Agents flagged it:")
