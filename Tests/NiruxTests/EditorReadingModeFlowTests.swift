@@ -11,7 +11,8 @@ final class EditorReadingModeFlowTests: XCTestCase {
     /// Opened in the front editor, a Markdown file shows rendered, the
     /// reading view taking the keyboard with the column, its table drawn,
     /// only its web link live, and drawn again when the file changes on
-    /// disk. ⌘S and ⌘P do what they do in Monaco, Esc first clears a
+    /// disk. ⌘S and ⌘P (here on a Russian layout, which types no Latin
+    /// letter) do what they do in Monaco, Esc first clears a
     /// selection, and Send Selection finds nothing in it (the hidden
     /// source's selection isn't what the user sees). ⌘F there shows the
     /// source with Monaco's find, and the toggle
@@ -37,7 +38,7 @@ final class EditorReadingModeFlowTests: XCTestCase {
             waitForView("rendered:Rewritten:focused", in: webView)
             UIFlowHarness.run("(function () { var m = \(Self.mainEditor).getModel(); m.setValue(m.getValue() + '\\nSaved.\\n'); })()", in: webView)
             harness.waitUntil("the edit") { editor.unsavedPaths == [notes] }
-            UIFlowHarness.run(Self.command("s"), in: webView)
+            UIFlowHarness.run(Self.command("ы", code: "KeyS"), in: webView)
             harness.waitUntil("⌘S to save it") {
                 editor.unsavedPaths.isEmpty && (try? String(contentsOfFile: notes, encoding: .utf8))?.hasSuffix("Saved.\n") == true
             }
@@ -52,7 +53,7 @@ final class EditorReadingModeFlowTests: XCTestCase {
             XCTAssertNil(selection)
             var pickerAsked = false
             editor.onFilePickerRequest = { _ in pickerAsked = true }
-            UIFlowHarness.run(Self.command("p"), in: webView)
+            UIFlowHarness.run(Self.command("з", code: "KeyP"), in: webView)
             XCTAssertTrue(pickerAsked)
             UIFlowHarness.run("getSelection().selectAllChildren(document.querySelector('#markdown-view h1')); "
                 + "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))", in: webView)
@@ -65,7 +66,7 @@ final class EditorReadingModeFlowTests: XCTestCase {
             UIFlowHarness.run("document.querySelector('#markdown-view a').click()", in: webView)
             harness.waitUntil("the link to open") { opened.map(\.absoluteString) == ["https://example.com/a"] }
 
-            UIFlowHarness.run(Self.command("f"), in: webView)
+            UIFlowHarness.run(Self.command("f", code: "KeyF"), in: webView)
             waitForView("source:# Rewritten:find", in: webView)
             XCTAssertEqual(editor.renderButton.toolTip, "Show Rendered")
 
@@ -111,15 +112,17 @@ final class EditorReadingModeFlowTests: XCTestCase {
         }
     }
 
-    /// A draft, in the nirux-draft skill's folder, reads as source even in
-    /// the front editor, wrapped and without line numbers; Copy Draft puts
-    /// its text, unsaved edits included, on the pasteboard. Another tab
-    /// keeps the wrap it had, Toggle Word Wrap on the draft included, and
-    /// its line numbers.
+    /// A draft, in the folder the nirux-draft skill makes in the temporary
+    /// directory, reads as source even in the front editor, wrapped and
+    /// without line numbers; Copy Draft puts its text, unsaved edits
+    /// included, on the pasteboard, from its button or ⋯ (where a narrow
+    /// header has no room for it). A diff over it follows Toggle Word Wrap,
+    /// as another tab does, which numbers its lines.
     func testDraftWrapsAndCopiesItsText() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-draft-\(UUID().uuidString)").path
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: folder) }
         try UIFlowHarness.run { harness in
-            let folder = harness.root + "/nirux-draft-Ab12Cd"
-            try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
             let draft = folder + "/reply.md"
             try "# Reply\n\nFirst.\n".write(toFile: draft, atomically: true, encoding: .utf8)
             harness.shell.openInEditorColumn(path: draft)
@@ -128,18 +131,127 @@ final class EditorReadingModeFlowTests: XCTestCase {
             let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
             waitForView("source:# Reply", in: webView)
             XCTAssertTrue(editor.header.accessories.contains { $0 === editor.copyDraftButton })
+            XCTAssertTrue(editor.header.currentMenu().items.contains { $0.title == "Copy Draft" })
             XCTAssertFalse(editor.header.trailingButtons.contains(editor.renderButton))
             UIFlowHarness.waitForAnswer("a wrapped draft", to: Self.options, in: webView) { $0 == "on:off" }
-            editor.toggleWordWrap()
 
             UIFlowHarness.run("\(Self.mainEditor).getModel().setValue('# Reply\\n\\nEdited.\\n')", in: webView)
             editor.copyDraftButton.performClick(nil)
             harness.waitUntil("the draft on the pasteboard") { editor.pasteboard.string(forType: .string) == "# Reply\n\nEdited.\n" }
             XCTAssertEqual(editor.copyDraftButton.title, "Copied ✓")
 
+            // Changed on disk under the edit: Compare shows a diff over it.
+            try "# Reply\n\nBy an agent.\n".write(toFile: draft, atomically: true, encoding: .utf8)
+            let banner = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: EditorConflictBanner.self))
+            harness.waitUntil("the conflict") { !banner.isHidden }
+            try XCTUnwrap(UIFlowHarness.button(titled: "Compare", in: banner)).performClick(nil)
+            UIFlowHarness.waitForAnswer("the diff over the draft", to: Self.diffWrap, in: webView) { $0 == "off" }
+            editor.toggleWordWrap()
+            UIFlowHarness.waitForAnswer("the diff to wrap", to: Self.diffWrap, in: webView) { $0 == "on" }
+
             harness.shell.openInEditorColumn(path: harness.repo + "/" + UIFlowHarness.searchTarget)
-            UIFlowHarness.waitForAnswer("the user's wrap on another tab", to: Self.options, in: webView) { $0 == "off:on" }
+            UIFlowHarness.waitForAnswer("the wrap toggled, with line numbers", to: Self.options, in: webView) { $0 == "on:on" }
             XCTAssertTrue(editor.header.accessories.isEmpty)
+            XCTAssertFalse(editor.header.currentMenu().items.contains { $0.title == "Copy Draft" })
+        }
+    }
+
+    /// A draft is a file in a nirux-draft- folder right in the temporary
+    /// directory, whichever link its path goes through; one in a repository
+    /// isn't.
+    func testDraftIsInTheSkillsFolderInTheTemporaryDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        let link = root + "-link"
+        try FileManager.default.createDirectory(atPath: root + "/nirux-draft-Ab12", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: root)
+        defer {
+            try? FileManager.default.removeItem(atPath: link)
+            try? FileManager.default.removeItem(atPath: root)
+        }
+        XCTAssertTrue(EditorColumn.isDraft(link + "/nirux-draft-Ab12/reply.md", temporaryDirectories: [root]))
+        XCTAssertFalse(EditorColumn.isDraft(root + "/repo/nirux-draft-notes/plan.md", temporaryDirectories: [root]))
+        XCTAssertFalse(EditorColumn.isDraft(root + "/drafts/reply.md", temporaryDirectories: [root]))
+    }
+
+    /// An open's range (nirux-show-code) is highlighted, not selected: the
+    /// caret at its start, three lines above it in view, no sticky scroll
+    /// over them, and the header names its lines, where they are. The file
+    /// read again from disk keeps them and the user's place; Esc with
+    /// nothing selected sends the front editor back and keeps them. An edit
+    /// above moves them, one in them ends them, and so does the next open in
+    /// the tab; lines asked past the end come back as asked once the file
+    /// grows; an open at a line leaves a git diff to show its source.
+    func testShownRangeIsHighlightedWithItsContext() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let long = harness.repo + "/long.txt"
+            try (1...200).map { "line \($0)\n" }.joined().write(toFile: long, atomically: true, encoding: .utf8)
+            shell.openInEditorColumn(path: long, line: 40, endLine: 52, takeFocus: false)
+            let editor = try XCTUnwrap(workspace.front?.editorColumn)
+            let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+            waitForRange("40-52|caret 40:1|context|flat", in: webView)
+            XCTAssertEqual(editor.header.context, "Lines 40–52")
+            try rewrite(long, with: "row", in: webView)
+            waitForRange("40-52|caret 40:1|context|flat", in: webView)
+            XCTAssertEqual(editor.header.context, "Lines 40–52")
+
+            UIFlowHarness.run("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))", in: webView)
+            harness.waitUntil("the front editor to go back") { !workspace.isFrontShown }
+            UIFlowHarness.run("var e = \(Self.mainEditor); e.setPosition({ lineNumber: 150, column: 1 }); e.setScrollTop(e.getTopForLineNumber(147))", in: webView)
+            try rewrite(long, with: "item", in: webView)
+            waitForRange("40-52|caret 150:1|context|flat", in: webView)
+
+            UIFlowHarness.run("\(Self.mainEditor).getModel().applyEdits([{ range: new monaco.Range(30, 1, 36, 1), text: '' }])", in: webView)
+            UIFlowHarness.waitForAnswer("the lines moved up", to: Self.shownRange, in: webView) { $0.hasPrefix("34-46|") }
+            harness.waitUntil("the header to follow them") { editor.header.context == "Lines 34–46" }
+            UIFlowHarness.run("\(Self.mainEditor).getModel().applyEdits([{ range: new monaco.Range(40, 1, 40, 1), text: 'x' }])", in: webView)
+            UIFlowHarness.waitForAnswer("the edit to end the lines", to: Self.shownRange, in: webView) { $0.hasPrefix("none|") && $0.hasSuffix("|sticky") }
+            harness.waitUntil("the header's folder again") { editor.header.context == "" }
+
+            shell.openInEditorColumn(path: long, line: 60, endLine: 60, takeFocus: false)
+            waitForRange("60-60|caret 60:1|context|flat", in: webView)
+            XCTAssertEqual(editor.header.context, "Line 60")
+            shell.openInEditorColumn(path: long, line: 70, endLine: 72, takeFocus: false)
+            waitForRange("70-72|caret 70:1|context|flat", in: webView)
+            XCTAssertEqual(editor.header.context, "Lines 70–72")
+            // Ending before it starts: no range, here or in the header.
+            shell.openInEditorColumn(path: long, line: 300, endLine: 250, takeFocus: false)
+            UIFlowHarness.waitForAnswer("no lines shown", to: Self.shownRange, in: webView) { $0.hasPrefix("none|") }
+            XCTAssertEqual(editor.header.context, "")
+            shell.openInEditorColumn(path: long, line: 70, endLine: 72, takeFocus: false)
+            waitForRange("70-72|caret 70:1|context|flat", in: webView)
+            shell.openInEditorColumn(path: long, takeFocus: false)
+            UIFlowHarness.waitForAnswer("the next open to end the lines", to: Self.shownRange, in: webView) { $0.hasPrefix("none|") && $0.hasSuffix("|sticky") }
+            XCTAssertEqual(editor.header.context, "")
+
+            // Asked past its end, then written longer: the lines as asked.
+            let short = harness.repo + "/short.txt"
+            try (1...20).map { "line \($0)\n" }.joined().write(toFile: short, atomically: true, encoding: .utf8)
+            shell.openInEditorColumn(path: short, line: 30, endLine: 32, takeFocus: false)
+            UIFlowHarness.waitForAnswer("its last line shown", to: Self.shownRange, in: webView) { $0.hasPrefix("21-21|") }
+            harness.waitUntil("the header to name it") { editor.header.context == "Line 21" }
+            try rewrite(short, with: "longer", lines: 40, in: webView)
+            UIFlowHarness.waitForAnswer("the lines as asked", to: Self.shownRange, in: webView) { $0.hasPrefix("30-32|") }
+            harness.waitUntil("the header to name them") { editor.header.context == "Lines 30–32" }
+
+            let readme = harness.repo + "/README.md"
+            shell.openInEditorColumn(path: readme, takeFocus: false)
+            editor.toggleDiff()
+            harness.waitUntil("the diff of README.md") { editor.diffActivePath == readme }
+            shell.openInEditorColumn(path: readme, line: 1, endLine: 1, takeFocus: false)
+            XCTAssertNil(editor.diffActivePath)
+            waitForView("source:# Flow", in: webView)
+            waitForRange("1-1|caret 1:1|context|flat", in: webView)
+        }
+    }
+
+    /// Writes `file` again, `lines` lines starting with `word`, and waits
+    /// for the page to read it.
+    private func rewrite(_ file: String, with word: String, lines: Int = 200, in webView: WKWebView) throws {
+        try (1...lines).map { "\(word) \($0)\n" }.joined().write(toFile: file, atomically: true, encoding: .utf8)
+        UIFlowHarness.waitForAnswer("the file read again", to: "\(Self.mainEditor).getModel().getLineContent(1)", in: webView) {
+            $0 == "\(word) 1"
         }
     }
 
@@ -180,10 +292,39 @@ final class EditorReadingModeFlowTests: XCTestCase {
     private static let options = "(function () { var e = \(mainEditor); var o = monaco.editor.EditorOption; "
         + "return e.getOption(o.wordWrap) + ':' + (e.getOption(o.lineNumbers).renderType === monaco.editor.RenderLineNumbersType.Off ? 'off' : 'on'); })()"
 
-    /// ⌘ and `key` as the page gets them.
-    private static func command(_ key: String) -> String {
+    /// ⌘ and the key at `code`, typing `key`, as the page gets them.
+    private static func command(_ key: String, code: String) -> String {
         "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', "
-            + "{ key: '\(key)', code: 'Key\(key.uppercased())', metaKey: true, bubbles: true, cancelable: true }))"
+            + "{ key: '\(key)', code: '\(code)', metaKey: true, bubbles: true, cancelable: true }))"
+    }
+
+    /// The word wrap of the Monaco diff on screen; empty without one.
+    private static let diffWrap = "(function () { var d = monaco.editor.getDiffEditors()[0]; "
+        + "if (!d || !d.getModel() || getComputedStyle(document.getElementById('diff-editor')).display === 'none') return ''; "
+        + "return d.getModifiedEditor().getOption(monaco.editor.EditorOption.wordWrap); })()"
+
+    /// The lines highlighted as shown ("40-52", "none"), then the caret
+    /// ("caret 40:1") or "selection", whether the view starts three lines
+    /// above the caret ("context"), and "sticky" or "flat".
+    private static let shownRange = """
+        (function () {
+          var e = \(mainEditor);
+          if (!e || !e.getModel()) return '';
+          var shown = e.getModel().getAllDecorations().filter(function (d) { return d.options.className === 'nirux-shown-range'; })[0];
+          var p = e.getPosition();
+          return [
+            shown ? shown.range.startLineNumber + '-' + shown.range.endLineNumber : 'none',
+            e.getSelection().isEmpty() ? 'caret ' + p.lineNumber + ':' + p.column : 'selection',
+            e.getScrollTop() === e.getTopForLineNumber(Math.max(1, p.lineNumber - 3)) ? 'context' : 'top ' + e.getScrollTop(),
+            e.getOption(monaco.editor.EditorOption.stickyScroll).enabled ? 'sticky' : 'flat'
+          ].join('|');
+        })()
+        """
+
+    private func waitForRange(_ expected: String, in webView: WKWebView, file: StaticString = #filePath, line: UInt = #line) {
+        UIFlowHarness.waitForAnswer("the page to show \(expected)", to: Self.shownRange, in: webView, file: file, line: line) {
+            $0 == expected
+        }
     }
 
     private func waitForView(_ expected: String, in webView: WKWebView, file: StaticString = #filePath, line: UInt = #line) {

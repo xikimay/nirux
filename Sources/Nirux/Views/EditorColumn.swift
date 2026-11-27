@@ -53,6 +53,18 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     /// and a diff, ⌘F or an open at a line ends it. It stays with the tab as
     /// the column moves.
     private(set) var renderedPaths: Set<String> = []
+    /// Drafts among the tabs (`isDraft`), as each opened.
+    private(set) var draftPaths: Set<String> = []
+    /// The lines an open showed in a tab (nirux-show-code's range), where
+    /// the page highlights them (an edit above moves them), until the next
+    /// open in it, an edit in them or its rendering. `id`: what the page
+    /// answers with.
+    struct ShownRange: Equatable {
+        let lines: ClosedRange<Int>
+        let id: Int
+    }
+    private(set) var shownRanges: [String: ShownRange] = [:]
+    private var nextShownRangeID = 0
     private(set) var diffGroupTabs: [String: DiffGroupTab] = [:]
     /// The title of the active tab when it shows several files' diff.
     var activeDiffGroupTitle: String? { activePath.flatMap { diffGroupTabs[$0]?.title } }
@@ -405,17 +417,26 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         takeFocus: Bool = true, interactive: Bool = true
     ) {
         let absolute = absolutePath(for: path)
+        let range = newShownRange(line: line, endLine: endLine)
 
         // Already open → just switch.
         if tabPaths.contains(absolute) {
-            // A line shows in the source.
+            let showedRange = shownRanges[absolute] != nil
+            shownRanges[absolute] = range
+            // A line shows in the source, not under a git diff (Pierre's hides it).
             if line != nil, renderedPaths.contains(absolute) { setRendered(false, of: absolute) }
+            if line != nil, diffModeByPath.removeValue(forKey: absolute) != nil {
+                if diffActivePath == absolute { exitDiff() } else if activePath == absolute { diffLoadGeneration += 1 }
+            }
             switchTo(path: absolute, takeFocus: takeFocus)
             if let line {
                 var payload: [String: Any] = ["type": "goToLine", "path": absolute, "line": line]
-                Self.applyNavFlags(&payload, endLine: endLine, takeFocus: takeFocus)
+                Self.applyNavFlags(&payload, endLine: endLine, range: range, takeFocus: takeFocus)
                 sendBridge(payload)
+            } else if showedRange {
+                sendBridge(["type": "clearShownRange", "path": absolute])
             }
+            refreshHeader()
             return
         }
 
@@ -435,10 +456,17 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
 
         guard let file = readFileContent(at: absolute, interactive: interactive) else { return }
 
+        shownRanges[absolute] = range
         openBuffer(
             path: absolute, content: file.content, version: file.version,
             line: line, endLine: endLine, takeFocus: takeFocus, encoding: file.encoding
         )
+    }
+
+    private func newShownRange(line: Int?, endLine: Int?) -> ShownRange? {
+        guard let line, let endLine, endLine >= line else { return nil }
+        nextShownRangeID += 1
+        return ShownRange(lines: line...endLine, id: nextShownRangeID)
     }
 
     /// Read result with encoding fallbacks. `.binary` means NUL bytes were
@@ -513,7 +541,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
             }
             return
         }
-        openBuffer(path: absolute, content: "", version: .missing, line: nil, activate: activate)
+        openBuffer(path: absolute, content: "", version: .missing, line: nil, activate: activate, forDiff: true)
     }
 
     private func openBuffer(
@@ -524,7 +552,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         endLine: Int? = nil,
         takeFocus: Bool = true,
         activate: Bool = true,
-        encoding: String.Encoding = .utf8
+        encoding: String.Encoding = .utf8,
+        forDiff: Bool = false
     ) {
         tabPaths.append(absolute)
         dirtyByPath[absolute] = false
@@ -535,8 +564,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         if activate {
             activePath = absolute
         }
+        if Self.isDraft(absolute) { draftPaths.insert(absolute) }
         // Not one opened at a line or for its diff: those show in the source.
-        if isFront, line == nil, Self.isRenderable(absolute), diffModeByPath[absolute] == nil {
+        if isFront, line == nil, !forDiff, canRender(absolute) {
             renderedPaths.insert(absolute)
         }
 
@@ -556,7 +586,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         ]
         payload.merge(tabFlags(of: absolute)) { $1 }
         if let line { payload["line"] = line }
-        Self.applyNavFlags(&payload, endLine: endLine, takeFocus: takeFocus)
+        Self.applyNavFlags(&payload, endLine: endLine, range: shownRanges[absolute], takeFocus: takeFocus)
         sendBridge(payload)
         startFileWatch()
     }
@@ -591,7 +621,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         fileTree.reveal(absolutePath: path)
         var payload: [String: Any] = ["type": "switchTab", "path": path]
         payload.merge(tabFlags(of: path)) { $1 }
-        Self.applyNavFlags(&payload, endLine: nil, takeFocus: takeFocus)
+        Self.applyNavFlags(&payload, endLine: nil, range: nil, takeFocus: takeFocus)
         sendBridge(payload)
         // Known gap: re-entering a saved diff intent below still grabs
         // focus JS-side even for takeFocus:false — rare enough (agent open
@@ -630,13 +660,17 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
 
     /// The header's toggle: the active Markdown tab rendered, or its source.
     func toggleRendered() {
-        guard let path = currentPath, Self.isRenderable(path) else { return }
+        guard let path = currentPath, canRender(path) else { return }
         setRendered(!renderedPaths.contains(path), of: path)
     }
 
     /// `find`: Monaco's find opens on the source, as ⌘F asked.
     private func setRendered(_ rendered: Bool, of path: String, find: Bool = false) {
         if rendered { renderedPaths.insert(path) } else { renderedPaths.remove(path) }
+        // The reading view highlights no lines.
+        if rendered, shownRanges.removeValue(forKey: path) != nil {
+            sendBridge(["type": "clearShownRange", "path": path])
+        }
         // Before a diff ends: the page then shows the reading view at once.
         sendBridge(["type": "setRendered", "path": path, "rendered": rendered, "find": find])
         if rendered {
@@ -657,7 +691,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     /// Copy Draft: the active draft's text, unsaved edits included, as plain
     /// text; the button says so for a moment.
     func copyDraft() {
-        guard let path = currentPath, Self.isDraft(path) else { return }
+        guard let path = currentPath, draftPaths.contains(path) else { return }
         webView.callAsyncJavaScript("return window.niruxBridge.text(path)", arguments: ["path": path], in: nil, in: .page) { [weak self] result in
             guard let self else { return }
             guard case .success(let value) = result, let text = value as? String else {
@@ -853,7 +887,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
 
         if FileManager.default.fileExists(atPath: absolute) {
             guard let file = readFileContent(at: absolute, interactive: false) else { return false }
-            openBuffer(path: absolute, content: file.content, version: file.version, line: nil, activate: activate, encoding: file.encoding)
+            openBuffer(
+                path: absolute, content: file.content, version: file.version, line: nil, activate: activate,
+                encoding: file.encoding, forDiff: true
+            )
         } else {
             openDeletedBufferForDiff(path: absolute, activate: activate)
         }
@@ -957,6 +994,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         diskModifiedWhileDirty.remove(path)
         diffModeByPath.removeValue(forKey: path)
         renderedPaths.remove(path)
+        draftPaths.remove(path)
+        shownRanges.removeValue(forKey: path)
         diffGroupTabs.removeValue(forKey: path)
         if diffActivePath == path {
             diffLoadGeneration += 1
@@ -1029,17 +1068,25 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
 
     /// How the page shows `path` (bridge.js's `adoptTabFlags`).
     private func tabFlags(of path: String) -> [String: Any] {
-        ["rendered": renderedPaths.contains(path), "draft": Self.isDraft(path)]
+        ["rendered": renderedPaths.contains(path), "draft": draftPaths.contains(path)]
     }
 
-    /// A text the nirux-draft skill wrote, in its `mktemp` folder.
-    nonisolated static func isDraft(_ path: String) -> Bool {
-        ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent.hasPrefix("nirux-draft-")
+    /// A text the nirux-draft skill wrote: a file in the folder its
+    /// `mktemp -d` made right in the temporary directory ($TMPDIR, else /tmp).
+    nonisolated static func isDraft(_ path: String, temporaryDirectories: [String] = [NSTemporaryDirectory(), "/tmp"]) -> Bool {
+        let folder = (path as NSString).deletingLastPathComponent
+        guard (folder as NSString).lastPathComponent.hasPrefix("nirux-draft-") else { return false }
+        let resolved = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+        return temporaryDirectories.map(resolved).contains(resolved((folder as NSString).deletingLastPathComponent))
     }
 
-    /// A Markdown file that isn't a draft: it can show rendered.
-    nonisolated static func isRenderable(_ path: String) -> Bool {
-        ["md", "markdown"].contains((path as NSString).pathExtension.lowercased()) && !isDraft(path)
+    nonisolated static func isMarkdown(_ path: String) -> Bool {
+        ["md", "markdown"].contains((path as NSString).pathExtension.lowercased())
+    }
+
+    /// A Markdown tab that isn't a draft: it can show rendered.
+    func canRender(_ path: String) -> Bool {
+        Self.isMarkdown(path) && !draftPaths.contains(path)
     }
 
     private func newTextVersion(of path: String) -> Int {
@@ -1051,8 +1098,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     /// Shared tail of every navigation payload — one place to add the next
     /// flag so the fresh-open, already-open and switch-tab paths can't
     /// drift apart.
-    private static func applyNavFlags(_ payload: inout [String: Any], endLine: Int?, takeFocus: Bool) {
+    private static func applyNavFlags(_ payload: inout [String: Any], endLine: Int?, range: ShownRange?, takeFocus: Bool) {
         if let endLine { payload["endLine"] = endLine }
+        if let range { payload["rangeID"] = range.id }
         if !takeFocus { payload["focus"] = false }
     }
 
@@ -1474,6 +1522,16 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
             onSendSelectionShortcut?()
         case "escapeKey":
             onEscapeKey?()
+        case "shownRangeMoved":
+            guard let path = body["path"] as? String, let shown = shownRanges[path], shown.id == body["rangeID"] as? Int,
+                  let start = body["start"] as? Int, let end = body["end"] as? Int, start <= end
+            else { return }
+            shownRanges[path] = ShownRange(lines: start...end, id: shown.id)
+            refreshHeader()
+        case "shownRangeCleared":
+            guard let path = body["path"] as? String, shownRanges[path]?.id == body["rangeID"] as? Int else { return }
+            shownRanges[path] = nil
+            refreshHeader()
         case "findInSource":
             guard let path = body["path"] as? String, path == currentPath, renderedPaths.contains(path) else { return }
             setRendered(false, of: path, find: true)
