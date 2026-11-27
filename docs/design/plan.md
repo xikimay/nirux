@@ -102,6 +102,20 @@ sub-tasks asking, an agent stopped at the user's step (amber while one of
 those is an agent). Folds last until the app quits; nothing is edited from the
 sidebar yet. The switch's tools reach an agent at its next start.
 
+A task with steps keeps its row calm. Unselected, its line is its current
+step (its first open step) behind a bar of one segment per step (done in
+violet, the current one green while the agent works, amber when it is the
+user's): "Next" becomes the first open step, "Working" the step worked on, and
+a step for the user turns the row amber ("Needs you") until its pull request
+merges or closes. Selected, the row lists its steps under its line: "✓ N
+done", then each open one, the current one marked; the Lead's next step gives
+way to them. Where no bar shows (the command bar, the catch-up card, the hover
+preview) a step worked on says "Working · …". A row stopped at the user's step
+asks the user as a question does for the sidebar (a fold, the rail, the
+archived list keep it); ⌘J and the waiting count stay with agents' questions
+and approvals, which they answer in place. The Board doesn't read the steps
+yet.
+
 ## Pull requests
 
 1. The model (lane 1).

@@ -35,6 +35,13 @@ struct SidebarStatusLine: Hashable {
     var detail: String?
 }
 
+/// A step of a task's line in the day plan (docs/design/plan.md).
+struct SidebarPlanStep: Hashable {
+    let title: String
+    let isDone: Bool
+    let isForUser: Bool
+}
+
 /// The sign before a row's title, in the state dots' column.
 enum SidebarRowMark: Hashable, CaseIterable {
     case needsYou, error, working, asking, blocked, readyToMerge, merged, idle
@@ -85,6 +92,11 @@ struct SidebarRowSummary: Hashable {
     var focusColumn: Int?
     /// The block that says the status whole, if one does.
     var saidBelow: Block?
+    /// The line is the task's current step in the day plan: an unselected row draws its steps' bar before it.
+    var isPlanStep = false
+
+    /// The status where no bar shows (the command bar, the catch-up card): a step worked on says Working.
+    var statusAlone: String { isPlanStep && mark == .working ? "Working · " + status.text : status.text }
 
     /// What the status line prints: the status, or less under a block that
     /// has it whole. `status.text` stays what the row says where no block
@@ -174,13 +186,15 @@ extension WorkspaceInfo {
             let quiet = working.lazy.compactMap(\.quietFor).first.map { "Working · no word for \($0)" }
             let activity = circling?.circling?.statusText ?? quiet ?? followUp?.roundText
             let problem = prInfo?.problem
-            let words = problem.map { "Working · " + $0 } ?? activity ?? "Working"
+            let step = problem == nil && activity == nil ? currentPlanStep.flatMap { $0.isForUser ? nil : $0.title } : nil
+            let words = problem.map { "Working · " + $0 } ?? activity ?? step ?? "Working"
             let detail = circling?.circling?.detail ?? (problem == nil ? nil : followUp?.roundText)
             return SidebarRowSummary(
                 mark: .working,
                 status: SidebarStatusLine(text: words, tone: .neutral, detail: detail),
                 trailing: (circling.map { [$0] } ?? working).compactMap(\.elapsedDisplay).first.map { .turn($0) } ?? age,
-                focusColumn: circling?.index
+                focusColumn: circling?.index,
+                isPlanStep: step != nil
             )
         }
         if let prInfo, let problem = prInfo.problem {
@@ -202,6 +216,12 @@ extension WorkspaceInfo {
                 trailing: age
             )
         }
+        // A step for the user stops the agent, until its pull request merged or closed.
+        if let current = currentPlanStep, current.isForUser, prInfo.map({ $0.state == .open }) ?? true {
+            var summary = row(.needsYou, "Needs you · \(current.title)", .needsYou)
+            summary.isPlanStep = true
+            return summary
+        }
         if let blocker = blockerText {
             return row(.blocked, "Blocked · \(blocker)", .neutral)
         }
@@ -211,6 +231,12 @@ extension WorkspaceInfo {
             return turnStatusLine.map { row(.finished, $0, .neutral) } ?? row(.idle, "Done", .neutral)
         }
         if let pullRequest { return pullRequest }
+        // The plan's step says itself on every row; the Lead's next step only where asked.
+        if let current = currentPlanStep {
+            var summary = row(.idle, Self.nextStepLine(current.title), .neutral)
+            summary.isPlanStep = true
+            return summary
+        }
         if includesNextStep, let next = nextStepText {
             return row(.idle, Self.nextStepLine(next), .neutral)
         }

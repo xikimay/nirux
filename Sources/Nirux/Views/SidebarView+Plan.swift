@@ -60,6 +60,16 @@ extension SidebarView {
         return (rows, listing.leadLines.map { .plan(.line($0, isNested: false)) })
     }
 
+    /// Each task's steps, from one walk of the plan.
+    static func steps(in plan: Plan) -> [String: [SidebarPlanStep]] {
+        let tasks = plan.lines.flatMap { [$0] + $0.descendants }.compactMap { line in
+            line.workspaceID.map { id in
+                (id, line.children.filter { $0.kind == .step }.map { SidebarPlanStep(title: $0.title, isDone: $0.isChecked, isForUser: $0.isForUser) })
+            }
+        }
+        return Dictionary(tasks, uniquingKeysWith: { first, _ in first })
+    }
+
     func planRowsHeight(_ rows: [PlanRow], width: CGFloat) -> CGFloat {
         rows.reduce(CGFloat(0)) { total, row in
             switch row {

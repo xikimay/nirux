@@ -239,4 +239,14 @@ struct PlanTests {
         #expect(plan.proposals.map(\.id) == ["letter", "running"])
         #expect(plan.proposals.first?.line.after == nil)
     }
+
+    @Test func aSessionsCurrentLineIsItsFirstOpenStepNotASessionUnderIt() throws {
+        var plan = Plan()
+        try plan.add(Plan.Line(id: "s", kind: .session, title: "Export", by: .lead, at: 1, workspaceID: "export"), to: .top)
+        try plan.add(Plan.Line(id: "p", kind: .session, title: "Fonts", by: .lead, at: 1), to: .under("s"))
+        try plan.add(Plan.Line(id: "u", kind: .step, title: "Check the proof", by: .lead, at: 1, isForUser: true), to: .under("s"))
+        let session = try #require(plan.line("s"))
+        #expect(session.current?.id == "u")
+        #expect(session.waitsForUser)
+    }
 }

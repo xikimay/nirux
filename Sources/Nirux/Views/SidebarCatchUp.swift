@@ -89,7 +89,7 @@ struct SidebarCatchUp: Hashable {
         case .blocked, .asking: .quiet
         case .idle, .finished, .readyToMerge, .merged, .checksRunning: .done
         }
-        let text = kind == .done ? info.turnStatusLine ?? "Done" : summary.status.text
+        let text = kind == .done ? info.turnStatusLine ?? "Done" : summary.statusAlone
         return Row(
             workspaceID: info.id, title: info.title, kind: kind, text: text,
             icon: icon(for: kind, row: info.stateIcon(summary: summary))

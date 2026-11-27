@@ -386,6 +386,10 @@ struct WorkspaceInfo: Hashable {
     var usage: SidebarTaskUsage?
     /// Its line sits in a feature of the day plan (SidebarView+Plan).
     var inFeature = false
+    /// Its steps in the day plan, in order.
+    var planSteps: [SidebarPlanStep] = []
+    /// The step its agent works on: the first not done.
+    var currentPlanStep: SidebarPlanStep? { planSteps.first { !$0.isDone } }
     var isNested: Bool { parentTitle != nil || inFeature }
     /// A feature's task's sub-task sits two steps in.
     var nestDepth: Int { (parentTitle != nil ? 1 : 0) + (inFeature ? 1 : 0) }

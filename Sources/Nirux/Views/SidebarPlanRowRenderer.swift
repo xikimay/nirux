@@ -122,7 +122,7 @@ struct SidebarPlanRowRenderer {
         return (["Added by \(who)", time] + (source.map { [$0] } ?? [])).joined(separator: " · ")
     }
 
-    private static func label(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
+    static func label(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = font
         label.textColor = color
@@ -204,6 +204,136 @@ final class SidebarPlanMark: NSView {
                 Theme.Color.textTertiary.setStroke()
                 box.stroke()
             }
+        }
+    }
+}
+
+// MARK: - Steps
+
+extension SidebarPlanRowRenderer {
+    static let stepHeight: CGFloat = 18
+
+    /// The selected row's steps: "✓ N done", then each open one, the current first.
+    @MainActor
+    static func stepViews(_ steps: [SidebarPlanStep], x: CGFloat, maxX: CGFloat, top: CGFloat, agentWorks: Bool) -> [NSView] {
+        var views: [NSView] = []
+        var y = top
+        let done = steps.filter(\.isDone).count
+        if done > 0 {
+            let label = Self.label("✓ \(done) done", font: Theme.Font.caption, color: Theme.Color.textTertiary)
+            label.setAccessibilityLabel("\(done) steps done")
+            label.frame = NSRect(x: x, y: y - stepHeight + 2, width: max(0, maxX - x), height: 14)
+            views.append(label)
+            y -= stepHeight
+        }
+        for (index, step) in steps.filter({ !$0.isDone }).enumerated() {
+            let isCurrent = index == 0
+            let mark = SidebarStepMark(state: step.isForUser ? .forUser : isCurrent && agentWorks ? .working : .open)
+            mark.frame = NSRect(x: x, y: y - stepHeight + (stepHeight - 10) / 2, width: 10, height: 10)
+            views.append(mark)
+            var right = maxX
+            if step.isForUser {
+                let chip = SidebarBadgeView(text: "you", textColor: Theme.Color.waiting, fillColor: Theme.Color.tint(Theme.Color.waiting, 0.16), font: Theme.Font.caption)
+                let height: CGFloat = 14
+                chip.cornerRadius = height / 2
+                let width = ceil(chip.fittingWidth)
+                chip.frame = NSRect(x: right - width, y: y - stepHeight + 2, width: width, height: height)
+                views.append(chip)
+                right = chip.frame.minX - Theme.Space.xs
+            }
+            let label = Self.label(step.title, font: isCurrent ? Theme.Font.bodyMedium : Theme.Font.body,
+                                   color: isCurrent ? Theme.Color.textPrimary : Theme.Color.textSecondary)
+            let textX = x + 10 + Theme.Space.sm
+            label.frame = NSRect(x: textX, y: y - stepHeight + 2, width: max(0, right - textX), height: 15)
+            label.toolTip = step.title
+            label.setAccessibilityLabel((step.isForUser ? "Your step: " : isCurrent ? "Current step: " : "Step: ") + step.title)
+            views.append(label)
+            y -= stepHeight
+        }
+        return views
+    }
+}
+
+/// One segment per step of a task's line: done ones in violet, the current one in green while its agent works
+/// (amber when it is the user's), the rest grey.
+final class SidebarSegmentBar: NSView {
+    static let maxWidth: CGFloat = 48
+    static let gap: CGFloat = 2
+
+    let steps: [SidebarPlanStep]
+    let agentWorks: Bool
+
+    static func width(count: Int) -> CGFloat {
+        min(maxWidth, CGFloat(count) * 10)
+    }
+
+    init(steps: [SidebarPlanStep], agentWorks: Bool) {
+        self.steps = steps
+        self.agentWorks = agentWorks
+        super.init(frame: .zero)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.progressIndicator)
+        setAccessibilityLabel(Self.spoken(steps))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// "2 of 5 steps done, the current one yours".
+    static func spoken(_ steps: [SidebarPlanStep]) -> String {
+        let done = "\(steps.filter(\.isDone).count) of \(steps.count) steps done"
+        return steps.first { !$0.isDone }?.isForUser == true ? done + ", the current one yours" : done
+    }
+
+    /// Each segment's span: the gap narrows, then goes, so any count fits the bar.
+    static func spans(count: Int, width: CGFloat) -> [(x: CGFloat, width: CGFloat)] {
+        guard count > 0 else { return [] }
+        let gap = count > 1 ? max(0, min(Self.gap, (width - CGFloat(count)) / CGFloat(count - 1))) : 0
+        let segment = (width - gap * CGFloat(count - 1)) / CGFloat(count)
+        return (0..<count).map { (CGFloat($0) * (segment + gap), segment) }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let current = steps.firstIndex { !$0.isDone }
+        for (index, span) in Self.spans(count: steps.count, width: bounds.width).enumerated() {
+            let step = steps[index]
+            let color: NSColor = step.isDone ? Theme.Color.done
+                : index == current ? (step.isForUser ? Theme.Color.waiting : agentWorks ? Theme.Color.working : Theme.Color.textSecondary)
+                : Theme.Color.lineStrong
+            color.setFill()
+            let radius = min(bounds.height, span.width) / 2
+            NSBezierPath(roundedRect: NSRect(x: span.x, y: 0, width: span.width, height: bounds.height), xRadius: radius, yRadius: radius).fill()
+        }
+    }
+}
+
+/// A step's mark in the selected row's list.
+final class SidebarStepMark: NSView {
+    enum State { case open, working, forUser }
+
+    let state: State
+
+    init(state: State) {
+        self.state = state
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let rect = bounds.insetBy(dx: 1.5, dy: 1.5)
+        let ring = NSBezierPath(ovalIn: rect)
+        ring.lineWidth = 1.5
+        (state == .working ? Theme.Color.working : state == .forUser ? Theme.Color.waiting : Theme.Color.textTertiary).setStroke()
+        ring.stroke()
+        if state == .working {
+            Theme.Color.working.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 2.5, dy: 2.5)).fill()
         }
     }
 }

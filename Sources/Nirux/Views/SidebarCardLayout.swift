@@ -164,6 +164,10 @@ struct SidebarCardLayout {
     let statusBelowStep: Bool
     let statusLineLimit: Int
     let statusLineCount: Int
+    /// The day plan steps' bar before the status line of an unselected row, with its gap; 0 without.
+    let segmentsWidth: CGFloat
+    /// The selected row's steps under its status line: "✓ N done", then each open one.
+    let planStepLines: Int
     let height: CGFloat
 
     init(workspace: WorkspaceInfo, sidebarWidth: CGFloat) {
@@ -171,7 +175,15 @@ struct SidebarCardLayout {
         self.sidebarWidth = sidebarWidth
         isCompact = workspace.showsCompactRow
         state = workspace.cardState
-        summary = workspace.rowSummary(includesNextStep: isCompact || workspace.isLead)
+        let includesNextStep = isCompact || workspace.isLead
+        var summary = workspace.rowSummary(includesNextStep: includesNextStep)
+        // The selected row lists its steps: its line says what it said before them.
+        if workspace.isActive, summary.isPlanStep, summary.mark == .idle {
+            var plain = workspace
+            plain.planSteps = []
+            summary = plain.rowSummary(includesNextStep: includesNextStep)
+        }
+        self.summary = summary
         goal = isCompact || workspace.isLead ? nil : WorkspaceInfo.oneRunOfWords(workspace.purpose)
         step = SidebarTaskStep(workspace)
         let number: Int? = if let pr = workspace.prInfo { pr.state == .closed ? nil : pr.number }
@@ -200,9 +212,19 @@ struct SidebarCardLayout {
         // The step's badge says Merged already: "in your build" alone.
         else if step == .merged, let words = ChangelogStore.Shipping.allCases.map(\.words).first(where: { phrase == "Merged · " + $0 }) { phrase = words }
         else if let prefix, phrase.hasPrefix(prefix) { phrase = String(phrase.dropFirst(prefix.count)) }
+        // The selected row lists its steps, the current one marked.
+        if workspace.isActive, summary.isPlanStep, summary.mark == .working { phrase = "Working" }
         statusText = SidebarWorkspaceCardRenderer.statusText(summary, shown: phrase)
-        let besideStep = rowWidth - stepWidth - Theme.Space.xs
-        statusBelowStep = summary.mark == .working && SidebarWrappedText.lineCount(
+        // Working on a step, or waiting at the user's: the bar says which.
+        let showsBar = !workspace.planSteps.isEmpty && (summary.isPlanStep || summary.mark == .working)
+            && !workspace.isActive && !isCompact && !workspace.isLead
+        segmentsWidth = showsBar ? SidebarSegmentBar.width(count: workspace.planSteps.count) + Theme.Space.xs : 0
+        let doneSteps = workspace.planSteps.filter(\.isDone).count
+        planStepLines = workspace.isActive && !isCompact && !workspace.isLead && !workspace.planSteps.isEmpty
+            ? (doneSteps > 0 ? 1 : 0) + workspace.planSteps.count - doneSteps : 0
+        let besideStep = rowWidth - stepWidth - Theme.Space.xs - segmentsWidth
+        // The bar stays beside the badge, its step cut: the selected row lists it whole.
+        statusBelowStep = segmentsWidth == 0 && summary.mark == .working && SidebarWrappedText.lineCount(
             statusText, width: max(1, besideStep), lineHeight: Metrics.statusRowHeight, maxLines: 2
         ) > 1
         statusLineLimit = [.needsYou, .error, .blocked, .asking].contains(summary.mark)
@@ -245,6 +267,7 @@ struct SidebarCardLayout {
         } else {
             var height = Metrics.rowPaddingY * 2 + Metrics.titleRowHeight + Metrics.statusGap
                 + CGFloat(statusLineCount + (goal == nil ? 0 : 1) + (statusBelowStep ? 1 : 0)) * Metrics.statusRowHeight
+            if planStepLines > 0 { height += Metrics.columnsGap + CGFloat(planStepLines) * SidebarPlanRowRenderer.stepHeight }
             let lineCount = CGFloat(max(rows.count, links.isEmpty ? 0 : 1))
             if lineCount > 0 {
                 height += Metrics.columnsGap + lineCount * Metrics.chipHeight + (lineCount - 1) * Metrics.chipGap
