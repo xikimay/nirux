@@ -430,6 +430,17 @@ final class ProjectBoardGitHubTests: XCTestCase {
         XCTAssertEqual(ProjectBoard.message(.refused(status: nil, message: unresolved)), unresolved)
     }
 
+    /// A primary rate limit says when it resets, as the merge queue's reads
+    /// do: `rate_limit` is free.
+    func testAPrimaryRateLimitSaysWhenItResets() {
+        let gh = ScriptedGH()
+        gh.answer(prefix: ["pr", "list"], status: 1, stderr: "gh: API rate limit exceeded for user ID 1.\n")
+        gh.answer(prefix: ["api", "--hostname", "github.com", "rate_limit"],
+                  stdout: MergeQueueGitHubTests.rateLimit.replacingOccurrences(of: #""remaining":4997"#, with: #""remaining":0"#))
+        XCTAssertEqual(GitHubCLIBoardClient(gh: gh.run).pullRequests(repository: "acme/widgets", state: .open),
+                       .failure(.rateLimited(resetAt: Date(timeIntervalSince1970: 1_790_619_350))))
+    }
+
     func testWithoutGhNothingRuns() {
         let client = GitHubCLIBoardClient(gh: { GitHub.CLI.run($0, gh: nil) })
         XCTAssertEqual(client.pullRequests(repository: "acme/widgets", state: .open), .failure(.ghMissing))

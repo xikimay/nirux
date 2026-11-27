@@ -386,13 +386,19 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
 
     // MARK: Running gh
 
-    /// gh's standard output when it exited 0, else its error. A primary
-    /// rate limit asks `rate_limit` (free) when the limit resets.
+    /// gh's standard output when it exited 0, else its error.
     private func call(_ arguments: [String]) -> Result<Data, GitHub.CLI.Failure> {
-        let read = gh(.init(arguments, timeout: Self.readTimeout)).flatMap(\.result)
+        Self.withReset(gh(.init(arguments, timeout: Self.readTimeout)).flatMap(\.result), gh: gh, timeout: Self.readTimeout)
+    }
+
+    /// `read`, a primary rate limit with when it resets: `rate_limit`
+    /// (free) says.
+    static func withReset(
+        _ read: Result<Data, GitHub.CLI.Failure>, gh: GitHub.CLI.Runner, timeout: TimeInterval
+    ) -> Result<Data, GitHub.CLI.Failure> {
         guard case .failure(.rateLimited) = read else { return read }
-        let limit = try? gh(.init(Self.rateLimitArguments, timeout: Self.readTimeout)).flatMap(\.result).get()
-        return .failure(.rateLimited(resetAt: limit.flatMap(MergeQueue.parseRateLimit).flatMap(Self.resetOfExhaustedPool)))
+        let limit = try? gh(.init(rateLimitArguments, timeout: timeout)).flatMap(\.result).get()
+        return .failure(.rateLimited(resetAt: limit.flatMap(MergeQueue.parseRateLimit).flatMap(resetOfExhaustedPool)))
     }
 
     private func parse<Value>(

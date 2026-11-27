@@ -36,6 +36,14 @@ final class ProjectBoardFlowTests: BoardRepositoryTestCase {
             set { lock.lock(); failing = newValue; lock.unlock() }
         }
 
+        private var hold: DispatchGroup?
+        /// Open reads answer once it is left, from now on: what happens
+        /// during one.
+        var holdOpenReads: DispatchGroup? {
+            get { lock.lock(); defer { lock.unlock() }; return hold }
+            set { lock.lock(); hold = newValue; lock.unlock() }
+        }
+
         init(
             openPullRequests: String, mergedPullRequests: String = "[]", runs: String,
             openByRepository: [String: String] = [:], failures: [String: GitHub.CLI.Failure] = [:]
@@ -61,6 +69,7 @@ final class ProjectBoardFlowTests: BoardRepositoryTestCase {
 
         func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, GitHub.CLI.Failure> {
             record("pr \(state) \(repository)")
+            if state == .open { holdOpenReads?.wait() }
             if let failure = failures[repository] { return .failure(failure) }
             let open = openByRepository[repository] ?? openPullRequests
             return .success(Data((state == .open ? open : mergedPullRequests).utf8))

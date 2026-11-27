@@ -161,7 +161,7 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
     }
 
     private func read(_ arguments: [String]) -> Result<Data, GitHub.CLI.Failure> {
-        gh(.init(arguments, timeout: timeout)).flatMap(\.result)
+        GitHubCLIQueueClient.withReset(gh(.init(arguments, timeout: timeout)).flatMap(\.result), gh: gh, timeout: timeout)
     }
 }
 
