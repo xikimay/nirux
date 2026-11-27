@@ -32,8 +32,8 @@ extension NiruxShellView {
                 DispatchQueue.main.async { @MainActor [weak self] in
                     guard let self else { return }
                     knowledgeChecks.remove(spaceID)
-                    if !pass.closed.isEmpty || !pass.suspected.isEmpty {
-                        NiruxDebugLog.log("Knowledge: \(spaceID) closed \(pass.closed), suspected \(pass.suspected)")
+                    if pass != SpaceKnowledge.Pass() {
+                        NiruxDebugLog.log("Knowledge: \(spaceID) closed \(pass.closed), suspected \(pass.suspected), failing \(pass.failing)")
                         knowledgeChanged(inSpace: spaceID)
                     }
                 }

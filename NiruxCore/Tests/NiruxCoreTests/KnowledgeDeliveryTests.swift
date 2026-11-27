@@ -208,5 +208,11 @@ struct KnowledgeCheckTests {
         #expect(loaded.status(of: second.id, now: 81, macOS: 27) == .closed("b.swift is gone."))
         #expect(loaded.status(of: first.id, now: 81, macOS: 27) == .open, "a check that holds clears the failure")
         #expect(loaded.state(of: first.id).checkedTip == "tip2")
+        let paged = KnowledgeBrickTests.brick(proofs: [.file(path: "d.swift"), .page(url: "https://a.example/d", quote: "the page says this")])
+        loaded.bricks[paged.id] = paged
+        loaded.record([paged.id: [.holds, .fails("the page is gone.")]], tip: "tip2", now: 90)
+        loaded.record([paged.id: [.holds, .skipped]], tip: "tip3", now: 95)
+        guard case .failing = loaded.status(of: paged.id, now: 96, macOS: 27) else { Issue.record("a check that skipped the page cleared it"); return }
+        #expect(loaded.record([paged.id: [.holds, .fails("the page is gone.")]], tip: "tip3", now: 100) == [paged.id])
     }
 }

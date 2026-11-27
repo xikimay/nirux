@@ -287,7 +287,8 @@ public struct KnowledgeSession: Codable, Equatable, Sendable {
 public enum KnowledgeCorrection {
     /// Words that say something is wrong, in English and French, folded.
     static let cues: Set<String> = [
-        "no", "not", "nope", "wrong", "incorrect", "isn", "doesn", "don", "aren", "wasn", "never", "actually", "instead",
+        "no", "not", "nope", "wrong", "incorrect", "isn", "doesn", "don", "aren", "wasn", "weren", "didn", "won", "shouldn", "couldn",
+        "wouldn", "hasn", "haven", "never", "actually", "instead",
         "rather", "stop", "mistake", "false", "non", "pas", "faux", "fausse", "mauvais", "mauvaise", "erreur", "plutot", "jamais",
         "arrete", "ne", "n"
     ]

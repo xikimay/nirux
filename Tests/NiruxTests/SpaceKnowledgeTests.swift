@@ -102,8 +102,9 @@ final class SpaceKnowledgeTests: XCTestCase {
 
     func testAProposalNeedsProofsThatHoldNow() throws {
         try commit("Sources/Model/Store.swift", "struct Store {}\n", message: "Store a thing (#14)")
+        try commit("Sources/Model/Train.swift", "struct Train {}\n", message: "Merge #15 (feat/train) into the train")
         func problem(_ proofs: [Proof]) -> String? { SpaceKnowledge.proofProblem(of: brick(proofs: proofs), anchor: anchor, now: Date().timeIntervalSince1970) }
-        XCTAssertNil(problem([.pullRequest(12), .pullRequest(14), .commit(try git("rev-parse", "HEAD~1"))]))
+        XCTAssertNil(problem([.pullRequest(12), .pullRequest(14), .pullRequest(15), .commit(try git("rev-parse", "HEAD~2"))]))
         XCTAssertNil(problem([.test(path: "Sources/Views/Glass.swift", name: "glass"), .file(path: "Sources/Model")]))
         XCTAssertTrue(problem([.pullRequest(13)])?.contains("PR #13") == true)
         XCTAssertTrue(problem([.commit("deadbeefdeadbeef")])?.contains("commit deadbee") == true)
@@ -119,6 +120,11 @@ final class SpaceKnowledgeTests: XCTestCase {
         XCTAssertNil(anchor.folder, "no main checkout to run git in")
         XCTAssertNil(SpaceKnowledge.proofProblem(of: brick(), anchor: anchor, now: Date().timeIntervalSince1970))
         XCTAssertNotNil(SpaceKnowledge.proofProblem(of: brick(proofs: [.pullRequest(13)]), anchor: anchor, now: Date().timeIntervalSince1970))
+        // Its HEAD names its default branch, whatever it is called.
+        try git("--git-dir=" + bare.path, "branch", "-q", "-m", "main", "trunk")
+        XCTAssertNotNil(SpaceKnowledge.baseTip(gitDir: bare.path))
+        try git("branch", "-q", "-m", "main", "trunk")
+        XCTAssertNil(SpaceKnowledge.baseTip(gitDir: repo.appendingPathComponent(".git").path), "a checkout's HEAD follows its branch")
     }
 
     func testACorrectionMakesItsBrickSuspectUntilTheUserConfirmsIt() throws {

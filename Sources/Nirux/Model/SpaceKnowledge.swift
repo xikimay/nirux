@@ -62,16 +62,20 @@ enum SpaceKnowledge {
     /// else the local main or master. Never a checkout's HEAD, which follows
     /// whatever branch it is on; a bare repository's HEAD names its default.
     static func baseTip(gitDir: String, timeout: TimeInterval = 15) -> String? {
-        let isBare = git(["rev-parse", "--is-bare-repository"], in: gitDir, gitDir: gitDir, timeout: timeout)
-            .map { String(decoding: $0.standardOutput, as: UTF8.self).hasPrefix("true") } ?? false
         let refs = ["refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master", "refs/heads/main", "refs/heads/master"]
-        for ref in refs + (isBare ? ["HEAD"] : []) {
-            guard let result = git(["rev-parse", "--verify", "--quiet", ref + "^{commit}"], in: gitDir, gitDir: gitDir, timeout: timeout),
-                  result.terminationStatus == 0 else { continue }
-            let sha = String(decoding: result.standardOutput, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            if sha.count == 40 { return sha }
-        }
-        return nil
+        guard let listed = git(["for-each-ref", "--format=%(refname) %(objectname)"] + refs, in: gitDir, gitDir: gitDir, timeout: timeout),
+              listed.terminationStatus == 0
+        else { return nil }
+        let tips = Dictionary(String(decoding: listed.standardOutput, as: UTF8.self).split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: " ")
+            return parts.count == 2 && parts[1].count == 40 ? (String(parts[0]), String(parts[1])) : nil
+        }, uniquingKeysWith: { first, _ in first })
+        if let tip = refs.lazy.compactMap({ tips[$0] }).first { return tip }
+        guard let bare = git(["rev-parse", "--is-bare-repository", "--verify", "--quiet", "HEAD^{commit}"], in: gitDir, gitDir: gitDir, timeout: timeout),
+              bare.terminationStatus == 0
+        else { return nil }
+        let answer = String(decoding: bare.standardOutput, as: UTF8.self).split(separator: "\n").map(String.init)
+        return answer.count == 2 && answer[0] == "true" && answer[1].count == 40 ? answer[1] : nil
     }
 
     /// For a Codex launch in `launchDirectory`: when the space serves bricks
@@ -111,7 +115,7 @@ enum SpaceKnowledge {
     /// The files the checkout holding `folder` changes from where its branch
     /// left the base branch, committed or not, new ones included; relative
     /// to its top. Each git call bounded short: a launch waits on it.
-    static func changedFiles(in folder: String, timeout: TimeInterval = 2) -> [String] {
+    static func changedFiles(in folder: String, timeout: TimeInterval = 1) -> [String] {
         func output(_ arguments: [String], in folder: String, gitDir: String? = nil) -> Data? {
             guard let result = git(arguments, in: folder, gitDir: gitDir, timeout: timeout), result.terminationStatus == 0 else { return nil }
             return result.standardOutput
@@ -147,7 +151,11 @@ enum SpaceKnowledge {
                 return .data(blob.standardOutput)
             },
             hasPullRequest: { number in
-                let merged = run(["log", "-1", "--format=%H", "-E", "--grep=^Merge pull request #\(number)( |$)", "--grep=\\(#\(number)\\)$", tip])
+                // Merged alone, squashed, or through a merge train.
+                let merged = run([
+                    "log", "-1", "--format=%H", "-E", "--grep=^Merge pull request #\(number)( |$)", "--grep=\\(#\(number)\\)$",
+                    "--grep=^Merge #\(number) \\(", tip
+                ])
                 guard let merged, merged.terminationStatus == 0 else { return nil }
                 return !merged.standardOutput.isEmpty
             },
@@ -221,6 +229,8 @@ enum SpaceKnowledge {
     struct Pass: Equatable, Sendable {
         var closed: [String] = []
         var suspected: [String] = []
+        /// Failing since this pass.
+        var failing: [String] = []
     }
 
     /// Makes suspect the bricks a correction followed since they were last
@@ -267,7 +277,9 @@ enum SpaceKnowledge {
                 continue
             }
             let results = Dictionary(uniqueKeysWithValues: bricks.map { ($0.id, $0.brick.check(in: source)) })
+            let wasFailing = Set(bricks.map(\.id).filter { loaded.state(of: $0).failedAt != nil })
             pass.closed += loaded.record(results, tip: source.tip, now: now)
+            pass.failing += bricks.map(\.id).filter { !wasFailing.contains($0) && loaded.state(of: $0).failedAt != nil && loaded.state(of: $0).closedAt == nil }
             if let tip = source.tip { loaded.state.checkedTips[key] = tip }
         }
         if daily {
@@ -291,7 +303,7 @@ enum SpaceKnowledge {
         switch anchor.kind {
         case .gitRepository(let gitDir):
             guard let tip = baseTip(gitDir: gitDir) else {
-                return "Nirux can’t read \(anchor.name)’s base branch to check the proofs."
+                return "Nirux finds no base branch in \(anchor.name) to check the proofs at: origin’s default branch, or main or master."
             }
             source = repositorySource(gitDir: gitDir, tip: tip, readsPages: true)
         case .folder(let path):

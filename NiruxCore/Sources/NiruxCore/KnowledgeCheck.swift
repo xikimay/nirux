@@ -121,8 +121,12 @@ extension KnowledgeStore.Loaded {
             } else if !checks.contains(where: { if case .unknown = $0 { return true } else { return false } }) {
                 brick.checkedAt = now
                 brick.checkedTip = tip
-                brick.failedAt = nil
-                brick.failedBecause = nil
+                // Only every proof checked again clears a failure: a page
+                // waits for the daily check.
+                if !checks.contains(.skipped) {
+                    brick.failedAt = nil
+                    brick.failedBecause = nil
+                }
             }
             state.bricks[id] = brick
         }
