@@ -127,12 +127,13 @@ struct KnowledgeDeliveryTests {
 
     // MARK: Corrections
 
-    @Test func aPromptNamingTheSubjectInAnyCaseOrAccentIsACorrection() {
+    @Test func aPromptSayingTheSubjectIsWrongInAnyCaseOrAccentIsACorrection() {
         let bricks = [Self.served("b-1", subject: "backing layer"), Self.served("b-2", subject: "keyDown"), Self.served("b-3", subject: "élan")]
         #expect(KnowledgeCorrection.named(in: "Non, le Backing  Layer n'est pas comme ça", among: bricks) == ["b-1"])
         #expect(KnowledgeCorrection.named(in: "keydown isn't handled there", among: bricks) == ["b-2"])
-        #expect(KnowledgeCorrection.named(in: "the layering is fine; keydowns too", among: bricks).isEmpty)
-        #expect(KnowledgeCorrection.named(in: "ELAN!", among: bricks) == ["b-3"])
+        #expect(KnowledgeCorrection.named(in: "the layering is wrong; keydowns too", among: bricks).isEmpty)
+        #expect(KnowledgeCorrection.named(in: "ELAN : faux !", among: bricks) == ["b-3"])
+        #expect(KnowledgeCorrection.named(in: "Now add a drop shadow to the backing layer", among: bricks).isEmpty, "naming it isn't correcting it")
     }
 }
 
@@ -184,22 +185,28 @@ struct KnowledgeCheckTests {
         #expect(Proof.page(url: "https://a.example/x", quote: "the quote of the page").check(in: source) == .skipped)
         let daily = Self.source(files: [:], pages: ["https://a.example/x": "<p>The <b>quote</b> of the&nbsp;page</p><script>x()</script>"])
         #expect(Proof.page(url: "https://a.example/x", quote: "The quote of the page").check(in: daily) == .holds)
+        #expect(KnowledgeText.pageText("a &amp;lt;T&amp;gt; b") == "a &lt;T&gt; b", "an escaped entity stays text")
         guard case .fails = Proof.page(url: "https://a.example/y", quote: "The quote of the page").check(in: daily) else { Issue.record("held"); return }
         #expect(Proof.said(quote: "keep it", day: "2026-11-27").check(in: daily) == .holds)
     }
 
-    @Test func aFailingProofClosesItsBrickAndAnUnknownOneLeavesItAsItWas() {
+    @Test func aProofFailingTwiceClosesItsBrickOnceFailsAndAnUnknownLeavesIt() {
         var loaded = KnowledgeStore.Loaded()
         let first = KnowledgeBrickTests.brick(proofs: [.file(path: "a.swift")])
         let second = KnowledgeBrickTests.brick(proofs: [.file(path: "b.swift")])
         let third = KnowledgeBrickTests.brick(proofs: [.file(path: "c.swift")])
         for brick in [first, second, third] { loaded.bricks[brick.id] = brick }
-        let closed = loaded.record([
-            first.id: [.holds], second.id: [.holds, .fails("b.swift is gone.")], third.id: [.unknown("git failed")]
+        let once = loaded.record([
+            first.id: [.fails("a.swift is gone.")], second.id: [.holds, .fails("b.swift is gone.")], third.id: [.unknown("git failed")]
         ], tip: "tip1", now: 70)
-        #expect(closed == [second.id])
-        #expect(loaded.state(of: first.id).checkedTip == "tip1")
-        #expect(loaded.status(of: second.id, now: 71, macOS: 27) == .closed("b.swift is gone."))
+        #expect(once.isEmpty)
+        guard case .failing = loaded.status(of: second.id, now: 71, macOS: 27) else { Issue.record("not failing"); return }
+        #expect(ServedKnowledge.compile(loaded, now: 71, macOS: 27).bricks.map(\.id) == [third.id], "a failing brick isn't served")
         #expect(loaded.state(of: third.id) == BrickState())
+        let twice = loaded.record([first.id: [.holds], second.id: [.fails("b.swift is gone.")]], tip: "tip2", now: 80)
+        #expect(twice == [second.id])
+        #expect(loaded.status(of: second.id, now: 81, macOS: 27) == .closed("b.swift is gone."))
+        #expect(loaded.status(of: first.id, now: 81, macOS: 27) == .open, "a check that holds clears the failure")
+        #expect(loaded.state(of: first.id).checkedTip == "tip2")
     }
 }

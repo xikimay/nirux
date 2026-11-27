@@ -210,7 +210,7 @@ final class ProjectMemoryPreview: NSView {
             switch status {
             case nil: showBrickActions(.validate, .dismiss)
             case .open?: showBrickActions(nil, .close)
-            case .expired?, .suspect?: showBrickActions(.reconfirm, .close)
+            case .expired?, .suspect?, .failing?: showBrickActions(.reconfirm, .close)
             case .closed?: showBrickActions(nil, nil)
             }
             sourceLabel.stringValue = status == nil ? "Source: proposal \(id), in this space’s knowledge" : "Source: brick \(id), never edited"
@@ -326,6 +326,7 @@ final class ProjectMemoryPreview: NSView {
         case .open?: meta.append(bricks.serves ? "agents get it when they open a file it concerns" : "the space’s bricks are off")
         case .expired?: meta.append("expired")
         case .suspect?: meta.append("suspect")
+        case .failing?: meta.append("failing")
         case .closed?: meta.append("closed")
         }
         var lines = ["About " + brick.scope.paths.map { "\(brick.scope.name)/\($0)" }.joined(separator: ", ")]

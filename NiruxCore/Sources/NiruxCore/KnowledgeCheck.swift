@@ -97,8 +97,9 @@ extension KnowledgeBrick {
 
 extension KnowledgeStore.Loaded {
     /// Records the checks of `results` (brick id → its proofs' checks) at
-    /// `tip`: a brick a proof fails for closes, with why; one whose checks
-    /// all came back is checked at `tip`. Returns the ids it closed.
+    /// `tip`: a brick a proof fails for is failing, and closes, with why, if
+    /// it was failing already; one whose checks all held is checked at
+    /// `tip`, no longer failing. Returns the ids it closed.
     @discardableResult
     public mutating func record(_ results: [String: [ProofCheck]], tip: String?, now: TimeInterval) -> [String] {
         var closed: [String] = []
@@ -109,12 +110,19 @@ extension KnowledgeStore.Loaded {
                 if case .fails(let why) = check { return why }
                 return nil
             }).first {
-                brick.closedAt = now
-                brick.closedBecause = failure
-                closed.append(id)
+                if brick.failedAt == nil {
+                    brick.failedAt = now
+                    brick.failedBecause = failure
+                } else {
+                    brick.closedAt = now
+                    brick.closedBecause = failure
+                    closed.append(id)
+                }
             } else if !checks.contains(where: { if case .unknown = $0 { return true } else { return false } }) {
                 brick.checkedAt = now
                 brick.checkedTip = tip
+                brick.failedAt = nil
+                brick.failedBecause = nil
             }
             state.bricks[id] = brick
         }
@@ -163,8 +171,9 @@ public enum KnowledgeText {
         for pattern in [#"(?is)<script\b.*?</script>"#, #"(?is)<style\b.*?</style>"#, #"(?s)<!--.*?-->"#, #"(?s)<[^>]*>"#] {
             text = text.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
         }
-        let entities = ["&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'", "&rsquo;": "'", "&lsquo;": "'",
-                        "&ldquo;": "\"", "&rdquo;": "\""]
+        // `&amp;` last: `&amp;lt;` means the text "&lt;".
+        let entities = [("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&rsquo;", "'"), ("&lsquo;", "'"),
+                        ("&ldquo;", "\""), ("&rdquo;", "\""), ("&amp;", "&")]
         for (entity, plain) in entities { text = text.replacingOccurrences(of: entity, with: plain) }
         return text
     }

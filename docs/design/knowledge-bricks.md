@@ -17,11 +17,14 @@ memory; no new place.
   hash of its content and written once. When it stops being true it closes,
   and a new brick replaces it (`replaces`).
 - **Recheck**: Nirux checks each standing brick again whenever its
-  repository's base branch moves (as last fetched: `origin`'s default
-  branch, else `HEAD`), every 5 minutes at most, and all of them once a
-  day, pages included. It reads git objects at the tip, never the working
-  tree, and runs nothing a brick holds. A proof that no longer holds closes
-  its brick, with why.
+  repository's base branch moves, every 5 minutes at most, and all of them
+  once a day, pages included. It reads git objects at the tip (through the git dir,
+  bare repositories too), never a working tree, and runs nothing a brick
+  holds. The base is `origin`'s default branch as fetched, else the local
+  main or master, never a checkout's HEAD. A proof that no longer holds
+  makes its brick **failing** (not served); the next check closes it, with
+  why, or clears it: a page down once or a stray tip never closes a brick for
+  good.
 
 ## Up to date
 
@@ -31,10 +34,12 @@ memory; no new place.
   confirms it again ("Still True").
 - A brick about something macOS may change (`macos`) expires on another
   major version until confirmed there.
-- **Suspect**: when the user's own prompt names a brick's subject in a
+- **Suspect**: when the user's own prompt names a brick's subject and says
+  something is wrong ("no", "not", "wrong", "non", "pas", "faux"…) in a
   session that received it (Claude's UserPromptSubmit, agy's first model
-  call of a turn; never a line Nirux typed), that counts as a correction:
-  the brick is no longer served until confirmed or closed.
+  call of a turn; never a line Nirux typed: a Mission's, a pull request
+  round's), that counts as a correction: the brick is no longer served until
+  confirmed or closed.
 
 ## Who writes
 
@@ -47,8 +52,9 @@ proofs once more. Nothing else creates a brick.
 ## Reaching agents
 
 Nothing is loaded by default. A brick reaches an agent when it reads or
-edits a file under its paths, once per session, within 3,000 bytes per
-session (about 750 tokens):
+edits a file under its paths, once per session (a compacted Claude
+conversation may get it again), within 3,000 bytes per session (about 750
+tokens):
 
 - **Claude Code**: the PostToolUse of Read, Edit, MultiEdit, Write and
   NotebookEdit returns the bricks as `additionalContext` (measured on
@@ -58,9 +64,10 @@ session (about 750 tokens):
   hooks are guarded on the space serving bricks, so a model call doesn't
   start Nirux for nothing.
 - **Codex** opens files through its shell, where Nirux doesn't see them. It
-  gets, at its start, the bricks about the files its branch already
-  changes, after the brief in its `developer_instructions` (unless the
-  user's Codex config sets its own). Codex 0.171 has a PostToolUse hook
+  gets, at a new thread's start, the bricks about the files its branch
+  already changes, after the brief in its `developer_instructions` (unless
+  the user's Codex config sets its own); a resumed thread keeps what it got,
+  and a restarted column gets the brief alone once what agents get changed. Codex 0.171 has a PostToolUse hook
   with `additionalContext`, behind its own hook trust: not used yet.
 
 `memory_search` finds the bricks agents may get now; the rest is found by
@@ -69,7 +76,7 @@ turns it all off: nothing is served, searched or rechecked.
 
 ## Measure
 
-`uses.jsonl` (90 days) records each brick reaching a task and each
+`uses.jsonl` (90 days, the newest 10,000 lines) records each brick reaching a task and each
 correction after it, never a prompt's text. Space Memory shows, per brick,
 how many tasks it reached and in how many a correction followed.
 

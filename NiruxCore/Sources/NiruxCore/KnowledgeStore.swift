@@ -73,7 +73,12 @@ public struct KnowledgeStore: Sendable {
             loaded.readOnlyReason = "knowledge/state.json isn’t a small regular file: Nirux leaves it alone."
         case .data(let data):
             let version = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["schemaVersion"] as? Int
-            if let state = try? JSONDecoder().decode(KnowledgeState.self, from: data) { loaded.state = state }
+            if let state = try? JSONDecoder().decode(KnowledgeState.self, from: data) {
+                loaded.state = state
+            } else if version.map({ $0 <= KnowledgeState.currentSchemaVersion }) != false {
+                // What it holds (closings, dismissals) must not be lost to an empty state.
+                loaded.readOnlyReason = "knowledge/state.json can’t be read: Nirux leaves it alone."
+            }
             if let version, version > KnowledgeState.currentSchemaVersion {
                 loaded.readOnlyReason = "A newer Nirux keeps this space’s knowledge."
             }
@@ -190,20 +195,24 @@ extension KnowledgeStore.Loaded {
         case readOnly(String)
     }
 
-    public func refusal(of brick: KnowledgeBrick, now: TimeInterval, macOS: Int) -> Refusal? {
+    /// `validating`: the proposal itself waits; the checks a validation
+    /// needs (the space's room, the brick it replaces) still apply.
+    public func refusal(of brick: KnowledgeBrick, now: TimeInterval, macOS: Int, validating: Bool = false) -> Refusal? {
         if let reason = readOnlyReason { return .readOnly(reason) }
         if let problem = brick.problem { return .invalid(problem) }
         let id = brick.id
         if let status = status(of: id, now: now, macOS: macOS) { return .exists(status) }
-        if let same = state.proposals.first(where: { $0.id == id }) {
+        if !validating, let same = state.proposals.first(where: { $0.id == id }) {
             if let dismissed = same.dismissedAt { return .dismissed(at: dismissed) }
             if same.isPending { return .alreadyPending(since: same.proposedAt) }
         }
         if let replaced = brick.replaces, bricks[replaced] == nil { return .replacesUnknown(replaced) }
-        guard pending.count < KnowledgeStore.maxPending else { return .tooManyPending }
-        // A replacement takes its brick's place.
+        let others = pending.filter { $0.id != id }.count
+        guard validating || others < KnowledgeStore.maxPending else { return .tooManyPending }
+        // A replacement takes its brick's place; at validation, the others
+        // waiting still count, so validating them all stays within room.
         let freed = brick.replaces.map { state(of: $0).closedAt == nil } == true ? 1 : 0
-        guard standing - freed + pending.count < KnowledgeStore.maxBricks else { return .full }
+        guard standing - freed + others < KnowledgeStore.maxBricks else { return .full }
         return nil
     }
 
@@ -222,7 +231,8 @@ extension KnowledgeStore.Loaded {
                 old.closedAt = now
                 old.closedBecause = "Replaced by a brick you validated."
             }
-            old.replacedBy = id
+            // A brick two proposals replaced keeps the first.
+            if old.replacedBy == nil { old.replacedBy = id }
             state.bricks[replaced] = old
         }
         return brick
@@ -239,9 +249,12 @@ extension KnowledgeStore.Loaded {
         guard bricks[id] != nil, state(of: id).closedAt == nil else { return false }
         var brick = state(of: id)
         brick.reconfirmedAt = now
-        brick.reconfirmedMacOS = macOS
+        // Only a brick macOS may change records where it was confirmed.
+        if bricks[id]?.macOS != nil { brick.reconfirmedMacOS = macOS }
         brick.suspectAt = nil
         brick.suspectBecause = nil
+        brick.failedAt = nil
+        brick.failedBecause = nil
         state.bricks[id] = brick
         return true
     }

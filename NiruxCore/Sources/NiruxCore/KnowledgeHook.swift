@@ -28,18 +28,34 @@ public struct KnowledgeUse: Codable, Equatable, Sendable {
     public static let keptDays = 90
     static let maxFileBytes = 2_000_000
 
-    /// Appends `uses` in one write each, unless the file is full.
+    /// Appends `uses`, unless the file is full, under the lock a trim
+    /// takes: a line appended while the file is rewritten would be lost.
     public static func append(_ uses: [KnowledgeUse], in store: KnowledgeStore) {
         let url = store.folder.appendingPathComponent(fileName)
-        var info = stat()
-        if stat(url.path, &info) == 0, info.st_size >= maxFileBytes { return }
-        let descriptor = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        let lines = uses.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }.reduce(Data(), +)
+        locked(store, attempts: 100) {
+            var info = stat()
+            if stat(url.path, &info) == 0, info.st_size >= maxFileBytes { return }
+            let descriptor = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0o600)
+            guard descriptor >= 0 else { return }
+            defer { close(descriptor) }
+            _ = lines.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
+        }
+    }
+
+    /// Runs `body` holding `uses.lock`, or not at all once `attempts`
+    /// tries 10 ms apart fail.
+    private static func locked(_ store: KnowledgeStore, attempts: Int, _ body: () -> Void) {
+        let descriptor = open(store.folder.appendingPathComponent("uses.lock").path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { return }
         defer { close(descriptor) }
-        for use in uses {
-            guard var line = try? JSONEncoder().encode(use) else { continue }
-            line.append(UInt8(ascii: "\n"))
-            _ = line.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
+        for _ in 0..<attempts {
+            if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {
+                body()
+                flock(descriptor, LOCK_UN)
+                return
+            }
+            usleep(10_000)
         }
     }
 
@@ -50,13 +66,20 @@ public struct KnowledgeUse: Codable, Equatable, Sendable {
         return data.split(separator: UInt8(ascii: "\n")).compactMap { try? decoder.decode(KnowledgeUse.self, from: $0) }
     }
 
-    /// Rewrites the file without the lines past `keptDays`, when it has some.
+    /// Lines kept at most by a trim, the newest: well under the file's limit,
+    /// past which nothing more is recorded.
+    static let maxKeptLines = 10_000
+
+    /// Rewrites the file without the lines past `keptDays`, and without the
+    /// oldest past `maxKeptLines`, when it has some.
     public static func trim(in store: KnowledgeStore, now: TimeInterval) {
-        let uses = load(in: store)
-        let kept = uses.filter { now - $0.time < Double(keptDays) * 86_400 }
-        guard kept.count < uses.count else { return }
-        let lines = kept.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }
-        try? KnowledgeStore.writePrivately(lines.reduce(Data(), +), to: store.folder.appendingPathComponent(fileName))
+        locked(store, attempts: 300) {
+            let uses = load(in: store)
+            let kept = uses.filter { now - $0.time < Double(keptDays) * 86_400 }.suffix(maxKeptLines)
+            guard kept.count < uses.count else { return }
+            let lines = kept.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }
+            try? KnowledgeStore.writePrivately(lines.reduce(Data(), +), to: store.folder.appendingPathComponent(fileName))
+        }
     }
 
     /// Per brick: the tasks it reached, and those where a correction followed.
@@ -106,10 +129,20 @@ public enum KnowledgeHook {
     /// read_file and edit_file take `Path`).
     static let agyPathArguments = ["Path", "AbsolutePath", "TargetFile", "FilePath", "File"]
 
+    /// `typedByNirux`: a prompt Nirux typed (a Mission's, a pull request
+    /// round's), never the user's correction.
     public static func answer(
-        agent: Agent, payload: [String: Any], store: KnowledgeStore, task: String?, now: TimeInterval, macOS: Int
+        agent: Agent, payload: [String: Any], store: KnowledgeStore, task: String?, now: TimeInterval, macOS: Int,
+        typedByNirux: (String) -> Bool = { $0.hasPrefix("[Nirux") }
     ) -> Answer {
         let event = payload["hook_event_name"] as? String ?? payload["hookEventName"] as? String
+        func isTypedByUser(_ prompt: String) -> Bool { !typedByNirux(prompt.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        // A compacted conversation lost what it got: it may get it again.
+        if agent == .claude, event == "SessionStart", payload["source"] as? String == "compact", let session = payload["session_id"] as? String {
+            let url = KnowledgeSession.url(in: store.sessionsFolder, agent: agent.rawValue, session: session, subagent: nil)
+            if FileManager.default.fileExists(atPath: url.path) { _ = KnowledgeSession.update(url) { $0 = KnowledgeSession() } }
+            return Answer()
+        }
         // Most hook calls are none of these: they read nothing.
         guard let event, handled[agent]?.contains(event) == true,
               let served = ServedKnowledge.read(store.servedURL), !served.bricks.isEmpty
@@ -154,8 +187,9 @@ public enum KnowledgeHook {
             _ = KnowledgeSession.update(url) { session in
                 let picked = KnowledgeDelivery.pick(served, anchor: file.anchor, path: file.path, session: session, now: now, macOS: macOS)
                 guard !picked.isEmpty else { return }
-                // Kept for the model call: the line it will take of the budget.
-                session.bytes += KnowledgeDelivery.cost(KnowledgeDelivery.text(picked, about: KnowledgeDelivery.openedFiles))
+                // Kept for the model call: its lines count now, the one header
+                // when it is sent.
+                session.bytes += picked.map { KnowledgeDelivery.cost($0.line) + 1 }.reduce(0, +)
                 session.pending += picked.map(\.id)
             }
             return Answer()
@@ -170,6 +204,7 @@ public enum KnowledgeHook {
                 let bricks = served.bricks.filter { session.pending.contains($0.id) && $0.isServed(now: now, macOS: macOS) }
                 session.pending = []
                 for brick in bricks { session.delivered[brick.id] = now }
+                if !bricks.isEmpty { session.bytes += KnowledgeDelivery.cost(KnowledgeDelivery.text([], about: KnowledgeDelivery.openedFiles)) }
                 return bricks
             } ?? []
             guard !pending.isEmpty else { return Answer(uses: uses(corrected, .corrected)) }
@@ -191,11 +226,6 @@ public enum KnowledgeHook {
             session.corrected += named
             return named
         } ?? []
-    }
-
-    /// Not a line Nirux typed (a Mission's, a restarted Lead's).
-    static func isTypedByUser(_ prompt: String) -> Bool {
-        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[Nirux")
     }
 
     static func absolute(_ path: String, cwd: String?) -> String {

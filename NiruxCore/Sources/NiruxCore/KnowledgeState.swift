@@ -22,6 +22,11 @@ public struct BrickState: Codable, Equatable, Sendable {
     public var checkedTip: String?
     public var closedAt: TimeInterval?
     public var closedBecause: String?
+    /// A check a proof failed; the next failing check closes the brick,
+    /// one that holds clears it. A blip (a page down, a branch switched)
+    /// never closes a brick for good.
+    public var failedAt: TimeInterval?
+    public var failedBecause: String?
     public var replacedBy: String?
     public var suspectAt: TimeInterval?
     public var suspectBecause: String?
@@ -39,6 +44,8 @@ public enum BrickStatus: Equatable, Sendable {
     case expired(String)
     /// Someone may have proven it wrong: served again once reconfirmed.
     case suspect(String)
+    /// A proof failed once: the next check closes it or clears it.
+    case failing(String)
     /// A proof stopped holding, or the user closed it: for good.
     case closed(String)
 
@@ -49,6 +56,7 @@ public enum BrickStatus: Equatable, Sendable {
         case .open: return "brick"
         case .expired: return "expired"
         case .suspect: return "suspect"
+        case .failing: return "failing"
         case .closed: return "closed"
         }
     }
@@ -56,7 +64,7 @@ public enum BrickStatus: Equatable, Sendable {
     public var reason: String? {
         switch self {
         case .open: return nil
-        case .expired(let reason), .suspect(let reason), .closed(let reason): return reason
+        case .expired(let reason), .suspect(let reason), .failing(let reason), .closed(let reason): return reason
         }
     }
 }
@@ -75,8 +83,12 @@ extension KnowledgeBrick {
 
     public func status(_ state: BrickState, now: TimeInterval, macOS: Int) -> BrickStatus {
         if state.closedAt != nil { return .closed(state.closedBecause ?? "Closed.") }
+        if state.failedAt != nil {
+            return .failing((state.failedBecause ?? "A proof failed.") + " Nirux checks again: a second failure closes it.")
+        }
         if state.suspectAt != nil { return .suspect(state.suspectBecause ?? "Suspect.") }
-        if let confirmed = state.reconfirmedMacOS ?? self.macOS, confirmed != macOS {
+        if let validated = self.macOS, (state.reconfirmedMacOS ?? validated) != macOS {
+            let confirmed = state.reconfirmedMacOS ?? validated
             return .expired("Confirmed on macOS \(confirmed): confirm it still holds on macOS \(macOS).")
         }
         if let expiry = expiry(state), now >= expiry {

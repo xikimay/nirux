@@ -19,10 +19,12 @@ extension NiruxShellView {
         recheckKnowledge()
     }
 
-    /// One pass per space at a time; a space without bricks costs a stat.
+    /// One timer pass per space at a time; a space without bricks costs a
+    /// stat. Named spaces (the switch changed) get a pass even behind one
+    /// under way: the queue runs it after, with the switch as it is now.
     func recheckKnowledge(spaceIDs: [String]? = nil) {
         for space in profiles where spaceIDs?.contains(space.id) ?? true {
-            guard knowledgeChecks.insert(space.id).inserted else { continue }
+            guard knowledgeChecks.insert(space.id).inserted || spaceIDs != nil else { continue }
             let spaceID = space.id
             let serves = SpaceDefaultsStore.defaults(forSpace: spaceID).servesKnowledge
             Self.knowledgeQueue.async {
@@ -78,11 +80,12 @@ extension NiruxShellView {
 
     /// Codex's instructions for a launch in `workspace`: the brief file, or
     /// one of its own when bricks apply (SpaceKnowledge.codexInstructions);
-    /// nil when the user's Codex config sets its own.
-    func codexInstructionsFile(for workspace: WorkspaceState, launchDirectory: String) -> String? {
+    /// nil when the user's Codex config sets its own. A resumed thread holds
+    /// what it got: no git on the way of its launch.
+    func codexInstructionsFile(for workspace: WorkspaceState, launchDirectory: String, resumes: Bool) -> String? {
         let injection = spaceBriefInjection(for: workspace)
         guard !Self.codexConfigSetsDeveloperInstructions(launchDirectory: launchDirectory) else { return nil }
-        guard SpaceDefaultsStore.defaults(forSpace: workspace.profileID).servesKnowledge,
+        guard !resumes, SpaceDefaultsStore.defaults(forSpace: workspace.profileID).servesKnowledge,
               let file = SpaceKnowledge.codexInstructions(
                 spaceID: workspace.profileID, task: workspace.id, launchDirectory: launchDirectory, withBrief: injection != nil
               )

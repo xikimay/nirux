@@ -79,7 +79,10 @@ final class SpaceKnowledgeTests: XCTestCase {
         XCTAssertEqual(served, [id])
         XCTAssertEqual(store.load().state.checkedTips[anchor.key!], try git("rev-parse", "HEAD"))
         try commit("Sources/Views/Glass.swift", "func glass() {}\n", message: "Drop the comment")
-        XCTAssertEqual(recheck(at: 200).closed, [id])
+        XCTAssertEqual(recheck(at: 200).closed, [], "a first failure may be a blip")
+        XCTAssertEqual(served, [], "a failing brick reaches no agent")
+        try commit("README.md", "hello\n", message: "Readme")
+        XCTAssertEqual(recheck(at: 300).closed, [id])
         guard case .closed(let why)? = store.load().status(of: id, now: 201, macOS: SpaceKnowledge.macOS) else { return XCTFail("still open") }
         XCTAssertTrue(why.contains("no longer says"), why)
         XCTAssertEqual(served, [], "a closed brick reaches no agent")
@@ -107,6 +110,15 @@ final class SpaceKnowledgeTests: XCTestCase {
         XCTAssertTrue(problem([.file(path: "Sources/Gone.swift")])?.contains("is gone") == true)
         XCTAssertTrue(problem([.said(quote: "keep it", day: "2999-01-01")])?.contains("past day") == true)
         XCTAssertNil(problem([.said(quote: "keep it", day: "2026-11-01")]))
+    }
+
+    func testABareRepositoryIsCheckedThroughItsGitDir() throws {
+        let bare = root.appendingPathComponent("bare.git")
+        try git("clone", "-q", "--bare", repo.path, bare.path)
+        let anchor = SpaceAnchor.repository(commonDir: bare.path, topLevel: nil)
+        XCTAssertNil(anchor.folder, "no main checkout to run git in")
+        XCTAssertNil(SpaceKnowledge.proofProblem(of: brick(), anchor: anchor, now: Date().timeIntervalSince1970))
+        XCTAssertNotNil(SpaceKnowledge.proofProblem(of: brick(proofs: [.pullRequest(13)]), anchor: anchor, now: Date().timeIntervalSince1970))
     }
 
     func testACorrectionMakesItsBrickSuspectUntilTheUserConfirmsIt() throws {
@@ -153,6 +165,15 @@ final class SpaceKnowledgeTests: XCTestCase {
         XCTAssertTrue(text.contains("about the files this branch changes"))
         XCTAssertTrue(text.contains("AppKit rewrites a view's backing layer"))
         XCTAssertEqual(KnowledgeUse.load(in: store).map(\.agent), ["codex"])
+
+        // Closed since: a restarted column replays the launch naming this file.
+        try git("checkout", "-q", "main")
+        try git("stash", "push", "-q", "-u", "-m", "space-knowledge-test")
+        try commit("Sources/Views/Glass.swift", "func glass() {}\n", message: "Drop the comment")
+        recheck(at: Date().timeIntervalSince1970 + 1)
+        let replayed = try String(contentsOfFile: file, encoding: .utf8)
+        XCTAssertTrue(replayed.contains("Keep it short."))
+        XCTAssertFalse(replayed.contains("backing layer"), replayed)
     }
 
     // MARK: The receiver

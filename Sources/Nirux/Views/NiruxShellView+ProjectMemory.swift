@@ -209,7 +209,7 @@ extension NiruxShellView {
                 if let problem = SpaceKnowledge.proofProblem(of: proposal.brick, anchor: anchor, now: now) {
                     throw ProjectMemory.WriteError.failed(problem)
                 }
-                if let refusal = loaded.refusal(of: proposal.brick, now: now, macOS: SpaceKnowledge.macOS), refusal != .alreadyPending(since: proposal.proposedAt) {
+                if let refusal = loaded.refusal(of: proposal.brick, now: now, macOS: SpaceKnowledge.macOS, validating: true) {
                     throw ProjectMemory.WriteError.failed(Self.text(of: refusal))
                 }
                 guard let brick = loaded.validate(id, now: now) else { throw ProjectMemory.WriteError.failed("It was decided meanwhile.") }

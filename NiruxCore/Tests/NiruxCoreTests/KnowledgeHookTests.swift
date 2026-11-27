@@ -87,6 +87,19 @@ struct KnowledgeHookTests {
         #expect(prompt("backing layer again").uses.isEmpty)
     }
 
+    @Test func aCompactedConversationMayGetItsBricksAgain() throws {
+        let space = try Space()
+        let read = Self.claudeRead(space.path("Sources/Views/Glass.swift"))
+        #expect(context(KnowledgeHook.answer(agent: .claude, payload: read, store: space.store, task: nil, now: 1, macOS: 27)) != nil)
+        #expect(KnowledgeHook.answer(agent: .claude, payload: read, store: space.store, task: nil, now: 2, macOS: 27) == KnowledgeHook.Answer())
+        let resumed: [String: Any] = ["hook_event_name": "SessionStart", "session_id": "s1", "source": "resume"]
+        _ = KnowledgeHook.answer(agent: .claude, payload: resumed, store: space.store, task: nil, now: 3, macOS: 27)
+        #expect(KnowledgeHook.answer(agent: .claude, payload: read, store: space.store, task: nil, now: 4, macOS: 27) == KnowledgeHook.Answer())
+        let compacted: [String: Any] = ["hook_event_name": "SessionStart", "session_id": "s1", "source": "compact"]
+        #expect(KnowledgeHook.answer(agent: .claude, payload: compacted, store: space.store, task: nil, now: 5, macOS: 27) == KnowledgeHook.Answer())
+        #expect(context(KnowledgeHook.answer(agent: .claude, payload: read, store: space.store, task: nil, now: 6, macOS: 27)) != nil)
+    }
+
     @Test func agyGetsTheBricksOfTheFilesItOpenedAtItsNextModelCall() throws {
         let space = try Space()
         let read: [String: Any] = [

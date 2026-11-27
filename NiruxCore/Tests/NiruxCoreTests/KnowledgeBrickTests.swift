@@ -85,6 +85,34 @@ struct KnowledgeBrickTests {
         #expect(brick.status(state, now: 2_000, macOS: 28) == .open)
     }
 
+    @Test func confirmingABrickMacOSCantChangeNeverTiesItToAVersion() {
+        var loaded = KnowledgeStore.Loaded()
+        let brick = Self.brick(proofs: [.file(path: "a.swift")])
+        loaded.bricks[brick.id] = brick
+        let suspected = loaded.suspect(brick.id, because: "why", now: 1)
+        let confirmed = loaded.reconfirm(brick.id, now: 2, macOS: 26)
+        #expect(suspected && confirmed)
+        #expect(loaded.status(of: brick.id, now: 3, macOS: 27) == .open)
+    }
+
+    @Test func validatingStillChecksTheRoomAndWhatItReplaces() {
+        var loaded = KnowledgeStore.Loaded()
+        for number in 1..<KnowledgeStore.maxBricks {
+            let brick = Self.brick(proofs: [.pullRequest(number)])
+            loaded.bricks[brick.id] = brick
+        }
+        let first = Self.brick(proofs: [.pullRequest(100)], validatedAt: nil)
+        let second = Self.brick(proofs: [.pullRequest(101)], validatedAt: nil)
+        loaded.state.proposals = [BrickProposal(brick: first, proposedAt: 0), BrickProposal(brick: second, proposedAt: 0)]
+        #expect(loaded.refusal(of: first, now: 1, macOS: 27, validating: true) == .full)
+        loaded.state.proposals.removeLast()
+        #expect(loaded.refusal(of: first, now: 1, macOS: 27, validating: true) == nil)
+        #expect(loaded.refusal(of: first, now: 1, macOS: 27) == .alreadyPending(since: 0))
+        let orphan = Self.brick(proofs: [.pullRequest(102)], replaces: "b-000000000000", validatedAt: nil)
+        loaded.state.proposals.append(BrickProposal(brick: orphan, proposedAt: 0))
+        #expect(loaded.refusal(of: orphan, now: 1, macOS: 27, validating: true) == .replacesUnknown("b-000000000000"))
+    }
+
     @Test func closedOutranksSuspectWhichOutranksExpired() {
         let brick = Self.brick(proofs: [.pullRequest(1)], validatedAt: 0)
         var state = BrickState()
@@ -125,6 +153,14 @@ struct KnowledgeBrickTests {
         let loaded = store.load()
         #expect(loaded.readOnlyReason != nil)
         #expect(loaded.refusal(of: Self.brick(), now: 0, macOS: 27) == .readOnly(loaded.readOnlyReason!))
+    }
+
+    @Test func anUnreadableStateIsNeverWrittenOver() throws {
+        let store = KnowledgeStore(spaceFolder: try folder())
+        try FileManager.default.createDirectory(at: store.folder, withIntermediateDirectories: true)
+        try Data(#"{"schemaVersion": 1, "bricks": {}, "proposals": [{"brick": {"proofs": [{"kind": "ci"}]}}]}"#.utf8)
+            .write(to: store.folder.appendingPathComponent("state.json"))
+        #expect(store.load().readOnlyReason != nil)
     }
 
     @Test func savingDropsDecidedProposalsPastTheirLifetime() throws {

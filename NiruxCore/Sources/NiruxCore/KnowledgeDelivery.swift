@@ -285,10 +285,19 @@ public struct KnowledgeSession: Codable, Equatable, Sendable {
 // MARK: - Corrections
 
 public enum KnowledgeCorrection {
+    /// Words that say something is wrong, in English and French, folded.
+    static let cues: Set<String> = [
+        "no", "not", "nope", "wrong", "incorrect", "isn", "doesn", "don", "aren", "wasn", "never", "actually", "instead",
+        "rather", "stop", "mistake", "false", "non", "pas", "faux", "fausse", "mauvais", "mauvaise", "erreur", "plutot", "jamais",
+        "arrete", "ne", "n"
+    ]
+
     /// The bricks whose subject `prompt` names, whole words, in any case and
-    /// accent: what the user wrote about after an agent got them.
+    /// accent, when it also says something is wrong ("no", "pas"…): the
+    /// user correcting an agent about them.
     public static func named(in prompt: String, among bricks: [ServedKnowledge.Brick]) -> [String] {
         let text = folded(prompt)
+        guard text.split(separator: " ").contains(where: { cues.contains(String($0)) }) else { return [] }
         return bricks.filter { brick in
             let subject = folded(brick.subject)
             return subject.count > 2 && text.contains(subject)

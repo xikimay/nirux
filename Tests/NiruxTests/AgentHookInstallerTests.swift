@@ -383,6 +383,10 @@ final class AgentHookInstallerTests: XCTestCase {
         try Data("{}".utf8).write(to: served)
         XCTAssertEqual(try runHook(argv, env: niruxEnv), 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: receiverOutput.path), "no space: no receiver")
+        env["NIRUX_STATE_DIR"] = home.appendingPathComponent("elsewhere").path
+        XCTAssertEqual(try runHook(argv, env: env), 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: receiverOutput.path), "the receiver's state folder, not the default")
+        env.removeValue(forKey: "NIRUX_STATE_DIR")
         XCTAssertEqual(try runHook(argv, env: env), 0)
         let lines = try String(contentsOf: receiverOutput, encoding: .utf8).components(separatedBy: "\n")
         XCTAssertEqual(Array(lines.prefix(3)), ["--hook", "claude", "--agy"])

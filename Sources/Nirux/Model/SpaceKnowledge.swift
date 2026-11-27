@@ -27,10 +27,18 @@ enum SpaceKnowledge {
         }
         guard let spaceID = environment["NIRUX_PROFILE_ID"], let store = store(spaceID: spaceID, stateDirectory: stateDirectory) else { return nil }
         let answer = KnowledgeHook.answer(
-            agent: agent, payload: payload, store: store, task: environment["NIRUX_WORKSPACE_ID"], now: now, macOS: macOS
+            agent: agent, payload: payload, store: store, task: environment["NIRUX_WORKSPACE_ID"], now: now, macOS: macOS,
+            typedByNirux: isTypedByNirux
         )
         if !answer.uses.isEmpty { KnowledgeUse.append(answer.uses, in: store) }
         return answer.output
+    }
+
+    /// The prompts Nirux types into an agent: a Mission's or a restarted
+    /// Lead's line, a pull request round (CI, conflict, review feedback).
+    static func isTypedByNirux(_ prompt: String) -> Bool {
+        prompt.hasPrefix("[Nirux") || prompt.hasPrefix("CI failed on PR #") || prompt.hasPrefix("/receiving-code-review ")
+            || prompt.range(of: #"^PR #\d+ conflicts with "#, options: .regularExpression) != nil
     }
 
     // MARK: Reading a repository
@@ -38,19 +46,28 @@ enum SpaceKnowledge {
     private static let gitEnvironment = GitDetect.readOnlyEnvironment.merging(["GIT_NO_LAZY_FETCH": "1"]) { _, new in new }
     static let maxFileBytes = 2 << 20
 
-    private static func git(_ arguments: [String], in folder: String, maxBytes: Int = 1 << 20) -> BoundedProcessResult? {
+    /// git in `folder`, or on the repository whose git dir is `gitDir`:
+    /// a check reads objects only, a bare repository's too.
+    private static func git(
+        _ arguments: [String], in folder: String, gitDir: String? = nil, maxBytes: Int = 1 << 20, timeout: TimeInterval = 15
+    ) -> BoundedProcessResult? {
         BoundedProcess.run(
-            executableURL: URL(fileURLWithPath: "/usr/bin/git"), arguments: ["--literal-pathspecs"] + arguments,
-            currentDirectoryURL: URL(fileURLWithPath: folder), environment: gitEnvironment, timeout: 15, captureStandardError: true,
+            executableURL: URL(fileURLWithPath: "/usr/bin/git"), arguments: (gitDir.map { ["--git-dir=" + $0] } ?? []) + ["--literal-pathspecs"] + arguments,
+            currentDirectoryURL: URL(fileURLWithPath: gitDir ?? folder), environment: gitEnvironment, timeout: timeout, captureStandardError: true,
             maxStandardOutputBytes: maxBytes
         )
     }
 
     /// The tip of the base branch as last fetched: origin's default branch,
-    /// else the checkout's HEAD for a repository without one.
-    static func baseTip(folder: String) -> String? {
-        for ref in ["refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master", "HEAD"] {
-            guard let result = git(["rev-parse", "--verify", "--quiet", ref + "^{commit}"], in: folder), result.terminationStatus == 0 else { continue }
+    /// else the local main or master. Never a checkout's HEAD, which follows
+    /// whatever branch it is on; a bare repository's HEAD names its default.
+    static func baseTip(gitDir: String, timeout: TimeInterval = 15) -> String? {
+        let isBare = git(["rev-parse", "--is-bare-repository"], in: gitDir, gitDir: gitDir, timeout: timeout)
+            .map { String(decoding: $0.standardOutput, as: UTF8.self).hasPrefix("true") } ?? false
+        let refs = ["refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master", "refs/heads/main", "refs/heads/master"]
+        for ref in refs + (isBare ? ["HEAD"] : []) {
+            guard let result = git(["rev-parse", "--verify", "--quiet", ref + "^{commit}"], in: gitDir, gitDir: gitDir, timeout: timeout),
+                  result.terminationStatus == 0 else { continue }
             let sha = String(decoding: result.standardOutput, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             if sha.count == 40 { return sha }
         }
@@ -67,9 +84,11 @@ enum SpaceKnowledge {
         spaceID: String, task: String, launchDirectory: String, withBrief: Bool,
         now: TimeInterval = Date().timeIntervalSince1970, stateDirectory: URL = Persistence.stateDirectory
     ) -> String? {
+        // Files only, before any git: a launch waits on this.
         guard let store = store(spaceID: spaceID, stateDirectory: stateDirectory),
-              let served = ServedKnowledge.read(store.servedURL), !served.bricks.isEmpty,
-              let repository = KnowledgeLocation.repository(of: (launchDirectory as NSString).appendingPathComponent("launch"))
+              let served = ServedKnowledge.read(store.servedURL),
+              let repository = KnowledgeLocation.repository(of: (launchDirectory as NSString).appendingPathComponent("launch")),
+              served.bricks.contains(where: { $0.anchor == repository.anchor })
         else { return nil }
         let picked = KnowledgeDelivery.pick(served, anchor: repository.anchor, paths: changedFiles(in: launchDirectory), now: now, macOS: macOS)
         guard !picked.isEmpty else { return nil }
@@ -91,50 +110,54 @@ enum SpaceKnowledge {
 
     /// The files the checkout holding `folder` changes from where its branch
     /// left the base branch, committed or not, new ones included; relative
-    /// to its top. Bounded: a launch waits on it.
-    static func changedFiles(in folder: String) -> [String] {
-        guard let top = git(["rev-parse", "--show-toplevel"], in: folder, maxBytes: 4096), top.terminationStatus == 0 else { return [] }
-        let root = String(decoding: top.standardOutput, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let tip = baseTip(folder: root),
-              let base = git(["merge-base", "HEAD", tip], in: root, maxBytes: 4096), base.terminationStatus == 0
+    /// to its top. Each git call bounded short: a launch waits on it.
+    static func changedFiles(in folder: String, timeout: TimeInterval = 2) -> [String] {
+        func output(_ arguments: [String], in folder: String, gitDir: String? = nil) -> Data? {
+            guard let result = git(arguments, in: folder, gitDir: gitDir, timeout: timeout), result.terminationStatus == 0 else { return nil }
+            return result.standardOutput
+        }
+        func line(_ data: Data?) -> String? { data.map { String(decoding: $0, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) } }
+        guard let paths = line(output(["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], in: folder))?
+                .components(separatedBy: "\n"), paths.count == 2,
+              let tip = baseTip(gitDir: paths[1], timeout: timeout),
+              let fork = line(output(["merge-base", "HEAD", tip], in: paths[0]))
         else { return [] }
-        let fork = String(decoding: base.standardOutput, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         let lists = [["diff", "--name-only", "-z", fork], ["ls-files", "-z", "--others", "--exclude-standard"]]
         return lists.flatMap { arguments -> [String] in
-            guard let result = git(arguments, in: root), result.terminationStatus == 0 else { return [] }
-            return result.standardOutput.split(separator: 0).map { String(decoding: $0, as: UTF8.self) }
+            (output(arguments, in: paths[0]) ?? Data()).split(separator: 0).map { String(decoding: $0, as: UTF8.self) }
         }
     }
 
-    /// What a check reads of the repository whose main checkout is `folder`,
-    /// at `tip`: git's objects only, never the working tree.
-    static func repositorySource(folder: String, tip: String, readsPages: Bool) -> KnowledgeSource {
-        KnowledgeSource(
+    /// What a check reads of the repository whose git dir is `gitDir`, at
+    /// `tip`: git's objects only, never a working tree.
+    static func repositorySource(gitDir: String, tip: String, readsPages: Bool) -> KnowledgeSource {
+        @Sendable func run(_ arguments: [String], maxBytes: Int = 1 << 20) -> BoundedProcessResult? {
+            git(arguments, in: gitDir, gitDir: gitDir, maxBytes: maxBytes)
+        }
+        return KnowledgeSource(
             tip: tip,
             file: { path in
-                guard let listed = git(["ls-tree", "--name-only", tip, "--", path], in: folder), listed.terminationStatus == 0 else {
+                guard let listed = run(["ls-tree", "--name-only", tip, "--", path]), listed.terminationStatus == 0 else {
                     return .unknown("git couldn’t list \(path).")
                 }
                 guard !listed.standardOutput.isEmpty else { return .missing }
-                guard let blob = git(["cat-file", "-p", "\(tip):\(path)"], in: folder, maxBytes: maxFileBytes), blob.terminationStatus == 0 else {
+                guard let blob = run(["cat-file", "-p", "\(tip):\(path)"], maxBytes: maxFileBytes), blob.terminationStatus == 0 else {
                     return .unknown("git couldn’t read \(path).")
                 }
                 return .data(blob.standardOutput)
             },
             hasPullRequest: { number in
-                let merged = git([
-                    "log", "-1", "--format=%H", "-E", "--grep=^Merge pull request #\(number)( |$)", "--grep=\\(#\(number)\\)$", tip
-                ], in: folder)
+                let merged = run(["log", "-1", "--format=%H", "-E", "--grep=^Merge pull request #\(number)( |$)", "--grep=\\(#\(number)\\)$", tip])
                 guard let merged, merged.terminationStatus == 0 else { return nil }
                 return !merged.standardOutput.isEmpty
             },
             hasCommit: { sha in
-                switch git(["merge-base", "--is-ancestor", sha, tip], in: folder)?.terminationStatus {
+                switch run(["merge-base", "--is-ancestor", sha, tip])?.terminationStatus {
                 case 0?: return true
                 case 1?: return false
                 default:
                     // An unknown commit isn't on the branch.
-                    return git(["cat-file", "-e", sha + "^{commit}"], in: folder)?.terminationStatus == 128 ? false : nil
+                    return run(["cat-file", "-e", sha + "^{commit}"])?.terminationStatus == 128 ? false : nil
                 }
             },
             page: readsPages ? page : nil
@@ -233,10 +256,10 @@ enum SpaceKnowledge {
             guard let anchor = anchor(key: key) else { continue }
             let source: KnowledgeSource
             switch anchor.kind {
-            case .gitRepository:
-                guard let folder = anchor.folder, let tip = baseTip(folder: folder) else { continue }
+            case .gitRepository(let gitDir):
+                guard let tip = baseTip(gitDir: gitDir) else { continue }
                 guard daily || loaded.state.checkedTips[key] != tip else { continue }
-                source = repositorySource(folder: folder, tip: tip, readsPages: daily)
+                source = repositorySource(gitDir: gitDir, tip: tip, readsPages: daily)
             case .folder(let path):
                 guard daily else { continue }
                 source = folderSource(path: path, readsPages: true)
@@ -266,11 +289,11 @@ enum SpaceKnowledge {
     static func proofProblem(of brick: KnowledgeBrick, anchor: SpaceAnchor, now: TimeInterval) -> String? {
         let source: KnowledgeSource
         switch anchor.kind {
-        case .gitRepository:
-            guard let folder = anchor.folder, let tip = baseTip(folder: folder) else {
+        case .gitRepository(let gitDir):
+            guard let tip = baseTip(gitDir: gitDir) else {
                 return "Nirux can’t read \(anchor.name)’s base branch to check the proofs."
             }
-            source = repositorySource(folder: folder, tip: tip, readsPages: true)
+            source = repositorySource(gitDir: gitDir, tip: tip, readsPages: true)
         case .folder(let path):
             source = folderSource(path: path, readsPages: true)
         case .unknown:
@@ -306,10 +329,18 @@ enum SpaceKnowledge {
     }
 
     /// Writes what agents get from `loaded`, unless it says so already.
+    /// A Codex column restarted replays its launch, which names its file:
+    /// what it was given then goes back to the brief alone.
     static func serve(_ loaded: KnowledgeStore.Loaded, in store: KnowledgeStore, serves: Bool, now: TimeInterval) throws {
         let served = serves ? ServedKnowledge.compile(loaded, now: now, macOS: macOS) : nil
         let current = ServedKnowledge.read(store.servedURL)
         guard current != served, !(current == nil && served?.bricks.isEmpty != false) else { return }
         try store.writeServed(served)
+        let codex = store.folder.appendingPathComponent("codex")
+        let briefURL = store.folder.deletingLastPathComponent().appendingPathComponent("brief.md")
+        let brief = SpaceBrief.readBrief(at: briefURL).flatMap(SpaceBrief.body(of:)).map { SpaceBrief.injectedText(body: $0, briefPath: briefURL.path) } ?? ""
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: codex.path)) ?? [] where name.hasSuffix(".toml") {
+            try? KnowledgeStore.writePrivately(Data(SpaceBrief.tomlBasicString(brief).utf8), to: codex.appendingPathComponent(name))
+        }
     }
 }

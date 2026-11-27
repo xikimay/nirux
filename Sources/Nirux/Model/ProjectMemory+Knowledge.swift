@@ -99,7 +99,7 @@ extension ProjectMemory {
             func rank(_ status: BrickStatus?) -> Int {
                 switch status {
                 case .open?: return 0
-                case .expired?, .suspect?: return 1
+                case .expired?, .suspect?, .failing?: return 1
                 case .closed?: return 2
                 case nil: return 0
                 }

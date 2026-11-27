@@ -246,7 +246,7 @@ extension NiruxShellView {
         case .codex(let resume, let mode, let model):
             return Self.codexCommand(
                 resume: resume, workingDirectory: resumeDirectory, mode: mode ?? Self.codexLaunchMode(for: workspace), model: model,
-                briefFile: codexInstructionsFile(for: workspace, launchDirectory: launchDirectory),
+                briefFile: codexInstructionsFile(for: workspace, launchDirectory: launchDirectory, resumes: resume != nil),
                 handoverPrompt: handoverPrompt
             )
         case .agy(let resume, let mode, let model):

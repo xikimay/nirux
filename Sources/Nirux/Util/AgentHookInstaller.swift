@@ -390,11 +390,17 @@ enum AgentHookInstaller {
     /// (KnowledgeHook), guarded on the space serving some: agy runs
     /// PreInvocation before each model call, which must not start Nirux for
     /// nothing.
-    static func agyKnowledgeHookCommand(executablePath: String, stateDirectory: URL = Persistence.stateDirectory) -> String {
+    /// The state folder is the receiver's: NIRUX_STATE_DIR when the
+    /// terminal has it, else `stateDirectory`.
+    static func agyKnowledgeHookCommand(executablePath: String, stateDirectory: URL = defaultStateDirectory) -> String {
         let path = shellQuoted(executablePath)
-        let served = shellQuoted(stateDirectory.appendingPathComponent("projects").path + "/") + #""$NIRUX_PROFILE_ID""#
-            + shellQuoted("/\(KnowledgeStore.folderName)/\(ServedKnowledge.fileName)")
-        return #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -n "$NIRUX_PROFILE_ID" ] && [ -f \#(served) ] && [ -x \#(path) ]; then exec \#(path) --hook claude --agy; else /bin/cat >/dev/null; fi"#
+        let served = #""$d/projects/$NIRUX_PROFILE_ID/\#(KnowledgeStore.folderName)/\#(ServedKnowledge.fileName)""#
+        return #"d=${NIRUX_STATE_DIR:-\#(shellQuoted(stateDirectory.path))}; if [ -n "$NIRUX_AGENT_UUID" ] && [ -n "$NIRUX_PROFILE_ID" ] && [ -f \#(served) ] && [ -x \#(path) ]; then exec \#(path) --hook claude --agy; else /bin/cat >/dev/null; fi"#
+    }
+
+    /// The real state's folder, whatever this build runs on.
+    static var defaultStateDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("nirux")
     }
 
     /// SessionStart captures new conversations, and Stop captures conversations
@@ -404,7 +410,7 @@ enum AgentHookInstaller {
     /// (probed on agy 1.5.18). Never PreToolUse, whose hooks must decide on
     /// the tool call. agy's default timeout (30 s) covers a cold start of the
     /// receiver.
-    static func agyHooks(executablePath: String, stateDirectory: URL = Persistence.stateDirectory) -> [String: Any] {
+    static func agyHooks(executablePath: String, stateDirectory: URL = defaultStateDirectory) -> [String: Any] {
         let handler: [String: Any] = ["type": "command", "command": agyHookCommand(executablePath: executablePath)]
         let knowledge: [String: Any] = [
             "type": "command", "command": agyKnowledgeHookCommand(executablePath: executablePath, stateDirectory: stateDirectory)
