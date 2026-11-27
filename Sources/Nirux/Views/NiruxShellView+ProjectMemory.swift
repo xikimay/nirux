@@ -7,6 +7,7 @@ extension NiruxShellView {
     struct ProjectMemoryContext: Sendable {
         let folder: String
         let brief: URL?
+        let spaceID: String
         let home: String
         let environment: [String: String]
         let managed: ProjectMemory.ManagedFolders
@@ -17,6 +18,7 @@ extension NiruxShellView {
         case memory(fileName: String)
         case rule(text: String)
         case missingFile(fileName: String)
+        case brick(id: String)
         case none
 
         /// The item a write acts on, kept selected when it fails.
@@ -51,6 +53,7 @@ extension NiruxShellView {
         let context = ProjectMemoryContext(
             folder: folder,
             brief: SpaceBrief.briefURL(spaceID: spaceID),
+            spaceID: spaceID,
             home: sideEffects.homeDirectory(),
             environment: ProcessInfo.processInfo.environment,
             managed: sideEffects.claudeManagedSettings()
@@ -185,7 +188,58 @@ extension NiruxShellView {
                 }
             }
         }
+        actions.brick = { [weak self] id, action in
+            guard let self else { return false }
+            return writeBrick(context, id: id, action: action)
+        }
         return actions
+    }
+
+    /// Writes the user's decision about a brick on the knowledge queue, then
+    /// reads everything back into the open panel, the brick selected. A
+    /// proposal is validated only on proofs that still hold.
+    private func writeBrick(_ context: ProjectMemoryContext, id: String, action: ProjectMemoryPreview.BrickAction) -> Bool {
+        let request = projectMemoryRequest
+        let opening = projectMemoryPanel?.opening ?? 0
+        changeKnowledge(inSpace: context.spaceID, { loaded, store, now in
+            switch action {
+            case .validate:
+                guard let proposal = loaded.pending.first(where: { $0.id == id }) else { throw ProjectMemory.WriteError.failed("It was decided meanwhile.") }
+                guard let anchor = SpaceKnowledge.anchor(key: proposal.brick.scope.anchor) else { throw ProjectMemory.WriteError.failed("Its repository is unknown.") }
+                if let problem = SpaceKnowledge.proofProblem(of: proposal.brick, anchor: anchor, now: now) {
+                    throw ProjectMemory.WriteError.failed(problem)
+                }
+                if let refusal = loaded.refusal(of: proposal.brick, now: now, macOS: SpaceKnowledge.macOS, validating: true) {
+                    throw ProjectMemory.WriteError.failed(Self.text(of: refusal))
+                }
+                guard let brick = loaded.validate(id, now: now) else { throw ProjectMemory.WriteError.failed("It was decided meanwhile.") }
+                // The brick's file first: a state naming a brick without one shows nothing.
+                try store.add(brick)
+            case .dismiss:
+                guard loaded.dismiss(id, now: now) else { throw ProjectMemory.WriteError.failed("It was decided meanwhile.") }
+            case .reconfirm:
+                guard loaded.reconfirm(id, now: now, macOS: SpaceKnowledge.macOS) else { throw ProjectMemory.WriteError.failed("It is closed.") }
+            case .close:
+                guard loaded.close(id, because: "Closed by you.", now: now) else { throw ProjectMemory.WriteError.failed("It is closed already.") }
+            }
+        }, completion: { [weak self] failure in
+            guard let self else { return }
+            Self.readProjectMemory(context) { [weak self] model in
+                guard let self, let panel = projectMemoryPanel else { return }
+                guard request == projectMemoryRequest else {
+                    panel.writeEnded(opening: opening)
+                    if let failure { showToast(failure, tone: .error) }
+                    return
+                }
+                let picks: (ProjectMemory.Entry) -> Bool = { model.knowledge.brick(of: $0)?.id == id }
+                if let failure {
+                    panel.writeFailed(failure, model: model, selecting: picks)
+                } else {
+                    panel.update(model: model, selecting: picks)
+                }
+            }
+        })
+        return true
     }
 
     /// The Brief tab holds typed text: a write to the brief now would be
@@ -239,6 +293,7 @@ extension NiruxShellView {
                     case .missingFile(let fileName):
                         if case .missingFile(let line) = entry.source { return line.fileName == fileName }
                         return false
+                    case .brick(let id): return model.knowledge.brick(of: entry)?.id == id
                     case .none: return false
                     }
                 }
@@ -262,7 +317,7 @@ extension NiruxShellView {
 
     /// Off the main thread through nonisolated functions, so the closures
     /// can't inherit this view's main-actor isolation.
-    nonisolated private static func readProjectMemory(
+    nonisolated static func readProjectMemory(
         _ context: ProjectMemoryContext, completion: @escaping @MainActor @Sendable (ProjectMemoryPanel.Model) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -291,10 +346,13 @@ extension NiruxShellView {
         let location = ProjectMemory.locate(
             folder: context.folder, home: context.home, environment: context.environment, managed: context.managed
         )
+        let bricks = SpaceKnowledge.store(spaceID: context.spaceID).flatMap {
+            ProjectMemory.Bricks.read($0, serves: SpaceDefaultsStore.defaults(forSpace: context.spaceID).servesKnowledge)
+        }
         return ProjectMemoryPanel.Model(
             repository: URL(fileURLWithPath: location.projectRoot).lastPathComponent,
             location: location,
-            knowledge: ProjectMemory.knowledge(folder: context.folder, brief: context.brief, location: location)
+            knowledge: ProjectMemory.knowledge(folder: context.folder, brief: context.brief, location: location, bricks: bricks)
         )
     }
 }

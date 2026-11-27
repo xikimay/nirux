@@ -263,6 +263,31 @@ final class ProjectMemoryTests: XCTestCase {
 
     // MARK: - Links
 
+    func testBricksListProposalsFirstThenStandingThenClosed() {
+        func brick(_ sentence: String, _ number: Int, validated: TimeInterval?) -> KnowledgeBrick {
+            KnowledgeBrick(
+                sentence: sentence, subject: "a subject", scope: .init(anchor: "git:/x/.git", name: "x", paths: ["a.swift"]),
+                proofs: [.pullRequest(number)], proposedBy: "the Lead", validatedAt: validated
+            )
+        }
+        let closed = brick("A brick closed since it was validated.", 1, validated: 1)
+        let open = brick("A brick that stands and reaches agents.", 2, validated: 2)
+        let proposed = brick("A brick that waits for the user to validate.", 3, validated: nil)
+        var loaded = KnowledgeStore.Loaded(bricks: [closed.id: closed, open.id: open])
+        loaded.state.bricks[closed.id] = BrickState()
+        loaded.state.bricks[closed.id]?.closedAt = 3
+        loaded.state.proposals = [BrickProposal(brick: proposed, proposedAt: 4)]
+        let bricks = ProjectMemory.Bricks(loaded: loaded, reach: [open.id: .init(tasks: 3, corrections: 1)], serves: true, now: 5, macOS: 27)
+        let knowledge = ProjectMemory.Knowledge(brief: nil, teamFiles: [], memory: nil, bricks: bricks)
+        XCTAssertEqual(knowledge.entries.map(\.title), [proposed.sentence, open.sentence, closed.sentence])
+        XCTAssertEqual(knowledge.entries.map(\.badge), ["proposed", "brick", "closed"])
+        XCTAssertEqual(knowledge.entries.map(\.scope), [.whenRelevant, .whenRelevant, .whenRelevant])
+        XCTAssertTrue(knowledge.entries[1].detail.hasSuffix("3 tasks"), knowledge.entries[1].detail)
+        XCTAssertEqual(ProjectMemory.summary(of: knowledge), "3 when relevant · 1 brick to validate")
+        XCTAssertNil(knowledge.target(of: knowledge.entries[1]), "a brick is never edited")
+        XCTAssertEqual(knowledge.brick(of: knowledge.entries[0])?.id, proposed.id)
+    }
+
     func testLinks() throws {
         let text = "See [[alpha]], [[ beta ]] and [[]], [[[gamma]]], [[not\nclosed]] [[alpha]]."
         let links = ProjectMemory.links(in: text)

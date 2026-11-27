@@ -51,6 +51,10 @@ extension ProjectMemory {
             case memory(Int)
             /// A line of `MEMORY.md` whose file is gone.
             case missingFile(IndexLine)
+            /// A brick of the space, by id.
+            case brick(String)
+            /// A brick proposed to the user, by id.
+            case proposal(String)
         }
 
         let scope: Scope
@@ -59,6 +63,49 @@ extension ProjectMemory {
         let source: Source
         /// Folded once (see `folded`): the filter runs on every keystroke.
         let searchText: String
+        /// What the row's chip says instead of its scope.
+        var badge: String?
+    }
+
+    /// The space's bricks, as the list shows them.
+    struct Bricks: Equatable, Sendable {
+        let loaded: KnowledgeStore.Loaded
+        /// Per brick: the tasks it reached, those a correction followed.
+        let reach: [String: Reach]
+        /// The space's switch.
+        let serves: Bool
+        let now: TimeInterval
+        let macOS: Int
+
+        struct Reach: Equatable, Sendable {
+            var tasks = 0
+            var corrections = 0
+        }
+
+        func status(of id: String) -> BrickStatus? { loaded.status(of: id, now: now, macOS: macOS) }
+
+        /// Reads the space's bricks and their uses.
+        static func read(_ store: KnowledgeStore, serves: Bool, now: TimeInterval = Date().timeIntervalSince1970) -> Bricks? {
+            let loaded = store.load()
+            guard !loaded.bricks.isEmpty || !loaded.state.proposals.isEmpty else { return nil }
+            let reach = KnowledgeUse.reach(KnowledgeUse.load(in: store)).mapValues { Reach(tasks: $0.tasks, corrections: $0.corrections) }
+            return Bricks(loaded: loaded, reach: reach, serves: serves, now: now, macOS: SpaceKnowledge.macOS)
+        }
+
+        /// Proposals first, then standing bricks, then closed ones.
+        var listed: [(id: String, brick: KnowledgeBrick, status: BrickStatus?)] {
+            let proposals = loaded.pending.map { ($0.id, $0.brick, BrickStatus?.none) }
+            let bricks = loaded.ordered.map { ($0.id, $0.brick, status(of: $0.id)) }
+            func rank(_ status: BrickStatus?) -> Int {
+                switch status {
+                case .open?: return 0
+                case .expired?, .suspect?, .failing?: return 1
+                case .closed?: return 2
+                case nil: return 0
+                }
+            }
+            return proposals + bricks.enumerated().sorted { (rank($0.element.2), $0.offset) < (rank($1.element.2), $1.offset) }.map(\.element)
+        }
     }
 
     /// What agents know about a repository, as read.
@@ -67,13 +114,16 @@ extension ProjectMemory {
         let files: [RuleFile]
         /// Nil when the repository has no memory folder yet.
         let memory: Contents?
+        /// Nil when the space has no brick and no proposal.
+        let bricks: Bricks?
         /// Always, then team, then when relevant: the memory in its index's
         /// order, then the index's lines without a file.
         let entries: [Entry]
 
-        init(brief: RuleFile?, teamFiles: [RuleFile], memory: Contents?) {
+        init(brief: RuleFile?, teamFiles: [RuleFile], memory: Contents?, bricks: Bricks? = nil) {
             files = (brief.map { [$0] } ?? []) + teamFiles
             self.memory = memory
+            self.bricks = bricks
             var entries: [Entry] = []
             for (fileIndex, file) in files.enumerated() {
                 let scope: Scope = fileIndex == 0 && brief != nil ? .always : .team
@@ -84,6 +134,20 @@ extension ProjectMemory {
                         searchText: ProjectMemory.folded(rule.text)
                     ))
                 }
+            }
+            for (id, brick, status) in bricks?.listed ?? [] {
+                let reach = bricks?.reach[id]
+                let detail = [
+                    status == nil ? "proposed by \(brick.proposedBy ?? "an agent")" : nil,
+                    brick.scope.paths.joined(separator: ", "),
+                    brick.proofs.map(\.label).joined(separator: " · "),
+                    reach.map { "\($0.tasks) task\($0.tasks == 1 ? "" : "s")" }
+                ].compactMap { $0 }.joined(separator: " · ")
+                entries.append(Entry(
+                    scope: .whenRelevant, title: brick.sentence, detail: detail, source: status == nil ? .proposal(id) : .brick(id),
+                    searchText: ProjectMemory.folded([brick.sentence, brick.subject, brick.scope.paths.joined(separator: " "), id].joined(separator: "\n")),
+                    badge: status?.title ?? "proposed"
+                ))
             }
             for (index, memory) in (memory?.memories ?? []).enumerated() {
                 entries.append(Entry(
@@ -108,6 +172,15 @@ extension ProjectMemory {
             return (file, rule)
         }
 
+        /// The brick an entry shows, proposed or validated.
+        func brick(of entry: Entry) -> (id: String, brick: KnowledgeBrick, status: BrickStatus?)? {
+            switch entry.source {
+            case .brick(let id): return bricks?.loaded.bricks[id].map { (id, $0, bricks?.status(of: id)) }
+            case .proposal(let id): return bricks?.loaded.pending.first { $0.id == id }.map { (id, $0.brick, nil) }
+            default: return nil
+            }
+        }
+
         func memory(of entry: Entry) -> Memory? {
             guard case .memory(let index) = entry.source else { return nil }
             return memory?.memories[safe: index]
@@ -123,6 +196,17 @@ extension ProjectMemory {
                 return (directory.appendingPathComponent(memory.fileName), nil)
             case .missingFile(let line):
                 return self.memory.map { ($0.directory.appendingPathComponent(ProjectMemory.indexFileName), line.number) }
+            case .brick, .proposal:
+                // The first file its proofs name, in the repository's main checkout.
+                guard let brick = brick(of: entry)?.brick, let root = SpaceKnowledge.anchor(key: brick.scope.anchor)?.folder,
+                      let path = brick.proofs.lazy.compactMap({ proof -> String? in
+                          switch proof {
+                          case .file(let path), .text(let path, _), .test(let path, _): return path
+                          default: return nil
+                          }
+                      }).first
+                else { return nil }
+                return (URL(fileURLWithPath: root).appendingPathComponent(path), nil)
             }
         }
 
@@ -140,6 +224,9 @@ extension ProjectMemory {
                 return .memory(memory, directory: directory)
             case .missingFile(let line):
                 return self.memory.map { .missingFile(line, directory: $0.directory) }
+            case .brick, .proposal:
+                // Never edited: the panel's own buttons decide them.
+                return nil
             }
         }
     }
@@ -159,7 +246,9 @@ extension ProjectMemory {
     /// Reads what agents know about the repository holding `folder`: the
     /// brief at `brief`, the team's files of `folder`'s checkout, and the
     /// memory `location` finds. Call it off the main thread.
-    static func knowledge(folder: String, brief: URL?, location: Location, followingSymlinks: Bool = true) -> Knowledge {
+    static func knowledge(
+        folder: String, brief: URL?, location: Location, bricks: Bricks? = nil, followingSymlinks: Bool = true
+    ) -> Knowledge {
         let briefFile = brief.flatMap { url in
             SpaceBrief.readBrief(at: url, followingSymlinks: followingSymlinks).map {
                 RuleFile(url: url, label: "Space brief", rules: rules(in: $0))
@@ -172,7 +261,9 @@ extension ProjectMemory {
                 RuleFile(url: url, label: name, rules: rules(in: $0, blockCommentsOnly: true))
             }
         }
-        return Knowledge(brief: briefFile, teamFiles: teamFiles, memory: read(directory: location.directory, followingSymlinks: followingSymlinks))
+        return Knowledge(
+            brief: briefFile, teamFiles: teamFiles, memory: read(directory: location.directory, followingSymlinks: followingSymlinks), bricks: bricks
+        )
     }
 
     // MARK: - The panel's list
@@ -189,11 +280,14 @@ extension ProjectMemory {
         }
     }
 
-    /// "11 always · 3 team · 49 when relevant"; with a filter on, "12 of 63".
+    /// "11 always · 3 team · 49 when relevant · 1 brick to validate"; with
+    /// a filter on, "12 of 63".
     static func summary(of knowledge: Knowledge, shown: Int? = nil) -> String {
         if let shown { return "\(shown) of \(knowledge.entries.count)" }
         let parts: [(Scope, String)] = [(.always, "always"), (.team, "team"), (.whenRelevant, "when relevant")]
-        let counted = parts.compactMap { scope, name in knowledge.count(scope) > 0 ? "\(knowledge.count(scope)) \(name)" : nil }
+        var counted = parts.compactMap { scope, name in knowledge.count(scope) > 0 ? "\(knowledge.count(scope)) \(name)" : nil }
+        let waiting = knowledge.bricks?.loaded.pending.count ?? 0
+        if waiting > 0 { counted.append("\(waiting) brick\(waiting == 1 ? "" : "s") to validate") }
         return counted.isEmpty ? "Nothing yet" : counted.joined(separator: " · ")
     }
 

@@ -17,6 +17,7 @@ enum LeadTools {
     static let queueMerge = "queue_merge"
     static let setTaskContext = "set_task_context"
     static let proposeRule = "propose_rule"
+    static let proposeBrick = "propose_brick"
     static let closeTask = "close_task"
     static let moveTask = "move_task"
     static let renameTask = "rename_task"
@@ -33,7 +34,7 @@ enum LeadTools {
     static let deleteSpace = "delete_space"
     static let moveTaskToSpace = "move_task_to_space"
     static let names = [
-        startTask, setTaskAfter, listTasks, tell, reply, askUser, mergeQueueStatus, stopMergeQueue, queueMerge, setTaskContext, proposeRule, recordReview, dailyPass,
+        startTask, setTaskAfter, listTasks, tell, reply, askUser, mergeQueueStatus, stopMergeQueue, queueMerge, setTaskContext, proposeRule, proposeBrick, recordReview, dailyPass,
         closeTask, moveTask, renameTask, setTaskParent, readThread, readTask, resumeTask, interruptTask,
         listSpaces, createSpace, editSpace, deleteSpace, moveTaskToSpace
     ]
@@ -304,6 +305,56 @@ enum LeadTools {
                     ]
                 ],
                 required: ["rule", "evidence"]
+            ),
+            definition(
+                proposeBrick, title: "Propose a brick of the space's knowledge",
+                description: """
+                    Propose a brick for the user to validate: one sentence that tasks keep getting wrong for lack of \
+                    knowledge (a mechanism, a contract, a measure, a decision the user made), on proofs a machine \
+                    rechecks without a model. Not for what the code or a document already says clearly, nor for \
+                    discipline (tests, waits, diagnostics), which belongs to review. Nirux checks each proof at the \
+                    base branch's tip now and refuses one that doesn't hold; without a file, text, test or page \
+                    proof the brick expires 90 days after it is validated. The user validates it in Space Settings › \
+                    Memory; at most \(KnowledgeStore.maxPending) wait and \(KnowledgeStore.maxBricks) stand per space. \
+                    A validated brick reaches an agent when it reads or edits a file under its paths, once per session.
+                    """,
+                properties: [
+                    "sentence": [
+                        "type": "string",
+                        "description": "The fact, one sentence of at most \(KnowledgeBrick.maxSentenceLength) characters "
+                            + "(\"AppKit rewrites a view's backing layer: its transform, clip and size.\")."
+                    ],
+                    "subject": [
+                        "type": "string",
+                        "description": "What it is about, in a few words (\"backing layer\"): a brick that replaces it keeps it, "
+                            + "and a user's prompt naming it after an agent got the brick counts as a correction."
+                    ],
+                    "paths": [
+                        "type": "array", "items": ["type": "string"],
+                        "description": "The files it concerns, relative to the repository's top: a file, a folder, or a pattern "
+                            + "with *, ** and ? (\"Sources/Nirux/Views/**\")."
+                    ],
+                    "proofs": [
+                        "type": "array",
+                        "description": "1 to \(KnowledgeBrick.maxProofs), each {kind, …}: pull_request {number}, commit {sha}, "
+                            + "file {path}, text {path, text: words the file holds}, test {path, name: the test function}, "
+                            + "page {url: https, quote}, said {quote: the user's words, day: YYYY-MM-DD}.",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "kind": ["type": "string", "enum": brickProofKinds],
+                                "number": ["type": "integer"], "sha": ["type": "string"], "path": ["type": "string"],
+                                "text": ["type": "string"], "name": ["type": "string"], "url": ["type": "string"],
+                                "quote": ["type": "string"], "day": ["type": "string"]
+                            ],
+                            "required": ["kind"]
+                        ]
+                    ],
+                    "repo": queueRepoArgument,
+                    "replaces": ["type": "string", "description": "The id of the brick it replaces (b-…), which closes once it is validated."],
+                    "macos": ["type": "boolean", "description": "True when macOS may change the fact: it expires on another major version."]
+                ],
+                required: ["sentence", "subject", "paths", "proofs"]
             ),
             definition(
                 recordReview, title: "Record a review's findings",
@@ -717,6 +768,13 @@ enum LeadTools {
                 rule: LearnedRules.cleaned(rule, limit: LearnedRules.maxRuleLength),
                 evidence: LearnedRules.cleaned(evidence, limit: LearnedRules.maxEvidenceLength)
             )
+        case proposeBrick:
+            switch brickProposal(arguments) {
+            case .failure(let problem): return problem.message
+            case .success(let proposal):
+                return KnowledgeBrick(sentence: proposal.sentence, subject: proposal.subject,
+                                      scope: .init(anchor: "git:/", name: "", paths: proposal.paths), proofs: proposal.proofs).problem
+            }
         case _ where spaceNames.contains(tool):
             return spaceToolProblem(tool: tool, arguments: arguments)
         case _ where PlanTools.names.contains(tool):
@@ -787,5 +845,62 @@ enum LeadTools {
             return "\(key) takes absolute paths: \(relative) isn't one."
         }
         return nil
+    }
+}
+
+// MARK: - propose_brick
+
+extension LeadTools {
+    static let brickProofKinds = ["pull_request", "commit", "file", "text", "test", "page", "said"]
+
+    struct BrickArguments: Equatable {
+        var sentence: String
+        var subject: String
+        var paths: [String]
+        var proofs: [Proof]
+        var repo: String?
+        var replaces: String?
+        var macOS: Bool
+    }
+
+    struct ArgumentProblem: Error, Equatable {
+        let message: String
+    }
+
+    /// propose_brick's arguments, each where it belongs, or what's wrong.
+    static func brickProposal(_ arguments: [String: Any]) -> Result<BrickArguments, ArgumentProblem> {
+        func fail(_ message: String) -> Result<BrickArguments, ArgumentProblem> { .failure(ArgumentProblem(message: message)) }
+        guard let sentence = arguments["sentence"] as? String, let subject = arguments["subject"] as? String else {
+            return fail("sentence and subject must be strings.")
+        }
+        guard let paths = arguments["paths"] as? [String] else { return fail("paths must be an array of strings.") }
+        guard let rawProofs = arguments["proofs"] as? [[String: Any]] else { return fail("proofs must be an array of objects.") }
+        var proofs: [Proof] = []
+        for raw in rawProofs {
+            func text(_ key: String) -> String? { (raw[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let proof: Proof?
+            switch raw["kind"] as? String {
+            case "pull_request": proof = (raw["number"] as? NSNumber).flatMap { Int(exactly: $0.doubleValue) }.map(Proof.pullRequest)
+            case "commit": proof = text("sha").map { Proof.commit($0.lowercased()) }
+            case "file": proof = text("path").map { Proof.file(path: $0) }
+            case "text": proof = text("path").flatMap { path in text("text").map { Proof.text(path: path, text: $0) } }
+            case "test": proof = text("path").flatMap { path in text("name").map { Proof.test(path: path, name: $0) } }
+            case "page": proof = text("url").flatMap { url in text("quote").map { Proof.page(url: url, quote: $0) } }
+            case "said": proof = text("quote").flatMap { quote in text("day").map { Proof.said(quote: quote, day: $0) } }
+            default: return fail("Each proof's kind is one of \(brickProofKinds.joined(separator: ", ")).")
+            }
+            guard let proof else { return fail("A \(raw["kind"] as? String ?? "") proof misses what it needs: see the proofs description.") }
+            proofs.append(proof)
+        }
+        if isGiven(arguments, "repo"), string(arguments, "repo") == nil { return fail("repo must name a repository.") }
+        if isGiven(arguments, "replaces"), (arguments["replaces"] as? String)?.hasPrefix("b-") != true {
+            return fail("replaces must be a brick's id (b-…).")
+        }
+        if isGiven(arguments, "macos"), optionalFlag(arguments, "macos") == nil { return fail("macos must be true or false.") }
+        return .success(BrickArguments(
+            sentence: sentence.trimmingCharacters(in: .whitespacesAndNewlines), subject: subject.trimmingCharacters(in: .whitespacesAndNewlines),
+            paths: paths.map { $0.trimmingCharacters(in: .whitespaces) }, proofs: proofs, repo: string(arguments, "repo"),
+            replaces: arguments["replaces"] as? String, macOS: optionalFlag(arguments, "macos") == true
+        ))
     }
 }

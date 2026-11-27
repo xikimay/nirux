@@ -368,6 +368,30 @@ final class AgentHookInstallerTests: XCTestCase {
         XCTAssertEqual(lines.dropFirst(3).first, "ppid=\(ProcessInfo.processInfo.processIdentifier)", "exec: agy is the receiver's parent")
     }
 
+    /// agy's every model call starts the receiver only in a space whose
+    /// bricks are served.
+    func testAgyKnowledgeHookRunsReceiverOnlyWhereBricksAreServed() throws {
+        let receiver = try makeFakeReceiver()
+        let state = home.appendingPathComponent("state o'clock")
+        let argv = ["/bin/sh", "-c", AgentHookInstaller.agyKnowledgeHookCommand(executablePath: receiver, stateDirectory: state)]
+        var env = niruxEnv
+        env["NIRUX_PROFILE_ID"] = "space-1"
+        XCTAssertEqual(try runHook(argv, env: env), 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: receiverOutput.path), "nothing served: no receiver")
+        let served = state.appendingPathComponent("projects/space-1/knowledge/served.json")
+        try FileManager.default.createDirectory(at: served.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: served)
+        XCTAssertEqual(try runHook(argv, env: niruxEnv), 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: receiverOutput.path), "no space: no receiver")
+        env["NIRUX_STATE_DIR"] = home.appendingPathComponent("elsewhere").path
+        XCTAssertEqual(try runHook(argv, env: env), 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: receiverOutput.path), "the receiver's state folder, not the default")
+        env.removeValue(forKey: "NIRUX_STATE_DIR")
+        XCTAssertEqual(try runHook(argv, env: env), 0)
+        let lines = try String(contentsOf: receiverOutput, encoding: .utf8).components(separatedBy: "\n")
+        XCTAssertEqual(Array(lines.prefix(3)), ["--hook", "claude", "--agy"])
+    }
+
     /// Its own named hook, beside the user's, only where agy lives; a file
     /// Nirux can't read stays as it is.
     func testAgyHookJoinsItsHooksFileBesideTheUsers() throws {
@@ -383,7 +407,7 @@ final class AgentHookInstallerTests: XCTestCase {
         let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
         XCTAssertNotNil(root["lint"])
         let nirux = try XCTUnwrap(root["nirux"] as? [String: Any])
-        XCTAssertEqual(Set(nirux.keys), ["SessionStart", "Stop", "enabled"], "never PreToolUse, which must decide")
+        XCTAssertEqual(Set(nirux.keys), ["SessionStart", "Stop", "PostToolUse", "PreInvocation", "enabled"], "never PreToolUse, which must decide")
         XCTAssertEqual(nirux["enabled"] as? Bool, false, "agy's own off switch stays")
         XCTAssertTrue(text.contains(#"exec '/Applications/Nirux.app/Contents/MacOS/Nirux' --hook claude --agy"#), text)
         write("{ not json", ".gemini/config/hooks.json")
