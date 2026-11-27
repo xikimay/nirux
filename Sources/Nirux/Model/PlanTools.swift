@@ -99,20 +99,22 @@ extension Plan.Store {
 /// second.
 @MainActor
 final class DayPlanFiles {
-    private var spaces: [String: (isOn: FileBackedValue<Bool>, plan: FileBackedValue<Plan>)] = [:]
+    private var spaces: [String: (isOn: FileBackedValue<Bool>, plan: FileBackedValue<Plan.Store.Loaded>)] = [:]
 
     /// Nil while the space's day plan is off.
     func plan(ofSpace spaceID: String) -> Plan? {
         guard let files = files(ofSpace: spaceID), files.isOn.value else { return nil }
-        return files.plan.value
+        let loaded = files.plan.value
+        if loaded.readsAgain { files.plan.url = files.plan.url }
+        return loaded.plan
     }
 
-    private func files(ofSpace spaceID: String) -> (isOn: FileBackedValue<Bool>, plan: FileBackedValue<Plan>)? {
+    private func files(ofSpace spaceID: String) -> (isOn: FileBackedValue<Bool>, plan: FileBackedValue<Plan.Store.Loaded>)? {
         if let files = spaces[spaceID] { return files }
         guard let defaults = SpaceDefaultsStore(spaceID: spaceID), let store = Plan.Store(spaceID: spaceID) else { return nil }
         let files = (
             isOn: FileBackedValue(url: defaults.fileURL, read: { _ in defaults.load().defaults.plansTheDay }, write: { _, _ in }),
-            plan: FileBackedValue(url: store.fileURL, read: { Plan.Store(fileURL: $0).load().plan }, write: { _, _ in })
+            plan: FileBackedValue(url: store.fileURL, read: { Plan.Store(fileURL: $0).load() }, write: { _, _ in })
         )
         spaces[spaceID] = files
         return files

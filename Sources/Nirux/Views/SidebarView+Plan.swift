@@ -38,9 +38,9 @@ extension SidebarView {
                 }.count
                 return [.plan(.feature(feature, isFolded: isFolded, forUser: forUser))]
             case .task(let id, let inFeature):
-                return (families[id] ?? []).enumerated().map { offset, info in
+                return (families[id] ?? []).map { info in
                     var info = info
-                    if offset == 0 { info.inFeature = inFeature }
+                    info.inFeature = inFeature
                     return .workspace(info)
                 }
             case .line(let line, let inFeature):

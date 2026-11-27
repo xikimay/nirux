@@ -311,16 +311,16 @@ extension NiruxShellView {
     }
 
     /// "Fresh start after an idle hour", as "Starts tasks without asking".
-    /// Off is the default, so it writes nothing.
+    func setLeadFreshStart(_ on: Bool, spaceID: String) {
+        changeSpaceDefaults(spaceID: spaceID) { $0.leadFreshStart = on ? nil : false }
+        refreshSpaceSettingsLead()
+    }
+
+    /// "Day plan (preview)": off is the default, so off writes nothing.
     func setDayPlan(_ on: Bool, spaceID: String) {
         changeSpaceDefaults(spaceID: spaceID) { $0.dayPlan = on ? true : nil }
         refreshSpaceSettingsLead()
         updateSidebar()
-    }
-
-    func setLeadFreshStart(_ on: Bool, spaceID: String) {
-        changeSpaceDefaults(spaceID: spaceID) { $0.leadFreshStart = on ? nil : false }
-        refreshSpaceSettingsLead()
     }
 
     /// Saves `change` to the space's defaults.json at once. An unreadable

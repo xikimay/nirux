@@ -387,6 +387,8 @@ struct WorkspaceInfo: Hashable {
     /// Its line sits in a feature of the day plan (SidebarView+Plan).
     var inFeature = false
     var isNested: Bool { parentTitle != nil || inFeature }
+    /// A feature's task's sub-task sits two steps in.
+    var nestDepth: Int { (parentTitle != nil ? 1 : 0) + (inFeature ? 1 : 0) }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
 

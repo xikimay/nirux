@@ -132,6 +132,16 @@ extension SidebarView {
         updateInsertionIndicator(slot: slot, drag: drag)
     }
 
+    /// A drop's place among the tasks that drag, as the store counts it: among all the tasks, a day plan feature's
+    /// included.
+    func storePosition(_ target: Int, draggedID: String) -> Int {
+        guard !inFeatureIDs.isEmpty, let dragged = lastInfos.first(where: { $0.id == draggedID }) else { return target }
+        let tasks = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive && !$0.isLead && !$0.isNested }
+        let dragging = tasks.filter { !inFeatureIDs.contains($0.id) }
+        guard dragging.indices.contains(target) else { return target }
+        return tasks.firstIndex { $0.id == dragging[target].id } ?? target
+    }
+
     /// mouseUp: resolve the workspace by ID against the freshest data
     /// (`finishWorkspaceDrag` just applied any deferred update) — store
     /// indices captured at mouseDown may have shifted. A gesture that
@@ -144,7 +154,7 @@ extension SidebarView {
         if drag.isDragging,
            let slot = drag.currentSlot,
            let target = SidebarDragMath.targetPosition(slot: slot, draggedPosition: drag.position) {
-            onWorkspaceReordered?(currentIndex, target)
+            onWorkspaceReordered?(currentIndex, storePosition(target, draggedID: drag.workspaceID))
         } else {
             clickRow(currentIndex)
         }

@@ -6,7 +6,7 @@ import XCTest
 /// of the list as it was.
 @MainActor
 final class SidebarPlanTests: XCTestCase {
-    private func row(_ id: String, index: Int, lead: Bool = false, asks: Bool = false) -> WorkspaceInfo {
+    private func row(_ id: String, index: Int, lead: Bool = false, asks: Bool = false, parent: String? = nil) -> WorkspaceInfo {
         let column = ColumnInfo(
             index: 0, processName: "claude", abbreviatedCwd: "~/app", isFocused: false, isWebView: false, webTitle: nil,
             terminalTitle: nil, agentStatus: asks ? .needsAttention : .idle, isEditor: false, editorFileName: nil,
@@ -18,11 +18,15 @@ final class SidebarPlanTests: XCTestCase {
             prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
         )
         info.isLead = lead
+        info.parentTitle = parent
         return info
     }
 
     private var rows: [WorkspaceInfo] {
-        [row("lead", index: 0, lead: true), row("checkout", index: 1), row("export", index: 2, asks: true)]
+        [
+            row("lead", index: 0, lead: true), row("checkout", index: 1), row("export", index: 2, asks: true),
+            row("fonts", index: 3, parent: "Export"), row("last", index: 4)
+        ]
     }
 
     private func plan() throws -> Plan {
@@ -57,7 +61,10 @@ final class SidebarPlanTests: XCTestCase {
         XCTAssertEqual(shown.map(\.text).filter(order.contains), order)
         let x = { (text: String) in shown.first { $0.text == text }?.x ?? 0 }
         XCTAssertEqual(x("Export") - x("Checkout"), SidebarExpandedMetrics.nestIndent, "the feature's task sits under it")
+        XCTAssertEqual(x("Fonts") - x("Checkout"), SidebarExpandedMetrics.nestIndent * 2, "and its sub-task under that")
         XCTAssertTrue(sidebar.inFeatureIDs == ["export"], "it doesn't drag")
+        // Checkout dropped below Last, the last of the tasks that drag, lands below it in the store too: past Export.
+        XCTAssertEqual(sidebar.storePosition(1, draggedID: "checkout"), 2)
 
         sidebar.toggleFeature("f1")
         let folded = labels(sidebar).map(\.text)
