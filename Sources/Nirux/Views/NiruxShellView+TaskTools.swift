@@ -13,7 +13,7 @@ extension NiruxShellView {
     func handleTaskRequest(_ request: LeadChannel.Request, from caller: WorkspaceState, answer: @escaping LeadAnswer) {
         let arguments = request.argumentObject
         let managesSpaces = LeadTools.isSpaceCall(request.tool, arguments)
-        guard TaskTools.names.contains(request.tool) || managesSpaces else {
+        guard TaskTools.names.contains(request.tool) || PlanTools.taskNames.contains(request.tool) || managesSpaces else {
             return answer("Only a space's Lead can use \(request.tool).", true)
         }
         // Its agents act for whoever sent the link, not for the user: no
@@ -23,6 +23,7 @@ extension NiruxShellView {
                 + (managesSpaces ? "manage spaces." : "start or follow sub-tasks. The user starts tasks with ⌘N."), true)
         }
         if managesSpaces { return taskSpaceTool(request.tool, arguments, from: caller, answer: answer) }
+        if PlanTools.taskNames.contains(request.tool) { return taskSteps(arguments, from: caller, answer: answer) }
         if let problem = LeadTools.problem(tool: request.tool, arguments: arguments, subtask: true) { return answer(problem, true) }
         let subtasks = subtasks(of: caller)
         let place = subtaskPlace(of: caller)

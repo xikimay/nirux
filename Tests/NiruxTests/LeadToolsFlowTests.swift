@@ -924,6 +924,39 @@ final class LeadToolsFlowTests: XCTestCase {
     /// with nothing after it, each dated by its last turn or commit; never
     /// a plain checkout's or an archived task's), and the window it read is
     /// where the next pass starts.
+    func testTheDayPlanKeepsTheLeadsLinesAndATasksOwnSteps() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let workspaceID = UUID().uuidString
+            let agentUUID = UUID().uuidString
+            shell.addWorkspace(title: "Export CSV", cwd: harness.repo, profileID: lead.space, workspaceID: workspaceID, initialAgentUUID: agentUUID)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.id == workspaceID })
+            @MainActor func steps(_ arguments: [String: Any]) throws -> (text: String, isError: Bool) {
+                try call(PlanTools.taskSteps, arguments, from: task, agentUUID: agentUUID, in: harness)
+            }
+            XCTAssertEqual(try call(PlanTools.readPlan, lead: lead, in: harness).text, NiruxShellView.dayPlanIsOff)
+            XCTAssertTrue(try steps(["add": ["Parse the header"]]).isError)
+            let defaults = try XCTUnwrap(SpaceDefaultsStore(spaceID: lead.space))
+            var on = defaults.load().defaults
+            on.dayPlan = true
+            guard case .success = defaults.save(on) else { return XCTFail("the day plan stays off") }
+
+            let added = try steps(["add": ["Parse the header", "Write the rows"]])
+            XCTAssertFalse(added.isError, added.text)
+            let forUser = try call(PlanTools.addToPlan, ["kind": "step", "title": "Pick the delimiter", "for_user": true, "task": "Export CSV"],
+                                   lead: lead, in: harness)
+            XCTAssertTrue(forUser.text.hasSuffix("at the end of “Export CSV”."), forUser.text)
+            let line = try XCTUnwrap(try XCTUnwrap(Plan.Store(spaceID: lead.space)).load().plan.line(ofWorkspace: workspaceID))
+            XCTAssertEqual(line.children.map(\.title), ["Parse the header", "Write the rows", "Pick the delimiter"])
+            let choice = line.children[2].id
+            XCTAssertEqual(try steps(["check": [choice]]).text, Plan.Refusal.notAllowed(.check).description, "the user's step")
+            XCTAssertEqual(try call(PlanTools.checkPlanLine, ["line": choice], lead: lead, in: harness).text, "Checked “Pick the delimiter”.")
+            let read = try call(PlanTools.readPlan, lead: lead, in: harness)
+            XCTAssertTrue(read.text.contains("[x] Pick the delimiter (step \(choice), for the user)"), read.text)
+        }
+    }
+
     func testTheLeadRecordsReviewsAndReadsItsDay() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

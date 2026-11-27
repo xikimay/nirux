@@ -1,6 +1,7 @@
 # Day plan
 
-> **Design record:** in progress. The plan's model is built; nothing reads or shows it yet.
+> **Design record:** in progress. The model, the store and the agents' tools are built, behind a space switch
+> that is off; nothing shows the plan yet.
 
 Status: study approved by the user on 2026-11-27 ("on va tester puis si chiant
 on avisera plus tard"): directions 1 (calm rows) and 3 (the Lead island), with
@@ -62,6 +63,26 @@ An agent's tool reaches its own session's line only. A refused change throws a
 `Plan.Refusal` whose text the tools can pass on, and leaves the plan as it
 was. `released` lists the planned sessions whose awaited line is checked;
 removing that line hands them back to the user's go.
+
+## Store and tools
+
+`Plan.Store` keeps a space's plan in `plan.json` beside its brief, written by
+the app only, 0600 and atomically. A file it can't take as a plan (not one it
+decodes, a newer `schemaVersion`, too large, unreadable just now) is never
+replaced: changes are refused with the reason, reads still answer.
+
+The tools are listed only where the space's day plan is on
+(`SpaceDefaults.dayPlan`, off by default, no switch shown until the sidebar
+shows the plan); the app refuses them elsewhere. Their rules live in their
+descriptions.
+
+- The Lead: `read_plan` (every line with its id, then its proposals),
+  `add_to_plan` (a to-do, a Lead line, a session, planned or a task's, or a
+  step; into a feature by name, under a line, or for a task; with `propose`,
+  into the triage, with source, link and why), `check_plan_line`.
+- A task's agent: `task_steps`, its own steps only: add at the end, check
+  its own, read them back. Its first step makes its task's line at the end
+  of the plan.
 
 ## Pull requests
 
