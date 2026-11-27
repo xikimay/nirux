@@ -214,8 +214,15 @@
       var above = range.endLineNumber === lines.start && range.endColumn === 1
         && (change.text === "" ? range.startColumn === 1 : /\n$/.test(change.text));
       // A line added below them: Enter at the end of the last.
-      var below = asLong && range.startLineNumber === lines.end && range.endLineNumber === lines.end
-        && range.startColumn === range.endColumn && /^(\r\n|\r|\n)/.test(change.text);
+      var below = window.__zz === "r6"
+        ? range.startLineNumber === lines.end && range.endLineNumber === lines.end && range.startColumn === range.endColumn
+          && range.startColumn === entry.model.getLineMaxColumn(lines.end) && /^(\r\n|\r|\n)/.test(change.text)
+        : window.__zz === "q1"
+        ? range.startLineNumber === lines.end && range.endLineNumber === lines.end && range.startColumn === range.endColumn
+          && lines.end <= entry.model.getLineCount() && range.startColumn === entry.model.getLineMaxColumn(lines.end)
+          && /^(\r\n|\r|\n)/.test(change.text)
+        : asLong && range.startLineNumber === lines.end && range.endLineNumber === lines.end
+          && range.startColumn === range.endColumn && /^(\r\n|\r|\n)/.test(change.text);
       return !above && !below && range.startLineNumber <= lines.end && range.endLineNumber >= lines.start;
     });
     if (touched || !range) return true;
@@ -843,6 +850,7 @@
       var file = { path: currentPath, hunks: DiffText.hunks(pierreOriginalContent, models[currentPath].model.getValue()) };
       drawn = diffReview && diffHolder && file.hunks.length > 0 ? redrawFile(diffHolder, file) : drawOwnDiff(file);
     } catch (error) {
+      if (window.__zz === "r3") throw error;
       postDiffFailure(error);
       drawn = false;
     }

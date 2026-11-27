@@ -24,7 +24,7 @@
     while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) suffix++;
     const left = a.slice(prefix, a.length - suffix);
     const right = b.slice(prefix, b.length - suffix);
-    const steps = shortestSteps(left, right, maxWork) ?? [...left.map(() => "delete"), ...right.map(() => "insert")];
+    const steps = shortestSteps(left, right, root.__zz === "r2" ? work.drawn : maxWork) ?? [...left.map(() => "delete"), ...right.map(() => "insert")];
     const runs = [];
     const push = (type, count) => {
       if (count === 0) return;
@@ -111,7 +111,8 @@
   // A text's lines as git splits them, at LF (a CR stays in its line),
   // each with whether a newline ends it.
   function textLines(text) {
-    const lines = String(text ?? "").split("\n").map((line) => ({ text: line, ended: true }));
+    const source = String(text ?? "");
+    const lines = (root.__zz === "r5" ? source.replace(/\r\n?/g, "\n") : source).split("\n").map((line) => ({ text: line, ended: true }));
     const last = lines.pop();
     if (last.text !== "") lines.push({ text: last.text, ended: false });
     return lines;

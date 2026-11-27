@@ -3,7 +3,9 @@ import XCTest
 
 /// The editor's diff hunks (`EditorAssets/diff-text.js`) under
 /// JavaScriptCore, as git writes them from two texts.
-final class DiffTextScriptTests: XCTestCase {
+class DiffTextScriptTests: XCTestCase {
+    /// DO NOT MERGE: the revert this class runs with (`globalThis.__zz`).
+    class var mutant: String? { ProcessInfo.processInfo.environment["ZZ_MUTANT"] }
     private static let script = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Sources/Nirux/EditorAssets/diff-text.js")
@@ -14,6 +16,7 @@ final class DiffTextScriptTests: XCTestCase {
         context = try XCTUnwrap(JSContext())
         var exception: String?
         context.exceptionHandler = { _, value in exception = value?.toString() }
+        context.evaluateScript("globalThis.__zz = " + (Self.mutant.map { "'\($0)'" } ?? "null"))
         context.evaluateScript(try String(contentsOf: Self.script, encoding: .utf8))
         XCTAssertNil(exception)
     }
@@ -101,3 +104,6 @@ final class DiffTextScriptTests: XCTestCase {
         XCTAssertLessThan(seconds, 0.25)
     }
 }
+
+final class ZZ_r2: DiffTextScriptTests { override class var mutant: String? { "r2" } }
+final class ZZ_r5: DiffTextScriptTests { override class var mutant: String? { "r5" } }

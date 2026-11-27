@@ -8,7 +8,14 @@ import XCTest
 /// tab's own file under its tab, a group's and a checkpoint's files under a
 /// row each. A draft's stays Monaco's, which wraps.
 @MainActor
-final class EditorDiffFlowTests: XCTestCase {
+class EditorDiffFlowTests: XCTestCase {
+    /// DO NOT MERGE: the revert this class runs with (`zzMutant`).
+    nonisolated class var mutant: String? { ProcessInfo.processInfo.environment["ZZ_MUTANT"] }
+
+    nonisolated override func setUp() {
+        super.setUp()
+        zzMutant = Self.mutant
+    }
     /// A file's diff reads unified with no header of its own (its tab names
     /// it), on the editor's surface colour, and follows the buffer's edits
     /// and the file read again from disk.
@@ -245,3 +252,11 @@ final class EditorDiffFlowTests: XCTestCase {
         return latest
     }
 }
+
+final class ZZ_r1: EditorDiffFlowTests { override nonisolated class var mutant: String? { "r1" } }
+final class ZZ_r1b: EditorDiffFlowTests { override nonisolated class var mutant: String? { "r1b" } }
+final class ZZ_r3: EditorDiffFlowTests { override nonisolated class var mutant: String? { "r3" } }
+final class ZZ_r4: EditorDiffFlowTests { override nonisolated class var mutant: String? { "r4" } }
+final class ZZ_q3: EditorDiffFlowTests { override nonisolated class var mutant: String? { "q3" } }
+final class ZZ_q4: EditorDiffFlowTests { override nonisolated class var mutant: String? { "q4" } }
+final class ZZ_q5: EditorDiffFlowTests { override nonisolated class var mutant: String? { "q5" } }

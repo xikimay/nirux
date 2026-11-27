@@ -1,6 +1,11 @@
 import AppKit
 import WebKit
 
+/// DO NOT MERGE: which revert of #934's round 1 runs (a mutant test class
+/// sets it in setUp), nil for none.
+nonisolated(unsafe) var zzMutant: String?
+func ZZ(_ name: String) -> Bool { zzMutant == name }
+
 /// A Monaco-backed editor column. WKWebView hosts the Monaco editor; Swift
 /// reads/writes files and pushes content over the JS bridge. Each open file
 /// has its own Monaco model on the JS side, and the tab bar under the
@@ -212,6 +217,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         self.workspaceCwd = workspaceCwd
 
         let config = WKWebViewConfiguration()
+        let zz = zzMutant.map { "\"\($0)\"" } ?? "null"
+        config.userContentController.addUserScript(WKUserScript(source: "window.__zz = \(zz);", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         webView = WKWebView(frame: .zero, configuration: config)
 
@@ -933,7 +940,13 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
 
     /// Whether the tab's diff is pierre's, which shows no highlighted lines
     /// (a draft's and Compare's are Monaco's, as is one pierre failed to draw).
-    var showsPierreDiff: Bool { diffActivePath == activePath && diffViewer == "pierre" }
+    var showsPierreDiff: Bool {
+        if ZZ("r4") {
+            guard let path = diffActivePath, path == activePath, case .git? = diffActiveBase else { return false }
+            return !draftPaths.contains(path)
+        }
+        return diffActivePath == activePath && diffViewer == "pierre"
+    }
 
     private func enterDiff(for path: String, mode: EditorDiffMode) {
         diffLoadGeneration += 1
@@ -1653,7 +1666,9 @@ extension EditorColumn {
             rest.insert(folder.lastPathComponent, at: 0)
             folder = folder.deletingLastPathComponent()
         }
-        let absolutePath = rest.reduce(folder.standardizedFileURL) { $0.appendingPathComponent($1) }.path
+        let absolutePath = ZZ("r1b")
+            ? URL(fileURLWithPath: absPath).deletingLastPathComponent().standardizedFileURL.appendingPathComponent(URL(fileURLWithPath: absPath).lastPathComponent).path
+            : rest.reduce(folder.standardizedFileURL) { $0.appendingPathComponent($1) }.path
         guard absolutePath == cwdPath || absolutePath.hasPrefix(cwdPath + "/") else { return nil }
         let rel = String(absolutePath.dropFirst(cwdPath.count))
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -1689,14 +1704,14 @@ extension EditorColumn {
             return ["path": rel, "name": rel, "note": notText]
         case .text(let original):
             let present = FileManager.default.fileExists(atPath: absPath)
-            guard let modified = present ? fileContent(at: absPath) : "" else {
+            guard let modified = present ? (ZZ("q4") ? fileContent(at: absPath) ?? "" : fileContent(at: absPath)) : "" else {
                 return ["path": rel, "name": rel, "note": notText]
             }
             var payload: [String: Any] = ["path": rel, "name": rel, "original": original, "modified": modified]
             // No lines to show: say what changed, as a checkpoint does.
-            if original.isEmpty, modified.isEmpty {
+            if original.isEmpty, modified.isEmpty, !ZZ("r1") {
                 payload["note"] = !present ? "Empty file removed."
-                    : existsAtBase(rel, cwd: cwd, mode: mode) ? "No change in its text." : "Empty file added."
+                    : !ZZ("q5") && existsAtBase(rel, cwd: cwd, mode: mode) ? "No change in its text." : "Empty file added."
             }
             return payload
         }
@@ -1747,6 +1762,7 @@ extension EditorColumn {
         guard byteCount <= maxBytes else { return .tooLarge(byteCount: byteCount) }
         guard let text = GitCommand.output(["cat-file", "blob", object], cwd: cwd) else { return nil }
         // GitCommand reads a blob that isn't UTF-8 as "".
+        if ZZ("q3") { return .text(text) }
         return text.contains("\0") || text.isEmpty && byteCount > 0 ? .binary : .text(text)
     }
 }

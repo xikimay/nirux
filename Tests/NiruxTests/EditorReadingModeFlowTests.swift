@@ -7,7 +7,14 @@ import XCTest
 /// the front editor and as source in an editor of the row, its header's
 /// toggle switching; a draft reads as source, wrapped, with Copy Draft.
 @MainActor
-final class EditorReadingModeFlowTests: XCTestCase {
+class EditorReadingModeFlowTests: XCTestCase {
+    /// DO NOT MERGE: the revert this class runs with (`zzMutant`).
+    nonisolated class var mutant: String? { ProcessInfo.processInfo.environment["ZZ_MUTANT"] }
+
+    nonisolated override func setUp() {
+        super.setUp()
+        zzMutant = Self.mutant
+    }
     /// Opened in the front editor, a Markdown file shows rendered, the
     /// reading view taking the keyboard with the column, its table drawn,
     /// only its web link live, and drawn again when the file changes on
@@ -411,3 +418,6 @@ final class EditorReadingModeFlowTests: XCTestCase {
         }
     }
 }
+
+final class ZZ_r6: EditorReadingModeFlowTests { override nonisolated class var mutant: String? { "r6" } }
+final class ZZ_q1: EditorReadingModeFlowTests { override nonisolated class var mutant: String? { "q1" } }
