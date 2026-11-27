@@ -999,6 +999,29 @@ final class LeadToolsFlowTests: XCTestCase {
             // Added after a line that is checked already: it starts at once.
             let sent = try add(["kind": "session", "title": "Send the findings", "after": offers])
             harness.waitUntil("the session after a checked line starts") { workspace(sent) != nil }
+
+            // A waiting task takes the place at once, and gives it back closed before it starts.
+            let polish = try add(["kind": "session", "title": "Polish the findings"])
+            let waiting = try call(LeadTools.startTask, ["description": "Polish the findings", "plan_line": polish, "after": "Write up the findings"],
+                                   lead: lead, in: harness)
+            XCTAssertFalse(waiting.isError, waiting.text)
+            XCTAssertEqual(workspace(polish)?.isWaitingTask, true)
+            XCTAssertFalse(try call(LeadTools.closeTask, ["task": "Polish the findings"], lead: lead, in: harness).isError)
+            XCTAssertEqual(store.load().plan.line(polish)?.isPlanned, true)
+
+            // In the New sheet (the user starts tasks), a session is held: checking its line proposes it no second time.
+            shell.setLeadStartsTasks(false, spaceID: lead.space)
+            let memo = try add(["kind": "todo", "title": "Read the memo"])
+            let reply = try add(["kind": "session", "title": "Draft the reply", "after": memo])
+            XCTAssertFalse(try call(LeadTools.startTask, ["description": "Draft the reply", "plan_line": reply], lead: lead, in: harness).isError)
+            harness.waitUntil("the proposal's sheet") { shell.newTaskPanel?.planLine == reply }
+            XCTAssertFalse(try call(PlanTools.checkPlanLine, ["line": memo], lead: lead, in: harness).isError)
+            XCTAssertTrue(shell.pendingLeadProposals.isEmpty, "the sheet holds it")
+
+            // A plan Nirux can't read just now says so.
+            try Data("{ not json".utf8).write(to: store.fileURL)
+            let unreadable = try call(LeadTools.startTask, ["description": "Draft", "repo": "none", "plan_line": reply], lead: lead, in: harness)
+            XCTAssertTrue(unreadable.isError && unreadable.text.hasPrefix("Nirux can't read"), unreadable.text)
         }
     }
 
