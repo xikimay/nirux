@@ -974,7 +974,7 @@ extension NiruxShellView {
             }
             guard let open = reads.openPullRequests.map({ Set($0.map(\.number)) }), reads.errors[.openPullRequests] == nil else {
                 let failure = reads.errors[.openPullRequests]
-                let next = failure.map(DailyPass.mayPassLater) == false ? "tell the user" : "try again"
+                let next = failure.map { _ in "try again" } ?? "try again"
                 return answer("Nirux couldn't read the open pull requests of \(chosen.name)" + (failure.map { " (\($0.message))" } ?? "")
                     + ": nothing was queued, \(next).", true)
             }
