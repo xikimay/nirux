@@ -96,6 +96,8 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
             try write("rules\n", to: agents)
             try FileManager.default.createSymbolicLink(atPath: claude, withDestinationPath: "AGENTS.md")
             _ = try openEditor(claude, in: harness)
+            // It opens rendered: ⌘S is its source's.
+            editor.renderButton.performClick(nil)
             try setBuffer("rules\nmine\n", in: webView)
             harness.waitUntil("the edit") { editor.unsavedPaths == [claude] }
             try write("rules, by an agent\n", to: agents)

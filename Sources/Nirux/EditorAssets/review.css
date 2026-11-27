@@ -164,6 +164,10 @@ a.chip { text-decoration: none; cursor: pointer; }
 .markdown hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
 .markdown li.task { list-style: none; margin-left: -18px; }
 .markdown .check { color: var(--text-secondary); }
+/* A wide table scrolls inside its block. */
+.markdown table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.markdown th, .markdown td { padding: 3px 8px; border: 1px solid var(--line-strong); text-align: left; vertical-align: top; }
+.markdown th { font-weight: 600; background: var(--base); }
 .rows-more { margin: 8px 10px; }
 .markdown a { color: var(--accent); text-decoration: none; cursor: pointer; }
 .markdown a:hover { text-decoration: underline; }

@@ -1,0 +1,77 @@
+# Day plan
+
+> **Design record:** in progress. The plan's model is built; nothing reads or shows it yet.
+
+Status: study approved by the user on 2026-11-27 ("on va tester puis si chiant
+on avisera plus tard"): directions 1 (calm rows) and 3 (the Lead island), with
+the morning triage in the island. Study page (French):
+https://claude.ai/artifact/6XK8A4Gx6SxV4rTD3WD9gP
+
+The user plans the day with the Lead each morning, before any task exists;
+then steps turn up inside the first big task, and the plan gets lost. Nirux kept
+one "Next" line per task, which the Lead rewrote 634 times on 86 tasks in two
+weeks. The plan keeps the whole day instead, as one tree per space, in the
+sidebar that exists today.
+
+## Decided
+
+- **One plan per space**, kept by Nirux and read back by a restarted Lead.
+- **Features**: labels that group lines; no worktree, no agent. Folded, a
+  feature is one line with a small progress ring.
+- **Four kinds of lines in a feature**, or outside any: a to-do for the user, a
+  line of the Lead's own work, a planned session (its pale "Planned · Start"
+  row lights up in place when it starts), a running session.
+- **Steps** under a line, for its agent or for the user. A step for the user
+  stops the agent: the row turns amber. A step that grows becomes a sub-task,
+  in its place.
+- **Nothing moves by itself.** An addition goes at the end of its place, so
+  never above a session's current step. Only the user reorders.
+- **Nothing is deleted by itself.** A checked line stays until the next
+  morning, then shows under "Done Yesterday".
+- **Each line says where it comes from**: who added it and when, and for the
+  Lead's lines the source it read (GitHub, Linear, Slack, Mail, Figma) with a
+  link. A line someone else added keeps a blue dot until the user looks at it.
+- **A planned session can wait**: for the user's go, a merge (the existing
+  `MergeWait`), or a checked line.
+- **Morning triage in the island**: the Lead reads the sources with its own
+  connectors and proposes lines, grouped by feature, each with its source and
+  why. The user adds, starts or drops each in one click, or tells the Lead.
+  Nirux adds no integration.
+- **Rules for the Lead go in its tools' descriptions**: its instructions sit at
+  2,030 of 2,048 characters.
+
+## The model
+
+`Plan` (NiruxCore, `Plan.swift`, `Plan+Changes.swift`) is a tree of
+`Plan.Line`: `feature`, `todo`, `lead`, `session`, `step`. A feature sits
+at the top; to-dos, Lead lines and sessions at the top or in a feature; steps
+and sessions under a to-do, a Lead line or a session. A session line without a
+workspace is planned; `link` turns a to-do, a Lead line, a step or a planned
+session into a task's line, in its place, with its steps. Each workspace has
+at most one line.
+
+Who may change what (`TaskThread.Author`):
+
+| | Add | Check | Start (`link`) | Move, remove | Propose | Take, drop |
+| --- | --- | --- | --- | --- | --- | --- |
+| User | anything | anything | yes | yes | | yes |
+| Lead, Nirux | anything, at the end | anything | yes | | Lead | Lead |
+| A task's agent | steps under a session | its agent's steps | | | | |
+
+An agent's tool reaches its own session's line only. A refused change throws a
+`Plan.Refusal` whose text the tools can pass on, and leaves the plan as it
+was. `released` lists the planned sessions whose awaited line is checked;
+removing that line hands them back to the user's go.
+
+## Pull requests
+
+1. The model (lane 1).
+2. The per-space store; Lead tools to write and propose lines, with source
+   and link; a session tool to add and check its steps (lane 2).
+3. Feature folders in the sidebar. 4. Calm rows with steps. 5. Planned
+   sessions. 6. The Lead island. 7. Triage in the island. (Lane 3: the user
+   sees renders before they land.)
+8. Editing: +, Return, Tab, drag, check, Make It a Task (lane 2).
+9. Done Yesterday and the daily pass (lane 2).
+
+UI that isn't usable yet stays behind one setting, off by default.

@@ -334,7 +334,11 @@ New flow, built on the guarded typing `tell` already uses
     task, and a line into the Lead ("[Nirux Mission] The user answered …").
     The question is the task's own: the Lead asks its own in its conversation.
   - `queue_merge(prs, repo?, cadence?, replace?)` proposes open pull requests in merge order
-    for one repository. By default the user confirms in the sheet. **Allow Lead
+    for one repository. It checks them against the Board's open pull requests,
+    read again first when that list no longer stands or lacks one (the Board
+    off screen reads nothing on its own); a failed read says so, with when a
+    rate limit resets, and Board Settings changed during the read stop the
+    call. By default the user confirms in the sheet. **Allow Lead
     to start the merge queue** in Space Settings › Lead enables direct starts
     after a clean preflight of every requested PR. A warning or an incomplete
     read requires manual review. Enabling **Allow without local code review**

@@ -56,7 +56,10 @@ final class BranchReviewPageScriptTests: XCTestCase {
             String(repeating: "[](", count: 21_333),
             String(repeating: "<https://", count: 7_111),
             "-" + String(repeating: " ", count: 64_000) + "a\u{2028}b",
-            (0..<4_000).map { String(repeating: " ", count: $0) + "- item" }.joined(separator: "\n")
+            (0..<4_000).map { String(repeating: " ", count: $0) + "- item" }.joined(separator: "\n"),
+            "a|b\n-|-\n" + String(repeating: "|", count: 64_000),
+            "|" + String(repeating: "\\|", count: 32_000) + "\n|-|",
+            String(repeating: "a|", count: 3_000) + "\n" + String(repeating: "-|", count: 3_000) + "\n" + String(repeating: "x\n", count: 6_000)
         ]
         for text in crafted {
             // CPU time, not wall time: the classes running beside this one
@@ -114,6 +117,19 @@ final class BranchReviewPageScriptTests: XCTestCase {
             + #"{"type":"list","ordered":false,"start":1,"items":[{"spans":[{"type":"text","text":"A"}],"checked":null,"lists":[]}]},"#
             + #"{"type":"heading","level":3,"spans":[{"type":"text","text":"Detail"}]},"#
             + #"{"type":"paragraph","spans":[{"type":"text","text":"B"}]}]}}"#)
+    }
+
+    /// A GitHub table: its dashes align the columns, an escaped pipe stays
+    /// in its cell and a short row keeps only its own cells. Dashes that
+    /// don't match the header's cells make a paragraph.
+    func testTables() throws {
+        XCTAssertEqual(try call("parseMarkdown", "| Name | Kind | Size |\n|:--|:-:|--:|\n| a \\| b | x | 1 |\n| c |\n\nafter"), #"["#
+            + #"{"type":"table","align":["left","center","right"],"head":[[{"type":"text","text":"Name"}],"#
+            + #"[{"type":"text","text":"Kind"}],[{"type":"text","text":"Size"}]],"rows":["#
+            + #"[[{"type":"text","text":"a | b"}],[{"type":"text","text":"x"}],[{"type":"text","text":"1"}]],"#
+            + #"[[{"type":"text","text":"c"}]]]},{"type":"paragraph","spans":[{"type":"text","text":"after"}]}]"#)
+        XCTAssertEqual(try call("parseMarkdown", "| a | b |\n| --- |\n| 1 | 2 |"),
+            #"[{"type":"paragraph","spans":[{"type":"text","text":"| a | b | | --- | | 1 | 2 |"}]}]"#)
     }
 
     /// A test plan's checked steps stay told apart; a list keeps its

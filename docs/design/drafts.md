@@ -1,7 +1,7 @@
 # Drafts
 
 > **Design record:** shipped as the bundled `nirux-draft` skill.\
-> **Differs today:** the skill reuses one folder per session and passes the workspace in its link; there is still no Copy button.\
+> **Differs today:** the skill reuses one folder per session and passes the workspace in its link; the editor has a Copy Draft button.\
 > **User guide:** [URL scheme and agent skills](../agent-skills.md).
 
 Status: design, validated by the user on 2026-10-02. Implemented as the
@@ -22,8 +22,9 @@ does what a draft needs:
 - `nirux://open-editor` opens any absolute text file, without a dialog when
   it carries `launch=`. It brings Nirux forward but leaves keyboard focus in
   the terminal;
-- Monaco shows the raw text. The user can edit it, then click into it:
-  `⌘A ⌘C` copies it verbatim;
+- Monaco shows the raw text, wrapped and without line numbers, never
+  rendered. The user can edit it; Copy Draft in the header copies it,
+  edits included;
 - `⌘W` dismisses it, without asking even when it was edited.
 
 What ships is one bundled skill, `nirux-draft`, next to `nirux-show-code`:
@@ -46,7 +47,9 @@ No new URL, no CLI flag.
 
 ## Decided
 
-- **No Copy button** in v1: `⌘A ⌘C` is enough.
+- **Copy Draft** (2026-11-26, replacing v1's "`⌘A ⌘C` is enough"): a file
+  whose folder starts with `nirux-draft-` is a draft, and the header's
+  primary button puts its text on the pasteboard as plain text only.
 - **Ephemeral**: drafts live in `$TMPDIR`, which macOS cleans up. A restored
   editor tab whose draft is gone doesn't open, silently (restore is
   non-interactive), and can leave an empty editor column.

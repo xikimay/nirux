@@ -223,6 +223,8 @@ enum Theme {
         static let add = "plus"
         static let search = "magnifyingglass"
         static let diff = "plus.forwardslash.minus"
+        /// The editor's toggle between a Markdown file's source and its text rendered.
+        static let renderedText = "doc.richtext"
         static let webInspector = "ladybug"
         static let branch = "arrow.triangle.branch"
         static let openWorktree = "folder"

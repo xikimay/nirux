@@ -32,8 +32,9 @@ extension ColumnHeaderAccessory {
 ///   truncated in the middle. A column may put its own view in place of
 ///   title and context (the browser's URL field).
 /// - status: a pill, only for an agent or a run.
-/// - buttons: the column's own icon actions, two at most; the ⋯ menu holds
-///   the rest. A text button goes among the accessories.
+/// - buttons: the column's own icon actions, two at most (three on the
+///   editor's Markdown tabs); the ⋯ menu holds the rest. A text button goes
+///   among the accessories.
 ///
 /// When the bar runs out of room, the context goes first, then the
 /// accessories, the status, the trailing buttons and the leading ones,
@@ -124,7 +125,8 @@ final class ColumnHeaderView: NSView {
     var leadingButtons: [ColumnHeaderButton] = [] {
         didSet { replace(oldValue, with: leadingButtons) }
     }
-    /// The column's own actions, before ⋯. Two at most.
+    /// The column's own actions, before ⋯. Two at most (three on the
+    /// editor's Markdown tabs).
     var trailingButtons: [ColumnHeaderButton] = [] {
         didSet { replace(oldValue, with: trailingButtons) }
     }
@@ -672,6 +674,17 @@ final class ColumnHeaderLabel: NSTextField, ColumnHeaderAccessory {
         if super.stringValue != shown { super.stringValue = shown }
         return width
     }
+}
+
+/// A text button among a header's accessories (the editor's Copy Draft),
+/// hidden where it doesn't fit.
+extension NiruxButton: ColumnHeaderAccessory {
+    func width(fitting maxWidth: CGFloat) -> CGFloat {
+        let width = intrinsicContentSize.width
+        return width <= maxWidth ? width : 0
+    }
+
+    var accessoryHeight: CGFloat { size.height }
 }
 
 /// The header's status: an agent's state icon, a symbol or a dot, then a

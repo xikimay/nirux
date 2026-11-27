@@ -931,8 +931,10 @@ extension NiruxShellView {
 
     // MARK: queue_merge
 
+    /// `afterRead`: the Board's open pull requests were just read for it.
     private func leadQueueMerge(
-        _ arguments: [String: Any], in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
+        _ arguments: [String: Any], in space: WorkspaceProfile, parent: NewTask.MissionParent, afterRead: Bool = false,
+        answer: @escaping LeadAnswer
     ) {
         guard let numbers = LeadTools.pullRequestNumbers(arguments), let cadence = LeadTools.queueCadence(arguments) else {
             return answer("Invalid pull requests or queue cadence.", true)
@@ -956,10 +958,39 @@ extension NiruxShellView {
             return answer("\(chosen.name)'s merge queue can't start: \(problem) Tell the user.", true)
         }
         let reads = board.reads[chosen.section.id]
-        if let open = reads?.openPullRequests.map({ Set($0.map(\.number)) }) {
-            let unknown = numbers.filter { !open.contains($0) }
-            guard unknown.isEmpty else {
-                return answer(unknown.map { "#\($0)" }.joined(separator: ", ") + " isn't an open pull request of \(chosen.name).", true)
+        if let reads {
+            if !afterRead, !reads.openListHolds(numbers, now: Date()) {
+                // Held until the read lands: a Board closed meanwhile still answers.
+                return board.readOpenPullRequests(section: chosen.section.id) { [self, board] in
+                    guard isSpaceLead(parent, spaceID: space.id) else {
+                        return answer("This terminal no longer belongs to the space’s Lead.", true)
+                    }
+                    // Another repository or other settings saved meanwhile aren't what the Lead asked for.
+                    guard projectBoardLocation(projectID: space.id)?.board === board,
+                          board.section(id: chosen.section.id)?.slot == chosen.section.slot,
+                          board.loaded(for: chosen.section)?.queueSettings == settings else {
+                        return answer("\(chosen.name)'s Board closed or its queue settings changed while Nirux read its pull requests: "
+                            + "check the Board, then try again.", true)
+                    }
+                    leadQueueMerge(arguments, in: space, parent: parent, afterRead: true, answer: answer)
+                }
+            }
+            guard reads.openPullRequests != nil, reads.errors[.openPullRequests] == nil else {
+                let failure = reads.errors[.openPullRequests]
+                let next = switch failure {
+                case .rateLimited(let reset?)?: "try again after \(reset.formatted(date: .omitted, time: .shortened))"
+                case let failure? where !DailyPass.mayPassLater(failure): "tell the user"
+                default: "try again"
+                }
+                return answer("Nirux couldn't read the open pull requests of \(chosen.name)" + (failure.map { " (\($0.message))" } ?? "")
+                    + ": nothing was queued, \(next).", true)
+            }
+            // An incomplete list (capped, a row unreadable) can't say one isn't open: the preflight reads each.
+            if let open = reads.completeOpenNumbers {
+                let unknown = numbers.filter { !open.contains($0) }
+                guard unknown.isEmpty else {
+                    return answer(unknown.map { "#\($0)" }.joined(separator: ", ") + " isn't an open pull request of \(chosen.name).", true)
+                }
             }
         }
         let controller = mergeQueue(projectID: space.id, repository: chosen.gitHub)
@@ -1015,9 +1046,7 @@ extension NiruxShellView {
         controller.readConfirmation(settings: settings, numbers: numbers) { [self] reading in
             defer { pendingLeadQueueStarts.remove(key) }
             let spaceDefaults = SpaceDefaultsStore.defaults(forSpace: key.projectID)
-            guard let caller = requestingTerminal(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID),
-                  caller.workspace.isLead, caller.workspace.profileID == key.projectID, !caller.column.isClosing,
-                  spaceDefaults.leadCanStartMergeQueue else {
+            guard isSpaceLead(parent, spaceID: key.projectID), spaceDefaults.leadCanStartMergeQueue else {
                 return answer("The Lead no longer has permission to start this queue.", true)
             }
             guard projectBoardLocation(projectID: key.projectID)?.board === board,
