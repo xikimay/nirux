@@ -1124,7 +1124,10 @@ What the board adds:
   click ([stacked pull requests](pr-stacks.md)).
 - **Cadence:** every 60 s while the board is on screen, 30 s while a row has
   pending checks, nothing while it is hidden. The sidebar's `PRDetect` keeps
-  running as today. Refresh reads now.
+  running as today. Refresh reads now. A Lead's `queue_merge` reads the open
+  pull requests now, shown or not, when the last read is older than its
+  interval, failed, or lacks a number it asks for, and answers once that read
+  lands: a Lead works while nobody looks at the board.
 - **The last post-merge run:** `gh run list --repo <owner/name>
   --workflow <file> --branch <base> --event push --limit 1` (REST), every 5
   minutes on screen, and at each queue step.

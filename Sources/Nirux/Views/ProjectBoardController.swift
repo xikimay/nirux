@@ -71,9 +71,21 @@ final class ProjectBoardController {
         }
 
         func pullRequestsAreFresh(now: Date) -> Bool {
-            let age = pullRequestsReadAt.map { now.timeIntervalSince($0) }
-            let interval = ProjectBoard.RefreshSchedule.interval(of: .openPullRequests, hasPendingChecks: hasPendingChecks)
-            return ProjectBoardController.stands(age: age, interval: interval)
+            ProjectBoardController.stands(age: pullRequestsReadAt.map { now.timeIntervalSince($0) }, interval: openInterval)
+        }
+
+        /// The last open list answers for `numbers`: read within its
+        /// interval, no read failed since, it holds each. Else the Lead's
+        /// queue reads it again first: off screen, the board doesn't.
+        func openListHolds(_ numbers: [Int], now: Date) -> Bool {
+            guard let open = openPullRequests, errors[.openPullRequests] == nil,
+                  let readAt = pullRequestsReadAt, now.timeIntervalSince(readAt) <= openInterval else { return false }
+            let read = Set(open.map(\.number))
+            return numbers.allSatisfy(read.contains)
+        }
+
+        private var openInterval: TimeInterval {
+            ProjectBoard.RefreshSchedule.interval(of: .openPullRequests, hasPendingChecks: hasPendingChecks)
         }
 
         var availableSources: Set<ProjectBoard.Source> {
@@ -161,6 +173,9 @@ final class ProjectBoardController {
     private var runningRemoteRead: (generation: Int, anchors: Set<String>)?
     /// Reads landed since the last render: they are drawn once, together.
     private var isRenderScheduled = false
+    /// By section, those waiting for its open pull requests
+    /// (`readOpenPullRequests`).
+    private var openReadWaiters: [String: [@MainActor () -> Void]] = [:]
     /// A board opened from the palette on a project without a repository
     /// opens Board Settings, once.
     private var offersSettings: Bool
@@ -249,7 +264,11 @@ final class ProjectBoardController {
         reads = [:]
         // The old space's tasks: the new one's are read without the sidebar's pass until its next one.
         stagesReadings = nil
+        let waiters = openReadWaiters.values.joined()
+        openReadWaiters = [:]
         reload()
+        // The reads they wait for answer for the old space, and are dropped: they hear now.
+        for landed in waiters { landed() }
     }
 
     /// Refresh, a new project, board.json saved, the space's anchors
@@ -593,6 +612,35 @@ final class ProjectBoardController {
         }
     }
 
+    /// Reads the section's open pull requests now, on screen or not, then
+    /// calls `landed` once a read started after this call has landed or
+    /// was dropped: a Lead works while nobody looks at the board.
+    func readOpenPullRequests(section id: String, then landed: @escaping @MainActor () -> Void) {
+        guard let schedule = reads[id]?.schedule else { return landed() }
+        openReadWaiters[id, default: []].append(landed)
+        if schedule.inFlight.contains(.openPullRequests) {
+            // That answer may predate the call: read again once it lands.
+            reads[id]?.schedule.expire(.openPullRequests)
+        } else {
+            read(.openPullRequests, section: id, now: ProjectBoard.clock())
+        }
+    }
+
+    /// An open read of the section landed, or was dropped: its waiters hear
+    /// once one started after them has.
+    private func openReadEnded(section id: String) {
+        guard let waiters = openReadWaiters[id] else { return }
+        if let schedule = reads[id]?.schedule {
+            if schedule.inFlight.contains(.openPullRequests) { return }
+            // Expired since it started (`expire`, a Refresh, a new config): its answer may predate the change.
+            if schedule.lastStarted[.openPullRequests] == nil {
+                return read(.openPullRequests, section: id, now: ProjectBoard.clock())
+            }
+        }
+        openReadWaiters[id] = nil
+        for landed in waiters { landed() }
+    }
+
     /// Retarget (docs/design/pr-stacks.md): bases pull request `number` of the
     /// section's repository on `base`, then reads its open pull requests
     /// again. Never sent twice: another click is the user's.
@@ -617,13 +665,17 @@ final class ProjectBoardController {
         _ source: ProjectBoard.Source, section id: String, reads asked: RepositoryReads, generation: Int,
         _ store: (inout RepositoryReads) -> Void
     ) {
-        guard generation == self.generation, var reads = self.reads[id], reads.generation == asked.generation else { return }
+        guard generation == self.generation, var reads = self.reads[id], reads.generation == asked.generation else {
+            if source == .openPullRequests { openReadEnded(section: id) }
+            return
+        }
         reads.schedule.finish(source)
         store(&reads)
         self.reads[id] = reads
         if source == .openPullRequests, !reads.isFromRemote, let numbers = reads.completeOpenNumbers {
             onOpenPullRequests?(reads.gitHub, numbers)
         }
+        if source == .openPullRequests { openReadEnded(section: id) }
         scheduleRender()
     }
 

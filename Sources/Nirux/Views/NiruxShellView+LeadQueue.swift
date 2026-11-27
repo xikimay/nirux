@@ -36,6 +36,13 @@ extension NiruxShellView {
         return nil
     }
 
+    /// The space's Lead terminal that sent a call is still there: an answer
+    /// that waited goes to it only.
+    func isSpaceLead(_ parent: NewTask.MissionParent, spaceID: String) -> Bool {
+        guard let caller = requestingTerminal(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID) else { return false }
+        return caller.workspace.isLead && caller.workspace.profileID == spaceID && !caller.column.isClosing
+    }
+
     func inspectOrStopLeadQueue(
         _ arguments: [String: Any], in space: WorkspaceProfile, parent: NewTask.MissionParent,
         stop: Bool, answer: @escaping LeadAnswer
@@ -43,8 +50,7 @@ extension NiruxShellView {
         let name = LeadTools.string(arguments, "repo")
         let board = projectBoardLocation(projectID: space.id)?.board
         let respond: @MainActor (BoardConfigStore.Loaded, [BoardSections.Section]) -> Void = { [self] loaded, sections in
-            guard let caller = requestingTerminal(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID),
-                  caller.workspace.isLead, caller.workspace.profileID == space.id, !caller.column.isClosing else {
+            guard isSpaceLead(parent, spaceID: space.id) else {
                 return answer("This terminal no longer belongs to the space’s Lead.", true)
             }
             let defaults = SpaceDefaultsStore.defaults(forSpace: space.id)

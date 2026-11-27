@@ -377,6 +377,40 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         }
     }
 
+    /// A Lead queues while the Board is off screen, where it reads nothing
+    /// on its own: a pull request opened since its last read is read then
+    /// and proposed; one that isn't open is refused after that read only;
+    /// a read that fails says so.
+    @MainActor
+    func testTheLeadQueuesAPullRequestOpenedWhileTheBoardWasOffScreen() throws {
+        let client = ProjectBoardFlowTests.FakeGitHub(openPullRequests: Self.boardPullRequests, runs: ProjectBoardGitHubTests.postMergeRuns)
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [16: MQ.sha("c")])
+        try withBoard(world: world, boardClient: client) { shell, board in
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "login" }))
+            XCTAssertFalse(shell.isProjectBoardShown(board))
+            let openReads = { client.calls.filter { $0.what == "pr open acme/widgets" }.count }
+            let read = openReads()
+            client.openPullRequests = Self.boardPullRequests.replacingOccurrences(of: "\"number\": 14", with: "\"number\": 16")
+
+            let queued = try callQueueTool(#"{"prs":[16]}"#, shell: shell)
+            XCTAssertFalse(queued.isError, queued.text)
+            XCTAssertEqual(shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets).selection, [16])
+            XCTAssertEqual(openReads(), read + 1)
+            try XCTUnwrap(shell.mergeQueueConfirmation).dismiss()
+
+            let closed = try callQueueTool(#"{"prs":[14]}"#, shell: shell)
+            XCTAssertTrue(closed.isError)
+            XCTAssertEqual(closed.text, "#14 isn't an open pull request of acme/widgets.")
+            XCTAssertEqual(openReads(), read + 2, "refused after a read of its own")
+
+            client.failures = ["acme/widgets": .noAnswer("gh took longer than 30 s")]
+            let failed = try callQueueTool(#"{"prs":[18]}"#, shell: shell)
+            XCTAssertTrue(failed.isError)
+            XCTAssertEqual(failed.text, "Nirux couldn't read the open pull requests of acme/widgets (gh took longer than 30 s): "
+                + "nothing was queued, try again.")
+        }
+    }
+
     @MainActor
     func testClearQueueMenuWorksForInvisibleSelectionsAndRespectsConfirmationAndQuit() throws {
         let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a])

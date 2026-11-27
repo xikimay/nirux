@@ -80,6 +80,24 @@ final class ProjectBoardScheduleTests: XCTestCase {
         XCTAssertEqual(due(schedule, at: 1_004), [])
     }
 
+    /// The Lead's queue goes by the last open list while it was read within
+    /// its interval and no read failed since; else it reads it again first.
+    @MainActor
+    func testTheLeadsQueueGoesByAnOpenListReadWithinItsInterval() throws {
+        var reads = try XCTUnwrap(ProjectBoardController.RepositoryReads(config: BoardConfig(repository: "acme/widgets", baseBranch: "main")))
+        let now = Date()
+        XCTAssertFalse(reads.openListHolds([12], now: now), "never read")
+        reads.openPullRequests = [ProjectBoard.PullRequest(
+            number: 12, state: .open, headRefName: "feat/login", headOid: String(repeating: "a", count: 40), baseRefName: "main",
+            isDraft: false, mergeable: "MERGEABLE", checks: [], url: "https://github.com/acme/widgets/pull/12", isFromConfiguredRepository: true
+        )]
+        reads.pullRequestsReadAt = now.addingTimeInterval(-60)
+        XCTAssertTrue(reads.openListHolds([12], now: now))
+        XCTAssertFalse(reads.openListHolds([12], now: now.addingTimeInterval(1)), "older than its interval")
+        reads.errors[.openPullRequests] = .noAnswer("timeout")
+        XCTAssertFalse(reads.openListHolds([12], now: now), "a read failed since")
+    }
+
     func testTheClockKeepsCountingWhileTheMacSleeps() {
         // CLOCK_MONOTONIC counts sleep; systemUptime doesn't. The two are
         // read apart, and on a virtual machine they don't start together:

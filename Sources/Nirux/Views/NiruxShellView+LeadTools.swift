@@ -931,8 +931,10 @@ extension NiruxShellView {
 
     // MARK: queue_merge
 
+    /// `afterRead`: the Board's open pull requests were just read for it.
     private func leadQueueMerge(
-        _ arguments: [String: Any], in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
+        _ arguments: [String: Any], in space: WorkspaceProfile, parent: NewTask.MissionParent, afterRead: Bool = false,
+        answer: @escaping LeadAnswer
     ) {
         guard let numbers = LeadTools.pullRequestNumbers(arguments), let cadence = LeadTools.queueCadence(arguments) else {
             return answer("Invalid pull requests or queue cadence.", true)
@@ -956,7 +958,19 @@ extension NiruxShellView {
             return answer("\(chosen.name)'s merge queue can't start: \(problem) Tell the user.", true)
         }
         let reads = board.reads[chosen.section.id]
-        if let open = reads?.openPullRequests.map({ Set($0.map(\.number)) }) {
+        if let reads {
+            if !afterRead, !reads.openListHolds(numbers, now: Date()) {
+                return board.readOpenPullRequests(section: chosen.section.id) { [self] in
+                    guard isSpaceLead(parent, spaceID: space.id) else {
+                        return answer("This terminal no longer belongs to the space’s Lead.", true)
+                    }
+                    leadQueueMerge(arguments, in: space, parent: parent, afterRead: true, answer: answer)
+                }
+            }
+            guard let open = reads.openPullRequests.map({ Set($0.map(\.number)) }), reads.errors[.openPullRequests] == nil else {
+                let reason = reads.errors[.openPullRequests].map { " (\($0.message))" } ?? ""
+                return answer("Nirux couldn't read the open pull requests of \(chosen.name)\(reason): nothing was queued, try again.", true)
+            }
             let unknown = numbers.filter { !open.contains($0) }
             guard unknown.isEmpty else {
                 return answer(unknown.map { "#\($0)" }.joined(separator: ", ") + " isn't an open pull request of \(chosen.name).", true)
@@ -1015,9 +1029,7 @@ extension NiruxShellView {
         controller.readConfirmation(settings: settings, numbers: numbers) { [self] reading in
             defer { pendingLeadQueueStarts.remove(key) }
             let spaceDefaults = SpaceDefaultsStore.defaults(forSpace: key.projectID)
-            guard let caller = requestingTerminal(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID),
-                  caller.workspace.isLead, caller.workspace.profileID == key.projectID, !caller.column.isClosing,
-                  spaceDefaults.leadCanStartMergeQueue else {
+            guard isSpaceLead(parent, spaceID: key.projectID), spaceDefaults.leadCanStartMergeQueue else {
                 return answer("The Lead no longer has permission to start this queue.", true)
             }
             guard projectBoardLocation(projectID: key.projectID)?.board === board,
