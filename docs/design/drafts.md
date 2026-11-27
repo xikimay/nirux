@@ -48,8 +48,10 @@ No new URL, no CLI flag.
 ## Decided
 
 - **Copy Draft** (2026-11-26, replacing v1's "`⌘A ⌘C` is enough"): a file
-  whose folder starts with `nirux-draft-` is a draft, and the header's
-  primary button puts its text on the pasteboard as plain text only.
+  whose folder starts with `nirux-draft-` and lies in a temporary
+  directory (`$TMPDIR`, `/tmp`, or a folder inside them, as a sandboxed
+  agent's) is a draft, and the header's primary button puts its text on
+  the pasteboard as plain text only.
 - **Ephemeral**: drafts live in `$TMPDIR`, which macOS cleans up. A restored
   editor tab whose draft is gone doesn't open, silently (restore is
   non-interactive), and can leave an empty editor column.

@@ -209,7 +209,10 @@
       // line as it was (Backspace at its start merges it: an edit).
       var above = range.endLineNumber === lines.start && range.endColumn === 1
         && (change.text === "" ? range.startColumn === 1 : /\n$/.test(change.text));
-      return !above && range.startLineNumber <= lines.end && range.endLineNumber >= lines.start;
+      // A line added below them: Enter at the end of the last.
+      var below = range.startLineNumber === lines.end && range.endLineNumber === lines.end && range.startColumn === range.endColumn
+        && range.startColumn === entry.model.getLineMaxColumn(lines.end) && /^(\r\n|\r|\n)/.test(change.text);
+      return !above && !below && range.startLineNumber <= lines.end && range.endLineNumber >= lines.start;
     });
     var range = entry.model.getDecorationRange(entry.shownRange.decorations[0]);
     if (touched || !range) return true;
@@ -310,6 +313,7 @@
     var path = payload.path;
     var content = payload.content || "";
     var lang = payload.language || languageFromPath(path);
+    var reloaded = !!models[path];
 
     if (models[path]) {
       // Reload existing model — Swift detected an external change while the
@@ -333,6 +337,8 @@
       adoptTabFlags(entry, payload);
     }
     if (payload.activate === false) return;
+    // Read again under the tab's own diff: the diff redraws, and stays.
+    if (reloaded && path === currentPath && diffMode !== null) return;
     switchToPath(path, payload.focus);
     if (typeof payload.line === "number" && payload.line > 0) {
       revealLine(payload.line, payload.column || 1, payload.endLine, payload.focus, payload.rangeID);
@@ -622,110 +628,18 @@
     return (text || "").split(/\r\n|\r|\n/);
   }
 
+  // The lines each side's editor marks: [{ type: "delete" | "insert", line, count }].
   function lineDiffOps(originalText, modifiedText) {
-    var original = splitLines(originalText);
-    var modified = splitLines(modifiedText);
-    var prefix = 0;
-    while (
-      prefix < original.length &&
-      prefix < modified.length &&
-      original[prefix] === modified[prefix]
-    ) {
-      prefix++;
-    }
-
-    var originalEnd = original.length - 1;
-    var modifiedEnd = modified.length - 1;
-    while (
-      originalEnd >= prefix &&
-      modifiedEnd >= prefix &&
-      original[originalEnd] === modified[modifiedEnd]
-    ) {
-      originalEnd--;
-      modifiedEnd--;
-    }
-
-    var originalMid = original.slice(prefix, originalEnd + 1);
-    var modifiedMid = modified.slice(prefix, modifiedEnd + 1);
-    if (originalMid.length === 0 && modifiedMid.length === 0) return [];
-
-    // Keep the local diff cheap. Large unmatched regions are still marked
-    // clearly as changed instead of freezing the editor with an O(n*m) table.
-    if (originalMid.length * modifiedMid.length > 2000000) {
-      var fallback = [];
-      if (originalMid.length > 0) {
-        fallback.push({ type: "delete", line: prefix + 1, count: originalMid.length });
-      }
-      if (modifiedMid.length > 0) {
-        fallback.push({ type: "insert", line: prefix + 1, count: modifiedMid.length });
-      }
-      return fallback;
-    }
-
-    var rows = originalMid.length + 1;
-    var cols = modifiedMid.length + 1;
-    var dp = new Uint32Array(rows * cols);
-    for (var i = 1; i < rows; i++) {
-      for (var j = 1; j < cols; j++) {
-        if (originalMid[i - 1] === modifiedMid[j - 1]) {
-          dp[i * cols + j] = dp[(i - 1) * cols + j - 1] + 1;
-        } else {
-          dp[i * cols + j] = Math.max(dp[(i - 1) * cols + j], dp[i * cols + j - 1]);
-        }
-      }
-    }
-
-    var raw = [];
-    var oi = originalMid.length;
-    var mj = modifiedMid.length;
-    while (oi > 0 && mj > 0) {
-      if (originalMid[oi - 1] === modifiedMid[mj - 1]) {
-        raw.push({ type: "equal" });
-        oi--;
-        mj--;
-      } else if (dp[(oi - 1) * cols + mj] >= dp[oi * cols + mj - 1]) {
-        raw.push({ type: "delete" });
-        oi--;
-      } else {
-        raw.push({ type: "insert" });
-        mj--;
-      }
-    }
-    while (oi-- > 0) raw.push({ type: "delete" });
-    while (mj-- > 0) raw.push({ type: "insert" });
-    raw.reverse();
-
     var ops = [];
-    var originalLine = prefix + 1;
-    var modifiedLine = prefix + 1;
-    for (var r = 0; r < raw.length; r++) {
-      var op = raw[r];
-      if (op.type === "equal") {
-        originalLine++;
-        modifiedLine++;
-      } else if (op.type === "delete") {
-        ops.push({ type: "delete", line: originalLine, count: 1 });
-        originalLine++;
-      } else {
-        ops.push({ type: "insert", line: modifiedLine, count: 1 });
-        modifiedLine++;
-      }
-    }
-    return mergeLineOps(ops);
-  }
-
-  function mergeLineOps(ops) {
-    var merged = [];
-    for (var i = 0; i < ops.length; i++) {
-      var op = ops[i];
-      var last = merged[merged.length - 1];
-      if (last && last.type === op.type && last.line + last.count === op.line) {
-        last.count += op.count;
-      } else {
-        merged.push({ type: op.type, line: op.line, count: op.count });
-      }
-    }
-    return merged;
+    var originalLine = 1;
+    var modifiedLine = 1;
+    DiffText.lineScript(splitLines(originalText), splitLines(modifiedText)).forEach(function (run) {
+      if (run.type === "delete") ops.push({ type: "delete", line: originalLine, count: run.count });
+      if (run.type === "insert") ops.push({ type: "insert", line: modifiedLine, count: run.count });
+      if (run.type !== "insert") originalLine += run.count;
+      if (run.type !== "delete") modifiedLine += run.count;
+    });
+    return ops;
   }
 
   function decorationFor(op) {
@@ -784,7 +698,7 @@
     var entry = models[path];
     if (!entry) return;
     keepReadingTop();
-    if (diffMode === "pierre") exitPierreDiff();
+    if (diffMode === "pierre" || diffMode === "pierre-group") exitPierreDiff();
     diffMode = "monaco";
     clearDiffDecorations();
     if (diffOriginalModel) { diffOriginalModel.dispose(); diffOriginalModel = null; }
@@ -902,103 +816,186 @@
     }, 80);
   }
 
+  // The diffs on screen, drawn as Branch Review draws them (pierre's
+  // createReview: unified, one file after another). `diffHolder`: a tab's
+  // own file, drawn again in place as its buffer changes.
+  var diffReview = null;
+  var diffHolder = null;
+  // Counts the diffs drawn: a group still being diffed stops at the next.
+  var diffGeneration = 0;
+
+  // A tab's own diff: its tab names the file, so no row of its own.
   function renderPierreDiff() {
     if (diffMode !== "pierre" || !currentPath || !models[currentPath]) return;
-    var entry = models[currentPath];
-    setStatus("Rendering diff…");
+    var file = { path: currentPath, hunks: DiffText.hunks(pierreOriginalContent, models[currentPath].model.getValue()) };
     showPierreDiffSurface();
-    try {
-      window.NiruxPierreDiff.render(pierreDiffRoot, {
-        path: currentPath,
-        original: pierreOriginalContent,
-        modified: entry.model.getValue(),
-        language: entry.model.getLanguageId()
-      }, {
-        onRendered: function () {
-          if (diffMode === "pierre") hideStatus();
-        }
-      });
-    } catch (e) {
-      postToSwift({ type: "error", message: "Pierre diff failed: " + String(e) });
-      enterMonacoDiff(currentPath, pierreOriginalContent);
-    }
+    var drawn = diffReview && diffHolder && file.hunks.length > 0 ? redrawFile(diffHolder, file) : drawOwnDiff(file);
+    // pierre couldn't draw it: Monaco's diff instead.
+    if (!drawn) enterMonacoDiff(currentPath, pierreOriginalContent);
   }
 
+  // Several files (Uncommitted Changes, a branch, a checkpoint): its tab
+  // names the group, each file has a row.
   function renderPierreDiffGroup() {
     if (diffMode !== "pierre-group" || !pierreGroupPayload) return;
     showPierreDiffSurface();
-    if (typeof pierreGroupPayload.patch === "string") {
-      window.NiruxPierreDiff.destroy(pierreDiffRoot);
-      var header = document.createElement("div");
-      header.className = "nirux-pierre-summary";
-      header.textContent = pierreGroupPayload.title;
-      if (pierreGroupPayload.warning) {
-        var warning = document.createElement("strong");
-        warning.textContent = pierreGroupPayload.warning;
-        header.appendChild(warning);
-      }
-      var patch = document.createElement("pre");
-      patch.className = "checkpoint-patch";
-      patch.textContent = pierreGroupPayload.patch;
-      pierreDiffRoot.replaceChildren(header, patch);
-      pierreDiffRoot.scrollTop = 0;
-      hideStatus();
-      return;
-    }
     if (pierreGroupPayload.loading) {
-      if (window.NiruxPierreDiff && pierreDiffRoot) {
-        window.NiruxPierreDiff.destroy(pierreDiffRoot);
-      }
+      destroyDiffReview();
+      pierreDiffRoot.replaceChildren();
       setStatus("Preparing diffs…");
       return;
     }
-    setStatus("Rendering diffs…");
-    try {
-      window.NiruxPierreDiff.renderMany(pierreDiffRoot, pierreGroupPayload, {
-        onRendered: function () {
-          if (diffMode === "pierre-group") {
-            installPierreGroupToggles();
-            hideStatus();
-          }
+    // A checkpoint's files come with their hunks, others with both texts.
+    drawGroup((pierreGroupPayload.files || []).map(function (file) {
+      return { path: file.path || file.name || "", hunks: file.hunks, original: file.original, modified: file.modified, note: file.note };
+    }), pierreGroupPayload.notes || [], pierreGroupPayload.warning);
+  }
+
+  // A tab's own file (no row: its tab names it), drawn at once: pierre
+  // fills in what the viewport shows. False when pierre couldn't draw it.
+  function drawOwnDiff(file) {
+    var stack = startDiffs([]);
+    if (file.hunks.length === 0) {
+      stack.appendChild(diffNote("No changes"));
+      return true;
+    }
+    var drawn = appendFile(stack, file, false);
+    diffHolder = stack.lastChild;
+    return drawn;
+  }
+
+  // A group's files, one after another under a row each, those that
+  // changed only: each diffed in turn, the page answering between them.
+  // `files`: { path, hunks }, { path, original, modified }, or for one Swift
+  // didn't read, { path, note }; `notes`: files left out, under `warning`.
+  function drawGroup(files, notes, warning) {
+    var stack = startDiffs(warning ? [warning].concat(notes) : notes);
+    var generation = diffGeneration;
+    var index = 0;
+    var shown = 0;
+    (function next() {
+      if (generation !== diffGeneration) return;
+      var until = Date.now() + 30;
+      while (index < files.length && Date.now() < until) {
+        var file = files[index++];
+        try {
+          var hunks = file.hunks || (file.note ? [] : DiffText.hunks(file.original, file.modified));
+          if (hunks.length === 0 && !file.note) continue;
+          shown++;
+          appendFile(stack, { path: file.path, hunks: hunks, note: file.note }, true);
+        } catch (error) {
+          stack.appendChild(diffNote("Nirux couldn’t draw the diff of " + file.path + "."));
+          postDiffFailure(error);
         }
+      }
+      if (index < files.length) window.setTimeout(next, 0);
+      else if (shown === 0 && notes.length === 0) stack.appendChild(diffNote("No changes"));
+    })();
+  }
+
+  // An empty surface for diffs, `notes` on top.
+  function startDiffs(notes) {
+    destroyDiffReview();
+    hideStatus();
+    var stack = document.createElement("div");
+    stack.className = "nirux-diff-stack";
+    pierreDiffRoot.replaceChildren(stack);
+    pierreDiffRoot.scrollTop = 0;
+    notes.forEach(function (note) { stack.appendChild(diffNote(note)); });
+    return stack;
+  }
+
+  function appendFile(stack, file, named) {
+    if (!diffReview) {
+      diffReview = window.NiruxPierreDiff.createReview(pierreDiffRoot, {
+        fontSize: editorFontSize,
+        lineHeight: Math.round(editorFontSize * 1.54)
       });
-      installPierreGroupToggles();
-    } catch (e) {
-      postToSwift({ type: "error", message: "Pierre multi-diff failed: " + String(e) });
-      exitDiff();
+    }
+    var holder = document.createElement("div");
+    holder.className = "nirux-diff-file";
+    if (named) stack.appendChild(fileRow(file, holder));
+    stack.appendChild(holder);
+    if (!file.note) return drawFile(holder, file);
+    holder.appendChild(diffNote(file.note));
+    return true;
+  }
+
+  // False when pierre couldn't draw it.
+  function drawFile(holder, file) {
+    try {
+      diffReview.renderFile(holder, { path: file.path, hunks: file.hunks });
+      return true;
+    } catch (error) {
+      holder.replaceChildren(diffNote("Nirux couldn’t draw this file’s diff."));
+      postDiffFailure(error);
+      return false;
     }
   }
 
-  function installPierreGroupToggles() {
-    if (!pierreDiffRoot || !pierreGroupPayload || !Array.isArray(pierreGroupPayload.files)) return;
-    var hosts = pierreDiffRoot.querySelectorAll(".nirux-pierre-host");
-    hosts.forEach(function (host, index) {
-      if (host.previousElementSibling && host.previousElementSibling.classList.contains("nirux-pierre-file-header")) {
-        return;
-      }
-      var file = pierreGroupPayload.files[index] || {};
-      var header = document.createElement("button");
-      header.type = "button";
-      header.className = "nirux-pierre-file-header";
-      header.setAttribute("aria-expanded", "true");
+  // pierre empties the file before it draws it again: the reader stays
+  // where they were.
+  function redrawFile(holder, file) {
+    var top = pierreDiffRoot.scrollTop;
+    var drawn = drawFile(holder, file);
+    pierreDiffRoot.scrollTop = top;
+    return drawn;
+  }
 
-      var chevron = document.createElement("span");
-      chevron.className = "nirux-pierre-file-chevron";
-      chevron.textContent = "▾";
+  function postDiffFailure(error) {
+    postToSwift({ type: "error", message: "Pierre diff failed: " + String(error) });
+  }
 
-      var title = document.createElement("span");
-      title.className = "nirux-pierre-file-title";
-      title.textContent = file.name || file.path || ("File " + (index + 1));
+  function diffNote(text) {
+    var note = document.createElement("div");
+    note.className = "nirux-diff-note";
+    note.textContent = text;
+    return note;
+  }
 
-      header.append(chevron, title);
-      header.addEventListener("click", function () {
-        var collapsed = host.classList.toggle("nirux-pierre-collapsed");
-        header.classList.toggle("collapsed", collapsed);
-        header.setAttribute("aria-expanded", collapsed ? "false" : "true");
-        chevron.textContent = collapsed ? "▸" : "▾";
-      });
-      host.parentNode.insertBefore(header, host);
+  // A group's row for one file: its folder and name, its lines added and
+  // removed; a click folds its diff.
+  function fileRow(file, holder) {
+    var path = window.ReviewPage.splitPath(file.path);
+    var counts = DiffText.lineCounts(file.hunks);
+    var row = document.createElement("button");
+    row.type = "button";
+    row.className = "nirux-pierre-file-header";
+    row.setAttribute("aria-expanded", "true");
+    var chevron = document.createElement("span");
+    chevron.className = "nirux-pierre-file-chevron";
+    chevron.textContent = "▾";
+    var folder = document.createElement("span");
+    folder.className = "nirux-pierre-file-folder";
+    // Cut at its start (the box runs right to left), read left to right.
+    folder.appendChild(document.createElement("bdi")).textContent = path.folder;
+    var name = document.createElement("span");
+    name.className = "nirux-pierre-file-title";
+    name.textContent = path.name;
+    var added = document.createElement("span");
+    added.className = "nirux-pierre-file-added";
+    added.textContent = "+" + counts.added;
+    var removed = document.createElement("span");
+    removed.className = "nirux-pierre-file-removed";
+    removed.textContent = "−" + counts.removed;
+    row.append(chevron, folder, name);
+    if (!file.note) row.append(added, removed);
+    row.addEventListener("click", function () {
+      holder.hidden = !holder.hidden;
+      row.classList.toggle("collapsed", holder.hidden);
+      row.setAttribute("aria-expanded", holder.hidden ? "false" : "true");
+      chevron.textContent = holder.hidden ? "▸" : "▾";
+      // pierre draws what comes into view as the root scrolls.
+      pierreDiffRoot.dispatchEvent(new Event("scroll"));
     });
+    return row;
+  }
+
+  function destroyDiffReview() {
+    diffGeneration++;
+    if (diffReview) diffReview.destroy();
+    diffReview = null;
+    diffHolder = null;
   }
 
   function exitPierreDiff() {
@@ -1008,10 +1005,11 @@
     }
     pierreOriginalContent = "";
     pierreGroupPayload = null;
-    if (window.NiruxPierreDiff && pierreDiffRoot) {
-      window.NiruxPierreDiff.destroy(pierreDiffRoot);
+    destroyDiffReview();
+    if (pierreDiffRoot) {
+      pierreDiffRoot.replaceChildren();
+      pierreDiffRoot.style.display = "none";
     }
-    if (pierreDiffRoot) pierreDiffRoot.style.display = "none";
   }
 
   function exitDiff(focus) {

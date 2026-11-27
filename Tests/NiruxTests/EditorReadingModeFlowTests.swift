@@ -223,6 +223,11 @@ final class EditorReadingModeFlowTests: XCTestCase {
             UIFlowHarness.run("\(Self.mainEditor).getModel().applyEdits([{ range: new monaco.Range(33, 1, 33, 1), text: '\\n' }])", in: webView)
             UIFlowHarness.waitForAnswer("the lines moved down", to: Self.shownRange, in: webView) { $0.hasPrefix("34-46|") }
             harness.waitUntil("the header to follow them down") { editor.header.context == "Lines 34–46" }
+            // A line added below them (Enter at the end of the last): they stay.
+            UIFlowHarness.run("var m = \(Self.mainEditor).getModel(); m.applyEdits([{ range: new monaco.Range(46, m.getLineMaxColumn(46), 46, m.getLineMaxColumn(46)), text: '\\n' }])", in: webView)
+            UIFlowHarness.waitForAnswer("the line added", to: "String(\(Self.mainEditor).getModel().getLineCount())", in: webView) { $0 == "196" }
+            UIFlowHarness.waitForAnswer("the lines still shown", to: Self.shownRange, in: webView) { $0.hasPrefix("34-46|") }
+            XCTAssertEqual(editor.header.context, "Lines 34–46")
             // Saved, then written again on disk: still where they moved.
             editor.saveAll()
             harness.waitUntil("the edits saved") { editor.unsavedPaths.isEmpty }
@@ -275,11 +280,19 @@ final class EditorReadingModeFlowTests: XCTestCase {
             XCTAssertNil(editor.diffActivePath)
             waitForView("source:# Flow", in: webView)
             waitForRange("1-1|caret 1:1|context|flat", in: webView)
+            XCTAssertEqual(editor.header.context, "Line 1")
             // An agent's open: the keyboard stays where the user types.
             XCTAssertIdentical(harness.window.firstResponder, terminal)
             UIFlowHarness.waitForAnswer("the page's focus", to: "document.activeElement === document.body ? 'none' : document.activeElement.tagName", in: webView) {
                 $0 == "none"
             }
+            // Its diff shows no highlight: the header names the folder over it.
+            editor.toggleDiff()
+            harness.waitUntil("the diff again") { editor.diffActivePath == readme }
+            XCTAssertEqual(editor.header.context, "")
+            editor.toggleDiff()
+            harness.waitUntil("the source again") { editor.diffActivePath == nil }
+            XCTAssertEqual(editor.header.context, "Line 1")
         }
     }
 

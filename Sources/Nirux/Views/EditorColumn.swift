@@ -909,10 +909,28 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
             "files": group.files
         ]
         if let diff = group.checkpoint {
-            payload["patch"] = diff.text
             payload["warning"] = diff.warning
+            payload["notes"] = diff.notes
+            payload["files"] = diff.files.map(Self.checkpointPayload)
         }
         sendBridge(payload)
+    }
+
+    /// A checkpoint's file as the page draws it: its hunks, or its note.
+    private nonisolated static func checkpointPayload(_ file: LocalCheckpoints.Diff.File) -> [String: Any] {
+        var payload: [String: Any] = ["path": file.path, "hunks": file.hunks.map { hunk -> [String: Any] in
+            ["oldStart": hunk.oldStart, "newStart": hunk.newStart, "section": hunk.section,
+             "lines": hunk.lines.map { ["kind": $0.kind, "text": $0.text] }]
+        }]
+        payload["note"] = file.note
+        return payload
+    }
+
+    /// Whether the tab's diff is pierre's, which neither wraps nor shows
+    /// highlighted lines: a draft's and Compare's are Monaco's.
+    var showsPierreDiff: Bool {
+        guard let path = diffActivePath, path == activePath, case .git? = diffActiveBase else { return false }
+        return !draftPaths.contains(path)
     }
 
     private func enterDiff(for path: String, mode: EditorDiffMode) {
@@ -942,7 +960,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
                 case .text(let original):
                     self.diffActivePath = path
                     self.diffActiveBase = .git(mode)
-                    self.sendBridge(["type": "enterDiff", "path": path, "original": original])
+                    self.sendBridge(["type": "enterDiff", "path": path, "original": original, "viewer": self.showsPierreDiff ? "pierre" : "monaco"])
                     self.endRendering(of: path)
                     self.refreshTabBar()
                 }
@@ -1664,13 +1682,7 @@ extension EditorColumn {
         byteCount: UInt64
     ) -> [String: Any] {
         NSLog("%@", "[EditorColumn] replacing large visual diff file \(absPath) (\(byteCount) bytes)")
-        return [
-            "path": rel,
-            "name": rel,
-            "original": "",
-            "modified": "Large file omitted from visual diff (\(byteCount) bytes).",
-            "language": "plaintext"
-        ]
+        return ["path": rel, "name": rel, "note": "Too large to compare (\(byteCount) bytes)."]
     }
 
     private nonisolated static func fileByteCount(path: String) -> UInt64? {

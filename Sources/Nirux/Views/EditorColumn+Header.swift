@@ -80,8 +80,8 @@ extension EditorColumn {
             header.context = ""
         } else {
             header.title = (activePath as NSString).lastPathComponent
-            header.context = shownRanges[activePath].map { Self.linesLabel($0.lines) }
-                ?? Self.directoryContext(of: activePath, workspaceCwd: workspaceCwd)
+            let shown = showsPierreDiff ? nil : shownRanges[activePath]
+            header.context = shown.map { Self.linesLabel($0.lines) } ?? Self.directoryContext(of: activePath, workspaceCwd: workspaceCwd)
         }
         header.titleToolTip = Self.isDiffGroupPath(activePath) ? nil : activePath
         diffButton.isEnabled = !Self.isDiffGroupPath(activePath)
