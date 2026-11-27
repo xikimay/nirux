@@ -76,6 +76,15 @@ final class ProjectBoardController {
             return ProjectBoardController.stands(age: age, interval: interval)
         }
 
+        /// The last open list answers for `numbers`: it stands, no read
+        /// failed since, and it holds each, or is incomplete (capped, a row
+        /// unreadable) so that reading it again wouldn't say more. Else the
+        /// Lead's queue reads it first: off screen, the board doesn't.
+        func openListHolds(_ numbers: [Int], now: Date) -> Bool {
+            guard openPullRequests != nil, errors[.openPullRequests] == nil, pullRequestsAreFresh(now: now) else { return false }
+            return completeOpenNumbers.map { Set(numbers).isSubset(of: $0) } ?? true
+        }
+
         var availableSources: Set<ProjectBoard.Source> {
             var sources: Set<ProjectBoard.Source> = [.openPullRequests, .mergedPullRequests]
             if baseBranch != nil, workflow != nil { sources.insert(.postMergeRun) }
@@ -161,6 +170,9 @@ final class ProjectBoardController {
     private var runningRemoteRead: (generation: Int, anchors: Set<String>)?
     /// Reads landed since the last render: they are drawn once, together.
     private var isRenderScheduled = false
+    /// By section, those waiting for its open pull requests
+    /// (`readOpenPullRequests`), with when they asked (`ProjectBoard.clock`).
+    private var openReadWaiters: [String: [(askedAt: TimeInterval, landed: @MainActor () -> Void)]] = [:]
     /// A board opened from the palette on a project without a repository
     /// opens Board Settings, once.
     private var offersSettings: Bool
@@ -249,7 +261,11 @@ final class ProjectBoardController {
         reads = [:]
         // The old space's tasks: the new one's are read without the sidebar's pass until its next one.
         stagesReadings = nil
+        let waiters = openReadWaiters.values.joined()
+        openReadWaiters = [:]
         reload()
+        // The reads they wait for answer for the old space, and are dropped: they hear now.
+        for waiter in waiters { waiter.landed() }
     }
 
     /// Refresh, a new project, board.json saved, the space's anchors
@@ -469,9 +485,10 @@ final class ProjectBoardController {
     }
 
     /// A reading made `age` seconds ago, of a source read every `interval`:
-    /// it stands for two intervals. Never made, it doesn't.
+    /// it stands for two intervals. Never made, or after now (the clock set
+    /// back), it doesn't.
     nonisolated static func stands(age: TimeInterval?, interval: TimeInterval) -> Bool {
-        age.map { $0 <= 2 * interval } ?? false
+        age.map { (0...2 * interval).contains($0) } ?? false
     }
 
     /// Reads what is due. Called on every status refresh (the heartbeat),
@@ -553,7 +570,8 @@ final class ProjectBoardController {
                     ProjectBoard.parsePullRequests(data, repository: gitHub).map(Result.success) ?? .failure(.unreadable(output: data))
                 }
             }, then: { [weak self] result in
-                self?.finish(source, section: id, reads: repository, generation: current) { reads in
+                guard let self else { return }
+                let stored = finish(source, section: id, reads: repository, generation: current) { reads in
                     reads.errors[source] = result.failureValue
                     guard case .success(let parsed) = result else {
                         if list == .open { reads.completeOpenNumbers = nil }
@@ -574,6 +592,7 @@ final class ProjectBoardController {
                         reads.mergedPullRequests = pullRequests
                     }
                 }
+                if list == .open { openReadEnded(section: id, startedAt: now, stored: stored) }
             })
         case .postMergeRun:
             guard let branch = repository.baseBranch, let workflow = repository.workflow else {
@@ -591,6 +610,35 @@ final class ProjectBoardController {
                 }
             })
         }
+    }
+
+    /// Reads the section's open pull requests now, on screen or not, then
+    /// calls `landed` once a read started since has stored its answer: a
+    /// Lead works while nobody looks at the board.
+    func readOpenPullRequests(section id: String, then landed: @escaping @MainActor () -> Void) {
+        guard let schedule = reads[id]?.schedule else { return landed() }
+        let now = ProjectBoard.clock()
+        openReadWaiters[id, default: []].append((now, landed))
+        // One under way started before: the next starts when it lands.
+        if !schedule.inFlight.contains(.openPullRequests) { read(.openPullRequests, section: id, now: now) }
+    }
+
+    /// The section's open read started at `startedAt` landed, `stored` or
+    /// dropped: those who asked before it started hear if it was stored;
+    /// the others get a read of their own once none runs.
+    private func openReadEnded(section id: String, startedAt: TimeInterval, stored: Bool) {
+        guard let waiters = openReadWaiters[id] else { return }
+        guard let schedule = reads[id]?.schedule else {
+            openReadWaiters[id] = nil
+            return waiters.forEach { $0.landed() }
+        }
+        let answered = stored ? waiters.filter { $0.askedAt <= startedAt } : []
+        let waiting = stored ? waiters.filter { $0.askedAt > startedAt } : waiters
+        openReadWaiters[id] = waiting.isEmpty ? nil : waiting
+        if !waiting.isEmpty, !schedule.inFlight.contains(.openPullRequests) {
+            read(.openPullRequests, section: id, now: ProjectBoard.clock())
+        }
+        for waiter in answered { waiter.landed() }
     }
 
     /// Retarget (docs/design/pr-stacks.md): bases pull request `number` of the
@@ -612,12 +660,13 @@ final class ProjectBoardController {
     }
 
     /// Stores an answer, unless it is for an earlier project or config of
-    /// the section: then it is moot.
+    /// the section: then it is moot, and false.
+    @discardableResult
     private func finish(
         _ source: ProjectBoard.Source, section id: String, reads asked: RepositoryReads, generation: Int,
         _ store: (inout RepositoryReads) -> Void
-    ) {
-        guard generation == self.generation, var reads = self.reads[id], reads.generation == asked.generation else { return }
+    ) -> Bool {
+        guard generation == self.generation, var reads = self.reads[id], reads.generation == asked.generation else { return false }
         reads.schedule.finish(source)
         store(&reads)
         self.reads[id] = reads
@@ -625,6 +674,7 @@ final class ProjectBoardController {
             onOpenPullRequests?(reads.gitHub, numbers)
         }
         scheduleRender()
+        return true
     }
 
     /// Answers landing together (the first reads, a Refresh) are drawn once.

@@ -16,24 +16,43 @@ final class ProjectBoardFlowTests: BoardRepositoryTestCase {
     final class FakeGitHub: ProjectBoardGitHub, @unchecked Sendable {
         private let lock = NSLock()
         private var recorded: [FakeGitHubCall] = []
-        let openPullRequests: String
+        private var open: String
+        private var failing: [String: GitHub.CLI.Failure]
         let mergedPullRequests: String
         let runs: String
         /// Open pull requests by `owner/name`, for a board with several
         /// repositories; the others get `openPullRequests`.
         let openByRepository: [String: String]
-        /// What gh answers instead for these `owner/name`.
-        let failures: [String: GitHub.CLI.Failure]
+
+        /// What the open reads answer from now on.
+        var openPullRequests: String {
+            get { lock.lock(); defer { lock.unlock() }; return open }
+            set { lock.lock(); open = newValue; lock.unlock() }
+        }
+
+        /// What gh answers instead for these `owner/name`, from now on.
+        var failures: [String: GitHub.CLI.Failure] {
+            get { lock.lock(); defer { lock.unlock() }; return failing }
+            set { lock.lock(); failing = newValue; lock.unlock() }
+        }
+
+        private var hold: DispatchGroup?
+        /// Open reads answer once it is left, from now on: what happens
+        /// during one.
+        var holdOpenReads: DispatchGroup? {
+            get { lock.lock(); defer { lock.unlock() }; return hold }
+            set { lock.lock(); hold = newValue; lock.unlock() }
+        }
 
         init(
             openPullRequests: String, mergedPullRequests: String = "[]", runs: String,
             openByRepository: [String: String] = [:], failures: [String: GitHub.CLI.Failure] = [:]
         ) {
-            self.openPullRequests = openPullRequests
+            open = openPullRequests
             self.mergedPullRequests = mergedPullRequests
             self.runs = runs
             self.openByRepository = openByRepository
-            self.failures = failures
+            failing = failures
         }
 
         var calls: [FakeGitHubCall] {
@@ -50,6 +69,7 @@ final class ProjectBoardFlowTests: BoardRepositoryTestCase {
 
         func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, GitHub.CLI.Failure> {
             record("pr \(state) \(repository)")
+            if state == .open { holdOpenReads?.wait() }
             if let failure = failures[repository] { return .failure(failure) }
             let open = openByRepository[repository] ?? openPullRequests
             return .success(Data((state == .open ? open : mergedPullRequests).utf8))
