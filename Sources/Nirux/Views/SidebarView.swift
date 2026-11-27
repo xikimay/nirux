@@ -174,6 +174,12 @@ final class SidebarView: NSView {
     /// Called synchronously while the preview is still attached to its window.
     var onOpenTaskThread: ((_ workspaceID: String, _ card: TaskPreviewCard) -> Void)?
     var lastInfos: [WorkspaceInfo] = []
+    /// The space's day plan while it is on (SidebarView+Plan).
+    var plan: Plan?
+    /// Features the user folded, kept until the app quits.
+    var foldedFeatures: Set<String> = []
+    /// Tasks whose rows sit in a feature: they don't drag.
+    var inFeatureIDs: Set<String> = []
     var lastProfiles: [ProfileInfo] = []
     /// The workspace each row of the last build stands for, by the index
     /// its hit area carries: `lastInfos` is already the next build's when
@@ -552,7 +558,11 @@ final class SidebarView: NSView {
         hasher.combine(isInactiveSectionCollapsed)
         hasher.combine(onboardingChecklist)
         // The rail draws no card.
-        if isExpanded { hasher.combine(catchUp) }
+        if isExpanded {
+            hasher.combine(catchUp)
+            hasher.combine(plan)
+            hasher.combine(foldedFeatures)
+        }
         hasher.combine(animates)
         hasher.combine(navigation)
         for workspace in lastInfos {
@@ -706,7 +716,7 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(Self.hoverTarget(of: area.region))
             NSCursor.pointingHand.set()
-        case .catchUp:
+        case .catchUp, .featureFold:
             clearHover()
             setHoverTarget(nil)
             NSCursor.pointingHand.set()
@@ -764,6 +774,8 @@ final class SidebarView: NSView {
             onNewWorkspace?()
         case .archivedToggle:
             toggleInactiveSection()
+        case .featureFold(let id):
+            toggleFeature(id)
         case .board:
             // A double-click's second press would focus the Board it opened.
             lastButtonActionAt = event.timestamp
@@ -1017,7 +1029,7 @@ final class SidebarView: NSView {
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                  .actionBlock(let workspaceIndex), .budgetChoice(let workspaceIndex, _, _):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
-            case .spacePicker, .newTask, .archivedToggle, .board, .history, .inert, .link, .catchUp:
+            case .spacePicker, .newTask, .archivedToggle, .board, .history, .inert, .link, .catchUp, .featureFold:
                 continue
             }
         }
@@ -1180,6 +1192,14 @@ extension SidebarView {
         } else if let header = inactiveSectionHeaderFrame {
             contentDocumentView.scrollToVisible(header)
         }
+    }
+
+    /// A day plan feature folds or unfolds its lines (SidebarView+Plan).
+    func toggleFeature(_ id: String) {
+        if foldedFeatures.remove(id) == nil { foldedFeatures.insert(id) }
+        lastRenderSignature = nil
+        rebuildContent()
+        lastRenderSignature = renderSignature()
     }
 
     /// No-op without an inactive workspace: an unfold nobody sees would

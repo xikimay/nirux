@@ -94,3 +94,27 @@ extension Plan.Store {
         self.init(fileURL: folder.appendingPathComponent(Self.fileName))
     }
 }
+
+/// The day plans the sidebar shows, read again only once their files changed: the sidebar refreshes several times a
+/// second.
+@MainActor
+final class DayPlanFiles {
+    private var spaces: [String: (isOn: FileBackedValue<Bool>, plan: FileBackedValue<Plan>)] = [:]
+
+    /// Nil while the space's day plan is off.
+    func plan(ofSpace spaceID: String) -> Plan? {
+        guard let files = files(ofSpace: spaceID), files.isOn.value else { return nil }
+        return files.plan.value
+    }
+
+    private func files(ofSpace spaceID: String) -> (isOn: FileBackedValue<Bool>, plan: FileBackedValue<Plan>)? {
+        if let files = spaces[spaceID] { return files }
+        guard let defaults = SpaceDefaultsStore(spaceID: spaceID), let store = Plan.Store(spaceID: spaceID) else { return nil }
+        let files = (
+            isOn: FileBackedValue(url: defaults.fileURL, read: { _ in defaults.load().defaults.plansTheDay }, write: { _, _ in }),
+            plan: FileBackedValue(url: store.fileURL, read: { Plan.Store(fileURL: $0).load().plan }, write: { _, _ in })
+        )
+        spaces[spaceID] = files
+        return files
+    }
+}

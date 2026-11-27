@@ -90,6 +90,7 @@ final class NiruxShellView: NSView {
     }
 
     let workspaceStore = WorkspaceStore()
+    let dayPlans = DayPlanFiles()
     let projectStore = ProjectStore()
     /// Each space's agent sessions (see AgentSessionLedger).
     var sessionLedger = AgentSessionLedger()

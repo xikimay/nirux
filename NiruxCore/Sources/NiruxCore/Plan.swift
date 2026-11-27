@@ -3,7 +3,7 @@ import Foundation
 /// A space's plan (docs/design/plan.md): features, the lines in them, the steps
 /// under those lines, and what the Lead proposes. It changes only through the
 /// methods of Plan+Changes.swift, which keep its rules.
-public struct Plan: Codable, Equatable, Sendable {
+public struct Plan: Codable, Hashable, Sendable {
     public typealias Author = TaskThread.Author
 
     public internal(set) var lines: [Line] = []
@@ -12,7 +12,7 @@ public struct Plan: Codable, Equatable, Sendable {
 
     public init() {}
 
-    public struct Line: Codable, Equatable, Sendable, Identifiable {
+    public struct Line: Codable, Hashable, Sendable, Identifiable {
         /// Open: a kind a later build adds is kept as it is, and fits nowhere here.
         public struct Kind: RawRepresentable, Codable, Hashable, Sendable {
             public let rawValue: String
@@ -67,14 +67,14 @@ public struct Plan: Codable, Equatable, Sendable {
         public var waitsForUser: Bool { kind == .session && current.map { $0.kind == .step && $0.isForUser } == true }
     }
 
-    public struct Origin: Codable, Equatable, Sendable {
+    public struct Origin: Codable, Hashable, Sendable {
         public var by: Author
         public var at: TimeInterval
         public var source: Source?
     }
 
     /// Where the Lead read a line: GitHub, Linear, Slack, Mail, Figma.
-    public struct Source: Codable, Equatable, Sendable {
+    public struct Source: Codable, Hashable, Sendable {
         public var name: String
         public var url: String?
         /// "assigned yesterday · high priority"
@@ -87,7 +87,7 @@ public struct Plan: Codable, Equatable, Sendable {
         }
     }
 
-    public enum Place: Codable, Equatable, Sendable {
+    public enum Place: Codable, Hashable, Sendable {
         /// Outside any feature.
         case top
         case under(String)
@@ -95,7 +95,7 @@ public struct Plan: Codable, Equatable, Sendable {
         case feature(title: String, id: String)
     }
 
-    public struct Proposal: Codable, Equatable, Sendable, Identifiable {
+    public struct Proposal: Codable, Hashable, Sendable, Identifiable {
         public var line: Line
         public var place: Place
         public var id: String { line.id }

@@ -32,6 +32,7 @@ extension SidebarView {
         // The space's Lead goes above the Tasks header (docs/design/spaces.md).
         let leadInfos = displayedWorkspaceInfos.filter { !$0.isInactive && $0.isLead }
         let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive && !$0.isLead }
+        let planned = planRows(activeInfos)
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
         let listedInactiveInfos = inactiveInfos.filter(listsWorkspace)
         let activeProfile = lastProfiles.first(where: { $0.isActive })
@@ -42,7 +43,7 @@ extension SidebarView {
             let height = expandedContentHeight(
                 hasPicker: activeProfile != nil,
                 leadInfos: leadInfos,
-                activeInfos: activeInfos,
+                planned: planned,
                 archivedHeight: inactiveInfos.isEmpty ? nil : archived,
                 onboardingHeight: onboardingCardHeight(listWidth: width),
                 width: width
@@ -63,14 +64,14 @@ extension SidebarView {
         }
         yOffset = buildBoardRow(top: yOffset) - SidebarExpandedMetrics.pickerBottomGap
         if !leadInfos.isEmpty {
-            yOffset = buildWorkspaceGroup(leadInfos, yOffset: yOffset) + SidebarExpandedMetrics.workspaceGap
+            yOffset = buildPlanRows(planned.lead, yOffset: buildWorkspaceGroup(leadInfos, yOffset: yOffset)) + SidebarExpandedMetrics.workspaceGap
             yOffset -= SidebarExpandedMetrics.leadGap
         }
         yOffset = buildTasksHeader(top: yOffset)
         if let catchUp {
             yOffset = buildCatchUpCard(catchUp, top: yOffset)
         }
-        yOffset = buildWorkspaceGroup(activeInfos, yOffset: yOffset)
+        yOffset = buildPlanRows(planned.tasks, yOffset: yOffset)
         if let onboardingCard {
             yOffset -= SidebarExpandedMetrics.onboardingCardGap
             onboardingCard.frame.origin = NSPoint(
@@ -205,14 +206,15 @@ extension SidebarView {
     /// `archivedHeight`: the archived list's (`archivedListHeight`), nil
     /// without an Archived row.
     private func expandedContentHeight(
-        hasPicker: Bool, leadInfos: [WorkspaceInfo], activeInfos: [WorkspaceInfo], archivedHeight: CGFloat?,
+        hasPicker: Bool, leadInfos: [WorkspaceInfo], planned: (tasks: [PlanRow], lead: [PlanRow]), archivedHeight: CGFloat?,
         onboardingHeight: CGFloat?, width: CGFloat
     ) -> CGFloat {
         typealias Metrics = SidebarExpandedMetrics
         var height = Metrics.topPadding + Metrics.tasksHeaderHeight
-            + Metrics.groupHeight(for: activeInfos, sidebarWidth: width)
+            + planRowsHeight(planned.tasks, width: width)
         if !leadInfos.isEmpty {
-            height += Metrics.groupHeight(for: leadInfos, sidebarWidth: width) - Metrics.workspaceGap + Metrics.leadGap
+            height += Metrics.groupHeight(for: leadInfos, sidebarWidth: width) + planRowsHeight(planned.lead, width: width)
+                - Metrics.workspaceGap + Metrics.leadGap
         }
         if hasPicker { height += Metrics.pickerHeight + Metrics.pickerBottomGap }
         // The Board row under the header, History at the bottom.
@@ -637,7 +639,7 @@ extension SidebarView {
 
     // MARK: - Workspace section
 
-    private func buildWorkspaceSection(workspace: WorkspaceInfo, yOffset: CGFloat) -> CGFloat {
+    func buildWorkspaceSection(workspace: WorkspaceInfo, yOffset: CGFloat) -> CGFloat {
         let result = SidebarWorkspaceCardRenderer(
             workspace: workspace,
             sidebarWidth: listWidth,
@@ -687,7 +689,7 @@ extension SidebarView {
 
     /// A view of this render, in the document view; the next render tears
     /// it down.
-    private func addExpandedView(_ view: NSView) {
+    func addExpandedView(_ view: NSView) {
         addSubviewDoc(view)
         expandedViews.append(view)
     }

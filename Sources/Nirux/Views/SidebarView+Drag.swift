@@ -70,10 +70,17 @@ extension SidebarView {
     private func makeWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) -> SidebarWorkspaceDrag? {
         // The Lead stays on top, a Mission child under its parent: a press
         // on either is a click. A card drags among the cards with no parent.
-        guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }), !dragged.isLead, !dragged.isNested
+        guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }), !dragged.isLead, !dragged.isNested,
+              !inFeatureIDs.contains(dragged.id)
         else { return nil }
+        // A day plan feature's tasks, and their sub-tasks, stay in it.
         let section = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive && !$0.isLead }
-        let group = section.filter { !$0.isNested }
+        var inFeature = false
+        let listed = section.filter { info in
+            if !info.isNested { inFeature = inFeatureIDs.contains(info.id) }
+            return !inFeature
+        }
+        let group = listed.filter { !$0.isNested }
         let frameOf = { (info: WorkspaceInfo) in
             self.hitAreas.first { area in
                 if case .workspace(let index) = area.region { return index == info.index }
@@ -83,7 +90,7 @@ extension SidebarView {
         // A card and the children listed under it are one drop target: the
         // line between two cards falls below the first one's children.
         var frames: [NSRect] = []
-        for info in section {
+        for info in listed {
             guard let frame = frameOf(info) else { continue }
             if info.isNested, let last = frames.popLast() {
                 frames.append(last.union(frame))
