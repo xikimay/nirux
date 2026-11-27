@@ -15,7 +15,17 @@ extension EditorColumn {
         // Up the responder chain to the app, like the menu's item.
         searchButton.action = #selector(NiruxApp.showWorkspaceSearch(_:))
         header.trailingButtons = [diffButton, searchButton]
-        header.menuProvider = { [weak self] in Self.headerMenu(isFront: self?.isFront ?? false) }
+        header.menuProvider = { [weak self] in
+            let menu = Self.headerMenu(isFront: self?.isFront ?? false)
+            // Also where a narrow header has no room for its button.
+            if let self, let path = self.currentPath, self.draftPaths.contains(path) {
+                let item = NSMenuItem(title: Self.copyDraftTitle, action: #selector(self.copyDraftClicked), keyEquivalent: "")
+                item.target = self
+                menu.insertItem(item, at: 0)
+                menu.insertItem(.separator(), at: 1)
+            }
+            return menu
+        }
         addSubview(header)
     }
 
@@ -52,8 +62,9 @@ extension EditorColumn {
         copyDraft()
     }
 
-    /// The header names the active tab and where its file is; the diff
-    /// toggle shows whether the tab shows its diff.
+    /// The header names the active tab and where its file is, or the lines
+    /// an open shows in it; the diff toggle shows whether the tab shows its
+    /// diff.
     func refreshHeader() {
         refreshTabButtons()
         guard let activePath else {
@@ -69,7 +80,8 @@ extension EditorColumn {
             header.context = ""
         } else {
             header.title = (activePath as NSString).lastPathComponent
-            header.context = Self.directoryContext(of: activePath, workspaceCwd: workspaceCwd)
+            header.context = shownRanges[activePath].map { Self.linesLabel($0.lines) }
+                ?? Self.directoryContext(of: activePath, workspaceCwd: workspaceCwd)
         }
         header.titleToolTip = Self.isDiffGroupPath(activePath) ? nil : activePath
         diffButton.isEnabled = !Self.isDiffGroupPath(activePath)
@@ -80,7 +92,7 @@ extension EditorColumn {
     /// The Markdown toggle on a tab that can render, Copy Draft on a draft.
     private func refreshTabButtons() {
         let rendered = currentPath.map(renderedPaths.contains) ?? false
-        let buttons = currentPath.map(Self.isRenderable) == true ? [renderButton, diffButton, searchButton] : [diffButton, searchButton]
+        let buttons = currentPath.map(canRender) == true ? [renderButton, diffButton, searchButton] : [diffButton, searchButton]
         if header.trailingButtons != buttons { header.trailingButtons = buttons }
         renderButton.isOn = rendered
         let toolTip = rendered ? "Show Source" : "Show Rendered"
@@ -88,8 +100,13 @@ extension EditorColumn {
             renderButton.toolTip = toolTip
             renderButton.setAccessibilityLabel(toolTip)
         }
-        let accessories: [ColumnHeaderAccessory] = currentPath.map(Self.isDraft) == true ? [copyDraftButton] : []
+        let accessories: [ColumnHeaderAccessory] = currentPath.map(draftPaths.contains) == true ? [copyDraftButton] : []
         if !header.accessories.elementsEqual(accessories, by: ===) { header.accessories = accessories }
+    }
+
+    /// The lines an open shows: "Line 40", "Lines 40–52".
+    nonisolated static func linesLabel(_ lines: ClosedRange<Int>) -> String {
+        lines.count == 1 ? "Line \(lines.lowerBound)" : "Lines \(lines.lowerBound)–\(lines.upperBound)"
     }
 
     /// The file's directory relative to the workspace ("Sources/Nirux"),
