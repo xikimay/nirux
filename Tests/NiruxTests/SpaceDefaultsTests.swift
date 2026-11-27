@@ -277,6 +277,18 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.groupsResults)
     }
 
+    /// The review checklist is on unless the file says; a file Nirux can't
+    /// read turns it off.
+    func testTheReviewChecklistSetting() throws {
+        XCTAssertTrue(SpaceDefaults().reviewChecklistIsOn)
+        let off = SpaceDefaultsStore.decode(Data(#"{"reviewChecklist": false}"#.utf8))
+        XCTAssertEqual(off.status, .loaded)
+        XCTAssertFalse(off.defaults.reviewChecklistIsOn)
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off.defaults)) as? [String: Any]
+        XCTAssertEqual(written?["reviewChecklist"] as? Bool, false)
+        XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.reviewChecklistIsOn)
+    }
+
     /// A cold Lead's fresh start is on unless the file says; a file Nirux
     /// can't read turns it off.
     func testTheFreshStartSetting() throws {

@@ -449,6 +449,9 @@ enum DailyPass {
         var tasks: [TaskActivity] = []
         /// The forgotten tasks the last read listed (`ForgottenTask.key`).
         var reported: Set<String> = []
+        /// The review starts in the window the checklist reached
+        /// (`ReviewChecklist.reached`).
+        var checklistReach = (reached: 0, started: 0)
 
         /// Anything for the pass to read. What GitHub didn't say isn't: a
         /// signed-out gh would make every day one.
@@ -458,6 +461,7 @@ enum DailyPass {
                 || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty || !threadWaits.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }
                 || forgottenTasks(tasks, now: window.end).contains { !reported.contains($0.key) }
+                || checklistReach.reached < checklistReach.started
         }
 
         /// The pass runs on news, or on anything waiting: its morning line
@@ -553,7 +557,7 @@ enum DailyPass {
         for limit in limits {
             parts = [
                 Part(text: morningSection(facts)).kept(), Part(text: instructions(facts)).kept(), Part(text: gitHubSection(facts)).kept(),
-                rulesSection(facts, limit).kept(),
+                Part(text: checklistSection(facts)).kept(), rulesSection(facts, limit).kept(),
                 forgottenSection(forgotten, reported: facts.reported, limit), findingsSection(facts, limit),
                 pullRequestsSection(facts, limit), ciSection(facts, limit, timeZone: timeZone), missionsSection(facts, limit, timeZone: timeZone),
                 threadWaitsSection(facts, limit)
@@ -633,6 +637,17 @@ enum DailyPass {
             ? "The next pass reads this window again. Read what you need with gh meanwhile."
             : "Read what you need with gh."
         return section("What GitHub didn’t say", lines + [after], total: lines.count + 1)
+    }
+
+    /// A review start the checklist missed: Nirux tells a review's fork by a
+    /// file Claude Code doesn't document (`ReviewChecklist.forkedSkill`).
+    private static func checklistSection(_ facts: Facts) -> String? {
+        let (reached, started) = facts.checklistReach
+        guard reached < started else { return nil }
+        return section("Review checklist", [
+            "- The review checklist reached \(reached) of \(started) reviewers started in this window (/code-review, /premortem): "
+                + "a Nirux bug, or Claude Code no longer forks reviews the way Nirux reads. Start a task to find out."
+        ], total: 1)
     }
 
     /// The tasks forgotten at the window's end, those the last read didn't

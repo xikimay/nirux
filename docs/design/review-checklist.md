@@ -1,0 +1,48 @@
+# Review checklist
+
+> **Design record:** approved by the Lead on 2026-11-27. Shipped for Claude Code; see [Spaces and tasks](../spaces-and-tasks.md#the-daily-pass).
+
+The space knowledge base study audited the 18 review findings that came back across tasks: about 13 were forgotten checks (a listed change left untested, a wait without end, a diagnostic that hides its result), not missing knowledge. Those belong to code review. So each review gets, as it starts, the kinds of finding the space's reviews keep recording.
+
+## What the reviewer sees
+
+At most 7 lines under one header, about 1,700 characters on 2026-11-27:
+
+    Review checklist from Nirux: this space's reviews recorded these kinds of finding in two tasks or more over the last 30 days, the most tasks first. Check the change for each of them too.
+    - listed-change-untested · 11 tasks (#828, #811, #824, #818, #804 and 6 more) · latest: “#864: loading the saved flag, the click wiring and the Fresh start / Close branches are untested.”
+    - unbounded-wait · 8 tasks (fix/queue-merge-stale-open-prs, #816, #808, #799, #798 and 3 more) · latest: “The waiter is answered only by a read nothing reset while it ran…”
+
+- **Derived, never written by hand:** the kinds `record_review` kept in the last 30 days (`review-findings.jsonl`) that showed up in two tasks or more, ordered as `ReviewFindings.kinds` orders them (most tasks, then the latest seen). Each line holds the kind, its tasks (the latest first, 5 at most: a task's pull request, else its branch) and its latest finding. The list changes as the findings do. No new `record_review` field.
+- **Nothing at session start:** workers load nothing more. The brief, the handover, the templates and `propose_rule` don't change.
+
+## Where it reaches the reviewer
+
+Claude Code 2.1.332 runs `/code-review` as a background fork (a `general-purpose` subagent), typed or through the Skill tool. Measured with canary hooks in 6 interactive runs:
+
+| Hook context | Reaches the forked reviewer |
+| --- | --- |
+| UserPromptSubmit (typed `/code-review`) | yes |
+| PreToolUse / PostToolUse of the Skill call | no: only the session that called it |
+| SubagentStart | yes, both paths |
+
+So the receiver (`Nirux --hook claude`) gives the list at **SubagentStart** only, once per reviewer. That event carries no prompt and no skill name. But by then Claude Code has already written `<session>/subagents/agent-<id>.forked-skill.json` beside the transcript, holding `{"skillName": "code-review"}`. A fork whose skill is exactly `code-review` or `premortem` (the last `:` segment, as `ReviewPass` reads commands) gets the list; any other subagent costs one file lookup. The workspace's space is the one Nirux last saved for it, else the launch's `NIRUX_PROFILE_ID`.
+
+SubagentStart (Claude Code 2.0.43) joins the installed hook events; it is older than PermissionRequest's 2.0.56.
+
+## When the file goes away
+
+`forked-skill.json` isn't documented. If Claude Code stops writing it, or runs a review without a fork, the list stops reaching reviewers, so that loss is said:
+
+- The receiver notes each review start the hooks name by documented means (a typed `/code-review` or `/premortem`, a Skill call of either), while a list is due, and each list it gives. Both go to `review-checklist.jsonl` (SpaceLog, 8 days).
+- The daily pass counts, per session, the starts a list reached (one list per start, in either order: a fork may start before its Skill call's PostToolUse). When one was missed, the digest says it in a kept section, and the pass runs on it: "The review checklist reached 0 of 3 reviewers started in this window…".
+
+## Settings
+
+**Review checklist** in Space Settings › Lead, on by default (`reviewChecklist` in `defaults.json`). Off, or with a `defaults.json` Nirux can't read, no list is given and no start is noted.
+
+## Not covered
+
+- Codex and Antigravity: they get no list (no hook reaches their reviewers).
+- A review Claude Code runs inline (no fork) gets no list; the daily pass counts it as missed.
+- `/code-review ultra` runs in the cloud: its start counts as missed too.
+- Adversarial reviews by agents a task starts itself: SubagentStart doesn't say what they are, and a loose match on their prompt would fire on ordinary prompts.
