@@ -183,8 +183,9 @@ extension NiruxShellView {
         // quick second ⌘W neither counts nor selects it meanwhile.
         wsToRemove.isClosing = true
         freezeThread(of: wsToRemove)
-        closeMergeWaits(of: wsToRemove, now: Date().timeIntervalSince1970)
+        // Before its wait goes: a waiting task that never started gives its planned session back.
         if wsToRemove.isWaitingTask { unlinkPlanLine(of: wsToRemove) }
+        closeMergeWaits(of: wsToRemove, now: Date().timeIntervalSince1970)
         // Closing the Lead turns it off: Space Settings says so at once.
         if wsToRemove.isLead { refreshSpaceSettingsLead() }
         // Only move the selection when the *active* workspace is going away —
