@@ -195,7 +195,10 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(try names(lead), [HistorySearchTool.name, MemorySearchTool.name] + LeadTools.names + PlanTools.leadNames)
         XCTAssertEqual(try names(task), [HistorySearchTool.name, MemorySearchTool.name] + TaskTools.names + PlanTools.taskNames)
         let allowed = NiruxMCPServer.claudeArguments(executable: "/x/Nirux").first { $0.hasPrefix("--allowedTools=") }
-        for name in PlanTools.names { XCTAssertEqual(allowed?.contains("mcp__nirux__\(name)"), true) }
+        for name in PlanTools.names {
+            XCTAssertEqual(allowed?.contains("mcp__nirux__\(name)"), true)
+            XCTAssertNil(LeadTools.problem(tool: name, arguments: [:]), "the app parses its arguments")
+        }
     }
 
     func testQueueControlsAreScopedToLeadsAndValidateArguments() throws {

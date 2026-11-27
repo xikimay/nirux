@@ -31,6 +31,10 @@ extension Plan {
         let kind = Line.Kind(rawValue: Self.string(arguments, "kind") ?? "")
         guard [Line.Kind.todo, .lead, .session, .step].contains(kind) else { throw Problem("kind must be todo, lead, session or step.") }
         guard task == nil || kind == .session || kind == .step else { throw Problem("task goes with a session or a step.") }
+        let proposes = try Self.flag(arguments, "propose")
+        guard !proposes || kind != .session || task == nil else {
+            throw Problem("Propose new work only: put a running task's line in the plan without propose.")
+        }
         if kind == .session, let task, let line = line(ofWorkspace: task.workspaceID) {
             throw Problem("\(task.title) is in the plan already, as \(line.id): only the user moves lines.")
         }
@@ -45,6 +49,9 @@ extension Plan {
         var place = under.map(Place.under)
             ?? feature.map { .feature(title: $0, id: next.feature(titled: $0)?.id ?? next.unusedID(newID, besides: [id])) } ?? .top
         if kind == .step, under == nil, feature == nil, let task {
+            if proposes, next.line(ofWorkspace: task.workspaceID) == nil {
+                throw Problem("\(task.title) has no line in the plan yet: add it first, as a session with task.")
+            }
             place = .under(try next.lineID(of: task, at: now, newID: newID, besides: [id]))
         }
         let line = Line(
@@ -52,7 +59,6 @@ extension Plan {
             detail: try Self.text(arguments, "detail", limit: Self.maxDetailLength), isForUser: try Self.flag(arguments, "for_user"),
             workspaceID: kind == .session ? task?.workspaceID : nil, after: Self.string(arguments, "after")
         )
-        let proposes = try Self.flag(arguments, "propose")
         if proposes { try next.propose(line, to: place) } else { try next.add(line, to: place) }
         self = next
         return proposes
@@ -173,6 +179,10 @@ extension Plan {
     /// Nil when left out or blank.
     private static func text(_ arguments: [String: Any], _ key: String, limit: Int) throws -> String? {
         guard let value = arguments[key], !(value is NSNull) else { return nil }
+        return try text(value, key, limit: limit)
+    }
+
+    private static func text(_ value: Any, _ key: String, limit: Int) throws -> String? {
         guard let raw = value as? String else { throw Problem("\(key) must be a string.") }
         guard let text = AgentText.clean(raw, maxLength: limit * 4) else { return nil }
         guard text.count <= limit else { throw Problem("\(key) must hold at most \(limit) characters.") }
@@ -183,7 +193,7 @@ extension Plan {
         guard let value = arguments[key], !(value is NSNull) else { return [] }
         guard let items = value as? [Any] else { throw Problem("\(key) must list strings.") }
         return try items.map { item in
-            guard let text = try Self.text(["item": item], "item", limit: limit) else { throw Problem("\(key) must list strings, none blank.") }
+            guard let text = try Self.text(item as Any, key, limit: limit) else { throw Problem("\(key) must list strings, none blank.") }
             return text
         }
     }

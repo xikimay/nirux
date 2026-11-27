@@ -33,6 +33,15 @@ struct PlanToolsTests {
         #expect(throws: Plan.Problem("feat/page-breaks is in the plan already, as c: only the user moves lines.")) {
             try plan.add(["kind": "session"], task: task, newID: ids.make, at: 6)
         }
+        #expect(throws: Plan.Problem("Propose new work only: put a running task's line in the plan without propose.")) {
+            try plan.add(["kind": "session", "propose": true], task: Plan.Task(workspaceID: "w9", title: "feat/other"), newID: ids.make, at: 6)
+        }
+        #expect(throws: Plan.Problem("feat/other has no line in the plan yet: add it first, as a session with task.")) {
+            try plan.add(["kind": "step", "title": "x", "propose": true], task: Plan.Task(workspaceID: "w9", title: "feat/other"), newID: ids.make, at: 6)
+        }
+        #expect(plan.line(ofWorkspace: "w9") == nil)
+        #expect(try plan.add(["kind": "step", "title": "Answer the review", "propose": true], task: task, newID: ids.make, at: 6)
+            .hasSuffix("for “feat/page-breaks”: the user takes or drops it."))
         #expect(throws: Plan.Problem("task goes with a session or a step.")) {
             try plan.add(["kind": "todo", "title": "x"], task: task, newID: ids.make, at: 6)
         }
@@ -83,6 +92,7 @@ struct PlanToolsTests {
             - [ ] Test 3 long documents (step f)
             """)
         #expect(throws: Plan.Problem("add must list strings, none blank.")) { try plan.steps(["add": [" "]], of: mine, newID: ids.make, at: 6) }
+        #expect(throws: Plan.Problem("check must be a string.")) { try plan.steps(["check": [12345]], of: mine, newID: ids.make, at: 6) }
     }
 
     @Test func readPlanShowsEveryLineWithItsIdAndTheProposalsApart() throws {

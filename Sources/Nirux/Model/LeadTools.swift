@@ -719,6 +719,8 @@ enum LeadTools {
             )
         case _ where spaceNames.contains(tool):
             return spaceToolProblem(tool: tool, arguments: arguments)
+        case _ where PlanTools.names.contains(tool):
+            return nil
         default:
             return "Unknown tool: \(tool)"
         }

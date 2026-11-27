@@ -52,8 +52,9 @@ extension NiruxShellView {
 
     static let dayPlanIsOff = "The day plan is off in this space."
 
+    /// Letters only: an agent never passes one as a number.
     private static func newPlanID() -> String {
-        String(UUID().uuidString.lowercased().prefix(5))
+        String((0..<5).compactMap { _ in "abcdefghjkmnpqrstuvwxyz".randomElement() })
     }
 
     private static func noSpaceTask(_ name: String) -> String {

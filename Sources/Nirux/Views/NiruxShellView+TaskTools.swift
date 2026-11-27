@@ -19,8 +19,10 @@ extension NiruxShellView {
         // Its agents act for whoever sent the link, not for the user: no
         // pre-allowed agents, no space environment or setup script.
         guard !caller.startedOutsideNirux else {
-            return answer("This workspace was opened by a link from outside Nirux: its agents can't "
-                + (managesSpaces ? "manage spaces." : "start or follow sub-tasks. The user starts tasks with ⌘N."), true)
+            let refused = managesSpaces ? "manage spaces."
+                : PlanTools.taskNames.contains(request.tool) ? "write the day plan."
+                : "start or follow sub-tasks. The user starts tasks with ⌘N."
+            return answer("This workspace was opened by a link from outside Nirux: its agents can't " + refused, true)
         }
         if managesSpaces { return taskSpaceTool(request.tool, arguments, from: caller, answer: answer) }
         if PlanTools.taskNames.contains(request.tool) { return taskSteps(arguments, from: caller, answer: answer) }
