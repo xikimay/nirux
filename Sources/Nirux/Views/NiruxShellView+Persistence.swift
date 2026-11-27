@@ -10,6 +10,7 @@ extension NiruxShellView {
         defer {
             LoopLog.lines.trimInBackground(spaceIDs: profiles.map(\.id))
             ReviewFindings.lines.trimInBackground(spaceIDs: profiles.map(\.id))
+            ReviewChecklist.reaches.trimInBackground(spaceIDs: profiles.map(\.id))
         }
         let persisted = Persistence.load()
         // Not over a state it couldn't read: its tasks would look gone.

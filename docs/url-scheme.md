@@ -53,7 +53,7 @@ nirux://open-editor?file=/path/to/file.swift&line=42&endLine=57&workspace=<NIRUX
 Opens a file in an editor column.
 
 - `file` is an absolute, URL-encoded path to an existing regular text file of at most 5 MB. Binaries are refused, and symlinks are resolved.
-- `line` and `endLine` are optional line numbers, starting at 1. With both, the editor highlights the range.
+- `line` and `endLine` are optional line numbers, starting at 1. With both, the editor highlights the range, a few lines above it in view, and its header names the lines, until an edit in them or the next open of the file.
 - `workspace` is optional. When it matches a workspace ID (`NIRUX_WORKSPACE_ID` in Nirux terminals), Nirux switches to that workspace first.
 
 The editor becomes the focused column, so `Cmd+W` then closes the file's tab, but typing still goes where it went before.

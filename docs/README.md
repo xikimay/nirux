@@ -36,6 +36,7 @@ A design record holds the decisions behind one feature, as they were taken. Reco
 | [Glass interface](design/glass-interface.md) | In progress: tokens and views not shown yet |
 | [Branch Review](design/branch-review.md) | Shipped |
 | [Review badges](design/review-badges.md) | Shipped in part |
+| [Review checklist](design/review-checklist.md) | Shipped for Claude Code |
 | [PR feedback inbox](design/pr-feedback-inbox.md) | Shipped, sidebar part changed since |
 | [CI failure actions](design/ci-failure-actions.md) | Shipped |
 | [CI failure triage](design/ci-failure-triage.md) | Shipped |

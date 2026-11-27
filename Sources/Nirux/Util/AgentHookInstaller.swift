@@ -92,7 +92,8 @@ enum AgentHookInstaller {
     /// PermissionRequest (a dialog opens, with the tool call it asks
     /// about), PostToolUse/PostToolUseFailure (the call ran: its dialog was
     /// answered, the agent works again) and SubagentStop (a subagent's
-    /// dialogs are gone) need Claude Code 2.0.56 or later. Claude Code
+    /// dialogs are gone) need Claude Code 2.0.56 or later; SubagentStart
+    /// (2.0.43) gives a forked review its checklist (ReviewChecklist). Claude Code
     /// before 2.1.101 drops the whole settings file over an event name it
     /// doesn't know, so only long-established events belong here.
     static let claudeHookEvents = [
@@ -103,6 +104,7 @@ enum AgentHookInstaller {
         "PostToolUse",
         "PostToolUseFailure",
         "Notification",
+        "SubagentStart",
         "SubagentStop",
         "Stop",
         "SessionEnd"

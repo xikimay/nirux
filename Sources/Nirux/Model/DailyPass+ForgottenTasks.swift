@@ -254,5 +254,6 @@ extension DailyPass {
         var commits: [TimeInterval?]
         /// Each repository folder's base branch.
         var bases: [String: Base]
+        var checklistReaches: [ReviewChecklist.Reach] = []
     }
 }

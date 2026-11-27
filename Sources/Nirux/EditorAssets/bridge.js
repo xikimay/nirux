@@ -95,10 +95,137 @@
   }
 
   // A draft wraps, without line numbers; other tabs follow the wrap toggle.
+  // No sticky scroll over shown lines: it would cover the context above.
   function applyTabOptions() {
     var entry = currentPath && models[currentPath];
     var draft = !!entry && !!entry.draft;
-    editor.updateOptions({ wordWrap: draft || wordWrap ? "on" : "off", lineNumbers: draft ? "off" : "on" });
+    editor.updateOptions({
+      wordWrap: draft || wordWrap ? "on" : "off",
+      lineNumbers: draft ? "off" : "on",
+      stickyScroll: { enabled: !(entry && entry.shownRange) }
+    });
+  }
+
+  // Lines above shown ones that stay in view.
+  var shownRangeContext = 3;
+
+  // An open's lines (nirux-show-code), highlighted. `id` is Swift's, for
+  // when an edit in them ends the highlight.
+  // `start` and `end` stay as asked (a file read again may have them);
+  // `now`: the lines highlighted, where edits moved them.
+  function markRange(path, start, end, id) {
+    var entry = models[path];
+    var model = entry.model;
+    var last = Math.min(end, model.getLineCount());
+    var first = Math.min(start, last);
+    entry.shownRange = {
+      id: id,
+      start: start,
+      end: end,
+      now: { start: first, end: last },
+      decorations: model.deltaDecorations([], [{
+        range: new monaco.Range(first, 1, last, model.getLineMaxColumn(last)),
+        options: {
+          isWholeLine: true,
+          // Lines added at either edge stay out of them.
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+          className: "nirux-shown-range",
+          linesDecorationsClassName: "nirux-shown-range-gutter",
+          overviewRuler: { color: "#78A3F799", position: monaco.editor.OverviewRulerLane.Full }
+        }
+      }])
+    };
+  }
+
+  // Swift's header names `before`: tells it once where the lines are now.
+  function tellShownLinesMoved(path, before) {
+    var shown = models[path].shownRange;
+    if (shown.now.start !== before.start || shown.now.end !== before.end) tellShownLines(path, shown);
+  }
+
+  // The lines highlighted, the caret at their start with nothing
+  // selected, a few lines above them in view.
+  function showRange(target, start, end, id) {
+    markRange(currentPath, start, end, id);
+    tellShownLinesMoved(currentPath, { start: start, end: end });
+    applyTabOptions();
+    revealShownRange(target, models[currentPath].shownRange);
+  }
+
+  // `placed`: the line the caret was put on, until the user moves it.
+  function revealShownRange(target, shown) {
+    shown.placed = shown.now.start;
+    target.setPosition({ lineNumber: shown.placed, column: 1 });
+    target.setScrollTop(target.getTopForLineNumber(Math.max(1, shown.placed - shownRangeContext)));
+  }
+
+  // The file as it is on disk now, the caret and scroll where they were:
+  // a reload isn't an edit, and lines just shown name this text (an agent
+  // often writes the file, then shows it).
+  function replaceText(path, content) {
+    var entry = models[path];
+    var shown = entry.shownRange;
+    var target = path === currentPath ? activeEditor() : null;
+    var view = target && target.saveViewState();
+    // Shown before the file had them (an agent's open ahead of its write),
+    // the caret still where it was put: shown again where they are.
+    var position = target && target.getPosition();
+    var reveal = !!shown && !shown.moved && (shown.now.start !== shown.start || shown.now.end !== shown.end)
+      && !!position && position.lineNumber === shown.placed;
+    entry.reloading = true;
+    entry.model.setValue(content);
+    entry.reloading = false;
+    if (view) target.restoreViewState(view);
+    if (!shown) return;
+    entry.model.deltaDecorations(shown.decorations, []);
+    // As asked until an edit moved them (the asked lines then hold other
+    // text); only the file's end may have clamped them.
+    var lines = shown.moved ? shown.now : shown;
+    markRange(path, lines.start, lines.end, shown.id);
+    entry.shownRange.moved = shown.moved;
+    entry.shownRange.placed = shown.placed;
+    tellShownLinesMoved(path, shown.now);
+    if (reveal) revealShownRange(target, entry.shownRange);
+  }
+
+  // `tell`: an edit ended it, which Swift doesn't know yet.
+  function clearShownRange(path, tell) {
+    var entry = models[path];
+    if (!entry || !entry.shownRange) return;
+    var id = entry.shownRange.id;
+    entry.model.deltaDecorations(entry.shownRange.decorations, []);
+    entry.shownRange = null;
+    if (path === currentPath) applyTabOptions();
+    if (tell) postToSwift({ type: "shownRangeCleared", path: path, rangeID: id });
+  }
+
+  // Whether an edit touched the shown lines: its changes name the lines as
+  // they were before it, as `now` does until it is moved along.
+  function editsShownRange(path, entry, event) {
+    var lines = entry.shownRange.now;
+    var touched = event.changes.some(function (change) {
+      var range = change.range;
+      // Whole lines above taken out, or lines added above, the first shown
+      // line as it was (Backspace at its start merges it: an edit).
+      var above = range.endLineNumber === lines.start && range.endColumn === 1
+        && (change.text === "" ? range.startColumn === 1 : /\n$/.test(change.text));
+      return !above && range.startLineNumber <= lines.end && range.endLineNumber >= lines.start;
+    });
+    var range = entry.model.getDecorationRange(entry.shownRange.decorations[0]);
+    if (touched || !range) return true;
+    var now = entry.shownRange.now;
+    if (now.start !== range.startLineNumber || now.end !== range.endLineNumber) {
+      entry.shownRange.now = { start: range.startLineNumber, end: range.endLineNumber };
+      entry.shownRange.moved = true;
+      tellShownLines(path, entry.shownRange);
+    }
+    return false;
+  }
+
+  // Swift's header names the lines highlighted, where an edit above or
+  // the file's end put them.
+  function tellShownLines(path, shown) {
+    postToSwift({ type: "shownRangeMoved", path: path, rangeID: shown.id, start: shown.now.start, end: shown.now.end });
   }
 
   // Where the reading view was, before a diff or the source hides it.
@@ -164,13 +291,14 @@
     var entry = { model: model, cleanValue: content };
     // Listen on the model so dirty state updates whether the regular editor
     // or the diff editor's modified side is showing it.
-    entry.contentListener = model.onDidChangeContent(function () {
+    entry.contentListener = model.onDidChangeContent(function (event) {
+      if (entry.shownRange && !entry.reloading && editsShownRange(path, entry, event)) clearShownRange(path, true);
       reportDirtyFor(path);
       if (diffMode === "monaco" && diffEditor && diffOriginalModel && currentPath === path) {
         scheduleDiffDecorations();
       } else if (diffMode === "pierre" && currentPath === path) {
         schedulePierreRender();
-      } else if (currentPath === path && showsRendered()) {
+      } else if (currentPath === path && showsRendered() && !entry.reloading) {
         drawMarkdown();
       }
     });
@@ -197,7 +325,7 @@
       models[path].cleanValue = content;
       models[path].version = payload.version;
       adoptTabFlags(models[path], payload);
-      models[path].model.setValue(content);
+      replaceText(path, content);
       monaco.editor.setModelLanguage(models[path].model, lang);
     } else {
       var entry = ensureModel(path, content, lang);
@@ -207,7 +335,7 @@
     if (payload.activate === false) return;
     switchToPath(path, payload.focus);
     if (typeof payload.line === "number" && payload.line > 0) {
-      revealLine(payload.line, payload.column || 1, payload.endLine, payload.focus);
+      revealLine(payload.line, payload.column || 1, payload.endLine, payload.focus, payload.rangeID);
     }
   }
 
@@ -223,30 +351,21 @@
       || (markdownView.contains(document.activeElement) && document.hasFocus());
   }
 
-  function revealLine(line, column, endLine, focus) {
+  // `rangeID`: Swift's id for line..endLine, shown highlighted (showRange).
+  // A one-line range is highlighted too. Any open ends the lines shown
+  // before.
+  function revealLine(line, column, endLine, focus, rangeID) {
     var target = activeEditor();
     if (!target) return;
     var refocus = shouldFocus(target, focus);
     var model = target.getModel();
-    if (model) {
-      line = Math.min(line, model.getLineCount());
-    }
-    // A range (agent "show me this code" flow): select line..endLine so the
-    // snippet is visibly highlighted, not just scrolled to. endLine == line
-    // still selects — a one-line snippet deserves its highlight too.
-    if (typeof endLine === "number" && endLine >= line && model) {
-      var end = Math.min(endLine, model.getLineCount());
-      var range = {
-        startLineNumber: line,
-        startColumn: 1,
-        endLineNumber: end,
-        endColumn: model.getLineMaxColumn(end)
-      };
-      target.setSelection(range);
-      target.revealRangeInCenter(range);
+    clearShownRange(currentPath, false);
+    if (typeof rangeID === "number" && model) {
+      showRange(target, line, endLine, rangeID);
       if (refocus) focusShownView();
       return;
     }
+    if (model) line = Math.min(line, model.getLineCount());
     target.revealLineInCenter(line);
     target.setPosition({ lineNumber: line, column: column || 1 });
     if (refocus) focusShownView();
@@ -352,15 +471,23 @@
     postToSwift({ type: "escapeKey" });
   });
 
+  // Whether a ⌘ key is `letter` as the app's menu reads it
+  // (WebContentKeyRouting.typesLetter): the letter typed, or on a layout
+  // that types no Latin letter (Russian), the key in its place.
+  function typesLetter(event, letter) {
+    var key = String(event.key).toLowerCase();
+    if (key === letter) return true;
+    return !/^[\x00-\x7f]*$/.test(key) && event.code === "Key" + letter.toUpperCase();
+  }
+
   // On a rendered tab, ⌘F asks Swift for its source, with Monaco's find;
   // ⌘S and ⌘P do what they do in Monaco.
   window.addEventListener("keydown", function (event) {
     if (!showsRendered() || event.defaultPrevented || event.isComposing) return;
     if (!event.metaKey || event.shiftKey || event.altKey || event.ctrlKey) return;
-    var key = String(event.key).toLowerCase();
-    if (key === "f") postToSwift({ type: "findInSource", path: currentPath });
-    else if (key === "s") requestSave();
-    else if (key === "p") postToSwift({ type: "filePickerRequest" });
+    if (typesLetter(event, "f")) postToSwift({ type: "findInSource", path: currentPath });
+    else if (typesLetter(event, "s")) requestSave();
+    else if (typesLetter(event, "p")) postToSwift({ type: "filePickerRequest" });
     else return;
     event.preventDefault();
   });
@@ -969,9 +1096,9 @@
     target.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Digit0, function () { resetFontZoom(); });
   }
 
-  // A draft always wraps.
+  // A draft's own editor wraps whatever the toggle says; a diff over it
+  // follows the toggle.
   function toggleWordWrap() {
-    if (currentPath && models[currentPath] && models[currentPath].draft) return;
     wordWrap = !wordWrap;
     if (editor) applyTabOptions();
     if (diffEditor) diffEditor.updateOptions({ wordWrap: wordWrap ? "on" : "off" });
@@ -1027,8 +1154,9 @@
         // WebContent crash) the switch fails — bail rather than painting
         // the selection onto whatever file is currently displayed.
         if (msg.path && currentPath !== msg.path) break;
-        if (typeof msg.line === "number") revealLine(msg.line, msg.column, msg.endLine, msg.focus);
+        if (typeof msg.line === "number") revealLine(msg.line, msg.column, msg.endLine, msg.focus, msg.rangeID);
         break;
+      case "clearShownRange": clearShownRange(msg.path, false); break;
       case "enterDiff":
         if (msg.viewer === "monaco") {
           enterMonacoDiff(msg.path, msg.original);
@@ -1039,7 +1167,7 @@
       case "enterPierreDiff": enterPierreDiff(msg.path, msg.original); break;
       case "enterMonacoDiff": enterMonacoDiff(msg.path, msg.original); break;
       case "enterDiffGroup": enterPierreDiffGroup(msg); break;
-      case "exitDiff": exitDiff(); break;
+      case "exitDiff": exitDiff(msg.focus); break;
       case "toggleWordWrap": toggleWordWrap(); break;
       case "saveAll": saveBuffers(msg); break;
       case "toggleMinimap": toggleMinimap(); break;

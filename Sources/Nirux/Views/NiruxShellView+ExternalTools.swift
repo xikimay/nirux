@@ -571,7 +571,7 @@ extension NiruxShellView {
            - `file` is required and must be an **absolute** path, URL-encoded. Files
              larger than 5 MB are refused — quote the snippet in the reply instead.
            - `line` is optional (1-based). `endLine` is optional; when present the
-             editor selects/highlights the whole `line..endLine` range — prefer passing
+             editor highlights the whole `line..endLine` range, without selecting it — prefer passing
              both so the user sees the snippet boundaries.
            - `workspace=$NIRUX_WORKSPACE_ID` makes Nirux switch to this session's
              workspace before opening; keep it in the command.

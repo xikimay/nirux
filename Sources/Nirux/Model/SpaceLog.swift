@@ -49,12 +49,13 @@ struct SpaceLog<Entry: Codable & Sendable>: Sendable {
         return size >= maxFileBytes
     }
 
-    /// Whether the line was written.
+    /// Whether the line was written. `trims` false for a writer beside the
+    /// app: a trim replaces the file another process may be appending to.
     @discardableResult
-    func append(_ entry: Entry, spaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> Bool {
+    func append(_ entry: Entry, spaceID: String, stateDirectory: URL = Persistence.stateDirectory, trims: Bool = true) -> Bool {
         guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory),
               var line = try? JSONEncoder().encode(entry) else { return false }
-        trim(spaceID: spaceID, now: time(entry), stateDirectory: stateDirectory)
+        if trims { trim(spaceID: spaceID, now: time(entry), stateDirectory: stateDirectory) }
         guard !isFull(spaceID: spaceID, stateDirectory: stateDirectory) else { return false }
         line.append(UInt8(ascii: "\n"))
         do {
