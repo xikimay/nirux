@@ -79,6 +79,23 @@ final class MemorySearchToolTests: XCTestCase {
         XCTAssertEqual(search(["query": "cafe build"]), "No matching project memory.", "the space's switch is off")
     }
 
+    func testARuleRestingOnABrickAgentsNoLongerGetSaysSo() throws {
+        let store = try XCTUnwrap(SpaceKnowledge.store(spaceID: "sample", stateDirectory: state))
+        let brick = KnowledgeBrick(
+            sentence: "The café build signs with the team's key on CI.", subject: "café build", scope: .init(anchor: "git:/x/.git", name: "x", paths: ["Sources/**"]),
+            proofs: [.file(path: "a.swift")], validatedAt: 1
+        )
+        var knowledge = KnowledgeState()
+        knowledge.bricks[try store.add(brick)] = BrickState()
+        knowledge.bricks[brick.id]?.closedAt = 2
+        knowledge.bricks[brick.id]?.closedBecause = "a.swift is gone."
+        try store.save(knowledge, now: 3)
+        let brief = try XCTUnwrap(SpaceBrief.briefURL(spaceID: "sample", stateDirectory: state))
+        try write("- Sign the café build on CI (\(brick.id)).", to: brief)
+        let answer = search(["query": "cafe build", "scope": "always"])
+        XCTAssertTrue(answer.contains("[Flagged: it rests on \(brick.id), closed: a.swift is gone.]"), answer)
+    }
+
     func testNoMemoryAndDisabledAutoMemoryAreReadOnly() throws {
         var outside = context
         outside.environment.removeValue(forKey: "NIRUX_PROFILE_ID")

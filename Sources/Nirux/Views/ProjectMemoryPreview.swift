@@ -151,7 +151,7 @@ final class ProjectMemoryPreview: NSView {
         switch entry.source {
         case .rule: movable = entry.scope == .always
         case .memory: movable = true
-        case .missingFile, .brick, .proposal: movable = false
+        case .missingFile, .brick, .proposal, .flag: movable = false
         }
         scopeControl.isHidden = !movable
         scopeControl.selectedSegment = entry.scope == .always ? 0 : 1
@@ -210,11 +210,30 @@ final class ProjectMemoryPreview: NSView {
             switch status {
             case nil: showBrickActions(.validate, .dismiss)
             case .open?: showBrickActions(nil, .close)
-            case .expired?, .suspect?, .failing?: showBrickActions(.reconfirm, .close)
+            case .expired?, .suspect?, .failing?, .flagged?: showBrickActions(.reconfirm, .close)
             case .closed?: showBrickActions(nil, nil)
             }
             sourceLabel.stringValue = status == nil ? "Source: proposal \(id), in this space’s knowledge" : "Source: brick \(id), never edited"
             sourceLabel.toolTip = nil
+        case .flag:
+            guard let flag = knowledge.flag(of: entry) else { return }
+            meta = ["Flagged by an agent", flag.kind.rawValue, Self.dateFormatter.string(from: Date(timeIntervalSince1970: flag.time))]
+            description = flag.text
+            let lines = (flag.evidence.map { ["Where it showed: \($0)"] } ?? [])
+                + ["A flag changes no brick: ask the Lead for one, on a proof, if it is worth keeping."]
+            body = NSAttributedString(string: lines.joined(separator: "\n"), attributes: Self.bodyAttributes)
+            showBrickActions(nil, .dismiss)
+            sourceLabel.stringValue = "Source: flag \(flag.id), from a task’s agent"
+            sourceLabel.toolTip = nil
+        }
+        if !entry.cites.isEmpty, let bricks = knowledge.bricks {
+            // Why it is flagged reads in full, above what it says.
+            if let base = bricks.flaggedBase(in: entry.cites) {
+                meta.append("flagged")
+                description = ["Flagged: it rests on \(base.id), \(base.why)", description].filter { !$0.isEmpty }.joined(separator: " ")
+            } else {
+                meta.append("rests on " + entry.cites.joined(separator: ", "))
+            }
         }
         metaLabel.stringValue = meta.joined(separator: " · ")
         descriptionLabel.stringValue = description
@@ -327,6 +346,7 @@ final class ProjectMemoryPreview: NSView {
         case .expired?: meta.append("expired")
         case .suspect?: meta.append("suspect")
         case .failing?: meta.append("failing")
+        case .flagged?: meta.append("flagged")
         case .closed?: meta.append("closed")
         }
         var lines = ["About " + brick.scope.paths.map { "\(brick.scope.name)/\($0)" }.joined(separator: ", ")]
@@ -344,6 +364,17 @@ final class ProjectMemoryPreview: NSView {
             lines.append("No check can contradict it: served until \(dateFormatter.string(from: Date(timeIntervalSince1970: expiry))) unless you confirm it again.")
         }
         if let macOS = brick.macOS { lines.append("Reviewed again on each new macOS (validated on macOS \(state.reconfirmedMacOS ?? macOS)).") }
+        if let bases = brick.restsOn, !bases.isEmpty {
+            lines.append("Rests on " + bases.map { "\($0) (\(bricks.status(of: $0)?.title ?? "gone"))" }.joined(separator: ", ") + ".")
+        }
+        let resting = bricks.loaded.resting(on: id)
+        if !resting.isEmpty { lines.append("Bricks resting on it: " + resting.joined(separator: ", ") + ".") }
+        let flags = bricks.flags.filter { $0.brick == id }
+        if !flags.isEmpty {
+            lines.append("")
+            lines.append("Agents flagged it:")
+            lines += flags.suffix(3).map { "• \($0.kind.rawValue), \(dateFormatter.string(from: Date(timeIntervalSince1970: $0.time))): \($0.text)" }
+        }
         if status != nil {
             let reach = bricks.reach[id] ?? .init()
             let corrections = switch reach.corrections {

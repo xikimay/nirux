@@ -54,10 +54,6 @@ public struct KnowledgeStore: Sendable {
 
         public func state(of id: String) -> BrickState { state.bricks[id] ?? BrickState() }
 
-        public func status(of id: String, now: TimeInterval, macOS: Int) -> BrickStatus? {
-            bricks[id].map { $0.status(state(of: id), now: now, macOS: macOS) }
-        }
-
         /// Bricks that aren't closed: they count against `maxBricks`.
         public var standing: Int { bricks.keys.filter { state(of: $0).closedAt == nil }.count }
     }
@@ -190,6 +186,9 @@ extension KnowledgeStore.Loaded {
         /// The same brick exists, in this state.
         case exists(BrickStatus)
         case replacesUnknown(String)
+        /// A brick it rests on that the space doesn't hold, or doesn't serve.
+        case restsOnUnknown(String)
+        case restsOnNotServed(String, BrickStatus)
         case tooManyPending
         case full
         case readOnly(String)
@@ -207,6 +206,10 @@ extension KnowledgeStore.Loaded {
             if same.isPending { return .alreadyPending(since: same.proposedAt) }
         }
         if let replaced = brick.replaces, bricks[replaced] == nil { return .replacesUnknown(replaced) }
+        for base in brick.restsOn ?? [] {
+            guard let status = status(of: base, now: now, macOS: macOS) else { return .restsOnUnknown(base) }
+            guard status.isServed else { return .restsOnNotServed(base, status) }
+        }
         let others = pending.filter { $0.id != id }.count
         guard validating || others < KnowledgeStore.maxPending else { return .tooManyPending }
         // A replacement takes its brick's place; at validation, the others
@@ -236,6 +239,13 @@ extension KnowledgeStore.Loaded {
             state.bricks[replaced] = old
         }
         return brick
+    }
+
+    /// The user read an agent's flag: no longer listed.
+    public mutating func dismissFlag(_ id: String) -> Bool {
+        guard !(state.dismissedFlags ?? []).contains(id) else { return false }
+        state.dismissedFlags = (state.dismissedFlags ?? []) + [id]
+        return true
     }
 
     public mutating func dismiss(_ id: String, now: TimeInterval) -> Bool {

@@ -18,6 +18,8 @@ public struct KnowledgeBrick: Codable, Equatable, Sendable {
     public var macOS: Int?
     /// The brick it replaces.
     public var replaces: String?
+    /// The bricks it rests on: when one stops being served, it is flagged.
+    public var restsOn: [String]?
     /// Who proposed it, as shown ("the Lead").
     public var proposedBy: String?
     /// When the user validated it; nil while it is only proposed.
@@ -25,7 +27,7 @@ public struct KnowledgeBrick: Codable, Equatable, Sendable {
 
     public init(
         sentence: String, subject: String, scope: Scope, proofs: [Proof], macOS: Int? = nil, replaces: String? = nil,
-        proposedBy: String? = nil, validatedAt: TimeInterval? = nil
+        restsOn: [String]? = nil, proposedBy: String? = nil, validatedAt: TimeInterval? = nil
     ) {
         self.sentence = sentence
         self.subject = subject
@@ -33,6 +35,7 @@ public struct KnowledgeBrick: Codable, Equatable, Sendable {
         self.proofs = proofs
         self.macOS = macOS
         self.replaces = replaces
+        self.restsOn = restsOn
         self.proposedBy = proposedBy
         self.validatedAt = validatedAt
     }
@@ -58,12 +61,13 @@ public struct KnowledgeBrick: Codable, Equatable, Sendable {
     /// the same brick, whoever proposed it and whenever.
     public var id: String {
         struct Content: Encodable {
-            let sentence: String, subject: String, scope: Scope, proofs: [Proof], macOS: Int?, replaces: String?
+            let sentence: String, subject: String, scope: Scope, proofs: [Proof], macOS: Int?, replaces: String?, restsOn: [String]?
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let data = (try? encoder.encode(Content(
-            sentence: sentence, subject: subject, scope: scope, proofs: proofs, macOS: macOS, replaces: replaces
+            sentence: sentence, subject: subject, scope: scope, proofs: proofs, macOS: macOS, replaces: replaces,
+            restsOn: restsOn.flatMap { $0.isEmpty ? nil : $0 }
         ))) ?? Data()
         return "b-" + SHA256.hash(data: data).prefix(6).map { String(format: "%02x", $0) }.joined()
     }
@@ -180,6 +184,7 @@ extension KnowledgeBrick {
     public static let maxPaths = 10
     public static let maxProofs = 6
     public static let maxQuoteLength = 300
+    public static let maxBases = 5
 
     /// Why it can't be a brick, or nil: one sentence, a subject, the files
     /// it concerns, at least one proof, each well formed.
@@ -194,6 +199,11 @@ extension KnowledgeBrick {
             return "“\(path)” must be a path relative to the repository’s top, without “..”."
         }
         guard (1...Self.maxProofs).contains(proofs.count) else { return "A brick needs 1 to \(Self.maxProofs) proofs." }
+        if let bases = restsOn {
+            guard bases.count <= Self.maxBases, bases.allSatisfy(KnowledgeLinks.isBrickID) else {
+                return "rests_on names at most \(Self.maxBases) bricks by their ids (b-…)."
+            }
+        }
         for proof in proofs {
             if let problem = Self.problem(of: proof) { return problem }
         }

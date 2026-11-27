@@ -215,6 +215,8 @@ extension NiruxShellView {
                 guard let brick = loaded.validate(id, now: now) else { throw ProjectMemory.WriteError.failed("It was decided meanwhile.") }
                 // The brick's file first: a state naming a brick without one shows nothing.
                 try store.add(brick)
+            case .dismiss where id.hasPrefix("f-"):
+                _ = loaded.dismissFlag(id)
             case .dismiss:
                 guard loaded.dismiss(id, now: now) else { throw ProjectMemory.WriteError.failed("It was decided meanwhile.") }
             case .reconfirm:

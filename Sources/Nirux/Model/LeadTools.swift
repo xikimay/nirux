@@ -352,6 +352,10 @@ enum LeadTools {
                     ],
                     "repo": queueRepoArgument,
                     "replaces": ["type": "string", "description": "The id of the brick it replaces (b-…), which closes once it is validated."],
+                    "rests_on": [
+                        "type": "array", "items": ["type": "string"],
+                        "description": "Ids of the bricks it builds on (b-…), each served now: when one stops being served, this one is flagged."
+                    ],
                     "macos": ["type": "boolean", "description": "True when macOS may change the fact: it expires on another major version."]
                 ],
                 required: ["sentence", "subject", "paths", "proofs"]
@@ -773,7 +777,8 @@ enum LeadTools {
             case .failure(let problem): return problem.message
             case .success(let proposal):
                 return KnowledgeBrick(sentence: proposal.sentence, subject: proposal.subject,
-                                      scope: .init(anchor: "git:/", name: "", paths: proposal.paths), proofs: proposal.proofs).problem
+                                      scope: .init(anchor: "git:/", name: "", paths: proposal.paths), proofs: proposal.proofs,
+                                      restsOn: proposal.restsOn).problem
             }
         case _ where spaceNames.contains(tool):
             return spaceToolProblem(tool: tool, arguments: arguments)
@@ -860,6 +865,7 @@ extension LeadTools {
         var proofs: [Proof]
         var repo: String?
         var replaces: String?
+        var restsOn: [String]?
         var macOS: Bool
     }
 
@@ -897,10 +903,14 @@ extension LeadTools {
             return fail("replaces must be a brick's id (b-…).")
         }
         if isGiven(arguments, "macos"), optionalFlag(arguments, "macos") == nil { return fail("macos must be true or false.") }
+        if isGiven(arguments, "rests_on"), (arguments["rests_on"] as? [String])?.allSatisfy(KnowledgeLinks.isBrickID) != true {
+            return fail("rests_on must be an array of brick ids (b-…).")
+        }
         return .success(BrickArguments(
             sentence: sentence.trimmingCharacters(in: .whitespacesAndNewlines), subject: subject.trimmingCharacters(in: .whitespacesAndNewlines),
             paths: paths.map { $0.trimmingCharacters(in: .whitespaces) }, proofs: proofs, repo: string(arguments, "repo"),
-            replaces: arguments["replaces"] as? String, macOS: optionalFlag(arguments, "macos") == true
+            replaces: arguments["replaces"] as? String, restsOn: (arguments["rests_on"] as? [String]).flatMap { $0.isEmpty ? nil : $0 },
+            macOS: optionalFlag(arguments, "macos") == true
         ))
     }
 }

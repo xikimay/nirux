@@ -55,7 +55,7 @@ public struct ServedKnowledge: Codable, Equatable, Sendable {
     public static func compile(_ loaded: KnowledgeStore.Loaded, now: TimeInterval, macOS: Int) -> ServedKnowledge {
         ServedKnowledge(bricks: loaded.ordered.compactMap { id, brick in
             let state = loaded.state(of: id)
-            guard brick.status(state, now: now, macOS: macOS).isServed else { return nil }
+            guard loaded.status(of: id, now: now, macOS: macOS)?.isServed == true else { return nil }
             return Brick(
                 id: id, sentence: brick.sentence, subject: brick.subject, anchor: brick.scope.anchor, name: brick.scope.name,
                 paths: brick.scope.paths, proof: brick.proofs.map(\.label).joined(separator: " · "),

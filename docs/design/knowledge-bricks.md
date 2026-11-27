@@ -94,7 +94,7 @@ Under `<state dir>/projects/<space id>/knowledge/`, 0700/0600:
 `bricks/<id>.json` (immutable), `state.json` (checks, closing, suspicion,
 confirmation, proposals), `served.json` (what the hook receiver hands out,
 absent when nothing is), `sessions/` (what each agent session got, 7 days),
-`uses.jsonl`, `codex/<task>.toml`. A session's record lives while hooks
+`uses.jsonl`, `flags.jsonl`, `codex/<task>.toml`. A session's record lives while hooks
 read it, and goes 7 days after the last.
 
 ## Limits
@@ -103,8 +103,34 @@ read it, and goes 7 days after the last.
   cheap for a hook that runs at every tool use. A task moved to another
   space keeps its old space's bricks until its shells restart.
 
-## Later
+## Links
 
-Links from rules, procedures and other bricks to the bricks they rest on,
-flagged when one closes; an agents' flag tool (a gap, an error, a
-contradiction) with no right to write; CI failures making a brick suspect.
+Whatever is built on bricks says which ones it rests on:
+
+- a brick, through `rests_on` (part of its content, so of its id); each
+  must be served when it is proposed;
+- any item of "What agents know" (a brief rule, a team rule, a memory), by
+  citing the brick's id (`b-…`) in its text.
+
+**Flagging in chain**: when a brick stops being served (closed, failing,
+suspect, expired, or itself flagged), a brick resting on it is **flagged**,
+and not served until the user confirms it after that ("Still True") or
+closes it; down the chain too. A rule or memory citing it shows "flagged"
+in Space Memory and in `memory_search`'s excerpt, with which brick and why:
+the user edits it.
+
+## Flags
+
+`flag_knowledge`, for every agent Nirux starts, writes a signal and nothing
+else to `knowledge/flags.jsonl` (90 days): a **gap** (a fact the knowledge
+lacked), an **error** (a brick proven wrong: a test, CI, the code), a
+**contradiction** (two bricks, or a brick and the code, disagree). One line
+each; text that looks like a secret or contact details is refused; the
+same flag from a task once a day.
+
+- A flag naming a brick shows on its card; an error or contradiction counts
+  like a correction: from two tasks since the brick was last confirmed, it
+  is suspect. That is also how CI breaking on a brick reaches it.
+- A flag naming no brick is listed in Space Memory for the user, who
+  dismisses it or asks the Lead for a brick. No agent proposes bricks from
+  flags on its own.

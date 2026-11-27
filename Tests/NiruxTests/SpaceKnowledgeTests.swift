@@ -150,6 +150,18 @@ final class SpaceKnowledgeTests: XCTestCase {
         XCTAssertEqual(served, [id])
     }
 
+    func testAgentsFlaggingABrickWrongCountLikeCorrections() throws {
+        let id = try validated(brick())
+        recheck(at: 100)
+        try KnowledgeFlag.append(KnowledgeFlag(time: 150, kind: .error, brick: id, about: "clip", text: "the code sets bounds", evidence: nil, task: "w1"), in: store)
+        try KnowledgeFlag.append(KnowledgeFlag(time: 151, kind: .gap, brick: nil, about: "train", text: "riders are inner merges", evidence: nil, task: "w2"), in: store)
+        XCTAssertEqual(recheck(at: 200).suspected, [], "one task's flag is shown, not acted on; a gap names no brick")
+        KnowledgeUse.append([KnowledgeUse(time: 210, brick: id, kind: .corrected, task: "w2", agent: "claude")], in: store)
+        XCTAssertEqual(recheck(at: 220).suspected, [id])
+        guard case .suspect(let why)? = store.load().status(of: id, now: 221, macOS: SpaceKnowledge.macOS) else { return XCTFail("not suspect") }
+        XCTAssertTrue(why.hasPrefix("You and agents"), why)
+    }
+
     func testAnUnansweredCheckIsTriedAgainAtTheNextPass() throws {
         // Nothing listens on port 9: the page can't be read.
         let id = try validated(brick(proofs: [.file(path: "Sources/Views/Glass.swift"), .page(url: "https://127.0.0.1:9/glass", quote: "a quote of the page")]))
@@ -292,5 +304,51 @@ final class ProposeBrickArgumentsTests: XCTestCase {
             let problem = LeadTools.problem(tool: LeadTools.proposeBrick, arguments: arguments) ?? ""
             XCTAssertTrue(problem.contains(words), "\(key): \(problem)")
         }
+    }
+}
+
+/// flag_knowledge, as an agent calls it through the MCP server.
+final class FlagKnowledgeToolTests: XCTestCase {
+    private let root = FileManager.default.temporaryDirectory.appendingPathComponent("flag-tool-\(UUID().uuidString)")
+    private var state: URL { root.appendingPathComponent("state") }
+    private func context(workspace: String? = "w1") -> NiruxMCPServer.Context {
+        var environment = ["NIRUX_PROFILE_ID": "space-1"]
+        if let workspace {
+            environment["NIRUX_WORKSPACE_ID"] = workspace
+            environment["NIRUX_AGENT_UUID"] = "agent-1"
+            environment[NiruxLaunchAuthorization.environmentKey] = "launch-1"
+        }
+        return .init(workingDirectory: root.path, environment: environment, stateDirectory: state, claudeProjects: root.appendingPathComponent("claude"))
+    }
+    private var store: KnowledgeStore { SpaceKnowledge.store(spaceID: "space-1", stateDirectory: state)! }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testAnAgentFlagsOnceAndChangesNoBrick() throws {
+        let gap: [String: Any] = ["kind": "gap", "about": "merge train", "text": "a rider shows as Merge #N into the train", "evidence": "#801"]
+        let result = FlagKnowledgeTool.call(gap, context: context(), now: 100)
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertEqual(KnowledgeFlag.load(in: store).map(\.about), ["merge train"])
+        XCTAssertEqual(KnowledgeFlag.load(in: store).first?.task, "w1")
+        XCTAssertTrue(FlagKnowledgeTool.call(gap, context: context(), now: 200).isError, "the same flag from the same task, the same day")
+        XCTAssertFalse(FlagKnowledgeTool.call(gap, context: context(workspace: "w2"), now: 200).isError, "another task may")
+        XCTAssertTrue(store.load().bricks.isEmpty)
+    }
+
+    func testWhatAFlagCantHold() {
+        let calls: [[String: Any]] = [
+            ["kind": "guess", "about": "a", "text": "b"],
+            ["kind": "gap", "about": "a", "text": "reach me at jane.doe@example.com"],
+            ["kind": "error", "about": "a", "text": "wrong", "brick": "b-0123456789ab"],
+            ["kind": "gap", "about": "a", "text": "b", "extra": 1]
+        ]
+        for call in calls {
+            XCTAssertTrue(FlagKnowledgeTool.call(call, context: context(), now: 1).isError, "\(call)")
+        }
+        XCTAssertTrue(FlagKnowledgeTool.call(["kind": "gap", "about": "a", "text": "b"], context: context(workspace: nil), now: 1).isError,
+                      "only an agent Nirux started")
+        XCTAssertTrue(KnowledgeFlag.load(in: store).isEmpty)
     }
 }
