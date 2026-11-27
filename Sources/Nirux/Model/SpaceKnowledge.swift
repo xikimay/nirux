@@ -51,8 +51,11 @@ enum SpaceKnowledge {
 
     /// git in `folder`, or on the repository whose git dir is `gitDir`:
     /// a check reads objects only, a bare repository's too.
+    /// How long one git call may take: every caller runs off the main thread.
+    static let gitTimeout: TimeInterval = 15
+
     private static func git(
-        _ arguments: [String], in folder: String, gitDir: String? = nil, maxBytes: Int = 1 << 20, timeout: TimeInterval = 15
+        _ arguments: [String], in folder: String, gitDir: String? = nil, maxBytes: Int = 1 << 20, timeout: TimeInterval = gitTimeout
     ) -> BoundedProcessResult? {
         BoundedProcess.run(
             executableURL: URL(fileURLWithPath: "/usr/bin/git"), arguments: (gitDir.map { ["--git-dir=" + $0] } ?? []) + ["--literal-pathspecs"] + arguments,
@@ -64,7 +67,7 @@ enum SpaceKnowledge {
     /// The tip of the base branch as last fetched: origin's default branch,
     /// else the local main or master. Never a checkout's HEAD, which follows
     /// whatever branch it is on; a bare repository's HEAD names its default.
-    static func baseTip(gitDir: String, timeout: TimeInterval = 15) -> String? {
+    static func baseTip(gitDir: String, timeout: TimeInterval = gitTimeout) -> String? {
         let refs = ["refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master", "refs/heads/main", "refs/heads/master"]
         guard let listed = git(["for-each-ref", "--format=%(refname) %(objectname)"] + refs, in: gitDir, gitDir: gitDir, timeout: timeout),
               listed.terminationStatus == 0
@@ -100,7 +103,7 @@ enum SpaceKnowledge {
     /// thread. Returns the bricks it gave.
     @discardableResult
     static func writeCodexInstructions(
-        spaceID: String, task: String, launchDirectory: String, withBrief: Bool,
+        spaceID: String, task: String, launchDirectory: String, withBrief: Bool, gitTimeout: TimeInterval = SpaceKnowledge.gitTimeout,
         now: TimeInterval = Date().timeIntervalSince1970, stateDirectory: URL = Persistence.stateDirectory
     ) -> [String] {
         guard let store = store(spaceID: spaceID, stateDirectory: stateDirectory) else { return [] }
@@ -108,7 +111,8 @@ enum SpaceKnowledge {
         if let served = ServedKnowledge.read(store.servedURL),
            let repository = KnowledgeLocation.repository(of: (launchDirectory as NSString).appendingPathComponent("launch")),
            served.bricks.contains(where: { $0.anchor == repository.anchor }) {
-            picked = KnowledgeDelivery.pick(served, anchor: repository.anchor, paths: changedFiles(in: launchDirectory), now: now, macOS: macOS)
+            let changed = changedFiles(in: launchDirectory, timeout: gitTimeout)
+            picked = KnowledgeDelivery.pick(served, anchor: repository.anchor, paths: changed, now: now, macOS: macOS)
         }
         let brief = withBrief ? codexBrief(in: store) : ""
         let bricks = picked.isEmpty ? "" : KnowledgeDelivery.text(picked, about: KnowledgeDelivery.branchFiles)
@@ -127,8 +131,9 @@ enum SpaceKnowledge {
 
     /// The files the checkout holding `folder` changes from where its branch
     /// left the base branch, committed or not, new ones included; relative
-    /// to its top. Each git call bounded short: a launch waits on it.
-    static func changedFiles(in folder: String, timeout: TimeInterval = 1) -> [String] {
+    /// to its top. Runs off the main thread: a slow git (a loaded machine,
+    /// a busy volume) gets the time any git read here gets.
+    static func changedFiles(in folder: String, timeout: TimeInterval = gitTimeout) -> [String] {
         func output(_ arguments: [String], in folder: String, gitDir: String? = nil) -> Data? {
             guard let result = git(arguments, in: folder, gitDir: gitDir, timeout: timeout), result.terminationStatus == 0 else { return nil }
             return result.standardOutput
