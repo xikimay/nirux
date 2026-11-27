@@ -1,0 +1,4 @@
+# Vendored Monaco editor and generated diff bundle (~14 MB total).
+# Keeps hand-written bridge and review scripts in Sources/Nirux/EditorAssets/ searchable.
+Sources/Nirux/EditorAssets/vs/
+Sources/Nirux/EditorAssets/pierre-diff.bundle.js
