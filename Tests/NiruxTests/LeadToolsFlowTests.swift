@@ -1031,9 +1031,12 @@ final class LeadToolsFlowTests: XCTestCase {
             for id in rows {
                 TaskThread.Store.append(archivedEvents, workspaceID: id, spaceID: lead.space, stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
             }
+            let started = ReviewChecklist.Reach(time: now - 60, session: "s1", kind: .started)
+            ReviewChecklist.reaches.append(started, spaceID: lead.space, stateDirectory: URL(fileURLWithPath: harness.stateDirectory))
             let day = try call(LeadTools.dailyPass, lead: lead, in: harness)
             XCTAssertFalse(day.isError, day.text)
             XCTAssertTrue(day.text.contains("- test-waits-on-sleep · 2 tasks: "), day.text)
+            XCTAssertTrue(day.text.contains("- The review checklist reached 0 of 1 /code-review starts in this window"), day.text)
             let fix = "- “The user's fix” · branch \(harness.worktreeBranch) · not yours (started by the user) · PR #7 merged · "
                 + "last activity "
             let line = try XCTUnwrap(day.text.components(separatedBy: "\n").first { $0.hasPrefix(fix) }, day.text)
@@ -1549,6 +1552,14 @@ final class LeadToolsFlowTests: XCTestCase {
             pane.groupResultsSwitch.sendAction(pane.groupResultsSwitch.action, to: pane.groupResultsSwitch.target)
             XCTAssertNil(SpaceDefaultsStore(spaceID: lead.space)?.load().defaults.leadGroupsResults, "on writes nothing")
             XCTAssertEqual(pane.groupResultsSwitch.state, .on)
+            XCTAssertEqual(pane.reviewChecklistSwitch.state, .on)
+            pane.reviewChecklistSwitch.state = .off
+            pane.reviewChecklistSwitch.sendAction(pane.reviewChecklistSwitch.action, to: pane.reviewChecklistSwitch.target)
+            XCTAssertEqual(SpaceDefaultsStore(spaceID: lead.space)?.load().defaults.reviewChecklist, false)
+            XCTAssertEqual(pane.reviewChecklistSwitch.state, .off)
+            pane.reviewChecklistSwitch.state = .on
+            pane.reviewChecklistSwitch.sendAction(pane.reviewChecklistSwitch.action, to: pane.reviewChecklistSwitch.target)
+            XCTAssertNil(SpaceDefaultsStore(spaceID: lead.space)?.load().defaults.reviewChecklist, "on writes nothing")
             XCTAssertFalse(try call(LeadTools.recordReview, ["task": "Fix", "findings": [finding]], lead: lead, in: harness).isError)
             check(at: tomorrow + 86_400)
             XCTAssertEqual(box.sent.count, 1, "off, though something happened")

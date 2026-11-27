@@ -146,6 +146,7 @@ extension NiruxShellView {
             (facts.triagedRuns, facts.flakyTests) = DailyPass.ciFacts(ciStore, repositories: reads.repositories.map(\.name), window: window)
             facts.tasks = DailyPass.tasks(tasks.map { ($0.activity, $0.repository) }, with: reads)
             facts.reported = reported
+            facts.checklistReach = ReviewChecklist.reached(reads.checklistReaches, in: window)
             completion(facts)
         }
     }
@@ -380,7 +381,10 @@ extension NiruxShellView {
             let threadWaits = TaskThread.Store.queue.sync { waits(findings) }
             let bases = DailyPass.baseBranches(reads)
             let commits = DailyPass.commitTimes(tasks.map { ($0.folder, $0.repository.flatMap { bases[$0]?.ref }) })
-            let read = DailyPass.Reads(repositories: reports, findings: findings, commits: commits, bases: bases)
+            let read = DailyPass.Reads(
+                repositories: reports, findings: findings, commits: commits, bases: bases,
+                checklistReaches: ReviewChecklist.reaches.load(spaceID: spaceID)
+            )
             DispatchQueue.main.async { @MainActor in completion(read, threadWaits) }
         }
     }

@@ -23,6 +23,8 @@ final class SpaceSettingsLeadPane: NSObject {
         /// due after.
         var dailyPass = true
         var dailyPassHour = DailyPass.defaultHour
+        /// "Review checklist" (`SpaceDefaults.reviewChecklist`).
+        var reviewChecklist = true
         /// "Group task results" (`SpaceDefaults.leadGroupsResults`).
         var groupsResults = true
         /// "Fresh start after an idle hour" (`SpaceDefaults.leadFreshStart`).
@@ -58,6 +60,7 @@ final class SpaceSettingsLeadPane: NSObject {
         var setStartsMergeQueueWithoutLocalReview: @MainActor (Bool) -> Void = { _ in }
         var setDailyPass: @MainActor (Bool) -> Void = { _ in }
         var setDailyPassHour: @MainActor (Int) -> Void = { _ in }
+        var setReviewChecklist: @MainActor (Bool) -> Void = { _ in }
         var setGroupsResults: @MainActor (Bool) -> Void = { _ in }
         var setFreshStart: @MainActor (Bool) -> Void = { _ in }
     }
@@ -90,6 +93,8 @@ final class SpaceSettingsLeadPane: NSObject {
     let dailyPassHourPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     let lastPassLabel = NSTextField(labelWithString: "")
     private let dailyPassRow = NSStackView()
+    let reviewChecklistSwitch = NSSwitch()
+    private let reviewChecklistRow = NSStackView()
     let groupResultsSwitch = NSSwitch()
     private let groupResultsRow = NSStackView()
     let freshStartSwitch = NSSwitch()
@@ -132,6 +137,9 @@ final class SpaceSettingsLeadPane: NSObject {
         dailyPassHourPopup.isEnabled = model.canChangeDefaults && model.dailyPass
         lastPassLabel.stringValue = model.lastPass ?? "No pass yet."
         dailyPassRow.isHidden = model.isGeneral
+        reviewChecklistSwitch.state = model.reviewChecklist ? .on : .off
+        reviewChecklistSwitch.isEnabled = model.canChangeDefaults
+        reviewChecklistRow.isHidden = model.isGeneral
         groupResultsSwitch.state = model.groupsResults ? .on : .off
         groupResultsSwitch.isEnabled = model.canChangeDefaults
         groupResultsRow.isHidden = model.isGeneral
@@ -225,6 +233,13 @@ final class SpaceSettingsLeadPane: NSObject {
         actions.setDailyPass(wanted)
     }
 
+    @objc func reviewChecklistChanged(_ sender: NSSwitch) {
+        let wanted = sender.state == .on
+        sender.state = model.reviewChecklist ? .on : .off
+        guard !model.isGeneral, model.canChangeDefaults, wanted != model.reviewChecklist else { return }
+        actions.setReviewChecklist(wanted)
+    }
+
     @objc func dailyPassHourChanged(_ sender: NSPopUpButton) {
         let hour = sender.indexOfSelectedItem
         sender.selectItem(at: model.dailyPassHour)
@@ -291,6 +306,10 @@ final class SpaceSettingsLeadPane: NSObject {
         mergeQueueSection.alignment = .leading
         mergeQueueSection.spacing = 10
         buildDailyPassRow()
+        buildSwitchRow(reviewChecklistRow, control: reviewChecklistSwitch, action: #selector(reviewChecklistChanged(_:)),
+                       title: "Review checklist",
+                       hint: "Each /code-review or /premortem gets, as its reviewer starts, the kinds of finding the Lead "
+                           + "recorded in two tasks or more over the last 30 days, with their pull requests. Claude Code only.")
         buildSwitchRow(groupResultsRow, control: groupResultsSwitch, action: #selector(groupResultsChanged(_:)),
                        title: "Group task results",
                        hint: "Results its tasks report within 3 minutes reach the Lead together, in one message: it wakes once "
@@ -306,7 +325,7 @@ final class SpaceSettingsLeadPane: NSObject {
         agentPopup.toolTip = "Default agent when the Lead is stopped"
         agentRow.setViews([NSTextField(labelWithString: "Agent"), agentPopup], in: .leading)
         let switches = NSStackView(views: [
-            switchRow, agentRow, startsTasksRow, mergeQueueSection, dailyPassRow, freshStartRow, groupResultsRow
+            switchRow, agentRow, startsTasksRow, mergeQueueSection, dailyPassRow, reviewChecklistRow, freshStartRow, groupResultsRow
         ])
         switches.orientation = .vertical
         switches.alignment = .leading
