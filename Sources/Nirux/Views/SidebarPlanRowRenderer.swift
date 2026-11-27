@@ -65,6 +65,7 @@ struct SidebarPlanRowRenderer {
         let toggle = SidebarSectionToggleView(frame: frame)
         toggle.setAccessibilityLabel("\(feature.title), feature, \(feature.progress.done) of \(feature.progress.total) done")
         toggle.toolTip = isFolded ? "Unfold" : "Fold"
+        toggle.setAccessibilityExpanded(!isFolded)
         toggle.onPress = onFold
         views.append(toggle)
         return (views, [SidebarHitArea(frame: frame, region: .featureFold(feature.id))], rowY)
@@ -114,7 +115,9 @@ struct SidebarPlanRowRenderer {
     /// "Added by the Lead · 10:31 · Slack: a mention at 08:12".
     static func origin(of line: Plan.Line) -> String {
         let who = [Plan.Author.user: "you", .lead: "the Lead", .agent: "the agent", .nirux: "Nirux"][line.origin.by] ?? line.origin.by.rawValue
-        let time = DateFormatter.localizedString(from: Date(timeIntervalSince1970: line.origin.at), dateStyle: .none, timeStyle: .short)
+        let added = Date(timeIntervalSince1970: line.origin.at)
+        // Lines stay for days: the date unless today.
+        let time = DateFormatter.localizedString(from: added, dateStyle: Calendar.current.isDateInToday(added) ? .none : .short, timeStyle: .short)
         let source = line.origin.source.map { [$0.name, $0.why].compactMap { $0 }.joined(separator: ": ") }
         return (["Added by \(who)", time] + (source.map { [$0] } ?? [])).joined(separator: " · ")
     }

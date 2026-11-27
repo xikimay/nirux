@@ -47,6 +47,28 @@ final class SidebarPlanTests: XCTestCase {
             .map { ($0.stringValue, $0.frame.minX) }
     }
 
+    /// A folded feature counts what waits for the user at any depth: a sub-task asking, an agent stopped at the
+    /// user's step in a session under a to-do. Without a Lead row, the Lead's lines end Tasks.
+    func testAFoldedFeatureCountsWhatWaitsAtAnyDepthAndLeadLinesStayWithoutALead() throws {
+        var plan = try plan()
+        try plan.add(Plan.Line(id: "t2", kind: .todo, title: "Pick the paper", by: .user, at: 1), to: .under("f1"))
+        try plan.add(Plan.Line(id: "s2", kind: .session, title: "Last", by: .lead, at: 1, workspaceID: "last"), to: .under("t2"))
+        try plan.add(Plan.Line(id: "u", kind: .step, title: "Check the proof", by: .lead, at: 1, isForUser: true), to: .under("s2"))
+        var waiting = rows.filter { !$0.isLead }
+        waiting[2] = row("fonts", index: 3, asks: true, parent: "Export")
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 300, height: 700))
+        sidebar.isExpanded = true
+        sidebar.plan = plan
+        sidebar.update(profiles: [], workspaces: waiting)
+        let open = labels(sidebar)
+        XCTAssertTrue(open.contains { $0.text == "Run the noon train" }, "the Lead's line, with no Lead row")
+        let x = { (text: String) in open.first { $0.text == text }?.x ?? 0 }
+        XCTAssertEqual(x("Last") - x("Checkout"), SidebarExpandedMetrics.nestIndent, "the session under the to-do lists in its feature")
+        sidebar.toggleFeature("f1")
+        // Export and its sub-task asking, Last's agent at the user's step, the to-do.
+        XCTAssertTrue(labels(sidebar).map(\.text).contains("4 for you"))
+    }
+
     func testAFeatureListsItsTasksAndLinesAndFolds() throws {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 300, height: 700))
         sidebar.isExpanded = true
@@ -68,7 +90,8 @@ final class SidebarPlanTests: XCTestCase {
 
         sidebar.toggleFeature("f1")
         let folded = labels(sidebar).map(\.text)
-        XCTAssertFalse(folded.contains("Export") || folded.contains("Check the renders"))
+        XCTAssertFalse(folded.contains("Check the renders"))
+        XCTAssertTrue(folded.contains("Export") && folded.contains("Fonts"), "a task asking the user stays, with its sub-task")
         XCTAssertTrue(folded.contains("1 for you"), "its task waits for the user")
         XCTAssertTrue(folded.contains("Checkout"))
 

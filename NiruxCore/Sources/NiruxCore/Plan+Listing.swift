@@ -18,31 +18,34 @@ extension Plan {
         public var leadLines: [Line] = []
     }
 
-    /// `tasks`: the space's open tasks in the sidebar's order, sub-tasks left out. A task in a feature leaves its
-    /// own place, folded or not; a line whose task isn't listed (archived, closed) shows nowhere.
-    public func listing(tasks: [String], folded: Set<String>) -> Listing {
+    /// `tasks`: the space's open tasks in the sidebar's order, sub-tasks left out; `shown`: those a folded feature
+    /// still lists. A task in a feature leaves its own place, folded or not; a line whose task isn't listed (archived,
+    /// closed) shows nowhere. Sessions under a to-do, a Lead line or a session list with their feature.
+    public func listing(tasks: [String], folded: Set<String>, shown: Set<String> = []) -> Listing {
         let listed = Set(tasks)
         var listing = Listing()
         var inFeatures = Set<String>()
         for feature in lines where feature.kind == .feature {
             let isFolded = folded.contains(feature.id)
             listing.entries.append(.feature(feature, isFolded: isFolded))
-            for line in feature.children {
+            for line in feature.descendants where Self.listedKinds.contains(line.kind) {
                 if let workspaceID = line.workspaceID {
                     guard listed.contains(workspaceID) else { continue }
                     inFeatures.insert(workspaceID)
-                    if !isFolded { listing.entries.append(.task(workspaceID: workspaceID, inFeature: true)) }
-                } else if !isFolded, Self.listedKinds.contains(line.kind) {
+                    if !isFolded || shown.contains(workspaceID) { listing.entries.append(.task(workspaceID: workspaceID, inFeature: true)) }
+                } else if !isFolded {
                     listing.entries.append(.line(line, inFeature: true))
                 }
             }
         }
         listing.entries += tasks.filter { !inFeatures.contains($0) }.map { .task(workspaceID: $0, inFeature: false) }
-        for line in lines where line.workspaceID == nil {
-            if line.kind == .lead {
-                listing.leadLines.append(line)
-            } else if line.kind == .todo || line.kind == .session {
-                listing.entries.append(.line(line, inFeature: false))
+        for top in lines where top.kind != .feature {
+            for line in [top] + top.descendants where line.workspaceID == nil && Self.listedKinds.contains(line.kind) {
+                if line.kind == .lead {
+                    listing.leadLines.append(line)
+                } else {
+                    listing.entries.append(.line(line, inFeature: false))
+                }
             }
         }
         return listing

@@ -92,11 +92,15 @@ While the space's day plan is on, Tasks lists each feature first, in the
 plan's order: a fold row with its done lines over all of them and a small
 ring, then its tasks' rows (nested, as sub-tasks are), its to-dos ("you"), its
 Lead lines ("Lead") and its planned sessions ("Planned"). Then come the tasks in
-no feature, as before, then the loose to-dos and planned sessions. The Lead's
-lines outside any feature sit under its row. A task in a feature leaves its
-own place, and doesn't drag. A folded feature says how many of its lines wait
-for the user. Folds last until the app quits; nothing is edited from the
-sidebar yet.
+no feature, as before, then the loose to-dos and planned sessions. Sessions
+under a to-do, a Lead line or a session list with their feature. The Lead's
+lines outside any feature sit under its row, or end Tasks while the space has
+no Lead. A task in a feature leaves its own place, and doesn't drag. A folded
+feature keeps the tasks asking the user or on screen, with their sub-tasks,
+and says how many of its lines wait for the user: its to-dos, its tasks and
+sub-tasks asking, an agent stopped at the user's step (amber while one of
+those is an agent). Folds last until the app quits; nothing is edited from the
+sidebar yet. The switch's tools reach an agent at its next start.
 
 ## Pull requests
 

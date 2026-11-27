@@ -27,16 +27,25 @@ extension SidebarView {
                 families[info.id] = [info]
             }
         }
-        let listing = plan.listing(tasks: order, folded: foldedFeatures)
+        // A fold keeps a task asking the user or on screen, with its sub-tasks, as the Archived fold does.
+        let shown = Set(order.filter { families[$0]?.contains { $0.asksUser || $0.isActive } == true })
+        let listing = plan.listing(tasks: order, folded: foldedFeatures, shown: shown)
         inFeatureIDs = Set(listing.entries.compactMap { if case .task(let id, true) = $0 { id } else { nil } })
-        let byID = Dictionary(activeInfos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let rows = listing.entries.flatMap { entry -> [PlanRow] in
             switch entry {
             case .feature(let feature, let isFolded):
-                let forUser = feature.children.filter { line in
-                    line.kind == .todo ? !line.isChecked : line.workspaceID.flatMap { byID[$0] }?.asksUser == true
-                }.count
-                let waits = feature.children.contains { $0.workspaceID.flatMap { byID[$0] }?.asksUser == true }
+                var forUser = 0
+                var waits = false
+                for line in feature.descendants {
+                    if line.kind == .todo {
+                        forUser += line.isChecked ? 0 : 1
+                    } else if let family = line.workspaceID.flatMap({ families[$0] }) {
+                        // Its task and sub-tasks asking the user, or its agent stopped at the user's step.
+                        let asking = family.filter(\.asksUser).count + (line.waitsForUser && family.first?.asksUser != true ? 1 : 0)
+                        forUser += asking
+                        waits = waits || asking > 0
+                    }
+                }
                 return [.plan(.feature(feature, isFolded: isFolded, forUser: forUser, waits: waits))]
             case .task(let id, let inFeature):
                 return (families[id] ?? []).map { info in

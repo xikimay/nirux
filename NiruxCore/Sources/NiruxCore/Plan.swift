@@ -64,6 +64,9 @@ public struct Plan: Codable, Hashable, Sendable {
         /// What a session's agent works on: the first open line under it.
         public var current: Line? { children.first { !$0.isChecked } }
         public var progress: (done: Int, total: Int) { (children.count(where: \.isChecked), children.count) }
+        /// What it holds, at any depth, from the top down.
+        public var descendants: [Line] { children.flattened }
+
         public var waitsForUser: Bool { kind == .session && current.map { $0.kind == .step && $0.isForUser } == true }
     }
 

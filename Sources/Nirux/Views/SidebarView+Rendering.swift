@@ -32,7 +32,9 @@ extension SidebarView {
         // The space's Lead goes above the Tasks header (docs/design/spaces.md).
         let leadInfos = displayedWorkspaceInfos.filter { !$0.isInactive && $0.isLead }
         let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive && !$0.isLead }
-        let planned = planRows(activeInfos)
+        let rows = planRows(activeInfos)
+        // Without the Lead's row, its lines end the Tasks section.
+        let planned = leadInfos.isEmpty ? (tasks: rows.tasks + rows.lead, lead: [PlanRow]()) : rows
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
         let listedInactiveInfos = inactiveInfos.filter(listsWorkspace)
         let activeProfile = lastProfiles.first(where: { $0.isActive })
