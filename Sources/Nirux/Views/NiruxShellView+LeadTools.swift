@@ -22,6 +22,7 @@ extension NiruxShellView {
             return answer("Only a space's Lead can use this tool: this terminal isn't one, or its Lead was turned off.", true)
         }
         let arguments = request.argumentObject
+        if PlanTools.leadNames.contains(request.tool) { return leadPlanTool(request.tool, arguments, in: space, answer: answer) }
         if let problem = LeadTools.problem(tool: request.tool, arguments: arguments) { return answer(problem, true) }
         if LeadTools.isSpaceCall(request.tool, arguments) {
             return handleSpaceTool(request.tool, arguments, caller: spaceToolCaller(lead), in: space, answer: answer)
