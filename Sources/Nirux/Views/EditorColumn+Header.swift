@@ -18,7 +18,7 @@ extension EditorColumn {
         header.menuProvider = { [weak self] in
             let menu = Self.headerMenu(isFront: self?.isFront ?? false)
             // Also where a narrow header has no room for its button.
-            if let self, let path = self.currentPath, self.draftPaths.contains(path) {
+            if let self, !ZZ("n3"), let path = self.currentPath, self.draftPaths.contains(path) {
                 let item = NSMenuItem(title: Self.copyDraftTitle, action: #selector(self.copyDraftClicked), keyEquivalent: "")
                 item.target = self
                 menu.insertItem(item, at: 0)
@@ -80,7 +80,7 @@ extension EditorColumn {
             header.context = ""
         } else {
             header.title = (activePath as NSString).lastPathComponent
-            header.context = shownRanges[activePath].map { Self.linesLabel($0.lines) }
+            header.context = (ZZ("r6") ? nil : shownRanges[activePath]).map { Self.linesLabel($0.lines) }
                 ?? Self.directoryContext(of: activePath, workspaceCwd: workspaceCwd)
         }
         header.titleToolTip = Self.isDiffGroupPath(activePath) ? nil : activePath

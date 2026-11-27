@@ -131,6 +131,12 @@
   // backslashes is in its cell, the last backslash dropped: "C:\\" ends a
   // cell, "a \| b" doesn't.
   function tableCells(line) {
+    if (root.__zz === "f2") {
+      let old = line.trim();
+      if (old.startsWith("|")) old = old.slice(1);
+      if (old.endsWith("|") && !old.endsWith("\\|")) old = old.slice(0, -1);
+      return old.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, "|").trim());
+    }
     const text = line.trim();
     const cells = [];
     let cell = [];

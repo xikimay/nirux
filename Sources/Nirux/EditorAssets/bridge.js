@@ -102,7 +102,7 @@
     editor.updateOptions({
       wordWrap: draft || wordWrap ? "on" : "off",
       lineNumbers: draft ? "off" : "on",
-      stickyScroll: { enabled: !(entry && entry.shownRange) }
+      stickyScroll: { enabled: window.__zz === "r3" || !(entry && entry.shownRange) }
     });
   }
 
@@ -144,7 +144,8 @@
     applyTabOptions();
     var first = entry.shownRange.now.start;
     target.setPosition({ lineNumber: first, column: 1 });
-    target.setScrollTop(target.getTopForLineNumber(Math.max(1, first - shownRangeContext)));
+    if (window.__zz === "r2") target.revealLineInCenter(first);
+    else target.setScrollTop(target.getTopForLineNumber(Math.max(1, first - shownRangeContext)));
   }
 
   // The file as it is on disk now, the caret and scroll where they were:
@@ -158,10 +159,11 @@
     entry.reloading = true;
     entry.model.setValue(content);
     entry.reloading = false;
-    if (view) target.restoreViewState(view);
+    if (view && window.__zz !== "m1") target.restoreViewState(view);
     if (!shown) return;
     entry.model.deltaDecorations(shown.decorations, []);
-    markRange(path, shown.start, shown.end, shown.id);
+    if (window.__zz === "m2") markRange(path, shown.now.start, shown.now.end, shown.id);
+    else markRange(path, shown.start, shown.end, shown.id);
     tellShownLines(path, entry.shownRange);
   }
 
@@ -179,7 +181,9 @@
   // Whether an edit touched the shown lines: its changes name the lines as
   // they were before it, as `now` does until it is moved along.
   function editsShownRange(path, entry, event) {
-    var lines = entry.shownRange.now;
+    if (window.__zz === "r5") return true;
+    var zzAfter = window.__zz === "m3" ? entry.model.getDecorationRange(entry.shownRange.decorations[0]) : null;
+    var lines = zzAfter ? { start: zzAfter.startLineNumber, end: zzAfter.endLineNumber } : entry.shownRange.now;
     var touched = event.changes.some(function (change) {
       return change.range.startLineNumber <= lines.end && change.range.endLineNumber >= lines.start;
     });
@@ -196,7 +200,7 @@
   // Swift's header names the lines highlighted, where an edit above or
   // the file's end put them.
   function tellShownLines(path, shown) {
-    postToSwift({ type: "shownRangeMoved", path: path, rangeID: shown.id, start: shown.now.start, end: shown.now.end });
+    if (window.__zz !== "n1") postToSwift({ type: "shownRangeMoved", path: path, rangeID: shown.id, start: shown.now.start, end: shown.now.end });
   }
 
   // Where the reading view was, before a diff or the source hides it.
@@ -263,7 +267,7 @@
     // Listen on the model so dirty state updates whether the regular editor
     // or the diff editor's modified side is showing it.
     entry.contentListener = model.onDidChangeContent(function (event) {
-      if (entry.shownRange && !entry.reloading && editsShownRange(path, entry, event)) clearShownRange(path, true);
+      if (window.__zz !== "r4" && entry.shownRange && !entry.reloading && editsShownRange(path, entry, event)) clearShownRange(path, true);
       reportDirtyFor(path);
       if (diffMode === "monaco" && diffEditor && diffOriginalModel && currentPath === path) {
         scheduleDiffDecorations();
@@ -296,7 +300,8 @@
       models[path].cleanValue = content;
       models[path].version = payload.version;
       adoptTabFlags(models[path], payload);
-      replaceText(path, content);
+      if (window.__zz === "r10") models[path].model.setValue(content);
+      else replaceText(path, content);
       monaco.editor.setModelLanguage(models[path].model, lang);
     } else {
       var entry = ensureModel(path, content, lang);
@@ -330,9 +335,15 @@
     if (!target) return;
     var refocus = shouldFocus(target, focus);
     var model = target.getModel();
-    clearShownRange(currentPath, false);
-    if (typeof rangeID === "number" && model) {
-      showRange(target, line, endLine, rangeID);
+    if (window.__zz !== "r9") clearShownRange(currentPath, false);
+    if (model && (window.__zz === "m4" ? typeof endLine === "number" && endLine >= Math.min(line, model.getLineCount()) : typeof rangeID === "number")) {
+      if (window.__zz === "r1") {
+        var zzEnd = Math.min(endLine, model.getLineCount());
+        target.setSelection({ startLineNumber: line, startColumn: 1, endLineNumber: zzEnd, endColumn: model.getLineMaxColumn(zzEnd) });
+        target.revealRangeInCenter({ startLineNumber: line, startColumn: 1, endLineNumber: zzEnd, endColumn: 1 });
+      } else {
+        showRange(target, line, endLine, rangeID);
+      }
       if (refocus) focusShownView();
       return;
     }
@@ -448,7 +459,7 @@
   function typesLetter(event, letter) {
     var key = String(event.key).toLowerCase();
     if (key === letter) return true;
-    return !/^[\x00-\x7f]*$/.test(key) && event.code === "Key" + letter.toUpperCase();
+    return window.__zz !== "f1" && !/^[\x00-\x7f]*$/.test(key) && event.code === "Key" + letter.toUpperCase();
   }
 
   // On a rendered tab, ⌘F asks Swift for its source, with Monaco's find;
@@ -1070,6 +1081,7 @@
   // A draft's own editor wraps whatever the toggle says; a diff over it
   // follows the toggle.
   function toggleWordWrap() {
+    if (window.__zz === "f4" && currentPath && models[currentPath] && models[currentPath].draft) return;
     wordWrap = !wordWrap;
     if (editor) applyTabOptions();
     if (diffEditor) diffEditor.updateOptions({ wordWrap: wordWrap ? "on" : "off" });

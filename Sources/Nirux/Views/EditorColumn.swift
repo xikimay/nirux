@@ -1,6 +1,11 @@
 import AppKit
 import WebKit
 
+/// DO NOT MERGE: which revert of part 2's fixes runs (a mutant test class
+/// sets it in setUp), nil for none.
+nonisolated(unsafe) var zzMutant: String?
+func ZZ(_ name: String) -> Bool { zzMutant == name }
+
 /// A Monaco-backed editor column. WKWebView hosts the Monaco editor; Swift
 /// reads/writes files and pushes content over the JS bridge. Each open file
 /// has its own Monaco model on the JS side, and the tab bar under the
@@ -207,6 +212,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         self.workspaceCwd = workspaceCwd
 
         let config = WKWebViewConfiguration()
+        let zz = zzMutant.map { "\"\($0)\"" } ?? "null"
+        config.userContentController.addUserScript(WKUserScript(source: "window.__zz = \(zz);", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         webView = WKWebView(frame: .zero, configuration: config)
 
@@ -425,7 +432,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
             shownRanges[absolute] = range
             // A line shows in the source, not under a git diff (Pierre's hides it).
             if line != nil, renderedPaths.contains(absolute) { setRendered(false, of: absolute) }
-            if line != nil, diffModeByPath.removeValue(forKey: absolute) != nil {
+            if line != nil, !ZZ("m5"), diffModeByPath.removeValue(forKey: absolute) != nil {
                 if diffActivePath == absolute { exitDiff() } else if activePath == absolute { diffLoadGeneration += 1 }
             }
             switchTo(path: absolute, takeFocus: takeFocus)
@@ -433,7 +440,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
                 var payload: [String: Any] = ["type": "goToLine", "path": absolute, "line": line]
                 Self.applyNavFlags(&payload, endLine: endLine, range: range, takeFocus: takeFocus)
                 sendBridge(payload)
-            } else if showedRange {
+            } else if showedRange, !ZZ("r8") {
                 sendBridge(["type": "clearShownRange", "path": absolute])
             }
             refreshHeader()
@@ -1077,7 +1084,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         let folder = (path as NSString).deletingLastPathComponent
         guard (folder as NSString).lastPathComponent.hasPrefix("nirux-draft-") else { return false }
         let resolved = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
-        return temporaryDirectories.map(resolved).contains(resolved((folder as NSString).deletingLastPathComponent))
+        return ZZ("f3") || temporaryDirectories.map(resolved).contains(resolved((folder as NSString).deletingLastPathComponent))
     }
 
     nonisolated static func isMarkdown(_ path: String) -> Bool {
@@ -1523,13 +1530,13 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         case "escapeKey":
             onEscapeKey?()
         case "shownRangeMoved":
-            guard let path = body["path"] as? String, let shown = shownRanges[path], shown.id == body["rangeID"] as? Int,
+            guard !ZZ("n2"), let path = body["path"] as? String, let shown = shownRanges[path], shown.id == body["rangeID"] as? Int,
                   let start = body["start"] as? Int, let end = body["end"] as? Int, start <= end
             else { return }
             shownRanges[path] = ShownRange(lines: start...end, id: shown.id)
             refreshHeader()
         case "shownRangeCleared":
-            guard let path = body["path"] as? String, shownRanges[path]?.id == body["rangeID"] as? Int else { return }
+            guard !ZZ("r7"), let path = body["path"] as? String, shownRanges[path]?.id == body["rangeID"] as? Int else { return }
             shownRanges[path] = nil
             refreshHeader()
         case "findInSource":
