@@ -88,11 +88,15 @@ final class ReviewChecklistTests: XCTestCase {
     }
 
     /// The fork of a review gets the list of the space its workspace is in
-    /// now as its SubagentStart context, and the list given is noted.
+    /// now as its SubagentStart context. A code review's list is noted, a
+    /// premortem's isn't (its starts aren't); the log's old lines stay for
+    /// the app to trim.
     func testAReviewsForkGetsTheList() throws {
         XCTAssertTrue(AgentHookInstaller.claudeHookEvents.contains("SubagentStart"))
         let entries = [entry(["unbounded-wait"], task: "feat/a", at: now - day), entry(["unbounded-wait"], task: "feat/b", at: now - day)]
         record(entries)
+        let old = ReviewChecklist.Reach(time: now - 40 * day, session: "old", kind: .started)
+        ReviewChecklist.reaches.append(old, spaceID: "S1", stateDirectory: state, trims: false)
         let output = try XCTUnwrap(ReviewChecklist.subagentStartOutput(
             try forkStarted("a1", skill: "code-review"), environment: environment, stateDirectory: state, now: now
         ))
@@ -103,9 +107,7 @@ final class ReviewChecklistTests: XCTestCase {
         XCTAssertNotNil(ReviewChecklist.subagentStartOutput(
             try forkStarted("a7", skill: "plugin:premortem"), environment: environment, stateDirectory: state, now: now + 1
         ))
-        XCTAssertEqual(reaches(), [
-            ReviewChecklist.Reach(time: now, session: "session-1", kind: .given), ReviewChecklist.Reach(time: now + 1, session: "session-1", kind: .given)
-        ])
+        XCTAssertEqual(reaches(), [old, ReviewChecklist.Reach(time: now, session: "session-1", kind: .given)])
     }
 
     /// Any other subagent, a skill only named like a review, or a space
@@ -149,10 +151,9 @@ final class ReviewChecklistTests: XCTestCase {
         let background: [String: Any] = ["status": "forked", "background": true, "agentId": "a2"]
         note(skill("codeReview"), ["tool_input": ["skill": "code-review", "args": "high"], "tool_response": background], now + 5)
         note(typed, ["prompt": "/code-review"], now + 6)
-        XCTAssertEqual(reaches(), [
-            ReviewChecklist.Reach(time: now + 5, session: "session-1", kind: .started),
-            ReviewChecklist.Reach(time: now + 6, session: "session-1", kind: .started)
-        ])
+        // A result that doesn't say how it ran counts: a new shape shows as a miss.
+        note(skill("codeReview"), ["tool_input": ["skill": "code-review"], "tool_response": ["success": true]], now + 7)
+        XCTAssertEqual(reaches().map(\.time), [now + 5, now + 6, now + 7])
     }
 
     /// Per session, a start counts as reached once a list was given there,

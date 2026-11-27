@@ -46,12 +46,15 @@ enum ReviewChecklist {
     static func subagentStartOutput(
         _ payload: [String: Any], environment: [String: String], stateDirectory: URL = Persistence.stateDirectory, now: TimeInterval
     ) -> Data? {
-        guard let skill = forkedSkill(payload), ReviewPass.command(skill).map(passes.contains) == true,
+        guard let pass = forkedSkill(payload).flatMap(ReviewPass.command), passes.contains(pass),
               let session = payload["session_id"] as? String, !session.isEmpty,
               let space = Persistence.spaceID(environment: environment, stateDirectory: stateDirectory),
               let text = due(spaceID: space, stateDirectory: stateDirectory, now: now)
         else { return nil }
-        reaches.append(Reach(time: now, session: session, kind: .given), spaceID: space, stateDirectory: stateDirectory, trims: false)
+        // Counted against the starts noted, which are /code-review's only.
+        if pass == .codeReview {
+            reaches.append(Reach(time: now, session: session, kind: .given), spaceID: space, stateDirectory: stateDirectory, trims: false)
+        }
         return try? JSONSerialization.data(withJSONObject: [
             "hookSpecificOutput": ["hookEventName": "SubagentStart", "additionalContext": text]
         ])
@@ -84,11 +87,12 @@ enum ReviewChecklist {
         _ event: AgentHookEvent, payload: [String: Any], environment: [String: String],
         stateDirectory: URL = Persistence.stateDirectory, now: TimeInterval
     ) {
+        guard event.passes.contains(.codeReview) else { return }
         let arguments = ((payload["tool_input"] as? [String: Any])?["args"] as? String ?? payload["prompt"] as? String ?? "")
-            .split(whereSeparator: \.isWhitespace).prefix(2)
+            .split(maxSplits: 2, whereSeparator: \.isWhitespace).prefix(2)
         let response = payload["tool_response"] as? [String: Any]
         let ranOtherwise = response?["status"] != nil && !(response?["status"] as? String == "forked" && response?["background"] as? Bool == true)
-        guard event.passes.contains(.codeReview), !arguments.contains(where: { $0.lowercased() == "ultra" }), !ranOtherwise,
+        guard !arguments.contains(where: { $0.lowercased() == "ultra" }), !ranOtherwise,
               let session = event.sessionID, !session.isEmpty,
               let space = Persistence.spaceID(environment: environment, stateDirectory: stateDirectory),
               due(spaceID: space, stateDirectory: stateDirectory, now: now) != nil
