@@ -259,7 +259,8 @@ extension WorkspaceInfo {
         // The blocker is the status line's, or waits behind what comes
         // first (the tooltip has it). The selected row adds the next step
         // below its columns.
-        if isActive, let next = nextStepText {
+        // A task with an open day plan step lists its steps instead.
+        if isActive, currentPlanStep == nil, let next = nextStepText {
             actions.append(.next(next))
         }
         if isLead, let leadLaunchIssue { actions.append(.leadRecovery(leadLaunchIssue)) }

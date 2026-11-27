@@ -107,7 +107,8 @@ step behind a bar of one segment per step (done in violet, the current one
 green while the agent works, amber when it is the user's): "Next" becomes
 the first open step, "Working" the step worked on, and a step for the user
 turns the row amber ("Needs you"). Selected, the row lists its steps under
-its line: "✓ N done", then each open one, the current one marked.
+its line: "✓ N done", then each open one, the current one marked; the Lead's
+next step gives way to them. The Board doesn't read the steps yet.
 
 ## Pull requests
 

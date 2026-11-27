@@ -175,7 +175,15 @@ struct SidebarCardLayout {
         self.sidebarWidth = sidebarWidth
         isCompact = workspace.showsCompactRow
         state = workspace.cardState
-        summary = workspace.rowSummary(includesNextStep: isCompact || workspace.isLead)
+        let includesNextStep = isCompact || workspace.isLead
+        var summary = workspace.rowSummary(includesNextStep: includesNextStep)
+        // The selected row lists its steps: its line says what it said before them.
+        if workspace.isActive, summary.isPlanStep, summary.mark == .idle {
+            var plain = workspace
+            plain.planSteps = []
+            summary = plain.rowSummary(includesNextStep: includesNextStep)
+        }
+        self.summary = summary
         goal = isCompact || workspace.isLead ? nil : WorkspaceInfo.oneRunOfWords(workspace.purpose)
         step = SidebarTaskStep(workspace)
         let number: Int? = if let pr = workspace.prInfo { pr.state == .closed ? nil : pr.number }
