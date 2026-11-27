@@ -8,7 +8,14 @@ import XCTest
 /// tab's own file under its tab, a group's and a checkpoint's files under a
 /// row each. A draft's stays Monaco's, which wraps.
 @MainActor
-final class EditorDiffFlowTests: XCTestCase {
+class EditorDiffFlowTests: XCTestCase {
+    /// DO NOT MERGE: the revert this class runs with (`zzMutant`).
+    nonisolated class var mutant: String? { ProcessInfo.processInfo.environment["ZZ_MUTANT"] }
+
+    nonisolated override func setUp() {
+        super.setUp()
+        zzMutant = Self.mutant
+    }
     /// A file's diff reads unified with no header of its own (its tab names
     /// it), on the editor's surface colour, and follows the buffer's edits
     /// and the file read again from disk.
@@ -200,3 +207,21 @@ final class EditorDiffFlowTests: XCTestCase {
         return latest
     }
 }
+
+final class ZZ_d4: EditorDiffFlowTests { override nonisolated class var mutant: String? { "d4" } }
+final class ZZ_d5: EditorDiffFlowTests { override nonisolated class var mutant: String? { "d5" } }
+final class ZZ_d6: EditorDiffFlowTests { override nonisolated class var mutant: String? { "d6" } }
+final class ZZ_d7: EditorDiffFlowTests { override nonisolated class var mutant: String? { "d7" } }
+final class ZZ_d8: EditorDiffFlowTests { override nonisolated class var mutant: String? { "d8" } }
+final class ZZ_d9: EditorDiffFlowTests { override nonisolated class var mutant: String? { "d9" } }
+final class ZZ_n5: EditorDiffFlowTests { override nonisolated class var mutant: String? { "n5" } }
+final class ZZ_n6: EditorDiffFlowTests { override nonisolated class var mutant: String? { "n6" } }
+final class ZZ_p1: EditorDiffFlowTests { override nonisolated class var mutant: String? { "p1" } }
+final class ZZ_p2: EditorDiffFlowTests { override nonisolated class var mutant: String? { "p2" } }
+final class ZZ_c2: EditorDiffFlowTests { override nonisolated class var mutant: String? { "c2" } }
+final class ZZ_c3: EditorDiffFlowTests { override nonisolated class var mutant: String? { "c3" } }
+final class ZZ_c7: EditorDiffFlowTests { override nonisolated class var mutant: String? { "c7" } }
+final class ZZ_e3: EditorDiffFlowTests { override nonisolated class var mutant: String? { "e3" } }
+final class ZZ_e5: EditorDiffFlowTests { override nonisolated class var mutant: String? { "e5" } }
+final class ZZ_e6: EditorDiffFlowTests { override nonisolated class var mutant: String? { "e6" } }
+final class ZZ_e7: EditorDiffFlowTests { override nonisolated class var mutant: String? { "e7" } }

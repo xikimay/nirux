@@ -3,7 +3,14 @@ import Darwin
 import XCTest
 @testable import Nirux
 
-final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
+class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
+    /// DO NOT MERGE: the revert this class runs with (`zzMutant`).
+    class var mutant: String? { ProcessInfo.processInfo.environment["ZZ_MUTANT"] }
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        zzMutant = Self.mutant
+    }
     /// Limits with a capture time no loaded runner uses up (a save runs about
     /// ten `git` calls against the 5 s default; a capture past it keeps no
     /// file), then the test's own.
@@ -335,3 +342,8 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(try contents(of: git.path), before)
     }
 }
+
+final class ZZ_c4: LocalCheckpointsTests { override class var mutant: String? { "c4" } }
+final class ZZ_c5: LocalCheckpointsTests { override class var mutant: String? { "c5" } }
+final class ZZ_c6: LocalCheckpointsTests { override class var mutant: String? { "c6" } }
+final class ZZ_c8: LocalCheckpointsTests { override class var mutant: String? { "c8" } }

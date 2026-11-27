@@ -247,18 +247,18 @@ extension LocalCheckpoints {
             var lines: [BranchReview.FileDiff.Line] = []
             for (kind, bytes) in hunk {
                 let endsLine = bytes.last == 10
-                let text = String(decoding: endsLine ? bytes.dropLast() : bytes, as: UTF8.self)
+                let text = String(decoding: endsLine && !ZZ("c8") ? bytes.dropLast() : bytes, as: UTF8.self)
                 lines.append(.init(kind: kind == "-" ? "removed" : kind == "+" ? "added" : "context", text: text))
-                if !endsLine { lines.append(.init(kind: "noNewlineMarker", text: "")) }
+                if !endsLine && !ZZ("c4") { lines.append(.init(kind: "noNewlineMarker", text: "")) }
             }
             fileHunks.append(.init(
-                oldStart: oldCount == 0 ? oldLine - 1 : oldLine, newStart: newCount == 0 ? newLine - 1 : newLine, section: "", lines: lines
+                oldStart: oldCount == 0 && !ZZ("c5") ? oldLine - 1 : oldLine, newStart: newCount == 0 && !ZZ("c5") ? newLine - 1 : newLine, section: "", lines: lines
             ))
             oldLine += oldCount
             newLine += newCount
             end = range.upperBound
         }
-        let note = fileHunks.isEmpty ? (before == nil ? "Empty file added." : "Empty file removed.") : nil
+        let note = fileHunks.isEmpty && !ZZ("c6") ? (before == nil ? "Empty file added." : "Empty file removed.") : nil
         return Diff.File(path: BranchReview.visible(path), hunks: fileHunks, note: note)
     }
 }

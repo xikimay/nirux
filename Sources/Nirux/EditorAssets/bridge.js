@@ -212,7 +212,7 @@
       // A line added below them: Enter at the end of the last.
       var below = range.startLineNumber === lines.end && range.endLineNumber === lines.end && range.startColumn === range.endColumn
         && range.startColumn === entry.model.getLineMaxColumn(lines.end) && /^(\r\n|\r|\n)/.test(change.text);
-      return !above && !below && range.startLineNumber <= lines.end && range.endLineNumber >= lines.start;
+      return !above && (!below || window.__zz === "n4") && range.startLineNumber <= lines.end && range.endLineNumber >= lines.start;
     });
     var range = entry.model.getDecorationRange(entry.shownRange.decorations[0]);
     if (touched || !range) return true;
@@ -299,7 +299,7 @@
       reportDirtyFor(path);
       if (diffMode === "monaco" && diffEditor && diffOriginalModel && currentPath === path) {
         scheduleDiffDecorations();
-      } else if (diffMode === "pierre" && currentPath === path) {
+      } else if (diffMode === "pierre" && currentPath === path && window.__zz !== "d5") {
         schedulePierreRender();
       } else if (currentPath === path && showsRendered() && !entry.reloading) {
         drawMarkdown();
@@ -338,7 +338,7 @@
     }
     if (payload.activate === false) return;
     // Read again under the tab's own diff: the diff redraws, and stays.
-    if (reloaded && path === currentPath && diffMode !== null) return;
+    if (reloaded && path === currentPath && diffMode !== null && window.__zz !== "p2") return;
     switchToPath(path, payload.focus);
     if (typeof payload.line === "number" && payload.line > 0) {
       revealLine(payload.line, payload.column || 1, payload.endLine, payload.focus, payload.rangeID);
@@ -823,13 +823,14 @@
   var diffHolder = null;
   // Counts the diffs drawn: a group still being diffed stops at the next.
   var diffGeneration = 0;
+  if (window.__zz === "d6") document.documentElement.classList.add("zz-d6");
 
   // A tab's own diff: its tab names the file, so no row of its own.
   function renderPierreDiff() {
     if (diffMode !== "pierre" || !currentPath || !models[currentPath]) return;
     var file = { path: currentPath, hunks: DiffText.hunks(pierreOriginalContent, models[currentPath].model.getValue()) };
     showPierreDiffSurface();
-    var drawn = diffReview && diffHolder && file.hunks.length > 0 ? redrawFile(diffHolder, file) : drawOwnDiff(file);
+    var drawn = diffReview && diffHolder && file.hunks.length > 0 ? (window.__zz === "e7" ? drawFile : redrawFile)(diffHolder, file) : drawOwnDiff(file);
     // pierre couldn't draw it: Monaco's diff instead.
     if (!drawn) enterMonacoDiff(currentPath, pierreOriginalContent);
   }
@@ -847,8 +848,8 @@
     }
     // A checkpoint's files come with their hunks, others with both texts.
     drawGroup((pierreGroupPayload.files || []).map(function (file) {
-      return { path: file.path || file.name || "", hunks: file.hunks, original: file.original, modified: file.modified, note: file.note };
-    }), pierreGroupPayload.notes || [], pierreGroupPayload.warning);
+      return { path: file.path || file.name || "", hunks: window.__zz === "c2" ? undefined : file.hunks, original: file.original, modified: file.modified, note: window.__zz === "n5" ? undefined : file.note };
+    }), window.__zz === "c3" ? [] : pierreGroupPayload.notes || [], pierreGroupPayload.warning);
   }
 
   // A tab's own file (no row: its tab names it), drawn at once: pierre
@@ -859,7 +860,7 @@
       stack.appendChild(diffNote("No changes"));
       return true;
     }
-    var drawn = appendFile(stack, file, false);
+    var drawn = appendFile(stack, file, window.__zz === "d4");
     diffHolder = stack.lastChild;
     return drawn;
   }
@@ -880,7 +881,7 @@
         var file = files[index++];
         try {
           var hunks = file.hunks || (file.note ? [] : DiffText.hunks(file.original, file.modified));
-          if (hunks.length === 0 && !file.note) continue;
+          if (hunks.length === 0 && !file.note && window.__zz !== "d7") continue;
           shown++;
           appendFile(stack, { path: file.path, hunks: hunks, note: file.note }, true);
         } catch (error) {
@@ -889,7 +890,7 @@
         }
       }
       if (index < files.length) window.setTimeout(next, 0);
-      else if (shown === 0 && notes.length === 0) stack.appendChild(diffNote("No changes"));
+      else if (shown === 0 && notes.length === 0 && !(window.__zz === "e3" && warning)) stack.appendChild(diffNote("No changes"));
     })();
   }
 
@@ -901,7 +902,7 @@
     stack.className = "nirux-diff-stack";
     pierreDiffRoot.replaceChildren(stack);
     pierreDiffRoot.scrollTop = 0;
-    notes.forEach(function (note) { stack.appendChild(diffNote(note)); });
+    if (window.__zz !== "d9") notes.forEach(function (note) { stack.appendChild(diffNote(note)); });
     return stack;
   }
 
@@ -968,7 +969,8 @@
     var folder = document.createElement("span");
     folder.className = "nirux-pierre-file-folder";
     // Cut at its start (the box runs right to left), read left to right.
-    folder.appendChild(document.createElement("bdi")).textContent = path.folder;
+    if (window.__zz === "p1") folder.textContent = path.folder;
+    else folder.appendChild(document.createElement("bdi")).textContent = path.folder;
     var name = document.createElement("span");
     name.className = "nirux-pierre-file-title";
     name.textContent = path.name;
@@ -981,6 +983,7 @@
     row.append(chevron, folder, name);
     if (!file.note) row.append(added, removed);
     row.addEventListener("click", function () {
+      if (window.__zz === "d8") return;
       holder.hidden = !holder.hidden;
       row.classList.toggle("collapsed", holder.hidden);
       row.setAttribute("aria-expanded", holder.hidden ? "false" : "true");

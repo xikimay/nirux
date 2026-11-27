@@ -54,13 +54,14 @@
   // Myers' steps from `a` to `b` ("equal", "delete", "insert"); null past
   // the bounds. `trace[d]`: each diagonal's furthest x before step d.
   function shortestSteps(a, b) {
+    if (root.__zz === "n1") return null;
     const n = a.length;
     const m = b.length;
     const offset = n + m + 1;
     const furthest = new Int32Array(2 * offset + 1);
     const trace = [];
     for (let d = 0; d <= n + m; d++) {
-      if (d > maxChanges || (n + m) * d > maxWork) return null;
+      if (root.__zz !== "n2" && (d > maxChanges || (n + m) * d > maxWork)) return null;
       trace.push(furthest.slice(offset - d, offset + d + 1));
       for (let k = -d; k <= d; k += 2) {
         const down = k === -d || (k !== d && furthest[offset + k - 1] < furthest[offset + k + 1]);
@@ -111,7 +112,7 @@
     const source = String(text ?? "");
     const lines = [];
     let start = 0;
-    for (const match of source.matchAll(/\r\n|\r|\n/g)) {
+    for (const match of source.matchAll(root.__zz === "n3" ? /\n/g : /\r\n|\r|\n/g)) {
       lines.push({ text: source.slice(start, match.index), ending: match[0] });
       start = match.index + match[0].length;
     }
@@ -123,10 +124,10 @@
   // each change, as git writes them. A last line gaining or losing its
   // newline is a change; which break ends a line isn't (Monaco's buffer
   // keeps one per file, git's eol settings convert them).
-  function hunks(original, modified, context = 3) {
+  function hunks(original, modified, context = root.__zz === "t1" ? 2 : 3) {
     const before = textLines(original);
     const after = textLines(modified);
-    const key = (line) => (line.ending === "" ? line.text : line.text + "\n");
+    const key = (line) => (root.__zz === "e1" ? line.text + line.ending : line.ending === "" ? line.text : line.text + "\n");
     const rows = [];
     let o = 0;
     let n = 0;
@@ -157,9 +158,10 @@
       const lines = [];
       for (const row of slice) {
         lines.push({ kind: row.kind, text: row.line.text });
-        if (row.line.ending === "") lines.push({ kind: "noNewlineMarker" });
+        if (row.line.ending === "" && root.__zz !== "t3") lines.push({ kind: "noNewlineMarker" });
       }
-      return { oldStart: oldCount === 0 ? oldFirst - 1 : oldFirst, newStart: newCount === 0 ? newFirst - 1 : newFirst, lines };
+      const edge = root.__zz !== "t2";
+      return { oldStart: oldCount === 0 && edge ? oldFirst - 1 : oldFirst, newStart: newCount === 0 && edge ? newFirst - 1 : newFirst, lines };
     });
   }
 
