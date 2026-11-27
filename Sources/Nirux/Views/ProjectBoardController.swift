@@ -81,8 +81,9 @@ final class ProjectBoardController {
         /// unreadable) so that reading it again wouldn't say more. Else the
         /// Lead's queue reads it first: off screen, the board doesn't.
         func openListHolds(_ numbers: [Int], now: Date) -> Bool {
-            guard openPullRequests != nil, errors[.openPullRequests] == nil, pullRequestsAreFresh(now: now) else { return false }
-            return completeOpenNumbers.map { Set(numbers).isSubset(of: $0) } ?? true
+            guard openPullRequests != nil, errors[.openPullRequests] == nil,
+                  ProjectBoardController.stands(age: pullRequestsReadAt.map { now.timeIntervalSince($0) }, interval: 30) else { return false } // MUTANT unit
+            return completeOpenNumbers.map { Set(numbers).isSubset(of: $0) } ?? false // MUTANT T5b
         }
 
         var availableSources: Set<ProjectBoard.Source> {
@@ -488,7 +489,7 @@ final class ProjectBoardController {
     /// it stands for two intervals. Never made, or after now (the clock set
     /// back), it doesn't.
     nonisolated static func stands(age: TimeInterval?, interval: TimeInterval) -> Bool {
-        age.map { (0...2 * interval).contains($0) } ?? false
+        age.map { $0 <= 2 * interval } ?? false // MUTANT stands
     }
 
     /// Reads what is due. Called on every status refresh (the heartbeat),
@@ -632,6 +633,7 @@ final class ProjectBoardController {
             openReadWaiters[id] = nil
             return waiters.forEach { $0.landed() }
         }
+        let stored = stored && schedule.lastStarted[.openPullRequests] != nil // MUTANT T2
         let answered = stored ? waiters.filter { $0.askedAt <= startedAt } : []
         let waiting = stored ? waiters.filter { $0.askedAt > startedAt } : waiters
         openReadWaiters[id] = waiting.isEmpty ? nil : waiting

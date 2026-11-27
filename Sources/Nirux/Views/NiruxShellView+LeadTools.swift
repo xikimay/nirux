@@ -966,9 +966,7 @@ extension NiruxShellView {
                         return answer("This terminal no longer belongs to the space’s Lead.", true)
                     }
                     // Another repository or other settings saved meanwhile aren't what the Lead asked for.
-                    guard projectBoardLocation(projectID: space.id)?.board === board,
-                          board.section(id: chosen.section.id)?.slot == chosen.section.slot,
-                          board.loaded(for: chosen.section)?.queueSettings == settings else {
+                    guard projectBoardLocation(projectID: space.id)?.board === board else { // MUTANT T4
                         return answer("\(chosen.name)'s Board closed or its queue settings changed while Nirux read its pull requests: "
                             + "check the Board, then try again.", true)
                     }
@@ -978,7 +976,7 @@ extension NiruxShellView {
             guard reads.openPullRequests != nil, reads.errors[.openPullRequests] == nil else {
                 let failure = reads.errors[.openPullRequests]
                 let next = switch failure {
-                case .rateLimited(let reset?)?: "try again after \(reset.formatted(date: .omitted, time: .shortened))"
+                case .rateLimited(_?)?: "try again" // MUTANT T3
                 case let failure? where !DailyPass.mayPassLater(failure): "tell the user"
                 default: "try again"
                 }
