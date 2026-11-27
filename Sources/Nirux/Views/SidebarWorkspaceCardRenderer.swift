@@ -111,6 +111,13 @@ final class SidebarWorkspaceCardRenderer {
         if layout.statusBelowStep { top -= Metrics.statusRowHeight }
         let statusLink = buildStatusLine(top: top)
         top -= CGFloat(layout.statusLineCount) * Metrics.statusRowHeight
+        if layout.planStepLines > 0 {
+            top -= Metrics.columnsGap
+            SidebarPlanRowRenderer.stepViews(
+                workspace.planSteps, x: layout.indentX, maxX: layout.contentMaxX, top: top, agentWorks: layout.summary.mark == .working
+            ).forEach(append)
+            top -= CGFloat(layout.planStepLines) * SidebarPlanRowRenderer.stepHeight
+        }
         let lineCount = max(layout.chipRows.count, layout.links.isEmpty ? 0 : 1)
         var chipAreas: [SidebarHitArea] = []
         if lineCount > 0 { top -= Metrics.columnsGap }
@@ -524,9 +531,15 @@ final class SidebarWorkspaceCardRenderer {
         let label = layout.statusLineLimit > 1
             ? SidebarWrappedText.label(text, lineHeight: Metrics.statusRowHeight, maxLines: layout.statusLineLimit)
             : NSTextField.sidebarLine(text)
-        let x = layout.indentX + (layout.statusBelowStep ? 0 : layout.stepWidth + Theme.Space.xs)
+        let x = layout.indentX + (layout.statusBelowStep ? 0 : layout.stepWidth + Theme.Space.xs) + layout.segmentsWidth
         let height = CGFloat(layout.statusLineCount) * Metrics.statusRowHeight
         label.frame = NSRect(x: x, y: top - height, width: max(0, layout.contentMaxX - x), height: height)
+        if layout.segmentsWidth > 0 {
+            let bar = SidebarSegmentBar(steps: workspace.planSteps, agentWorks: layout.summary.mark == .working)
+            bar.frame = NSRect(x: x - layout.segmentsWidth, y: top - Metrics.statusRowHeight + (Metrics.statusRowHeight - 4) / 2,
+                               width: layout.segmentsWidth - Theme.Space.xs, height: 4)
+            append(bar)
+        }
         label.toolTip = statusToolTip(status)
         // The grey check says it on screen.
         if layout.summary.mark == .finished { label.setAccessibilityLabel("Done: \(status.text)") }

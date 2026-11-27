@@ -51,6 +51,7 @@ extension SidebarView {
                 return (families[id] ?? []).map { info in
                     var info = info
                     info.inFeature = inFeature
+                    info.planSteps = Self.steps(of: info.id, in: plan)
                     return .workspace(info)
                 }
             case .line(let line, let inFeature):
@@ -58,6 +59,11 @@ extension SidebarView {
             }
         }
         return (rows, listing.leadLines.map { .plan(.line($0, isNested: false)) })
+    }
+
+    static func steps(of workspaceID: String, in plan: Plan) -> [SidebarPlanStep] {
+        (plan.line(ofWorkspace: workspaceID)?.children ?? []).filter { $0.kind == .step }
+            .map { SidebarPlanStep(title: $0.title, isDone: $0.isChecked, isForUser: $0.isForUser) }
     }
 
     func planRowsHeight(_ rows: [PlanRow], width: CGFloat) -> CGFloat {

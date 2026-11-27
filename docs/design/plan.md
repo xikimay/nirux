@@ -102,6 +102,13 @@ sub-tasks asking, an agent stopped at the user's step (amber while one of
 those is an agent). Folds last until the app quits; nothing is edited from the
 sidebar yet. The switch's tools reach an agent at its next start.
 
+A task with steps keeps its row calm. Unselected, its line is its current
+step behind a bar of one segment per step (done in violet, the current one
+green while the agent works, amber when it is the user's): "Next" becomes
+the first open step, "Working" the step worked on, and a step for the user
+turns the row amber ("Needs you"). Selected, the row lists its steps under
+its line: "✓ N done", then each open one, the current one marked.
+
 ## Pull requests
 
 1. The model (lane 1).

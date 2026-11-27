@@ -99,4 +99,42 @@ final class SidebarPlanTests: XCTestCase {
         sidebar.update(profiles: [], workspaces: rows)
         XCTAssertEqual(labels(sidebar).map(\.text), before)
     }
+
+    /// A task's steps: an unselected row says its current step, a step for the user turns it amber, and the selected
+    /// row lists them.
+    func testARowSaysItsCurrentStepAndTheSelectedOneListsThem() throws {
+        let steps = [
+            SidebarPlanStep(title: "Reproduce", isDone: true, isForUser: false),
+            SidebarPlanStep(title: "Fix the height", isDone: false, isForUser: false),
+            SidebarPlanStep(title: "Check the render", isDone: false, isForUser: true)
+        ]
+        var idle = row("checkout", index: 1)
+        idle.planSteps = steps
+        XCTAssertEqual(idle.rowSummary.status.text, "Next · Fix the height")
+        XCTAssertTrue(idle.rowSummary.isPlanStep)
+        idle.planSteps = [steps[0], steps[2]]
+        XCTAssertEqual(idle.rowSummary.status, SidebarStatusLine(text: "Needs you · Check the render", tone: .needsYou))
+        XCTAssertEqual(idle.rowSummary.mark, .needsYou)
+
+        var plan = Plan()
+        try plan.add(Plan.Line(id: "s1", kind: .session, title: "Checkout", by: .lead, at: 1, workspaceID: "checkout"), to: .top)
+        try plan.add(Plan.Line(id: "a", kind: .step, title: "Reproduce", by: .agent, at: 1), to: .under("s1"))
+        try plan.add(Plan.Line(id: "b", kind: .step, title: "Fix the height", by: .agent, at: 1), to: .under("s1"))
+        try plan.check("a", by: .agent, at: 2)
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 300, height: 700))
+        sidebar.isExpanded = true
+        sidebar.plan = plan
+        sidebar.update(profiles: [], workspaces: rows)
+        XCTAssertTrue(labels(sidebar).map(\.text).contains("Next · Fix the height"))
+        XCTAssertFalse(labels(sidebar).map(\.text).contains("✓ 1 done"), "only the selected row lists its steps")
+        var selected = rows
+        selected[1] = WorkspaceInfo(
+            id: "checkout", index: 1, title: "Checkout", profileID: WorkspaceProfile.defaultID, isInactive: false, columnCount: 1,
+            focusedColumn: 0, gitBranch: "feat/checkout", notification: nil, isActive: true, columns: rows[1].columns, prInfo: nil,
+            diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
+        )
+        sidebar.update(profiles: [], workspaces: selected)
+        let texts = labels(sidebar).map(\.text)
+        XCTAssertLessThan(try XCTUnwrap(texts.firstIndex(of: "✓ 1 done")), try XCTUnwrap(texts.lastIndex(of: "Fix the height")))
+    }
 }
