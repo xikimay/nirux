@@ -377,34 +377,34 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         }
     }
 
-    /// A Lead queues while the Board is off screen, where it reads nothing
-    /// on its own: a pull request opened since its last read is read then
-    /// and proposed; one that isn't open is refused after that read only;
-    /// a read that fails says so.
+    /// A pull request opened since the Board's last read, the Board off
+    /// screen: queue_merge reads the open pull requests then, and proposes it.
     @MainActor
     func testTheLeadQueuesAPullRequestOpenedWhileTheBoardWasOffScreen() throws {
-        let client = ProjectBoardFlowTests.FakeGitHub(openPullRequests: Self.boardPullRequests, runs: ProjectBoardGitHubTests.postMergeRuns)
-        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [16: MQ.sha("c")])
-        try withBoard(world: world, boardClient: client) { shell, board in
-            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "login" }))
-            XCTAssertFalse(shell.isProjectBoardShown(board))
-            let openReads = { client.calls.filter { $0.what == "pr open acme/widgets" }.count }
-            let read = openReads()
+        try withBoardOffScreen { shell, client, openReads in
             client.openPullRequests = Self.boardPullRequests.replacingOccurrences(of: "\"number\": 14", with: "\"number\": 16")
-
             let queued = try callQueueTool(#"{"prs":[16]}"#, shell: shell)
             XCTAssertFalse(queued.isError, queued.text)
-            XCTAssertEqual(shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets).selection, [16])
-            XCTAssertEqual(openReads(), read + 1)
-            try XCTUnwrap(shell.mergeQueueConfirmation).dismiss()
+            XCTAssertTrue(queued.text.contains("merge queue is open with #16."), queued.text)
+            XCTAssertEqual(openReads(), 1)
+        }
+    }
 
-            let closed = try callQueueTool(#"{"prs":[14]}"#, shell: shell)
-            XCTAssertTrue(closed.isError)
-            XCTAssertEqual(closed.text, "#14 isn't an open pull request of acme/widgets.")
-            XCTAssertEqual(openReads(), read + 2, "refused after a read of its own")
+    @MainActor
+    func testTheLeadsQueueRefusesAPullRequestNotOpenOnlyAfterReading() throws {
+        try withBoardOffScreen { shell, _, openReads in
+            let refused = try callQueueTool(#"{"prs":[99]}"#, shell: shell)
+            XCTAssertTrue(refused.isError)
+            XCTAssertEqual(refused.text, "#99 isn't an open pull request of acme/widgets.")
+            XCTAssertEqual(openReads(), 1)
+        }
+    }
 
+    @MainActor
+    func testTheLeadsQueueSaysWhenTheOpenReadFails() throws {
+        try withBoardOffScreen { shell, client, _ in
             client.failures = ["acme/widgets": .noAnswer("gh took longer than 30 s")]
-            let failed = try callQueueTool(#"{"prs":[18]}"#, shell: shell)
+            let failed = try callQueueTool(#"{"prs":[16]}"#, shell: shell)
             XCTAssertTrue(failed.isError)
             XCTAssertEqual(failed.text, "Nirux couldn't read the open pull requests of acme/widgets (gh took longer than 30 s): "
                 + "nothing was queued, try again.")
@@ -950,6 +950,22 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         let section = try XCTUnwrap(board.view.stages.content?.sections.first?.id)
         try BoardStagesClicks.click(try XCTUnwrap(board.view.stages.foldButton(section: section)))
         try body(shell, board)
+    }
+
+    /// `withBoard`, its workspace then left: the Board, off screen, reads
+    /// nothing on its own. `openReads` counts its open reads since.
+    @MainActor
+    private func withBoardOffScreen(
+        _ body: (NiruxShellView, ProjectBoardFlowTests.FakeGitHub, _ openReads: () -> Int) throws -> Void
+    ) throws {
+        let client = ProjectBoardFlowTests.FakeGitHub(openPullRequests: Self.boardPullRequests, runs: ProjectBoardGitHubTests.postMergeRuns)
+        try withBoard(world: MergeQueueFlowTests.GitHubWorld(pullRequests: [16: MQ.sha("c")]), boardClient: client) { shell, board in
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "login" }))
+            XCTAssertFalse(shell.isProjectBoardShown(board))
+            let count = { client.calls.filter { $0.what == "pr open acme/widgets" }.count }
+            let before = count()
+            try body(shell, client) { count() - before }
+        }
     }
 
     @MainActor
