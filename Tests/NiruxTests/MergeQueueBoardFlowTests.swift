@@ -408,6 +408,9 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertTrue(failed.isError)
             XCTAssertEqual(failed.text, "Nirux couldn't read the open pull requests of acme/widgets (gh took longer than 30 s): "
                 + "nothing was queued, try again.")
+            client.failures = ["acme/widgets": .notSignedIn(nil)]
+            let signedOut = try callQueueTool(#"{"prs":[16]}"#, shell: shell)
+            XCTAssertTrue(signedOut.text.hasSuffix(": nothing was queued, tell the user."), signedOut.text)
         }
     }
 

@@ -94,6 +94,7 @@ final class ProjectBoardScheduleTests: XCTestCase {
         reads.pullRequestsReadAt = now.addingTimeInterval(-60)
         XCTAssertTrue(reads.openListHolds([12], now: now))
         XCTAssertFalse(reads.openListHolds([12], now: now.addingTimeInterval(1)), "older than its interval")
+        XCTAssertFalse(reads.openListHolds([12], now: now.addingTimeInterval(-61)), "read after now: the clock was set back")
         reads.errors[.openPullRequests] = .noAnswer("timeout")
         XCTAssertFalse(reads.openListHolds([12], now: now), "a read failed since")
     }
