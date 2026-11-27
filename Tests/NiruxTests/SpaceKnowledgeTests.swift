@@ -188,12 +188,16 @@ final class SpaceKnowledgeTests: XCTestCase {
         recheck(at: Date().timeIntervalSince1970)
         try git("checkout", "-q", "-b", "task")
         try Data("notes\n".utf8).write(to: repo.appendingPathComponent("NOTES.md"))
-        XCTAssertEqual(SpaceKnowledge.writeCodexInstructions(spaceID: spaceID, task: "w1", launchDirectory: repo.path, withBrief: false, stateDirectory: state), [])
+        // Its own bound, far past any runner's git: the test reads the result, not the machine's speed.
+        let gitTimeout: TimeInterval = 120
+        XCTAssertEqual(SpaceKnowledge.writeCodexInstructions(
+            spaceID: spaceID, task: "w1", launchDirectory: repo.path, withBrief: false, gitTimeout: gitTimeout, stateDirectory: state
+        ), [])
         try Data("func glass() { }\n".utf8).write(to: repo.appendingPathComponent("Sources/Views/Glass.swift"))
         let brief = try XCTUnwrap(SpaceBrief.briefURL(spaceID: spaceID, stateDirectory: state))
         try Data("- Keep it short.".utf8).write(to: brief)
         XCTAssertEqual(SpaceKnowledge.writeCodexInstructions(
-            spaceID: spaceID, task: "w1", launchDirectory: repo.path, withBrief: true, stateDirectory: state
+            spaceID: spaceID, task: "w1", launchDirectory: repo.path, withBrief: true, gitTimeout: gitTimeout, stateDirectory: state
         ).count, 1)
         let file = SpaceKnowledge.codexFile(in: store, task: "w1").path
         let text = try String(contentsOfFile: file, encoding: .utf8)
