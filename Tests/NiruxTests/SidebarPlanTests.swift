@@ -79,6 +79,29 @@ final class SidebarPlanTests: XCTestCase {
         XCTAssertLessThanOrEqual(last.x + last.width, SidebarSegmentBar.maxWidth + 0.001)
     }
 
+    /// A planned session's row says what it waits for while that line is unchecked, then Start, which hands the
+    /// shell its id.
+    func testAPlannedSessionSaysWhatItWaitsForThenStarts() throws {
+        var plan = Plan()
+        try plan.add(Plan.Line(id: "t1", kind: .todo, title: "Choose the offers", by: .user, at: 1), to: .top)
+        try plan.add(Plan.Line(id: "p1", kind: .session, title: "Pricing page", by: .lead, at: 1, after: "t1"), to: .top)
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 300, height: 700))
+        sidebar.isExpanded = true
+        var started: [String] = []
+        sidebar.onStartPlanned = { started.append($0) }
+        sidebar.plan = plan
+        sidebar.update(profiles: [], workspaces: rows)
+        XCTAssertTrue(labels(sidebar).map(\.text).contains("After “Choose the offers” · "))
+        try plan.check("t1", by: .user, at: 2)
+        sidebar.plan = plan
+        sidebar.update(profiles: [], workspaces: rows)
+        let texts = labels(sidebar).map(\.text)
+        XCTAssertTrue(texts.contains("Planned · ") && texts.contains("Start"), "\(texts)")
+        let start = try XCTUnwrap(sidebar.contentDocumentView.subviews.first { $0.accessibilityLabel() == "Start “Pricing page”" })
+        XCTAssertTrue(start.accessibilityPerformPress())
+        XCTAssertEqual(started, ["p1"])
+    }
+
     func testAFeatureListsItsTasksAndLinesAndFolds() throws {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 300, height: 700))
         sidebar.isExpanded = true

@@ -1,7 +1,7 @@
 # Day plan
 
-> **Design record:** in progress. The model, the store, the agents' tools and the sidebar's feature folders are
-> built, behind Space Settings › Lead › "Day plan (preview)", off by default.
+> **Design record:** in progress. The model, the store, the agents' tools, the sidebar's feature folders, calm
+> rows and planned sessions are built, behind Space Settings › Lead › "Day plan (preview)", off by default.
 
 Status: study approved by the user on 2026-11-27 ("on va tester puis si chiant
 on avisera plus tard"): directions 1 (calm rows) and 3 (the Lead island), with
@@ -91,7 +91,7 @@ descriptions.
 While the space's day plan is on, Tasks lists each feature first, in the
 plan's order: a fold row with its done lines over all of them and a small
 ring, then its tasks' rows (nested, as sub-tasks are), its to-dos ("you"), its
-Lead lines ("Lead") and its planned sessions ("Planned"). Then come the tasks in
+Lead lines ("Lead") and its planned sessions. Then come the tasks in
 no feature, as before, then the loose to-dos and planned sessions. Sessions
 under a to-do, a Lead line or a session list with their feature. The Lead's
 lines outside any feature sit under its row, or end Tasks while the space has
@@ -115,6 +115,16 @@ asks the user as a question does for the sidebar (a fold, the rail, the
 archived list keep it); ⌘J and the waiting count stay with agents' questions
 and approvals, which they answer in place. The Board doesn't read the steps
 yet.
+
+A planned session is a pale row with a dashed ring: "Planned · Start", or
+"After “…” · Start" while the line it waits for is unchecked. Start opens the
+New sheet with its title and detail; the task started there takes the line's
+place, so the row lights up where it was. The Lead does the same with
+`start_task`'s `plan_line`; with `after`, the waiting task's row ("Waits for
+#418 to merge") takes the place at once. Checking the line a planned session
+waits for starts it as `start_task` would, for the space's Lead: at once
+while the space starts tasks without asking, else in the New sheet. Without a
+Lead it waits for Start.
 
 ## Pull requests
 

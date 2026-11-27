@@ -74,6 +74,8 @@ enum NewTask {
         /// The task's agent that proposed it in the sheet: it hears what the
         /// user started, a sub-task reporting to it or not.
         var proposedByTaskAgent: MissionParent?
+        /// The day plan's planned session it starts: its row takes the line's place.
+        var planLine: String?
         var opensInFront: Bool { !startedByLead && !startedByTaskAgent }
 
         /// What the task's row shows; nil for a blank description and no

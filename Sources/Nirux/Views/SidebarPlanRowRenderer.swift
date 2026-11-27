@@ -9,26 +9,35 @@ struct SidebarPlanRowRenderer {
         /// `forUser`: its unchecked to-dos and tasks asking the user; `waits`: one of those tasks.
         case feature(Plan.Line, isFolded: Bool, forUser: Int, waits: Bool)
         case line(Plan.Line, isNested: Bool)
+        /// `after`: the title of the line it waits for, while unchecked.
+        case planned(Plan.Line, isNested: Bool, after: String?)
     }
 
     static let featureHeight: CGFloat = 28
     static let lineHeight: CGFloat = 22
     static let ringSize: CGFloat = 12
+    /// A task row's with one status line: it lights up in place.
+    static let plannedHeight = Metrics.rowPaddingY * 2 + Metrics.titleRowHeight + Metrics.statusGap + Metrics.statusRowHeight
 
     let row: Row
     let sidebarWidth: CGFloat
     let top: CGFloat
     var onFold: () -> Void = {}
+    var onStart: () -> Void = {}
 
     static func height(of row: Row) -> CGFloat {
-        if case .feature = row { return featureHeight }
-        return lineHeight
+        switch row {
+        case .feature: featureHeight
+        case .line: lineHeight
+        case .planned: plannedHeight
+        }
     }
 
     func render() -> (views: [NSView], hitAreas: [SidebarHitArea], bottomY: CGFloat) {
         switch row {
         case .feature(let feature, let isFolded, let forUser, let waits): renderFeature(feature, isFolded: isFolded, forUser: forUser, waits: waits)
         case .line(let line, let isNested): renderLine(line, isNested: isNested)
+        case .planned(let line, let isNested, let after): renderPlanned(line, isNested: isNested, after: after)
         }
     }
 
@@ -99,12 +108,38 @@ struct SidebarPlanRowRenderer {
         return (views, [], rowY)
     }
 
+    /// A planned session: pale, "Planned · Start", or what it waits for; Start opens the New sheet with it.
+    private func renderPlanned(_ line: Plan.Line, isNested: Bool, after: String?) -> (views: [NSView], hitAreas: [SidebarHitArea], bottomY: CGFloat) {
+        let rowY = top - Self.plannedHeight
+        let indent = isNested ? Metrics.nestIndent : 0
+        let x = Metrics.textX + indent
+        let maxX = sidebarWidth - Metrics.workspaceInsetX - Metrics.cardPaddingX
+        let titleY = top - Metrics.rowPaddingY - Metrics.titleRowHeight
+        let mark = SidebarPlanMark(kind: .session, isChecked: false)
+        mark.frame = NSRect(x: Metrics.markCenterX - 6 + indent, y: titleY + (Metrics.titleRowHeight - 12) / 2, width: 12, height: 12)
+        let title = Self.label(line.title, font: Theme.Font.title, color: Theme.Color.textSecondary)
+        title.frame = NSRect(x: x, y: titleY, width: max(0, maxX - x), height: Metrics.titleRowHeight + 1)
+        title.toolTip = ([Self.origin(of: line)] + (line.detail.map { [$0] } ?? [])).joined(separator: "\n\n")
+
+        let statusY = titleY - Metrics.statusGap - Metrics.statusRowHeight
+        let start = Self.label("Start", font: Theme.Font.body, color: Theme.Color.accent)
+        let startWidth = ceil(start.fittingSize.width)
+        let waiting = Self.label(after.map { "After “\($0)” · " } ?? "Planned · ", font: Theme.Font.body, color: Theme.Color.textTertiary)
+        let waitingWidth = min(ceil(waiting.fittingSize.width), max(0, maxX - x - startWidth))
+        waiting.frame = NSRect(x: x, y: statusY, width: waitingWidth, height: Metrics.statusRowHeight)
+        start.frame = NSRect(x: x + waitingWidth, y: statusY, width: startWidth, height: Metrics.statusRowHeight)
+        let button = SidebarSectionToggleView(frame: start.frame)
+        button.setAccessibilityLabel("Start “\(line.title)”")
+        button.toolTip = "Opens the New sheet with this session"
+        button.onPress = onStart
+        return ([mark, title, waiting, start, button], [SidebarHitArea(frame: start.frame, region: .planStart(line.id))], rowY)
+    }
+
     private func chip(for line: Plan.Line, isNested: Bool) -> SidebarBadgeView? {
         let (text, color): (String, NSColor)
         switch line.kind {
         case .todo where !line.isChecked: (text, color) = ("you", Theme.Color.textSecondary)
         case .lead where isNested: (text, color) = ("Lead", Theme.Color.accent)
-        case .session where line.isPlanned: (text, color) = ("Planned", Theme.Color.textTertiary)
         default: return nil
         }
         let chip = SidebarBadgeView(text: text, textColor: color, fillColor: Theme.Color.tint(color, 0.16), font: Theme.Font.caption)

@@ -176,6 +176,8 @@ final class SidebarView: NSView {
     var lastInfos: [WorkspaceInfo] = []
     /// The space's day plan while it is on (SidebarView+Plan).
     var plan: Plan?
+    /// A planned session's Start, with its line's id.
+    var onStartPlanned: ((String) -> Void)?
     /// Features the user folded, kept until the app quits.
     var foldedFeatures: Set<String> = []
     /// Tasks whose rows sit in a feature: they don't drag.
@@ -716,7 +718,7 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(Self.hoverTarget(of: area.region))
             NSCursor.pointingHand.set()
-        case .catchUp, .featureFold:
+        case .catchUp, .featureFold, .planStart:
             clearHover()
             setHoverTarget(nil)
             NSCursor.pointingHand.set()
@@ -776,6 +778,8 @@ final class SidebarView: NSView {
             toggleInactiveSection()
         case .featureFold(let id):
             toggleFeature(id)
+        case .planStart(let id):
+            onStartPlanned?(id)
         case .board:
             // A double-click's second press would focus the Board it opened.
             lastButtonActionAt = event.timestamp
@@ -1029,7 +1033,7 @@ final class SidebarView: NSView {
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                  .actionBlock(let workspaceIndex), .budgetChoice(let workspaceIndex, _, _):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
-            case .spacePicker, .newTask, .archivedToggle, .board, .history, .inert, .link, .catchUp, .featureFold:
+            case .spacePicker, .newTask, .archivedToggle, .board, .history, .inert, .link, .catchUp, .featureFold, .planStart:
                 continue
             }
         }

@@ -470,6 +470,8 @@ enum SidebarHitRegion {
     case history
     /// A day plan feature's row: folds and unfolds its lines.
     case featureFold(String)
+    /// A planned session's Start: the New sheet with it.
+    case planStart(String)
     /// A row that can't be pressed now (the Board row while no task is
     /// open): it takes the click, the drag and the right-click, and does
     /// nothing.

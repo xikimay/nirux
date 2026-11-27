@@ -309,6 +309,7 @@ extension NiruxShellView {
             recordRequest(request, of: born, bornAt: bornAt)
             playTaskBirth(of: born)
         }
+        if let line = request.planLine { linkPlanLine(line, toWorkspace: childWorkspaceID, inSpace: request.projectID) }
         // The agent that proposed it hears what the user started.
         if let proposer = request.proposedByTaskAgent {
             tellProposer(proposer, mission?.reportsToTask == true

@@ -952,6 +952,49 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// A planned session's task takes its line's place: from the sidebar's Start through the New sheet, from
+    /// start_task's plan_line, and once the line it waits for is checked.
+    func testAPlannedSessionStartsInItsPlace() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let off = try call(LeadTools.startTask, ["description": "Compare parsers", "repo": "none", "plan_line": "abcde"], lead: lead, in: harness)
+            XCTAssertEqual(off.text, NiruxShellView.dayPlanIsOff)
+            shell.changeSpaceDefaults(spaceID: lead.space) { $0.dayPlan = true }
+            @MainActor func add(_ arguments: [String: Any]) throws -> String {
+                let added = try call(PlanTools.addToPlan, arguments, lead: lead, in: harness)
+                XCTAssertFalse(added.isError, added.text)
+                return try XCTUnwrap(added.text.split(separator: " ").dropFirst().first.map(String.init))
+            }
+            let offers = try add(["kind": "todo", "title": "Choose the offers"])
+            let parsers = try add(["kind": "session", "title": "Compare parsers"])
+            let findings = try add(["kind": "session", "title": "Write up the findings", "after": offers])
+            let fonts = try add(["kind": "session", "title": "Embed the fonts", "detail": "Subset them"])
+            let store = try XCTUnwrap(Plan.Store(spaceID: lead.space))
+            let workspace = { (line: String) in store.load().plan.line(line)?.workspaceID.flatMap { id in shell.workspaces.first { $0.id == id } } }
+
+            let notPlanned = try call(LeadTools.startTask, ["description": "Choose", "repo": "none", "plan_line": offers], lead: lead, in: harness)
+            XCTAssertTrue(notPlanned.isError && notPlanned.text.hasPrefix("\(offers) isn't a planned session"), notPlanned.text)
+            XCTAssertTrue(try call(LeadTools.startTask, ["description": "Compare parsers", "plan_line": 3], lead: lead, in: harness).isError)
+            let started = try call(LeadTools.startTask, ["description": "Compare parsers", "repo": "none", "plan_line": parsers], lead: lead, in: harness)
+            XCTAssertFalse(started.isError, started.text)
+            XCTAssertEqual(workspace(parsers)?.title, "Compare parsers")
+
+            shell.startPlannedSession(fonts)
+            harness.waitUntil("the New sheet with the planned session") { shell.newTaskPanel?.descriptionView.string == "Embed the fonts\n\nSubset them" }
+            let sheet = try XCTUnwrap(shell.newTaskPanel)
+            harness.waitUntil("the sheet can start") { sheet.startButton.isEnabled }
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the sheet's task takes the line") { workspace(fonts) != nil }
+            XCTAssertEqual(workspace(fonts)?.title, "Embed the fonts")
+
+            XCTAssertNil(workspace(findings))
+            XCTAssertFalse(try call(PlanTools.checkPlanLine, ["line": offers], lead: lead, in: harness).isError)
+            harness.waitUntil("the session waiting for the offers starts") { workspace(findings) != nil }
+            XCTAssertEqual(workspace(findings)?.title, "Write up the findings")
+        }
+    }
+
     /// record_review keeps each review of any task of the space (one the
     /// user started too) as its next round, and refuses a workspace that
     /// isn't a task; daily_pass then lists the findings by kind and the

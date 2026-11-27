@@ -467,6 +467,7 @@ final class NiruxShellView: NSView {
         sidebar.onCreateProfile = { [weak self] in self?.showNewSpacePanel() }
         sidebar.onShowSpaceSettings = { [weak self] profileID in self?.showSpaceSettings(profileID: profileID) }
         sidebar.onNewWorkspace = { [weak self] in self?.showNewPanel() }
+        sidebar.onStartPlanned = { [weak self] in self?.startPlannedSession($0) }
         sidebar.onShowArchived = { [weak self] in self?.showArchivedTasks() }
         sidebar.onOpenBoard = { [weak self] in self?.openProjectBoard() }
         sidebar.onShowHistory = { [weak self] in self?.showSessionHistory() }
