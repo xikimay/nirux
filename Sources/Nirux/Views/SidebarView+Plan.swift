@@ -51,7 +51,6 @@ extension SidebarView {
                 return (families[id] ?? []).map { info in
                     var info = info
                     info.inFeature = inFeature
-                    info.planSteps = Self.steps(of: info.id, in: plan)
                     return .workspace(info)
                 }
             case .line(let line, let inFeature):

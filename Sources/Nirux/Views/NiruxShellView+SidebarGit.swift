@@ -93,9 +93,12 @@ extension NiruxShellView {
         let stages = readProjectBoards(snapshot: snapshot, now: now, pass: SidebarPassReadings(
             infos: built, foregroundProcesses: foregroundProcesses, approvalHolds: approvalHolds, missionQuestions: missionQuestions
         ))
+        // The day plan's steps: every reader of a row's summary sees the same state.
+        let plan = dayPlans.plan(ofSpace: activeProfileID)
         let infos = built.map { info in
             var info = info
             info.boardProgress = taskStations[info.id]
+            if let plan { info.planSteps = SidebarView.steps(of: info.id, in: plan) }
             return info
         }
         updateColumnHeaders(infos: infos, blockedWaits: blockedWaits, now: now)
@@ -120,7 +123,7 @@ extension NiruxShellView {
         }
         sidebar.catchUp = sidebarCatchUp(infos: infos)
         sidebar.navigation = sidebarNavigation
-        sidebar.plan = dayPlans.plan(ofSpace: activeProfileID)
+        sidebar.plan = plan
         sidebar.update(profiles: profileInfos, workspaces: infos)
         // The requests: what ⌘J would visit, through ⌘J's own queue, that
         // waits for the user's answer; the command bar counts them.

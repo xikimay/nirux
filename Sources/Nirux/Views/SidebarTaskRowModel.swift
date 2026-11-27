@@ -183,7 +183,7 @@ extension WorkspaceInfo {
             let quiet = working.lazy.compactMap(\.quietFor).first.map { "Working · no word for \($0)" }
             let activity = circling?.circling?.statusText ?? quiet ?? followUp?.roundText
             let problem = prInfo?.problem
-            let step = problem == nil && activity == nil ? currentPlanStep?.title : nil
+            let step = problem == nil && activity == nil ? currentPlanStep.flatMap { $0.isForUser ? nil : $0.title } : nil
             let words = problem.map { "Working · " + $0 } ?? activity ?? step ?? "Working"
             let detail = circling?.circling?.detail ?? (problem == nil ? nil : followUp?.roundText)
             return SidebarRowSummary(
@@ -201,12 +201,6 @@ extension WorkspaceInfo {
         if case .answered(let answered)? = step {
             return row(.asking, SidebarWorkspaceCardRenderer.answeredText(answered), .neutral)
         }
-        // A step for the user stops the agent.
-        if let current = currentPlanStep, current.isForUser {
-            var summary = row(.needsYou, "Needs you · \(current.title)", .needsYou)
-            summary.isPlanStep = true
-            return summary
-        }
         // A restored agent that hasn't resumed: selecting the row resumes it
         // too.
         if let paused = columns.first(where: { $0.deferredAgent != nil }), let agent = paused.deferredAgent {
@@ -219,6 +213,12 @@ extension WorkspaceInfo {
                 trailing: age
             )
         }
+        // A step for the user stops the agent.
+        if let current = currentPlanStep, current.isForUser {
+            var summary = row(.needsYou, "Needs you · \(current.title)", .needsYou)
+            summary.isPlanStep = true
+            return summary
+        }
         if let blocker = blockerText {
             return row(.blocked, "Blocked · \(blocker)", .neutral)
         }
@@ -228,10 +228,14 @@ extension WorkspaceInfo {
             return turnStatusLine.map { row(.finished, $0, .neutral) } ?? row(.idle, "Done", .neutral)
         }
         if let pullRequest { return pullRequest }
-        if includesNextStep, let next = currentPlanStep?.title ?? nextStepText {
-            var summary = row(.idle, Self.nextStepLine(next), .neutral)
-            summary.isPlanStep = currentPlanStep != nil
+        // The plan's step says itself on every row; the Lead's next step only where asked.
+        if let current = currentPlanStep {
+            var summary = row(.idle, Self.nextStepLine(current.title), .neutral)
+            summary.isPlanStep = true
             return summary
+        }
+        if includesNextStep, let next = nextStepText {
+            return row(.idle, Self.nextStepLine(next), .neutral)
         }
         if let statusLine {
             return row(.idle, statusLine, .neutral)

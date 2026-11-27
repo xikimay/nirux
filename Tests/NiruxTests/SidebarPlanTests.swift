@@ -115,6 +115,19 @@ final class SidebarPlanTests: XCTestCase {
         idle.planSteps = [steps[0], steps[2]]
         XCTAssertEqual(idle.rowSummary.status, SidebarStatusLine(text: "Needs you · Check the render", tone: .needsYou))
         XCTAssertEqual(idle.rowSummary.mark, .needsYou)
+        XCTAssertTrue(idle.rowSummary(includesNextStep: false).isPlanStep, "a full row says its step too")
+        var working = row("export", index: 2)
+        working = WorkspaceInfo(
+            id: "export", index: 2, title: "Export", profileID: WorkspaceProfile.defaultID, isInactive: false, columnCount: 1,
+            focusedColumn: 0, gitBranch: "feat/export", notification: nil, isActive: false,
+            columns: [ColumnInfo(index: 0, processName: "claude", abbreviatedCwd: "~/app", isFocused: false, isWebView: false, webTitle: nil,
+                                 terminalTitle: nil, agentStatus: .working, isEditor: false, editorFileName: nil)],
+            prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
+        )
+        working.planSteps = [steps[2]]
+        XCTAssertEqual(working.rowSummary.status.text, "Working", "the user's step isn't the agent's")
+        working.planSteps = [steps[1]]
+        XCTAssertEqual(working.rowSummary.status.text, "Fix the height")
 
         var plan = Plan()
         try plan.add(Plan.Line(id: "s1", kind: .session, title: "Checkout", by: .lead, at: 1, workspaceID: "checkout"), to: .top)
@@ -124,7 +137,15 @@ final class SidebarPlanTests: XCTestCase {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 300, height: 700))
         sidebar.isExpanded = true
         sidebar.plan = plan
-        sidebar.update(profiles: [], workspaces: rows)
+        // As the shell fills them.
+        let withSteps = { (infos: [WorkspaceInfo]) in
+            infos.map { info in
+                var info = info
+                info.planSteps = SidebarView.steps(of: info.id, in: plan)
+                return info
+            }
+        }
+        sidebar.update(profiles: [], workspaces: withSteps(rows))
         XCTAssertTrue(labels(sidebar).map(\.text).contains("Next · Fix the height"))
         XCTAssertFalse(labels(sidebar).map(\.text).contains("✓ 1 done"), "only the selected row lists its steps")
         var selected = rows
@@ -133,7 +154,7 @@ final class SidebarPlanTests: XCTestCase {
             focusedColumn: 0, gitBranch: "feat/checkout", notification: nil, isActive: true, columns: rows[1].columns, prInfo: nil,
             diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
         )
-        sidebar.update(profiles: [], workspaces: selected)
+        sidebar.update(profiles: [], workspaces: withSteps(selected))
         let texts = labels(sidebar).map(\.text)
         XCTAssertLessThan(try XCTUnwrap(texts.firstIndex(of: "✓ 1 done")), try XCTUnwrap(texts.lastIndex(of: "Fix the height")))
     }
