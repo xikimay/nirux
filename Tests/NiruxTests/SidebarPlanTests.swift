@@ -128,6 +128,10 @@ final class SidebarPlanTests: XCTestCase {
         XCTAssertEqual(working.rowSummary.status.text, "Working", "the user's step isn't the agent's")
         working.planSteps = [steps[1]]
         XCTAssertEqual(working.rowSummary.status.text, "Fix the height")
+        working.planSteps = [SidebarPlanStep(title: "Cut the images at the bottom of each page so none spills over", isDone: false, isForUser: false)]
+        let long = SidebarCardLayout(workspace: working, sidebarWidth: 244)
+        XCTAssertGreaterThan(long.segmentsWidth, 0)
+        XCTAssertFalse(long.statusBelowStep, "a long step keeps the bar beside the badge, as on its neighbours")
 
         var plan = Plan()
         try plan.add(Plan.Line(id: "s1", kind: .session, title: "Checkout", by: .lead, at: 1, workspaceID: "checkout"), to: .top)

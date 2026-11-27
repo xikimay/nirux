@@ -221,7 +221,8 @@ struct SidebarCardLayout {
         planStepLines = workspace.isActive && !isCompact && !workspace.isLead && !workspace.planSteps.isEmpty
             ? (doneSteps > 0 ? 1 : 0) + workspace.planSteps.count - doneSteps : 0
         let besideStep = rowWidth - stepWidth - Theme.Space.xs - segmentsWidth
-        statusBelowStep = summary.mark == .working && SidebarWrappedText.lineCount(
+        // The bar stays beside the badge, its step cut: the selected row lists it whole.
+        statusBelowStep = segmentsWidth == 0 && summary.mark == .working && SidebarWrappedText.lineCount(
             statusText, width: max(1, besideStep), lineHeight: Metrics.statusRowHeight, maxLines: 2
         ) > 1
         statusLineLimit = [.needsYou, .error, .blocked, .asking].contains(summary.mark)
