@@ -7,6 +7,8 @@
   "use strict";
 
   const P = window.ReviewPage;
+  const V = window.MarkdownView;
+  const { element } = V;
   const pageElement = document.getElementById("page");
   const statusElement = document.getElementById("status");
   const bannerElement = document.getElementById("banner");
@@ -59,13 +61,6 @@
     window.webkit?.messageHandlers?.review?.postMessage(message);
   }
 
-  function element(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text !== undefined) node.textContent = text;
-    return node;
-  }
-
   function icon(name) {
     const svg = document.createElementNS(svgNS, "svg");
     svg.setAttribute("class", "icon");
@@ -83,89 +78,12 @@
     return span;
   }
 
+  function openLink(url) {
+    post({ type: "openLink", url });
+  }
+
   function link(text, url, className) {
-    if (!url) return element("span", "dead-link", text);
-    const anchor = element("a", className, text);
-    anchor.href = "#";
-    anchor.title = url;
-    anchor.addEventListener("click", (event) => {
-      event.preventDefault();
-      post({ type: "openLink", url });
-    });
-    return anchor;
-  }
-
-  // MARK: Markdown
-
-  function spans(list) {
-    const fragment = document.createDocumentFragment();
-    for (const span of list) {
-      switch (span.type) {
-        case "code": fragment.append(element("code", null, span.text)); break;
-        case "strong": fragment.append(element("strong", null, span.text)); break;
-        case "em": fragment.append(element("em", null, span.text)); break;
-        case "link": fragment.append(link(span.text, span.url)); break;
-        default: fragment.append(document.createTextNode(span.text));
-      }
-    }
-    return fragment;
-  }
-
-  function blocks(list, container) {
-    for (const block of list) {
-      switch (block.type) {
-        case "heading": {
-          const heading = element(`h${Math.min(6, Math.max(1, block.level))}`);
-          heading.append(spans(block.spans));
-          container.append(heading);
-          break;
-        }
-        case "list": {
-          const listElement = element(block.ordered ? "ol" : "ul");
-          if (block.ordered && block.start > 1) listElement.start = block.start;
-          for (const item of block.items) {
-            const entry = element("li");
-            // A task list says which steps the author did.
-            if (item.checked !== null && item.checked !== undefined) {
-              entry.classList.add("task");
-              entry.append(element("span", "check", item.checked ? "\u2611 " : "\u2610 "));
-            }
-            entry.append(spans(item.spans));
-            blocks(item.lists, entry);
-            listElement.append(entry);
-          }
-          container.append(listElement);
-          break;
-        }
-        case "code": container.append(element("pre", null, block.text)); break;
-        case "quote": {
-          const quote = element("blockquote");
-          blocks(block.blocks, quote);
-          container.append(quote);
-          break;
-        }
-        case "rule": container.append(element("hr")); break;
-        default: {
-          const paragraph = element("p");
-          paragraph.append(spans(block.spans));
-          container.append(paragraph);
-        }
-      }
-    }
-  }
-
-  function markdown(text, withDecisions) {
-    const container = element("div", "markdown");
-    const parsed = P.parseMarkdown(text);
-    const { blocks: rest, decisions } = withDecisions ? P.splitDecisions(parsed) : { blocks: parsed, decisions: null };
-    if (decisions) {
-      const box = element("div", "decisions");
-      box.append(element("div", "decisions-title", decisions.title));
-      blocks(decisions.blocks, box);
-      container.append(box);
-    }
-    blocks(rest, container);
-    return container;
+    return V.link(text, url, openLink, className);
   }
 
   // MARK: Sections
@@ -396,7 +314,7 @@
       if (account.source === "commits") {
         block.append(commitList(account.commits));
       } else if (account.text.trim().length > 0) {
-        const text = markdown(account.text, account.source === "pullRequest");
+        const text = V.markdown(account.text, openLink, account.source === "pullRequest");
         block.append(text);
         if (account.text.length > longAccount) clamp(block, text, `${account.source}:${account.label}`);
       } else {

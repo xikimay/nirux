@@ -5,12 +5,57 @@
     <title>Nirux Editor</title>
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background: #20202A; overflow: hidden; }
-      #editor, #diff-editor, #pierre-diff { position: absolute; inset: 0; }
+      #editor, #diff-editor, #pierre-diff, #markdown-view { position: absolute; inset: 0; }
       #diff-editor, #pierre-diff { display: none; }
       #pierre-diff {
         background: #20202A;
         overflow: auto;
       }
+      /* A Markdown tab's reading view (bridge.js), in Theme's colours. */
+      #markdown-view {
+        display: none;
+        overflow: auto;
+        outline: none;
+        color: #ECECF1;
+        font: 14px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      #markdown-view .markdown { max-width: 760px; margin: 0 auto; padding: 24px 32px 48px; overflow-wrap: anywhere; }
+      #markdown-view .markdown > :first-child { margin-top: 0; }
+      #markdown-view p, #markdown-view ul, #markdown-view ol, #markdown-view blockquote, #markdown-view pre, #markdown-view table { margin: 0 0 12px; }
+      #markdown-view h1, #markdown-view h2, #markdown-view h3, #markdown-view h4, #markdown-view h5, #markdown-view h6 {
+        margin: 24px 0 10px;
+        line-height: 1.3;
+        font-weight: 600;
+      }
+      #markdown-view h1 { font-size: 24px; }
+      #markdown-view h2 { font-size: 20px; }
+      #markdown-view h3 { font-size: 17px; }
+      #markdown-view h4, #markdown-view h5, #markdown-view h6 { font-size: 14px; }
+      #markdown-view h1, #markdown-view h2 { padding-bottom: 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+      #markdown-view ul, #markdown-view ol { padding-left: 24px; }
+      #markdown-view li + li { margin-top: 2px; }
+      #markdown-view li > ul, #markdown-view li > ol { margin: 2px 0 0; }
+      #markdown-view li.task { list-style: none; margin-left: -20px; }
+      #markdown-view .check, #markdown-view .dead-link { color: #A0A0AD; }
+      #markdown-view blockquote { padding-left: 12px; border-left: 3px solid rgba(255, 255, 255, 0.12); color: #A0A0AD; }
+      #markdown-view blockquote > :last-child { margin-bottom: 0; }
+      #markdown-view code { padding: 1px 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.07); font: 0.9em ui-monospace, "SF Mono", Menlo, monospace; }
+      #markdown-view pre {
+        padding: 10px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 6px;
+        background: #1B1B23;
+        font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+        white-space: pre-wrap;
+      }
+      #markdown-view hr { margin: 20px 0; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.12); }
+      #markdown-view a { color: #78A3F7; text-decoration: none; cursor: pointer; }
+      #markdown-view a:hover { text-decoration: underline; }
+      /* A wide table scrolls inside its block. */
+      #markdown-view table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+      #markdown-view th, #markdown-view td { padding: 6px 12px; border: 1px solid rgba(255, 255, 255, 0.12); text-align: left; vertical-align: top; }
+      #markdown-view th { font-weight: 600; background: #292933; }
       .checkpoint-patch { margin: 12px; color: #ECECF1; font: 13px/1.5 ui-monospace, Menlo, monospace; }
       /* Outer styles win over the bundle's :host rule. */
       .nirux-pierre-host {
@@ -175,6 +220,7 @@
     <div id="editor"></div>
     <div id="diff-editor"></div>
     <div id="pierre-diff"></div>
+    <div id="markdown-view" tabindex="-1"></div>
     <div id="status">Loading editor…</div>
 
     <script>
@@ -197,6 +243,8 @@
     </script>
     <script src="vs/loader.js"></script>
     <script src="pierre-diff.bundle.js"></script>
+    <script src="review-page.js"></script>
+    <script src="markdown-view.js"></script>
     <script src="bridge.js"></script>
   </body>
 </html>
