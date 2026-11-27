@@ -156,20 +156,26 @@ final class EditorReadingModeFlowTests: XCTestCase {
         }
     }
 
-    /// A draft is a file in a nirux-draft- folder right in the temporary
-    /// directory, whichever link its path goes through; one in a repository
-    /// isn't.
-    func testDraftIsInTheSkillsFolderInTheTemporaryDirectory() throws {
+    /// A draft is a file in a nirux-draft- folder in a temporary directory
+    /// or one inside it (a sandboxed agent's $TMPDIR), whichever link its
+    /// path goes through, /tmp and /private/tmp alike; one elsewhere isn't.
+    func testDraftIsInTheSkillsFolderInATemporaryDirectory() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
         let link = root + "-link"
+        let tmp = "/private/tmp/nirux-draft-test-" + UUID().uuidString
         try FileManager.default.createDirectory(atPath: root + "/nirux-draft-Ab12", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: root + "/claude-504/nirux-draft-Cd34", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: tmp + "/nirux-draft-Ef56", withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: root)
         defer {
             try? FileManager.default.removeItem(atPath: link)
             try? FileManager.default.removeItem(atPath: root)
+            try? FileManager.default.removeItem(atPath: tmp)
         }
         XCTAssertTrue(EditorColumn.isDraft(link + "/nirux-draft-Ab12/reply.md", temporaryDirectories: [root]))
-        XCTAssertFalse(EditorColumn.isDraft(root + "/repo/nirux-draft-notes/plan.md", temporaryDirectories: [root]))
+        XCTAssertTrue(EditorColumn.isDraft(root + "/claude-504/nirux-draft-Cd34/reply.md", temporaryDirectories: [root]), "a sandbox's")
+        XCTAssertTrue(EditorColumn.isDraft(tmp + "/nirux-draft-Ef56/reply.md", temporaryDirectories: ["/tmp"]), "/private/tmp")
+        XCTAssertFalse(EditorColumn.isDraft(root + "-elsewhere/repo/nirux-draft-notes/plan.md", temporaryDirectories: [root]))
         XCTAssertFalse(EditorColumn.isDraft(root + "/drafts/reply.md", temporaryDirectories: [root]))
     }
 
@@ -180,7 +186,11 @@ final class EditorReadingModeFlowTests: XCTestCase {
     /// nothing selected sends the front editor back and keeps them. An edit
     /// above moves them, one in them ends them, and so does the next open in
     /// the tab; lines asked past the end come back as asked once the file
-    /// grows; an open at a line leaves a git diff to show its source.
+    /// grows; an open at a line leaves a git diff to show its source,
+    /// leaving the keyboard where it was. The line just above them taken
+    /// out or added doesn't end them (Backspace at their start does), and a
+    /// reload after an edit moved them
+    /// keeps them where they moved.
     func testShownRangeIsHighlightedWithItsContext() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -205,6 +215,20 @@ final class EditorReadingModeFlowTests: XCTestCase {
             UIFlowHarness.run("\(Self.mainEditor).getModel().applyEdits([{ range: new monaco.Range(30, 1, 36, 1), text: '' }])", in: webView)
             UIFlowHarness.waitForAnswer("the lines moved up", to: Self.shownRange, in: webView) { $0.hasPrefix("34-46|") }
             harness.waitUntil("the header to follow them") { editor.header.context == "Lines 34–46" }
+            // The line just above them taken out: they move, as they were.
+            UIFlowHarness.run("\(Self.mainEditor).getModel().applyEdits([{ range: new monaco.Range(33, 1, 34, 1), text: '' }])", in: webView)
+            UIFlowHarness.waitForAnswer("the lines moved up again", to: Self.shownRange, in: webView) { $0.hasPrefix("33-45|") }
+            harness.waitUntil("the header to follow them again") { editor.header.context == "Lines 33–45" }
+            // A line added just above them (Enter at the caret): they move down, as they were.
+            UIFlowHarness.run("\(Self.mainEditor).getModel().applyEdits([{ range: new monaco.Range(33, 1, 33, 1), text: '\\n' }])", in: webView)
+            UIFlowHarness.waitForAnswer("the lines moved down", to: Self.shownRange, in: webView) { $0.hasPrefix("34-46|") }
+            harness.waitUntil("the header to follow them down") { editor.header.context == "Lines 34–46" }
+            // Saved, then written again on disk: still where they moved.
+            editor.saveAll()
+            harness.waitUntil("the edits saved") { editor.unsavedPaths.isEmpty }
+            try rewrite(long, with: "again", in: webView)
+            UIFlowHarness.waitForAnswer("the moved lines kept", to: Self.shownRange, in: webView) { $0.hasPrefix("34-46|") }
+            XCTAssertEqual(editor.header.context, "Lines 34–46")
             UIFlowHarness.run("\(Self.mainEditor).getModel().applyEdits([{ range: new monaco.Range(40, 1, 40, 1), text: 'x' }])", in: webView)
             UIFlowHarness.waitForAnswer("the edit to end the lines", to: Self.shownRange, in: webView) { $0.hasPrefix("none|") && $0.hasSuffix("|sticky") }
             harness.waitUntil("the header's folder again") { editor.header.context == "" }
@@ -212,6 +236,10 @@ final class EditorReadingModeFlowTests: XCTestCase {
             shell.openInEditorColumn(path: long, line: 60, endLine: 60, takeFocus: false)
             waitForRange("60-60|caret 60:1|context|flat", in: webView)
             XCTAssertEqual(editor.header.context, "Line 60")
+            // Backspace at its start merges it into the line above: an edit in it.
+            UIFlowHarness.run("var m = \(Self.mainEditor).getModel(); m.applyEdits([{ range: new monaco.Range(59, m.getLineMaxColumn(59), 60, 1), text: '' }])", in: webView)
+            UIFlowHarness.waitForAnswer("Backspace to end the line", to: Self.shownRange, in: webView) { $0.hasPrefix("none|") }
+            harness.waitUntil("the header's folder after Backspace") { editor.header.context == "" }
             shell.openInEditorColumn(path: long, line: 70, endLine: 72, takeFocus: false)
             waitForRange("70-72|caret 70:1|context|flat", in: webView)
             XCTAssertEqual(editor.header.context, "Lines 70–72")
@@ -231,18 +259,27 @@ final class EditorReadingModeFlowTests: XCTestCase {
             shell.openInEditorColumn(path: short, line: 30, endLine: 32, takeFocus: false)
             UIFlowHarness.waitForAnswer("its last line shown", to: Self.shownRange, in: webView) { $0.hasPrefix("21-21|") }
             harness.waitUntil("the header to name it") { editor.header.context == "Line 21" }
-            try rewrite(short, with: "longer", lines: 40, in: webView)
-            UIFlowHarness.waitForAnswer("the lines as asked", to: Self.shownRange, in: webView) { $0.hasPrefix("30-32|") }
+            try rewrite(short, with: "longer", in: webView)
+            // The caret where it was put: it goes to them, with their context.
+            waitForRange("30-32|caret 30:1|context|flat", in: webView)
             harness.waitUntil("the header to name them") { editor.header.context == "Lines 30–32" }
 
             let readme = harness.repo + "/README.md"
             shell.openInEditorColumn(path: readme, takeFocus: false)
             editor.toggleDiff()
             harness.waitUntil("the diff of README.md") { editor.diffActivePath == readme }
+            let terminal = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.terminalView)
+            harness.window.makeFirstResponder(terminal)
+            UIFlowHarness.run("document.activeElement && document.activeElement.blur()", in: webView)
             shell.openInEditorColumn(path: readme, line: 1, endLine: 1, takeFocus: false)
             XCTAssertNil(editor.diffActivePath)
             waitForView("source:# Flow", in: webView)
             waitForRange("1-1|caret 1:1|context|flat", in: webView)
+            // An agent's open: the keyboard stays where the user types.
+            XCTAssertIdentical(harness.window.firstResponder, terminal)
+            UIFlowHarness.waitForAnswer("the page's focus", to: "document.activeElement === document.body ? 'none' : document.activeElement.tagName", in: webView) {
+                $0 == "none"
+            }
         }
     }
 

@@ -127,32 +127,14 @@
     return { cells, align };
   }
 
-  // A row's cells, its outer pipes dropped. A pipe after an odd run of
-  // backslashes is in its cell, the last backslash dropped: "C:\\" ends a
-  // cell, "a \| b" doesn't.
+  // A row's cells, its outer pipes dropped. Split as GitHub splits them: a
+  // pipe right after a backslash is in its cell ("C:\\|" too), that
+  // backslash dropped (GitHub's other backslash escapes aren't read).
   function tableCells(line) {
-    const text = line.trim();
-    const cells = [];
-    let cell = [];
-    let backslashes = 0;
-    let endsCell = false;
-    for (const character of text) {
-      endsCell = false;
-      if (character === "|" && backslashes % 2 === 0) {
-        cells.push(cell.join("").trim());
-        cell = [];
-        endsCell = true;
-      } else if (character === "|") {
-        cell[cell.length - 1] = "|";
-      } else {
-        cell.push(character);
-      }
-      backslashes = character === "\\" ? backslashes + 1 : 0;
-    }
-    cells.push(cell.join("").trim());
-    if (text.startsWith("|")) cells.shift();
-    if (endsCell && cells.length > 1) cells.pop();
-    return cells;
+    let text = line.trim();
+    if (text.startsWith("|")) text = text.slice(1);
+    if (text.endsWith("|") && !text.endsWith("\\|")) text = text.slice(0, -1);
+    return text.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, "|").trim());
   }
 
   // "## Title ##": the closing run of "#" goes only after a space, as in

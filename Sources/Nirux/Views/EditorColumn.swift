@@ -426,7 +426,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
             // A line shows in the source, not under a git diff (Pierre's hides it).
             if line != nil, renderedPaths.contains(absolute) { setRendered(false, of: absolute) }
             if line != nil, diffModeByPath.removeValue(forKey: absolute) != nil {
-                if diffActivePath == absolute { exitDiff() } else if activePath == absolute { diffLoadGeneration += 1 }
+                if diffActivePath == absolute { exitDiff(focus: takeFocus) } else if activePath == absolute { diffLoadGeneration += 1 }
             }
             switchTo(path: absolute, takeFocus: takeFocus)
             if let line {
@@ -868,12 +868,15 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         sendDiffGroup(group)
     }
 
-    private func exitDiff() {
+    /// `focus` false: an agent's open, which leaves the keyboard where it is.
+    private func exitDiff(focus: Bool = true) {
         diffLoadGeneration += 1
         diffActivePath = nil
         diffActiveBase = nil
         refreshTabBar()
-        sendBridge(["type": "exitDiff"])
+        var payload: [String: Any] = ["type": "exitDiff"]
+        if !focus { payload["focus"] = false }
+        sendBridge(payload)
     }
 
     @discardableResult
@@ -1072,12 +1075,15 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     }
 
     /// A text the nirux-draft skill wrote: a file in the folder its
-    /// `mktemp -d` made right in the temporary directory ($TMPDIR, else /tmp).
+    /// `mktemp -d` made in $TMPDIR, else /tmp, which is a temporary
+    /// directory or one inside it (a sandboxed agent's).
     nonisolated static func isDraft(_ path: String, temporaryDirectories: [String] = [NSTemporaryDirectory(), "/tmp"]) -> Bool {
         let folder = (path as NSString).deletingLastPathComponent
         guard (folder as NSString).lastPathComponent.hasPrefix("nirux-draft-") else { return false }
+        // Both sides resolved alike: /tmp and /private/tmp name one folder.
         let resolved = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
-        return temporaryDirectories.map(resolved).contains(resolved((folder as NSString).deletingLastPathComponent))
+        let parent = resolved((folder as NSString).deletingLastPathComponent)
+        return temporaryDirectories.map(resolved).contains { parent == $0 || parent.hasPrefix($0 + "/") }
     }
 
     nonisolated static func isMarkdown(_ path: String) -> Bool {

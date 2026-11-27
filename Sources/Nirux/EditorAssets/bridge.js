@@ -127,24 +127,36 @@
         range: new monaco.Range(first, 1, last, model.getLineMaxColumn(last)),
         options: {
           isWholeLine: true,
+          // Lines added at either edge stay out of them.
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
           className: "nirux-shown-range",
           linesDecorationsClassName: "nirux-shown-range-gutter",
           overviewRuler: { color: "#78A3F799", position: monaco.editor.OverviewRulerLane.Full }
         }
       }])
     };
-    if (first !== start || last !== end) tellShownLines(path, entry.shownRange);
+  }
+
+  // Swift's header names `before`: tells it once where the lines are now.
+  function tellShownLinesMoved(path, before) {
+    var shown = models[path].shownRange;
+    if (shown.now.start !== before.start || shown.now.end !== before.end) tellShownLines(path, shown);
   }
 
   // The lines highlighted, the caret at their start with nothing
   // selected, a few lines above them in view.
   function showRange(target, start, end, id) {
-    var entry = models[currentPath];
     markRange(currentPath, start, end, id);
+    tellShownLinesMoved(currentPath, { start: start, end: end });
     applyTabOptions();
-    var first = entry.shownRange.now.start;
-    target.setPosition({ lineNumber: first, column: 1 });
-    target.setScrollTop(target.getTopForLineNumber(Math.max(1, first - shownRangeContext)));
+    revealShownRange(target, models[currentPath].shownRange);
+  }
+
+  // `placed`: the line the caret was put on, until the user moves it.
+  function revealShownRange(target, shown) {
+    shown.placed = shown.now.start;
+    target.setPosition({ lineNumber: shown.placed, column: 1 });
+    target.setScrollTop(target.getTopForLineNumber(Math.max(1, shown.placed - shownRangeContext)));
   }
 
   // The file as it is on disk now, the caret and scroll where they were:
@@ -155,14 +167,25 @@
     var shown = entry.shownRange;
     var target = path === currentPath ? activeEditor() : null;
     var view = target && target.saveViewState();
+    // Shown before the file had them (an agent's open ahead of its write),
+    // the caret still where it was put: shown again where they are.
+    var position = target && target.getPosition();
+    var reveal = !!shown && !shown.moved && (shown.now.start !== shown.start || shown.now.end !== shown.end)
+      && !!position && position.lineNumber === shown.placed;
     entry.reloading = true;
     entry.model.setValue(content);
     entry.reloading = false;
     if (view) target.restoreViewState(view);
     if (!shown) return;
     entry.model.deltaDecorations(shown.decorations, []);
-    markRange(path, shown.start, shown.end, shown.id);
-    tellShownLines(path, entry.shownRange);
+    // As asked until an edit moved them (the asked lines then hold other
+    // text); only the file's end may have clamped them.
+    var lines = shown.moved ? shown.now : shown;
+    markRange(path, lines.start, lines.end, shown.id);
+    entry.shownRange.moved = shown.moved;
+    entry.shownRange.placed = shown.placed;
+    tellShownLinesMoved(path, shown.now);
+    if (reveal) revealShownRange(target, entry.shownRange);
   }
 
   // `tell`: an edit ended it, which Swift doesn't know yet.
@@ -181,13 +204,19 @@
   function editsShownRange(path, entry, event) {
     var lines = entry.shownRange.now;
     var touched = event.changes.some(function (change) {
-      return change.range.startLineNumber <= lines.end && change.range.endLineNumber >= lines.start;
+      var range = change.range;
+      // Whole lines above taken out, or lines added above, the first shown
+      // line as it was (Backspace at its start merges it: an edit).
+      var above = range.endLineNumber === lines.start && range.endColumn === 1
+        && (change.text === "" ? range.startColumn === 1 : /\n$/.test(change.text));
+      return !above && range.startLineNumber <= lines.end && range.endLineNumber >= lines.start;
     });
     var range = entry.model.getDecorationRange(entry.shownRange.decorations[0]);
     if (touched || !range) return true;
     var now = entry.shownRange.now;
     if (now.start !== range.startLineNumber || now.end !== range.endLineNumber) {
       entry.shownRange.now = { start: range.startLineNumber, end: range.endLineNumber };
+      entry.shownRange.moved = true;
       tellShownLines(path, entry.shownRange);
     }
     return false;
@@ -1138,7 +1167,7 @@
       case "enterPierreDiff": enterPierreDiff(msg.path, msg.original); break;
       case "enterMonacoDiff": enterMonacoDiff(msg.path, msg.original); break;
       case "enterDiffGroup": enterPierreDiffGroup(msg); break;
-      case "exitDiff": exitDiff(); break;
+      case "exitDiff": exitDiff(msg.focus); break;
       case "toggleWordWrap": toggleWordWrap(); break;
       case "saveAll": saveBuffers(msg); break;
       case "toggleMinimap": toggleMinimap(); break;
