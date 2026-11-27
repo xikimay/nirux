@@ -4,7 +4,10 @@ import XCTest
 /// The review page's pure functions (`EditorAssets/review-page.js`) under
 /// JavaScriptCore, on crafted strings: a pull request body is a branch's
 /// text, a fork's included (docs/design/branch-review.md, sections 1.1 and 9.1).
-final class BranchReviewPageScriptTests: XCTestCase {
+class BranchReviewPageScriptTests: XCTestCase {
+    /// DO NOT MERGE: the revert this class runs with (`globalThis.__zz`).
+    class var mutant: String? { nil }
+
     private static let script = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Sources/Nirux/EditorAssets/review-page.js")
@@ -15,6 +18,7 @@ final class BranchReviewPageScriptTests: XCTestCase {
         context = try XCTUnwrap(JSContext())
         var exception: String?
         context.exceptionHandler = { _, value in exception = value?.toString() }
+        context.evaluateScript("globalThis.__zz = " + (Self.mutant.map { "'\($0)'" } ?? "null"))
         context.evaluateScript(try String(contentsOf: Self.script, encoding: .utf8))
         XCTAssertNil(exception)
     }
@@ -300,3 +304,6 @@ final class BranchReviewPageScriptTests: XCTestCase {
         XCTAssertEqual(try call("notesLine", ["notes": 12, "wrongNotes": 1]), #""Claude’s notes marked wrong: 1 of 12""#)
     }
 }
+
+// DO NOT MERGE: one class per revert; each must fail, the class above must pass.
+final class ZZ_v4: BranchReviewPageScriptTests { override class var mutant: String? { "v4" } }

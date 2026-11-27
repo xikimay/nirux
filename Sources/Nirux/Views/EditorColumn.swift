@@ -1,6 +1,11 @@
 import AppKit
 import WebKit
 
+/// DO NOT MERGE: which revert of round 1's fixes runs (a mutant test class
+/// sets it in setUp), nil for none.
+nonisolated(unsafe) var zzMutant: String?
+func ZZ(_ name: String) -> Bool { zzMutant == name }
+
 /// A Monaco-backed editor column. WKWebView hosts the Monaco editor; Swift
 /// reads/writes files and pushes content over the JS bridge. Each open file
 /// has its own Monaco model on the JS side, and the tab bar under the
@@ -207,6 +212,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         self.workspaceCwd = workspaceCwd
 
         let config = WKWebViewConfiguration()
+        let zz = zzMutant.map { "\"\($0)\"" } ?? "null"
+        config.userContentController.addUserScript(WKUserScript(source: "window.__zz = \(zz);", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         webView = WKWebView(frame: .zero, configuration: config)
 
@@ -426,7 +433,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
             // A line shows in the source, not under a git diff (Pierre's hides it).
             if line != nil, renderedPaths.contains(absolute) { setRendered(false, of: absolute) }
             if line != nil, diffModeByPath.removeValue(forKey: absolute) != nil {
-                if diffActivePath == absolute { exitDiff(focus: takeFocus) } else if activePath == absolute { diffLoadGeneration += 1 }
+                if diffActivePath == absolute { exitDiff(focus: ZZ("q1s") ? true : takeFocus) } else if activePath == absolute { diffLoadGeneration += 1 }
             }
             switchTo(path: absolute, takeFocus: takeFocus)
             if let line {
@@ -1083,7 +1090,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         // Both sides resolved alike: /tmp and /private/tmp name one folder.
         let resolved = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
         let parent = resolved((folder as NSString).deletingLastPathComponent)
-        return temporaryDirectories.map(resolved).contains { parent == $0 || parent.hasPrefix($0 + "/") }
+        return temporaryDirectories.map(resolved).contains { parent == $0 || (!ZZ("q4") && parent.hasPrefix($0 + "/")) }
     }
 
     nonisolated static func isMarkdown(_ path: String) -> Bool {

@@ -128,7 +128,7 @@
         options: {
           isWholeLine: true,
           // Lines added at either edge stay out of them.
-          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+          stickiness: window.__zz === "v2" ? monaco.editor.TrackedRangeStickiness.AlwaysGrowsWhenTypingAtEdges : monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
           className: "nirux-shown-range",
           linesDecorationsClassName: "nirux-shown-range-gutter",
           overviewRuler: { color: "#78A3F799", position: monaco.editor.OverviewRulerLane.Full }
@@ -180,12 +180,12 @@
     entry.model.deltaDecorations(shown.decorations, []);
     // As asked until an edit moved them (the asked lines then hold other
     // text); only the file's end may have clamped them.
-    var lines = shown.moved ? shown.now : shown;
+    var lines = shown.moved && window.__zz !== "q2" ? shown.now : shown;
     markRange(path, lines.start, lines.end, shown.id);
     entry.shownRange.moved = shown.moved;
     entry.shownRange.placed = shown.placed;
     tellShownLinesMoved(path, shown.now);
-    if (reveal) revealShownRange(target, entry.shownRange);
+    if (reveal && window.__zz !== "v3") revealShownRange(target, entry.shownRange);
   }
 
   // `tell`: an edit ended it, which Swift doesn't know yet.
@@ -207,9 +207,9 @@
       var range = change.range;
       // Whole lines above taken out, or lines added above, the first shown
       // line as it was (Backspace at its start merges it: an edit).
-      var above = range.endLineNumber === lines.start && range.endColumn === 1
-        && (change.text === "" ? range.startColumn === 1 : /\n$/.test(change.text));
-      return !above && range.startLineNumber <= lines.end && range.endLineNumber >= lines.start;
+      var above = (window.__zz !== "v1" || range.startLineNumber < lines.start) && range.endLineNumber === lines.start && range.endColumn === 1
+        && (change.text === "" ? (window.__zz === "v5" || range.startColumn === 1) : /\n$/.test(change.text));
+      return (window.__zz === "q3" || !above) && range.startLineNumber <= lines.end && range.endLineNumber >= lines.start;
     });
     var range = entry.model.getDecorationRange(entry.shownRange.decorations[0]);
     if (touched || !range) return true;
@@ -1167,7 +1167,7 @@
       case "enterPierreDiff": enterPierreDiff(msg.path, msg.original); break;
       case "enterMonacoDiff": enterMonacoDiff(msg.path, msg.original); break;
       case "enterDiffGroup": enterPierreDiffGroup(msg); break;
-      case "exitDiff": exitDiff(msg.focus); break;
+      case "exitDiff": exitDiff(window.__zz === "q1p" ? undefined : msg.focus); break;
       case "toggleWordWrap": toggleWordWrap(); break;
       case "saveAll": saveBuffers(msg); break;
       case "toggleMinimap": toggleMinimap(); break;

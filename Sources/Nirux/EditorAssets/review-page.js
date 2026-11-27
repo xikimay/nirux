@@ -131,6 +131,30 @@
   // pipe right after a backslash is in its cell ("C:\\|" too), that
   // backslash dropped (GitHub's other backslash escapes aren't read).
   function tableCells(line) {
+    if (root.__zz === "v4") {
+      const odd = line.trim();
+      const cells = [];
+      let cell = [];
+      let backslashes = 0;
+      let endsCell = false;
+      for (const character of odd) {
+        endsCell = false;
+        if (character === "|" && backslashes % 2 === 0) {
+          cells.push(cell.join("").trim());
+          cell = [];
+          endsCell = true;
+        } else if (character === "|") {
+          cell[cell.length - 1] = "|";
+        } else {
+          cell.push(character);
+        }
+        backslashes = character === "\\" ? backslashes + 1 : 0;
+      }
+      cells.push(cell.join("").trim());
+      if (odd.startsWith("|")) cells.shift();
+      if (endsCell && cells.length > 1) cells.pop();
+      return cells;
+    }
     let text = line.trim();
     if (text.startsWith("|")) text = text.slice(1);
     if (text.endsWith("|") && !text.endsWith("\\|")) text = text.slice(0, -1);

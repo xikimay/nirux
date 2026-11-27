@@ -7,7 +7,15 @@ import XCTest
 /// the front editor and as source in an editor of the row, its header's
 /// toggle switching; a draft reads as source, wrapped, with Copy Draft.
 @MainActor
-final class EditorReadingModeFlowTests: XCTestCase {
+class EditorReadingModeFlowTests: XCTestCase {
+    /// DO NOT MERGE: the revert this class runs with (`zzMutant`).
+    nonisolated class var mutant: String? { nil }
+
+    nonisolated override func setUp() {
+        super.setUp()
+        zzMutant = Self.mutant
+    }
+
     /// Opened in the front editor, a Markdown file shows rendered, the
     /// reading view taking the keyboard with the column, its table drawn,
     /// only its web link live, and drawn again when the file changes on
@@ -370,3 +378,14 @@ final class EditorReadingModeFlowTests: XCTestCase {
         }
     }
 }
+
+// DO NOT MERGE: one class per revert; each must fail, the class above must pass.
+final class ZZ_q1s: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "q1s" } }
+final class ZZ_q1p: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "q1p" } }
+final class ZZ_q2: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "q2" } }
+final class ZZ_q3: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "q3" } }
+final class ZZ_q4: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "q4" } }
+final class ZZ_v1: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "v1" } }
+final class ZZ_v2: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "v2" } }
+final class ZZ_v3: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "v3" } }
+final class ZZ_v5: EditorReadingModeFlowTests { nonisolated override class var mutant: String? { "v5" } }
