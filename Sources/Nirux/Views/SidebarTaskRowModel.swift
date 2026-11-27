@@ -95,6 +95,9 @@ struct SidebarRowSummary: Hashable {
     /// The line is the task's current step in the day plan: an unselected row draws its steps' bar before it.
     var isPlanStep = false
 
+    /// The status where no bar shows (the command bar, the catch-up card): a step worked on says Working.
+    var statusAlone: String { isPlanStep && mark == .working ? "Working · " + status.text : status.text }
+
     /// What the status line prints: the status, or less under a block that
     /// has it whole. `status.text` stays what the row says where no block
     /// follows (the catch-up card, a tooltip).
@@ -213,8 +216,8 @@ extension WorkspaceInfo {
                 trailing: age
             )
         }
-        // A step for the user stops the agent.
-        if let current = currentPlanStep, current.isForUser {
+        // A step for the user stops the agent, until its pull request merged or closed.
+        if let current = currentPlanStep, current.isForUser, prInfo.map({ $0.state == .open }) ?? true {
             var summary = row(.needsYou, "Needs you · \(current.title)", .needsYou)
             summary.isPlanStep = true
             return summary

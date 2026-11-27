@@ -182,7 +182,9 @@ extension WorkspaceInfo {
     /// lists the workspace anyway.
     var asksUser: Bool {
         if case .needsYou = waitingTask { return true }
-        return columns.contains { $0.attention == .waiting || $0.attention == .error }
+        if columns.contains(where: { $0.attention == .waiting || $0.attention == .error }) { return true }
+        // Its agent stopped at the user's step: the row says Needs you.
+        return currentPlanStep?.isForUser == true && rowSummary.mark == .needsYou
     }
 
     /// One line in the archived list: parked work that asks nothing, offers

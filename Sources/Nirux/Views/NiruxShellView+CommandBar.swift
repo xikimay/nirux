@@ -41,7 +41,7 @@ extension NiruxShellView {
         let summary = task.rowSummary
         content.taskTitle = task.title
         content.taskIcon = task.stateIcon
-        var detail = summary.status.text
+        var detail = summary.statusAlone
         if case .turn(let time)? = summary.trailing { detail += " \(time)" }
         content.taskDetail = detail
         return content

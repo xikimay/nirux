@@ -61,8 +61,8 @@ public struct Plan: Codable, Hashable, Sendable {
 
         public var isChecked: Bool { checkedAt != nil }
         public var isPlanned: Bool { kind == .session && workspaceID == nil }
-        /// What a session's agent works on: the first open line under it.
-        public var current: Line? { children.first { !$0.isChecked } }
+        /// What a session's agent works on: its first open step (a session under it is another task).
+        public var current: Line? { children.first { $0.kind == .step && !$0.isChecked } }
         public var progress: (done: Int, total: Int) { (children.count(where: \.isChecked), children.count) }
         /// What it holds, at any depth, from the top down.
         public var descendants: [Line] { children.flattened }

@@ -95,10 +95,11 @@ extension NiruxShellView {
         ))
         // The day plan's steps: every reader of a row's summary sees the same state.
         let plan = dayPlans.plan(ofSpace: activeProfileID)
+        let steps = plan.map(SidebarView.steps(in:)) ?? [:]
         let infos = built.map { info in
             var info = info
             info.boardProgress = taskStations[info.id]
-            if let plan { info.planSteps = SidebarView.steps(of: info.id, in: plan) }
+            info.planSteps = steps[info.id] ?? []
             return info
         }
         updateColumnHeaders(infos: infos, blockedWaits: blockedWaits, now: now)

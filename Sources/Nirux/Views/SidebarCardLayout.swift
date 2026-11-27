@@ -215,7 +215,9 @@ struct SidebarCardLayout {
         // The selected row lists its steps, the current one marked.
         if workspace.isActive, summary.isPlanStep, summary.mark == .working { phrase = "Working" }
         statusText = SidebarWorkspaceCardRenderer.statusText(summary, shown: phrase)
-        let showsBar = summary.isPlanStep && !workspace.isActive && !isCompact && !workspace.isLead
+        // Working on a step, or waiting at the user's: the bar says which.
+        let showsBar = !workspace.planSteps.isEmpty && (summary.isPlanStep || summary.mark == .working)
+            && !workspace.isActive && !isCompact && !workspace.isLead
         segmentsWidth = showsBar ? SidebarSegmentBar.width(count: workspace.planSteps.count) + Theme.Space.xs : 0
         let doneSteps = workspace.planSteps.filter(\.isDone).count
         planStepLines = workspace.isActive && !isCompact && !workspace.isLead && !workspace.planSteps.isEmpty

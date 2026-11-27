@@ -221,6 +221,7 @@ extension SidebarPlanRowRenderer {
         let done = steps.filter(\.isDone).count
         if done > 0 {
             let label = Self.label("✓ \(done) done", font: Theme.Font.caption, color: Theme.Color.textTertiary)
+            label.setAccessibilityLabel("\(done) steps done")
             label.frame = NSRect(x: x, y: y - stepHeight + 2, width: max(0, maxX - x), height: 14)
             views.append(label)
             y -= stepHeight
@@ -245,6 +246,7 @@ extension SidebarPlanRowRenderer {
             let textX = x + 10 + Theme.Space.sm
             label.frame = NSRect(x: textX, y: y - stepHeight + 2, width: max(0, right - textX), height: 15)
             label.toolTip = step.title
+            label.setAccessibilityLabel((step.isForUser ? "Your step: " : isCurrent ? "Current step: " : "Step: ") + step.title)
             views.append(label)
             y -= stepHeight
         }
@@ -269,6 +271,9 @@ final class SidebarSegmentBar: NSView {
         self.steps = steps
         self.agentWorks = agentWorks
         super.init(frame: .zero)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.progressIndicator)
+        setAccessibilityLabel(Self.spoken(steps))
     }
 
     @available(*, unavailable)
@@ -276,17 +281,30 @@ final class SidebarSegmentBar: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    /// "2 of 5 steps done, the current one yours".
+    static func spoken(_ steps: [SidebarPlanStep]) -> String {
+        let done = "\(steps.filter(\.isDone).count) of \(steps.count) steps done"
+        return steps.first { !$0.isDone }?.isForUser == true ? done + ", the current one yours" : done
+    }
+
+    /// Each segment's span: the gap narrows, then goes, so any count fits the bar.
+    static func spans(count: Int, width: CGFloat) -> [(x: CGFloat, width: CGFloat)] {
+        guard count > 0 else { return [] }
+        let gap = count > 1 ? max(0, min(Self.gap, (width - CGFloat(count)) / CGFloat(count - 1))) : 0
+        let segment = (width - gap * CGFloat(count - 1)) / CGFloat(count)
+        return (0..<count).map { (CGFloat($0) * (segment + gap), segment) }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        guard !steps.isEmpty else { return }
-        let width = (bounds.width - Self.gap * CGFloat(steps.count - 1)) / CGFloat(steps.count)
         let current = steps.firstIndex { !$0.isDone }
-        for (index, step) in steps.enumerated() {
+        for (index, span) in Self.spans(count: steps.count, width: bounds.width).enumerated() {
+            let step = steps[index]
             let color: NSColor = step.isDone ? Theme.Color.done
                 : index == current ? (step.isForUser ? Theme.Color.waiting : agentWorks ? Theme.Color.working : Theme.Color.textSecondary)
                 : Theme.Color.lineStrong
             color.setFill()
-            let rect = NSRect(x: CGFloat(index) * (width + Self.gap), y: 0, width: max(1, width), height: bounds.height)
-            NSBezierPath(roundedRect: rect, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+            let radius = min(bounds.height, span.width) / 2
+            NSBezierPath(roundedRect: NSRect(x: span.x, y: 0, width: span.width, height: bounds.height), xRadius: radius, yRadius: radius).fill()
         }
     }
 }

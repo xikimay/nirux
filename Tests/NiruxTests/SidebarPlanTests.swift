@@ -6,7 +6,7 @@ import XCTest
 /// of the list as it was.
 @MainActor
 final class SidebarPlanTests: XCTestCase {
-    private func row(_ id: String, index: Int, lead: Bool = false, asks: Bool = false, parent: String? = nil) -> WorkspaceInfo {
+    private func row(_ id: String, index: Int, lead: Bool = false, asks: Bool = false, parent: String? = nil, next: String? = nil, pr: PRInfo? = nil) -> WorkspaceInfo {
         let column = ColumnInfo(
             index: 0, processName: "claude", abbreviatedCwd: "~/app", isFocused: false, isWebView: false, webTitle: nil,
             terminalTitle: nil, agentStatus: asks ? .needsAttention : .idle, isEditor: false, editorFileName: nil,
@@ -15,7 +15,7 @@ final class SidebarPlanTests: XCTestCase {
         var info = WorkspaceInfo(
             id: id, index: index, title: id.capitalized, profileID: WorkspaceProfile.defaultID, isInactive: false,
             columnCount: 1, focusedColumn: 0, gitBranch: "feat/\(id)", notification: nil, isActive: false, columns: [column],
-            prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
+            prInfo: pr, diffStats: nil, purpose: nil, nextStep: next, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
         )
         info.isLead = lead
         info.parentTitle = parent
@@ -69,6 +69,16 @@ final class SidebarPlanTests: XCTestCase {
         XCTAssertTrue(labels(sidebar).map(\.text).contains("4 for you"))
     }
 
+    /// Any count of steps fits the bar: the gap narrows, then goes.
+    func testTheBarFitsAnyCountOfSteps() throws {
+        let three = SidebarSegmentBar.spans(count: 3, width: 30)
+        XCTAssertEqual(three[1].x - (three[0].x + three[0].width), SidebarSegmentBar.gap, accuracy: 0.001)
+        let many = SidebarSegmentBar.spans(count: 40, width: SidebarSegmentBar.maxWidth)
+        XCTAssertTrue(many.allSatisfy { $0.width > 0 })
+        let last = try XCTUnwrap(many.last)
+        XCTAssertLessThanOrEqual(last.x + last.width, SidebarSegmentBar.maxWidth + 0.001)
+    }
+
     func testAFeatureListsItsTasksAndLinesAndFolds() throws {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 300, height: 700))
         sidebar.isExpanded = true
@@ -116,6 +126,15 @@ final class SidebarPlanTests: XCTestCase {
         XCTAssertEqual(idle.rowSummary.status, SidebarStatusLine(text: "Needs you · Check the render", tone: .needsYou))
         XCTAssertEqual(idle.rowSummary.mark, .needsYou)
         XCTAssertTrue(idle.rowSummary(includesNextStep: false).isPlanStep, "a full row says its step too")
+        XCTAssertTrue(idle.asksUser, "the fold, the rail and the archived list keep it")
+        var merged = row("checkout", index: 1, pr: PRInfo(number: 7, state: .merged, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
+                                                          mergeable: nil, url: "u", additions: nil, deletions: nil, changedFiles: nil))
+        merged.planSteps = idle.planSteps
+        XCTAssertNotEqual(merged.rowSummary.mark, .needsYou, "merged, the step left unticked no longer stops it")
+        XCTAssertFalse(merged.asksUser)
+        var withNext = row("checkout", index: 1, next: "Ship it")
+        withNext.planSteps = [steps[0], steps[1]]
+        XCTAssertTrue(TaskPreviewCard.statusAndNext(withNext) == ("Next · Fix the height", ""), "the preview says Next once")
         var working = row("export", index: 2)
         working = WorkspaceInfo(
             id: "export", index: 2, title: "Export", profileID: WorkspaceProfile.defaultID, isInactive: false, columnCount: 1,
@@ -126,8 +145,10 @@ final class SidebarPlanTests: XCTestCase {
         )
         working.planSteps = [steps[2]]
         XCTAssertEqual(working.rowSummary.status.text, "Working", "the user's step isn't the agent's")
+        XCTAssertGreaterThan(SidebarCardLayout(workspace: working, sidebarWidth: 300).segmentsWidth, 0, "the bar stays while it works")
         working.planSteps = [steps[1]]
         XCTAssertEqual(working.rowSummary.status.text, "Fix the height")
+        XCTAssertEqual(working.rowSummary.statusAlone, "Working · Fix the height", "where no bar shows")
         working.planSteps = [SidebarPlanStep(title: "Cut the images at the bottom of each page so none spills over", isDone: false, isForUser: false)]
         let long = SidebarCardLayout(workspace: working, sidebarWidth: 244)
         XCTAssertGreaterThan(long.segmentsWidth, 0)
@@ -145,7 +166,7 @@ final class SidebarPlanTests: XCTestCase {
         let withSteps = { (infos: [WorkspaceInfo]) in
             infos.map { info in
                 var info = info
-                info.planSteps = SidebarView.steps(of: info.id, in: plan)
+                info.planSteps = SidebarView.steps(in: plan)[info.id] ?? []
                 return info
             }
         }
