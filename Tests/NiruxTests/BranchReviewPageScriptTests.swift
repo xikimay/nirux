@@ -119,14 +119,16 @@ final class BranchReviewPageScriptTests: XCTestCase {
             + #"{"type":"paragraph","spans":[{"type":"text","text":"B"}]}]}}"#)
     }
 
-    /// A GitHub table: its dashes align the columns, an escaped pipe stays
-    /// in its cell and a short row keeps only its own cells. Dashes that
-    /// don't match the header's cells make a paragraph.
+    /// A GitHub table: its dashes align the columns, a pipe right after a
+    /// backslash stays in its cell, as GitHub splits it ("C:\\|" too), and
+    /// a short row keeps only its own cells. Dashes that don't match the
+    /// header's cells make a paragraph.
     func testTables() throws {
-        XCTAssertEqual(try call("parseMarkdown", "| Name | Kind | Size |\n|:--|:-:|--:|\n| a \\| b | x | 1 |\n| c |\n\nafter"), #"["#
+        XCTAssertEqual(try call("parseMarkdown", "| Name | Kind | Size |\n|:--|:-:|--:|\n| a \\| b | x | 1 |\n| C:\\\\| dir | 0 |\n| c |\n\nafter"), #"["#
             + #"{"type":"table","align":["left","center","right"],"head":[[{"type":"text","text":"Name"}],"#
             + #"[{"type":"text","text":"Kind"}],[{"type":"text","text":"Size"}]],"rows":["#
             + #"[[{"type":"text","text":"a | b"}],[{"type":"text","text":"x"}],[{"type":"text","text":"1"}]],"#
+            + #"[[{"type":"text","text":"C:\\| dir"}],[{"type":"text","text":"0"}]],"#
             + #"[[{"type":"text","text":"c"}]]]},{"type":"paragraph","spans":[{"type":"text","text":"after"}]}]"#)
         XCTAssertEqual(try call("parseMarkdown", "| a | b |\n| --- |\n| 1 | 2 |"),
             #"[{"type":"paragraph","spans":[{"type":"text","text":"| a | b | | --- | | 1 | 2 |"}]}]"#)
