@@ -80,8 +80,8 @@ final class ProjectBoardScheduleTests: XCTestCase {
         XCTAssertEqual(due(schedule, at: 1_004), [])
     }
 
-    /// The Lead's queue goes by the last open list while it was read within
-    /// its interval and no read failed since; else it reads it again first.
+    /// The Lead's queue goes by the last open list while it stands and no
+    /// read failed since; else it reads it again first.
     @MainActor
     func testTheLeadsQueueGoesByAnOpenListReadWithinItsInterval() throws {
         var reads = try XCTUnwrap(ProjectBoardController.RepositoryReads(config: BoardConfig(repository: "acme/widgets", baseBranch: "main")))
@@ -91,9 +91,11 @@ final class ProjectBoardScheduleTests: XCTestCase {
             number: 12, state: .open, headRefName: "feat/login", headOid: String(repeating: "a", count: 40), baseRefName: "main",
             isDraft: false, mergeable: "MERGEABLE", checks: [], url: "https://github.com/acme/widgets/pull/12", isFromConfiguredRepository: true
         )]
-        reads.pullRequestsReadAt = now.addingTimeInterval(-60)
-        XCTAssertTrue(reads.openListHolds([12], now: now))
-        XCTAssertFalse(reads.openListHolds([12], now: now.addingTimeInterval(1)), "older than its interval")
+        reads.completeOpenNumbers = [12]
+        reads.pullRequestsReadAt = now.addingTimeInterval(-120)
+        XCTAssertTrue(reads.openListHolds([12], now: now), "two intervals, as the Board counts a read current")
+        XCTAssertFalse(reads.openListHolds([12], now: now.addingTimeInterval(1)), "older")
+        XCTAssertFalse(reads.openListHolds([12], now: now.addingTimeInterval(-121)), "read after now: the clock was set back")
         reads.errors[.openPullRequests] = .noAnswer("timeout")
         XCTAssertFalse(reads.openListHolds([12], now: now), "a read failed since")
     }
