@@ -119,12 +119,14 @@ yet.
 A planned session is a pale row with a dashed ring: "Planned · Start", or
 "After “…” · Start" while the line it waits for is unchecked. Start opens the
 New sheet with its title and detail; the task started there takes the line's
-place, so the row lights up where it was. The Lead does the same with
-`start_task`'s `plan_line`; with `after`, the waiting task's row ("Waits for
-#418 to merge") takes the place at once. Checking the line a planned session
-waits for starts it as `start_task` would, for the space's Lead: at once
-while the space starts tasks without asking, else in the New sheet. Without a
-Lead it waits for Start.
+place, so the row lights up where it was (a task that opens in another space
+leaves it planned). The Lead does the same with `start_task`'s `plan_line`;
+with `after`, the waiting task's row ("Waits for #418 to merge") takes the
+place at once. Checking the line a planned session waits for (or adding one
+after a checked line) starts it as `start_task` would, for the space's Lead,
+in the default repository: at once while the space starts tasks without
+asking, else in the New sheet. Without a Lead it waits for Start. A session
+being made can't start a second time.
 
 ## Pull requests
 

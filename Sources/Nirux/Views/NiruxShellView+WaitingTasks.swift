@@ -65,7 +65,7 @@ extension NiruxShellView {
             guard let created = workspaces.first(where: { $0.id == id }) else { return answer("The task couldn't be added.", true) }
             holder = created
             // The waiting row takes the planned session's place.
-            if let planLine { linkPlanLine(planLine, toWorkspace: id, inSpace: current.id) }
+            if let planLine { linkPlanLine(planLine, toWorkspace: id, title: title, inSpace: current.id) }
         }
         saveState()
         updateSidebar()

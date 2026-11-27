@@ -41,7 +41,7 @@ enum PlanTools {
                     "task": ["type": "string", "description": LeadTools.taskDescription
                         + " With session, that task's line; with step, a step under it (its line is made if missing)."],
                     "for_user": ["type": "boolean", "description": "A step the user does: it stops the task's agent until checked."],
-                    "after": ["type": "string", "description": "A line's id: this planned session starts once that line is checked."],
+                    "after": ["type": "string", "description": "A line's id: once it is checked, Nirux starts this planned session as start_task would, in the default repository. For another, start it yourself with start_task's plan_line."],
                     "detail": ["type": "string", "description": "What a planned session will do, as you would tell its agent."],
                     "source": ["type": "string", "description": "Where you read it: GitHub, Linear, Slack, Mail, Figma."],
                     "url": ["type": "string", "description": "A link to it, http or https."],

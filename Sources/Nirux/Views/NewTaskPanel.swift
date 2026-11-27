@@ -383,9 +383,6 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         refresh()
     }
 
-    /// A proposal (`start_task` with "Starts tasks without asking" off),
-    /// from the Lead or a task's agent: its description, and its template,
-    /// picked once the repository's templates are read.
     /// A planned session's Start: its title, then its detail.
     func prefill(planned line: Plan.Line) {
         guard panel != nil else { return }
@@ -395,6 +392,9 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         refresh()
     }
 
+    /// A proposal (`start_task` with "Starts tasks without asking" off),
+    /// from the Lead or a task's agent: its description, and its template,
+    /// picked once the repository's templates are read.
     func prefill(_ proposal: LeadProposal, proposedBy: String = "the Lead") {
         guard panel != nil else { return }
         self.proposal = proposal

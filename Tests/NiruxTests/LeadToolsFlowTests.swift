@@ -976,6 +976,10 @@ final class LeadToolsFlowTests: XCTestCase {
             let notPlanned = try call(LeadTools.startTask, ["description": "Choose", "repo": "none", "plan_line": offers], lead: lead, in: harness)
             XCTAssertTrue(notPlanned.isError && notPlanned.text.hasPrefix("\(offers) isn't a planned session"), notPlanned.text)
             XCTAssertTrue(try call(LeadTools.startTask, ["description": "Compare parsers", "plan_line": 3], lead: lead, in: harness).isError)
+            shell.startingPlanLines.insert(parsers)
+            let twice = try call(LeadTools.startTask, ["description": "Compare parsers", "repo": "none", "plan_line": parsers], lead: lead, in: harness)
+            XCTAssertEqual(twice.text, "\(parsers) is starting already.")
+            shell.startingPlanLines.remove(parsers)
             let started = try call(LeadTools.startTask, ["description": "Compare parsers", "repo": "none", "plan_line": parsers], lead: lead, in: harness)
             XCTAssertFalse(started.isError, started.text)
             XCTAssertEqual(workspace(parsers)?.title, "Compare parsers")
@@ -992,6 +996,9 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertFalse(try call(PlanTools.checkPlanLine, ["line": offers], lead: lead, in: harness).isError)
             harness.waitUntil("the session waiting for the offers starts") { workspace(findings) != nil }
             XCTAssertEqual(workspace(findings)?.title, "Write up the findings")
+            // Added after a line that is checked already: it starts at once.
+            let sent = try add(["kind": "session", "title": "Send the findings", "after": offers])
+            harness.waitUntil("the session after a checked line starts") { workspace(sent) != nil }
         }
     }
 

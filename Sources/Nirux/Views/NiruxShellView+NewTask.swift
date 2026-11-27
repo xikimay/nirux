@@ -234,8 +234,15 @@ extension NiruxShellView {
         completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void,
         opened: (@MainActor (_ workspaceID: String, _ created: CreatedTask) -> Void)? = nil
     ) {
+        var request = request
+        // Its planned session started meanwhile: this task starts without the line.
+        if let line = request.planLine, startingPlanLines.contains(line) || !isPlanned(line, inSpace: request.projectID) {
+            request.planLine = nil
+        }
+        if let line = request.planLine { startingPlanLines.insert(line) }
         createTask(request, names: names) { [weak self] named, result in
             guard let self else { return }
+            if let line = named.planLine { self.startingPlanLines.remove(line) }
             switch result {
             case .failed(let message):
                 completion(.failed(message))
@@ -309,7 +316,10 @@ extension NiruxShellView {
             recordRequest(request, of: born, bornAt: bornAt)
             playTaskBirth(of: born)
         }
-        if let line = request.planLine { linkPlanLine(line, toWorkspace: childWorkspaceID, inSpace: request.projectID) }
+        // Opened in another space, it leaves the line planned.
+        if let line = request.planLine, decision.spaceID == request.projectID {
+            linkPlanLine(line, toWorkspace: childWorkspaceID, title: title, inSpace: request.projectID)
+        }
         // The agent that proposed it hears what the user started.
         if let proposer = request.proposedByTaskAgent {
             tellProposer(proposer, mission?.reportsToTask == true
