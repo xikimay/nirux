@@ -233,9 +233,10 @@ extension SidebarPlanRowRenderer {
             var right = maxX
             if step.isForUser {
                 let chip = SidebarBadgeView(text: "you", textColor: Theme.Color.waiting, fillColor: Theme.Color.tint(Theme.Color.waiting, 0.16), font: Theme.Font.caption)
-                chip.cornerRadius = 7
+                let height: CGFloat = 14
+                chip.cornerRadius = height / 2
                 let width = ceil(chip.fittingWidth)
-                chip.frame = NSRect(x: right - width, y: y - stepHeight + 2, width: width, height: 14)
+                chip.frame = NSRect(x: right - width, y: y - stepHeight + 2, width: width, height: height)
                 views.append(chip)
                 right = chip.frame.minX - Theme.Space.xs
             }
