@@ -119,7 +119,7 @@ enum NiruxMCPServer {
     /// Every tool, pre-allowed for every Claude Nirux launches; the Lead's
     /// are listed to a Lead only, a task's (the same names) to the agent of
     /// any other Nirux workspace, and the app checks each call.
-    static let toolNames = searchToolNames + LeadTools.names
+    static let toolNames = searchToolNames + LeadTools.names + PlanTools.names
 
     /// Who runs the server, and where.
     struct Context: Sendable {
@@ -160,18 +160,26 @@ enum NiruxMCPServer {
             return SpaceDefaultsStore.defaults(forSpace: space, stateDirectory: stateDirectory).tasksCanManageSpaces(inSpace: space)
         }
 
+        /// Its space's day plan is on: the plan's tools are listed.
+        var plansTheDay: Bool {
+            guard isLead || isWorkspaceAgent, let space = workspaceSpaceID else { return false }
+            return SpaceDefaultsStore.defaults(forSpace: space, stateDirectory: stateDirectory).plansTheDay
+        }
+
         /// The tools the app answers for this agent: the Lead's, or a task's.
         /// The app refuses a task's space tools unless the space the task
-        /// is in when it calls lets its tasks manage spaces.
+        /// is in when it calls lets its tasks manage spaces, and the plan's
+        /// while the space's day plan is off.
         var appToolNames: [String] {
-            if isLead { return LeadTools.names }
-            return isWorkspaceAgent ? TaskTools.callableNames : []
+            if isLead { return LeadTools.names + PlanTools.leadNames }
+            return isWorkspaceAgent ? TaskTools.callableNames + PlanTools.taskNames : []
         }
 
         /// Their definitions, for `tools/list`.
         var appToolDefinitions: [[String: Any]] {
-            if isLead { return LeadTools.definitions }
-            return isWorkspaceAgent ? TaskTools.definitions(managingSpaces: tasksManageSpaces) : []
+            if isLead { return LeadTools.definitions + (plansTheDay ? PlanTools.leadDefinitions : []) }
+            guard isWorkspaceAgent else { return [] }
+            return TaskTools.definitions(managingSpaces: tasksManageSpaces) + (plansTheDay ? PlanTools.taskDefinitions : [])
         }
         /// Tests shorten the Lead's calls' wait for the app.
         var leadTimeout: TimeInterval?

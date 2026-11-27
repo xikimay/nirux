@@ -39,7 +39,7 @@ struct SpaceDefaultsStore: Sendable {
 
     /// A deleted space's defaults (copies set aside included) and setup
     /// scripts, which may hold secrets, go with it, and the rules its Lead
-    /// proposed, its prompts' log, its review findings and its daily pass;
+    /// proposed, its prompts' log, its review findings, its daily pass and its plan;
     /// its brief stays. Its Claude settings
     /// are emptied, not removed: its workspaces go on in General, and their
     /// columns' launch lines name the file.
@@ -53,7 +53,8 @@ struct SpaceDefaultsStore: Sendable {
               let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
         else { return }
         for name in names where name == fileName || name.hasPrefix("defaults.corrupt.") || name == SpaceSetupScript.folderName
-            || [RuleProposalStore.fileName, LoopLog.lines.fileName, ReviewFindings.lines.fileName, DailyPassState.fileName].contains(name) {
+            || [RuleProposalStore.fileName, LoopLog.lines.fileName, ReviewFindings.lines.fileName, DailyPassState.fileName, Plan.Store.fileName]
+                .contains(name) {
             do {
                 try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             } catch {
@@ -295,24 +296,7 @@ struct SpaceDefaultsStore: Sendable {
         }
     }
 
-    /// Writes `data` to a new 0600 file next to `url`, then renames it over
-    /// `url`: the file never exists with wider permissions, and a reader
-    /// sees the old bytes or the new ones.
     static func writePrivately(_ data: Data, to url: URL) throws {
-        let folder = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let temporary = folder.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString.prefix(8)).tmp")
-        let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-        do {
-            try handle.write(contentsOf: data)
-            try handle.synchronize()
-            try handle.close()
-            guard rename(temporary.path, url.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        } catch {
-            unlink(temporary.path)
-            throw error
-        }
+        try PrivateFileWrite.write(data, to: url)
     }
 }

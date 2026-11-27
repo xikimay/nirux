@@ -154,6 +154,11 @@ extension Plan {
         }
     }
 
+    /// Matched without case or surrounding spaces.
+    func feature(titled title: String) -> Line? {
+        lines.first { $0.kind == .feature && $0.title.matches(title) }
+    }
+
     /// A line or a proposal has this workspace already.
     private func carries(_ workspaceID: String) -> Bool {
         line(ofWorkspace: workspaceID) != nil || proposals.contains { $0.line.workspaceID == workspaceID }
@@ -176,8 +181,8 @@ extension Plan {
             try Self.allow(author, change, line, under: lines[path: path])
             lines[path: path].children.insert(line, at: Self.clamp(index, lines[path: path].children.count))
         case .feature(let title, let id):
-            if let found = lines.firstIndex(where: { $0.kind == .feature && $0.title.matches(title) }) {
-                return try put(line, in: .under(lines[found].id), index: index, by: author, at: time, change: change)
+            if let found = feature(titled: title) {
+                return try put(line, in: .under(found.id), index: index, by: author, at: time, change: change)
             }
             var feature = Line(id: id, kind: .feature, title: title, by: author, at: time)
             try validate(feature)

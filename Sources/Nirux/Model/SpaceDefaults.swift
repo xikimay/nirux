@@ -57,6 +57,9 @@ struct SpaceDefaults: Equatable, Sendable {
     /// agents get the Lead's space tools (SpaceToolCaller). Nil: on in
     /// General, off elsewhere (`tasksCanManageSpaces`).
     var tasksManageSpaces: Bool?
+    /// The day plan (docs/design/plan.md), while it is built: on, the space's agents get the plan's tools
+    /// (PlanTools). Nil: off.
+    var dayPlan: Bool?
     /// Space Settings › Safety, one per `ClaudeSpaceSettings.Part`. Nil:
     /// its default.
     var claudeTrustsRepositories: Bool?
@@ -79,6 +82,7 @@ struct SpaceDefaults: Equatable, Sendable {
     var followsUpPullRequests: Bool { prFollowUp ?? true }
     var resumesWorkOnRelaunch: Bool { resumeWorkOnRelaunch ?? true }
     var splitsClaudeModels: Bool { claudeModelSplit ?? true }
+    var plansTheDay: Bool { dayPlan ?? false }
 
     /// About the 90th percentile of what a Nirux task spent in 7 days
     /// (the 2026-11-23 scan).
@@ -165,6 +169,7 @@ struct SpaceDefaults: Equatable, Sendable {
             (\.resumeWorkOnRelaunch, .resumeWorkOnRelaunch, false),
             (\.claudeModelSplit, .claudeModelSplit, false),
             (\.tasksManageSpaces, .tasksManageSpaces, false),
+            (\.dayPlan, .dayPlan, false),
             (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
             (\.claudeDeniesIrreversible, .claudeDeniesIrreversible, true),
             (\.claudeSandbox, .claudeSandbox, true)
@@ -279,7 +284,7 @@ extension SpaceDefaults: Codable {
         case schemaVersion, agent, leadAgent, claudeLaunchMode, codexLaunchMode, agyLaunchMode, environment
         case leadStartsTasks, leadStartsMergeQueue, leadStartsMergeQueueWithoutLocalReview, leadDailyPass, leadDailyPassHour, prFollowUp, resumeWorkOnRelaunch
         case leadGroupsResults
-        case leadFreshStart, tasksManageSpaces
+        case leadFreshStart, tasksManageSpaces, dayPlan
         case claudeModelSplit, taskBudget
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
@@ -312,6 +317,7 @@ extension SpaceDefaults: Codable {
         claudeModelSplit = (try? container.decodeIfPresent(Bool.self, forKey: .claudeModelSplit)) ?? nil
         taskBudget = ((try? container.decodeIfPresent(Int.self, forKey: .taskBudget)) ?? nil).flatMap { $0 >= 0 ? $0 : nil }
         tasksManageSpaces = (try? container.decodeIfPresent(Bool.self, forKey: .tasksManageSpaces)) ?? nil
+        dayPlan = (try? container.decodeIfPresent(Bool.self, forKey: .dayPlan)) ?? nil
         claudeTrustsRepositories = (try? container.decodeIfPresent(Bool.self, forKey: .claudeTrustsRepositories)) ?? nil
         claudeDeniesIrreversible = (try? container.decodeIfPresent(Bool.self, forKey: .claudeDeniesIrreversible)) ?? nil
         claudeSandbox = (try? container.decodeIfPresent(Bool.self, forKey: .claudeSandbox)) ?? nil
@@ -344,6 +350,7 @@ extension SpaceDefaults: Codable {
         try container.encodeIfPresent(claudeModelSplit, forKey: .claudeModelSplit)
         try container.encodeIfPresent(taskBudget, forKey: .taskBudget)
         try container.encodeIfPresent(tasksManageSpaces, forKey: .tasksManageSpaces)
+        try container.encodeIfPresent(dayPlan, forKey: .dayPlan)
         try container.encodeIfPresent(claudeTrustsRepositories, forKey: .claudeTrustsRepositories)
         try container.encodeIfPresent(claudeDeniesIrreversible, forKey: .claudeDeniesIrreversible)
         try container.encodeIfPresent(claudeSandbox, forKey: .claudeSandbox)
