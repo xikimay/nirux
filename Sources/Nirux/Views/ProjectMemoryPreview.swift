@@ -20,6 +20,14 @@ final class ProjectMemoryPreview: NSView {
     var onLink: (String) -> Void = { _ in }
     /// Gets the scope the switch was set to.
     var onScope: (ProjectMemory.Scope) -> Void = { _ in }
+    /// Gets what the user decided about the brick shown.
+    var onBrick: (BrickAction) -> Void = { _ in }
+    /// A brick's decisions: validate or dismiss a proposal, confirm a brick
+    /// that expired or became suspect, close one.
+    enum BrickAction: Equatable { case validate, dismiss, reconfirm, close }
+    let primaryButton = NSButton(title: "", target: nil, action: nil)
+    let secondaryButton = NSButton(title: "", target: nil, action: nil)
+    private var brickActions: (primary: BrickAction?, secondary: BrickAction?) = (nil, nil)
     let scopeControl = NSSegmentedControl(
         labels: [ProjectMemory.Scope.always.title, ProjectMemory.Scope.whenRelevant.title],
         trackingMode: .selectOne, target: nil, action: nil
@@ -82,7 +90,17 @@ final class ProjectMemoryPreview: NSView {
         scroll.documentView = textView
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
-        [titleLabel, metaLabel, descriptionLabel, separator, scroll, sourceLabel, scopeControl].forEach(addSubview)
+        for button in [primaryButton, secondaryButton] {
+            button.bezelStyle = .rounded
+            button.controlSize = .small
+            button.font = Theme.Font.caption
+            // The keyboard stays in the panel's search field.
+            button.refusesFirstResponder = true
+            button.target = self
+            button.action = #selector(brickButton(_:))
+            button.isHidden = true
+        }
+        [titleLabel, metaLabel, descriptionLabel, separator, scroll, sourceLabel, scopeControl, primaryButton, secondaryButton].forEach(addSubview)
 
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.canvas.cgColor
@@ -95,8 +113,15 @@ final class ProjectMemoryPreview: NSView {
         let inset = Theme.Space.lg
         let width = bounds.width - 2 * inset
         var y = bounds.height - Theme.Space.md - 20
-        let switchWidth = scopeControl.isHidden ? 0 : scopeControl.frame.width + Theme.Space.md
+        var switchWidth = scopeControl.isHidden ? 0 : scopeControl.frame.width + Theme.Space.md
         scopeControl.frame.origin = NSPoint(x: bounds.width - inset - scopeControl.frame.width, y: y + 1)
+        var right = bounds.width - inset
+        for button in [secondaryButton, primaryButton] where !button.isHidden {
+            button.sizeToFit()
+            button.frame.origin = NSPoint(x: right - button.frame.width, y: y - 1)
+            right = button.frame.minX - Theme.Space.sm
+            switchWidth = bounds.width - inset - right
+        }
         titleLabel.frame = NSRect(x: inset, y: y, width: width - switchWidth, height: 20)
         y -= 18
         metaLabel.frame = NSRect(x: inset, y: y, width: width, height: 15)
@@ -126,7 +151,7 @@ final class ProjectMemoryPreview: NSView {
         switch entry.source {
         case .rule: movable = entry.scope == .always
         case .memory: movable = true
-        case .missingFile: movable = false
+        case .missingFile, .brick, .proposal: movable = false
         }
         scopeControl.isHidden = !movable
         scopeControl.selectedSegment = entry.scope == .always ? 0 : 1
@@ -134,6 +159,7 @@ final class ProjectMemoryPreview: NSView {
         scopeControl.setEnabled(location.disabledBy == nil || entry.scope == .whenRelevant, forSegment: 1)
         titleLabel.stringValue = entry.title
         titleLabel.toolTip = entry.title
+        showBrickActions(nil, nil)
         var meta = [entry.scope.title]
         var description = ""
         let body: NSAttributedString
@@ -171,6 +197,24 @@ final class ProjectMemoryPreview: NSView {
             )
             sourceLabel.stringValue = "Source: \(ProjectMemory.indexFileName), line \(line.number)"
             sourceLabel.toolTip = knowledge.memory?.directory.appendingPathComponent(ProjectMemory.indexFileName).path
+        case .brick, .proposal:
+            guard let (id, brick, status) = knowledge.brick(of: entry), let bricks = knowledge.bricks else { return }
+            let card = Self.card(id: id, brick: brick, status: status, in: bricks)
+            // The sentence is the brick: whole, under its subject.
+            // "keyDown" stays as written; "backing layer" starts with a capital.
+            titleLabel.stringValue = brick.subject.dropFirst().contains(where: \.isUppercase)
+                ? brick.subject : brick.subject.prefix(1).uppercased() + brick.subject.dropFirst()
+            meta = card.meta
+            description = brick.sentence
+            body = NSAttributedString(string: card.body, attributes: Self.bodyAttributes)
+            switch status {
+            case nil: showBrickActions(.validate, .dismiss)
+            case .open?: showBrickActions(nil, .close)
+            case .expired?, .suspect?: showBrickActions(.reconfirm, .close)
+            case .closed?: showBrickActions(nil, nil)
+            }
+            sourceLabel.stringValue = status == nil ? "Source: proposal \(id), in this space’s knowledge" : "Source: brick \(id), never edited"
+            sourceLabel.toolTip = nil
         }
         metaLabel.stringValue = meta.joined(separator: " · ")
         descriptionLabel.stringValue = description
@@ -184,6 +228,7 @@ final class ProjectMemoryPreview: NSView {
         setHeaderHidden(true)
         endEditing()
         scopeControl.isHidden = true
+        showBrickActions(nil, nil)
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
         textView.textStorage?.setAttributedString(NSAttributedString(string: "\n\n" + text, attributes: [
@@ -237,6 +282,75 @@ final class ProjectMemoryPreview: NSView {
     /// Sets the switch back to `scope`, for a move that didn't start.
     func reshowScope(_ scope: ProjectMemory.Scope) {
         scopeControl.selectedSegment = scope == .always ? 0 : 1
+    }
+
+    private func showBrickActions(_ primary: BrickAction?, _ secondary: BrickAction?) {
+        brickActions = (primary, secondary)
+        for (button, action) in [(primaryButton, primary), (secondaryButton, secondary)] {
+            button.isHidden = action == nil
+            button.title = action.map(Self.title) ?? ""
+            button.keyEquivalent = ""
+        }
+        needsLayout = true
+    }
+
+    static func title(of action: BrickAction) -> String {
+        switch action {
+        case .validate: return "Validate"
+        case .dismiss: return "Dismiss"
+        case .reconfirm: return "Still True"
+        case .close: return "Close…"
+        }
+    }
+
+    /// While a decision is written, none other can be.
+    func setBrickActionsEnabled(_ enabled: Bool) {
+        primaryButton.isEnabled = enabled
+        secondaryButton.isEnabled = enabled
+    }
+
+    @objc private func brickButton(_ sender: NSButton) {
+        guard let action = sender === primaryButton ? brickActions.primary : brickActions.secondary else { return }
+        onBrick(action)
+    }
+
+    /// A brick's card: what it is, where it stands, how it is proven, what
+    /// it reached.
+    static func card(
+        id: String, brick: KnowledgeBrick, status: BrickStatus?, in bricks: ProjectMemory.Bricks
+    ) -> (meta: [String], body: String) {
+        let state = bricks.loaded.state(of: id)
+        var meta = [status == nil ? "Proposed by \(brick.proposedBy ?? "an agent")" : "Brick"]
+        switch status {
+        case nil: meta.append("no agent gets it until you validate it")
+        case .open?: meta.append(bricks.serves ? "agents get it when they open a file it concerns" : "the space’s bricks are off")
+        case .expired?: meta.append("expired")
+        case .suspect?: meta.append("suspect")
+        case .closed?: meta.append("closed")
+        }
+        var lines = ["About " + brick.scope.paths.map { "\(brick.scope.name)/\($0)" }.joined(separator: ", ")]
+        if let reason = status?.reason { lines.append(reason) }
+        lines.append("")
+        lines.append("Proofs:")
+        lines += brick.proofs.map { proof in
+            let kind = proof.isRechecked ? "rechecked" : "proves it was true"
+            return "• \(proof.label) — \(kind)"
+        }
+        if let tip = state.checkedTip, let at = state.checkedAt {
+            lines.append("Last checked at \(tip.prefix(7)), \(dateFormatter.string(from: Date(timeIntervalSince1970: at))).")
+        }
+        if status != nil, let expiry = brick.expiry(state) {
+            lines.append("No check can contradict it: served until \(dateFormatter.string(from: Date(timeIntervalSince1970: expiry))) unless you confirm it again.")
+        }
+        if let macOS = brick.macOS { lines.append("Reviewed again on each new macOS (validated on macOS \(state.reconfirmedMacOS ?? macOS)).") }
+        if status != nil {
+            let reach = bricks.reach[id] ?? .init()
+            let corrections = reach.corrections == 0 ? "no correction followed" : "a correction followed in \(reach.corrections)"
+            lines.append("")
+            lines.append("Reached \(reach.tasks) task\(reach.tasks == 1 ? "" : "s"); \(corrections).")
+            if let validated = brick.validatedAt { lines.append("Validated \(dateFormatter.string(from: Date(timeIntervalSince1970: validated))).") }
+        }
+        return (meta, lines.joined(separator: "\n"))
     }
 
     @objc private func scopeChanged() {

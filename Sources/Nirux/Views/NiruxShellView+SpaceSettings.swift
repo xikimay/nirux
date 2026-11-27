@@ -117,6 +117,7 @@ extension NiruxShellView {
                 self?.leadWorkspace(inSpace: spaceID)?.leadOptionsCache = nil
                 self?.spaceDefaultsSaved(defaults, replacing: loaded.defaults, spaceID: spaceID)
                 if defaults.taskBudget != loaded.defaults.taskBudget { self?.refreshTaskBudgets() }
+                if defaults.servesKnowledge != loaded.defaults.servesKnowledge { self?.recheckKnowledge(spaceIDs: [spaceID]) }
             }
             return saved
         }

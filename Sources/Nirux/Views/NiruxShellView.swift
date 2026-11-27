@@ -249,6 +249,9 @@ final class NiruxShellView: NSView {
     /// When the Mac last woke: the user's absence counts from there.
     var dailyPassWokeAt: TimeInterval = 0
     var dailyPassTimer: Timer?
+    var knowledgeTimer: Timer?
+    /// Spaces whose bricks are being rechecked.
+    var knowledgeChecks: Set<String> = []
     var dailyPassWakeObservers: [NSObjectProtocol] = []
     /// The sheet that adds a rule to a space's brief (LearnedRuleSheet).
     var learnedRuleSheet: LearnedRuleSheet?
