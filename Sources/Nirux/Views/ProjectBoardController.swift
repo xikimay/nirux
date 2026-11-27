@@ -78,8 +78,7 @@ final class ProjectBoardController {
         /// interval, no read failed since, it holds each. Else the Lead's
         /// queue reads it again first: off screen, the board doesn't.
         func openListHolds(_ numbers: [Int], now: Date) -> Bool {
-            guard let open = openPullRequests, errors[.openPullRequests] == nil,
-                  let readAt = pullRequestsReadAt, now.timeIntervalSince(readAt) <= openInterval else { return false }
+            guard let open = openPullRequests, pullRequestsReadAt != nil else { return false }
             let read = Set(open.map(\.number))
             return numbers.allSatisfy(read.contains)
         }

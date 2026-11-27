@@ -958,19 +958,7 @@ extension NiruxShellView {
             return answer("\(chosen.name)'s merge queue can't start: \(problem) Tell the user.", true)
         }
         let reads = board.reads[chosen.section.id]
-        if let reads {
-            if !afterRead, !reads.openListHolds(numbers, now: Date()) {
-                return board.readOpenPullRequests(section: chosen.section.id) { [self] in
-                    guard isSpaceLead(parent, spaceID: space.id) else {
-                        return answer("This terminal no longer belongs to the space’s Lead.", true)
-                    }
-                    leadQueueMerge(arguments, in: space, parent: parent, afterRead: true, answer: answer)
-                }
-            }
-            guard let open = reads.openPullRequests.map({ Set($0.map(\.number)) }), reads.errors[.openPullRequests] == nil else {
-                let reason = reads.errors[.openPullRequests].map { " (\($0.message))" } ?? ""
-                return answer("Nirux couldn't read the open pull requests of \(chosen.name)\(reason): nothing was queued, try again.", true)
-            }
+        if let open = reads?.openPullRequests.map({ Set($0.map(\.number)) }) {
             let unknown = numbers.filter { !open.contains($0) }
             guard unknown.isEmpty else {
                 return answer(unknown.map { "#\($0)" }.joined(separator: ", ") + " isn't an open pull request of \(chosen.name).", true)
