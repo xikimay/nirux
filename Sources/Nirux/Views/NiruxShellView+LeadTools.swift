@@ -986,7 +986,7 @@ extension NiruxShellView {
                     + ": nothing was queued, \(next).", true)
             }
             // An incomplete list (capped, a row unreadable) can't say one isn't open: the preflight reads each.
-            if let open = reads.completeOpenNumbers {
+            if let open = reads.completeOpenNumbers ?? reads.openPullRequests.map({ Set($0.map(\.number)) }) { // MUTANT T5a
                 let unknown = numbers.filter { !open.contains($0) }
                 guard unknown.isEmpty else {
                     return answer(unknown.map { "#\($0)" }.joined(separator: ", ") + " isn't an open pull request of \(chosen.name).", true)
