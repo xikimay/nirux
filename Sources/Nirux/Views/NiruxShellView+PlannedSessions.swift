@@ -2,17 +2,19 @@ import AppKit
 
 // MARK: - The day plan's planned sessions (docs/design/plan.md)
 
+/// A space's planned session.
+struct PlannedLine: Hashable {
+    let spaceID: String
+    let id: String
+}
+
 extension NiruxShellView {
     /// A planned session's Start: the New sheet in its space, with its title and detail.
     func startPlannedSession(_ lineID: String) {
-        guard !startingPlanLines.contains(lineID), let line = planStore(ofSpace: activeProfileID)?.load().plan.line(lineID), line.isPlanned,
-              let panel = showNewPanel(spaceID: activeProfileID)
+        guard plannedSessionProblem(lineID, inSpace: activeProfileID) == nil,
+              let line = planStore(ofSpace: activeProfileID)?.load().plan.line(lineID)
         else { return NSSound.beep() }
-        panel.prefill(planned: line)
-    }
-
-    func isPlanned(_ lineID: String, inSpace spaceID: String) -> Bool {
-        planStore(ofSpace: spaceID)?.load().plan.line(lineID)?.isPlanned == true
+        showNewPanel(spaceID: activeProfileID)?.prefill(planned: line)
     }
 
     /// Why start_task's plan_line can't take its task; nil when it can.
@@ -21,7 +23,7 @@ extension NiruxShellView {
         guard store.load().plan.line(lineID)?.isPlanned == true else {
             return "\(lineID) isn't a planned session of the day plan: read_plan lists them."
         }
-        return startingPlanLines.contains(lineID) ? "\(lineID) is starting already." : nil
+        return startingPlanLines.contains(PlannedLine(spaceID: spaceID, id: lineID)) ? "\(lineID) is starting already." : nil
     }
 
     /// A change, then the planned sessions it released start as the Lead's start_task starts them, in the space's
@@ -32,7 +34,7 @@ extension NiruxShellView {
         let result = try store.update { plan in
             let waiting = Set(plan.released.map(\.id))
             let result = try change(&plan)
-            released = plan.released.filter { !waiting.contains($0.id) && !startingPlanLines.contains($0.id) }
+            released = plan.released.filter { !waiting.contains($0.id) && !startingPlanLines.contains(PlannedLine(spaceID: spaceID, id: $0.id)) }
             return result
         }
         guard let space = profiles.first(where: { $0.id == spaceID }), let lead = leadMissionParent(inSpace: spaceID) else { return result }
@@ -52,6 +54,7 @@ extension NiruxShellView {
         do {
             try store.update { try $0.link(lineID, toWorkspace: workspaceID, by: .nirux) }
         } catch {
+            NSLog("[Plan] \(lineID) didn't take its task: \(error)")
             guard let lead = leadMissionParent(inSpace: spaceID) else { return }
             tellProposer(lead, "“\(title)” started, but the day plan's \(lineID) didn't take it: \(error)")
         }

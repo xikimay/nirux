@@ -234,15 +234,15 @@ extension NiruxShellView {
         completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void,
         opened: (@MainActor (_ workspaceID: String, _ created: CreatedTask) -> Void)? = nil
     ) {
-        var request = request
-        // Its planned session started meanwhile: this task starts without the line.
-        if let line = request.planLine, startingPlanLines.contains(line) || !isPlanned(line, inSpace: request.projectID) {
-            request.planLine = nil
+        // With the day plan off since, it starts without the line.
+        let planned = request.planLine.flatMap { line in planStore(ofSpace: request.projectID).map { _ in PlannedLine(spaceID: request.projectID, id: line) } }
+        if let planned {
+            if let problem = plannedSessionProblem(planned.id, inSpace: planned.spaceID) { return completion(.failed(problem)) }
+            startingPlanLines.insert(planned)
         }
-        if let line = request.planLine { startingPlanLines.insert(line) }
         createTask(request, names: names) { [weak self] named, result in
             guard let self else { return }
-            if let line = named.planLine { self.startingPlanLines.remove(line) }
+            if let planned { self.startingPlanLines.remove(planned) }
             switch result {
             case .failed(let message):
                 completion(.failed(message))

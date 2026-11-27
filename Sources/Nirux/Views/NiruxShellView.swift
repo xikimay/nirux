@@ -223,7 +223,7 @@ final class NiruxShellView: NSView {
     /// a time, and the timer that shows the next once no sheet is up.
     var pendingLeadProposals: [LeadProposal] = []
     /// The planned sessions whose task is being made: none starts twice.
-    var startingPlanLines: Set<String> = []
+    var startingPlanLines: Set<PlannedLine> = []
     var leadProposalTimer: Timer?
     /// Sub-tasks a task's `start_task` is starting (fetching, making the
     /// worktree), by the task's id: they count against its limit before

@@ -126,7 +126,8 @@ place at once. Checking the line a planned session waits for (or adding one
 after a checked line) starts it as `start_task` would, for the space's Lead,
 in the default repository: at once while the space starts tasks without
 asking, else in the New sheet. Without a Lead it waits for Start. A session
-being made can't start a second time.
+being made or taken can't start a second time: Start, the sheet and
+`start_task` say so.
 
 ## Pull requests
 

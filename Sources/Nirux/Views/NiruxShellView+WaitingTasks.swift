@@ -58,6 +58,7 @@ extension NiruxShellView {
             task.mergeWaits[index] = wait
             holder = task
         } else {
+            if let planLine, let problem = plannedSessionProblem(planLine, inSpace: current.id) { return answer(problem, true) }
             // A stable, uncreated path keeps a placeholder distinct from every real checkout.
             let placeholder = Persistence.stateDirectory.appendingPathComponent("waiting/\(id)").path
             addWorkspace(title: title, purpose: start.options?.goal, cwd: placeholder, profileID: current.id, workspaceID: id,
