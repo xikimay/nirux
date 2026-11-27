@@ -147,11 +147,8 @@ enum NiruxMCPServer {
             nonEmpty("NIRUX_WORKSPACE_ID") != nil && nonEmpty("NIRUX_AGENT_UUID") != nil
                 && nonEmpty(NiruxLaunchAuthorization.environmentKey) != nil
         }
-        /// The space its workspace is in, as Nirux last saved it: a shell
-        /// keeps its launch's `NIRUX_PROFILE_ID` after its workspace moves.
-        var workspaceSpaceID: String? {
-            nonEmpty("NIRUX_WORKSPACE_ID").flatMap { Persistence.savedSpaceID(ofWorkspace: $0, stateDirectory: stateDirectory) } ?? spaceID
-        }
+        /// The space its workspace is in (`Persistence.spaceID`).
+        var workspaceSpaceID: String? { Persistence.spaceID(environment: environment, stateDirectory: stateDirectory) }
 
         /// A task's agent whose space lets its tasks manage spaces, for the
         /// tools it lists and learns about.

@@ -154,6 +154,7 @@ extension NiruxShellView {
         lead.actions.setGroupsResults = { [weak self] on in self?.setLeadGroupsResults(on, spaceID: spaceID) }
         lead.actions.setFreshStart = { [weak self] on in self?.setLeadFreshStart(on, spaceID: spaceID) }
         lead.actions.setDailyPassHour = { [weak self] hour in self?.setDailyPassHour(hour, spaceID: spaceID) }
+        lead.actions.setReviewChecklist = { [weak self] on in self?.setReviewChecklist(on, spaceID: spaceID) }
         let settings = SpaceSettingsSection(
             spaceID: spaceID, general: general, defaults: defaults, safety: safety, lead: lead,
             brief: SpaceFileEditorPane(source: Self.briefSource(for: space)),

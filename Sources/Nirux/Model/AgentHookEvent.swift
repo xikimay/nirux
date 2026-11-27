@@ -544,8 +544,15 @@ enum AgentHookCLI {
 
         let env = ProcessInfo.processInfo.environment
         guard isFromNiruxTerminal(env: env) else { return 0 }
-        let emitterProcess = ProcessInstance.hookEmitter(for: kind)
         let now = Date().timeIntervalSince1970
+        // Every subagent: only a review's fork reads further.
+        if kind == .claude, raw["hook_event_name"] as? String == "SubagentStart" {
+            if let context = ReviewChecklist.subagentStartOutput(raw, environment: env, now: now) {
+                try? FileHandle.standardOutput.write(contentsOf: context)
+            }
+            return 0
+        }
+        let emitterProcess = ProcessInstance.hookEmitter(for: kind)
         guard var event = AgentHookEvent(
             kind: kind,
             payload: raw,
@@ -566,6 +573,7 @@ enum AgentHookCLI {
               let termination = TerminationWatch()
         else {
             append(event)
+            ReviewChecklist.noteReviewStart(event, payload: raw, environment: env, now: now)
             // Queued first, so the app hears of the session before the ledger
             // is read: a Mission child's claude whose conversation lacks the
             // answers its questions got gets them back as context. Not a

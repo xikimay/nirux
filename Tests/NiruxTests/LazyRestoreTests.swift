@@ -142,8 +142,8 @@ final class LazyRestoreTests: XCTestCase {
 
     // MARK: - When agents resume
 
-    /// A space's prompt log and review findings lose what is past 30 days
-    /// at launch, whether or not anything reads them.
+    /// A space's prompt log, review findings and checklist log lose what is
+    /// past their days at launch, whether or not anything reads them.
     func testLaunchTrimsTheSpacesLogs() throws {
         let state = URL(fileURLWithPath: root + "/state")
         let longAgo = Date().timeIntervalSince1970 - 40 * 86_400
@@ -152,11 +152,14 @@ final class LazyRestoreTests: XCTestCase {
         ReviewFindings.lines.append(
             .init(time: longAgo, workspace: "W", task: "feat/x", round: 1, findings: []), spaceID: space, stateDirectory: state
         )
+        ReviewChecklist.reaches.append(.init(time: longAgo, session: "s", kind: .started), spaceID: space, stateDirectory: state, trims: false)
         try withRestoredShell(layout()) { _, _ in
             LoopLog.lines.queue.sync {}
             ReviewFindings.lines.queue.sync {}
+            ReviewChecklist.reaches.queue.sync {}
             XCTAssertEqual(LoopLog.lines.load(spaceID: space), [])
             XCTAssertEqual(ReviewFindings.lines.load(spaceID: space), [])
+            XCTAssertEqual(ReviewChecklist.reaches.load(spaceID: space), [])
         }
     }
 

@@ -66,10 +66,19 @@ enum Persistence {
         stateURL.deletingLastPathComponent()
     }
 
+    /// The space of the workspace `environment` names, as Nirux last saved
+    /// it, else its launch's `NIRUX_PROFILE_ID`: a shell keeps that one
+    /// after its workspace moves.
+    static func spaceID(environment: [String: String], stateDirectory: URL) -> String? {
+        func nonEmpty(_ key: String) -> String? { environment[key].flatMap { $0.isEmpty ? nil : $0 } }
+        return nonEmpty("NIRUX_WORKSPACE_ID").flatMap { savedSpaceID(ofWorkspace: $0, stateDirectory: stateDirectory) } ?? nonEmpty("NIRUX_PROFILE_ID")
+    }
+
     /// The space `workspaceID` was in at the last save, read from the
     /// state.json in `stateDirectory` without the rest; nil when it can't
-    /// tell. For a process beside the app (the MCP server), whose launch
-    /// environment names the space the workspace was in then.
+    /// tell. For a process beside the app (the MCP server, the hook
+    /// receiver), whose launch environment names the space the workspace
+    /// was in then.
     static func savedSpaceID(ofWorkspace workspaceID: String, stateDirectory: URL) -> String? {
         struct Saved: Decodable {
             struct Workspace: Decodable {
