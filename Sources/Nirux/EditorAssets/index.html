@@ -56,50 +56,30 @@
       #markdown-view table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
       #markdown-view th, #markdown-view td { padding: 6px 12px; border: 1px solid rgba(255, 255, 255, 0.12); text-align: left; vertical-align: top; }
       #markdown-view th { font-weight: 600; background: #292933; }
-      .checkpoint-patch { margin: 12px; color: #ECECF1; font: 13px/1.5 ui-monospace, Menlo, monospace; }
-      /* Outer styles win over the bundle's :host rule. */
-      .nirux-pierre-host {
-        background: #20202A;
-        display: block;
-        min-height: 120px;
+      /* The editor's diffs (bridge.js drawOwnDiff, drawGroup): pierre's review, one file
+         after another, a group's files under a row each. */
+      .nirux-diff-stack { min-height: 100%; padding-bottom: 48px; }
+      .nirux-diff-note {
+        padding: 8px 12px;
+        color: #A0A0AD;
+        font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         border-bottom: 1px solid rgba(255, 255, 255, 0.07);
       }
-      .nirux-pierre-host.nirux-pierre-collapsed {
-        display: none;
-      }
-      .nirux-pierre-stack {
-        min-height: 100%;
-        padding-bottom: 48px;
-      }
-      .nirux-pierre-summary {
-        position: sticky;
-        top: 0;
-        z-index: 4;
-        min-height: 34px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 0 12px;
+      .nirux-diff-file { border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+      /* In Theme's colours: a rule here wins over pierre's :host ones (its
+         syntax colours stay its shiki theme's). */
+      #pierre-diff .nirux-review-diff {
+        --diffs-bg: #20202A;
+        --diffs-dark-bg: #20202A;
+        --diffs-fg: #ECECF1;
+        --diffs-dark: #ECECF1;
+        --diffs-bg-separator-override: #1B1B23;
+        background-color: #20202A;
         color: #ECECF1;
-        background: #1B1B23;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-      .nirux-pierre-summary-title {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-weight: 600;
-      }
-      .nirux-pierre-summary-count {
-        flex: none;
-        color: #A0A0AD;
       }
       .nirux-pierre-file-header {
         position: sticky;
-        top: 34px;
+        top: 0;
         z-index: 3;
         width: 100%;
         min-height: 30px;
@@ -115,23 +95,21 @@
         text-align: left;
         cursor: default;
       }
-      .nirux-pierre-file-header:hover {
-        background: #30303B;
-      }
-      .nirux-pierre-file-header.collapsed {
-        color: #A0A0AD;
-      }
-      .nirux-pierre-file-chevron {
-        flex: none;
-        width: 12px;
-        color: #A0A0AD;
-      }
-      .nirux-pierre-file-title {
+      .nirux-pierre-file-header:hover { background: #30303B; }
+      .nirux-pierre-file-header.collapsed { color: #A0A0AD; }
+      .nirux-pierre-file-chevron { flex: none; width: 12px; color: #A0A0AD; }
+      .nirux-pierre-file-folder {
         min-width: 0;
+        flex: 0 1 auto;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        direction: rtl;
+        color: #A0A0AD;
       }
+      .nirux-pierre-file-title { flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+      .nirux-pierre-file-added { margin-left: auto; color: #45d987; font-variant-numeric: tabular-nums; }
+      .nirux-pierre-file-removed { color: #ff6b7d; font-variant-numeric: tabular-nums; }
       #status {
         position: absolute; inset: 0;
         display: flex; align-items: center; justify-content: center;
@@ -248,6 +226,7 @@
     <script src="pierre-diff.bundle.js"></script>
     <script src="review-page.js"></script>
     <script src="markdown-view.js"></script>
+    <script src="diff-text.js"></script>
     <script src="bridge.js"></script>
   </body>
 </html>

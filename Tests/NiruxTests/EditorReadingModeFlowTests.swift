@@ -156,6 +156,34 @@ final class EditorReadingModeFlowTests: XCTestCase {
         }
     }
 
+    /// One edit that takes lines out above the shown ones and adds one below
+    /// them (Replace All, several carets) is reported, the lines moving up;
+    /// Enter inside the last of them ends them.
+    func testShownLinesUnderEditsAboveAndBelow() throws {
+        try UIFlowHarness.run { harness in
+            let sixty = harness.repo + "/sixty.txt"
+            try (1...60).map { "line \($0)\n" }.joined().write(toFile: sixty, atomically: true, encoding: .utf8)
+            harness.shell.openInEditorColumn(path: sixty, line: 40, endLine: 52, takeFocus: false)
+            let editor = try XCTUnwrap(harness.shell.activeWorkspace?.front?.editorColumn)
+            let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+            UIFlowHarness.waitForAnswer("the page to show the lines", to: Self.shownRange, in: webView) { $0.hasPrefix("40-52|") }
+            UIFlowHarness.run("""
+                (function () {
+                  var m = \(Self.mainEditor).getModel();
+                  var end = m.getLineMaxColumn(52);
+                  m.pushEditOperations([], [
+                    { range: new monaco.Range(1, 1, 21, 1), text: '' },
+                    { range: new monaco.Range(52, end, 52, end), text: '\\n' }
+                  ], function () { return null; });
+                })()
+                """, in: webView)
+            harness.waitUntil("the edit reported") { editor.unsavedPaths == [sixty] }
+            UIFlowHarness.waitForAnswer("the lines moved up", to: Self.shownRange, in: webView) { $0.hasPrefix("20-32|") }
+            UIFlowHarness.run("\(Self.mainEditor).getModel().applyEdits([{ range: new monaco.Range(32, 3, 32, 3), text: '\\n' }])", in: webView)
+            UIFlowHarness.waitForAnswer("the lines ended", to: Self.shownRange, in: webView) { $0.hasPrefix("none|") }
+        }
+    }
+
     /// A draft is a file in a nirux-draft- folder in a temporary directory
     /// or one inside it (a sandboxed agent's $TMPDIR), whichever link its
     /// path goes through, /tmp and /private/tmp alike; one elsewhere isn't.
@@ -223,6 +251,11 @@ final class EditorReadingModeFlowTests: XCTestCase {
             UIFlowHarness.run("\(Self.mainEditor).getModel().applyEdits([{ range: new monaco.Range(33, 1, 33, 1), text: '\\n' }])", in: webView)
             UIFlowHarness.waitForAnswer("the lines moved down", to: Self.shownRange, in: webView) { $0.hasPrefix("34-46|") }
             harness.waitUntil("the header to follow them down") { editor.header.context == "Lines 34–46" }
+            // A line added below them (Enter at the end of the last): they stay.
+            UIFlowHarness.run("var m = \(Self.mainEditor).getModel(); m.applyEdits([{ range: new monaco.Range(46, m.getLineMaxColumn(46), 46, m.getLineMaxColumn(46)), text: '\\n' }])", in: webView)
+            UIFlowHarness.waitForAnswer("the line added", to: "String(\(Self.mainEditor).getModel().getLineCount())", in: webView) { $0 == "196" }
+            UIFlowHarness.waitForAnswer("the lines still shown", to: Self.shownRange, in: webView) { $0.hasPrefix("34-46|") }
+            XCTAssertEqual(editor.header.context, "Lines 34–46")
             // Saved, then written again on disk: still where they moved.
             editor.saveAll()
             harness.waitUntil("the edits saved") { editor.unsavedPaths.isEmpty }
@@ -275,11 +308,19 @@ final class EditorReadingModeFlowTests: XCTestCase {
             XCTAssertNil(editor.diffActivePath)
             waitForView("source:# Flow", in: webView)
             waitForRange("1-1|caret 1:1|context|flat", in: webView)
+            XCTAssertEqual(editor.header.context, "Line 1")
             // An agent's open: the keyboard stays where the user types.
             XCTAssertIdentical(harness.window.firstResponder, terminal)
             UIFlowHarness.waitForAnswer("the page's focus", to: "document.activeElement === document.body ? 'none' : document.activeElement.tagName", in: webView) {
                 $0 == "none"
             }
+            // Its diff shows no highlight: the header names the folder over it.
+            editor.toggleDiff()
+            harness.waitUntil("the diff again") { editor.diffActivePath == readme }
+            harness.waitUntil("the header over pierre's diff") { editor.header.context == "" }
+            editor.toggleDiff()
+            harness.waitUntil("the source again") { editor.diffActivePath == nil }
+            XCTAssertEqual(editor.header.context, "Line 1")
         }
     }
 
