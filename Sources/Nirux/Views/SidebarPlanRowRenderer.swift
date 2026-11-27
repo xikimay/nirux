@@ -6,7 +6,8 @@ struct SidebarPlanRowRenderer {
     typealias Metrics = SidebarExpandedMetrics
 
     enum Row: Equatable {
-        case feature(Plan.Line, isFolded: Bool, forUser: Int)
+        /// `forUser`: its unchecked to-dos and tasks asking the user; `waits`: one of those tasks.
+        case feature(Plan.Line, isFolded: Bool, forUser: Int, waits: Bool)
         case line(Plan.Line, isNested: Bool)
     }
 
@@ -26,12 +27,12 @@ struct SidebarPlanRowRenderer {
 
     func render() -> (views: [NSView], hitAreas: [SidebarHitArea], bottomY: CGFloat) {
         switch row {
-        case .feature(let feature, let isFolded, let forUser): renderFeature(feature, isFolded: isFolded, forUser: forUser)
+        case .feature(let feature, let isFolded, let forUser, let waits): renderFeature(feature, isFolded: isFolded, forUser: forUser, waits: waits)
         case .line(let line, let isNested): renderLine(line, isNested: isNested)
         }
     }
 
-    private func renderFeature(_ feature: Plan.Line, isFolded: Bool, forUser: Int) -> (views: [NSView], hitAreas: [SidebarHitArea], bottomY: CGFloat) {
+    private func renderFeature(_ feature: Plan.Line, isFolded: Bool, forUser: Int, waits: Bool) -> (views: [NSView], hitAreas: [SidebarHitArea], bottomY: CGFloat) {
         let rowY = top - Self.featureHeight
         let frame = NSRect(x: Metrics.workspaceInsetX, y: rowY, width: sidebarWidth - Metrics.workspaceInsetX * 2, height: Self.featureHeight)
         var views: [NSView] = []
@@ -48,8 +49,10 @@ struct SidebarPlanRowRenderer {
         right = ring.frame.minX - Theme.Space.xs
         var trailing = ["\(feature.progress.done)/\(feature.progress.total)"]
         if isFolded, forUser > 0 { trailing.insert("\(forUser) for you", at: 0) }
+        // Amber only while an agent in it waits for the user.
+        let forUserColor = waits ? Theme.Color.waiting : Theme.Color.textSecondary
         for (index, text) in trailing.reversed().enumerated() {
-            let label = Self.label(text, font: Theme.Font.captionDigits, color: index == trailing.count - 1 && isFolded && forUser > 0 ? Theme.Color.waiting : Theme.Color.textTertiary)
+            let label = Self.label(text, font: Theme.Font.captionDigits, color: index == trailing.count - 1 && isFolded && forUser > 0 ? forUserColor : Theme.Color.textTertiary)
             let width = ceil(label.fittingSize.width)
             label.frame = NSRect(x: right - width, y: rowY + (Self.featureHeight - 14) / 2, width: width, height: 14)
             views.append(label)
@@ -98,13 +101,13 @@ struct SidebarPlanRowRenderer {
     private func chip(for line: Plan.Line, isNested: Bool) -> SidebarBadgeView? {
         let (text, color): (String, NSColor)
         switch line.kind {
-        case .todo where !line.isChecked: (text, color) = ("you", Theme.Color.waiting)
+        case .todo where !line.isChecked: (text, color) = ("you", Theme.Color.textSecondary)
         case .lead where isNested: (text, color) = ("Lead", Theme.Color.accent)
         case .session where line.isPlanned: (text, color) = ("Planned", Theme.Color.textTertiary)
         default: return nil
         }
         let chip = SidebarBadgeView(text: text, textColor: color, fillColor: Theme.Color.tint(color, 0.16), font: Theme.Font.caption)
-        chip.cornerRadius = 8
+        chip.cornerRadius = Theme.Radius.card
         return chip
     }
 
@@ -189,7 +192,7 @@ final class SidebarPlanMark: NSView {
             Theme.Color.textTertiary.setStroke()
             ring.stroke()
         default:
-            let box = NSBezierPath(roundedRect: rect, xRadius: 2.5, yRadius: 2.5)
+            let box = NSBezierPath(roundedRect: rect, xRadius: Theme.Radius.box, yRadius: Theme.Radius.box)
             if isChecked {
                 Theme.Color.done.setFill()
                 box.fill()

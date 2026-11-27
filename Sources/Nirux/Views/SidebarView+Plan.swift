@@ -36,7 +36,8 @@ extension SidebarView {
                 let forUser = feature.children.filter { line in
                     line.kind == .todo ? !line.isChecked : line.workspaceID.flatMap { byID[$0] }?.asksUser == true
                 }.count
-                return [.plan(.feature(feature, isFolded: isFolded, forUser: forUser))]
+                let waits = feature.children.contains { $0.workspaceID.flatMap { byID[$0] }?.asksUser == true }
+                return [.plan(.feature(feature, isFolded: isFolded, forUser: forUser, waits: waits))]
             case .task(let id, let inFeature):
                 return (families[id] ?? []).map { info in
                     var info = info
@@ -67,7 +68,7 @@ extension SidebarView {
                 currentY = buildWorkspaceSection(workspace: info, yOffset: currentY)
             case .plan(let plan):
                 var renderer = SidebarPlanRowRenderer(row: plan, sidebarWidth: listWidth, top: currentY)
-                if case .feature(let feature, _, _) = plan { renderer.onFold = { [weak self] in self?.toggleFeature(feature.id) } }
+                if case .feature(let feature, _, _, _) = plan { renderer.onFold = { [weak self] in self?.toggleFeature(feature.id) } }
                 let built = renderer.render()
                 built.views.forEach(addExpandedView)
                 hitAreas += built.hitAreas
