@@ -21,7 +21,11 @@ memory; no new place.
   once a day, pages included. It reads git objects at the tip (through the git dir,
   bare repositories too), never a working tree, and runs nothing a brick
   holds. The base is `origin`'s default branch as fetched, else the local
-  main or master, never a checkout's HEAD. A proof that no longer holds
+  main or master, never a checkout's HEAD. A check git or the network
+  didn't answer is tried again at the next pass: the tip and the daily
+  check are recorded only once every brick of the repository got an answer.
+  A commit is off the branch only when git says the object is missing;
+  commit proofs are kept as full SHAs, resolved when proposed. A proof that no longer holds
   makes its brick **failing** (not served); the next check closes it, with
   why, or clears it: a page down once or a stray tip never closes a brick for
   good.
@@ -34,12 +38,13 @@ memory; no new place.
   confirms it again ("Still True").
 - A brick about something macOS may change (`macos`) expires on another
   major version until confirmed there.
-- **Suspect**: when the user's own prompt names a brick's subject and says
-  something is wrong ("no", "not", "wrong", "non", "pas", "faux"…) in a
-  session that received it (Claude's UserPromptSubmit, agy's first model
-  call of a turn; never a line Nirux typed: a Mission's, a pull request
-  round's), that counts as a correction: the brick is no longer served until
-  confirmed or closed.
+- **Corrections**: a sentence the user typed (never a line Nirux typed: a
+  Mission's, a pull request round's) in a session that received the brick,
+  naming its subject and saying it is wrong ("wrong", "incorrect", "faux",
+  "erreur"…, or opening on "No," / "Non,"), is recorded on the brick. A
+  plain negation ("the layer is not updating, fix it") never counts.
+  Corrections in two different tasks since the brick was last confirmed
+  make it **suspect**: not served until the user confirms it or closes it.
 
 ## Who writes
 
@@ -67,8 +72,11 @@ tokens):
   gets, at a new thread's start, the bricks about the files its branch
   already changes, after the brief in its `developer_instructions` (unless
   the user's Codex config sets its own); a resumed thread keeps what it got,
-  and a restarted column gets the brief alone once what agents get changed. Codex 0.171 has a PostToolUse hook
-  with `additionalContext`, behind its own hook trust: not used yet.
+  and a restarted column gets the brief alone once what agents get changed.
+  The launch writes the brief at once and the bricks off the main thread
+  (git) as the column starts: a launch line read first gets the brief
+  alone. Codex 0.171 has a PostToolUse hook with `additionalContext`,
+  behind its own hook trust: not used yet.
 
 `memory_search` finds the bricks agents may get now; the rest is found by
 search too. Space Settings › Defaults › "Give agents the space's bricks"
@@ -86,7 +94,14 @@ Under `<state dir>/projects/<space id>/knowledge/`, 0700/0600:
 `bricks/<id>.json` (immutable), `state.json` (checks, closing, suspicion,
 confirmation, proposals), `served.json` (what the hook receiver hands out,
 absent when nothing is), `sessions/` (what each agent session got, 7 days),
-`uses.jsonl`, `codex/<task>.toml`.
+`uses.jsonl`, `codex/<task>.toml`. A session's record lives while hooks
+read it, and goes 7 days after the last.
+
+## Limits
+
+- The receiver finds the space by the terminal's `NIRUX_PROFILE_ID`, kept
+  cheap for a hook that runs at every tool use. A task moved to another
+  space keeps its old space's bricks until its shells restart.
 
 ## Later
 

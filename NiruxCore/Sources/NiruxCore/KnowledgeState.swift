@@ -10,8 +10,10 @@ public struct KnowledgeState: Codable, Equatable, Sendable {
     public var proposals: [BrickProposal] = []
     /// Per anchor, the base commit its bricks were last checked at.
     public var checkedTips: [String: String] = [:]
-    /// The last check that read pages too.
+    /// The last daily housekeeping (uses trimmed, old sessions gone).
     public var dailyCheckAt: TimeInterval?
+    /// Per anchor, its last daily check whose every result came back.
+    public var dailyChecks: [String: TimeInterval]?
 
     public init() {}
 }

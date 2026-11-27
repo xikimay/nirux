@@ -128,18 +128,47 @@ final class SpaceKnowledgeTests: XCTestCase {
         XCTAssertNil(SpaceKnowledge.baseTip(gitDir: repo.appendingPathComponent(".git").path), "a checkout's HEAD follows its branch")
     }
 
-    func testACorrectionMakesItsBrickSuspectUntilTheUserConfirmsIt() throws {
+    func testCorrectionsInTwoTasksMakeItsBrickSuspectUntilTheUserConfirmsIt() throws {
         let id = try validated(brick())
         recheck(at: 100)
         try FileManager.default.createDirectory(at: store.folder, withIntermediateDirectories: true)
-        KnowledgeUse.append([KnowledgeUse(time: 150, brick: id, kind: .corrected, task: "w1", agent: "claude")], in: store)
-        XCTAssertEqual(recheck(at: 200).suspected, [id])
+        func correct(in task: String, at time: TimeInterval) {
+            KnowledgeUse.append([KnowledgeUse(time: time, brick: id, kind: .corrected, task: task, agent: "claude")], in: store)
+        }
+        correct(in: "w1", at: 150)
+        correct(in: "w1", at: 160)
+        XCTAssertEqual(recheck(at: 200).suspected, [], "one task's corrections are recorded, not acted on")
+        XCTAssertEqual(served, [id])
+        correct(in: "w2", at: 210)
+        XCTAssertEqual(recheck(at: 220).suspected, [id])
         XCTAssertEqual(served, [])
         var loaded = store.load()
         XCTAssertTrue(loaded.reconfirm(id, now: 300, macOS: SpaceKnowledge.macOS))
         try store.save(loaded.state, now: 300)
-        XCTAssertEqual(recheck(at: 400), SpaceKnowledge.Pass(), "a correction before the confirmation no longer counts")
+        correct(in: "w3", at: 310)
+        XCTAssertEqual(recheck(at: 400), SpaceKnowledge.Pass(), "corrections before the confirmation no longer count")
         XCTAssertEqual(served, [id])
+    }
+
+    func testAnUnansweredCheckIsTriedAgainAtTheNextPass() throws {
+        // Nothing listens on port 9: the page can't be read.
+        let id = try validated(brick(proofs: [.file(path: "Sources/Views/Glass.swift"), .page(url: "https://127.0.0.1:9/glass", quote: "a quote of the page")]))
+        recheck(at: SpaceKnowledge.dailyInterval + 100)
+        let state = store.load().state
+        XCTAssertNil(state.checkedTips[anchor.key!], "the base isn't recorded as checked")
+        XCTAssertNil(state.dailyChecks?[anchor.key!], "nor the daily check")
+        XCTAssertEqual(store.load().status(of: id, now: SpaceKnowledge.dailyInterval + 101, macOS: SpaceKnowledge.macOS), .open)
+    }
+
+    func testOnlyAMissingCommitIsOffTheBranchAndProposalsKeepFullSHAs() throws {
+        let head = try git("rev-parse", "HEAD")
+        let resolved = SpaceKnowledge.resolvingCommits(of: brick(proofs: [.commit(String(head.prefix(8)))]), anchor: anchor)
+        XCTAssertEqual(resolved.proofs, [.commit(head)])
+        let gitDir = repo.appendingPathComponent(".git").path
+        XCTAssertEqual(SpaceKnowledge.repositorySource(gitDir: gitDir, tip: head, readsPages: false).hasCommit(String(repeating: "ab", count: 20)), false)
+        let notARepository = root.appendingPathComponent("empty")
+        try FileManager.default.createDirectory(at: notARepository, withIntermediateDirectories: true)
+        XCTAssertNil(SpaceKnowledge.repositorySource(gitDir: notARepository.path, tip: head, readsPages: false).hasCommit(head), "a git error says nothing")
     }
 
     func testTurningTheSwitchOffTakesBackWhatAgentsGet() throws {
@@ -159,13 +188,14 @@ final class SpaceKnowledgeTests: XCTestCase {
         recheck(at: Date().timeIntervalSince1970)
         try git("checkout", "-q", "-b", "task")
         try Data("notes\n".utf8).write(to: repo.appendingPathComponent("NOTES.md"))
-        XCTAssertNil(SpaceKnowledge.codexInstructions(spaceID: spaceID, task: "w1", launchDirectory: repo.path, withBrief: false, stateDirectory: state))
+        XCTAssertEqual(SpaceKnowledge.writeCodexInstructions(spaceID: spaceID, task: "w1", launchDirectory: repo.path, withBrief: false, stateDirectory: state), [])
         try Data("func glass() { }\n".utf8).write(to: repo.appendingPathComponent("Sources/Views/Glass.swift"))
         let brief = try XCTUnwrap(SpaceBrief.briefURL(spaceID: spaceID, stateDirectory: state))
         try Data("- Keep it short.".utf8).write(to: brief)
-        let file = try XCTUnwrap(SpaceKnowledge.codexInstructions(
+        XCTAssertEqual(SpaceKnowledge.writeCodexInstructions(
             spaceID: spaceID, task: "w1", launchDirectory: repo.path, withBrief: true, stateDirectory: state
-        ))
+        ).count, 1)
+        let file = SpaceKnowledge.codexFile(in: store, task: "w1").path
         let text = try String(contentsOfFile: file, encoding: .utf8)
         XCTAssertTrue(text.hasPrefix("\"# Space brief"), "one TOML string, the brief first")
         XCTAssertTrue(text.contains("Keep it short."))

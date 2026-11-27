@@ -127,13 +127,28 @@ struct KnowledgeDeliveryTests {
 
     // MARK: Corrections
 
-    @Test func aPromptSayingTheSubjectIsWrongInAnyCaseOrAccentIsACorrection() {
+    @Test func aSentenceSayingTheSubjectIsWrongInAnyCaseOrAccentIsACorrection() {
         let bricks = [Self.served("b-1", subject: "backing layer"), Self.served("b-2", subject: "keyDown"), Self.served("b-3", subject: "élan")]
-        #expect(KnowledgeCorrection.named(in: "Non, le Backing  Layer n'est pas comme ça", among: bricks) == ["b-1"])
-        #expect(KnowledgeCorrection.named(in: "keydown isn't handled there", among: bricks) == ["b-2"])
-        #expect(KnowledgeCorrection.named(in: "the layering is wrong; keydowns too", among: bricks).isEmpty)
-        #expect(KnowledgeCorrection.named(in: "ELAN : faux !", among: bricks) == ["b-3"])
-        #expect(KnowledgeCorrection.named(in: "Now add a drop shadow to the backing layer", among: bricks).isEmpty, "naming it isn't correcting it")
+        #expect(KnowledgeCorrection.named(in: "Non, le Backing  Layer n'est pas réécrit", among: bricks) == ["b-1"])
+        #expect(KnowledgeCorrection.named(in: "Non. Le backing layer n'est pas réécrit.", among: bricks) == ["b-1"])
+        #expect(KnowledgeCorrection.named(in: "What you said about keyDown is wrong", among: bricks) == ["b-2"])
+        #expect(KnowledgeCorrection.named(in: "ELAN : c'est faux !", among: bricks) == ["b-3"])
+    }
+
+    @Test func ordinaryInstructionsAreNeverCorrections() {
+        let bricks = [Self.served("b-1", subject: "backing layer"), Self.served("b-2", subject: "ui")]
+        for prompt in [
+            "The backing layer is not updating, please fix it",
+            "Don't change the backing layer, use a sublayer instead.",
+            "No need to touch the backing layer",
+            "Stop resizing the backing layer and never set its frame",
+            "Le backing layer ne se met pas à jour, corrige-le",
+            "Now add a drop shadow to the backing layer",
+            "The backing layer is set. That other part is wrong.",
+            "No, the UI is wrong"
+        ] {
+            #expect(KnowledgeCorrection.named(in: prompt, among: bricks).isEmpty, "\(prompt)")
+        }
     }
 }
 
@@ -171,10 +186,20 @@ struct KnowledgeCheckTests {
         guard case .fails = Proof.file(path: "Gone.swift").check(in: source) else { Issue.record("held"); return }
     }
 
-    @Test func aTestHoldsWhileItsFunctionIsThere() {
-        let source = Self.source(files: ["T.swift": "final class T: XCTestCase {\n    func testKeyDownIsHandled() throws {}\n}"])
+    @Test func aTestHoldsWhileItsFunctionIsThereNotCommentedOut() {
+        let source = Self.source(files: ["T.swift": """
+            final class T: XCTestCase {
+                func testKeyDownIsHandled() throws {}
+                @Test func swiftTesting() {}
+                // func testRetired() {
+                /// func testDocumented() {}
+            }
+            """])
         #expect(Proof.test(path: "T.swift", name: "testKeyDownIsHandled").check(in: source) == .holds)
-        guard case .fails = Proof.test(path: "T.swift", name: "testKeyDown").check(in: source) else { Issue.record("held"); return }
+        #expect(Proof.test(path: "T.swift", name: "swiftTesting").check(in: source) == .holds)
+        for name in ["testKeyDown", "testRetired", "testDocumented"] {
+            guard case .fails = Proof.test(path: "T.swift", name: name).check(in: source) else { Issue.record("\(name) held"); return }
+        }
     }
 
     @Test func historyAndPagesAnswerOnlyWhenRead() {

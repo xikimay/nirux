@@ -11,6 +11,9 @@ enum SpaceKnowledge {
 
     /// The pass that reads pages too, trims the uses and drops old sessions.
     static let dailyInterval: TimeInterval = 20 * 3600
+    /// Tasks a correction followed in, since the brick was last confirmed,
+    /// that stop serving it.
+    static let correctionsToSuspect = 2
 
     /// What the hook receiver prints for a Claude or agy hook in a terminal
     /// of `environment`'s space, recording the bricks it hands over and the
@@ -78,38 +81,48 @@ enum SpaceKnowledge {
         return answer.count == 2 && answer[0] == "true" && answer[1].count == 40 ? answer[1] : nil
     }
 
-    /// For a Codex launch in `launchDirectory`: when the space serves bricks
-    /// about files its branch already changes, a file of the task's own
-    /// holding the brief (`withBrief`) then those bricks, as Codex's
-    /// `developer_instructions`; nil otherwise. Codex opens files through
-    /// its shell, where Nirux doesn't see them: it gets its bricks at its
-    /// start (docs/design/knowledge-bricks.md).
-    static func codexInstructions(
+    /// Where a Codex launch of `task` finds its instructions.
+    static func codexFile(in store: KnowledgeStore, task: String) -> URL {
+        store.folder.appendingPathComponent("codex/\(task).toml")
+    }
+
+    /// The space's brief as Codex's instructions get it ("" for none).
+    static func codexBrief(in store: KnowledgeStore) -> String {
+        let briefURL = store.folder.deletingLastPathComponent().appendingPathComponent("brief.md")
+        return SpaceBrief.readBrief(at: briefURL).flatMap(SpaceBrief.body(of:)).map { SpaceBrief.injectedText(body: $0, briefPath: briefURL.path) } ?? ""
+    }
+
+    /// Writes Codex's instructions for a launch of `task` in `launchDirectory`:
+    /// the brief (`withBrief`), then the served bricks about the files its
+    /// branch already changes, if any. Codex opens files through its shell,
+    /// where Nirux doesn't see them: it gets its bricks at its start
+    /// (docs/design/knowledge-bricks.md). Runs git: never on the main
+    /// thread. Returns the bricks it gave.
+    @discardableResult
+    static func writeCodexInstructions(
         spaceID: String, task: String, launchDirectory: String, withBrief: Bool,
         now: TimeInterval = Date().timeIntervalSince1970, stateDirectory: URL = Persistence.stateDirectory
-    ) -> String? {
-        // Files only, before any git: a launch waits on this.
-        guard let store = store(spaceID: spaceID, stateDirectory: stateDirectory),
-              let served = ServedKnowledge.read(store.servedURL),
-              let repository = KnowledgeLocation.repository(of: (launchDirectory as NSString).appendingPathComponent("launch")),
-              served.bricks.contains(where: { $0.anchor == repository.anchor })
-        else { return nil }
-        let picked = KnowledgeDelivery.pick(served, anchor: repository.anchor, paths: changedFiles(in: launchDirectory), now: now, macOS: macOS)
-        guard !picked.isEmpty else { return nil }
-        var text = KnowledgeDelivery.text(picked, about: KnowledgeDelivery.branchFiles)
-        if withBrief, let briefURL = SpaceBrief.briefURL(spaceID: spaceID, stateDirectory: stateDirectory),
-           let brief = SpaceBrief.readBrief(at: briefURL).flatMap(SpaceBrief.body(of:)) {
-            text = SpaceBrief.injectedText(body: brief, briefPath: briefURL.path) + "\n\n" + text
+    ) -> [String] {
+        guard let store = store(spaceID: spaceID, stateDirectory: stateDirectory) else { return [] }
+        var picked: [ServedKnowledge.Brick] = []
+        if let served = ServedKnowledge.read(store.servedURL),
+           let repository = KnowledgeLocation.repository(of: (launchDirectory as NSString).appendingPathComponent("launch")),
+           served.bricks.contains(where: { $0.anchor == repository.anchor }) {
+            picked = KnowledgeDelivery.pick(served, anchor: repository.anchor, paths: changedFiles(in: launchDirectory), now: now, macOS: macOS)
         }
-        let file = store.folder.appendingPathComponent("codex/\(task).toml")
+        let brief = withBrief ? codexBrief(in: store) : ""
+        let bricks = picked.isEmpty ? "" : KnowledgeDelivery.text(picked, about: KnowledgeDelivery.branchFiles)
+        let text = [brief, bricks].filter { !$0.isEmpty }.joined(separator: "\n\n")
         do {
-            try KnowledgeStore.writePrivately(Data(SpaceBrief.tomlBasicString(text).utf8), to: file)
+            try KnowledgeStore.writePrivately(Data(SpaceBrief.tomlBasicString(text).utf8), to: codexFile(in: store, task: task))
         } catch {
             NiruxDebugLog.log("SpaceKnowledge: could not write Codex's instructions: \(error)")
-            return nil
+            return []
         }
-        KnowledgeUse.append(picked.map { KnowledgeUse(time: now, brick: $0.id, kind: .got, task: task, agent: "codex") }, in: store)
-        return file.path
+        if !picked.isEmpty {
+            KnowledgeUse.append(picked.map { KnowledgeUse(time: now, brick: $0.id, kind: .got, task: task, agent: "codex") }, in: store)
+        }
+        return picked.map(\.id)
     }
 
     /// The files the checkout holding `folder` changes from where its branch
@@ -164,8 +177,9 @@ enum SpaceKnowledge {
                 case 0?: return true
                 case 1?: return false
                 default:
-                    // An unknown commit isn't on the branch.
-                    return run(["cat-file", "-e", sha + "^{commit}"])?.terminationStatus == 128 ? false : nil
+                    // Missing from the store, it isn't on the branch; any other
+                    // error (git exits 128 for all) says nothing.
+                    return run(["rev-parse", "--verify", "--quiet", sha + "^{commit}"])?.terminationStatus == 1 ? false : nil
                 }
             },
             page: readsPages ? page : nil
@@ -254,16 +268,23 @@ enum SpaceKnowledge {
         guard loaded.readOnlyReason == nil else { return Pass() }
         let before = loaded.state
         var pass = Pass()
-        for use in KnowledgeUse.load(in: store) where use.kind == .corrected {
-            guard let brick = loaded.bricks[use.brick], use.time > (loaded.state(of: use.brick).reconfirmedAt ?? 0) else { continue }
-            if loaded.suspect(use.brick, because: "You wrote about “\(brick.subject)” in a task that had received it.", now: now) {
-                pass.suspected.append(use.brick)
-            }
+        // One correction is recorded and shown on the brick; corrections in
+        // two tasks since it was last confirmed stop serving it.
+        let corrections = Dictionary(grouping: KnowledgeUse.load(in: store).filter { $0.kind == .corrected }, by: \.brick)
+        for (id, uses) in corrections.sorted(by: { $0.key < $1.key }) {
+            guard let brick = loaded.bricks[id] else { continue }
+            let since = loaded.state(of: id).reconfirmedAt ?? 0
+            let tasks = Set(uses.filter { $0.time > since }.map { $0.task ?? "" })
+            guard tasks.count >= correctionsToSuspect,
+                  loaded.suspect(id, because: "You corrected agents about “\(brick.subject)” in \(tasks.count) tasks that had received it.", now: now)
+            else { continue }
+            pass.suspected.append(id)
         }
-        let daily = now - (loaded.state.dailyCheckAt ?? 0) >= dailyInterval
+        let housekeeping = now - (loaded.state.dailyCheckAt ?? 0) >= dailyInterval
         let standing = loaded.ordered.filter { loaded.state(of: $0.id).closedAt == nil }
         for (key, bricks) in Dictionary(grouping: standing, by: \.brick.scope.anchor) {
             guard let anchor = anchor(key: key) else { continue }
+            let daily = now - (loaded.state.dailyChecks?[key] ?? 0) >= dailyInterval
             let source: KnowledgeSource
             switch anchor.kind {
             case .gitRepository(let gitDir):
@@ -280,9 +301,13 @@ enum SpaceKnowledge {
             let wasFailing = Set(bricks.map(\.id).filter { loaded.state(of: $0).failedAt != nil })
             pass.closed += loaded.record(results, tip: source.tip, now: now)
             pass.failing += bricks.map(\.id).filter { !wasFailing.contains($0) && loaded.state(of: $0).failedAt != nil && loaded.state(of: $0).closedAt == nil }
+            // A check git or the network didn't answer is tried again at the next pass.
+            let decided = results.values.allSatisfy { checks in !checks.contains { if case .unknown = $0 { return true } else { return false } } }
+            guard decided else { continue }
             if let tip = source.tip { loaded.state.checkedTips[key] = tip }
+            if daily { loaded.state.dailyChecks = (loaded.state.dailyChecks ?? [:]).merging([key: now]) { $1 } }
         }
-        if daily {
+        if housekeeping {
             loaded.state.dailyCheckAt = now
             KnowledgeUse.trim(in: store, now: now)
             store.removeSessions(olderThan: 7, now: now)
@@ -294,6 +319,22 @@ enum SpaceKnowledge {
             NiruxDebugLog.log("SpaceKnowledge: could not save \(spaceID)'s knowledge: \(error)")
         }
         return pass
+    }
+
+    /// `brick` with each commit proof's SHA in full, as the repository of
+    /// `anchor` resolves it; one it can't resolve stays as given (its check
+    /// then refuses it).
+    static func resolvingCommits(of brick: KnowledgeBrick, anchor: SpaceAnchor) -> KnowledgeBrick {
+        guard case .gitRepository(let gitDir) = anchor.kind else { return brick }
+        var resolved = brick
+        resolved.proofs = brick.proofs.map { proof in
+            guard case .commit(let sha) = proof,
+                  let result = git(["rev-parse", "--verify", "--quiet", sha + "^{commit}"], in: gitDir, gitDir: gitDir), result.terminationStatus == 0
+            else { return proof }
+            let full = String(decoding: result.standardOutput, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            return full.count == 40 ? .commit(full) : proof
+        }
+        return resolved
     }
 
     /// Why `brick`'s proofs don't all hold now, at the base branch's tip
@@ -349,8 +390,7 @@ enum SpaceKnowledge {
         guard current != served, !(current == nil && served?.bricks.isEmpty != false) else { return }
         try store.writeServed(served)
         let codex = store.folder.appendingPathComponent("codex")
-        let briefURL = store.folder.deletingLastPathComponent().appendingPathComponent("brief.md")
-        let brief = SpaceBrief.readBrief(at: briefURL).flatMap(SpaceBrief.body(of:)).map { SpaceBrief.injectedText(body: $0, briefPath: briefURL.path) } ?? ""
+        let brief = codexBrief(in: store)
         for name in (try? FileManager.default.contentsOfDirectory(atPath: codex.path)) ?? [] where name.hasSuffix(".toml") {
             try? KnowledgeStore.writePrivately(Data(SpaceBrief.tomlBasicString(brief).utf8), to: codex.appendingPathComponent(name))
         }

@@ -346,7 +346,11 @@ final class ProjectMemoryPreview: NSView {
         if let macOS = brick.macOS { lines.append("Reviewed again on each new macOS (validated on macOS \(state.reconfirmedMacOS ?? macOS)).") }
         if status != nil {
             let reach = bricks.reach[id] ?? .init()
-            let corrections = reach.corrections == 0 ? "no correction followed" : "a correction followed in \(reach.corrections)"
+            let corrections = switch reach.corrections {
+            case 0: "no correction followed"
+            case 1: "a correction followed in 1 (a correction in another task stops serving it)"
+            default: "a correction followed in \(reach.corrections)"
+            }
             lines.append("")
             lines.append("Reached \(reach.tasks) task\(reach.tasks == 1 ? "" : "s"); \(corrections).")
             if let validated = brick.validatedAt { lines.append("Validated \(dateFormatter.string(from: Date(timeIntervalSince1970: validated))).") }

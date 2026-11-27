@@ -42,12 +42,15 @@ public enum ProofCheck: Equatable, Sendable {
 extension Proof {
     public func check(in source: KnowledgeSource) -> ProofCheck {
         let base = source.tip.map { "the base branch at \($0.prefix(7))" } ?? "the folder"
-        func reading(_ path: String, _ test: (String) -> ProofCheck) -> ProofCheck {
+        func raw(_ path: String, _ test: (String) -> ProofCheck) -> ProofCheck {
             switch source.file(path) {
             case .missing: return .fails("\(path) is gone from \(base).")
             case .unknown(let why): return .unknown(why)
-            case .data(let data): return test(KnowledgeText.normalized(String(decoding: data, as: UTF8.self)))
+            case .data(let data): return test(String(decoding: data, as: UTF8.self))
             }
+        }
+        func reading(_ path: String, _ test: (String) -> ProofCheck) -> ProofCheck {
+            raw(path) { test(KnowledgeText.normalized($0)) }
         }
         switch self {
         case .pullRequest(let number):
@@ -68,9 +71,9 @@ extension Proof {
             let words = KnowledgeText.normalized(text)
             return reading(path) { $0.contains(words) ? .holds : .fails("\(path) no longer says “\(Proof.clipped(text, 60))”.") }
         case .test(let path, let name):
-            return reading(path) { content in
-                ["func", "def", "fn", "function"].contains { content.contains("\($0) \(name)(") }
-                    ? .holds : .fails("\(path) no longer has the test \(name).")
+            // On the lines as written: a test commented out isn't one.
+            return raw(path) { content in
+                KnowledgeText.declares(content, function: name) ? .holds : .fails("\(path) no longer has the test \(name).")
             }
         case .page(let url, let quote):
             guard let page = source.page else { return .skipped }
@@ -89,7 +92,8 @@ extension Proof {
 }
 
 extension KnowledgeBrick {
-    /// Its proofs' checks, in order; the first failure closes it.
+    /// Its proofs' checks, in order (see `record`: a failure makes it
+    /// failing, a second one closes it).
     public func check(in source: KnowledgeSource) -> [ProofCheck] {
         proofs.map { $0.check(in: source) }
     }
@@ -166,6 +170,17 @@ public enum KnowledgeText {
             }
         }
         return result.hasSuffix(" ") ? String(result.dropLast()) : result
+    }
+
+    /// Whether a line of `content` that isn't a comment declares the
+    /// function `name` (`func`, `def`, `fn`, `function`).
+    public static func declares(_ content: String, function name: String) -> Bool {
+        let pattern = #"\b(func|def|fn|function)\s+"# + NSRegularExpression.escapedPattern(for: name) + #"\s*\("#
+        return content.split(whereSeparator: \.isNewline).contains { line in
+            let code = line.drop(while: \.isWhitespace)
+            return !["//", "/*", "*", "#", "--"].contains(where: code.hasPrefix)
+                && code.range(of: pattern, options: .regularExpression) != nil
+        }
     }
 
     /// A page's words: without its scripts, styles and tags, its common

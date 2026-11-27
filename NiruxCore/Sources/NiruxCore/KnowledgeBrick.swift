@@ -185,7 +185,7 @@ extension KnowledgeBrick {
     /// it concerns, at least one proof, each well formed.
     public var problem: String? {
         if let problem = Self.lineProblem(sentence, name: "sentence", range: 10...Self.maxSentenceLength) { return problem }
-        if sentence.range(of: #"[.!?;]\s+\p{Lu}"#, options: .regularExpression) != nil {
+        if !Self.isOneSentence(sentence) {
             return "sentence must be one sentence: put another fact in a brick of its own."
         }
         if let problem = Self.lineProblem(subject, name: "subject", range: 2...Self.maxSubjectLength) { return problem }
@@ -198,6 +198,21 @@ extension KnowledgeBrick {
             if let problem = Self.problem(of: proof) { return problem }
         }
         return nil
+    }
+
+    static let abbreviations: Set<String> = ["etc", "vs", "cf", "approx", "incl", "eg", "ie", "ex", "resp", "fig", "no", "nr", "dr", "mr", "mrs", "st"]
+
+    /// No end of a sentence before a capital, but a period after an
+    /// abbreviation ("e.g.", "etc.") or a number ("macOS 15.").
+    static func isOneSentence(_ text: String) -> Bool {
+        guard let regex = try? NSRegularExpression(pattern: #"(\S+)([.!?;])\s+\p{Lu}"#) else { return true }
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        return matches.allSatisfy { match in
+            guard let tokenRange = Range(match.range(at: 1), in: text), let markRange = Range(match.range(at: 2), in: text),
+                  text[markRange] == "." else { return false }
+            let token = text[tokenRange].trimmingCharacters(in: CharacterSet(charactersIn: "(\"'“‘"))
+            return token.contains(".") || token.allSatisfy({ $0.isNumber || $0 == "." }) || abbreviations.contains(token.lowercased())
+        }
     }
 
     static func problem(of proof: Proof) -> String? {

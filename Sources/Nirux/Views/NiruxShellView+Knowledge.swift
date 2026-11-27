@@ -78,19 +78,32 @@ extension NiruxShellView {
 
     // MARK: Codex, at its start
 
-    /// Codex's instructions for a launch in `workspace`: the brief file, or
-    /// one of its own when bricks apply (SpaceKnowledge.codexInstructions);
-    /// nil when the user's Codex config sets its own. A resumed thread holds
-    /// what it got: no git on the way of its launch.
+    /// Codex's instructions for a launch in `workspace`: in a space serving
+    /// bricks, a file of the task's own, the brief at once and the bricks
+    /// about its branch's changes written off the main thread as the column
+    /// starts (a launch line read first gets the brief alone); else the
+    /// brief file; nil when the user's Codex config sets its own. A resumed
+    /// thread holds what it got.
     func codexInstructionsFile(for workspace: WorkspaceState, launchDirectory: String, resumes: Bool) -> String? {
         let injection = spaceBriefInjection(for: workspace)
         guard !Self.codexConfigSetsDeveloperInstructions(launchDirectory: launchDirectory) else { return nil }
-        guard !resumes, SpaceDefaultsStore.defaults(forSpace: workspace.profileID).servesKnowledge,
-              let file = SpaceKnowledge.codexInstructions(
-                spaceID: workspace.profileID, task: workspace.id, launchDirectory: launchDirectory, withBrief: injection != nil
-              )
+        let spaceID = workspace.profileID
+        guard !resumes, SpaceDefaultsStore.defaults(forSpace: spaceID).servesKnowledge, let store = SpaceKnowledge.store(spaceID: spaceID),
+              FileManager.default.fileExists(atPath: store.servedURL.path)
         else { return injection?.codexInstructionsFile }
-        return file
+        let file = SpaceKnowledge.codexFile(in: store, task: workspace.id)
+        let brief = injection == nil ? "" : SpaceKnowledge.codexBrief(in: store)
+        do {
+            try KnowledgeStore.writePrivately(Data(SpaceBrief.tomlBasicString(brief).utf8), to: file)
+        } catch {
+            return injection?.codexInstructionsFile
+        }
+        let task = workspace.id
+        let withBrief = injection != nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            SpaceKnowledge.writeCodexInstructions(spaceID: spaceID, task: task, launchDirectory: launchDirectory, withBrief: withBrief)
+        }
+        return file.path
     }
 
     // MARK: propose_brick
@@ -125,11 +138,12 @@ extension NiruxShellView {
                 return DispatchQueue.main.async { answer("Nirux can’t tell which repository this brick is about: pass repo.", true) }
             }
             let now = Date().timeIntervalSince1970
-            let brick = KnowledgeBrick(
+            // Commits in full: a short SHA can turn ambiguous later.
+            let brick = SpaceKnowledge.resolvingCommits(of: KnowledgeBrick(
                 sentence: proposal.sentence, subject: proposal.subject, scope: .init(anchor: key, name: anchor.name, paths: proposal.paths),
                 proofs: proposal.proofs, macOS: proposal.macOS ? SpaceKnowledge.macOS : nil, replaces: proposal.replaces,
                 proposedBy: "the Lead"
-            )
+            ), anchor: anchor)
             var loaded = store.load()
             let reply: (String, Bool)
             if let refusal = loaded.refusal(of: brick, now: now, macOS: SpaceKnowledge.macOS) {

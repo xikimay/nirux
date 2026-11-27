@@ -267,6 +267,8 @@ public struct KnowledgeSession: Codable, Equatable, Sendable {
         }
         guard locked else { return nil }
         defer { flock(descriptor, LOCK_UN) }
+        // A session still at work keeps its record past the 7-day sweep.
+        futimes(descriptor, nil)
         var info = stat()
         guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_size <= 64 * 1024 else { return nil }
         var data = Data(count: Int(info.st_size))
@@ -285,23 +287,33 @@ public struct KnowledgeSession: Codable, Equatable, Sendable {
 // MARK: - Corrections
 
 public enum KnowledgeCorrection {
-    /// Words that say something is wrong, in English and French, folded.
+    /// Words that say a fact is wrong, folded; never a plain negation, which
+    /// ordinary instructions hold ("the layer is not updating, fix it").
     static let cues: Set<String> = [
-        "no", "not", "nope", "wrong", "incorrect", "isn", "doesn", "don", "aren", "wasn", "weren", "didn", "won", "shouldn", "couldn",
-        "wouldn", "hasn", "haven", "never", "actually", "instead",
-        "rather", "stop", "mistake", "false", "non", "pas", "faux", "fausse", "mauvais", "mauvaise", "erreur", "plutot", "jamais",
-        "arrete", "ne", "n"
+        "wrong", "incorrect", "mistaken", "mistake", "untrue", "faux", "fausse", "erreur", "errone", "erronee", "inexact", "inexacte"
     ]
+    static let noes: Set<String> = ["no", "non", "nope", "nah"]
 
     /// The bricks whose subject `prompt` names, whole words, in any case and
-    /// accent, when it also says something is wrong ("no", "pas"…): the
-    /// user correcting an agent about them.
+    /// accent, in a sentence saying it is wrong: one holding a cue word,
+    /// one opening on "No," or "Non,", or one right after a sentence that is
+    /// only that. Conservative by design: a missed correction costs less
+    /// than knowledge taken away by a misread instruction.
     public static func named(in prompt: String, among bricks: [ServedKnowledge.Brick]) -> [String] {
-        let text = folded(prompt)
-        guard text.split(separator: " ").contains(where: { cues.contains(String($0)) }) else { return [] }
+        var correcting: [String] = []
+        var afterNo = false
+        for sentence in prompt.components(separatedBy: CharacterSet(charactersIn: ".!?;\n")) {
+            let trimmed = sentence.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            let words = folded(trimmed)
+            let tokens = words.split(separator: " ").map(String.init)
+            let opensOnNo = trimmed.range(of: #"^(no|non|nope|nah)\s*[,:—–-]"#, options: [.regularExpression, .caseInsensitive]) != nil
+            if afterNo || opensOnNo || tokens.contains(where: cues.contains) { correcting.append(words) }
+            afterNo = tokens.count == 1 && noes.contains(tokens[0])
+        }
         return bricks.filter { brick in
-            let subject = folded(brick.subject)
-            return subject.count > 2 && text.contains(subject)
+            let subject = folded(brick.subject).trimmingCharacters(in: .whitespaces)
+            return subject.count > 2 && correcting.contains { $0.contains(" \(subject) ") }
         }.map(\.id)
     }
 
