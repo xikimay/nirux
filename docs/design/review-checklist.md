@@ -12,7 +12,7 @@ At most 7 lines under one header, about 1,700 characters on 2026-11-27:
     - listed-change-untested · 11 tasks (#828, #811, #824, #818, #804 and 6 more) · latest: “#864: loading the saved flag, the click wiring and the Fresh start / Close branches are untested.”
     - unbounded-wait · 8 tasks (fix/queue-merge-stale-open-prs, #816, #808, #799, #798 and 3 more) · latest: “The waiter is answered only by a read nothing reset while it ran…”
 
-- **Derived, never written by hand:** the kinds `record_review` kept in the last 30 days (`review-findings.jsonl`) that showed up in two tasks or more, ordered as `ReviewFindings.kinds` orders them (most tasks, then the latest seen). Each line holds the kind, its tasks (the latest first, 5 at most: a task's pull request, else its branch) and its latest finding. The list changes as the findings do. No new `record_review` field.
+- **Derived, never written by hand:** the kinds `record_review` kept in the last 30 days (`review-findings.jsonl`) that showed up in two tasks or more, ordered as `ReviewFindings.kinds` orders them (most tasks, then the latest seen). Each line holds the kind, its tasks (by their latest sighting, the latest first, 5 at most: a task's pull request, else its branch) and its latest finding. The list changes as the findings do. No new `record_review` field.
 - **Nothing at session start:** workers load nothing more. The brief, the handover, the templates and `propose_rule` don't change.
 
 ## Where it reaches the reviewer
@@ -33,7 +33,7 @@ SubagentStart (Claude Code 2.0.43) joins the installed hook events; it is older 
 
 `forked-skill.json` isn't documented. If Claude Code stops writing it, or runs a review without a fork, the list stops reaching reviewers, so that loss is said:
 
-- The receiver notes each review start the hooks name by documented means (a typed `/code-review` or `/premortem`, a Skill call of either), while a list is due, and each list it gives. Both go to `review-checklist.jsonl` (SpaceLog, 8 days).
+- The receiver notes each `/code-review` start the hooks name by documented means (typed, or a Skill call), while a list is due, and each list it gives. Both go to `review-checklist.jsonl` (SpaceLog, 8 days). Receivers only append to it: a trim replaces the file another receiver may be appending to, so the app trims it at launch. Not noted: `/code-review ultra` (it runs in the cloud), a Skill call whose result says it ran otherwise than as a background fork (`status` other than `forked` with `background: true`), and `/premortem` (only `/code-review` was measured running as a fork; a premortem may run inline). A forked premortem still gets the list.
 - The daily pass counts, per session, the starts a list reached (one list per start, in either order: a fork may start before its Skill call's PostToolUse). When one was missed, the digest says it in a kept section, and the pass runs on it: "The review checklist reached 0 of 3 reviewers started in this window…".
 
 ## Settings
@@ -43,6 +43,7 @@ SubagentStart (Claude Code 2.0.43) joins the installed hook events; it is older 
 ## Not covered
 
 - Codex and Antigravity: they get no list (no hook reaches their reviewers).
-- A review Claude Code runs inline (no fork) gets no list; the daily pass counts it as missed.
-- `/code-review ultra` runs in the cloud: its start counts as missed too.
+- A `/code-review` a foreground subagent runs (a foreground fork): Claude Code writes no forked-skill file for it (none of 31 on 2.1.321–2.1.331, by the transcripts on this Mac). On 2.1.332 a background subagent's Skill call ran as a background fork, with the file, and got the list.
+- A review Claude Code runs inline (no fork) gets no list; the daily pass counts a `/code-review` run inline as missed.
+- A start and its list land within milliseconds; a pair split by the window's edge counts as missed once.
 - Adversarial reviews by agents a task starts itself: SubagentStart doesn't say what they are, and a loose match on their prompt would fire on ordinary prompts.

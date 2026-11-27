@@ -357,7 +357,8 @@ final class SpaceDefaultsTests: XCTestCase {
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("setup"), withIntermediateDirectories: true)
         try Data("npm ci\n".utf8).write(to: folder.appendingPathComponent("setup/web-1.sh"))
         try Data("Goals.\n".utf8).write(to: folder.appendingPathComponent("brief.md"))
-        for name in [RuleProposalStore.fileName, LoopLog.lines.fileName, ReviewFindings.lines.fileName, DailyPassState.fileName] {
+        let logs = [RuleProposalStore.fileName, LoopLog.lines.fileName, ReviewFindings.lines.fileName, ReviewChecklist.reaches.fileName]
+        for name in logs + [DailyPassState.fileName] {
             try Data("{}\n".utf8).write(to: folder.appendingPathComponent(name))
         }
         let settings = folder.appendingPathComponent(ClaudeSpaceSettings.fileName)

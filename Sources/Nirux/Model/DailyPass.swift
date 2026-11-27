@@ -645,7 +645,7 @@ enum DailyPass {
         let (reached, started) = facts.checklistReach
         guard reached < started else { return nil }
         return section("Review checklist", [
-            "- The review checklist reached \(reached) of \(started) reviewers started in this window (/code-review, /premortem): "
+            "- The review checklist reached \(reached) of \(started) reviewers started in this window (/code-review): "
                 + "a Nirux bug, or Claude Code no longer forks reviews the way Nirux reads. Start a task to find out."
         ], total: 1)
     }

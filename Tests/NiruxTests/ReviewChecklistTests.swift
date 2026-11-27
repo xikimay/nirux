@@ -63,12 +63,14 @@ final class ReviewChecklistTests: XCTestCase {
             entry(["unbounded-wait", "untested"], task: "feat/b", pullRequest: 2, at: now - 4 * day),
             entry(["unbounded-wait", "solo"], task: "feat/c", at: now - 3 * day),
             entry(["solo"], task: "feat/c", at: now - 2 * day),
+            // A task seen first comes first once reviewed again.
+            entry(["unbounded-wait"], task: "feat/a", pullRequest: 1, at: now - day),
             entry(["old-pair"], task: "feat/d", at: now - 31 * day),
             entry(["old-pair"], task: "feat/e", at: now - 31 * day)
         ]
         XCTAssertEqual(ReviewChecklist.text(entries, now: now), [
             ReviewChecklist.header,
-            "- unbounded-wait · 3 tasks (feat/c, #2, #1) · latest: “unbounded-wait in feat/c”",
+            "- unbounded-wait · 3 tasks (#1, feat/c, #2) · latest: “unbounded-wait in feat/a”",
             "- untested · 2 tasks (#2, #1) · latest: “untested in feat/b”"
         ].joined(separator: "\n"))
         XCTAssertNil(ReviewChecklist.text(Array(entries.suffix(3)), now: now), "no kind in two tasks: no list")
@@ -98,14 +100,20 @@ final class ReviewChecklistTests: XCTestCase {
         let hook = try XCTUnwrap(json["hookSpecificOutput"] as? [String: Any])
         XCTAssertEqual(hook["hookEventName"] as? String, "SubagentStart")
         XCTAssertEqual(hook["additionalContext"] as? String, ReviewChecklist.text(entries, now: now))
-        XCTAssertEqual(reaches(), [ReviewChecklist.Reach(time: now, session: "session-1", kind: .given)])
+        XCTAssertNotNil(ReviewChecklist.subagentStartOutput(
+            try forkStarted("a7", skill: "plugin:premortem"), environment: environment, stateDirectory: state, now: now + 1
+        ))
+        XCTAssertEqual(reaches(), [
+            ReviewChecklist.Reach(time: now, session: "session-1", kind: .given), ReviewChecklist.Reach(time: now + 1, session: "session-1", kind: .given)
+        ])
     }
 
     /// Any other subagent, a skill only named like a review, or a space
     /// whose switch is off: nothing given, nothing noted.
     func testOtherSubagentsGetNothing() throws {
         record([entry(["unbounded-wait"], task: "feat/a", at: now - day), entry(["unbounded-wait"], task: "feat/b", at: now - day)])
-        for (agent, skill) in [("a2", nil), ("a3", "simplify"), ("a4", "adversarial-review")] as [(String, String?)] {
+        let others: [(String, String?)] = [("a2", nil), ("a3", "simplify"), ("a4", "adversarial-review"), ("a6", "code-style-review")]
+        for (agent, skill) in others {
             let payload = try forkStarted(agent, skill: skill)
             XCTAssertNil(ReviewChecklist.subagentStartOutput(payload, environment: environment, stateDirectory: state, now: now), agent)
         }
@@ -117,18 +125,34 @@ final class ReviewChecklistTests: XCTestCase {
         XCTAssertEqual(reaches(), [])
     }
 
-    /// A typed /code-review or a Skill call is noted while a list is due;
-    /// a prompt that only says "adversarial" isn't.
+    /// A /code-review start, typed or a Skill call run as a background fork,
+    /// is noted while a list is due. Not `ultra` (the cloud), a foreground
+    /// fork (no forked-skill file), a premortem (it may run inline), nor a
+    /// prompt that only says "adversarial".
     func testReviewStartsAreNotedWhileAListIsDue() throws {
-        let start = AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "session-1", reviewPasses: ["codeReview"])
-        ReviewChecklist.noteReviewStart(start, environment: environment, stateDirectory: state, now: now)
+        let typed = AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "session-1", reviewPasses: ["codeReview"])
+        let note = { (event: AgentHookEvent, payload: [String: Any], time: TimeInterval) in
+            ReviewChecklist.noteReviewStart(event, payload: payload, environment: self.environment, stateDirectory: self.state, now: time)
+        }
+        note(typed, ["prompt": "/code-review high"], now)
         XCTAssertEqual(reaches(), [], "no list due yet")
         record([entry(["unbounded-wait"], task: "feat/a", at: now - day), entry(["unbounded-wait"], task: "feat/b", at: now - day)])
-        let adversarial = AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "session-1", reviewPasses: ["adversarial"])
-        ReviewChecklist.noteReviewStart(adversarial, environment: environment, stateDirectory: state, now: now)
-        let skill = AgentHookEvent(kind: .claude, name: .postToolUse, sessionID: "session-1", toolName: "Skill", reviewPasses: ["premortem"])
-        ReviewChecklist.noteReviewStart(skill, environment: environment, stateDirectory: state, now: now + 1)
-        XCTAssertEqual(reaches(), [ReviewChecklist.Reach(time: now + 1, session: "session-1", kind: .started)])
+        note(typed, ["prompt": "/code-review ultra 812"], now + 1)
+        let skill = { (pass: String) in
+            AgentHookEvent(kind: .claude, name: .postToolUse, sessionID: "session-1", toolName: "Skill", reviewPasses: [pass])
+        }
+        note(skill("codeReview"), ["tool_input": ["skill": "code-review", "args": "ultra"]], now + 2)
+        note(skill("premortem"), ["tool_input": ["skill": "premortem"]], now + 3)
+        note(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "session-1", reviewPasses: ["adversarial"]), [:], now + 3)
+        let foreground: [String: Any] = ["status": "forked", "agentId": "a1", "result": "No findings."]
+        note(skill("codeReview"), ["tool_input": ["skill": "code-review", "args": "high"], "tool_response": foreground], now + 4)
+        let background: [String: Any] = ["status": "forked", "background": true, "agentId": "a2"]
+        note(skill("codeReview"), ["tool_input": ["skill": "code-review", "args": "high"], "tool_response": background], now + 5)
+        note(typed, ["prompt": "/code-review"], now + 6)
+        XCTAssertEqual(reaches(), [
+            ReviewChecklist.Reach(time: now + 5, session: "session-1", kind: .started),
+            ReviewChecklist.Reach(time: now + 6, session: "session-1", kind: .started)
+        ])
     }
 
     /// Per session, a start counts as reached once a list was given there,

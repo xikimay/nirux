@@ -573,7 +573,7 @@ enum AgentHookCLI {
               let termination = TerminationWatch()
         else {
             append(event)
-            ReviewChecklist.noteReviewStart(event, environment: env, now: now)
+            ReviewChecklist.noteReviewStart(event, payload: raw, environment: env, now: now)
             // Queued first, so the app hears of the session before the ledger
             // is read: a Mission child's claude whose conversation lacks the
             // answers its questions got gets them back as context. Not a

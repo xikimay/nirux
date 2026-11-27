@@ -22,7 +22,9 @@ enum ReviewChecklist {
         let kinds = ReviewFindings.kinds(entries.filter { $0.time >= since }).filter { $0.taskCount > 1 }.prefix(maxKinds)
         guard !kinds.isEmpty else { return nil }
         let lines = kinds.map { kind in
-            let handles = Array(kind.handles.reversed())
+            // Each task by its latest sighting, the latest first.
+            let lastSightings = Dictionary(kind.sightings.map { ($0.identity, $0) }, uniquingKeysWith: { _, last in last }).values
+            let handles = lastSightings.sorted { ($0.time, $0.handle) > ($1.time, $1.handle) }.map(\.handle)
             let more = handles.count > maxHandles ? " and \(handles.count - maxHandles) more" : ""
             let latest = kind.sightings.last.map { " · latest: “\($0.text)”" } ?? ""
             return "- \(kind.name) · \(kind.taskCount) tasks (\(handles.prefix(maxHandles).joined(separator: ", "))\(more))\(latest)"
@@ -49,7 +51,7 @@ enum ReviewChecklist {
               let space = Persistence.spaceID(environment: environment, stateDirectory: stateDirectory),
               let text = due(spaceID: space, stateDirectory: stateDirectory, now: now)
         else { return nil }
-        reaches.append(Reach(time: now, session: session, kind: .given), spaceID: space, stateDirectory: stateDirectory)
+        reaches.append(Reach(time: now, session: session, kind: .given), spaceID: space, stateDirectory: stateDirectory, trims: false)
         return try? JSONSerialization.data(withJSONObject: [
             "hookSpecificOutput": ["hookEventName": "SubagentStart", "additionalContext": text]
         ])
@@ -72,17 +74,26 @@ enum ReviewChecklist {
         return object["skillName"] as? String
     }
 
-    /// A review start the hooks say by documented means (a typed command,
-    /// a Skill call), noted while a list is due: the daily pass compares
-    /// them with the lists given.
+    /// A `/code-review` start the hooks say by documented means (a typed
+    /// command, a Skill call), noted while a list is due: the daily pass
+    /// compares them with the lists given. Only it was measured running as a
+    /// fork; `ultra` runs in the cloud. A Skill call that ran otherwise than
+    /// as a background fork (a foreground subagent's, inline) had no
+    /// forked-skill file on 2.1.321–2.1.332, so gets no list: not counted.
     static func noteReviewStart(
-        _ event: AgentHookEvent, environment: [String: String], stateDirectory: URL = Persistence.stateDirectory, now: TimeInterval
+        _ event: AgentHookEvent, payload: [String: Any], environment: [String: String],
+        stateDirectory: URL = Persistence.stateDirectory, now: TimeInterval
     ) {
-        guard !passes.isDisjoint(with: event.passes), let session = event.sessionID, !session.isEmpty,
+        let arguments = ((payload["tool_input"] as? [String: Any])?["args"] as? String ?? payload["prompt"] as? String ?? "")
+            .split(whereSeparator: \.isWhitespace).prefix(2)
+        let response = payload["tool_response"] as? [String: Any]
+        let ranOtherwise = response?["status"] != nil && !(response?["status"] as? String == "forked" && response?["background"] as? Bool == true)
+        guard event.passes.contains(.codeReview), !arguments.contains(where: { $0.lowercased() == "ultra" }), !ranOtherwise,
+              let session = event.sessionID, !session.isEmpty,
               let space = Persistence.spaceID(environment: environment, stateDirectory: stateDirectory),
               due(spaceID: space, stateDirectory: stateDirectory, now: now) != nil
         else { return }
-        reaches.append(Reach(time: now, session: session, kind: .started), spaceID: space, stateDirectory: stateDirectory)
+        reaches.append(Reach(time: now, session: session, kind: .started), spaceID: space, stateDirectory: stateDirectory, trims: false)
     }
 
     // MARK: - Reach
@@ -97,7 +108,8 @@ enum ReviewChecklist {
         enum CodingKeys: String, CodingKey { case time = "t", session = "s", kind = "k" }
     }
 
-    /// Written by hook receivers, read by the daily pass (a week at most).
+    /// Written by hook receivers, which never trim it (another may append
+    /// meanwhile), trimmed by the app at launch, read by the daily pass.
     static let reaches = SpaceLog<Reach>(fileName: "review-checklist.jsonl", keptDays: 8, maxFileBytes: 500_000) { $0.time }
 
     /// The review starts in `window` a list reached, of those noted: in
