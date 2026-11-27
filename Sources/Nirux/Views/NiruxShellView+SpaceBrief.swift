@@ -39,13 +39,12 @@ extension NiruxShellView {
         SpaceBrief.prepareInjection(spaceID: workspace.profileID)
     }
 
-    /// The Codex brief file, unless one of the user's Codex configs already
-    /// sets `developer_instructions`, which Nirux must not override: the user
-    /// config (`$CODEX_HOME` when Nirux sees it, else ~/.codex) and project
-    /// configs (`.codex/config.toml`) from `launchDirectory` up to the home
-    /// folder.
-    static func codexBriefFile(from injection: SpaceBrief.Injection?, launchDirectory: String) -> String? {
-        guard let injection else { return nil }
+    /// Whether one of the user's Codex configs that a launch in
+    /// `launchDirectory` reads sets `developer_instructions`, which Nirux
+    /// must not override: the user config (`$CODEX_HOME` when Nirux sees it,
+    /// else ~/.codex) and project configs (`.codex/config.toml`) from
+    /// `launchDirectory` up to the home folder.
+    static func codexConfigSetsDeveloperInstructions(launchDirectory: String) -> Bool {
         let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
         let codexHome = ProcessInfo.processInfo.environment["CODEX_HOME"]
             .map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(".codex")
@@ -55,12 +54,8 @@ extension NiruxShellView {
             configs.append(folder.appendingPathComponent(".codex/config.toml"))
             folder.deleteLastPathComponent()
         }
-        for config in configs {
-            if let text = try? String(contentsOf: config, encoding: .utf8),
-               SpaceBrief.codexConfigSetsDeveloperInstructions(text) {
-                return nil
-            }
+        return configs.contains { config in
+            (try? String(contentsOf: config, encoding: .utf8)).map(SpaceBrief.codexConfigSetsDeveloperInstructions) == true
         }
-        return injection.codexInstructionsFile
     }
 }

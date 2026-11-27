@@ -290,6 +290,7 @@ extension NiruxShellView {
             reviewChecklist: defaults?.defaults.reviewChecklistIsOn ?? false,
             groupsResults: defaults?.defaults.groupsResults ?? false,
             freshStart: defaults?.defaults.leadStartsFreshWhenCold ?? false,
+            dayPlan: defaults?.defaults.plansTheDay ?? false,
             lastPass: lastDailyPassText(inSpace: space.id),
             canChangeDefaults: defaults?.isWritable ?? false
         )
@@ -320,6 +321,13 @@ extension NiruxShellView {
     func setLeadFreshStart(_ on: Bool, spaceID: String) {
         changeSpaceDefaults(spaceID: spaceID) { $0.leadFreshStart = on ? nil : false }
         refreshSpaceSettingsLead()
+    }
+
+    /// "Day plan (preview)": off is the default, so off writes nothing.
+    func setDayPlan(_ on: Bool, spaceID: String) {
+        changeSpaceDefaults(spaceID: spaceID) { $0.dayPlan = on ? true : nil }
+        refreshSpaceSettingsLead()
+        updateSidebar()
     }
 
     /// Saves `change` to the space's defaults.json at once. An unreadable

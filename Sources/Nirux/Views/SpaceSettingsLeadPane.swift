@@ -29,6 +29,8 @@ final class SpaceSettingsLeadPane: NSObject {
         var groupsResults = true
         /// "Fresh start after an idle hour" (`SpaceDefaults.leadFreshStart`).
         var freshStart = true
+        /// "Day plan (preview)" (`SpaceDefaults.dayPlan`).
+        var dayPlan = false
         /// "Last pass: …", nil before the first.
         var lastPass: String?
         /// False while the space's defaults.json can't be written.
@@ -63,6 +65,7 @@ final class SpaceSettingsLeadPane: NSObject {
         var setReviewChecklist: @MainActor (Bool) -> Void = { _ in }
         var setGroupsResults: @MainActor (Bool) -> Void = { _ in }
         var setFreshStart: @MainActor (Bool) -> Void = { _ in }
+        var setDayPlan: @MainActor (Bool) -> Void = { _ in }
     }
 
     static let width: CGFloat = 680
@@ -99,6 +102,8 @@ final class SpaceSettingsLeadPane: NSObject {
     private let groupResultsRow = NSStackView()
     let freshStartSwitch = NSSwitch()
     private let freshStartRow = NSStackView()
+    let dayPlanSwitch = NSSwitch()
+    private let dayPlanRow = NSStackView()
     private let alwaysSection = NSStackView()
 
     private(set) var model: Model
@@ -146,6 +151,9 @@ final class SpaceSettingsLeadPane: NSObject {
         freshStartSwitch.state = model.freshStart ? .on : .off
         freshStartSwitch.isEnabled = model.canChangeDefaults
         freshStartRow.isHidden = model.isGeneral
+        dayPlanSwitch.state = model.dayPlan ? .on : .off
+        dayPlanSwitch.isEnabled = model.canChangeDefaults
+        dayPlanRow.isHidden = model.isGeneral
         alwaysSection.isHidden = model.isGeneral
     }
 
@@ -201,6 +209,13 @@ final class SpaceSettingsLeadPane: NSObject {
         sender.state = model.groupsResults ? .on : .off
         guard !model.isGeneral, model.canChangeDefaults, wanted != model.groupsResults else { return }
         actions.setGroupsResults(wanted)
+    }
+
+    @objc func dayPlanChanged(_ sender: NSSwitch) {
+        let wanted = sender.state == .on
+        sender.state = model.dayPlan ? .on : .off
+        guard !model.isGeneral, model.canChangeDefaults, wanted != model.dayPlan else { return }
+        actions.setDayPlan(wanted)
     }
 
     @objc func freshStartChanged(_ sender: NSSwitch) {
@@ -318,6 +333,11 @@ final class SpaceSettingsLeadPane: NSObject {
                        title: "Fresh start after an idle hour",
                        hint: "With 200k of context or more, a Claude Lead idle for an hour starts a new conversation: "
                            + "its next message would write the whole context again. Its tasks, questions and brief stay.")
+        buildSwitchRow(dayPlanRow, control: dayPlanSwitch, action: #selector(dayPlanChanged(_:)),
+                       title: "Day plan (preview)",
+                       hint: "The day planned with the Lead, in the sidebar: features that fold, to-dos, the Lead's lines and "
+                           + "planned sessions. Still being built: nothing is edited there yet. Agents running now get its tools "
+                           + "when they next start.")
         agentPopup.addItems(withTitles: CodingAgent.launchable.map(\.productName))
         agentPopup.target = self
         agentPopup.action = #selector(agentChanged(_:))
@@ -325,7 +345,8 @@ final class SpaceSettingsLeadPane: NSObject {
         agentPopup.toolTip = "Default agent when the Lead is stopped"
         agentRow.setViews([NSTextField(labelWithString: "Agent"), agentPopup], in: .leading)
         let switches = NSStackView(views: [
-            switchRow, agentRow, startsTasksRow, mergeQueueSection, dailyPassRow, reviewChecklistRow, freshStartRow, groupResultsRow
+            switchRow, agentRow, startsTasksRow, mergeQueueSection, dailyPassRow, reviewChecklistRow, freshStartRow, groupResultsRow,
+            dayPlanRow
         ])
         switches.orientation = .vertical
         switches.alignment = .leading

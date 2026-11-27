@@ -40,7 +40,7 @@ final class ThemeGuardTests: XCTestCase {
     static let amberFiles: Set<String> = [
         "Views/BoardStagesLineView.swift", "Views/BoardStagesMergedView.swift", "Views/ColumnHeaderView.swift",
         "Views/CountBadge.swift", "Views/IconRail.swift", "Views/SidebarApprovalBlockRenderer.swift",
-        "Views/SidebarCardLayout.swift", "Views/SidebarCatchUp.swift", "Views/SidebarRenderer.swift",
+        "Views/SidebarCardLayout.swift", "Views/SidebarCatchUp.swift", "Views/SidebarPlanRowRenderer.swift", "Views/SidebarRenderer.swift",
         "Views/SidebarView+Rendering.swift", "Views/SidebarWorkspaceCardRenderer.swift", "Views/StateIcon.swift",
         "Views/WaitingTaskView.swift"
     ]

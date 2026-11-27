@@ -23,6 +23,8 @@ extension Plan {
         public struct Loaded: Equatable, Sendable {
             public var plan: Plan
             public var readOnlyReason: String?
+            /// It couldn't be read just now: the next read may.
+            public var readsAgain = false
         }
 
         private struct File: Codable {
@@ -35,7 +37,7 @@ extension Plan {
             case .missing:
                 return Loaded(plan: Plan())
             case .unreadableBytes:
-                return Loaded(plan: Plan(), readOnlyReason: "\(Self.fileName) can't be read just now: try again.")
+                return Loaded(plan: Plan(), readOnlyReason: "\(Self.fileName) can't be read just now: try again.", readsAgain: true)
             case .tooLarge, .notARegularFile:
                 return Loaded(plan: Plan(), readOnlyReason: "\(Self.fileName) isn't a small regular file: Nirux leaves it alone.")
             case .data(let data):

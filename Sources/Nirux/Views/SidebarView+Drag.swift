@@ -70,10 +70,17 @@ extension SidebarView {
     private func makeWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) -> SidebarWorkspaceDrag? {
         // The Lead stays on top, a Mission child under its parent: a press
         // on either is a click. A card drags among the cards with no parent.
-        guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }), !dragged.isLead, !dragged.isNested
+        guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }), !dragged.isLead, !dragged.isNested,
+              !inFeatureIDs.contains(dragged.id)
         else { return nil }
+        // A day plan feature's tasks, and their sub-tasks, stay in it.
         let section = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive && !$0.isLead }
-        let group = section.filter { !$0.isNested }
+        var inFeature = false
+        let listed = section.filter { info in
+            if !info.isNested { inFeature = inFeatureIDs.contains(info.id) }
+            return !inFeature
+        }
+        let group = listed.filter { !$0.isNested }
         let frameOf = { (info: WorkspaceInfo) in
             self.hitAreas.first { area in
                 if case .workspace(let index) = area.region { return index == info.index }
@@ -83,7 +90,7 @@ extension SidebarView {
         // A card and the children listed under it are one drop target: the
         // line between two cards falls below the first one's children.
         var frames: [NSRect] = []
-        for info in section {
+        for info in listed {
             guard let frame = frameOf(info) else { continue }
             if info.isNested, let last = frames.popLast() {
                 frames.append(last.union(frame))
@@ -125,6 +132,16 @@ extension SidebarView {
         updateInsertionIndicator(slot: slot, drag: drag)
     }
 
+    /// A drop's place among the tasks that drag, as the store counts it: among all the tasks, a day plan feature's
+    /// included.
+    func storePosition(_ target: Int, draggedID: String) -> Int {
+        guard !inFeatureIDs.isEmpty, let dragged = lastInfos.first(where: { $0.id == draggedID }) else { return target }
+        let tasks = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive && !$0.isLead && !$0.isNested }
+        let dragging = tasks.filter { !inFeatureIDs.contains($0.id) }
+        guard dragging.indices.contains(target) else { return target }
+        return tasks.firstIndex { $0.id == dragging[target].id } ?? target
+    }
+
     /// mouseUp: resolve the workspace by ID against the freshest data
     /// (`finishWorkspaceDrag` just applied any deferred update) — store
     /// indices captured at mouseDown may have shifted. A gesture that
@@ -137,7 +154,7 @@ extension SidebarView {
         if drag.isDragging,
            let slot = drag.currentSlot,
            let target = SidebarDragMath.targetPosition(slot: slot, draggedPosition: drag.position) {
-            onWorkspaceReordered?(currentIndex, target)
+            onWorkspaceReordered?(currentIndex, storePosition(target, draggedID: drag.workspaceID))
         } else {
             clickRow(currentIndex)
         }

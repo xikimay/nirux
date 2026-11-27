@@ -57,6 +57,28 @@ final class MemorySearchToolTests: XCTestCase {
         XCTAssertTrue(search(["query": "missing term"]).contains("No matching"))
     }
 
+    func testBricksAreFoundOnlyWhileAgentsMayGetThem() throws {
+        let store = try XCTUnwrap(SpaceKnowledge.store(spaceID: "sample", stateDirectory: state))
+        func brick(_ sentence: String, _ number: Int, validated: Bool = true) -> KnowledgeBrick {
+            KnowledgeBrick(
+                sentence: sentence, subject: "café build", scope: .init(anchor: "git:/x/.git", name: "x", paths: ["Sources/**"]),
+                proofs: [.file(path: "a.swift"), .pullRequest(number)], validatedAt: validated ? 1 : nil
+            )
+        }
+        let open = brick("The café build signs with the team's key on CI.", 1)
+        let closed = brick("The café build skipped signing before November.", 2)
+        var knowledge = KnowledgeState()
+        for brick in [open, closed] { knowledge.bricks[try store.add(brick)] = BrickState() }
+        knowledge.bricks[closed.id]?.closedAt = 5
+        knowledge.proposals = [BrickProposal(brick: brick("The café build waits for the notary each time.", 3, validated: false), proposedAt: 2)]
+        try store.save(knowledge, now: 6)
+
+        let answer = search(["query": "cafe build"])
+        XCTAssertEqual(answer, "[When relevant · brick \(open.id), Sources/**] The café build signs with the team's key on CI. (proof: a.swift · PR #1)")
+        try write(#"{"schemaVersion": 1, "knowledgeBricks": false}"#, to: state.appendingPathComponent("projects/sample/defaults.json"))
+        XCTAssertEqual(search(["query": "cafe build"]), "No matching project memory.", "the space's switch is off")
+    }
+
     func testNoMemoryAndDisabledAutoMemoryAreReadOnly() throws {
         var outside = context
         outside.environment.removeValue(forKey: "NIRUX_PROFILE_ID")

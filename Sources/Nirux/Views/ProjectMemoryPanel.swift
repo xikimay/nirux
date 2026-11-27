@@ -58,6 +58,8 @@ final class ProjectMemoryPanel: NSObject {
         var save: @MainActor (ProjectMemory.Target, String) -> Bool = { _, _ in false }
         var add: @MainActor (ProjectMemoryAddSheet.Item) -> Bool = { _ in false }
         var delete: @MainActor (ProjectMemory.Target) -> Bool = { _ in false }
+        /// A decision about a brick or a proposal, by id.
+        var brick: @MainActor (String, ProjectMemoryPreview.BrickAction) -> Bool = { _, _ in false }
         /// Asks `alert`'s question; true on its first button.
         var confirm: @MainActor (NSAlert) -> Bool = { $0.runModal() == .alertFirstButtonReturn }
     }
@@ -267,6 +269,7 @@ final class ProjectMemoryPanel: NSObject {
         deleteButton?.isEnabled = !isWriting && target != nil
         saveButton?.isEnabled = !isWriting
         preview?.scopeControl.isEnabled = !isWriting
+        preview?.setBrickActionsEnabled(!isWriting)
     }
 
     static func emptyText(model: Model, filtered: Bool) -> String {
@@ -428,6 +431,21 @@ final class ProjectMemoryPanel: NSObject {
         // meanwhile can't turn it into another item.
         guard actions.confirm(alert) else { return }
         _ = write { actions.delete(target) }
+    }
+
+    /// Closing a brick is for good: asked first.
+    private func decideSelectedBrick(_ action: ProjectMemoryPreview.BrickAction) {
+        guard !isWriting, let entry = selectedEntry, let (id, _, _) = model?.knowledge.brick(of: entry) else { return NSSound.beep() }
+        if action == .close {
+            let alert = NSAlert()
+            alert.messageText = "Close this brick?"
+            alert.informativeText = "Agents stop getting it, for good: a brick is never edited. If the fact changed, "
+                + "a new brick replaces it."
+            alert.addButton(withTitle: "Close Brick").hasDestructiveAction = true
+            alert.addButton(withTitle: "Cancel")
+            guard actions.confirm(alert) else { return }
+        }
+        _ = write { actions.brick(id, action) }
     }
 
     /// A memory moved to Always loses its file to the Trash: asked first.
@@ -736,6 +754,7 @@ final class ProjectMemoryPanel: NSObject {
         let preview = ProjectMemoryPreview(frame: .zero)
         preview.onLink = { [weak self] fileName in self?.reveal(fileName: fileName) }
         preview.onScope = { [weak self] scope in self?.moveSelected(to: scope) }
+        preview.onBrick = { [weak self] action in self?.decideSelectedBrick(action) }
         background.addSubview(preview)
         tableView = table
         scrollView = scroll
@@ -848,8 +867,8 @@ final class ProjectMemoryCellView: NSTableCellView {
         let isGone: Bool
         if case .missingFile = entry.source { isGone = true } else { isGone = false }
         detailLabel.textColor = isGone ? Theme.Color.error : Theme.Color.textSecondary
-        chipLabel.stringValue = entry.scope.title.lowercased()
-        chipLabel.textColor = entry.scope == .whenRelevant ? Theme.Color.textSecondary : Theme.Color.textPrimary
+        chipLabel.stringValue = entry.badge ?? entry.scope.title.lowercased()
+        chipLabel.textColor = entry.badge == "proposed" || entry.scope != .whenRelevant ? Theme.Color.textPrimary : Theme.Color.textSecondary
         lock.isHidden = entry.scope != .team
         needsLayout = true
     }

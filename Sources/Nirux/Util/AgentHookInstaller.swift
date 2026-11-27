@@ -388,13 +388,39 @@ enum AgentHookInstaller {
         return #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x \#(path) ]; then exec \#(path) --hook claude --agy; else /bin/cat >/dev/null; fi"#
     }
 
+    /// The receiver of the hooks that hand agy the space's bricks
+    /// (KnowledgeHook), guarded on the space serving some: agy runs
+    /// PreInvocation before each model call, which must not start Nirux for
+    /// nothing.
+    /// The state folder is the receiver's: NIRUX_STATE_DIR when the
+    /// terminal has it, else `stateDirectory`.
+    static func agyKnowledgeHookCommand(executablePath: String, stateDirectory: URL = defaultStateDirectory) -> String {
+        let path = shellQuoted(executablePath)
+        let served = #""$d/projects/$NIRUX_PROFILE_ID/\#(KnowledgeStore.folderName)/\#(ServedKnowledge.fileName)""#
+        return #"d=${NIRUX_STATE_DIR:-\#(shellQuoted(stateDirectory.path))}; if [ -n "$NIRUX_AGENT_UUID" ] && [ -n "$NIRUX_PROFILE_ID" ] && [ -f \#(served) ] && [ -x \#(path) ]; then exec \#(path) --hook claude --agy; else /bin/cat >/dev/null; fi"#
+    }
+
+    /// The real state's folder, whatever this build runs on.
+    static var defaultStateDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("nirux")
+    }
+
     /// SessionStart captures new conversations, and Stop captures conversations
     /// continued with `--continue` or switched to with `/resume` (neither fires
-    /// SessionStart). Never PreToolUse, whose hooks must decide on the tool
-    /// call. agy's default timeout (30 s) covers a cold start of the receiver.
-    static func agyHooks(executablePath: String) -> [String: Any] {
+    /// SessionStart). A file tool's PostToolUse sets the space's bricks about
+    /// its file aside, and the next PreInvocation hands them to the model
+    /// (probed on agy 1.5.18). Never PreToolUse, whose hooks must decide on
+    /// the tool call. agy's default timeout (30 s) covers a cold start of the
+    /// receiver.
+    static func agyHooks(executablePath: String, stateDirectory: URL = defaultStateDirectory) -> [String: Any] {
         let handler: [String: Any] = ["type": "command", "command": agyHookCommand(executablePath: executablePath)]
-        return ["SessionStart": [handler], "Stop": [handler]]
+        let knowledge: [String: Any] = [
+            "type": "command", "command": agyKnowledgeHookCommand(executablePath: executablePath, stateDirectory: stateDirectory)
+        ]
+        return [
+            "SessionStart": [handler], "Stop": [handler],
+            "PostToolUse": [["matcher": ".*file.*", "hooks": [knowledge]]], "PreInvocation": [knowledge]
+        ]
     }
 
     /// `installAgyHooks` from a build that writes the hooks: run when Nirux

@@ -553,13 +553,19 @@ enum AgentHookCLI {
             return 0
         }
         let emitterProcess = ProcessInstance.hookEmitter(for: kind)
+        // The space's bricks about a file the agent just opened, for it to
+        // read (see KnowledgeHook): never on a PermissionRequest.
+        let knowledge = SpaceKnowledge.hookOutput(kind: kind, payload: raw, environment: env, now: now)
         guard var event = AgentHookEvent(
             kind: kind,
             payload: raw,
             env: env,
             now: now,
             emitterProcess: emitterProcess
-        ) else { return 0 }
+        ) else {
+            if let knowledge { try? FileHandle.standardOutput.write(contentsOf: knowledge) }
+            return 0
+        }
         event.applyAccount(environment: env)
 
         let channel = PermissionApprovalChannel.standard
@@ -582,6 +588,8 @@ enum AgentHookCLI {
             if event.name == .sessionStart, event.agentID == nil, !TurnEndText.isHeadless(env),
                let context = MissionAnswerContext.hookOutput(source: event.source, environment: env) {
                 try? FileHandle.standardOutput.write(contentsOf: context)
+            } else if let knowledge {
+                try? FileHandle.standardOutput.write(contentsOf: knowledge)
             }
             return 0
         }

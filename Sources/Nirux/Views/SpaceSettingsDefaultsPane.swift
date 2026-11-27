@@ -38,6 +38,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     let relaunchSwitch = NSSwitch()
     let manageSpacesSwitch = NSSwitch()
     let modelsSwitch = NSSwitch()
+    let knowledgeSwitch = NSSwitch()
     let tableView = NSTableView()
     let addButton = NSButton(title: "Add Variable", target: nil, action: nil)
     let removeButton = NSButton(title: "Remove", target: nil, action: nil)
@@ -68,7 +69,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         fillPopups()
         tableView.reloadData()
         let writable = loaded.isWritable
-        for control in [agentPopup, claudePopup, codexPopup, agyPopup, budgetPopup, followUpSwitch, relaunchSwitch, manageSpacesSwitch, modelsSwitch, addButton, tableView]
+        for control in [agentPopup, claudePopup, codexPopup, agyPopup, budgetPopup, followUpSwitch, relaunchSwitch, manageSpacesSwitch, modelsSwitch, knowledgeSwitch, addButton, tableView]
             as [NSControl] {
             control.isEnabled = writable
         }
@@ -76,6 +77,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         relaunchSwitch.state = loaded.defaults.resumesWorkOnRelaunch ? .on : .off
         manageSpacesSwitch.state = loaded.defaults.tasksCanManageSpaces(inSpace: spaceID) ? .on : .off
         modelsSwitch.state = loaded.defaults.splitsClaudeModels ? .on : .off
+        knowledgeSwitch.state = loaded.defaults.servesKnowledge ? .on : .off
         updateRemoveButton()
         let banner = message ?? loaded.problem
         bannerLabel.stringValue = banner?.asWarning ?? ""
@@ -195,6 +197,14 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         var defaults = loaded.defaults
         // On is the default: nothing is written for it.
         defaults.claudeModelSplit = sender.state == .on ? nil : false
+        guard defaults != loaded.defaults else { return }
+        write(defaults)
+    }
+
+    @objc func knowledgeChanged(_ sender: NSSwitch) {
+        var defaults = loaded.defaults
+        // On is the default: nothing is written for it.
+        defaults.knowledgeBricks = sender.state == .on ? nil : false
         guard defaults != loaded.defaults else { return }
         write(defaults)
     }
@@ -393,6 +403,12 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
             hint: "Every subagent of the Claude sessions this space starts runs on Opus, whatever its call asks. A new Lead "
                 + "conversation runs on Fable; a resumed one keeps the model it ran. Off, Claude Code picks as usual."
         )
+        let knowledge = switchRow(
+            knowledgeSwitch, action: #selector(knowledgeChanged(_:)), title: "Give agents the space’s bricks",
+            hint: "A fact you validated in Space Memory reaches an agent when it reads or edits a file it concerns, once per "
+                + "session and about 750 tokens at most. Nirux rechecks each proof when the base branch moves and every day. "
+                + "Off, no agent gets them and nothing is rechecked."
+        )
 
         let header = NSTextField(labelWithString: "Environment")
         header.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
@@ -445,12 +461,12 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         environment.alignment = .leading
         environment.spacing = 8
 
-        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, relaunch, manageSpaces, models, environment])
+        let stack = NSStackView(views: [bannerLabel, form, formHint, followUp, relaunch, manageSpaces, models, knowledge, environment])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14
         stack.setCustomSpacing(22, after: formHint)
-        stack.setCustomSpacing(22, after: models)
+        stack.setCustomSpacing(22, after: knowledge)
         stack.edgeInsets = Self.insets
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)

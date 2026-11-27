@@ -52,6 +52,9 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Space Settings › Defaults, "Lead on Fable, subagents on Opus". Nil:
     /// on.
     var claudeModelSplit: Bool?
+    /// Space Settings › Defaults, "Give agents the space's bricks"
+    /// (docs/design/knowledge-bricks.md). Nil: on.
+    var knowledgeBricks: Bool?
     /// Space Settings › Defaults, "Task budget": weighted tokens
     /// (`TokenCounts.weighted`) a task may spend over 7 days before its row
     /// warns and its pull request's follow-ups wait. Nil: the default; 0: off.
@@ -87,6 +90,7 @@ struct SpaceDefaults: Equatable, Sendable {
     var resumesWorkOnRelaunch: Bool { resumeWorkOnRelaunch ?? true }
     var splitsClaudeModels: Bool { claudeModelSplit ?? true }
     var plansTheDay: Bool { dayPlan ?? false }
+    var servesKnowledge: Bool { knowledgeBricks ?? true }
 
     /// About the 90th percentile of what a Nirux task spent in 7 days
     /// (the 2026-11-23 scan).
@@ -173,6 +177,7 @@ struct SpaceDefaults: Equatable, Sendable {
             (\.prFollowUp, .prFollowUp, false),
             (\.resumeWorkOnRelaunch, .resumeWorkOnRelaunch, false),
             (\.claudeModelSplit, .claudeModelSplit, false),
+            (\.knowledgeBricks, .knowledgeBricks, false),
             (\.tasksManageSpaces, .tasksManageSpaces, false),
             (\.dayPlan, .dayPlan, false),
             (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
@@ -290,7 +295,7 @@ extension SpaceDefaults: Codable {
         case leadStartsTasks, leadStartsMergeQueue, leadStartsMergeQueueWithoutLocalReview, leadDailyPass, leadDailyPassHour, prFollowUp, resumeWorkOnRelaunch
         case leadGroupsResults, reviewChecklist
         case leadFreshStart, tasksManageSpaces, dayPlan
-        case claudeModelSplit, taskBudget
+        case claudeModelSplit, taskBudget, knowledgeBricks
         case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
 
@@ -321,6 +326,7 @@ extension SpaceDefaults: Codable {
         leadFreshStart = (try? container.decodeIfPresent(Bool.self, forKey: .leadFreshStart)) ?? nil
         resumeWorkOnRelaunch = (try? container.decodeIfPresent(Bool.self, forKey: .resumeWorkOnRelaunch)) ?? nil
         claudeModelSplit = (try? container.decodeIfPresent(Bool.self, forKey: .claudeModelSplit)) ?? nil
+        knowledgeBricks = (try? container.decodeIfPresent(Bool.self, forKey: .knowledgeBricks)) ?? nil
         taskBudget = ((try? container.decodeIfPresent(Int.self, forKey: .taskBudget)) ?? nil).flatMap { $0 >= 0 ? $0 : nil }
         tasksManageSpaces = (try? container.decodeIfPresent(Bool.self, forKey: .tasksManageSpaces)) ?? nil
         dayPlan = (try? container.decodeIfPresent(Bool.self, forKey: .dayPlan)) ?? nil
@@ -355,6 +361,7 @@ extension SpaceDefaults: Codable {
         try container.encodeIfPresent(leadFreshStart, forKey: .leadFreshStart)
         try container.encodeIfPresent(resumeWorkOnRelaunch, forKey: .resumeWorkOnRelaunch)
         try container.encodeIfPresent(claudeModelSplit, forKey: .claudeModelSplit)
+        try container.encodeIfPresent(knowledgeBricks, forKey: .knowledgeBricks)
         try container.encodeIfPresent(taskBudget, forKey: .taskBudget)
         try container.encodeIfPresent(tasksManageSpaces, forKey: .tasksManageSpaces)
         try container.encodeIfPresent(dayPlan, forKey: .dayPlan)

@@ -11,7 +11,8 @@ enum MemorySearchTool {
         [
             "name": name,
             "title": "Search project memory",
-            "description": "Search the space brief, team rules, and saved notes. Each excerpt names its scope and source file.",
+            "description": "Search the space brief, team rules, saved notes and the space's bricks (facts the user validated). "
+                + "Each excerpt names its scope and source file.",
             "inputSchema": [
                 "type": "object",
                 "properties": [
@@ -54,8 +55,13 @@ enum MemorySearchTool {
             folder: context.workingDirectory, home: context.nonEmpty("HOME") ?? NSHomeDirectory(),
             environment: context.environment, followingSymlinks: false
         )
+        let bricks = context.spaceID.flatMap { spaceID in
+            SpaceKnowledge.store(spaceID: spaceID, stateDirectory: context.stateDirectory).flatMap {
+                ProjectMemory.Bricks.read($0, serves: SpaceDefaultsStore.defaults(forSpace: spaceID, stateDirectory: context.stateDirectory).servesKnowledge)
+            }
+        }
         let knowledge = ProjectMemory.knowledge(
-            folder: context.workingDirectory, brief: brief, location: location, followingSymlinks: false
+            folder: context.workingDirectory, brief: brief, location: location, bricks: bricks, followingSymlinks: false
         )
         return render(knowledge, query: query, scope: scope, limit: limit, notice: location.notice)
     }
@@ -108,6 +114,13 @@ enum MemorySearchTool {
         case .missingFile(let line):
             source = ProjectMemory.indexFileName + ":\(line.number)"
             text = "\(entry.title) — \(entry.detail). \(line.target) \(line.hook)"
+        case .brick(let id):
+            // Only what agents may get now: a closed, expired or suspect brick isn't.
+            guard let bricks = knowledge.bricks, bricks.serves, bricks.status(of: id) == .open, let brick = bricks.loaded.bricks[id] else { return nil }
+            source = "brick \(id), " + brick.scope.paths.joined(separator: ", ")
+            text = "\(brick.sentence) (proof: \(brick.proofs.map(\.label).joined(separator: " · ")))"
+        case .proposal:
+            return nil
         }
         let excerpt = HistorySearch.excerpt(of: text, terms: terms) ?? "[Excerpt withheld.]"
         return "[\(entry.scope.title) · \(BranchReview.visible(source))] " + bounded(excerpt, bytes: maxExcerptBytes)

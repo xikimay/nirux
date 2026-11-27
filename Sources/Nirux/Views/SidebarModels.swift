@@ -384,7 +384,11 @@ struct WorkspaceInfo: Hashable {
     var frontPill: String?
     /// Its context and its week's spend (`UsageMonitor`).
     var usage: SidebarTaskUsage?
-    var isNested: Bool { parentTitle != nil }
+    /// Its line sits in a feature of the day plan (SidebarView+Plan).
+    var inFeature = false
+    var isNested: Bool { parentTitle != nil || inFeature }
+    /// A feature's task's sub-task sits two steps in.
+    var nestDepth: Int { (parentTitle != nil ? 1 : 0) + (inFeature ? 1 : 0) }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
 
@@ -460,6 +464,8 @@ enum SidebarHitRegion {
     case board
     /// The History row, at the bottom: Session History.
     case history
+    /// A day plan feature's row: folds and unfolds its lines.
+    case featureFold(String)
     /// A row that can't be pressed now (the Board row while no task is
     /// open): it takes the click, the drag and the right-click, and does
     /// nothing.
