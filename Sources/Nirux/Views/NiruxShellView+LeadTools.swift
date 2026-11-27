@@ -965,22 +965,32 @@ extension NiruxShellView {
                     guard isSpaceLead(parent, spaceID: space.id) else {
                         return answer("This terminal no longer belongs to the space’s Lead.", true)
                     }
-                    guard projectBoardLocation(projectID: space.id)?.board === board else {
-                        return answer("\(space.name)'s Board closed or moved to another space while Nirux read its pull requests: "
-                            + "ask the user to open it (⌃⌘B), then try again.", true)
+                    // Another repository or other settings saved meanwhile aren't what the Lead asked for.
+                    guard projectBoardLocation(projectID: space.id)?.board === board,
+                          board.section(id: chosen.section.id)?.slot == chosen.section.slot,
+                          board.loaded(for: chosen.section)?.queueSettings == settings else {
+                        return answer("\(chosen.name)'s Board closed or its queue settings changed while Nirux read its pull requests: "
+                            + "check the Board, then try again.", true)
                     }
                     leadQueueMerge(arguments, in: space, parent: parent, afterRead: true, answer: answer)
                 }
             }
-            guard let open = reads.openPullRequests.map({ Set($0.map(\.number)) }), reads.errors[.openPullRequests] == nil else {
+            guard reads.openPullRequests != nil, reads.errors[.openPullRequests] == nil else {
                 let failure = reads.errors[.openPullRequests]
-                let next = failure.map { _ in "try again" } ?? "try again"
+                let next = switch failure {
+                case .rateLimited(let reset?)?: "try again after \(reset.formatted(date: .omitted, time: .shortened))"
+                case let failure? where !DailyPass.mayPassLater(failure): "tell the user"
+                default: "try again"
+                }
                 return answer("Nirux couldn't read the open pull requests of \(chosen.name)" + (failure.map { " (\($0.message))" } ?? "")
                     + ": nothing was queued, \(next).", true)
             }
-            let unknown = numbers.filter { !open.contains($0) }
-            guard unknown.isEmpty else {
-                return answer(unknown.map { "#\($0)" }.joined(separator: ", ") + " isn't an open pull request of \(chosen.name).", true)
+            // An incomplete list (capped, a row unreadable) can't say one isn't open: the preflight reads each.
+            if let open = reads.completeOpenNumbers {
+                let unknown = numbers.filter { !open.contains($0) }
+                guard unknown.isEmpty else {
+                    return answer(unknown.map { "#\($0)" }.joined(separator: ", ") + " isn't an open pull request of \(chosen.name).", true)
+                }
             }
         }
         let controller = mergeQueue(projectID: space.id, repository: chosen.gitHub)
