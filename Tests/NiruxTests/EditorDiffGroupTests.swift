@@ -8,7 +8,7 @@ final class EditorDiffGroupTests: BranchReviewRepositoryTestCase {
     @MainActor
     func testCheckpointDiffIsAVirtualTabAndRetainsItsWarning() throws {
         let editor = EditorColumn(workspaceCwd: repo)
-        editor.showCheckpointDiff(.init(warning: "Incomplete checkpoint", text: "No changes."), title: "Saved → Working Tree")
+        editor.showCheckpointDiff(.init(warning: "Incomplete checkpoint", notes: [], files: []), title: "Saved → Working Tree")
         let tab = try XCTUnwrap(editor.activePath)
         XCTAssertNil(editor.currentPath)
         XCTAssertTrue(editor.openPaths.isEmpty)

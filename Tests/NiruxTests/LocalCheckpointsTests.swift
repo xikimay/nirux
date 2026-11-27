@@ -76,10 +76,10 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         let before = try contents(of: repo)
         let live = try await store.diff(from: first.id, to: nil, worktree: repo + "/Sources")
         XCTAssertNil(live.warning)
-        XCTAssertTrue(live.text.contains("--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,1 @@\n-first\n+third\n\\ No newline at end of file"))
+        XCTAssertTrue(patch(live).contains("README.md\n@@ -1 +1 @@\n-first\n+third\n\\"), patch(live))
         let saved = try await store.diff(from: first.id, to: second.id, worktree: repo)
-        XCTAssertTrue(saved.text.contains("-first\n+second\n"))
-        XCTAssertFalse(saved.text.contains("third"))
+        XCTAssertTrue(patch(saved).contains("-first\n+second"))
+        XCTAssertFalse(patch(saved).contains("third"))
         XCTAssertEqual(try contents(of: repo), before)
     }
 
@@ -92,12 +92,12 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         try git(["add", "new tracked"])
         try write("untracked", "private")
         let live = try await store.diff(from: clean.id, to: nil, worktree: repo)
-        XCTAssertTrue(live.text.contains("-widgets\n+edited after capture\n"))
-        XCTAssertTrue(live.text.contains("--- /dev/null\n+++ b/new tracked"))
-        XCTAssertFalse(live.text.contains("private"))
+        XCTAssertTrue(patch(live).contains("-widgets\n+edited after capture"))
+        XCTAssertTrue(patch(live).contains("new tracked\n@@ -0 +1 @@\n+added"))
+        XCTAssertFalse(patch(live).contains("private"))
         let dirty = try store.save(worktree: repo, label: nil)
         let pair = try await store.diff(from: clean.id, to: dirty.id, worktree: repo + "/Sources")
-        XCTAssertEqual(pair.text, live.text)
+        XCTAssertEqual(patch(pair), patch(live))
 
         try write("README.md", "committed later\n")
         try git(["add", "README.md"])
@@ -105,8 +105,8 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         let later = try store.save(worktree: repo, label: nil)
         XCTAssertTrue(later.files.isEmpty)
         let committed = try await store.diff(from: clean.id, to: later.id, worktree: repo)
-        XCTAssertTrue(committed.text.contains("-widgets\n+committed later\n"))
-        XCTAssertTrue(committed.text.contains("--- /dev/null\n+++ b/new tracked"))
+        XCTAssertTrue(patch(committed).contains("-widgets\n+committed later"))
+        XCTAssertTrue(patch(committed).contains("new tracked\n@@ -0 +1 @@"))
     }
 
     func testUnavailableBaselineIsReportedWithoutInventingAnAddition() async throws {
@@ -116,8 +116,8 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         _ = try store.persist(.init(manifest: missing))
         try write("README.md", "changed\n")
         let diff = try await store.diff(from: missing.id, to: nil, worktree: repo)
-        XCTAssertTrue(diff.text.contains("baseline unavailable"))
-        XCTAssertFalse(diff.text.contains("--- /dev/null"))
+        XCTAssertTrue(patch(diff).contains("baseline unavailable"))
+        XCTAssertFalse(patch(diff).contains("@@ -0 "))
     }
 
     func testDiffWarnsForEitherIncompleteCheckpointAndSkipsUnsafeInputs() async throws {
@@ -133,12 +133,12 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         try write("README.md", Data([0, 255, 2]))
         let binary = try await store.diff(from: incomplete.id, to: nil, worktree: repo)
         XCTAssertNotNil(binary.warning)
-        XCTAssertTrue(binary.text.contains("Binary"), binary.text)
-        XCTAssertFalse(binary.text.contains("@@"))
+        XCTAssertTrue(patch(binary).contains("Binary"), patch(binary))
+        XCTAssertFalse(patch(binary).contains("@@"))
         try write("README.md", Data(repeating: 65, count: 65))
         let large = try await store.diff(from: complete.id, to: nil, worktree: repo)
-        XCTAssertTrue(large.text.localizedCaseInsensitiveContains("size limit"), large.text)
-        XCTAssertFalse(large.text.contains("@@"))
+        XCTAssertTrue(patch(large).localizedCaseInsensitiveContains("size limit"), patch(large))
+        XCTAssertFalse(patch(large).contains("@@"))
     }
 
     func testWorkingDiffDistinguishesRecordedDeletionFromUnreadableFile() async throws {
@@ -150,13 +150,13 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         try write("README.md", "restored\n")
         try fm.removeItem(atPath: repo + "/Sources")
         let missing = try await store.diff(from: saved.id, to: nil, worktree: repo)
-        XCTAssertTrue(missing.text.contains("--- /dev/null\n+++ b/README.md"))
-        XCTAssertTrue(missing.text.contains("--- a/Sources/App.swift\n+++ /dev/null"))
+        XCTAssertTrue(patch(missing).contains("README.md\n@@ -0 +1 @@"))
+        XCTAssertTrue(patch(missing).contains("Sources/App.swift\n@@ -1 +0 @@"))
         try write("outside/App.swift", "external content", at: root)
         try fm.createSymbolicLink(atPath: repo + "/Sources", withDestinationPath: root + "/outside")
         let linked = try await store.diff(from: saved.id, to: nil, worktree: repo)
-        XCTAssertTrue(linked.text.contains("Skipped Sources/App.swift"))
-        XCTAssertFalse(linked.text.contains("external content"))
+        XCTAssertTrue(patch(linked).contains("Skipped Sources/App.swift"))
+        XCTAssertFalse(patch(linked).contains("external content"))
     }
 
     func testExportPublishesStoredBytesAndRefusesOccupiedOrProtectedFolders() throws {
@@ -206,16 +206,36 @@ final class LocalCheckpointsTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(try fm.contentsOfDirectory(atPath: export.path), [])
     }
 
-    func testUnifiedDiffPreservesLineEndingsAndSeparatesDistantEdits() throws {
+    func testFileDiffPreservesLineEndingsAndSeparatesDistantEdits() throws {
         let middle = (1...10).map { "line \($0)\n" }.joined()
         let old = Data(("first\r\n" + middle + "last").utf8)
         let new = Data(("first\n" + middle + "last\n").utf8)
-        let patch = try XCTUnwrap(LocalCheckpoints.unifiedDiff(path: "note", before: old, after: new))
-        XCTAssertTrue(patch.contains("@@ -1,4 +1,4 @@\n-first\r\n+first\n"))
-        XCTAssertTrue(patch.contains("@@ -9,4 +9,4 @@\n"))
-        XCTAssertTrue(patch.hasSuffix("-last\n\\ No newline at end of file\n+last\n"))
-        let empty = try LocalCheckpoints.unifiedDiff(path: "empty", before: nil, after: Data())
-        XCTAssertEqual(empty, "--- /dev/null\n+++ b/empty\n")
+        let file = try XCTUnwrap(LocalCheckpoints.fileDiff(path: "note", before: old, after: new))
+        XCTAssertEqual(file.hunks.map { [$0.oldStart, $0.newStart, $0.lines.count] }, [[1, 1, 5], [9, 9, 6]])
+        XCTAssertTrue(patch(file).contains("@@ -1 +1 @@\n-first\r\n+first\n line 1"))
+        XCTAssertTrue(patch(file).hasSuffix("-last\n\\\n+last"))
+        let empty = try XCTUnwrap(LocalCheckpoints.fileDiff(path: "empty", before: nil, after: Data()))
+        XCTAssertEqual(empty, LocalCheckpoints.Diff.File(path: "empty", hunks: [], note: "Empty file added."))
+    }
+
+    /// A checkpoint diff as text to read: what it skipped, then each file's
+    /// path and hunks (" ", "-", "+" lines, "\" for a missing newline).
+    private func patch(_ diff: LocalCheckpoints.Diff) -> String {
+        (diff.notes + diff.files.map(patch)).joined(separator: "\n")
+    }
+
+    private func patch(_ file: LocalCheckpoints.Diff.File) -> String {
+        let hunks = file.hunks.flatMap { hunk in
+            ["@@ -\(hunk.oldStart) +\(hunk.newStart) @@"] + hunk.lines.map { line in
+                switch line.kind {
+                case "added": "+" + line.text
+                case "removed": "-" + line.text
+                case "noNewlineMarker": "\\"
+                default: " " + line.text
+                }
+            }
+        }
+        return ([file.path] + (file.note.map { [$0] } ?? []) + hunks).joined(separator: "\n")
     }
 
     func testUnsafeFilesAreOmittedWithReasons() throws {

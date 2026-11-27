@@ -3,8 +3,18 @@ import Foundation
 
 extension LocalCheckpoints {
     struct Diff: Sendable {
+        /// A file's change as Branch Review's page reads it, or why it has
+        /// no lines to show (an empty file added or removed).
+        struct File: Sendable, Equatable {
+            let path: String
+            let hunks: [BranchReview.FileDiff.Hunk]
+            var note: String?
+        }
+
         let warning: String?
-        let text: String
+        /// Why files were left out.
+        let notes: [String]
+        let files: [File]
     }
 
     func diff(from id: UUID, to otherID: UUID?, worktree: String) async throws -> Diff {
@@ -25,7 +35,7 @@ extension LocalCheckpoints {
         let modified = try after.map(indexedFiles) ?? [:]
         var paths = Set(original.keys).union(modified.keys)
         var omissions = Set((before.omissions + (after?.omissions ?? [])).map(\.path))
-        var sections: [String] = [], skipped: [String] = []
+        var files: [Diff.File] = [], skipped: [String] = []
         var exceedsFileLimit = paths.count > limits.maxFilesPerCapture
         func include(_ path: String) {
             if paths.count < limits.maxFilesPerCapture { paths.insert(path) }
@@ -79,21 +89,21 @@ extension LocalCheckpoints {
                 for case let data? in [left, right] where !data.contains(0) {
                     guard !BranchReview.Secrets.containsKey(String(decoding: data, as: UTF8.self)) else { throw Problem("Secret content") }
                 }
-                if let section = try Self.unifiedDiff(path: path, before: left, after: right) {
-                    guard section.utf8.count <= remainingPatch else {
+                if let file = try Self.fileDiff(path: path, before: left, after: right) {
+                    let size = file.hunks.reduce(0) { total, hunk in total + hunk.lines.reduce(0) { $0 + $1.text.utf8.count + 2 } }
+                    guard size <= remainingPatch else {
                         skipped.append("Diff size limit reached. Additional changes are omitted.")
                         break
                     }
-                    remainingPatch -= section.utf8.count
-                    sections.append(section)
+                    remainingPatch -= size
+                    files.append(file)
                 }
             } catch {
                 skipped.append("Skipped " + BranchReview.visible(path) + " — " + error.localizedDescription)
             }
         }
         let warning = before.isIncomplete || after?.isIncomplete == true ? "Incomplete checkpoint. Some changes may be missing." : nil
-        let text = skipped + sections
-        return Diff(warning: warning, text: text.isEmpty ? "No changes." : text.joined(separator: "\n"))
+        return Diff(warning: warning, notes: skipped, files: files)
     }
 
     private func indexedFiles(_ manifest: Manifest) throws -> [String: File] {
@@ -166,8 +176,11 @@ extension LocalCheckpoints {
         return data
     }
 
-    /// Lines retain their LF so the comparison also sees changes to the final newline.
-    static func unifiedDiff(path: String, before: Data?, after: Data?) throws -> String? {
+    /// The file's change as hunks (three lines of context), nil when it has
+    /// none. Lines retain their LF so the comparison also sees changes to the
+    /// final newline; a CR before it stays in the line's text, which pierre
+    /// shows where endings differ.
+    static func fileDiff(path: String, before: Data?, after: Data?) throws -> Diff.File? {
         guard before != after else { return nil }
         func lines(_ bytes: Data?) throws -> [Data] {
             guard let bytes else { return [] }
@@ -183,8 +196,6 @@ extension LocalCheckpoints {
             return result
         }
         let old = try lines(before), new = try lines(after)
-        let name = BranchReview.visible(path)
-        var patch = "--- " + (before == nil ? "/dev/null" : "a/" + name) + "\n+++ " + (after == nil ? "/dev/null" : "b/" + name) + "\n"
         var prefix = 0, suffix = 0
         let common = min(old.count, new.count)
         while prefix < common, old[prefix] == new[prefix] { prefix += 1 }
@@ -227,21 +238,27 @@ extension LocalCheckpoints {
             } else { hunks.append(range) }
         }
         var end = 0, oldLine = 1, newLine = 1
+        var fileHunks: [BranchReview.FileDiff.Hunk] = []
         for range in hunks {
             oldLine += range.lowerBound - end
             newLine += range.lowerBound - end
             let hunk = edits[range]
             let oldCount = hunk.count { $0.kind != "+" }, newCount = hunk.count { $0.kind != "-" }
-            patch += "@@ -\(oldCount == 0 ? oldLine - 1 : oldLine),\(oldCount) +\(newCount == 0 ? newLine - 1 : newLine),\(newCount) @@\n"
+            var lines: [BranchReview.FileDiff.Line] = []
             for (kind, bytes) in hunk {
-                patch.append(kind)
-                patch += String(decoding: bytes, as: UTF8.self)
-                if bytes.last != 10 { patch += "\n\\ No newline at end of file\n" }
+                let endsLine = bytes.last == 10
+                let text = String(decoding: endsLine ? bytes.dropLast() : bytes, as: UTF8.self)
+                lines.append(.init(kind: kind == "-" ? "removed" : kind == "+" ? "added" : "context", text: text))
+                if !endsLine { lines.append(.init(kind: "noNewlineMarker", text: "")) }
             }
+            fileHunks.append(.init(
+                oldStart: oldCount == 0 ? oldLine - 1 : oldLine, newStart: newCount == 0 ? newLine - 1 : newLine, section: "", lines: lines
+            ))
             oldLine += oldCount
             newLine += newCount
             end = range.upperBound
         }
-        return patch
+        let note = fileHunks.isEmpty ? (before == nil ? "Empty file added." : "Empty file removed.") : nil
+        return Diff.File(path: BranchReview.visible(path), hunks: fileHunks, note: note)
     }
 }
