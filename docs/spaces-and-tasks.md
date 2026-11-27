@@ -158,7 +158,7 @@ It then proposes the rules that would have spared that friction, through **Rule 
 
 Nirux asks only when something happened, and only once the Lead has been idle for 30 minutes and you have been away from Nirux for 10. For a day after, the Lead's row shows what the pass read ("Daily pass · 6 PRs, 1 flaky test, 2 rules proposed"), and its reply in its terminal says why. Turn it off or change its hour with **Daily pass** in Space Settings › Lead. You can also ask the Lead for a pass at any time.
 
-**Review checklist** (Space Settings › Lead, on by default) gives each `/code-review` and `/premortem` in the space, as its reviewer starts, the kinds of finding the Lead recorded in two tasks or more over the last 30 days, with their pull requests and latest finding. Nothing is added to sessions otherwise. It works with Claude Code only; when a `/code-review` started without the list, the daily pass says so. Turn it off with the same switch.
+**Review checklist** (Space Settings › Lead, on by default) gives each `/code-review` and `/premortem` in the space, as its reviewer starts, the kinds of finding the Lead recorded in two tasks or more over the last 30 days, with their pull requests and latest finding. Nothing is added to sessions otherwise. It works with Claude Code only; when `/code-review` runs start without the list, the daily pass gives the counts. Turn it off with the same switch.
 
 **Group task results** (Space Settings › Lead, on by default) saves the Lead a wake per finished task: the results its tasks report within 3 minutes of the first one reach it together, in one message (or together through its Claude hook). Questions never wait.
 

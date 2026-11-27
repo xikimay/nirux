@@ -60,7 +60,7 @@ The pass also reports per-task waits, question and round counts and the time to 
    - the rules waiting;
    - the brief's "Rules learned" as sessions read them now (the Lead's copy dates from its start);
    - the rules dismissed in the last 90 days.
-6. **Review checklist:** how many `/code-review` starts in the window the checklist reached, when one was missed ([Review checklist](review-checklist.md)). It is news, and kept like the rules.
+6. **Review checklist:** how many `/code-review` starts in the window the checklist reached, when one was missed ([Review checklist](review-checklist.md)), kept like the rules. An approximate count: only none reached across two sessions or more is news, and asks for a task.
 7. **What GitHub didn't say**, shown even on a day with nothing else. It isn't news on its own: a signed-out gh would make every day one. Errors are read as the merge queue reads them: no answer (no network, a timeout, a 5xx, what gh never said) and rate limits leave the window to read again, and so does a repository whose remote git or ssh couldn't read; anything GitHub or gh said (signed out, refused) holds until someone acts. Three reads in a row that may be read again at most: the third marks the window read all the same.
 
    The store compares wording; the Lead compares meaning.

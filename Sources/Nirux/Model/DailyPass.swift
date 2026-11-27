@@ -451,7 +451,7 @@ enum DailyPass {
         var reported: Set<String> = []
         /// The review starts in the window the checklist reached
         /// (`ReviewChecklist.reached`).
-        var checklistReach = (reached: 0, started: 0)
+        var checklistReach = ReviewChecklist.Tally()
 
         /// Anything for the pass to read. What GitHub didn't say isn't: a
         /// signed-out gh would make every day one.
@@ -461,7 +461,7 @@ enum DailyPass {
                 || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty || !threadWaits.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }
                 || forgottenTasks(tasks, now: window.end).contains { !reported.contains($0.key) }
-                || checklistReach.reached < checklistReach.started
+                || checklistReach.isBroken
         }
 
         /// The pass runs on news, or on anything waiting: its morning line
@@ -548,7 +548,7 @@ enum DailyPass {
             let quiet = header + "\n\n" + morningSection(facts) + "\n\nNothing happened since \(since): no review recorded, "
                 + "\(merged)\(failure)no Mission message held, no rule decided. Nothing to propose"
                 + (tasks.text == nil ? ": say so in one line." : ".")
-            let sections = [gitHubSection(facts), tasks.text].compactMap { $0 }
+            let sections = [gitHubSection(facts), checklistSection(facts), tasks.text].compactMap { $0 }
             return Digest(text: ([quiet] + sections).joined(separator: "\n\n"), readUntil: window.end, listed: tasks.listed)
         }
         // The rules before the facts; each section lists its facts in time
@@ -639,15 +639,18 @@ enum DailyPass {
         return section("What GitHub didn’t say", lines + [after], total: lines.count + 1)
     }
 
-    /// A review start the checklist missed: Nirux tells a review's fork by a
+    /// The review starts the checklist missed, as counted. Only none in
+    /// several sessions asks for a task: Nirux tells a review's fork by a
     /// file Claude Code doesn't document (`ReviewChecklist.forkedSkill`).
     private static func checklistSection(_ facts: Facts) -> String? {
-        let (reached, started) = facts.checklistReach
-        guard reached < started else { return nil }
-        return section("Review checklist", [
-            "- The review checklist reached \(reached) of \(started) reviewers started in this window (/code-review): "
-                + "a Nirux bug, or Claude Code no longer forks reviews the way Nirux reads. Start a task to find out."
-        ], total: 1)
+        let tally = facts.checklistReach
+        guard tally.reached < tally.started else { return nil }
+        let line = tally.isBroken
+            ? "- The review checklist reached none of \(tally.started) /code-review starts in this window, in \(tally.sessions) sessions: "
+                + "Nirux may no longer tell a review's fork from other subagents. Start a task to find out."
+            : "- The review checklist reached \(tally.reached) of \(tally.started) /code-review starts in this window "
+                + "(an approximate count: nothing to do)."
+        return section("Review checklist", [line], total: 1)
     }
 
     /// The tasks forgotten at the window's end, those the last read didn't

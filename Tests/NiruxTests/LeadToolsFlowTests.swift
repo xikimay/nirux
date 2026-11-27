@@ -1036,7 +1036,7 @@ final class LeadToolsFlowTests: XCTestCase {
             let day = try call(LeadTools.dailyPass, lead: lead, in: harness)
             XCTAssertFalse(day.isError, day.text)
             XCTAssertTrue(day.text.contains("- test-waits-on-sleep · 2 tasks: "), day.text)
-            XCTAssertTrue(day.text.contains("- The review checklist reached 0 of 1 reviewers started in this window"), day.text)
+            XCTAssertTrue(day.text.contains("- The review checklist reached 0 of 1 /code-review starts in this window"), day.text)
             let fix = "- “The user's fix” · branch \(harness.worktreeBranch) · not yours (started by the user) · PR #7 merged · "
                 + "last activity "
             let line = try XCTUnwrap(day.text.components(separatedBy: "\n").first { $0.hasPrefix(fix) }, day.text)

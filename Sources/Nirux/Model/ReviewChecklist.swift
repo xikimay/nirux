@@ -32,6 +32,14 @@ enum ReviewChecklist {
         return ([header] + lines).joined(separator: "\n")
     }
 
+    /// The launch's space (`NIRUX_PROFILE_ID`), else the one Nirux saved for
+    /// the workspace: a sync hook doesn't read state.json when it can help
+    /// it. A workspace moved since its shell started reads its old space's.
+    static func spaceID(_ environment: [String: String], stateDirectory: URL) -> String? {
+        environment["NIRUX_PROFILE_ID"].flatMap { $0.isEmpty ? nil : $0 }
+            ?? Persistence.spaceID(environment: environment, stateDirectory: stateDirectory)
+    }
+
     /// The space's list now, unless its switch is off.
     static func due(spaceID: String, stateDirectory: URL, now: TimeInterval) -> String? {
         guard SpaceDefaultsStore.defaults(forSpace: spaceID, stateDirectory: stateDirectory).reviewChecklistIsOn else { return nil }
@@ -48,7 +56,7 @@ enum ReviewChecklist {
     ) -> Data? {
         guard let pass = forkedSkill(payload).flatMap(ReviewPass.command), passes.contains(pass),
               let session = payload["session_id"] as? String, !session.isEmpty,
-              let space = Persistence.spaceID(environment: environment, stateDirectory: stateDirectory),
+              let space = spaceID(environment, stateDirectory: stateDirectory),
               let text = due(spaceID: space, stateDirectory: stateDirectory, now: now)
         else { return nil }
         // Counted against the starts noted, which are /code-review's only.
@@ -89,12 +97,12 @@ enum ReviewChecklist {
     ) {
         guard event.passes.contains(.codeReview) else { return }
         let arguments = ((payload["tool_input"] as? [String: Any])?["args"] as? String ?? payload["prompt"] as? String ?? "")
-            .split(maxSplits: 2, whereSeparator: \.isWhitespace).prefix(2)
+            .split(whereSeparator: \.isWhitespace)
         let response = payload["tool_response"] as? [String: Any]
         let ranOtherwise = response?["status"] != nil && !(response?["status"] as? String == "forked" && response?["background"] as? Bool == true)
         guard !arguments.contains(where: { $0.lowercased() == "ultra" }), !ranOtherwise,
               let session = event.sessionID, !session.isEmpty,
-              let space = Persistence.spaceID(environment: environment, stateDirectory: stateDirectory),
+              let space = spaceID(environment, stateDirectory: stateDirectory),
               due(spaceID: space, stateDirectory: stateDirectory, now: now) != nil
         else { return }
         reaches.append(Reach(time: now, session: session, kind: .started), spaceID: space, stateDirectory: stateDirectory, trims: false)
@@ -116,14 +124,29 @@ enum ReviewChecklist {
     /// meanwhile), trimmed by the app at launch, read by the daily pass.
     static let reaches = SpaceLog<Reach>(fileName: "review-checklist.jsonl", keptDays: 8, maxFileBytes: 500_000) { $0.time }
 
+    /// The review starts of a window, and how many a list reached.
+    struct Tally: Equatable, Sendable {
+        var reached = 0
+        var started = 0
+        /// The sessions they started in.
+        var sessions = 0
+
+        /// What a broken hook looks like: no list in several sessions. A
+        /// miss here and there is the count's own imprecision
+        /// (docs/design/review-checklist.md).
+        var isBroken: Bool { reached == 0 && sessions >= 2 }
+    }
+
     /// The review starts in `window` a list reached, of those noted: in
     /// each session, one list per start at most, in either order (a fork
     /// may start before its Skill call's PostToolUse).
-    static func reached(_ reaches: [Reach], in window: DailyPass.Window) -> (reached: Int, started: Int) {
+    static func reached(_ reaches: [Reach], in window: DailyPass.Window) -> Tally {
         let sessions = Dictionary(grouping: reaches.filter { window.contains($0.time) }, by: \.session).values
-        return sessions.reduce((0, 0)) { total, events in
+        return sessions.reduce(into: Tally()) { tally, events in
             let started = events.filter { $0.kind == .started }.count
-            return (total.0 + min(started, events.count - started), total.1 + started)
+            tally.reached += min(started, events.count - started)
+            tally.started += started
+            if started > 0 { tally.sessions += 1 }
         }
     }
 }

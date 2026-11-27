@@ -13,7 +13,7 @@ final class ReviewChecklistTests: XCTestCase {
         try super.setUpWithError()
         state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-checklist-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
-        // The workspace moved to S1 since its shell started in S-stale.
+        // Nirux saved workspace W1 in space S1.
         try Data(#"{"workspaces": [{"id": "W1", "profileID": "S1"}]}"#.utf8).write(to: state.appendingPathComponent("state.json"))
     }
 
@@ -22,7 +22,7 @@ final class ReviewChecklistTests: XCTestCase {
         super.tearDown()
     }
 
-    private let environment = ["NIRUX_WORKSPACE_ID": "W1", "NIRUX_PROFILE_ID": "S-stale"]
+    private let environment = ["NIRUX_WORKSPACE_ID": "W1", "NIRUX_PROFILE_ID": "S1"]
 
     private func entry(_ kinds: [String], task: String, pullRequest: Int? = nil, at time: TimeInterval) -> ReviewFindings.Entry {
         ReviewFindings.Entry(
@@ -87,19 +87,21 @@ final class ReviewChecklistTests: XCTestCase {
         XCTAssertEqual(lines.first, "- kind-1 · 7 tasks (feat/t7, feat/t6, feat/t5, feat/t4, feat/t3 and 2 more) · latest: “kind-1 in feat/t7”")
     }
 
-    /// The fork of a review gets the list of the space its workspace is in
-    /// now as its SubagentStart context. A code review's list is noted, a
-    /// premortem's isn't (its starts aren't); the log's old lines stay for
-    /// the app to trim.
+    /// The fork of a review gets the list of its launch's space, else the
+    /// one Nirux saved for its workspace, as its SubagentStart context. A
+    /// code review's list is noted, a premortem's isn't (its starts aren't);
+    /// the log's old lines stay for the app to trim.
     func testAReviewsForkGetsTheList() throws {
         XCTAssertTrue(AgentHookInstaller.claudeHookEvents.contains("SubagentStart"))
         let entries = [entry(["unbounded-wait"], task: "feat/a", at: now - day), entry(["unbounded-wait"], task: "feat/b", at: now - day)]
         record(entries)
         let old = ReviewChecklist.Reach(time: now - 40 * day, session: "old", kind: .started)
         ReviewChecklist.reaches.append(old, spaceID: "S1", stateDirectory: state, trims: false)
-        let output = try XCTUnwrap(ReviewChecklist.subagentStartOutput(
-            try forkStarted("a1", skill: "code-review"), environment: environment, stateDirectory: state, now: now
-        ))
+        let fork = try forkStarted("a1", skill: "code-review")
+        let elsewhere = ["NIRUX_WORKSPACE_ID": "W1", "NIRUX_PROFILE_ID": "S-other"]
+        XCTAssertNil(ReviewChecklist.subagentStartOutput(fork, environment: elsewhere, stateDirectory: state, now: now), "the launch's space first")
+        let saved = ["NIRUX_WORKSPACE_ID": "W1"]
+        let output = try XCTUnwrap(ReviewChecklist.subagentStartOutput(fork, environment: saved, stateDirectory: state, now: now))
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: output) as? [String: Any])
         let hook = try XCTUnwrap(json["hookSpecificOutput"] as? [String: Any])
         XCTAssertEqual(hook["hookEventName"] as? String, "SubagentStart")
@@ -140,6 +142,7 @@ final class ReviewChecklistTests: XCTestCase {
         XCTAssertEqual(reaches(), [], "no list due yet")
         record([entry(["unbounded-wait"], task: "feat/a", at: now - day), entry(["unbounded-wait"], task: "feat/b", at: now - day)])
         note(typed, ["prompt": "/code-review ultra 812"], now + 1)
+        note(typed, ["prompt": "/code-review --comment ultra 926"], now + 1)
         let skill = { (pass: String) in
             AgentHookEvent(kind: .claude, name: .postToolUse, sessionID: "session-1", toolName: "Skill", reviewPasses: [pass])
         }
@@ -157,7 +160,8 @@ final class ReviewChecklistTests: XCTestCase {
     }
 
     /// Per session, a start counts as reached once a list was given there,
-    /// before or after it; the digest says so when one wasn't.
+    /// before or after it. The digest gives the counts; only none reached in
+    /// two sessions or more is news, and asks for a task.
     func testTheDailyPassSaysWhenTheListMissedAReviewer() {
         let window = DailyPass.Window(start: now - day, end: now)
         let reach = { (time: TimeInterval, session: String, kind: ReviewChecklist.Reach.Kind) in
@@ -168,18 +172,27 @@ final class ReviewChecklistTests: XCTestCase {
             reach(now - 50, "s2", .started), reach(now - 40, "s3", .given),
             reach(now - 2 * day, "s4", .started)
         ]
-        let counted = ReviewChecklist.reached(reaches, in: window)
-        XCTAssertEqual([counted.reached, counted.started], [1, 2])
+        XCTAssertEqual(ReviewChecklist.reached(reaches, in: window), ReviewChecklist.Tally(reached: 1, started: 2, sessions: 2))
 
         var facts = DailyPass.Facts(
             spaceName: "Nirux", window: window, findings: [], repositories: [], triagedRuns: [], flakyTests: [], missions: [],
             proposals: [], briefRules: []
         )
-        facts.checklistReach = counted
-        XCTAssertTrue(facts.hasNews)
-        XCTAssertTrue(DailyPass.digest(facts).text.contains("- The review checklist reached 1 of 2 reviewers started in this window"))
-        facts.checklistReach = (2, 2)
-        XCTAssertFalse(facts.hasNews)
+        let task = "Start a task"
+        for (reached, started, sessions) in [(1, 2, 2), (0, 2, 1)] {
+            facts.checklistReach = ReviewChecklist.Tally(reached: reached, started: started, sessions: sessions)
+            XCTAssertFalse(facts.hasNews, "a miss here and there")
+            let text = DailyPass.digest(facts).text
+            XCTAssertTrue(text.contains("- The review checklist reached \(reached) of \(started) /code-review starts in this window "
+                + "(an approximate count: nothing to do)."), text)
+            XCTAssertFalse(text.contains(task), text)
+        }
+        facts.checklistReach = ReviewChecklist.Tally(reached: 0, started: 3, sessions: 2)
+        XCTAssertTrue(facts.hasNews, "none in two sessions: a broken hook")
+        let broken = DailyPass.digest(facts).text
+        XCTAssertTrue(broken.contains("- The review checklist reached none of 3 /code-review starts in this window, in 2 sessions: "), broken)
+        XCTAssertTrue(broken.contains(task), broken)
+        facts.checklistReach = ReviewChecklist.Tally(reached: 2, started: 2, sessions: 2)
         XCTAssertFalse(DailyPass.digest(facts).text.contains("## Review checklist"))
     }
 }
