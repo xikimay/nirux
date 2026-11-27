@@ -156,18 +156,23 @@ final class TaskPreviewCard: NSView {
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
+    /// The row's status and the next step, each once: the plan's step is the next one when the row says it.
+    static func statusAndNext(_ info: WorkspaceInfo) -> (status: String, next: String) {
+        let row = info.rowSummary
+        let nextLine = info.nextStepText.map(WorkspaceInfo.nextStepLine)
+        let status = row.status.tone == .branch || row.status.text == nextLine ? info.phase.displayName : row.statusAlone
+        return (status, row.isPlanStep ? "" : info.nextStepText.map { "Next · \($0)" } ?? "")
+    }
+
     func show(_ info: WorkspaceInfo, opensThread: Bool, width: CGFloat) {
         let header = layoutHeader(info, buttonTitle: opensThread ? "Open task thread" : "Open task", width: width)
         setFrameSize(NSSize(width: width, height: header + Theme.Space.md))
     }
 
     private func layoutHeader(_ info: WorkspaceInfo, buttonTitle: String, width: CGFloat) -> CGFloat {
-        let row = info.rowSummary.status
         title.stringValue = info.title
         goal.stringValue = WorkspaceInfo.oneRunOfWords(info.purpose) ?? ""
-        let nextLine = info.nextStepText.map(WorkspaceInfo.nextStepLine)
-        status.stringValue = row.tone == .branch || row.text == nextLine ? info.phase.displayName : row.text
-        next.stringValue = info.nextStepText.map { "Next · \($0)" } ?? ""
+        (status.stringValue, next.stringValue) = Self.statusAndNext(info)
         var y = Theme.Space.md
         let inner = width - 2 * Theme.Space.md
         for field in [title, goal, status, next] {
