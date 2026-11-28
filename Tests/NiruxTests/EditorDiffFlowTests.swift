@@ -20,7 +20,9 @@ final class EditorDiffFlowTests: XCTestCase {
             let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
             editor.toggleDiff()
             harness.waitUntil("README.md's diff") { editor.diffActivePath == readme }
-            let shown = waitForDiffs("README.md's diff", in: webView) { $0.types.count == 1 && $0.lines[0].contains("Edited.") }
+            let shown = waitForDiffs("README.md's diff", in: webView, timeout: Self.firstLoad) {
+                $0.types.count == 1 && $0.lines[0].contains("Edited.")
+            }
             XCTAssertEqual(shown?.types, ["single"])
             XCTAssertEqual(shown?.rows, [])
             XCTAssertEqual(shown?.background, "rgb(32, 32, 42)")
@@ -76,7 +78,7 @@ final class EditorDiffFlowTests: XCTestCase {
             let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
             let paths = ["README.md", UIFlowHarness.searchTarget, "docs/same.txt", "big.txt", "empty.txt", "gone.txt", "crlf.txt", "bin.dat", "gone.bin", "kept.txt", "old/a.txt"]
             editor.showDiffCollection(title: "Uncommitted Changes (11)", paths: paths, mode: .head)
-            let shown = waitForDiffs("the changed files", in: webView) { $0.rows.count == 10 && $0.types.count == 4 }
+            let shown = waitForDiffs("the changed files", in: webView, timeout: Self.firstLoad) { $0.rows.count == 10 && $0.types.count == 4 }
             XCTAssertEqual(shown?.rows, [
                 "|README.md|+2|−0", "docs/|search-target.txt|+1|−1", "|big.txt", "|empty.txt", "|gone.txt", "|crlf.txt|+2|−2", "|bin.dat", "|gone.bin", "|kept.txt",
                 "old/|a.txt|+0|−1"
@@ -107,7 +109,9 @@ final class EditorDiffFlowTests: XCTestCase {
             editor.showCheckpointDiff(LocalCheckpoints.Diff(
                 warning: "Incomplete checkpoint. Some changes may be missing.", notes: ["Skipped B.bin — Binary file"], files: [file]
             ), title: "Since the checkpoint")
-            let shown = waitForDiffs("the checkpoint's file", in: webView) { $0.rows.count == 1 && $0.types.count == 1 && $0.lines[0].contains("-- old") }
+            let shown = waitForDiffs("the checkpoint's file", in: webView, timeout: Self.firstLoad) {
+                $0.rows.count == 1 && $0.types.count == 1 && $0.lines[0].contains("-- old")
+            }
             XCTAssertEqual(shown?.notes, ["Incomplete checkpoint. Some changes may be missing.", "Skipped B.bin — Binary file"])
             XCTAssertEqual(shown?.rows, ["|A.swift|+1|−2"])
 
@@ -135,7 +139,7 @@ final class EditorDiffFlowTests: XCTestCase {
             harness.waitUntil("the shown line") { editor.header.context == "Line 1" }
             editor.toggleDiff()
             harness.waitUntil("the draft's diff") { editor.diffActivePath == draft }
-            UIFlowHarness.waitForAnswer("Monaco's diff", to: Self.diffWrap, in: webView) { $0 == "off" }
+            UIFlowHarness.waitForAnswer("Monaco's diff", to: Self.diffWrap, in: webView, timeout: Self.firstLoad) { $0 == "off" }
             harness.waitUntil("the page's word") { editor.diffViewer == "monaco" }
             XCTAssertEqual(editor.header.context, "Line 1")
             editor.toggleWordWrap()
@@ -152,7 +156,9 @@ final class EditorDiffFlowTests: XCTestCase {
             let editor = try XCTUnwrap(harness.shell.activeWorkspace?.front?.editorColumn)
             let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
             harness.waitUntil("the shown lines") { editor.header.context == "Lines 1–2" }
-            UIFlowHarness.waitForAnswer("the page to show README.md", to: "\(Self.mainEditor).getModel().getValue()", in: webView) { $0.hasPrefix("# Flow") }
+            UIFlowHarness.waitForAnswer(
+                "the page to show README.md", to: "\(Self.mainEditor).getModel().getValue()", in: webView, timeout: Self.firstLoad
+            ) { $0.hasPrefix("# Flow") }
             UIFlowHarness.run("""
                 (function () {
                   window.NiruxPierreDiff = Object.assign({}, window.NiruxPierreDiff, { createReview: function () { throw new Error('no review'); } });
@@ -176,7 +182,7 @@ final class EditorDiffFlowTests: XCTestCase {
             let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
             editor.toggleDiff()
             harness.waitUntil("its diff") { editor.diffActivePath == target }
-            waitForDiffs("no changes yet", in: webView) { $0.notes == ["No changes"] }
+            waitForDiffs("no changes yet", in: webView, timeout: Self.firstLoad) { $0.notes == ["No changes"] }
             UIFlowHarness.run("""
                 (function () {
                   if (document.activeElement) document.activeElement.blur();
@@ -192,6 +198,11 @@ final class EditorDiffFlowTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Each test's first wait on the page: Monaco's first load, and a
+    /// group's files read off the main thread, are slow on a runner busy
+    /// with heavier tests.
+    private static let firstLoad: TimeInterval = 30
 
     /// The diff's scroll once line 105 reads changed; empty before.
     private static let placeAfterRedraw = """
@@ -258,11 +269,11 @@ final class EditorDiffFlowTests: XCTestCase {
 
     @discardableResult
     private func waitForDiffs(
-        _ description: String, in webView: WKWebView, file: StaticString = #filePath, line: UInt = #line,
+        _ description: String, in webView: WKWebView, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line,
         _ matches: @escaping (Shown) -> Bool
     ) -> Shown? {
         var latest: Shown?
-        UIFlowHarness.waitForAnswer(description, to: Self.shown, in: webView, file: file, line: line) { answer in
+        UIFlowHarness.waitForAnswer(description, to: Self.shown, in: webView, timeout: timeout, file: file, line: line) { answer in
             guard let shown = try? JSONDecoder().decode(Shown.self, from: Data(answer.utf8)) else { return false }
             latest = shown
             return matches(shown)
