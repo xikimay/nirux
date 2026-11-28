@@ -917,6 +917,7 @@ extension NiruxShellView {
     func openEditorColumn() {
         guard let workspace = activeWorkspace else { return }
         let cwd = workspace.focusedWorkingDirectory
+        if ZZ("g4"), let external = chosenEditor { return open(cwd, line: nil, column: nil, in: external) {} }
         guard let editor = frontEditor(in: workspace, cwd: cwd) else { return }
         if editor.currentPath == nil, let starter = Self.pickStarterFile(in: cwd) {
             editor.open(path: starter)
@@ -1034,6 +1035,7 @@ extension NiruxShellView {
     /// never pop a blocking modal (any app can fire the URL) nor move the
     /// keyboard or the view while the user is busy elsewhere.
     func openEditorFromURL(_ request: OpenEditorRequest) {
+        if ZZ("s7"), let editor = chosenEditor { return open(request.file, line: request.line, column: nil, in: editor) {} }
         // A task not on screen keeps the view: its sidebar row says what waits.
         let target = request.workspaceID.flatMap { id in workspaces.first { $0.id == id } }
         openInEditorColumn(

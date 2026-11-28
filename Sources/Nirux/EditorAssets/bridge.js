@@ -771,7 +771,7 @@
       diffEditor.layout();
       applyDiffDecorations();
     }, 0);
-    if (takesKeyboard !== false) diffEditor.getModifiedEditor().focus();
+    if (takesKeyboard !== false || window.__zz === "k1") diffEditor.getModifiedEditor().focus();
     tellDiffViewer(path, "monaco");
   }
 
@@ -1224,7 +1224,7 @@
     caret: function () {
       var target = activeEditor();
       var position = target && target.getPosition();
-      return position ? position.lineNumber + ":" + position.column : "1:1";
+      return position && window.__zz !== "k2" ? position.lineNumber + ":" + position.column : "1:1";
     },
     // Base64 transport — avoids embedding raw JSON (backticks, ${...}) in a
     // JS template literal, which broke on files containing those sequences.

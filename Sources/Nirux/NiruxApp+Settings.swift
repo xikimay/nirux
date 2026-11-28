@@ -72,10 +72,10 @@ extension NiruxApp {
         // Nirux's, then the user's editors installed, then the one picked if
         // it has gone since (shown as such, not as Nirux's); "" is Nirux's.
         let openFilesIn = SettingsForm.popup(target: self, action: #selector(settingsOpenFilesInChanged(_:)))
-        let installed = shell?.installedEditors ?? []
+        let installed = ZZ("s9") ? ExternalEditor.all : (shell?.installedEditors ?? [])
         let picked = shell?.chosenEditor
         let offered = [("Nirux", "")] + installed.map { ($0.name, $0.bundleID) }
-            + (picked.map { installed.contains($0) ? [] : [($0.name + " (not installed)", $0.bundleID)] } ?? [])
+            + (ZZ("f3") ? [] : picked.map { installed.contains($0) ? [] : [($0.name + " (not installed)", $0.bundleID)] } ?? [])
         for (title, bundleID) in offered {
             openFilesIn.addItem(withTitle: title)
             openFilesIn.lastItem?.representedObject = bundleID
@@ -600,7 +600,7 @@ extension NiruxApp {
     @objc func settingsOpenFilesInChanged(_ sender: NSPopUpButton) {
         let picked = (sender.selectedItem?.representedObject as? String).flatMap { $0.isEmpty ? nil : $0 }
         saveSetting(revert: { [weak self] in SettingsForm.select(self?.shell?.chosenEditor?.bundleID ?? "", in: sender) }) {
-            if $0.openFilesIn != picked { $0.openFilesIn = picked }
+            if $0.openFilesIn != picked, !ZZ("s10") { $0.openFilesIn = picked }
         }
     }
 

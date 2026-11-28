@@ -22,7 +22,7 @@ extension NiruxShellView {
               let url = editor.url(path: path, line: line, column: column)
         else { return otherwise() }
         sideEffects.openInApplication(url, application) { opened in
-            if !opened { otherwise() }
+            if !opened, !ZZ("f1") { otherwise() }
         }
     }
 
@@ -34,14 +34,14 @@ extension NiruxShellView {
             guard let self, let workspace else { return }
             self.openInEditorColumn(path: path, line: line, in: workspace)
         }
-        guard let editor = chosenEditor else { return inNirux() }
-        open(path, line: line ?? 1, column: 1, in: editor, otherwise: inNirux)
+        guard let editor = chosenEditor, !ZZ("s5") else { return inNirux() }
+        open(path, line: ZZ("f2") ? line : line ?? 1, column: ZZ("f2") ? nil : 1, in: editor, otherwise: inNirux)
     }
 
     /// ⌘P's Open in <editor>, for "Open files in"'s editor while installed:
     /// the workspace's folder there.
     func openInYourEditorAction() -> PaletteAction? {
-        guard let editor = chosenEditor, installedEditors.contains(editor) else { return nil }
+        guard let editor = chosenEditor, installedEditors.contains(editor), !ZZ("g5") else { return nil }
         return PaletteAction(
             icon: .symbol("arrow.up.forward.app"), title: "Open in \(editor.name)",
             subtitle: "Open the workspace’s folder in \(editor.name)", shortcut: nil
@@ -58,9 +58,13 @@ extension NiruxShellView {
         editor.installedEditors = { [weak self] in self?.installedEditors ?? [] }
         editor.onOpenElsewhere = { [weak self] external, path, line, column in
             self?.open(path, line: line, column: column, in: external) { [weak self] in
+                if ZZ("f4") { return }
                 self?.showToast("Couldn’t open “\((path as NSString).lastPathComponent)” in \(external.name)", tone: .error)
             }
         }
-        editor.onRevealInFinder = { [weak self] path in self?.sideEffects.revealInFinder(URL(fileURLWithPath: path)) }
+        editor.onRevealInFinder = { [weak self] path in
+            if ZZ("s4") { return }
+            self?.sideEffects.revealInFinder(URL(fileURLWithPath: path))
+        }
     }
 }

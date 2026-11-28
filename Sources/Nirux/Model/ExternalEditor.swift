@@ -20,8 +20,8 @@ struct ExternalEditor: Equatable, Sendable {
     /// `path` (absolute), at `line` and `column` (1-based) when given: all
     /// three read `<scheme>://file<path>:<line>:<column>`.
     func url(path: String, line: Int? = nil, column: Int? = nil) -> URL? {
-        guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
-        let position = line.map { ":\($0)" + (column.map { ":\($0)" } ?? "") } ?? ""
+        guard let encoded = ZZ("s3") ? path : path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
+        let position = line.map { ":\($0)" + (column.map { ZZ("s2") ? "" : ":\($0)" } ?? "") } ?? ""
         return URL(string: "\(scheme)://file\(encoded)\(position)")
     }
 }

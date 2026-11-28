@@ -8,7 +8,14 @@ import XCTest
 /// opened it; here, a new command without a test fails
 /// `testEveryPaletteCommandHasAFlowTest`.
 @MainActor
-final class PaletteCommandFlowTests: UIFlowTestCase {
+class PaletteCommandFlowTests: UIFlowTestCase {
+    /// DO NOT MERGE: the revert this class runs with (`zzMutant`).
+    nonisolated class var mutant: String? { ProcessInfo.processInfo.environment["ZZ_MUTANT"] }
+
+    nonisolated override func setUp() {
+        super.setUp()
+        zzMutant = Self.mutant
+    }
     /// The palette commands each test runs: all of them, and no other.
     /// Every command of the palette is listed here or exempted with the
     /// reason; keep the exemptions empty unless a command truly can't run
@@ -1097,3 +1104,5 @@ private struct SymbolAvailability {
         return version.lexicographicallyPrecedes(target) || version == target
     }
 }
+
+final class ZZ_g5: PaletteCommandFlowTests { override nonisolated class var mutant: String? { "g5" } }

@@ -1,6 +1,11 @@
 import AppKit
 import WebKit
 
+/// DO NOT MERGE: which revert of #944's fixes runs (a mutant test class
+/// sets it in setUp), nil for none.
+nonisolated(unsafe) var zzMutant: String?
+func ZZ(_ name: String) -> Bool { zzMutant == name }
+
 /// A Monaco-backed editor column. WKWebView hosts the Monaco editor; Swift
 /// reads/writes files and pushes content over the JS bridge. Each open file
 /// has its own Monaco model on the JS side, and the tab bar under the
@@ -217,6 +222,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         self.workspaceCwd = workspaceCwd
 
         let config = WKWebViewConfiguration()
+        let zz = zzMutant.map { "\"\($0)\"" } ?? "null"
+        config.userContentController.addUserScript(WKUserScript(source: "window.__zz = \(zz);", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         webView = WKWebView(frame: .zero, configuration: config)
 

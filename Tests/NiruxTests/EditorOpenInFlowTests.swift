@@ -7,7 +7,14 @@ import XCTest
 /// ⋯'s Open in at the caret, Reveal in Finder, and Settings › General's
 /// "Open files in" for what the user opens.
 @MainActor
-final class EditorOpenInFlowTests: XCTestCase {
+class EditorOpenInFlowTests: XCTestCase {
+    /// DO NOT MERGE: the revert this class runs with (`zzMutant`).
+    nonisolated class var mutant: String? { ProcessInfo.processInfo.environment["ZZ_MUTANT"] }
+
+    nonisolated override func setUp() {
+        super.setUp()
+        zzMutant = Self.mutant
+    }
     private static let zed = URL(fileURLWithPath: "/Applications/Zed.app")
     private static let vscode = URL(fileURLWithPath: "/Applications/Visual Studio Code.app")
     private static let mainEditor = "monaco.editor.getEditors().filter(function (e) { return e.getContainerDomNode().id === 'editor'; })[0]"
@@ -117,3 +124,18 @@ final class EditorOpenInFlowTests: XCTestCase {
         }
     }
 }
+
+final class ZZ_k2: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "k2" } }
+final class ZZ_s1: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "s1" } }
+final class ZZ_s2: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "s2" } }
+final class ZZ_s3: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "s3" } }
+final class ZZ_s4: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "s4" } }
+final class ZZ_s5: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "s5" } }
+final class ZZ_s7: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "s7" } }
+final class ZZ_f1: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "f1" } }
+final class ZZ_f2: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "f2" } }
+final class ZZ_f4: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "f4" } }
+final class ZZ_g1: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "g1" } }
+final class ZZ_g2: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "g2" } }
+final class ZZ_g3: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "g3" } }
+final class ZZ_g4: EditorOpenInFlowTests { override nonisolated class var mutant: String? { "g4" } }

@@ -6,7 +6,14 @@ import XCTest
 /// agents actually get, and write only the setting the user changed:
 /// otherwise opening it, touching one control, or a failed write can leave
 /// agents in a mode nobody chose.
-final class SettingsWindowTests: XCTestCase {
+class SettingsWindowTests: XCTestCase {
+    /// DO NOT MERGE: the revert this class runs with (`zzMutant`).
+    class var mutant: String? { ProcessInfo.processInfo.environment["ZZ_MUTANT"] }
+
+    override func setUp() {
+        super.setUp()
+        zzMutant = Self.mutant
+    }
 
     @MainActor
     func testSettingsShowEffectiveLaunchModesWhenNothingIsSaved() throws {
@@ -1085,3 +1092,6 @@ final class SettingsWindowTests: XCTestCase {
     }
 }
 
+final class ZZ_s9: SettingsWindowTests { override class var mutant: String? { "s9" } }
+final class ZZ_s10: SettingsWindowTests { override class var mutant: String? { "s10" } }
+final class ZZ_f3: SettingsWindowTests { override class var mutant: String? { "f3" } }
