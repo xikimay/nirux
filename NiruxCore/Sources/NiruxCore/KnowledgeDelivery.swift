@@ -53,13 +53,16 @@ public struct ServedKnowledge: Codable, Equatable, Sendable {
 
     /// The open bricks of `loaded`, oldest first.
     public static func compile(_ loaded: KnowledgeStore.Loaded, now: TimeInterval, macOS: Int) -> ServedKnowledge {
-        ServedKnowledge(bricks: loaded.ordered.compactMap { id, brick in
-            let state = loaded.state(of: id)
-            guard brick.status(state, now: now, macOS: macOS).isServed else { return nil }
+        var chains: [String: KnowledgeStore.Loaded.Chain] = [:]
+        var memo: [String: (until: TimeInterval?, macOS: Int?)] = [:]
+        return ServedKnowledge(bricks: loaded.ordered.compactMap { id, brick in
+            guard loaded.chain(of: id, now: now, macOS: macOS, cache: &chains)?.status.isServed == true else { return nil }
+            let bounds = loaded.servedBounds(of: id, now: now, macOS: macOS, chains: &chains, memo: &memo)
             return Brick(
                 id: id, sentence: brick.sentence, subject: brick.subject, anchor: brick.scope.anchor, name: brick.scope.name,
                 paths: brick.scope.paths, proof: brick.proofs.map(\.label).joined(separator: " · "),
-                servedUntil: brick.expiry(state), macOS: brick.macOS == nil ? nil : state.reconfirmedMacOS ?? brick.macOS
+                // A brick resting on others stops with the first of them.
+                servedUntil: bounds.until, macOS: bounds.macOS
             )
         })
     }

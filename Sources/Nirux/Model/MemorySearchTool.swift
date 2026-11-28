@@ -119,11 +119,13 @@ enum MemorySearchTool {
             guard let bricks = knowledge.bricks, bricks.serves, bricks.status(of: id) == .open, let brick = bricks.loaded.bricks[id] else { return nil }
             source = "brick \(id), " + brick.scope.paths.joined(separator: ", ")
             text = "\(brick.sentence) (proof: \(brick.proofs.map(\.label).joined(separator: " · ")))"
-        case .proposal:
+        case .proposal, .flag:
             return nil
         }
         let excerpt = HistorySearch.excerpt(of: text, terms: terms) ?? "[Excerpt withheld.]"
-        return "[\(entry.scope.title) · \(BranchReview.visible(source))] " + bounded(excerpt, bytes: maxExcerptBytes)
+        // It rests on a brick agents no longer get: said, so it isn't taken as is.
+        let flagged = knowledge.bricks?.flaggedBase(in: entry.cites).map { bounded(BranchReview.visible(" [Flagged: it rests on \($0.id), \($0.why)]"), bytes: 300) } ?? ""
+        return "[\(entry.scope.title) · \(BranchReview.visible(source))] " + bounded(excerpt, bytes: maxExcerptBytes - flagged.utf8.count) + flagged
     }
 
     private static func bounded(_ text: String, bytes: Int) -> String {

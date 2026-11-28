@@ -33,29 +33,13 @@ public struct KnowledgeUse: Codable, Equatable, Sendable {
     public static func append(_ uses: [KnowledgeUse], in store: KnowledgeStore) {
         let url = store.folder.appendingPathComponent(fileName)
         let lines = uses.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }.reduce(Data(), +)
-        locked(store, attempts: 100) {
+        store.locked("uses.lock", attempts: 100) {
             var info = stat()
             if stat(url.path, &info) == 0, info.st_size >= maxFileBytes { return }
             let descriptor = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0o600)
             guard descriptor >= 0 else { return }
             defer { close(descriptor) }
             _ = lines.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
-        }
-    }
-
-    /// Runs `body` holding `uses.lock`, or not at all once `attempts`
-    /// tries 10 ms apart fail.
-    private static func locked(_ store: KnowledgeStore, attempts: Int, _ body: () -> Void) {
-        let descriptor = open(store.folder.appendingPathComponent("uses.lock").path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard descriptor >= 0 else { return }
-        defer { close(descriptor) }
-        for _ in 0..<attempts {
-            if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {
-                body()
-                flock(descriptor, LOCK_UN)
-                return
-            }
-            usleep(10_000)
         }
     }
 
@@ -73,7 +57,7 @@ public struct KnowledgeUse: Codable, Equatable, Sendable {
     /// Rewrites the file without the lines past `keptDays`, and without the
     /// oldest past `maxKeptLines`, when it has some.
     public static func trim(in store: KnowledgeStore, now: TimeInterval) {
-        locked(store, attempts: 300) {
+        store.locked("uses.lock", attempts: 300) {
             let uses = load(in: store)
             let kept = uses.filter { now - $0.time < Double(keptDays) * 86_400 }.suffix(maxKeptLines)
             guard kept.count < uses.count else { return }

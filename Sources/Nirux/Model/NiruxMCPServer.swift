@@ -115,11 +115,13 @@ enum NiruxMCPServer {
     }
 
     private static let searchToolNames = [HistorySearchTool.name, MemorySearchTool.name]
+    /// Answered by the server itself, for an agent Nirux started.
+    private static let localToolNames = searchToolNames + [FlagKnowledgeTool.name]
 
     /// Every tool, pre-allowed for every Claude Nirux launches; the Lead's
     /// are listed to a Lead only, a task's (the same names) to the agent of
     /// any other Nirux workspace, and the app checks each call.
-    static let toolNames = searchToolNames + LeadTools.names + PlanTools.names
+    static let toolNames = localToolNames + LeadTools.names + PlanTools.names
 
     /// Who runs the server, and where.
     struct Context: Sendable {
@@ -260,10 +262,11 @@ enum NiruxMCPServer {
         case "ping":
             return response(id: id, result: [:])
         case "tools/list":
-            return response(id: id, result: ["tools": [HistorySearchTool.definition, MemorySearchTool.definition] + context.appToolDefinitions])
+            let flag = context.isLead || context.isWorkspaceAgent ? [FlagKnowledgeTool.definition] : []
+            return response(id: id, result: ["tools": [HistorySearchTool.definition, MemorySearchTool.definition] + flag + context.appToolDefinitions])
         case "tools/call":
             let name = params["name"] as? String
-            guard let name, searchToolNames.contains(name) || context.appToolNames.contains(name) else {
+            guard let name, localToolNames.contains(name) || context.appToolNames.contains(name) else {
                 return response(id: id, error: (-32602, "Unknown tool: \(name ?? "none")"))
             }
             guard let arguments = params["arguments"] as? [String: Any] ?? (params["arguments"] == nil ? [:] : nil) else {
@@ -272,6 +275,7 @@ enum NiruxMCPServer {
             let result = switch name {
             case HistorySearchTool.name: HistorySearchTool.call(arguments, context: context)
             case MemorySearchTool.name: MemorySearchTool.call(arguments, context: context)
+            case FlagKnowledgeTool.name: FlagKnowledgeTool.call(arguments, context: context)
             default: callAppTool(name, arguments: arguments, context: context)
             }
             return response(id: id, result: [

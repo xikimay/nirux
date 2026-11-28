@@ -55,6 +55,8 @@ extension ProjectMemory {
             case brick(String)
             /// A brick proposed to the user, by id.
             case proposal(String)
+            /// What an agent flagged without naming a brick (a gap), by id.
+            case flag(String)
         }
 
         let scope: Scope
@@ -65,6 +67,13 @@ extension ProjectMemory {
         let searchText: String
         /// What the row's chip says instead of its scope.
         var badge: String?
+        /// The bricks its text cites: it rests on them.
+        var cites: [String] = []
+
+        var isFlag: Bool {
+            if case .flag = source { return true }
+            return false
+        }
     }
 
     /// The space's bricks, as the list shows them.
@@ -76,6 +85,8 @@ extension ProjectMemory {
         let serves: Bool
         let now: TimeInterval
         let macOS: Int
+        /// What agents flagged, the user's dismissals left out.
+        var flags: [KnowledgeFlag] = []
 
         struct Reach: Equatable, Sendable {
             var tasks = 0
@@ -87,9 +98,22 @@ extension ProjectMemory {
         /// Reads the space's bricks and their uses.
         static func read(_ store: KnowledgeStore, serves: Bool, now: TimeInterval = Date().timeIntervalSince1970) -> Bricks? {
             let loaded = store.load()
-            guard !loaded.bricks.isEmpty || !loaded.state.proposals.isEmpty else { return nil }
+            let dismissed = Set(loaded.state.dismissedFlags ?? [])
+            let flags = KnowledgeFlag.load(in: store).filter { !dismissed.contains($0.id) }
+            guard !loaded.bricks.isEmpty || !loaded.state.proposals.isEmpty || !flags.isEmpty else { return nil }
             let reach = KnowledgeUse.reach(KnowledgeUse.load(in: store)).mapValues { Reach(tasks: $0.tasks, corrections: $0.corrections) }
-            return Bricks(loaded: loaded, reach: reach, serves: serves, now: now, macOS: SpaceKnowledge.macOS)
+            return Bricks(loaded: loaded, reach: reach, serves: serves, now: now, macOS: SpaceKnowledge.macOS, flags: flags)
+        }
+
+        /// The first brick of this space `cites` names that agents don't get
+        /// now, and why. An id the space doesn't hold (a shared CLAUDE.md, a
+        /// proposal) says nothing.
+        func flaggedBase(in cites: [String]) -> (id: String, why: String)? {
+            for id in cites {
+                guard let status = status(of: id), status != .open else { continue }
+                return (id, status.title + (status.reason.map { ": \($0)" } ?? ""))
+            }
+            return nil
         }
 
         /// Proposals first, then standing bricks, then closed ones.
@@ -99,7 +123,7 @@ extension ProjectMemory {
             func rank(_ status: BrickStatus?) -> Int {
                 switch status {
                 case .open?: return 0
-                case .expired?, .suspect?, .failing?: return 1
+                case .expired?, .suspect?, .failing?, .flagged?: return 1
                 case .closed?: return 2
                 case nil: return 0
                 }
@@ -135,7 +159,16 @@ extension ProjectMemory {
                     ))
                 }
             }
-            for (id, brick, status) in bricks?.listed ?? [] {
+            let listed = bricks?.listed ?? []
+            let flagEntries = (bricks?.flags ?? []).filter { $0.brick == nil }.map { flag in
+                Entry(
+                    scope: .whenRelevant, title: flag.about, detail: "\(flag.kind.rawValue) flagged by an agent · \(flag.text)", source: .flag(flag.id),
+                    searchText: ProjectMemory.folded([flag.about, flag.text].joined(separator: "\n")), badge: flag.kind.rawValue
+                )
+            }
+            let proposals = listed.prefix { $0.status == nil }.count
+            for (index, (id, brick, status)) in listed.enumerated() {
+                if index == proposals { entries += flagEntries }
                 let reach = bricks?.reach[id]
                 let detail = [
                     status == nil ? "proposed by \(brick.proposedBy ?? "an agent")" : nil,
@@ -149,6 +182,7 @@ extension ProjectMemory {
                     badge: status?.title ?? "proposed"
                 ))
             }
+            if proposals == listed.count { entries += flagEntries }
             for (index, memory) in (memory?.memories ?? []).enumerated() {
                 entries.append(Entry(
                     scope: .whenRelevant, title: memory.title, detail: memory.description, source: .memory(index),
@@ -162,7 +196,22 @@ extension ProjectMemory {
                     searchText: ProjectMemory.folded([line.title, line.target, line.hook].joined(separator: "\n"))
                 ))
             }
-            self.entries = entries
+            // A rule or a memory that cites a brick rests on it: flagged
+            // while agents don't get that brick.
+            let ruleFiles = files
+            self.entries = entries.map { entry in
+                var entry = entry
+                switch entry.source {
+                case .rule(let file, let index):
+                    entry.cites = ruleFiles[safe: file]?.rules[safe: index].map { KnowledgeLinks.cited(in: $0.text) } ?? []
+                case .memory(let index):
+                    entry.cites = memory?.memories[safe: index].map { KnowledgeLinks.cited(in: $0.body + "\n" + $0.description) } ?? []
+                default:
+                    break
+                }
+                if bricks?.flaggedBase(in: entry.cites) != nil { entry.badge = "flagged" }
+                return entry
+            }
         }
 
         func rule(of entry: Entry) -> (file: RuleFile, rule: Rule)? {
@@ -181,6 +230,11 @@ extension ProjectMemory {
             }
         }
 
+        func flag(of entry: Entry) -> KnowledgeFlag? {
+            guard case .flag(let id) = entry.source else { return nil }
+            return bricks?.flags.first { $0.id == id }
+        }
+
         func memory(of entry: Entry) -> Memory? {
             guard case .memory(let index) = entry.source else { return nil }
             return memory?.memories[safe: index]
@@ -196,6 +250,8 @@ extension ProjectMemory {
                 return (directory.appendingPathComponent(memory.fileName), nil)
             case .missingFile(let line):
                 return self.memory.map { ($0.directory.appendingPathComponent(ProjectMemory.indexFileName), line.number) }
+            case .flag:
+                return nil
             case .brick, .proposal:
                 // The first file its proofs name, in the repository's main checkout.
                 guard let brick = brick(of: entry)?.brick, let root = SpaceKnowledge.anchor(key: brick.scope.anchor)?.folder,
@@ -210,7 +266,8 @@ extension ProjectMemory {
             }
         }
 
-        func count(_ scope: Scope) -> Int { entries.filter { $0.scope == scope }.count }
+        /// Agents' flags aren't knowledge they get: counted apart.
+        func count(_ scope: Scope) -> Int { entries.filter { $0.scope == scope && !$0.isFlag }.count }
 
         /// What a write acts on for `entry`, resolved now; nil for the
         /// team's rules, which change in the editor.
@@ -224,7 +281,7 @@ extension ProjectMemory {
                 return .memory(memory, directory: directory)
             case .missingFile(let line):
                 return self.memory.map { .missingFile(line, directory: $0.directory) }
-            case .brick, .proposal:
+            case .brick, .proposal, .flag:
                 // Never edited: the panel's own buttons decide them.
                 return nil
             }
@@ -275,7 +332,7 @@ extension ProjectMemory {
         let words = text.split(whereSeparator: \.isWhitespace).map { folded(String($0)) }
         return knowledge.entries.indices.filter { index in
             let entry = knowledge.entries[index]
-            let inScope = scope == nil || entry.scope == scope || (scope == .always && entry.scope == .team)
+            let inScope = scope == nil || (!entry.isFlag && (entry.scope == scope || (scope == .always && entry.scope == .team)))
             return inScope && words.allSatisfy(entry.searchText.contains)
         }
     }
@@ -288,6 +345,10 @@ extension ProjectMemory {
         var counted = parts.compactMap { scope, name in knowledge.count(scope) > 0 ? "\(knowledge.count(scope)) \(name)" : nil }
         let waiting = knowledge.bricks?.loaded.pending.count ?? 0
         if waiting > 0 { counted.append("\(waiting) brick\(waiting == 1 ? "" : "s") to validate") }
+        let flagged = knowledge.entries.filter { $0.badge == "flagged" }.count
+        if flagged > 0 { counted.append("\(flagged) flagged") }
+        let flags = knowledge.entries.filter(\.isFlag).count
+        if flags > 0 { counted.append("\(flags) flag\(flags == 1 ? "" : "s") from agents") }
         return counted.isEmpty ? "Nothing yet" : counted.joined(separator: " · ")
     }
 

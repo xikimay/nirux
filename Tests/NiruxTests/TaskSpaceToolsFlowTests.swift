@@ -76,7 +76,7 @@ final class TaskSpaceToolsFlowTests: XCTestCase {
         return (try XCTUnwrap(text), try XCTUnwrap(result["isError"] as? Bool))
     }
 
-    private let searchTools = [HistorySearchTool.name, MemorySearchTool.name]
+    private let searchTools = [HistorySearchTool.name, MemorySearchTool.name, FlagKnowledgeTool.name]
 
     /// `shell`'s first workspace in General, on screen: the tools never
     /// move what the user looks at.

@@ -435,7 +435,8 @@ final class ProjectMemoryPanel: NSObject {
 
     /// Closing a brick is for good: asked first.
     private func decideSelectedBrick(_ action: ProjectMemoryPreview.BrickAction) {
-        guard !isWriting, let entry = selectedEntry, let (id, _, _) = model?.knowledge.brick(of: entry) else { return NSSound.beep() }
+        guard !isWriting, let entry = selectedEntry,
+              let id = model?.knowledge.brick(of: entry)?.id ?? model?.knowledge.flag(of: entry)?.id else { return NSSound.beep() }
         if action == .close {
             let alert = NSAlert()
             alert.messageText = "Close this brick?"

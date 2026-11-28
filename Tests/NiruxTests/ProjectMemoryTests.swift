@@ -288,6 +288,39 @@ final class ProjectMemoryTests: XCTestCase {
         XCTAssertEqual(knowledge.brick(of: knowledge.entries[0])?.id, proposed.id)
     }
 
+    func testWhatRestsOnABrickAgentsNoLongerGetIsFlaggedAndGapsAreListed() {
+        let base = KnowledgeBrick(
+            sentence: "A brick the rest of the list rests on, one sentence.", subject: "a subject", scope: .init(anchor: "git:/x/.git", name: "x", paths: ["a.swift"]),
+            proofs: [.file(path: "a.swift")], validatedAt: 1
+        )
+        var loaded = KnowledgeStore.Loaded(bricks: [base.id: base])
+        loaded.state.bricks[base.id] = BrickState()
+        let brief = ProjectMemory.RuleFile(url: URL(fileURLWithPath: "/tmp/brief.md"), label: "Space brief", rules: [
+            ProjectMemory.Rule(text: "**Glass** stays in a child view (\(base.id)).", lines: 1...1),
+            ProjectMemory.Rule(text: "**Tests** wait on state (b-0123456789ab, another space's).", lines: 2...2)
+        ])
+        let gap = KnowledgeFlag(time: 5, kind: .gap, brick: nil, about: "merge train", text: "riders are inner merges", evidence: nil, task: "w1")
+        let dismissed = KnowledgeFlag(time: 6, kind: .gap, brick: nil, about: "old", text: "read", evidence: nil, task: "w1")
+        func knowledge(_ loaded: KnowledgeStore.Loaded) -> ProjectMemory.Knowledge {
+            let flags = [gap, dismissed].filter { !(loaded.state.dismissedFlags ?? []).contains($0.id) }
+            return ProjectMemory.Knowledge(brief: brief, teamFiles: [], memory: nil,
+                                           bricks: .init(loaded: loaded, reach: [:], serves: true, now: 10, macOS: 27, flags: flags))
+        }
+        _ = loaded.dismissFlag(dismissed.id)
+        let standing = knowledge(loaded)
+        XCTAssertEqual(standing.entries[0].cites, [base.id])
+        XCTAssertNil(standing.entries[0].badge, "its brick stands")
+        XCTAssertEqual(standing.entries.map(\.title).filter { $0 == "merge train" || $0 == "old" }, ["merge train"])
+        XCTAssertNotNil(standing.flag(of: standing.entries.first { $0.title == "merge train" }!))
+        _ = loaded.close(base.id, because: "a.swift is gone.", now: 8)
+        let closed = knowledge(loaded)
+        XCTAssertEqual(closed.entries[0].badge, "flagged")
+        XCTAssertNil(closed.entries[1].badge)
+        XCTAssertEqual(ProjectMemory.summary(of: closed), "2 always · 1 when relevant · 1 flagged · 1 flag from agents",
+                       "the brick counts, a gap isn't knowledge agents get, another space's id flags nothing")
+        XCTAssertFalse(ProjectMemory.entries(in: closed, text: "", scope: .whenRelevant).contains { closed.entries[$0].isFlag })
+    }
+
     func testLinks() throws {
         let text = "See [[alpha]], [[ beta ]] and [[]], [[[gamma]]], [[not\nclosed]] [[alpha]]."
         let links = ProjectMemory.links(in: text)
