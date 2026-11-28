@@ -810,6 +810,7 @@
   }
 
   function enterPierreDiffGroup(payload) {
+    postToSwift({ type: "error", message: "probe: page got enterDiffGroup loading " + !!(payload && payload.loading) + " files " + ((payload && payload.files) || []).length + " pierre " + !!window.NiruxPierreDiff });
     if (!window.NiruxPierreDiff || !pierreDiffRoot) return;
     keepReadingTop();
     if (diffMode === "monaco") exitMonacoDiff();
@@ -817,6 +818,7 @@
     pierreOriginalContent = "";
     pierreGroupPayload = payload || { files: [] };
     renderPierreDiffGroup();
+    postToSwift({ type: "error", message: "probe: page drew rows " + pierreDiffRoot.querySelectorAll(".nirux-pierre-file-header").length });
   }
 
   function schedulePierreRender() {

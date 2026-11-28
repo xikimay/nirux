@@ -51,41 +51,29 @@ final class EditorDiffFlowTests: XCTestCase {
     /// (too large, binary, empty, its text unchanged); a click on the row
     /// folds it.
     func testGroupDiffHasOneRowPerChangedFile() throws {
+        Self.probe("group: test start")
         try UIFlowHarness.run { harness in
+            Self.probe("group: harness ready")
             let repo = harness.repo
-            try "Same.\n".write(toFile: repo + "/docs/same.txt", atomically: true, encoding: .utf8)
-            let big = String(repeating: "x\n", count: 210_000)
-            try big.write(toFile: repo + "/big.txt", atomically: true, encoding: .utf8)
-            try "".write(toFile: repo + "/gone.txt", atomically: true, encoding: .utf8)
-            try "a\r\nb\r\n".write(toFile: repo + "/crlf.txt", atomically: true, encoding: .utf8)
-            try "".write(toFile: repo + "/kept.txt", atomically: true, encoding: .utf8)
-            try "abc\n".write(toFile: repo + "/bin.dat", atomically: true, encoding: .utf8)
-            try Data([0, 255, 2]).write(to: URL(fileURLWithPath: repo + "/gone.bin"))
-            try FileManager.default.createDirectory(atPath: repo + "/old", withIntermediateDirectories: true)
-            try "a\n".write(toFile: repo + "/old/a.txt", atomically: true, encoding: .utf8)
-            try UIFlowHarness.git(["add", "docs/same.txt", "big.txt", "gone.txt", "crlf.txt", "kept.txt", "bin.dat", "gone.bin", "old/a.txt"], at: repo)
-            try UIFlowHarness.git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "same"], at: repo)
-            try "Find it elsewhere.\n".write(toFile: repo + "/" + UIFlowHarness.searchTarget, atomically: true, encoding: .utf8)
-            try (big + "y\n").write(toFile: repo + "/big.txt", atomically: true, encoding: .utf8)
-            try FileManager.default.removeItem(atPath: repo + "/gone.txt")
-            try "".write(toFile: repo + "/empty.txt", atomically: true, encoding: .utf8)
-            try "a\nb\n".write(toFile: repo + "/crlf.txt", atomically: true, encoding: .utf8)
-            try Data([0, 1, 3]).write(to: URL(fileURLWithPath: repo + "/bin.dat"))
-            try FileManager.default.removeItem(atPath: repo + "/gone.bin")
-            try FileManager.default.removeItem(atPath: repo + "/old")
+            try Self.writeChanges(in: repo, as: "group")
             harness.shell.openInEditorColumn(path: repo + "/README.md")
+            Self.probe("group: opened")
             let editor = try XCTUnwrap(harness.shell.activeWorkspace?.front?.editorColumn)
             let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
             let paths = ["README.md", UIFlowHarness.searchTarget, "docs/same.txt", "big.txt", "empty.txt", "gone.txt", "crlf.txt", "bin.dat", "gone.bin", "kept.txt", "old/a.txt"]
             editor.showDiffCollection(title: "Uncommitted Changes (11)", paths: paths, mode: .head)
-            let shown = waitForDiffs("the changed files", in: webView, timeout: Self.firstLoad) { $0.rows.count == 10 && $0.types.count == 4 }
+            Self.probe("group: asked")
+            harness.waitUntil("the files read", timeout: 60) { editor.diffGroupTabs.values.contains { !$0.isLoading } }
+            Self.probe("group: files read, group active \(editor.activePath.map(EditorColumn.isDiffGroupPath) ?? false)")
+            let shown = waitForDiffs("the changed files", in: webView, timeout: 60) { $0.rows.count == 10 && $0.types.count == 4 }
+            Self.probe("group: drawn")
             XCTAssertEqual(shown?.rows, [
                 "|README.md|+2|−0", "docs/|search-target.txt|+1|−1", "|big.txt", "|empty.txt", "|gone.txt", "|crlf.txt|+2|−2", "|bin.dat", "|gone.bin", "|kept.txt",
                 "old/|a.txt|+0|−1"
             ])
             XCTAssertEqual(shown?.types, ["single", "single", "single", "single"])
             XCTAssertEqual(shown?.notes, [
-                "Too large to compare (\(big.utf8.count + 2) bytes).", "Empty file added.", "Empty file removed.",
+                "Too large to compare (420002 bytes).", "Empty file added.", "Empty file removed.",
                 "Binary or unreadable, not compared.", "Binary or unreadable, not compared.", "No change in its text."
             ])
             // The folder reads left to right, its end by the name.
@@ -96,6 +84,64 @@ final class EditorDiffFlowTests: XCTestCase {
                 $0 == "folded"
             }
         }
+    }
+
+    /// Probe: the group asked once the page has loaded, as a user does.
+    func testGroupDiffOnALoadedPage() throws {
+        Self.probe("loaded: test start")
+        try UIFlowHarness.run { harness in
+            Self.probe("loaded: harness ready")
+            let repo = harness.repo
+            try Self.writeChanges(in: repo, as: "loaded")
+            harness.shell.openInEditorColumn(path: repo + "/README.md")
+            Self.probe("loaded: opened")
+            let editor = try XCTUnwrap(harness.shell.activeWorkspace?.front?.editorColumn)
+            let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+            UIFlowHarness.waitForAnswer("the page to show README.md", to: "\(Self.mainEditor).getModel().getValue()", in: webView, timeout: 60) {
+                $0.hasPrefix("# Flow")
+            }
+            Self.probe("loaded: page ready")
+            let paths = ["README.md", UIFlowHarness.searchTarget, "docs/same.txt", "big.txt", "empty.txt", "gone.txt", "crlf.txt", "bin.dat", "gone.bin", "kept.txt", "old/a.txt"]
+            editor.showDiffCollection(title: "Uncommitted Changes (11)", paths: paths, mode: .head)
+            Self.probe("loaded: asked")
+            harness.waitUntil("the files read", timeout: 60) { editor.diffGroupTabs.values.contains { !$0.isLoading } }
+            Self.probe("loaded: files read, group active \(editor.activePath.map(EditorColumn.isDiffGroupPath) ?? false)")
+            let shown = waitForDiffs("the changed files on a loaded page", in: webView, timeout: 30) { $0.rows.count == 10 && $0.types.count == 4 }
+            Self.probe("loaded: drawn")
+            XCTAssertEqual(shown?.rows.count, 10)
+        }
+    }
+
+    private static func probe(_ text: String) {
+        NSLog("%@", "[probe] \(text)")
+    }
+
+    private static func writeChanges(in repo: String, as name: String) throws {
+        probe("\(name): writes start")
+        try "Same.\n".write(toFile: repo + "/docs/same.txt", atomically: true, encoding: .utf8)
+        let big = String(repeating: "x\n", count: 210_000)
+        try big.write(toFile: repo + "/big.txt", atomically: true, encoding: .utf8)
+        try "".write(toFile: repo + "/gone.txt", atomically: true, encoding: .utf8)
+        try "a\r\nb\r\n".write(toFile: repo + "/crlf.txt", atomically: true, encoding: .utf8)
+        try "".write(toFile: repo + "/kept.txt", atomically: true, encoding: .utf8)
+        try "abc\n".write(toFile: repo + "/bin.dat", atomically: true, encoding: .utf8)
+        try Data([0, 255, 2]).write(to: URL(fileURLWithPath: repo + "/gone.bin"))
+        try FileManager.default.createDirectory(atPath: repo + "/old", withIntermediateDirectories: true)
+        try "a\n".write(toFile: repo + "/old/a.txt", atomically: true, encoding: .utf8)
+        probe("\(name): committed files written")
+        try UIFlowHarness.git(["add", "docs/same.txt", "big.txt", "gone.txt", "crlf.txt", "kept.txt", "bin.dat", "gone.bin", "old/a.txt"], at: repo)
+        probe("\(name): git add done")
+        try UIFlowHarness.git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "same"], at: repo)
+        probe("\(name): git commit done")
+        try "Find it elsewhere.\n".write(toFile: repo + "/" + UIFlowHarness.searchTarget, atomically: true, encoding: .utf8)
+        try (big + "y\n").write(toFile: repo + "/big.txt", atomically: true, encoding: .utf8)
+        try FileManager.default.removeItem(atPath: repo + "/gone.txt")
+        try "".write(toFile: repo + "/empty.txt", atomically: true, encoding: .utf8)
+        try "a\nb\n".write(toFile: repo + "/crlf.txt", atomically: true, encoding: .utf8)
+        try Data([0, 1, 3]).write(to: URL(fileURLWithPath: repo + "/bin.dat"))
+        try FileManager.default.removeItem(atPath: repo + "/gone.bin")
+        try FileManager.default.removeItem(atPath: repo + "/old")
+        probe("\(name): changes written")
     }
 
     /// A checkpoint's diff reads file by file too, from the hunks Swift

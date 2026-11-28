@@ -833,10 +833,14 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
         openDiffGroup(loadingGroup, at: groupPath)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let files = absolutePaths.compactMap { path in
-                Self.diffFilePayload(of: path, cwd: cwd, mode: mode)
+            let files = absolutePaths.compactMap { path -> [String: Any]? in
+                let started = Date()
+                let payload = Self.diffFilePayload(of: path, cwd: cwd, mode: mode)
+                NSLog("%@", "[probe] read \((path as NSString).lastPathComponent) in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+                return payload
             }
             Task { @MainActor [weak self] in
+                NSLog("%@", "[probe] files in: wanted \(self?.diffGroupTabs[groupPath]?.load == load), group active \(self?.activePath == groupPath)")
                 // Its tab still waits on it, in front or not: neither closed
                 // nor loading another list since.
                 guard let self, self.diffGroupTabs[groupPath]?.load == load else { return }
@@ -912,6 +916,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     }
 
     private func sendDiffGroup(_ group: DiffGroupTab) {
+        NSLog("%@", "[probe] send enterDiffGroup loading \(group.isLoading) files \(group.files.count) page ready \(monacoReady)")
         var payload: [String: Any] = [
             "type": "enterDiffGroup",
             "title": group.title,
@@ -1512,6 +1517,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     private func handleBridgeMessage(type: String, body: [String: Any]) {
         switch type {
         case "monacoReady":
+            NSLog("%@", "[probe] monacoReady, \(pendingOps.count) queued")
             monacoReady = true
             monacoLoadWatchdog?.invalidate()
             monacoLoadWatchdog = nil
