@@ -60,7 +60,8 @@ final class EditorOpenInFlowTests: XCTestCase {
             dirty.performActionForItem(at: try XCTUnwrap(dirtyTitles.firstIndex(of: "Save and Open in VS Code")))
             harness.waitUntil("saved, then opened") { opened.count == 3 }
             XCTAssertEqual(try String(contentsOfFile: notes, encoding: .utf8), "one\ntwo\nthree four\nfive\n")
-            XCTAssertTrue(editor.unsavedPaths.isEmpty)
+            // The page says the tab is clean once it hears the save was written.
+            harness.waitUntil("the tab clean") { editor.unsavedPaths.isEmpty }
 
             // A save refused (changed on disk under the edit): nothing opens.
             UIFlowHarness.run("(function () { var m = \(Self.mainEditor).getModel(); m.setValue(m.getValue() + 'six\\n'); })()", in: webView)
