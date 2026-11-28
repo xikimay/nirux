@@ -37,15 +37,15 @@ final class CommandBarToolbarTests: XCTestCase {
         return (window, toolbar, cup)
     }
 
-    /// An empty unified toolbar with the bar as its centred item, which asks
-    /// macOS 26 for none of its own glass; the bar takes the strip's width
-    /// within its bounds.
+    /// An empty unified toolbar with the bar as its centred item (the Lead
+    /// island joins it when it shows), which asks macOS 26 for none of its own
+    /// glass; the bar takes the strip's width within its bounds.
     func testTheBarIsTheToolbarsCentredItem() throws {
         let (window, toolbar, _) = window()
         defer { window.close() }
         XCTAssertTrue(window.toolbar === toolbar.toolbar)
         XCTAssertEqual(window.toolbarStyle, .unified)
-        XCTAssertEqual(toolbar.toolbar.centeredItemIdentifiers, [CommandBarToolbar.barItemID])
+        XCTAssertEqual(toolbar.toolbar.centeredItemIdentifiers, [CommandBarToolbar.islandItemID, CommandBarToolbar.barItemID])
         let item = try XCTUnwrap(toolbar.toolbar.items.first { $0.itemIdentifier == CommandBarToolbar.barItemID })
         XCTAssertTrue(item.view === toolbar.bar)
         XCTAssertFalse(item.isBordered, "no bordered background behind the bar's own glass")
