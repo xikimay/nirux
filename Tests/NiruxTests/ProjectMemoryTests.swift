@@ -316,7 +316,7 @@ final class ProjectMemoryTests: XCTestCase {
         let closed = knowledge(loaded)
         XCTAssertEqual(closed.entries[0].badge, "flagged")
         XCTAssertNil(closed.entries[1].badge)
-        XCTAssertEqual(ProjectMemory.summary(of: closed), "2 always · 1 when relevant · 1 flagged · 1 gap flagged by agents",
+        XCTAssertEqual(ProjectMemory.summary(of: closed), "2 always · 1 when relevant · 1 flagged · 1 flag from agents",
                        "the brick counts, a gap isn't knowledge agents get, another space's id flags nothing")
         XCTAssertFalse(ProjectMemory.entries(in: closed, text: "", scope: .whenRelevant).contains { closed.entries[$0].isFlag })
     }

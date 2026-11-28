@@ -63,13 +63,20 @@ public struct KnowledgeFlag: Codable, Equatable, Sendable {
 
     static let lockName = "flags.lock"
 
-    /// Appends `flag` under the lock a trim takes.
-    public static func append(_ flag: KnowledgeFlag, in store: KnowledgeStore) throws {
+    /// Appends `flag` under the lock a trim and other appends take, unless
+    /// `refusal`, given the flags written so far under that lock, says why
+    /// not: that reason, else nil.
+    @discardableResult
+    public static func append(
+        _ flag: KnowledgeFlag, in store: KnowledgeStore, unless refusal: ([KnowledgeFlag]) -> String? = { _ in nil }
+    ) throws -> String? {
         let url = store.folder.appendingPathComponent(fileName)
         var line = try JSONEncoder().encode(flag)
         line.append(UInt8(ascii: "\n"))
         var failure: Error?
+        var refused: String?
         let ran = store.locked(lockName, attempts: 100) {
+            if let reason = refusal(load(in: store)) { return refused = reason }
             var info = stat()
             if stat(url.path, &info) == 0, info.st_size >= maxFileBytes { return failure = CocoaError(.fileWriteOutOfSpace) }
             let descriptor = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0o600)
@@ -81,6 +88,7 @@ public struct KnowledgeFlag: Codable, Equatable, Sendable {
         }
         if !ran { throw POSIXError(.EBUSY) }
         if let failure { throw failure }
+        return refused
     }
 
     public static func load(in store: KnowledgeStore) -> [KnowledgeFlag] {

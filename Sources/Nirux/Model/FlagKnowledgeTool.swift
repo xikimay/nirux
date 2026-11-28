@@ -60,17 +60,18 @@ enum FlagKnowledgeTool {
             guard KnowledgeLinks.isBrickID(brick), store.load().bricks[brick] != nil else { return refused("This space holds no brick \(brick).") }
         }
         let task = context.nonEmpty("NIRUX_WORKSPACE_ID")
-        let flags = KnowledgeFlag.load(in: store)
-        let today = flags.filter { $0.task == task && now - $0.time < repeatWindow }
-        guard today.count < KnowledgeFlag.maxPerTaskPerDay else {
-            return refused("You flagged \(today.count) things today: tell the user the rest in your reply.")
-        }
-        let again = today.contains { flag in
-            flag.kind == kind && flag.brick == brick && ProjectMemory.folded(flag.about) == ProjectMemory.folded(about)
-        }
-        guard !again else { return refused("You flagged this already today: the user has it.") }
+        let flag = KnowledgeFlag(time: now, kind: kind, brick: brick, about: about, text: said, evidence: evidence, task: task)
         do {
-            try KnowledgeFlag.append(KnowledgeFlag(time: now, kind: kind, brick: brick, about: about, text: said, evidence: evidence, task: task), in: store)
+            // Counted where it is written: two calls at once can't both pass.
+            let refusal = try KnowledgeFlag.append(flag, in: store) { flags in
+                let today = flags.filter { $0.task == task && now - $0.time < repeatWindow }
+                if today.count >= KnowledgeFlag.maxPerTaskPerDay {
+                    return "You flagged \(today.count) things today: tell the user the rest in your reply."
+                }
+                let again = today.contains { $0.kind == kind && $0.brick == brick && ProjectMemory.folded($0.about) == ProjectMemory.folded(about) }
+                return again ? "You flagged this already today: the user has it." : nil
+            }
+            if let refusal { return refused(refusal) }
         } catch {
             return refused("Nirux couldn't record the flag: \(error.localizedDescription)")
         }

@@ -348,11 +348,15 @@ final class FlagKnowledgeToolTests: XCTestCase {
         XCTAssertTrue(FlagKnowledgeTool.call(gap, context: context(), now: 200).isError, "the same flag from the same task, the same day")
         XCTAssertFalse(FlagKnowledgeTool.call(gap, context: context(workspace: "w2"), now: 200).isError, "another task may")
         XCTAssertTrue(store.load().bricks.isEmpty)
-        for number in 2...5 {
-            XCTAssertFalse(FlagKnowledgeTool.call(["kind": "gap", "about": "gap \(number)", "text": "t"], context: context(), now: 300).isError)
+    }
+
+    func testFiveFlagsADayPerTaskEvenAtOnce() {
+        let agent = context()
+        DispatchQueue.concurrentPerform(iterations: 12) { number in
+            _ = FlagKnowledgeTool.call(["kind": "gap", "about": "gap \(number)", "text": "t"], context: agent, now: 300)
         }
-        XCTAssertTrue(FlagKnowledgeTool.call(["kind": "gap", "about": "one more", "text": "t"], context: context(), now: 300).isError,
-                      "five a day per task")
+        XCTAssertEqual(KnowledgeFlag.load(in: store).count, KnowledgeFlag.maxPerTaskPerDay)
+        XCTAssertTrue(FlagKnowledgeTool.call(["kind": "gap", "about": "one more", "text": "t"], context: agent, now: 400).isError)
     }
 
     func testWhatAFlagCantHold() {

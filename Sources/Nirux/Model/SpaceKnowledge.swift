@@ -296,8 +296,6 @@ enum SpaceKnowledge {
                 pass.suspected.append(id)
             }
         }
-        // When a brick was first seen expired: what bricks resting on it compare with.
-        _ = loaded.stampExpiries(now: now, macOS: macOS)
         let housekeeping = now - (loaded.state.dailyCheckAt ?? 0) >= dailyInterval
         let standing = loaded.ordered.filter { loaded.state(of: $0.id).closedAt == nil }
         for (key, bricks) in Dictionary(grouping: standing, by: \.brick.scope.anchor) {

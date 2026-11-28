@@ -347,8 +347,8 @@ extension ProjectMemory {
         if waiting > 0 { counted.append("\(waiting) brick\(waiting == 1 ? "" : "s") to validate") }
         let flagged = knowledge.entries.filter { $0.badge == "flagged" }.count
         if flagged > 0 { counted.append("\(flagged) flagged") }
-        let gaps = knowledge.entries.filter(\.isFlag).count
-        if gaps > 0 { counted.append("\(gaps) gap\(gaps == 1 ? "" : "s") flagged by agents") }
+        let flags = knowledge.entries.filter(\.isFlag).count
+        if flags > 0 { counted.append("\(flags) flag\(flags == 1 ? "" : "s") from agents") }
         return counted.isEmpty ? "Nothing yet" : counted.joined(separator: " · ")
     }
 

@@ -279,31 +279,13 @@ extension KnowledgeStore.Loaded {
         guard bricks[id] != nil, state(of: id).closedAt == nil else { return false }
         var brick = state(of: id)
         brick.reconfirmedAt = now
-        // Only a brick macOS may change records where it was confirmed.
-        if bricks[id]?.macOS != nil { brick.reconfirmedMacOS = macOS }
+        brick.reconfirmedMacOS = macOS
         brick.suspectAt = nil
         brick.suspectBecause = nil
         brick.failedAt = nil
         brick.failedBecause = nil
-        brick.expiredAt = nil
         state.bricks[id] = brick
         return true
-    }
-
-    /// Stamps when each standing brick was first seen expired, and clears it
-    /// once it isn't; true when something changed.
-    public mutating func stampExpiries(now: TimeInterval, macOS: Int) -> Bool {
-        var changed = false
-        for (id, brick) in bricks {
-            var stamped = state(of: id)
-            let expired: Bool
-            if case .expired = brick.status(stamped, now: now, macOS: macOS) { expired = true } else { expired = false }
-            guard expired != (stamped.expiredAt != nil) else { continue }
-            stamped.expiredAt = expired ? now : nil
-            state.bricks[id] = stamped
-            changed = true
-        }
-        return changed
     }
 
     public mutating func close(_ id: String, because reason: String, now: TimeInterval) -> Bool {

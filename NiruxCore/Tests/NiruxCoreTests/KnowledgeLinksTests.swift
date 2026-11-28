@@ -52,15 +52,30 @@ struct KnowledgeLinksTests {
         _ = loaded.reconfirm(top.id, now: 30, macOS: 27)
         #expect(loaded.status(of: top.id, now: 31, macOS: 27) == .open, "its base is flagged since 20, it was confirmed at 30")
         guard case .flagged? = loaded.status(of: middle.id, now: 31, macOS: 27) else { Issue.record("middle cleared"); return }
+    }
+
+    @Test func aBrickConfirmedAfterItsBaseExpiredStandsAndIsServedOnItsOwn() {
+        var loaded = KnowledgeStore.Loaded()
+        let base = Self.brick(1).with(proofs: [.pullRequest(1)])
+        let resting = Self.brick(2, restsOn: [base.id])
+        for brick in [base, resting] { loaded.bricks[brick.id] = brick }
+        let expiry = base.expiry(BrickState()) ?? 0
+        guard case .flagged? = loaded.status(of: resting.id, now: expiry + 1, macOS: 27) else { Issue.record("not flagged"); return }
+        _ = loaded.reconfirm(resting.id, now: expiry + 10, macOS: 27)
+        #expect(loaded.status(of: resting.id, now: expiry + 20, macOS: 27) == .open, "its base stopped on its date, before the confirmation")
+        let served = ServedKnowledge.compile(loaded, now: expiry + 20, macOS: 27).bricks.first { $0.id == resting.id }
+        #expect(served != nil && served?.servedUntil == nil, "the base it was confirmed past no longer bounds it")
+
         var tied = KnowledgeStore.Loaded()
         let system = KnowledgeBrickTests.brick("A fact that holds on one macOS only, one sentence.", proofs: [.file(path: "s.swift")], macOS: 26)
-        let resting = Self.brick(4, restsOn: [system.id])
-        for brick in [system, resting] { tied.bricks[brick.id] = brick }
-        let stamped = tied.stampExpiries(now: 40, macOS: 27)
-        #expect(stamped)
-        guard case .flagged? = tied.status(of: resting.id, now: 41, macOS: 27) else { Issue.record("not flagged"); return }
-        _ = tied.reconfirm(resting.id, now: 50, macOS: 27)
-        #expect(tied.status(of: resting.id, now: 51, macOS: 27) == .open, "confirmed after its base expired")
+        let onSystem = Self.brick(4, restsOn: [system.id])
+        for brick in [system, onSystem] { tied.bricks[brick.id] = brick }
+        guard case .flagged? = tied.status(of: onSystem.id, now: 40, macOS: 27) else { Issue.record("not flagged on 27"); return }
+        _ = tied.reconfirm(onSystem.id, now: 50, macOS: 27)
+        #expect(tied.status(of: onSystem.id, now: 1e9, macOS: 27) == .open, "confirmed on the macOS its base gave out on, for good")
+        guard case .flagged? = tied.status(of: onSystem.id, now: 1e9, macOS: 28) else { Issue.record("not flagged on 28"); return }
+        let tiedServed = ServedKnowledge.compile(tied, now: 60, macOS: 27).bricks.first { $0.id == onSystem.id }
+        #expect(tiedServed != nil && tiedServed?.macOS == nil, "served on any macOS, as it isn't about macOS")
     }
 
     @Test func aRestingBrickStopsBeingServedWithItsBase() {

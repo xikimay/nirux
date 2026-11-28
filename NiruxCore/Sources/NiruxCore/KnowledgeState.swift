@@ -31,14 +31,13 @@ public struct BrickState: Codable, Equatable, Sendable {
     /// never closes a brick for good.
     public var failedAt: TimeInterval?
     public var failedBecause: String?
-    /// When a pass first saw it expired: what a brick resting on it compares
-    /// its confirmation with.
-    public var expiredAt: TimeInterval?
     public var replacedBy: String?
     public var suspectAt: TimeInterval?
     public var suspectBecause: String?
     public var reconfirmedAt: TimeInterval?
-    /// The macOS major version it was last reconfirmed on.
+    /// The macOS major version it was last reconfirmed on: where a brick
+    /// about macOS is served, and where one resting on a brick that gave
+    /// out on a macOS change stands on its own.
     public var reconfirmedMacOS: Int?
 
     public init() {}

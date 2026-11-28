@@ -115,7 +115,11 @@ Whatever is built on bricks says which ones it rests on:
 **Flagging in chain**: when a brick stops being served (closed, failing,
 suspect, expired, or itself flagged), a brick resting on it is **flagged**,
 and not served until the user confirms it after that ("Still True") or
-closes it; down the chain too. A rule or memory citing it shows "flagged"
+closes it; down the chain too. "After" compares with when the base
+stopped: its closing, failure or suspicion, its expiry date, or for a
+macOS change the macOS the brick was confirmed on. Once confirmed past
+it, the brick stands on its own: that base no longer bounds how long, or
+on which macOS, it is served. A rule or memory citing it shows "flagged"
 in Space Memory and in `memory_search`'s excerpt, with which brick and why:
 the user edits it. An id the space doesn't hold (a CLAUDE.md shared with
 another space, a proposal) flags nothing.
