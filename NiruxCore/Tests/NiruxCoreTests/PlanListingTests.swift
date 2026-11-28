@@ -59,4 +59,21 @@ struct PlanListingTests {
         let folded = plan.listing(tasks: ["embed", "other"], folded: ["f"], shown: ["embed"])
         #expect(folded.entries.prefix(2) == [.feature(feature, isFolded: true), .task(workspaceID: "embed", inFeature: true)])
     }
+
+    @Test func theIslandSaysTheLeadsLineNowTheUsersToDosThenWhatComesNext() throws {
+        var plan = Plan()
+        try plan.add(Plan.Line(id: "f", kind: .feature, title: "Export", by: .user, at: 1), to: .top)
+        try plan.add(Plan.Line(id: "a", kind: .lead, title: "Check the renders", by: .lead, at: 1), to: .under("f"))
+        try plan.add(Plan.Line(id: "t", kind: .todo, title: "Reply to the printer", by: .user, at: 1), to: .top)
+        try plan.add(Plan.Line(id: "b", kind: .lead, title: "Run the noon train", by: .lead, at: 1), to: .top)
+        try plan.add(Plan.Line(id: "p", kind: .session, title: "Page texts", by: .lead, at: 1, after: "t"), to: .top)
+        try plan.add(Plan.Line(id: "d", kind: .todo, title: "Pick the offers", by: .user, at: 1), to: .top)
+        try plan.check("d", by: .user, at: 2)
+        let island = plan.island
+        #expect(island.now?.id == "a")
+        #expect(island.forYou.map(\.id) == ["t"])
+        #expect(island.next.map(\.id) == ["b", "p"])
+        try plan.check("a", by: .lead, at: 3)
+        #expect(plan.island.now?.id == "b")
+    }
 }

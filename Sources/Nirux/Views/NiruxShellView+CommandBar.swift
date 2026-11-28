@@ -18,6 +18,7 @@ extension NiruxShellView {
         bar.onTask = { [weak self] in self?.showTaskMenuFromCommandBar() }
         bar.onSearch = { [weak self] in self?.showCommandPalette() }
         bar.onWaiting = { [weak self] in self?.jumpToNextWaitingAgent() }
+        toolbar.island.onPress = { [weak self] in self?.showLeadIslandPanel() }
         scheduleMetadataRefresh()
     }
 

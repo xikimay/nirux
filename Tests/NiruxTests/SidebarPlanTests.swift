@@ -102,6 +102,18 @@ final class SidebarPlanTests: XCTestCase {
         XCTAssertEqual(started, ["p1"])
     }
 
+    /// While the Lead island shows, the Lead's lines leave its row.
+    func testTheIslandTakesTheLeadsLinesFromItsRow() throws {
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 300, height: 700))
+        sidebar.isExpanded = true
+        sidebar.plan = try plan()
+        sidebar.update(profiles: [], workspaces: rows)
+        XCTAssertTrue(labels(sidebar).map(\.text).contains("Run the noon train"))
+        sidebar.leadLinesInIsland = true
+        sidebar.update(profiles: [], workspaces: rows)
+        XCTAssertFalse(labels(sidebar).map(\.text).contains("Run the noon train"))
+    }
+
     func testAFeatureListsItsTasksAndLinesAndFolds() throws {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 300, height: 700))
         sidebar.isExpanded = true

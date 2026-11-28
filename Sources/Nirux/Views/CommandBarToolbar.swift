@@ -20,19 +20,24 @@ extension NSTitlebarAccessoryViewController {
 @MainActor
 final class CommandBarToolbar: NSObject, NSToolbarDelegate {
     static let barItemID = NSToolbarItem.Identifier("nirux.commandBar")
+    static let islandItemID = NSToolbarItem.Identifier("nirux.leadIsland")
     static let maximumBarWidth: CGFloat = 640
     static let minimumBarWidth: CGFloat = 280
 
     let bar: CommandBarView
+    /// The Lead island, left of the bar while the space plans the day (`showIsland`).
+    let island: LeadIslandView
     let toolbar: NSToolbar
     /// Made once: a second item handed the same bar would take it from the
     /// live one (full screen in or out, a toolbar sync), leaving an empty
     /// strip.
     private(set) lazy var barItem = Self.barItem(bar)
+    private(set) lazy var islandItem = Self.islandItem(island)
     private var displayModeObservation: NSKeyValueObservation?
 
     init(bar: CommandBarView) {
         self.bar = bar
+        island = LeadIslandView(level: bar.level)
         toolbar = NSToolbar(identifier: "nirux.main")
         super.init()
         toolbar.delegate = self
@@ -44,7 +49,7 @@ final class CommandBarToolbar: NSObject, NSToolbarDelegate {
         displayModeObservation = toolbar.observe(\.displayMode) { toolbar, _ in
             MainActor.assumeIsolated { if toolbar.displayMode != .iconOnly { toolbar.displayMode = .iconOnly } }
         }
-        toolbar.centeredItemIdentifiers = [Self.barItemID]
+        toolbar.centeredItemIdentifiers = [Self.islandItemID, Self.barItemID]
         // From 280 to 640 pt, as wide as the strip allows: the toolbar sizes
         // the item between those bounds (a preferred width above priority 50
         // would make it measure 640 and send the bar to the » menu in a
@@ -54,6 +59,11 @@ final class CommandBarToolbar: NSObject, NSToolbarDelegate {
             bar.heightAnchor.constraint(equalToConstant: CommandBarView.height),
             bar.widthAnchor.constraint(lessThanOrEqualToConstant: Self.maximumBarWidth),
             bar.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.minimumBarWidth),
+        ])
+        island.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            island.heightAnchor.constraint(equalToConstant: CommandBarView.height),
+            island.widthAnchor.constraint(lessThanOrEqualToConstant: LeadIslandView.maximumWidth),
         ])
     }
 
@@ -67,8 +77,37 @@ final class CommandBarToolbar: NSObject, NSToolbarDelegate {
     func toolbar(
         _ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
-        guard itemIdentifier == Self.barItemID else { return nil }
-        return barItem
+        switch itemIdentifier {
+        case Self.barItemID: return barItem
+        case Self.islandItemID: return islandItem
+        default: return nil
+        }
+    }
+
+    /// The island with `content`, or none; true while it is on screen (not in the » menu, not before the window).
+    @discardableResult
+    func showIsland(_ content: LeadIslandView.Content?) -> Bool {
+        if let content { island.show(content) }
+        let index = toolbar.items.firstIndex { $0.itemIdentifier == Self.islandItemID }
+        if content != nil, index == nil {
+            toolbar.insertItem(withItemIdentifier: Self.islandItemID, at: 0)
+        } else if content == nil, let index {
+            toolbar.removeItem(at: index)
+        }
+        return content != nil && island.window != nil && !island.isHiddenOrHasHiddenAncestor
+    }
+
+    static func islandItem(_ island: LeadIslandView) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: islandItemID)
+        item.view = island
+        item.label = "Lead"
+        // In the » menu, the panel under the bar.
+        let menu = NSMenuItem(title: "Lead…", action: #selector(LeadIslandView.pressed), keyEquivalent: "")
+        menu.target = island
+        item.menuFormRepresentation = menu
+        item.isBordered = false
+        if #available(macOS 26, *) { item.style = .plain }
+        return item
     }
 
     /// The bar's item. On macOS 26 a toolbar item may sit on the system's
@@ -91,6 +130,6 @@ final class CommandBarToolbar: NSObject, NSToolbarDelegate {
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.barItemID]
+        [Self.islandItemID, Self.barItemID]
     }
 }

@@ -335,8 +335,9 @@ final class SpaceSettingsLeadPane: NSObject {
                            + "its next message would write the whole context again. Its tasks, questions and brief stay.")
         buildSwitchRow(dayPlanRow, control: dayPlanSwitch, action: #selector(dayPlanChanged(_:)),
                        title: "Day plan (preview)",
-                       hint: "The day planned with the Lead, in the sidebar: features that fold, to-dos, the Lead's lines and "
-                           + "planned sessions. Still being built: nothing is edited there yet. Agents running now get its tools "
+                       hint: "The day planned with the Lead: in the sidebar, features that fold, to-dos, the Lead's lines and "
+                           + "planned sessions; in the title bar, the Lead's island, where Done checks a to-do. Still being built: "
+                           + "nothing else is edited yet. Agents running now get its tools "
                            + "when they next start.")
         agentPopup.addItems(withTitles: CodingAgent.launchable.map(\.productName))
         agentPopup.target = self
