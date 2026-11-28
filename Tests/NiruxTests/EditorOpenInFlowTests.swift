@@ -77,6 +77,67 @@ final class EditorOpenInFlowTests: XCTestCase {
         }
     }
 
+    /// Save and Open reads the caret before it saves: an agent's open that
+    /// switches the tab meanwhile doesn't move it.
+    func testSaveAndOpenKeepsItsFilesCaret() throws {
+        try UIFlowHarness.run { harness in
+            var opened: [String] = []
+            harness.shell.sideEffects.applicationURL = { $0 == "com.microsoft.VSCode" ? Self.vscode : nil }
+            harness.shell.sideEffects.openInApplication = { url, _, done in
+                opened.append(url.absoluteString)
+                done(true)
+            }
+            let notes = harness.repo + "/docs/notes.txt"
+            try "one\ntwo\nthree\n".write(toFile: notes, atomically: true, encoding: .utf8)
+            harness.shell.openInEditorColumn(path: notes)
+            let editor = try XCTUnwrap(harness.shell.activeWorkspace?.front?.editorColumn)
+            let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+            UIFlowHarness.waitForAnswer("the page to show the file", to: "\(Self.mainEditor).getModel().getValue()", in: webView, timeout: 30) {
+                $0.hasPrefix("one")
+            }
+            UIFlowHarness.run("""
+                (function () {
+                  var e = \(Self.mainEditor);
+                  e.getModel().setValue('one\\ntwo\\nthree four\\n');
+                  e.setPosition({ lineNumber: 3, column: 5 });
+                })()
+                """, in: webView)
+            harness.waitUntil("the edit") { editor.unsavedPaths == [notes] }
+            let menu = editor.header.currentMenu()
+            menu.performActionForItem(at: try XCTUnwrap(menu.items.map(\.title).firstIndex(of: "Save and Open in VS Code")))
+            harness.shell.openInEditorColumn(path: harness.repo + "/" + UIFlowHarness.searchTarget, takeFocus: false)
+            harness.waitUntil("saved, then opened") { !opened.isEmpty }
+            XCTAssertEqual(opened, ["vscode://file\(notes):3:5"])
+        }
+    }
+
+    /// A Markdown tab read rendered has no caret: Open in opens the file with
+    /// no line.
+    func testOpenInFromARenderedTabTakesNoLine() throws {
+        try UIFlowHarness.run { harness in
+            var opened: [String] = []
+            harness.shell.sideEffects.applicationURL = { $0 == "com.microsoft.VSCode" ? Self.vscode : nil }
+            harness.shell.sideEffects.openInApplication = { url, _, done in
+                opened.append(url.absoluteString)
+                done(true)
+            }
+            let notes = harness.repo + "/docs/notes.md"
+            try "# Notes\n\nOne.\n".write(toFile: notes, atomically: true, encoding: .utf8)
+            harness.shell.openInEditorColumn(path: notes)
+            let editor = try XCTUnwrap(harness.shell.activeWorkspace?.front?.editorColumn)
+            let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+            UIFlowHarness.waitForAnswer("the page to show it rendered", to: Self.rendered, in: webView, timeout: 30) { $0 == "rendered" }
+            let menu = editor.header.currentMenu()
+            menu.performActionForItem(at: try XCTUnwrap(menu.items.map(\.title).firstIndex(of: "Open in VS Code")))
+            harness.waitUntil("VS Code asked") { !opened.isEmpty }
+            XCTAssertEqual(opened, ["vscode://file" + notes])
+        }
+    }
+
+    /// "rendered" while the page shows the tab's Markdown view.
+    private static let rendered = "(function () { var view = document.getElementById('markdown-view'); "
+        + "return view && getComputedStyle(view).display !== 'none' ? 'rendered' : 'source'; })()"
+
     /// With "Open files in" on Zed, a terminal's file link goes to Zed (at
     /// its line, a column always), while Open Editor and what an agent shows
     /// stay in Nirux's editor; once Zed is gone, or fails to open it, a link

@@ -71,16 +71,18 @@ extension EditorColumn {
         }
     }
 
-    /// The user carries on there, with their edits: saved first, and
+    /// The user carries on there, with their edits: the caret read first
+    /// (an agent's open may switch the tab during the save), then saved, and
     /// nothing opens when the save fails.
     @objc private func openElsewhereClicked(_ sender: NSMenuItem) {
         guard let path = currentPath, let editor = ExternalEditor.withBundleID(sender.representedObject as? String) else { return }
-        let open: () -> Void = { [weak self] in
-            self?.readCaret { line, column in self?.onOpenElsewhere?(editor, path, line, column) }
-        }
-        guard unsavedPaths.contains(path) else { return open() }
-        save(paths: [path]) { written in
-            if written { open() }
+        readCaret(of: path) { [weak self] line, column in
+            guard let self else { return }
+            let open: () -> Void = { self.onOpenElsewhere?(editor, path, line, column) }
+            guard self.unsavedPaths.contains(path) else { return open() }
+            self.save(paths: [path]) { written in
+                if written { open() }
+            }
         }
     }
 

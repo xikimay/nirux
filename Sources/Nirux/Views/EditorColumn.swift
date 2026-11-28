@@ -95,8 +95,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     var onFilePickerRequest: ((EditorColumn) -> Void)?
     /// The user's own editors installed, for ⋯'s Open in (the shell's).
     var installedEditors: () -> [ExternalEditor] = { [] }
-    /// Open in one of them: the file, at the caret's line and column.
-    var onOpenElsewhere: ((ExternalEditor, String, Int, Int) -> Void)?
+    /// Open in one of them: the file, at the caret's line and column (none
+    /// read rendered).
+    var onOpenElsewhere: ((ExternalEditor, String, Int?, Int?) -> Void)?
     var onRevealInFinder: ((String) -> Void)?
     /// Asked before a tab with unsaved edits closes. Unset, it stays.
     var askAboutUnsavedEdits: ([String]) -> UnsavedEditsChoice = { _ in .cancel }
@@ -1224,11 +1225,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
 
     // MARK: - JS bridge
 
-    /// The caret's line and column in the page, 1 and 1 when it can't say.
-    func readCaret(_ done: @escaping @MainActor (Int, Int) -> Void) {
-        webView.evaluateJavaScript("window.niruxBridge.caret()") { value, _ in
-            let numbers = (value as? String)?.split(separator: ":").compactMap { Int($0) } ?? []
-            MainActor.assumeIsolated { done(numbers.first ?? 1, numbers.dropFirst().first ?? 1) }
+    /// The caret's line and column in `path`'s tab; none while another tab
+    /// shows, or it reads rendered.
+    func readCaret(of path: String, _ done: @escaping @MainActor (Int?, Int?) -> Void) {
+        webView.callAsyncJavaScript("return window.niruxBridge.caret(path)", arguments: ["path": path], in: nil, in: .page) { result in
+            let numbers = ((try? result.get()) as? String)?.split(separator: ":").compactMap { Int($0) } ?? []
+            MainActor.assumeIsolated { done(numbers.first, numbers.dropFirst().first) }
         }
     }
 

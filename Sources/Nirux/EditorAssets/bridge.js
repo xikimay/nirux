@@ -840,6 +840,9 @@
   // the open does; a redraw's doesn't.
   function renderPierreDiff(takesKeyboard) {
     if (diffMode !== "pierre" || !currentPath || !models[currentPath]) return;
+    // The keyboard in the surface (a file's row) goes with it to Monaco's
+    // diff, should it fall back: it would stay on a hidden node.
+    var keyboardInside = pierreDiffRoot.contains(document.activeElement);
     showPierreDiffSurface();
     var drawn;
     try {
@@ -850,7 +853,7 @@
       drawn = false;
     }
     // pierre couldn't draw it: Monaco's diff instead.
-    if (!drawn) enterMonacoDiff(currentPath, pierreOriginalContent, takesKeyboard);
+    if (!drawn) enterMonacoDiff(currentPath, pierreOriginalContent, takesKeyboard || keyboardInside);
   }
 
   // Several files (Uncommitted Changes, a branch, a checkpoint): its tab
@@ -1220,11 +1223,12 @@
         postToSwift({ type: "error", message: String(e) });
       }
     },
-    // The caret, "line:column", for an editor of the user's to open at.
-    caret: function () {
-      var target = activeEditor();
+    // `path`'s caret, "line:column", for an editor of the user's to open
+    // at; none while another tab shows, or this one reads rendered.
+    caret: function (path) {
+      var target = path === currentPath && !showsRendered() ? activeEditor() : null;
       var position = target && target.getPosition();
-      return position ? position.lineNumber + ":" + position.column : "1:1";
+      return position ? position.lineNumber + ":" + position.column : "";
     },
     // Base64 transport — avoids embedding raw JSON (backticks, ${...}) in a
     // JS template literal, which broke on files containing those sequences.

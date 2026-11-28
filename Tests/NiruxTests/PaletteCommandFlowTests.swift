@@ -133,10 +133,6 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
-    /// The match sits far up the scrollback of a terminal in another
-    /// workspace, and more matches are printed after the search: picking it
-    /// brings that column forward, find bar open, and Ghostty scrolls to
-    /// that very match.
     /// With "Open files in" on an editor installed, Open in <editor> opens
     /// the workspace's folder there.
     func testOpenInYourEditorCommand() throws {
@@ -153,6 +149,10 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
+    /// The match sits far up the scrollback of a terminal in another
+    /// workspace, and more matches are printed after the search: picking it
+    /// brings that column forward, find bar open, and Ghostty scrolls to
+    /// that very match.
     func testSearchEverywhere() throws {
         try UIFlowHarness.run { harness in
             let home = try XCTUnwrap(harness.shell.activeWorkspace)
