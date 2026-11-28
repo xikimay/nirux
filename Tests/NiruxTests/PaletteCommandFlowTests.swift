@@ -18,6 +18,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         tests: [
             "testTerminalColumnCommands": ["New Terminal", "Resize Column (Cycle Width)"],
             "testEditorCommands": ["Open Editor", "Toggle Editor Diff", "Search Workspace"],
+            "testOpenInYourEditorCommand": ["Open in Zed"],
             "testSearchEverywhere": ["Search Everywhere"],
             "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
             "testOpenIsolatedTestBrowser": ["Open Isolated Test Browser"],
@@ -46,8 +47,11 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
     func testEveryPaletteCommandHasAFlowTest() throws {
         try UIFlowHarness.run { harness in
-            // Import Browser Cookies is offered only with a Chromium browser.
+            // Import Browser Cookies is offered only with a Chromium browser,
+            // Open in Zed only with Zed installed and set to open files.
             harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
+            harness.shell.sideEffects.applicationURL = { $0 == "dev.zed.Zed" ? URL(fileURLWithPath: "/Applications/Zed.app") : nil }
+            XCTAssertTrue(Persistence.updateSettings(liveLayout: nil) { $0.openFilesIn = "dev.zed.Zed" })
             let titles = harness.paletteCommandTitles()
             XCTAssertEqual(titles.count, Set(titles).count, "two palette commands share a title: \(titles)")
             // Restart Lead… is offered only in a space with a Lead, Promote to
@@ -133,6 +137,22 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
     /// workspace, and more matches are printed after the search: picking it
     /// brings that column forward, find bar open, and Ghostty scrolls to
     /// that very match.
+    /// With "Open files in" on an editor installed, Open in <editor> opens
+    /// the workspace's folder there.
+    func testOpenInYourEditorCommand() throws {
+        try UIFlowHarness.run { harness in
+            var opened: [String] = []
+            harness.shell.sideEffects.applicationURL = { $0 == "dev.zed.Zed" ? URL(fileURLWithPath: "/Applications/Zed.app") : nil }
+            harness.shell.sideEffects.openInApplication = { url, _, done in
+                opened.append(url.absoluteString)
+                done(true)
+            }
+            XCTAssertTrue(Persistence.updateSettings(liveLayout: nil) { $0.openFilesIn = "dev.zed.Zed" })
+            harness.runPaletteCommand("Open in Zed")
+            XCTAssertEqual(opened, ["zed://file" + (try XCTUnwrap(harness.shell.activeWorkspace)).focusedWorkingDirectory])
+        }
+    }
+
     func testSearchEverywhere() throws {
         try UIFlowHarness.run { harness in
             let home = try XCTUnwrap(harness.shell.activeWorkspace)

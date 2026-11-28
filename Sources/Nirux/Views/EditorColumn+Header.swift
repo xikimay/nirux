@@ -16,7 +16,7 @@ extension EditorColumn {
         searchButton.action = #selector(NiruxApp.showWorkspaceSearch(_:))
         header.trailingButtons = [diffButton, searchButton]
         header.menuProvider = { [weak self] in
-            let menu = Self.headerMenu(isFront: self?.isFront ?? false)
+            let menu = Self.headerMenu(isFront: self?.isFront ?? false, elsewhere: self?.openElsewhereItems() ?? [])
             // Also where a narrow header has no room for its button.
             if let self, let path = self.currentPath, self.draftPaths.contains(path) {
                 let item = NSMenuItem(title: Self.copyDraftTitle, action: #selector(self.copyDraftClicked), keyEquivalent: "")
@@ -29,8 +29,9 @@ extension EditorColumn {
         addSubview(header)
     }
 
-    /// The editor's ⋯ menu: where it lies, its main-menu items, then the column's.
-    private static func headerMenu(isFront: Bool) -> NSMenu {
+    /// The editor's ⋯ menu: where it lies, its main-menu items, where else
+    /// the file opens, then the column's.
+    private static func headerMenu(isFront: Bool, elsewhere: [NSMenuItem]) -> NSMenu {
         let menu = NSMenu()
         menu.addItem(ColumnHeaderView.columnItem(
             isFront ? "Keep in Row" : "Bring to Centre", isEnabled: { $0.canToggleColumnPlace(withHeader: $1) }
@@ -46,8 +47,46 @@ extension EditorColumn {
             $0.toggleMinimap()
         })
         menu.addItem(.separator())
+        elsewhere.forEach(menu.addItem)
+        menu.addItem(.separator())
         ColumnHeaderView.columnMenuItems().forEach(menu.addItem)
         return menu
+    }
+
+    /// Open in each of the user's editors installed (Save and Open with
+    /// unsaved edits), then Reveal in Finder: for a file on disk.
+    private func openElsewhereItems() -> [NSMenuItem] {
+        let onDisk = currentPath.map { FileManager.default.fileExists(atPath: $0) } ?? false
+        let saves = currentPath.map(unsavedPaths.contains) ?? false
+        let opens = installedEditors().map { editor in
+            let title = (saves ? "Save and Open in " : "Open in ") + editor.name
+            let item = NSMenuItem(title: title, action: onDisk ? #selector(openElsewhereClicked(_:)) : nil, keyEquivalent: "")
+            item.representedObject = editor.bundleID
+            return item
+        }
+        let reveal = NSMenuItem(title: "Reveal in Finder", action: onDisk ? #selector(revealInFinderClicked) : nil, keyEquivalent: "")
+        return (opens + [reveal]).map { item in
+            item.target = self
+            return item
+        }
+    }
+
+    /// The user carries on there, with their edits: saved first, and
+    /// nothing opens when the save fails.
+    @objc private func openElsewhereClicked(_ sender: NSMenuItem) {
+        guard let path = currentPath, let editor = ExternalEditor.withBundleID(sender.representedObject as? String) else { return }
+        let open: () -> Void = { [weak self] in
+            self?.readCaret { line, column in self?.onOpenElsewhere?(editor, path, line, column) }
+        }
+        guard unsavedPaths.contains(path) else { return open() }
+        save(paths: [path]) { written in
+            if written { open() }
+        }
+    }
+
+    @objc private func revealInFinderClicked() {
+        guard let path = currentPath else { return }
+        onRevealInFinder?(path)
     }
 
     @objc private func diffButtonClicked() {

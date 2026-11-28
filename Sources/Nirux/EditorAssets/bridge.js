@@ -697,7 +697,8 @@
       .deltaDecorations(diffDecorationIds.modified, modifiedDecorations);
   }
 
-  function enterMonacoDiff(path, originalContent) {
+  // `takesKeyboard` false: a redraw nobody asked for (an agent's write).
+  function enterMonacoDiff(path, originalContent, takesKeyboard) {
     var entry = models[path];
     if (!entry) return;
     keepReadingTop();
@@ -770,7 +771,7 @@
       diffEditor.layout();
       applyDiffDecorations();
     }, 0);
-    diffEditor.getModifiedEditor().focus();
+    if (takesKeyboard !== false) diffEditor.getModifiedEditor().focus();
     tellDiffViewer(path, "monaco");
   }
 
@@ -799,7 +800,7 @@
     diffMode = "pierre";
     pierreOriginalContent = originalContent || "";
     pierreGroupPayload = null;
-    renderPierreDiff();
+    renderPierreDiff(true);
     if (diffMode === "pierre") tellDiffViewer(path, "pierre");
   }
 
@@ -822,7 +823,7 @@
     if (pierreRenderTimer) window.clearTimeout(pierreRenderTimer);
     pierreRenderTimer = window.setTimeout(function () {
       pierreRenderTimer = null;
-      renderPierreDiff();
+      renderPierreDiff(false);
     }, 80);
   }
 
@@ -835,7 +836,9 @@
   var diffGeneration = 0;
 
   // A tab's own diff: its tab names the file, so no row of its own.
-  function renderPierreDiff() {
+  // `takesKeyboard`: a fallback to Monaco's diff takes the keyboard, as
+  // the open does; a redraw's doesn't.
+  function renderPierreDiff(takesKeyboard) {
     if (diffMode !== "pierre" || !currentPath || !models[currentPath]) return;
     showPierreDiffSurface();
     var drawn;
@@ -847,7 +850,7 @@
       drawn = false;
     }
     // pierre couldn't draw it: Monaco's diff instead.
-    if (!drawn) enterMonacoDiff(currentPath, pierreOriginalContent);
+    if (!drawn) enterMonacoDiff(currentPath, pierreOriginalContent, takesKeyboard);
   }
 
   // Several files (Uncommitted Changes, a branch, a checkpoint): its tab
@@ -1216,6 +1219,12 @@
       } catch (e) {
         postToSwift({ type: "error", message: String(e) });
       }
+    },
+    // The caret, "line:column", for an editor of the user's to open at.
+    caret: function () {
+      var target = activeEditor();
+      var position = target && target.getPosition();
+      return position ? position.lineNumber + ":" + position.column : "1:1";
     },
     // Base64 transport — avoids embedding raw JSON (backticks, ${...}) in a
     // JS template literal, which broke on files containing those sequences.

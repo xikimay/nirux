@@ -604,7 +604,7 @@ final class NiruxShellView: NSView {
             self?.openBranchReview(in: targetWorkspace)
         }
         workspace.onTerminalOpenFile = { [weak self] targetWorkspace, path, line in
-            self?.openInEditorColumn(path: path, line: line, in: targetWorkspace)
+            self?.openFileFromTerminal(path: path, line: line, in: targetWorkspace)
         }
         wireFrontColumn(workspace)
         workspace.onResumeExitedAgent = { [weak self] targetWorkspace, column in
