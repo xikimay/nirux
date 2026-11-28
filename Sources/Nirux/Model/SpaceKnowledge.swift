@@ -273,17 +273,28 @@ enum SpaceKnowledge {
         guard loaded.readOnlyReason == nil else { return Pass() }
         let before = loaded.state
         var pass = Pass()
-        // One correction is recorded and shown on the brick; corrections in
-        // two tasks since it was last confirmed stop serving it.
-        let corrections = Dictionary(grouping: KnowledgeUse.load(in: store).filter { $0.kind == .corrected }, by: \.brick)
-        for (id, uses) in corrections.sorted(by: { $0.key < $1.key }) {
+        // One correction, or one agent's flag saying a brick is wrong, is
+        // recorded and shown on it; such signals from two tasks since it was
+        // last confirmed stop serving it.
+        // An agent's flag counts from a task that had received the brick.
+        let uses = KnowledgeUse.load(in: store)
+        let received = Set(uses.filter { $0.kind == .got }.map { "\($0.brick)\n\($0.task ?? "")" })
+        let signals = uses.filter { $0.kind == .corrected }.map { (brick: $0.brick, time: $0.time, task: $0.task, byUser: true) }
+            + KnowledgeFlag.load(in: store).filter { $0.faultsItsBrick && received.contains("\($0.brick ?? "")\n\($0.task ?? "")") }
+                .map { (brick: $0.brick ?? "", time: $0.time, task: $0.task, byUser: false) }
+        for (id, signals) in Dictionary(grouping: signals, by: \.brick).sorted(by: { $0.key < $1.key }) {
             guard let brick = loaded.bricks[id] else { continue }
             let since = loaded.state(of: id).reconfirmedAt ?? 0
-            let tasks = Set(uses.filter { $0.time > since }.map { $0.task ?? "" })
-            guard tasks.count >= correctionsToSuspect,
-                  loaded.suspect(id, because: "You corrected agents about “\(brick.subject)” in \(tasks.count) tasks that had received it.", now: now)
-            else { continue }
-            pass.suspected.append(id)
+            let recent = signals.filter { $0.time > since }
+            let tasks = Set(recent.map { $0.task ?? "" })
+            // Agents alone may share one misreading (a Lead and its task, one
+            // CI failure in a train): they need one task more.
+            let needed = recent.contains(where: \.byUser) ? correctionsToSuspect : correctionsToSuspect + 1
+            guard tasks.count >= needed else { continue }
+            let who = Set(recent.map(\.byUser)).count == 2 ? "You and agents" : recent[0].byUser ? "You" : "Agents"
+            if loaded.suspect(id, because: "\(who) said “\(brick.subject)” was wrong in \(tasks.count) tasks that had received it.", now: now) {
+                pass.suspected.append(id)
+            }
         }
         let housekeeping = now - (loaded.state.dailyCheckAt ?? 0) >= dailyInterval
         let standing = loaded.ordered.filter { loaded.state(of: $0.id).closedAt == nil }
@@ -315,6 +326,11 @@ enum SpaceKnowledge {
         if housekeeping {
             loaded.state.dailyCheckAt = now
             KnowledgeUse.trim(in: store, now: now)
+            KnowledgeFlag.trim(in: store, now: now)
+            // Dismissals of flags that aged out go with them, once the file read.
+            if let live = KnowledgeFlag.loadIfReadable(in: store).map({ Set($0.map(\.id)) }) {
+                loaded.state.dismissedFlags = loaded.state.dismissedFlags.map { $0.filter(live.contains) }
+            }
             store.removeSessions(olderThan: 7, now: now)
         }
         do {

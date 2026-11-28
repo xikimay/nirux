@@ -383,6 +383,9 @@ struct PersistedSettings: Codable {
     /// Where a task without a repository gets its folder (see
     /// NewTask+Folder); nil: `~/Nirux Tasks`.
     var tasksFolder: String?
+    /// The editor of the user's that the files they open go to (an
+    /// `ExternalEditor.bundleID`); nil: Nirux's.
+    var openFilesIn: String?
     /// A task without a repository started once: the ⌘N sheet no longer
     /// says that Claude Code asks to trust each new folder.
     var startedFolderTask: Bool = false
@@ -442,6 +445,7 @@ struct PersistedSettings: Codable {
         case explainModel
         case explainEffort
         case tasksFolder
+        case openFilesIn
         case startedFolderTask
         case boardOrder
         case claudeManualMode
@@ -506,6 +510,7 @@ struct PersistedSettings: Codable {
         tasksFolder = (try? container.decodeIfPresent(String.self, forKey: .tasksFolder)).flatMap { $0 }.flatMap {
             $0.hasPrefix("/") ? $0 : nil
         }
+        openFilesIn = (try? container.decodeIfPresent(String.self, forKey: .openFilesIn)).flatMap { $0 }
         startedFolderTask = (try? container.decodeIfPresent(Bool.self, forKey: .startedFolderTask)) ?? false
         boardOrder = (try? container.decodeIfPresent(String.self, forKey: .boardOrder)).flatMap { $0 }
             .flatMap(BoardStages.Order.init(rawValue:)) ?? .sidebar
@@ -559,6 +564,7 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(explainModel, forKey: .explainModel)
         try container.encodeIfPresent(explainEffort, forKey: .explainEffort)
         try container.encodeIfPresent(tasksFolder, forKey: .tasksFolder)
+        try container.encodeIfPresent(openFilesIn, forKey: .openFilesIn)
         if startedFolderTask { try container.encode(true, forKey: .startedFolderTask) }
         if boardOrder != .sidebar { try container.encode(boardOrder.rawValue, forKey: .boardOrder) }
     }

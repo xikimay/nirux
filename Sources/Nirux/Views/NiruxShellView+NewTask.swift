@@ -234,8 +234,17 @@ extension NiruxShellView {
         completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void,
         opened: (@MainActor (_ workspaceID: String, _ created: CreatedTask) -> Void)? = nil
     ) {
+        // Its planned session taken or being made meanwhile: nothing starts. Without the plan (off, unreadable) it
+        // starts without the line.
+        let line = request.planLine.flatMap { planLine($0, inSpace: request.projectID) }
+        let planned = line.map { PlannedLine(spaceID: request.projectID, id: $0.id) }
+        if let line, let planned {
+            guard line.isPlanned, !startingPlanLines.contains(planned) else { return completion(.failed("This planned session started meanwhile.")) }
+            startingPlanLines.insert(planned)
+        }
         createTask(request, names: names) { [weak self] named, result in
             guard let self else { return }
+            if let planned { self.startingPlanLines.remove(planned) }
             switch result {
             case .failed(let message):
                 completion(.failed(message))
@@ -308,6 +317,10 @@ extension NiruxShellView {
         if let born = workspaces.first(where: { $0.id == childWorkspaceID }) {
             recordRequest(request, of: born, bornAt: bornAt)
             playTaskBirth(of: born)
+        }
+        // Opened in another space, it leaves the line planned.
+        if let line = request.planLine, decision.spaceID == request.projectID {
+            linkPlanLine(line, toWorkspace: childWorkspaceID, title: title, inSpace: request.projectID)
         }
         // The agent that proposed it hears what the user started.
         if let proposer = request.proposedByTaskAgent {

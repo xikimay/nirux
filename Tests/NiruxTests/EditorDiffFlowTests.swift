@@ -166,6 +166,31 @@ final class EditorDiffFlowTests: XCTestCase {
         }
     }
 
+    /// A redraw pierre fails (here after an agent's write) falls back to
+    /// Monaco's diff without taking the keyboard.
+    func testAFailedRedrawLeavesTheKeyboard() throws {
+        try UIFlowHarness.run { harness in
+            let target = harness.repo + "/" + UIFlowHarness.searchTarget
+            harness.shell.openInEditorColumn(path: target)
+            let editor = try XCTUnwrap(harness.shell.activeWorkspace?.front?.editorColumn)
+            let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+            editor.toggleDiff()
+            harness.waitUntil("its diff") { editor.diffActivePath == target }
+            waitForDiffs("no changes yet", in: webView) { $0.notes == ["No changes"] }
+            UIFlowHarness.run("""
+                (function () {
+                  if (document.activeElement) document.activeElement.blur();
+                  window.NiruxPierreDiff = Object.assign({}, window.NiruxPierreDiff, { createReview: function () { throw new Error('no review'); } });
+                })()
+                """, in: webView)
+            try "Changed by an agent.\n".write(toFile: target, atomically: true, encoding: .utf8)
+            UIFlowHarness.waitForAnswer("Monaco's diff", to: Self.diffWrap, in: webView) { !$0.isEmpty }
+            UIFlowHarness.waitForAnswer(
+                "the keyboard where it was", to: "document.activeElement.closest('#diff-editor') ? 'diff' : 'elsewhere'", in: webView
+            ) { $0 == "elsewhere" }
+        }
+    }
+
     // MARK: - Helpers
 
     /// The diff's scroll once line 105 reads changed; empty before.

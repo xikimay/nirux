@@ -93,6 +93,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     var onPathChanged: (() -> Void)?
     var onDirtyChanged: (() -> Void)?
     var onFilePickerRequest: ((EditorColumn) -> Void)?
+    /// The user's own editors installed, for ⋯'s Open in (the shell's).
+    var installedEditors: () -> [ExternalEditor] = { [] }
+    /// Open in one of them: the file, at the caret's line and column (none
+    /// read rendered).
+    var onOpenElsewhere: ((ExternalEditor, String, Int?, Int?) -> Void)?
+    var onRevealInFinder: ((String) -> Void)?
     /// Asked before a tab with unsaved edits closes. Unset, it stays.
     var askAboutUnsavedEdits: ([String]) -> UnsavedEditsChoice = { _ in .cancel }
     /// How long a Save All waits for the page to post its saves.
@@ -734,7 +740,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     /// Saves `paths`, or every dirty buffer when nil: the page posts them,
     /// as it holds the text. A file changed on disk under its edits isn't
     /// saved: its tab shows, with the conflict banner.
-    private func save(paths: [String]?, then completion: @escaping (Bool) -> Void) {
+    func save(paths: [String]?, then completion: @escaping (Bool) -> Void) {
         let targets = paths ?? unsavedPaths
         guard !targets.isEmpty else { return completion(true) }
         guard monacoReady else {
@@ -1218,6 +1224,15 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler, 
     }
 
     // MARK: - JS bridge
+
+    /// The caret's line and column in `path`'s tab; none while another tab
+    /// shows, or it reads rendered.
+    func readCaret(of path: String, _ done: @escaping @MainActor (Int?, Int?) -> Void) {
+        webView.callAsyncJavaScript("return window.niruxBridge.caret(path)", arguments: ["path": path], in: nil, in: .page) { result in
+            let numbers = ((try? result.get()) as? String)?.split(separator: ":").compactMap { Int($0) } ?? []
+            MainActor.assumeIsolated { done(numbers.first, numbers.dropFirst().first) }
+        }
+    }
 
     private func sendBridge(_ payload: [String: Any]) {
         let send = { [weak self] in

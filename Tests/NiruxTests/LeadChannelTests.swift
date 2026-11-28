@@ -159,8 +159,8 @@ final class LeadChannelTests: XCTestCase {
         let names = { (context: NiruxMCPServer.Context) in
             ((try self.send(list, context: context)["result"] as? [String: Any])?["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
         }
-        XCTAssertEqual(try names(context(lead: true)), [HistorySearchTool.name, MemorySearchTool.name] + LeadTools.names)
-        XCTAssertEqual(try names(context(lead: false)), [HistorySearchTool.name, MemorySearchTool.name] + TaskTools.names)
+        XCTAssertEqual(try names(context(lead: true)), [HistorySearchTool.name, MemorySearchTool.name, FlagKnowledgeTool.name] + LeadTools.names)
+        XCTAssertEqual(try names(context(lead: false)), [HistorySearchTool.name, MemorySearchTool.name, FlagKnowledgeTool.name] + TaskTools.names)
         XCTAssertEqual(try names(context(lead: false, inWorkspace: false)), [HistorySearchTool.name, MemorySearchTool.name])
         // A workspace opened by a link from outside Nirux has no launch id.
         XCTAssertEqual(try names(context(lead: false, launchID: "")), [HistorySearchTool.name, MemorySearchTool.name])
@@ -176,7 +176,7 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertNotNil(try call(LeadTools.queueMerge, ["prs": [1]], context: context(lead: false))["error"], "the Lead's only")
         XCTAssertNotNil(try call(LeadTools.listTasks, [:], context: context(lead: false, inWorkspace: false))["error"], "unknown outside")
         let allowed = NiruxMCPServer.claudeArguments(executable: "/x/Nirux").first { $0.hasPrefix("--allowedTools=") }
-        for name in LeadTools.names { XCTAssertEqual(allowed?.contains("mcp__nirux__\(name)"), true) }
+        for name in LeadTools.names + [FlagKnowledgeTool.name] { XCTAssertEqual(allowed?.contains("mcp__nirux__\(name)"), true) }
     }
 
     func testThePlansToolsAreListedOnlyWhereTheDayPlanIsOn() throws {
@@ -188,12 +188,12 @@ final class LeadChannelTests: XCTestCase {
         var task = context(lead: false)
         lead.environment["NIRUX_PROFILE_ID"] = "plans"
         task.environment["NIRUX_PROFILE_ID"] = "plans"
-        XCTAssertEqual(try names(lead), [HistorySearchTool.name, MemorySearchTool.name] + LeadTools.names)
+        XCTAssertEqual(try names(lead), [HistorySearchTool.name, MemorySearchTool.name, FlagKnowledgeTool.name] + LeadTools.names)
         let defaults = stateDirectory.appendingPathComponent("projects/plans/defaults.json")
         try FileManager.default.createDirectory(at: defaults.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(#"{"schemaVersion": 1, "dayPlan": true}"#.utf8).write(to: defaults)
-        XCTAssertEqual(try names(lead), [HistorySearchTool.name, MemorySearchTool.name] + LeadTools.names + PlanTools.leadNames)
-        XCTAssertEqual(try names(task), [HistorySearchTool.name, MemorySearchTool.name] + TaskTools.names + PlanTools.taskNames)
+        XCTAssertEqual(try names(lead), [HistorySearchTool.name, MemorySearchTool.name, FlagKnowledgeTool.name] + LeadTools.names + PlanTools.leadNames)
+        XCTAssertEqual(try names(task), [HistorySearchTool.name, MemorySearchTool.name, FlagKnowledgeTool.name] + TaskTools.names + PlanTools.taskNames)
         let allowed = NiruxMCPServer.claudeArguments(executable: "/x/Nirux").first { $0.hasPrefix("--allowedTools=") }
         for name in PlanTools.names {
             XCTAssertEqual(allowed?.contains("mcp__nirux__\(name)"), true)

@@ -21,9 +21,9 @@ extension NiruxShellView {
                     guard let workspace = spaceTask(name, in: space) else { throw Plan.Problem(noSpaceTask(name, in: space)) }
                     return Plan.Task(workspaceID: workspace.id, title: workspace.title)
                 }
-                answer(try store.update { try $0.add(arguments, task: task, newID: Self.newPlanID, at: now) }, false)
+                answer(try updatePlan(store, inSpace: space.id) { try $0.add(arguments, task: task, newID: Self.newPlanID, at: now) }, false)
             default:
-                answer(try store.update { try $0.check(arguments, by: .lead, at: now) }, false)
+                answer(try updatePlan(store, inSpace: space.id) { try $0.check(arguments, by: .lead, at: now) }, false)
             }
         } catch {
             answer(String(describing: error), true)
@@ -35,14 +35,16 @@ extension NiruxShellView {
         let task = Plan.Task(workspaceID: caller.id, title: caller.title)
         do {
             let now = Date().timeIntervalSince1970
-            answer(try store.update { try $0.steps(arguments, of: task, tasks: planTaskName, newID: Self.newPlanID, at: now) }, false)
+            answer(try updatePlan(store, inSpace: caller.profileID) {
+                try $0.steps(arguments, of: task, tasks: planTaskName, newID: Self.newPlanID, at: now)
+            }, false)
         } catch {
             answer(String(describing: error), true)
         }
     }
 
     /// Nil while the space's day plan is off.
-    private func planStore(ofSpace spaceID: String) -> Plan.Store? {
+    func planStore(ofSpace spaceID: String) -> Plan.Store? {
         guard SpaceDefaultsStore.defaults(forSpace: spaceID).plansTheDay else { return nil }
         return Plan.Store(spaceID: spaceID)
     }

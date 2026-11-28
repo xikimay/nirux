@@ -222,6 +222,8 @@ final class NiruxShellView: NSView {
     /// A Lead's tasks waiting to be proposed in the New sheet, one sheet at
     /// a time, and the timer that shows the next once no sheet is up.
     var pendingLeadProposals: [LeadProposal] = []
+    /// The planned sessions whose task is being made: none starts twice.
+    var startingPlanLines: Set<PlannedLine> = []
     var leadProposalTimer: Timer?
     /// Sub-tasks a task's `start_task` is starting (fetching, making the
     /// worktree), by the task's id: they count against its limit before
@@ -467,6 +469,7 @@ final class NiruxShellView: NSView {
         sidebar.onCreateProfile = { [weak self] in self?.showNewSpacePanel() }
         sidebar.onShowSpaceSettings = { [weak self] profileID in self?.showSpaceSettings(profileID: profileID) }
         sidebar.onNewWorkspace = { [weak self] in self?.showNewPanel() }
+        sidebar.onStartPlanned = { [weak self] in self?.startPlannedSession($0) }
         sidebar.onShowArchived = { [weak self] in self?.showArchivedTasks() }
         sidebar.onOpenBoard = { [weak self] in self?.openProjectBoard() }
         sidebar.onShowHistory = { [weak self] in self?.showSessionHistory() }
@@ -604,7 +607,7 @@ final class NiruxShellView: NSView {
             self?.openBranchReview(in: targetWorkspace)
         }
         workspace.onTerminalOpenFile = { [weak self] targetWorkspace, path, line in
-            self?.openInEditorColumn(path: path, line: line, in: targetWorkspace)
+            self?.openFileFromTerminal(path: path, line: line, in: targetWorkspace)
         }
         wireFrontColumn(workspace)
         workspace.onResumeExitedAgent = { [weak self] targetWorkspace, column in

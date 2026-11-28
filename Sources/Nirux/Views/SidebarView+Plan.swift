@@ -53,6 +53,9 @@ extension SidebarView {
                     info.inFeature = inFeature
                     return .workspace(info)
                 }
+            case .line(let line, let inFeature) where line.isPlanned:
+                let after = line.after.flatMap { plan.line($0) }.flatMap { $0.isChecked ? nil : $0.title }
+                return [.plan(.planned(line, isNested: inFeature, after: after))]
             case .line(let line, let inFeature):
                 return [.plan(.line(line, isNested: inFeature))]
             }
@@ -88,6 +91,7 @@ extension SidebarView {
             case .plan(let plan):
                 var renderer = SidebarPlanRowRenderer(row: plan, sidebarWidth: listWidth, top: currentY)
                 if case .feature(let feature, _, _, _) = plan { renderer.onFold = { [weak self] in self?.toggleFeature(feature.id) } }
+                if case .planned(let line, _, _) = plan { renderer.onStart = { [weak self] in self?.onStartPlanned?(line.id) } }
                 let built = renderer.render()
                 built.views.forEach(addExpandedView)
                 hitAreas += built.hitAreas

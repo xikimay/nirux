@@ -2,11 +2,13 @@ import AppKit
 
 extension NiruxShellView {
 
-    func queueWaitingTask(_ start: MergeWait.PendingStart, after name: String, in space: WorkspaceProfile, answer: @escaping LeadAnswer) {
+    func queueWaitingTask(
+        _ start: MergeWait.PendingStart, after name: String, planLine: String? = nil, in space: WorkspaceProfile, answer: @escaping LeadAnswer
+    ) {
         guard let title = start.options?.title ?? NewTask.workspaceTitle(description: start.description),
               !start.suggestedBranch.isEmpty
         else { return answer("Start the description with a few words that name the task and its branch.", true) }
-        setDependency(of: nil, start: start, after: name, in: space, title: title, answer: answer)
+        setDependency(of: nil, start: start, after: name, in: space, title: title, planLine: planLine, answer: answer)
     }
 
     func changeWaitingTask(_ arguments: [String: Any], in space: WorkspaceProfile, answer: @escaping LeadAnswer) {
@@ -28,7 +30,7 @@ extension NiruxShellView {
 
     private func setDependency(
         of task: WorkspaceState?, start: MergeWait.PendingStart, after name: String, in space: WorkspaceProfile,
-        title: String, answer: @escaping LeadAnswer
+        title: String, planLine: String? = nil, answer: @escaping LeadAnswer
     ) {
         guard let current = profiles.first(where: { $0.id == space.id }),
               current.anchors.contains(where: { $0.key == start.repositoryKey }),
@@ -56,12 +58,15 @@ extension NiruxShellView {
             task.mergeWaits[index] = wait
             holder = task
         } else {
+            if let planLine, let problem = plannedSessionProblem(planLine, inSpace: current.id) { return answer(problem, true) }
             // A stable, uncreated path keeps a placeholder distinct from every real checkout.
             let placeholder = Persistence.stateDirectory.appendingPathComponent("waiting/\(id)").path
             addWorkspace(title: title, purpose: start.options?.goal, cwd: placeholder, profileID: current.id, workspaceID: id,
                          waitingStart: wait, activate: false)
             guard let created = workspaces.first(where: { $0.id == id }) else { return answer("The task couldn't be added.", true) }
             holder = created
+            // The waiting row takes the planned session's place.
+            if let planLine { linkPlanLine(planLine, toWorkspace: id, title: title, inSpace: current.id) }
         }
         saveState()
         updateSidebar()

@@ -89,6 +89,13 @@ extension Plan {
         lines[path: path] = line
     }
 
+    /// A task closed before it started (a waiting task): its line is a planned session again, in its place.
+    public mutating func unlink(_ workspaceID: String, by author: Author) throws {
+        guard let id = line(ofWorkspace: workspaceID)?.id, let path = lines.path(to: id) else { throw Refusal.noLine(workspaceID) }
+        guard Self.may(author, .link, lines[path: path], under: parent(at: path)) else { throw Refusal.notAllowed(.link) }
+        lines[path: path].workspaceID = nil
+    }
+
     /// Removes a line with what it holds and the proposals placed under them; what waited for them waits for the
     /// user's go instead.
     public mutating func remove(_ id: String, by author: Author) throws {

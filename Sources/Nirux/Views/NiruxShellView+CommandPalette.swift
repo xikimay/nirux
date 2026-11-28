@@ -47,7 +47,8 @@ extension NiruxShellView {
                 subtitle: "Edit files in the current workspace", shortcut: nil
             ) { [weak self] in
                 self?.openEditorColumn()
-            },
+            }
+        ] + [openInYourEditorAction()].compactMap { $0 } + [
             PaletteAction(
                 icon: .symbol("tablecells"), title: "Open Board",
                 subtitle: "Branches, agents and pull requests of the current space",

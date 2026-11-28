@@ -169,7 +169,8 @@ enum LeadTools {
                     "description": ["type": "string", "description": "What the task must do, as you would tell the agent."],
                     "repo": ["type": "string", "description": "The repository's name in this space (see list_tasks); its default one when left out. \"\(noRepository)\": a new folder, no repository."],
                     "after": ["type": "string", "description": "Create a waiting task. Once the named task’s pull request merges, fetch the base and start the agent. Requires a repository and Starts tasks without asking."],
-                    "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."]
+                    "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."],
+                    "plan_line": ["type": "string", "description": "A planned session's id in the day plan (read_plan): the task takes its place."]
                 ]),
                 required: ["description"]
             ),
@@ -352,6 +353,10 @@ enum LeadTools {
                     ],
                     "repo": queueRepoArgument,
                     "replaces": ["type": "string", "description": "The id of the brick it replaces (b-…), which closes once it is validated."],
+                    "rests_on": [
+                        "type": "array", "items": ["type": "string"],
+                        "description": "Ids of the bricks it builds on (b-…), each served now: when one stops being served, this one is flagged."
+                    ],
                     "macos": ["type": "boolean", "description": "True when macOS may change the fact: it expires on another major version."]
                 ],
                 required: ["sentence", "subject", "paths", "proofs"]
@@ -681,6 +686,9 @@ enum LeadTools {
         if [startTask, setTaskAfter].contains(tool), arguments["after"] != nil, string(arguments, "after") == nil {
             return "after must name a task of this space."
         }
+        if tool == startTask, arguments["plan_line"] != nil, string(arguments, "plan_line") == nil {
+            return "plan_line must be a planned session's id, as read_plan shows it."
+        }
         if [queueMerge, mergeQueueStatus, stopMergeQueue].contains(tool), arguments["repo"] != nil, string(arguments, "repo") == nil {
             return "repo must name a repository in this space."
         }
@@ -773,7 +781,8 @@ enum LeadTools {
             case .failure(let problem): return problem.message
             case .success(let proposal):
                 return KnowledgeBrick(sentence: proposal.sentence, subject: proposal.subject,
-                                      scope: .init(anchor: "git:/", name: "", paths: proposal.paths), proofs: proposal.proofs).problem
+                                      scope: .init(anchor: "git:/", name: "", paths: proposal.paths), proofs: proposal.proofs,
+                                      restsOn: proposal.restsOn).problem
             }
         case _ where spaceNames.contains(tool):
             return spaceToolProblem(tool: tool, arguments: arguments)
@@ -860,6 +869,7 @@ extension LeadTools {
         var proofs: [Proof]
         var repo: String?
         var replaces: String?
+        var restsOn: [String]?
         var macOS: Bool
     }
 
@@ -897,10 +907,14 @@ extension LeadTools {
             return fail("replaces must be a brick's id (b-…).")
         }
         if isGiven(arguments, "macos"), optionalFlag(arguments, "macos") == nil { return fail("macos must be true or false.") }
+        if isGiven(arguments, "rests_on"), (arguments["rests_on"] as? [String])?.allSatisfy(KnowledgeLinks.isBrickID) != true {
+            return fail("rests_on must be an array of brick ids (b-…).")
+        }
         return .success(BrickArguments(
             sentence: sentence.trimmingCharacters(in: .whitespacesAndNewlines), subject: subject.trimmingCharacters(in: .whitespacesAndNewlines),
             paths: paths.map { $0.trimmingCharacters(in: .whitespaces) }, proofs: proofs, repo: string(arguments, "repo"),
-            replaces: arguments["replaces"] as? String, macOS: optionalFlag(arguments, "macos") == true
+            replaces: arguments["replaces"] as? String, restsOn: (arguments["rests_on"] as? [String]).flatMap { $0.isEmpty ? nil : $0 },
+            macOS: optionalFlag(arguments, "macos") == true
         ))
     }
 }

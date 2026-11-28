@@ -14,6 +14,8 @@ public struct KnowledgeState: Codable, Equatable, Sendable {
     public var dailyCheckAt: TimeInterval?
     /// Per anchor, its last daily check whose every result came back.
     public var dailyChecks: [String: TimeInterval]?
+    /// Flags the user dismissed (KnowledgeFlag ids).
+    public var dismissedFlags: [String]?
 
     public init() {}
 }
@@ -33,7 +35,9 @@ public struct BrickState: Codable, Equatable, Sendable {
     public var suspectAt: TimeInterval?
     public var suspectBecause: String?
     public var reconfirmedAt: TimeInterval?
-    /// The macOS major version it was last reconfirmed on.
+    /// The macOS major version it was last reconfirmed on: where a brick
+    /// about macOS is served, and where one resting on a brick that gave
+    /// out on a macOS change stands on its own.
     public var reconfirmedMacOS: Int?
 
     public init() {}
@@ -48,6 +52,9 @@ public enum BrickStatus: Equatable, Sendable {
     case suspect(String)
     /// A proof failed once: the next check closes it or clears it.
     case failing(String)
+    /// A brick it rests on stopped being served: served again once
+    /// reconfirmed.
+    case flagged(String)
     /// A proof stopped holding, or the user closed it: for good.
     case closed(String)
 
@@ -59,6 +66,7 @@ public enum BrickStatus: Equatable, Sendable {
         case .expired: return "expired"
         case .suspect: return "suspect"
         case .failing: return "failing"
+        case .flagged: return "flagged"
         case .closed: return "closed"
         }
     }
@@ -66,7 +74,7 @@ public enum BrickStatus: Equatable, Sendable {
     public var reason: String? {
         switch self {
         case .open: return nil
-        case .expired(let reason), .suspect(let reason), .failing(let reason), .closed(let reason): return reason
+        case .expired(let reason), .suspect(let reason), .failing(let reason), .flagged(let reason), .closed(let reason): return reason
         }
     }
 }

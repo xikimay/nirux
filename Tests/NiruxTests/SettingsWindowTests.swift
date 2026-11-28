@@ -405,6 +405,28 @@ final class SettingsWindowTests: XCTestCase {
         }
     }
 
+    /// "Open files in" offers Nirux's editor and the user's installed (here
+    /// Cursor only), and the one picked before if it has gone since (Zed),
+    /// shown as such; it saves the one picked, Nirux's none.
+    @MainActor
+    func testOpenFilesInOffersTheInstalledEditors() throws {
+        try withIsolatedState {
+            let shell = makeShell()
+            let cursor = "com.todesktop.230313mzl4w4u92"
+            shell.sideEffects.applicationURL = { $0 == cursor ? URL(fileURLWithPath: "/Applications/Cursor.app") : nil }
+            XCTAssertTrue(Persistence.updateSettings(liveLayout: nil) { $0.openFilesIn = "dev.zed.Zed" })
+            let app = try openSettings(shell: shell)
+            defer { close(app) }
+            XCTAssertEqual(app.settingsOpenFilesInPopup?.itemTitles, ["Nirux", "Cursor", "Zed (not installed)"])
+            XCTAssertEqual(selectedRawValue(app.settingsOpenFilesInPopup), "dev.zed.Zed")
+            try choose(cursor, in: app.settingsOpenFilesInPopup)
+            XCTAssertEqual(Persistence.load()?.settings?.openFilesIn, cursor)
+            XCTAssertEqual(shell.chosenEditor?.name, "Cursor")
+            try choose("", in: app.settingsOpenFilesInPopup)
+            XCTAssertNil(Persistence.load()?.settings?.openFilesIn)
+        }
+    }
+
     /// A choice a newer build saved shows as the default; picking that, or
     /// changing another setting, keeps it.
     @MainActor

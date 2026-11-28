@@ -32,6 +32,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsTasksFolderLabel: NSTextField?
     weak var settingsUsageLimitsCheckbox: NSButton?
     weak var settingsAgentResumePopup: NSPopUpButton?
+    weak var settingsOpenFilesInPopup: NSPopUpButton?
     weak var settingsLaunchModePopup: NSPopUpButton?
     weak var settingsNoFlickerCheckbox: NSButton?
     weak var settingsCodexLaunchModePopup: NSPopUpButton?

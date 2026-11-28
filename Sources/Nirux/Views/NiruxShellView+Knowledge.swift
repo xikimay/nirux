@@ -142,7 +142,7 @@ extension NiruxShellView {
             let brick = SpaceKnowledge.resolvingCommits(of: KnowledgeBrick(
                 sentence: proposal.sentence, subject: proposal.subject, scope: .init(anchor: key, name: anchor.name, paths: proposal.paths),
                 proofs: proposal.proofs, macOS: proposal.macOS ? SpaceKnowledge.macOS : nil, replaces: proposal.replaces,
-                proposedBy: "the Lead"
+                restsOn: proposal.restsOn, proposedBy: "the Lead"
             ), anchor: anchor)
             var loaded = store.load()
             let reply: (String, Bool)
@@ -179,6 +179,8 @@ extension NiruxShellView {
         case .exists(let status):
             return status == .open ? "This brick stands already: agents get it." : "This brick is \(status.title): \(status.reason ?? "")"
         case .replacesUnknown(let id): return "No brick \(id) in this space to replace."
+        case .restsOnUnknown(let id): return "No brick \(id) in this space to rest on."
+        case .restsOnNotServed(let id, let status): return "\(id) is \(status.title): a brick can rest only on bricks agents get."
         case .tooManyPending: return "\(KnowledgeStore.maxPending) bricks wait for the user already: propose this one once they decide."
         case .full: return "This space has \(KnowledgeStore.maxBricks) bricks: replace one (replaces) or let the user close one first."
         case .readOnly(let reason): return reason
