@@ -90,10 +90,12 @@ extension NiruxShellView {
         }
     }
 
-    private func leadStartTask(
+    func leadStartTask(
         _ arguments: [String: Any], selection: TaskAgentSelection, in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
         let description = LeadTools.string(arguments, "description") ?? ""
+        let planLine = LeadTools.string(arguments, "plan_line")
+        if let planLine, let problem = plannedSessionProblem(planLine, inSpace: space.id) { return answer(problem, true) }
         let repositories = newTaskRepositories(of: space)
         let repository: NewTaskPanel.Repository?
         var asksNoRepository = false
@@ -119,7 +121,7 @@ extension NiruxShellView {
             return leadProposeTask(
                 description, options: options, selection: arguments["agent"] != nil || selection.model != nil ? selection : nil,
                 repository: repository, withoutRepository: asksNoRepository, templateName: templateName,
-                in: space, parent: parent, answer: answer
+                planLine: planLine, in: space, parent: parent, answer: answer
             )
         }
         // A queued start needs only the template and anchor. A folder anchor must still be checked for a repository.
@@ -138,7 +140,7 @@ extension NiruxShellView {
                 let pending = MergeWait.PendingStart(description: description, repositoryKey: repository.key,
                                                      repository: repository.name, template: template,
                                                      selection: arguments["agent"] != nil || selection.model != nil ? selection : nil, options: options)
-                return self.queueWaitingTask(pending, after: after, in: space, answer: answer)
+                return self.queueWaitingTask(pending, after: after, planLine: planLine, in: space, answer: answer)
             }
             var folder: NewTask.Place?
             if repository == nil || info.target == nil {
@@ -157,7 +159,10 @@ extension NiruxShellView {
             // It opens behind what the user is doing.
             self.startAgentTask(
                 description, options: options, templateName: templateName, info: info, selection: selection, spaceID: space.id, parent: parent,
-                folder: folder, repository: repository, configure: { $0.startedByLead = true }, answer: answer
+                folder: folder, repository: repository, configure: { request in
+                    request.startedByLead = true
+                    request.planLine = planLine
+                }, answer: answer
             )
         }
     }
@@ -293,13 +298,14 @@ extension NiruxShellView {
     // swiftlint:disable:next function_parameter_count
     private func leadProposeTask(
         _ description: String, options: NewTask.StartOptions, selection: TaskAgentSelection?, repository: NewTaskPanel.Repository?,
-        withoutRepository: Bool, templateName: String?,
+        withoutRepository: Bool, templateName: String?, planLine: String?,
         in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
         let proposal = LeadProposal(
             spaceID: space.id,
             repository: repository.map { .named(key: $0.key) } ?? (withoutRepository ? .noRepository : .spaceDefault),
-            description: description, options: options, templateName: templateName, parent: parent, selection: selection
+            description: description, options: options, templateName: templateName, parent: parent, selection: selection,
+            planLine: planLine
         )
         if pendingLeadProposals.isEmpty, showLeadProposal(proposal) {
             return answer("Proposed to the user in the New sheet (the space’s setting “Starts tasks without asking” is off). "
@@ -1110,6 +1116,8 @@ struct LeadProposal: Equatable {
     /// workspace's id); nil for a Lead's proposal.
     var subtaskOf: String?
     var selection: TaskAgentSelection?
+    /// start_task's plan_line: the task takes that planned session's place.
+    var planLine: String?
 
     /// What the sheet shows: the description under its title, when one was
     /// given (the sheet names a task after its first line).

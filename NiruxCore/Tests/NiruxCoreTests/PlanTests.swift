@@ -249,4 +249,14 @@ struct PlanTests {
         #expect(session.current?.id == "u")
         #expect(session.waitsForUser)
     }
+
+    @Test func aTaskClosedBeforeItStartedGivesItsLineBackPlanned() throws {
+        var plan = Plan()
+        try plan.add(Plan.Line(id: "p", kind: .session, title: "Polish", by: .lead, at: 1), to: .top)
+        try plan.link("p", toWorkspace: "waiting", by: .nirux)
+        #expect(plan.line("p")?.isPlanned == false)
+        #expect(throws: Plan.Refusal.notAllowed(.link)) { try plan.unlink("waiting", by: .agent) }
+        try plan.unlink("waiting", by: .nirux)
+        #expect(plan.line("p")?.isPlanned == true)
+    }
 }

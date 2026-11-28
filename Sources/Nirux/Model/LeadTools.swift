@@ -169,7 +169,8 @@ enum LeadTools {
                     "description": ["type": "string", "description": "What the task must do, as you would tell the agent."],
                     "repo": ["type": "string", "description": "The repository's name in this space (see list_tasks); its default one when left out. \"\(noRepository)\": a new folder, no repository."],
                     "after": ["type": "string", "description": "Create a waiting task. Once the named task’s pull request merges, fetch the base and start the agent. Requires a repository and Starts tasks without asking."],
-                    "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."]
+                    "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."],
+                    "plan_line": ["type": "string", "description": "A planned session's id in the day plan (read_plan): the task takes its place."]
                 ]),
                 required: ["description"]
             ),
@@ -684,6 +685,9 @@ enum LeadTools {
         let messageLimit = MissionEventCLI.maxInstructionLength
         if [startTask, setTaskAfter].contains(tool), arguments["after"] != nil, string(arguments, "after") == nil {
             return "after must name a task of this space."
+        }
+        if tool == startTask, arguments["plan_line"] != nil, string(arguments, "plan_line") == nil {
+            return "plan_line must be a planned session's id, as read_plan shows it."
         }
         if [queueMerge, mergeQueueStatus, stopMergeQueue].contains(tool), arguments["repo"] != nil, string(arguments, "repo") == nil {
             return "repo must name a repository in this space."

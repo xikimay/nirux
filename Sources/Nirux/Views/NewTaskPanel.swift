@@ -140,6 +140,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// Who proposed what the sheet holds (`prefill`): the heading keeps
     /// saying so.
     private var proposedBy: String?
+    /// The planned session the sheet starts (see `NewTask.Request.planLine`).
+    var planLine: String?
 
     /// "Report to the Lead" shows with a Lead, unless the sub-task a task's
     /// agent proposed is checked: that one reports to the agent.
@@ -381,12 +383,22 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         refresh()
     }
 
+    /// A planned session's Start: its title, then its detail.
+    func prefill(planned line: Plan.Line) {
+        guard panel != nil else { return }
+        planLine = line.id
+        descriptionView.string = line.title + (line.detail.map { "\n\n" + $0 } ?? "")
+        hideError()
+        refresh()
+    }
+
     /// A proposal (`start_task` with "Starts tasks without asking" off),
     /// from the Lead or a task's agent: its description, and its template,
     /// picked once the repository's templates are read.
     func prefill(_ proposal: LeadProposal, proposedBy: String = "the Lead") {
         guard panel != nil else { return }
         self.proposal = proposal
+        planLine = proposal.planLine
         descriptionView.string = proposal.sheetDescription
         if let selection = proposal.selection, let index = CodingAgent.launchable.firstIndex(of: selection.agent) {
             if selectedAgent != selection.agent {
@@ -683,6 +695,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         )
         request.reportsToTask = agentParent != nil
         request.proposedByTaskAgent = reportsToTaskAgent
+        request.planLine = planLine
         if let proposal, taskText.firstLine == (proposal.options.title ?? proposal.description.firstLine) {
             request.title = proposal.options.title
             request.goal = proposal.options.goal
