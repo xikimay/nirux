@@ -31,7 +31,8 @@ final class EditorOpenInFlowTests: XCTestCase {
             harness.shell.openInEditorColumn(path: notes)
             let editor = try XCTUnwrap(harness.shell.activeWorkspace?.front?.editorColumn)
             let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
-            UIFlowHarness.waitForAnswer("the page to show the file", to: "\(Self.mainEditor).getModel().getValue()", in: webView) {
+            // Monaco's first load: slow on a runner busy with heavier tests.
+            UIFlowHarness.waitForAnswer("the page to show the file", to: "\(Self.mainEditor).getModel().getValue()", in: webView, timeout: 30) {
                 $0.hasPrefix("one")
             }
             UIFlowHarness.run("(function () { \(Self.mainEditor).setPosition({ lineNumber: 3, column: 7 }); })()", in: webView)

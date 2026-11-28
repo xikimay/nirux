@@ -365,15 +365,15 @@ final class UIFlowHarness {
     }
 
     /// Asks `webView`'s page `script` (its value a string) until `matches`
-    /// accepts the answer, 10 s at most: a page handles keys and finds after
-    /// the call that sent them returns.
+    /// accepts the answer, `timeout` at most: a page handles keys and finds
+    /// after the call that sent them returns.
     static func waitForAnswer(
-        _ description: String, to script: String, in webView: WKWebView,
+        _ description: String, to script: String, in webView: WKWebView, timeout: TimeInterval = 10,
         file: StaticString = #filePath, line: UInt = #line, matches: (String) -> Bool
     ) {
         let answer = PageAnswer()
         let seen = { answer.latest.map { "(the page answered \($0.debugDescription))" } ?? "(no answer)" }
-        waitUntil("\(description) \(seen())", timeout: 10, file: file, line: line) {
+        waitUntil("\(description) \(seen())", timeout: timeout, file: file, line: line) {
             if !answer.isAsking {
                 answer.isAsking = true
                 webView.evaluateJavaScript(script) { result, _ in
