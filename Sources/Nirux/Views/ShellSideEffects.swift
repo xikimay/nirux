@@ -21,6 +21,21 @@ struct ShellSideEffects {
     }
     var generateTaskNames: TaskNameSuggestion.Generator = TaskNameSuggestion.generate
 
+    /// Where an app is installed, nil when it isn't: the user's own editors.
+    var applicationURL: @MainActor (_ bundleID: String) -> URL? = {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
+    }
+    /// Opens `url` in the app at `application`, then says whether it did.
+    var openInApplication: @MainActor (
+        _ url: URL, _ application: URL, _ done: @escaping @MainActor @Sendable (Bool) -> Void
+    ) -> Void = { url, application, done in
+        NSWorkspace.shared.open([url], withApplicationAt: application, configuration: NSWorkspace.OpenConfiguration()) { app, error in
+            let opened = app != nil && error == nil
+            Task { @MainActor in done(opened) }
+        }
+    }
+    var revealInFinder: @MainActor (_ file: URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
+
     /// Runs just before Nirux reads whether a long Mission paste's agent is
     /// still in front for its Enter: tests end that agent there.
     var willPressEnter: @MainActor (_ pty: PtySession) -> Void = { _ in }

@@ -38,7 +38,7 @@ On a trackpad, two fingers moving sideways over the columns slide the row. It fo
 Terminals are drawn by Ghostty's engine and follow the appearance settings of your [Ghostty configuration](terminal-appearance.md).
 
 - `Cmd+F` searches the scrollback and highlights every match.
-- `Cmd+click` on a web URL opens it as a browser column in the same workspace. File links open in the editor, and other schemes go to their macOS handler.
+- `Cmd+click` on a web URL opens it as a browser column in the same workspace. File links open in the editor (or in your own, see below), and other schemes go to their macOS handler.
 - When a shell exits, press Enter to restart it. The scrollback is kept.
 
 ### Editor
@@ -48,6 +48,8 @@ The editor opens files in tabs, with a file tree, a search across the workspace,
 #### The front editor
 
 What an agent shows, a terminal's file link, a search result, the palette's Open Editor and a diff of the changes open in the front editor: a full editor column that comes to the centre in front of the row. The row stays where it was and dims behind it, sharp. Opened by an agent, it leaves the keyboard where you were typing, and while you type it waits behind a pill at the top of the row ("README.md ⌘Y") instead of coming up over you. For a task that isn't on screen, the view stays where it is and the pill waits on the task's row in the sidebar: a click on the row brings the front editor up. Opened by you, it takes the keyboard. `Cmd+Y`, `Esc` in it (when no find field, suggestion or selection takes it) or a click on the row sends it back as it is, its tabs, scroll and selection kept, and `Cmd+Y` brings it up again, so you can switch between it and your terminals. A click on the row gives the column you clicked the keyboard. A double-click on its header, or Keep in Row in its ⋯ menu, puts it in the row after the column it came from; the same on an editor of the row (Bring to Centre) brings that one up as the front editor. It isn't restored at launch, even one brought up from the row: keep it in the row to find it again. An editor column restored in the row keeps opening files itself while you work in it.
+
+The editor's ⋯ menu opens the file at the caret in Zed, Cursor or VS Code, whichever are installed (with unsaved edits, Save and Open saves it first), and Reveal in Finder shows it. **Settings › General › Open files in** sends a file link you `Cmd+click` in a terminal to one of them instead, at its line; the command palette then also offers `Open in Zed` (or Cursor, VS Code) for the workspace's folder. Everything else, `Open Editor` included, opens in Nirux's editor.
 
 Lines an agent shows are highlighted, with a few lines above them in view, and the header names them ("Lines 40–52") until you edit them or the file opens again. A Markdown file opened in the front editor reads rendered, unless it opens at a line; one opened in an editor of the row shows its source. The toggle beside the diff button switches the tab, and `Cmd+F` shows the source with its find. A draft an agent wrote for you to paste (the `nirux-draft` skill) shows as text, wrapped, with Copy Draft in the header; its diff stays side by side, following Toggle Word Wrap.
 

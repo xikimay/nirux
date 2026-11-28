@@ -69,6 +69,20 @@ extension NiruxApp {
         SettingsForm.select(NiruxShellView.currentAgentResumeOnLaunch().rawValue, in: resume)
         settingsAgentResumePopup = resume
 
+        // Nirux's, then the user's editors installed, then the one picked if
+        // it has gone since (shown as such, not as Nirux's); "" is Nirux's.
+        let openFilesIn = SettingsForm.popup(target: self, action: #selector(settingsOpenFilesInChanged(_:)))
+        let installed = shell?.installedEditors ?? []
+        let picked = shell?.chosenEditor
+        let offered = [("Nirux", "")] + installed.map { ($0.name, $0.bundleID) }
+            + (picked.map { installed.contains($0) ? [] : [($0.name + " (not installed)", $0.bundleID)] } ?? [])
+        for (title, bundleID) in offered {
+            openFilesIn.addItem(withTitle: title)
+            openFilesIn.lastItem?.representedObject = bundleID
+        }
+        SettingsForm.select(picked?.bundleID ?? "", in: openFilesIn)
+        settingsOpenFilesInPopup = openFilesIn
+
         let nameTasks = SettingsForm.checkbox(
             "Name new tasks with Claude Haiku", target: self, action: #selector(settingsGenerateTaskNamesChanged(_:))
         )
@@ -112,6 +126,14 @@ extension NiruxApp {
                 SettingsForm.hint(
                     "Each one gets a new folder here, named after it, instead of a worktree. Nirux never deletes "
                         + "these folders."
+                )
+            ],
+            [
+                SettingsForm.row("Open files in", openFilesIn),
+                SettingsForm.hint(
+                    "Where a file you ⌘-click in a terminal opens, at its line: Nirux’s editor, or Zed, Cursor or "
+                        + "VS Code once installed. With one set, ⌘P also offers to open the workspace’s folder in it. "
+                        + "Everything else opens in Nirux’s editor."
                 )
             ],
             [
@@ -574,6 +596,14 @@ extension NiruxApp {
         }
     }
 
+    /// Read at each open.
+    @objc func settingsOpenFilesInChanged(_ sender: NSPopUpButton) {
+        let picked = (sender.selectedItem?.representedObject as? String).flatMap { $0.isEmpty ? nil : $0 }
+        saveSetting(revert: { [weak self] in SettingsForm.select(self?.shell?.chosenEditor?.bundleID ?? "", in: sender) }) {
+            if $0.openFilesIn != picked { $0.openFilesIn = picked }
+        }
+    }
+
     /// Read at the next launch. Only a changed choice is written: a value a
     /// newer build saved shows as the default, and picking that keeps it.
     @objc func settingsAgentResumeChanged(_ sender: NSPopUpButton) {
@@ -821,6 +851,7 @@ extension NiruxApp {
         settingsTerminalOpacityLabel = nil
         settingsTasksFolderLabel = nil
         settingsAgentResumePopup = nil
+        settingsOpenFilesInPopup = nil
         settingsLaunchModePopup = nil
         settingsNoFlickerCheckbox = nil
         settingsUsageLimitsCheckbox = nil

@@ -931,6 +931,7 @@ extension NiruxShellView {
         editor.onFilePickerRequest = { [weak self] editor in
             self?.showFilePicker(for: editor)
         }
+        wireOpenElsewhere(editor)
         // Keep the sidebar's file name + dirty dot in sync with the active
         // tab instead of waiting out the 2s heartbeat.
         editor.onPathChanged = { [weak self] in self?.updateSidebar() }
